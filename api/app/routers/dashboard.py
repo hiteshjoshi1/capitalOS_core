@@ -42,7 +42,15 @@ def _effective_as_of(db: Session, anchor_ts: datetime) -> Optional[datetime]:
     """
     q = text("SELECT MAX(as_of) AS as_of FROM positions WHERE as_of <= :anchor_ts")
     r = db.execute(q, {"anchor_ts": anchor_ts}).mappings().one()
-    return r["as_of"]
+    as_of = r["as_of"]
+    if isinstance(as_of, str):
+        try:
+            as_of = datetime.fromisoformat(as_of)
+        except ValueError:
+            return None
+    if isinstance(as_of, datetime) and as_of.tzinfo is None:
+        as_of = as_of.replace(tzinfo=timezone.utc)
+    return as_of
 
 
 def _networth_components(db: Session, as_of: Optional[datetime]) -> Dict[str, float]:

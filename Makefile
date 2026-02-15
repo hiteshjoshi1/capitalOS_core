@@ -83,5 +83,10 @@ api-smoke:
 	curl -s http://localhost:8000/health
 	curl -s "http://localhost:8000/dashboard/summary?month=2026-02"
 
+.PHONY: api-test
+
+api-test:
+	docker compose run --rm api pytest
+
 logs:
 	docker compose logs -f
