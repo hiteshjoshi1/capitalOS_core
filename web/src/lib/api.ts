@@ -64,6 +64,24 @@ export type DashboardSummary = {
     value: number;
     percent_of_networth: number;
   }>;
+  snapshot_day: number;
+net_worth_as_of: string | null;
+net_worth_change: null | {
+  vs_prev_month?: {
+    abs: number;
+    pct: number | null;
+    current_as_of: string | null;
+    compare_as_of: string | null;
+    compare_month: string;
+  };
+  vs_prev_year?: {
+    abs: number;
+    pct: number | null;
+    current_as_of: string | null;
+    compare_as_of: string | null;
+    compare_month: string;
+  };
+};
 };
 
 
@@ -74,6 +92,7 @@ export const api = {
   health: () => req<Health>("/health"),
   platforms: () => req<Platform[]>("/platforms"),
   accounts: () => req<Account[]>("/accounts"),
-  dashboardSummary: (month: string) =>
-    req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}`),
+  dashboardSummary: (month: string, compare?: string) =>
+  req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
+
 };

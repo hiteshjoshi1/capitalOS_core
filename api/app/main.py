@@ -3,7 +3,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.health import router as health_router
-from app.routers.meta import router as meta_router
 from app.routers.platforms import router as platforms_router
 from app.routers.accounts import router as accounts_router
 from app.routers.dashboard import router as dashboard_router
@@ -25,7 +24,6 @@ if origins:
     )
 
 app.include_router(health_router)
-app.include_router(meta_router)
 app.include_router(platforms_router)
 app.include_router(accounts_router)
 app.include_router(dashboard_router)

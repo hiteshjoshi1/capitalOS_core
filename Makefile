@@ -62,10 +62,10 @@ openapi:
 
 .PHONY: apiup
 
-apiup:
+api-up:
 	docker compose up -d --build api
 
 .PHONY: webup
 
-webup:
+web-up:
 	cd web && npm install && npm run dev

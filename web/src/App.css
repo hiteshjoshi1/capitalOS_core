@@ -1,9 +1,14 @@
 :root {
   --bg: #0b0f14;
   --panel: #101826;
+  --panel2: #0f1622;
   --text: #e8eef6;
   --muted: #a7b3c4;
   --line: #22314a;
+  --accent: #6ea8ff;
+  --good: #46d39a;
+  --bad: #ff6b6b;
+  --warn: #f6c177;
   --radius: 16px;
 }
 
@@ -18,20 +23,21 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px 18px 60px;
+  min-width: 320px;
 }
 
 .header {
   display: flex;
   justify-content: space-between;
-  gap: 14px;
+  gap: 16px;
   align-items: flex-start;
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
-.title { font-size: 20px; font-weight: 800; }
+.title { font-size: 20px; font-weight: 700; letter-spacing: .2px; }
 .subtitle { font-size: 13px; color: var(--muted); margin-top: 6px; }
 
-.pillRow { display: flex; gap: 10px; flex-wrap: wrap; }
+.pillRow { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 .pill {
   border: 1px solid var(--line);
   background: rgba(255,255,255,0.03);
@@ -47,6 +53,7 @@ body {
 
 @media (max-width: 980px) {
   .grid.top, .grid.mid { grid-template-columns: 1fr; }
+  .pillRow { justify-content: flex-start; }
 }
 
 .card {
@@ -59,14 +66,14 @@ body {
 
 .cardTitle {
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: .3px;
   text-transform: uppercase;
   margin-bottom: 10px;
 }
 
-.big { font-size: 28px; font-weight: 900; margin: 6px 0 8px; }
+.big { font-size: 30px; font-weight: 800; margin: 4px 0 10px; letter-spacing: .3px; }
 .muted { color: var(--muted); }
 
 .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
@@ -77,6 +84,10 @@ body {
   color: var(--text);
   padding: 9px 10px;
   font-size: 12px;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: rgba(255,255,255,0.22);
 }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
@@ -100,3 +111,17 @@ body {
 .error { border-color: rgba(255, 107, 107, 0.45); }
 .pre { white-space: pre-wrap; margin: 0; color: #ffb4b4; }
 .hint { margin-top: 10px; color: var(--muted); font-size: 12px; }
+
+.monthControl {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.monthInput {
+  background: transparent;
+  color: inherit;
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 10px;
+  padding: 6px 8px;
+}

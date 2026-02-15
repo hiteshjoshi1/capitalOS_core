@@ -5,6 +5,14 @@ import "./App.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
+function currentMonthYYYYMM() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
+
+
 export default function App() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
@@ -12,6 +20,10 @@ export default function App() {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [month, setMonth] = useState<string>(currentMonthYYYYMM());
+
+  const mom = summary?.net_worth_change?.vs_prev_month;
+  const yoy = summary?.net_worth_change?.vs_prev_year;
 
 
   useEffect(() => {
@@ -19,12 +31,11 @@ export default function App() {
       try {
         setState("loading");
         //hardcode
-        const month = "2026-02";
         const [h, p, a, s] = await Promise.all([
           api.health(),
           api.platforms(),
           api.accounts(),
-          api.dashboardSummary(month),
+          api.dashboardSummary(month, "prev_month,prev_year")
         ]);
         setHealth(h.status);
         setPlatforms(p);
@@ -36,7 +47,7 @@ export default function App() {
         setState("error");
       }
     })();
-  }, []);
+  }, [month]);
 
   const platformsById = useMemo(() => {
     const m = new Map<number, Platform>();
@@ -49,13 +60,20 @@ export default function App() {
       <header className="header">
         <div>
           <div className="title">CapitalOS</div>
-          <div className="subtitle">Module 1 — Personal Finance Control Plane</div>
+          <div className="subtitle">Local-first personal finance control plane. Numbers below are placeholders for UI visualization.</div>
         </div>
 
         <div className="pillRow">
           <span className="pill">API: {health}</span>
-          <span className="pill">Platforms: {platforms.length}</span>
-          <span className="pill">Accounts: {accounts.length}</span>
+          <label className="pill monthControl">
+            <span>Month</span>
+            <input
+              className="monthInput"
+              type="month"
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+            />
+          </label>
         </div>
       </header>
 
@@ -73,12 +91,23 @@ export default function App() {
 
       {state === "ready" && (
         <>
-          {/* Top row: placeholder cards (we’ll wire net worth later) */}
           <section className="grid top">
             <div className="card">
               <div className="cardTitle">Net Worth</div>
               <div className="big">
                 <div className="big">S$ {summary?.net_worth.total?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"}</div>
+                <div className="muted" style={{ marginTop: 6 }}>
+
+                  MoM:{" "}
+                  {mom
+                    ? `S$ ${mom.abs.toLocaleString()} (${mom.pct == null ? "—" : `${(mom.pct * 100).toFixed(1)}%`})`
+                    : "—"}
+                  {" · "}
+                  YoY:{" "}
+                  {yoy
+                    ? `S$ ${yoy.abs.toLocaleString()} (${yoy.pct == null ? "—" : `${(yoy.pct * 100).toFixed(1)}%`})`
+                    : "—"}
+                </div>
                 <div className="muted">
                   Cash: S$ {summary?.net_worth.cash?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} ·
                   Stocks/Funds: S$ {summary?.net_worth.stocks_funds?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} ·
