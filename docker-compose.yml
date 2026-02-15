@@ -1,0 +1,28 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: capitalos-postgres
+    environment:
+      POSTGRES_USER: capitalos
+      POSTGRES_PASSWORD: capitalos
+      POSTGRES_DB: capitalos
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ./api
+    container_name: capitalos-api
+    environment:
+      DATABASE_URL: postgresql+psycopg2://capitalos:capitalos@postgres:5432/capitalos
+      CORS_ORIGINS: http://localhost:3000,http://localhost:5173
+      SNAPSHOT_DAY: "6"
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:

@@ -1,0 +1,94 @@
+#######################################
+# OS / Editor
+#######################################
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+#######################################
+# Environment Files
+#######################################
+.env
+.env.*
+!.env.example
+!.env.sample
+
+#######################################
+# Logs
+#######################################
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+#######################################
+# Docker
+#######################################
+docker-compose.override.yml
+*.pid
+
+#######################################
+# Python (FastAPI backend)
+#######################################
+# Bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Python build
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Test / coverage
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+.pyre/
+.pytype/
+
+# Ruff / lint caches
+.ruff_cache/
+
+# FastAPI / Uvicorn
+*.db
+*.sqlite3
+
+#######################################
+# Alembic / migrations artifacts
+#######################################
+# (keep actual migrations in git)
+# Only ignore compiled or temp files
+migrations/__pycache__/
+
+#######################################
+# Node (Vite frontend)
+#######################################
+web/node_modules/
+web/dist/
+web/.vite/
+web/.cache/
+
+# Optional: if you run frontend tests
+web/coverage/
+
+#######################################
+# Misc
+#######################################
+*.tsbuildinfo

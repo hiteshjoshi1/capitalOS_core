@@ -1,0 +1,456 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CapitalOS — Dashboard (Mock)</title>
+  <style>
+    :root{
+      --bg:#0b0f14;
+      --panel:#101826;
+      --panel2:#0f1622;
+      --text:#e8eef6;
+      --muted:#a7b3c4;
+      --line:#22314a;
+      --accent:#6ea8ff;
+      --good:#46d39a;
+      --bad:#ff6b6b;
+      --warn:#f6c177;
+      --radius:16px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      background: radial-gradient(1200px 800px at 20% 0%, #132033 0%, var(--bg) 55%);
+      color:var(--text);
+    }
+    .wrap{
+      max-width:1200px;
+      margin:0 auto;
+      padding:24px 18px 60px;
+    }
+    header{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:16px;
+      margin-bottom:18px;
+    }
+    .title{
+      display:flex;flex-direction:column;gap:6px;
+    }
+    .title h1{
+      font-size:20px;margin:0;font-weight:700;letter-spacing:.2px;
+    }
+    .title .sub{
+      color:var(--muted);font-size:13px;line-height:1.3;
+    }
+    .pillrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+    .pill{
+      border:1px solid var(--line);
+      background:rgba(255,255,255,0.03);
+      padding:8px 10px;
+      border-radius:999px;
+      font-size:12px;
+      color:var(--muted);
+    }
+    .grid{
+      display:grid;
+      gap:14px;
+    }
+    .g-top{grid-template-columns: 2.1fr 1.2fr 1.2fr;}
+    .g-mid{grid-template-columns: 1.2fr 1.2fr 1.6fr;}
+    .g-bot{grid-template-columns: 1.6fr 1.4fr;}
+    .card{
+      border:1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
+      border-radius:var(--radius);
+      padding:14px 14px 12px;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+    .card h2{
+      margin:0 0 10px 0;
+      font-size:13px;
+      color:var(--muted);
+      font-weight:600;
+      letter-spacing:.3px;
+      text-transform:uppercase;
+    }
+    .big{
+      font-size:30px;font-weight:800;margin:4px 0 10px;
+      letter-spacing:.3px;
+    }
+    .kpirow{
+      display:grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap:10px;
+    }
+    .kpi{
+      background:rgba(0,0,0,0.18);
+      border:1px solid rgba(255,255,255,0.05);
+      border-radius:12px;
+      padding:10px;
+      min-height:72px;
+    }
+    .kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
+    .kpi .val{font-weight:800;font-size:16px}
+    .kpi .delta{font-size:12px;margin-top:4px;color:var(--muted)}
+    .delta .up{color:var(--good);font-weight:700}
+    .delta .down{color:var(--bad);font-weight:700}
+    .bar{
+      height:10px;border-radius:999px;background:#0a121d;border:1px solid rgba(255,255,255,.06);
+      overflow:hidden;margin-top:10px;
+    }
+    .bar > span{display:block;height:100%}
+    .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+    .dot{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
+    .dot i{width:10px;height:10px;border-radius:999px;display:inline-block;background:var(--accent)}
+    .split{
+      display:grid;grid-template-columns: 1fr 1fr;gap:12px;
+    }
+    .mini{
+      border:1px dashed rgba(255,255,255,.10);
+      border-radius:12px;
+      padding:10px;
+      background:rgba(0,0,0,0.10);
+    }
+    .mini h3{margin:0 0 8px 0;font-size:12px;color:var(--muted);font-weight:700}
+    .table{
+      width:100%;
+      border-collapse:collapse;
+      overflow:hidden;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.08);
+      background:rgba(0,0,0,0.12);
+    }
+    .table th,.table td{
+      padding:10px 10px;
+      border-bottom:1px solid rgba(255,255,255,0.06);
+      font-size:12.5px;
+    }
+    .table th{color:var(--muted);text-align:left;font-weight:700}
+    .table tr:last-child td{border-bottom:none}
+    .tag{
+      display:inline-block;
+      padding:3px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.12);
+      color:var(--muted);
+      font-size:11px;
+      margin-right:6px;
+    }
+    .right{ text-align:right; }
+    .muted{ color:var(--muted); }
+    .good{ color:var(--good); font-weight:700; }
+    .bad{ color:var(--bad); font-weight:700; }
+    .actions{
+      display:flex;gap:10px;flex-wrap:wrap;margin-top:10px
+    }
+    .btn{
+      cursor:pointer;
+      border-radius:12px;
+      border:1px solid rgba(255,255,255,0.10);
+      background:rgba(255,255,255,0.04);
+      color:var(--text);
+      padding:9px 10px;
+      font-size:12px;
+    }
+    .btn:hover{border-color:rgba(255,255,255,0.22)}
+    footer{margin-top:18px;color:var(--muted);font-size:12px}
+    @media (max-width: 980px){
+      .g-top,.g-mid,.g-bot{grid-template-columns:1fr}
+      .kpirow{grid-template-columns:1fr 1fr}
+      .split{grid-template-columns:1fr}
+      .pillrow{justify-content:flex-start}
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div class="title">
+        <h1>CapitalOS — Dashboard (Mock)</h1>
+        <div class="sub">Local-first personal finance control plane. Numbers below are placeholders for UI visualization.</div>
+      </div>
+      <div class="pillrow">
+        <div class="pill">As of: 2026-02-12</div>
+        <div class="pill">Base currency: SGD</div>
+        <div class="pill">Monthly snapshot</div>
+      </div>
+    </header>
+
+    <!-- TOP ROW -->
+    <section class="grid g-top">
+      <div class="card">
+        <h2>Net Worth</h2>
+        <div class="big">S$ 742,180</div>
+
+        <div class="kpirow">
+          <div class="kpi">
+            <div class="label">Cash & Cash Eq</div>
+            <div class="val">S$ 118,400</div>
+            <div class="delta">MoM <span class="up">+2.1%</span></div>
+          </div>
+          <div class="kpi">
+            <div class="label">Stocks / Funds</div>
+            <div class="val">S$ 512,300</div>
+            <div class="delta">MoM <span class="up">+1.3%</span></div>
+          </div>
+          <div class="kpi">
+            <div class="label">Crypto</div>
+            <div class="val">S$ 136,900</div>
+            <div class="delta">MoM <span class="down">-4.8%</span></div>
+          </div>
+          <div class="kpi">
+            <div class="label">Debt (Loans)</div>
+            <div class="val">S$ 25,420</div>
+            <div class="delta">MoM <span class="down">+0.6%</span></div>
+          </div>
+        </div>
+
+        <div class="bar" title="Allocation (cash/stocks/crypto)">
+          <span style="width:16%; background:var(--warn)"></span>
+          <span style="width:69%; background:var(--accent)"></span>
+          <span style="width:15%; background:var(--good)"></span>
+        </div>
+
+        <div class="legend">
+          <span class="dot"><i style="background:var(--warn)"></i>Cash 16%</span>
+          <span class="dot"><i style="background:var(--accent)"></i>Stocks 69%</span>
+          <span class="dot"><i style="background:var(--good)"></i>Crypto 15%</span>
+        </div>
+
+        <div class="actions">
+          <button class="btn">View holdings</button>
+          <button class="btn">View trends</button>
+          <button class="btn">Update snapshot</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Credit Cards</h2>
+        <div class="split">
+          <div class="mini">
+            <h3>This month spend</h3>
+            <div class="big" style="font-size:22px;margin:0;">S$ 3,420</div>
+            <div class="muted" style="margin-top:6px;">vs last month: <span class="bad">+12%</span></div>
+          </div>
+          <div class="mini">
+            <h3>Utilization</h3>
+            <div class="big" style="font-size:22px;margin:0;">18%</div>
+            <div class="muted" style="margin-top:6px;">limit: S$ 20,000</div>
+          </div>
+        </div>
+
+        <div style="margin-top:10px;">
+          <div class="muted" style="font-size:12px;margin-bottom:6px;">Cards</div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Card</th>
+                <th class="right">Current bill</th>
+                <th class="right">Due</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>DBS Altitude</td>
+                <td class="right">S$ 1,780</td>
+                <td class="right">25 Feb</td>
+              </tr>
+              <tr>
+                <td>OCBC 365</td>
+                <td class="right">S$ 1,210</td>
+                <td class="right">18 Feb</td>
+              </tr>
+              <tr>
+                <td>UOB One</td>
+                <td class="right">S$ 430</td>
+                <td class="right">02 Mar</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="actions">
+          <button class="btn">Spending details</button>
+          <button class="btn">Category mapping</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Quick Risk</h2>
+        <div class="kpi">
+          <div class="label">Largest position</div>
+          <div class="val">ETH — 14.2%</div>
+          <div class="delta">Concentration threshold: <span class="warn">15%</span></div>
+        </div>
+        <div style="height:10px"></div>
+        <div class="kpi">
+          <div class="label">Top 5 positions</div>
+          <div class="val">48.6%</div>
+          <div class="delta">Target band: 35–55%</div>
+        </div>
+
+        <div style="margin-top:12px" class="muted">
+          <div style="font-size:12px;margin-bottom:6px;">Notes</div>
+          <div style="font-size:12px;line-height:1.4;">
+            Flag if any single holding crosses a configured threshold.
+            Show exposure across asset classes (e.g., ETH across Coinbase + wallets).
+          </div>
+        </div>
+
+        <div class="actions">
+          <button class="btn">Set thresholds</button>
+          <button class="btn">Risk breakdown</button>
+        </div>
+      </div>
+    </section>
+
+    <div style="height:14px"></div>
+
+    <!-- MIDDLE ROW -->
+    <section class="grid g-mid">
+      <div class="card">
+        <h2>Allocation by Geography</h2>
+        <div class="mini">
+          <div class="muted" style="font-size:12px;margin-bottom:8px;">Country/Region</div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Region</th>
+                <th class="right">Value</th>
+                <th class="right">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>US</td><td class="right">S$ 342,100</td><td class="right">46%</td></tr>
+              <tr><td>SG</td><td class="right">S$ 184,900</td><td class="right">25%</td></tr>
+              <tr><td>India</td><td class="right">S$ 96,800</td><td class="right">13%</td></tr>
+              <tr><td>HK</td><td class="right">S$ 44,200</td><td class="right">6%</td></tr>
+              <tr><td>Other</td><td class="right">S$ 74,180</td><td class="right">10%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <footer>In v1: geography can be derived from exchange/country tags + manual overrides.</footer>
+      </div>
+
+      <div class="card">
+        <h2>Allocation by Platform</h2>
+        <div class="mini">
+          <div class="muted" style="font-size:12px;margin-bottom:8px;">Broker / Bank / Exchange</div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Platform</th>
+                <th class="right">Value</th>
+                <th class="right">%</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><span class="tag">IBKR</span></td><td class="right">S$ 410,200</td><td class="right">55%</td></tr>
+              <tr><td><span class="tag">DBS</span></td><td class="right">S$ 132,000</td><td class="right">18%</td></tr>
+              <tr><td><span class="tag">Coinbase</span></td><td class="right">S$ 64,400</td><td class="right">9%</td></tr>
+              <tr><td><span class="tag">Wallets</span></td><td class="right">S$ 72,500</td><td class="right">10%</td></tr>
+              <tr><td><span class="tag">Other</span></td><td class="right">S$ 63,080</td><td class="right">8%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <footer>Platform tags are critical for ingestion and reconciliation.</footer>
+      </div>
+
+      <div class="card">
+        <h2>Trends (Monthly)</h2>
+        <div class="mini" style="height:250px; display:flex; align-items:center; justify-content:center;">
+          <div class="muted" style="text-align:center; line-height:1.4;">
+            Placeholder chart area<br/>
+            Net worth + portfolio value over time (monthly snapshots)
+          </div>
+        </div>
+        <div class="actions">
+          <button class="btn">Net worth trend</button>
+          <button class="btn">Spending trend</button>
+          <button class="btn">Export snapshot CSV</button>
+        </div>
+      </div>
+    </section>
+
+    <div style="height:14px"></div>
+
+    <!-- BOTTOM ROW -->
+    <section class="grid g-bot">
+      <div class="card">
+        <h2>Top Holdings (Overall)</h2>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Class</th>
+              <th>Geo</th>
+              <th>Platform</th>
+              <th class="right">% NW</th>
+              <th class="right">Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>ETH</td><td>Crypto</td><td>Global</td><td>Coinbase + Wallets</td><td class="right">14.2%</td><td class="right">S$ 105,400</td></tr>
+            <tr><td>NVDA</td><td>Stock</td><td>US</td><td>IBKR</td><td class="right">11.0%</td><td class="right">S$ 81,800</td></tr>
+            <tr><td>NFLX</td><td>Stock</td><td>US</td><td>IBKR</td><td class="right">9.4%</td><td class="right">S$ 69,700</td></tr>
+            <tr><td>SPY</td><td>Fund</td><td>US</td><td>IBKR</td><td class="right">7.6%</td><td class="right">S$ 56,300</td></tr>
+            <tr><td>HDFC Bank</td><td>Stock</td><td>India</td><td>Sharekhan</td><td class="right">6.4%</td><td class="right">S$ 47,200</td></tr>
+            <tr><td>DBS Savings</td><td>Cash</td><td>SG</td><td>DBS</td><td class="right">5.8%</td><td class="right">S$ 43,000</td></tr>
+          </tbody>
+        </table>
+        <footer>Top holdings are computed across *all* asset classes to show real concentration risk.</footer>
+      </div>
+<div class="card">
+  <h2>Cash Flow — February 2026</h2>
+
+  <div class="split">
+    <div class="mini">
+      <h3>Income</h3>
+      <div class="big" style="font-size:22px;margin:0;">S$ 12,480</div>
+      <div class="muted" style="margin-top:6px;">
+        Salary — S$ 12,000<br/>
+        Dividends — S$ 480
+      </div>
+    </div>
+
+    <div class="mini">
+      <h3>Expenses</h3>
+      <div class="big" style="font-size:22px;margin:0;">S$ 7,200</div>
+      <div class="muted" style="margin-top:6px;">
+        Housing — S$ 3,200<br/>
+        Education — S$ 800<br/>
+        Food — S$ 1,480<br/>
+        Transport — S$ 620<br/>
+        Others — S$ 1,100
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:12px" class="mini">
+    <h3>Net Cash Flow</h3>
+    <div class="big" style="font-size:22px;margin:0;">S$ 5,280</div>
+    <div class="muted" style="margin-top:6px;">
+      Savings rate: <span class="good">42%</span>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn">View monthly breakdown</button>
+    <button class="btn">View transaction ledger</button>
+    <button class="btn">Category mapping</button>
+  </div>
+</div>
+
+   
+    </section>
+
+    <footer style="margin-top:18px;">
+      Next drill-down screens suggested: Holdings (filters by asset class/geo/platform), Spending (merchant-level), Ingestion (per-source parsing + errors), Trends (time-series with snapshot diffs).
+    </footer>
+  </div>
+</body>
+</html>
