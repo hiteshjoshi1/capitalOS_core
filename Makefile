@@ -1,3 +1,4 @@
+PROJECT=capitalos
 # ---- Config ----
 DB_CONTAINER=capitalos-postgres
 DB_USER=capitalos
@@ -14,6 +15,14 @@ down:
 
 logs:
 	docker compose logs -f
+
+api-rebuild:
+	docker compose build api
+	docker compose up -d api
+
+web-rebuild:
+	docker compose build web
+	docker compose up -d web
 
 ps:
 	docker compose ps
@@ -69,3 +78,10 @@ api-up:
 
 web-up:
 	cd web && npm install && npm run dev
+
+api-smoke:
+	curl -s http://localhost:8000/health
+	curl -s "http://localhost:8000/dashboard/summary?month=2026-02"
+
+logs:
+	docker compose logs -f
