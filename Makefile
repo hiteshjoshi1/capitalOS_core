@@ -79,6 +79,11 @@ api-up:
 web-up:
 	cd web && npm install && npm run dev
 
+.PHONY: web-test
+
+web-test:
+	cd web && npm install && npm test
+
 api-smoke:
 	curl -s http://localhost:8000/health
 	curl -s "http://localhost:8000/dashboard/summary?month=2026-02"

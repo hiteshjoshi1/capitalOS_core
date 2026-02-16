@@ -88,10 +88,57 @@ net_worth_change: null | {
 
 export type Health = { status: string };
 
+export type AccountOptions = {
+  account_types: string[];
+  currencies: string[];
+  countries: string[];
+  currency_pattern: string;
+};
+
+export type AccountCreate = {
+  name: string;
+  platform_id: number | null;
+  platform: string;
+  account_type: string;
+  currency: string;
+  country: string | null;
+};
+
+export type PlatformCreate = {
+  code: string;
+  name: string;
+  platform_type: string;
+  country: string;
+  website?: string | null;
+};
+
+export type PlatformOptions = {
+  platform_types: string[];
+  countries: string[];
+  country_pattern: string;
+};
+
+export type CurrencyCreate = {
+  code: string;
+  name?: string | null;
+};
+
 export const api = {
   health: () => req<Health>("/health"),
   platforms: () => req<Platform[]>("/platforms"),
+  platformOptions: () => req<PlatformOptions>("/platforms/options"),
+  createPlatform: (payload: PlatformCreate) =>
+    req<Platform>("/platforms", { method: "POST", body: JSON.stringify(payload) }),
   accounts: () => req<Account[]>("/accounts"),
+  accountOptions: () => req<AccountOptions>("/accounts/options"),
+  createAccount: (payload: AccountCreate) =>
+    req<Account>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
+  currencies: () => req<{ id: number; code: string; name?: string | null }[]>("/currencies"),
+  createCurrency: (payload: CurrencyCreate) =>
+    req<{ id: number; code: string; name?: string | null }>("/currencies", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   dashboardSummary: (month: string, compare?: string) =>
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
 

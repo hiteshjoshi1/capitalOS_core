@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "./lib/api";
 import type { Account, Platform, DashboardSummary } from "./lib/api";
+import { Link } from "react-router-dom";
 import "./App.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -241,8 +242,8 @@ export default function App() {
                   })}
                 </tbody>
               </table>
-              <div className="muted" style={{ marginTop: 10 }}>
-                Next: add “Create account” UI and wire <code>POST /accounts</code>.
+              <div className="actions" style={{ marginTop: 10 }}>
+                <Link className="btn" to="/accounts/new">Add account</Link>
               </div>
             </div>
           </section>

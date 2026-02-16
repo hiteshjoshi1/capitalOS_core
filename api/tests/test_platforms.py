@@ -16,3 +16,24 @@ def test_platforms_list_order(client: TestClient, db_engine):
     assert resp.status_code == 200
     data = resp.json()
     assert [p["code"] for p in data] == ["DBS", "UOB", "IBKR"]
+
+
+def test_platforms_create_and_options(client: TestClient):
+    resp = client.get("/platforms/options")
+    assert resp.status_code == 200
+    assert "BANK" in resp.json()["platform_types"]
+    assert "countries" in resp.json()
+
+    resp = client.post(
+        "/platforms",
+        json={
+            "code": "CITI",
+            "name": "Citi Bank",
+            "platform_type": "BANK",
+            "country": "US",
+            "website": "https://www.citi.com",
+        },
+    )
+    assert resp.status_code == 200
+    created = resp.json()
+    assert created["code"] == "CITI"

@@ -50,6 +50,27 @@ def setup_db():
             )
             """
         )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS platforms (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL UNIQUE,
+              name TEXT NOT NULL,
+              platform_type TEXT NOT NULL,
+              country TEXT NOT NULL,
+              website TEXT
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS currencies (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL UNIQUE,
+              name TEXT
+            )
+            """
+        )
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.exec_driver_sql(
@@ -83,11 +104,25 @@ def setup_db():
             )
             """
         )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS prices (
+              id INTEGER PRIMARY KEY,
+              asset_id INTEGER NOT NULL,
+              ts TIMESTAMP NOT NULL,
+              price REAL NOT NULL,
+              currency TEXT NOT NULL
+            )
+            """
+        )
     yield
     with engine.begin() as conn:
+        conn.exec_driver_sql("DROP TABLE IF EXISTS currencies")
         conn.exec_driver_sql("DROP TABLE IF EXISTS transactions")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
         conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS assets")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS platforms")
     Base.metadata.drop_all(bind=engine)
 
 
@@ -99,6 +134,8 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM positions")
         conn.exec_driver_sql("DELETE FROM assets")
         conn.exec_driver_sql("DELETE FROM transactions")
+        conn.exec_driver_sql("DELETE FROM prices")
+        conn.exec_driver_sql("DELETE FROM currencies")
     yield
 
 

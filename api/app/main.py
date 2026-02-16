@@ -6,6 +6,7 @@ from app.routers.health import router as health_router
 from app.routers.platforms import router as platforms_router
 from app.routers.accounts import router as accounts_router
 from app.routers.dashboard import router as dashboard_router
+from app.routers.currencies import router as currencies_router
 
 
 
@@ -27,3 +28,4 @@ app.include_router(health_router)
 app.include_router(platforms_router)
 app.include_router(accounts_router)
 app.include_router(dashboard_router)
+app.include_router(currencies_router)
