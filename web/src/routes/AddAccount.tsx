@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { AccountOptions, Platform, PlatformOptions } from "../lib/api";
+import type { AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
 import "../App.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -30,9 +30,9 @@ export default function AddAccount() {
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [options, setOptions] = useState<AccountOptions | null>(null);
   const [platformOptions, setPlatformOptions] = useState<PlatformOptions | null>(null);
+  const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [showPlatformForm, setShowPlatformForm] = useState<boolean>(false);
-  const [showCurrencyForm, setShowCurrencyForm] = useState<boolean>(false);
   const [platformForm, setPlatformForm] = useState({
     code: "",
     name: "",
@@ -40,23 +40,22 @@ export default function AddAccount() {
     country: "",
     website: "",
   });
-  const [currencyForm, setCurrencyForm] = useState({
-    code: "",
-    name: "",
-  });
+  const [currencySearch, setCurrencySearch] = useState<string>("");
 
   useEffect(() => {
     (async () => {
       try {
         setState("loading");
-        const [p, o, po] = await Promise.all([
+        const [p, o, po, c] = await Promise.all([
           api.platforms(),
           api.accountOptions(),
           api.platformOptions(),
+          api.currencies(),
         ]);
         setPlatforms(p);
         setOptions(o);
         setPlatformOptions(po);
+        setCurrencies(c);
         setState("ready");
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -71,9 +70,7 @@ export default function AddAccount() {
     return platforms.find((p) => p.id === id);
   }, [form.platformId, platforms]);
 
-  const currencyPattern = options?.currency_pattern ?? "^[A-Z]{3}$";
-  const currencyRegex = useMemo(() => new RegExp(currencyPattern), [currencyPattern]);
-  const currencyOptions = options?.currencies ?? [];
+  const currencyOptions = currencies;
   const accountTypes = options?.account_types ?? [];
   const platformTypes = platformOptions?.platform_types ?? [];
   const platformCountries = platformOptions?.countries ?? [];
@@ -91,8 +88,7 @@ export default function AddAccount() {
     form.name.trim().length > 0 &&
     form.platformId !== "" &&
     form.accountType !== "" &&
-    form.currency.trim().length > 0 &&
-    currencyRegex.test(form.currency.trim().toUpperCase());
+    form.currency.trim().length > 0;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -130,14 +126,16 @@ export default function AddAccount() {
   }
 
   async function refreshOptions() {
-    const [p, o, po] = await Promise.all([
+    const [p, o, po, c] = await Promise.all([
       api.platforms(),
       api.accountOptions(),
       api.platformOptions(),
+      api.currencies(),
     ]);
     setPlatforms(p);
     setOptions(o);
     setPlatformOptions(po);
+    setCurrencies(c);
   }
 
   async function onCreatePlatform(e: React.FormEvent<HTMLFormElement>) {
@@ -171,22 +169,16 @@ export default function AddAccount() {
     setShowPlatformForm(false);
   }
 
-  async function onCreateCurrency(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    setErr("");
-    const code = currencyForm.code.trim().toUpperCase();
-    if (!currencyRegex.test(code)) {
-      setErr("Currency must be a 3-letter ISO code.");
-      return;
-    }
-    await api.createCurrency({
-      code,
-      name: currencyForm.name.trim() || null,
-    });
-    await refreshOptions();
-    setCurrencyForm({ code: "", name: "" });
-    setShowCurrencyForm(false);
-  }
+  const filteredCurrencies = useMemo(() => {
+    const q = currencySearch.trim().toUpperCase();
+    if (!q) return currencyOptions;
+    return currencyOptions.filter(
+      (c) =>
+        c.code.includes(q) ||
+        (c.name ? c.name.toUpperCase().includes(q) : false) ||
+        (c.country ? c.country.toUpperCase().includes(q) : false)
+    );
+  }, [currencyOptions, currencySearch]);
 
   return (
     <div className="wrap">
@@ -227,7 +219,16 @@ export default function AddAccount() {
             </label>
 
             <label className="field">
-              <span className="label">Platform</span>
+              <span className="label">
+                Platform
+                <button
+                  type="button"
+                  className="linkBtn"
+                  onClick={() => setShowPlatformForm(true)}
+                >
+                  Add platform
+                </button>
+              </span>
               <select
                 className="input"
                 value={form.platformId}
@@ -249,13 +250,6 @@ export default function AddAccount() {
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowPlatformForm((prev) => !prev)}
-              >
-                Add platform
-              </button>
             </label>
 
             <label className="field">
@@ -285,52 +279,28 @@ export default function AddAccount() {
 
             <label className="field">
               <span className="label">Currency</span>
-              {currencyOptions.length > 0 ? (
-                <select
-                  className="input"
-                  value={form.currency}
-                  aria-label="Account Currency"
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      currency: e.target.value,
-                    }))
-                  }
-                  required
-                >
-                  <option value="" disabled>
-                    Select currency
+              <input
+                className="input"
+                type="text"
+                list="currency-options"
+                value={currencySearch}
+                aria-label="Account Currency"
+                onChange={(e) => {
+                  const next = e.target.value.toUpperCase();
+                  setCurrencySearch(next);
+                  setForm((prev) => ({ ...prev, currency: next }));
+                }}
+                placeholder="Start typing to filter"
+                required
+              />
+              <datalist id="currency-options">
+                {filteredCurrencies.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name ?? "Unknown"} ({c.country ?? "Unknown"})
                   </option>
-                  {currencyOptions.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <input
-                  className="input"
-                  type="text"
-                  value={form.currency}
-                  aria-label="Account Currency"
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      currency: e.target.value.toUpperCase(),
-                    }))
-                  }
-                  placeholder="e.g. SGD"
-                  required
-                />
-              )}
-              <button
-                type="button"
-                className="btn"
-                onClick={() => setShowCurrencyForm((prev) => !prev)}
-              >
-                Add currency
-              </button>
-              <span className="hint">Format: 3-letter ISO code.</span>
+                ))}
+              </datalist>
+              <span className="hint">Type to filter and select a currency.</span>
             </label>
 
             <label className="field">
@@ -359,9 +329,10 @@ export default function AddAccount() {
           </form>
 
           {showPlatformForm && (
-            <div className="card">
-              <div className="cardTitle">New Platform</div>
-              <form className="formGrid" onSubmit={onCreatePlatform}>
+            <div className="modalBackdrop" role="dialog" aria-modal="true">
+              <div className="modal">
+                <div className="cardTitle">New Platform</div>
+                <form className="formGrid" onSubmit={onCreatePlatform}>
                 <label className="field">
                   <span className="label">Code</span>
                   <input
@@ -460,47 +431,10 @@ export default function AddAccount() {
                   </button>
                 </div>
               </form>
+              </div>
             </div>
           )}
 
-          {showCurrencyForm && (
-            <div className="card">
-              <div className="cardTitle">New Currency</div>
-              <form className="formGrid" onSubmit={onCreateCurrency}>
-                <label className="field">
-                  <span className="label">Code</span>
-                  <input
-                    className="input"
-                    type="text"
-                    value={currencyForm.code}
-                    aria-label="Currency Code"
-                    onChange={(e) => setCurrencyForm((prev) => ({ ...prev, code: e.target.value }))}
-                    placeholder="e.g. SGD"
-                    required
-                  />
-                </label>
-                <label className="field">
-                  <span className="label">Name</span>
-                  <input
-                    className="input"
-                    type="text"
-                    value={currencyForm.name}
-                    aria-label="Currency Name"
-                    onChange={(e) => setCurrencyForm((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g. Singapore Dollar"
-                  />
-                </label>
-                <div className="actions">
-                  <button className="btn" type="submit">
-                    Save currency
-                  </button>
-                  <button className="btn" type="button" onClick={() => setShowCurrencyForm(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            </div>
-          )}
         </div>
       )}
     </div>

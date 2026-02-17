@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.schemas.dashboard import PlatformAllocationOut, PlatformAllocationItem
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -156,6 +157,39 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str) -
     return {"income": income, "expenses": expenses, "net": net, "savings_rate": savings_rate}
 
 
+def _platform_allocation(db: Session, as_of: Optional[datetime]) -> dict:
+    if as_of is None:
+        return {"as_of": None, "total": 0.0, "items": []}
+
+    q = text("""
+        SELECT
+          COALESCE(pl.code, a.platform) AS platform,
+          pl.platform_type AS platform_type,
+          COALESCE(pl.country, a.country) AS country,
+          SUM(p.cost_basis_base) AS value
+        FROM positions p
+        JOIN accounts a ON a.id = p.account_id
+        LEFT JOIN platforms pl ON pl.id = a.platform_id
+        WHERE p.as_of = :as_of
+        GROUP BY COALESCE(pl.code, a.platform), pl.platform_type, COALESCE(pl.country, a.country)
+        ORDER BY value DESC
+    """)
+    rows = db.execute(q, {"as_of": as_of}).mappings().all()
+    total = sum(float(r["value"]) for r in rows)
+    items = []
+    for r in rows:
+        value = float(r["value"])
+        percent = round((value / total) * 100, 2) if total > 0 else 0.0
+        items.append({
+            "platform": r["platform"],
+            "platform_type": r["platform_type"],
+            "country": r["country"],
+            "value": value,
+            "percent": percent,
+        })
+    return {"as_of": as_of.isoformat(), "total": total, "items": items}
+
+
 @router.get("/summary")
 def dashboard_summary(
     month: str = Query(..., description="YYYY-MM"),
@@ -225,3 +259,23 @@ def dashboard_summary(
         "top_holdings": top,
         "net_worth_change": changes if changes else None,
     }
+
+
+@router.get("/platform-allocation", response_model=PlatformAllocationOut)
+def platform_allocation(
+    month: str = Query(..., description="YYYY-MM"),
+    db: Session = Depends(get_db),
+):
+    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    if snapshot_day < 1 or snapshot_day > 28:
+        raise HTTPException(status_code=500, detail="SNAPSHOT_DAY must be between 1 and 28")
+
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start, snapshot_day)
+    as_of = _effective_as_of(db, anchor)
+    payload = _platform_allocation(db, as_of)
+    return PlatformAllocationOut(
+        as_of=payload["as_of"],
+        total=payload["total"],
+        items=[PlatformAllocationItem(**item) for item in payload["items"]],
+    )

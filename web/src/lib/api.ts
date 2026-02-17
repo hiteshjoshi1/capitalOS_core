@@ -27,7 +27,7 @@ export type Account = {
   name: string;
   platform: string;      // legacy text column (DBS, IBKR, etc.)
   platform_id?: number | null;
-  account_type: string;  // BANK | BROKER | EXCHANGE | WALLET | CREDIT_CARD | LOAN
+  account_type: string;  // BANK | BROKER | EXCHANGE | WALLET | CREDIT_CARD | LOAN | MUTUAL_FUND
   currency: string;
   country?: string | null;
 };
@@ -84,9 +84,56 @@ net_worth_change: null | {
 };
 };
 
+export type SpendingSummary = {
+  month: string;
+  base_currency: string;
+  income_total: number;
+  expense_total: number;
+  net: number;
+  savings_rate: number | null;
+  income_categories: Array<{ category: string; amount: number }>;
+  expense_categories: Array<{ category: string; amount: number }>;
+};
+
+export type CreditCardSummary = {
+  month: string;
+  base_currency: string;
+  total_spend: number;
+  cards: Array<{
+    account_id: number;
+    account_name: string;
+    card_name: string;
+    issuer: string;
+    credit_limit: number;
+    statement_day: number;
+    due_day: number;
+    due_date: string;
+    current_due: number;
+    utilization: number | null;
+  }>;
+};
+
+export type PlatformAllocation = {
+  as_of: string | null;
+  total: number;
+  items: Array<{
+    platform: string;
+    platform_type: string | null;
+    country: string | null;
+    value: number;
+    percent: number;
+  }>;
+};
 
 
 export type Health = { status: string };
+
+export type Currency = {
+  id: number;
+  code: string;
+  name?: string | null;
+  country?: string | null;
+};
 
 export type AccountOptions = {
   account_types: string[];
@@ -121,6 +168,7 @@ export type PlatformOptions = {
 export type CurrencyCreate = {
   code: string;
   name?: string | null;
+  country?: string | null;
 };
 
 export const api = {
@@ -133,13 +181,19 @@ export const api = {
   accountOptions: () => req<AccountOptions>("/accounts/options"),
   createAccount: (payload: AccountCreate) =>
     req<Account>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
-  currencies: () => req<{ id: number; code: string; name?: string | null }[]>("/currencies"),
+  currencies: () => req<Currency[]>("/currencies"),
   createCurrency: (payload: CurrencyCreate) =>
-    req<{ id: number; code: string; name?: string | null }>("/currencies", {
+    req<Currency>("/currencies", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
   dashboardSummary: (month: string, compare?: string) =>
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
+  platformAllocation: (month: string) =>
+    req<PlatformAllocation>(`/dashboard/platform-allocation?month=${encodeURIComponent(month)}`),
+  spendingSummary: (month: string, baseCurrency = "SGD") =>
+    req<SpendingSummary>(`/spending/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  creditCardSummary: (month: string, baseCurrency = "SGD") =>
+    req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
 
 };

@@ -4,14 +4,15 @@ import { MemoryRouter } from "react-router-dom";
 
 import App from "../App";
 import { api } from "../lib/api";
-import type { Account, DashboardSummary, Platform } from "../lib/api";
+import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     health: vi.fn(),
-    platforms: vi.fn(),
-    accounts: vi.fn(),
     dashboardSummary: vi.fn(),
+    platformAllocation: vi.fn(),
+    spendingSummary: vi.fn(),
+    creditCardSummary: vi.fn(),
     accountOptions: vi.fn(),
     createAccount: vi.fn(),
     platformOptions: vi.fn(),
@@ -64,32 +65,65 @@ const summaryFixture: DashboardSummary = {
   ],
 };
 
-const platformsFixture: Platform[] = [
-  { id: 1, code: "DBS", name: "DBS Bank", platform_type: "BANK", country: "SG", website: null },
-  { id: 2, code: "IBKR", name: "Interactive Brokers", platform_type: "BROKER", country: "US", website: null },
-];
+const platformAllocationFixture: PlatformAllocation = {
+  as_of: "2026-02-06T00:00:00+00:00",
+  total: 100000,
+  items: [
+    { platform: "IBKR", platform_type: "BROKER", country: "US", value: 70000, percent: 70 },
+    { platform: "DBS", platform_type: "BANK", country: "SG", value: 30000, percent: 30 },
+  ],
+};
 
-const accountsFixture: Account[] = [
-  {
-    id: 1,
-    name: "DBS Savings",
-    platform: "DBS",
-    platform_id: 1,
-    account_type: "BANK",
-    currency: "SGD",
-    country: "SG",
-  },
-];
+const spendingSummaryFixture: SpendingSummary = {
+  month: "2026-02",
+  base_currency: "SGD",
+  income_total: 12480,
+  expense_total: 8710,
+  net: 3770,
+  savings_rate: 0.3,
+  income_categories: [
+    { category: "Salary", amount: 12000 },
+    { category: "Dividends", amount: 480 },
+  ],
+  expense_categories: [
+    { category: "Rent", amount: 3200 },
+    { category: "Groceries", amount: 1210 },
+  ],
+};
+
+const creditCardSummaryFixture: CreditCardSummary = {
+  month: "2026-02",
+  base_currency: "SGD",
+  total_spend: 2990,
+  cards: [
+    {
+      account_id: 11,
+      account_name: "DBS Credit Card",
+      card_name: "DBS Altitude",
+      issuer: "DBS",
+      credit_limit: 20000,
+      statement_day: 20,
+      due_day: 25,
+      due_date: "2026-02-25",
+      current_due: 2990,
+      utilization: 0.1495,
+    },
+  ],
+};
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
   mockApi.health.mockResolvedValue({ status: "ok" });
-  mockApi.platforms.mockResolvedValue(platformsFixture);
-  mockApi.accounts.mockResolvedValue(accountsFixture);
   mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
+  mockApi.platformAllocation.mockResolvedValue(platformAllocationFixture);
+  mockApi.spendingSummary.mockResolvedValue(spendingSummaryFixture);
+  mockApi.creditCardSummary.mockResolvedValue(creditCardSummaryFixture);
 });
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("App", () => {
@@ -101,14 +135,15 @@ describe("App", () => {
     );
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
-    expect(screen.getByText("CapitalOS")).toBeInTheDocument();
+    expect(screen.getByText("CapitalOS — Dashboard")).toBeInTheDocument();
 
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
 
     expect(screen.getByText(/S\$ 742,180/)).toBeInTheDocument();
-    expect(screen.getByText(/Income: S\$ 8,200/)).toBeInTheDocument();
-    expect(screen.getByText(/Expenses: S\$ 5,300/)).toBeInTheDocument();
-    expect(screen.getByText(/Savings rate: 35%/)).toBeInTheDocument();
+    expect(screen.getByText("Cash Flow — 2026-02")).toBeInTheDocument();
+    expect(screen.getByText(/S\$ 12,480/)).toBeInTheDocument();
+    expect(screen.getByText(/S\$ 8,710/)).toBeInTheDocument();
+    expect(screen.getByText(/30%/)).toBeInTheDocument();
 
     const holdingsSection = screen.getByText("Top Holdings").closest(".card");
     expect(holdingsSection).not.toBeNull();
@@ -118,21 +153,14 @@ describe("App", () => {
       expect(within(table).getByText("BTC")).toBeInTheDocument();
     }
 
-    const platformsSection = screen.getByText("Platforms (Reference)").closest(".card");
-    expect(platformsSection).not.toBeNull();
-    if (platformsSection) {
-      const table = within(platformsSection).getByRole("table");
-      expect(within(table).getByText("DBS", { selector: "code" })).toBeInTheDocument();
-      expect(within(table).getByText("IBKR", { selector: "code" })).toBeInTheDocument();
-    }
-
-    const accountsSection = screen.getByText("Accounts (Configured)").closest(".card");
-    expect(accountsSection).not.toBeNull();
-    if (accountsSection) {
-      const table = within(accountsSection).getByRole("table");
-      expect(within(table).getByText("DBS Savings", { selector: "td" })).toBeInTheDocument();
-      expect(within(accountsSection).getByText("SGD")).toBeInTheDocument();
-    }
+    expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
+    expect(screen.getByText("DBS Altitude")).toBeInTheDocument();
+    expect(screen.getByText("Allocation by Geography")).toBeInTheDocument();
+    expect(screen.getByText("Allocation by Platform")).toBeInTheDocument();
+    expect(screen.getByText("IBKR")).toBeInTheDocument();
+    expect(screen.getByText(/70.0%/)).toBeInTheDocument();
+    expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
+    expect(screen.getByText("Top Holdings (Overall)")).toBeInTheDocument();
   });
 
   it("renders API error state when requests fail", async () => {

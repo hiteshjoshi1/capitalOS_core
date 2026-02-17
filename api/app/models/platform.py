@@ -4,7 +4,7 @@ from .base import Base
 
 # IMPORTANT: This enum name must match the DB enum created by migration: platform_type
 PlatformType = Enum(
-    "BANK", "BROKER", "EXCHANGE", "CARD_ISSUER", "WALLET_PROVIDER",
+    "BANK", "BROKER", "EXCHANGE", "CARD_ISSUER", "WALLET_PROVIDER", "MUTUAL_FUND",
     name="platform_type",
     create_type=False,
 )

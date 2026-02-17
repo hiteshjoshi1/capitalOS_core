@@ -32,8 +32,8 @@ def test_accounts_options(client: TestClient, db_engine):
         )
         conn.execute(
             text(
-                "INSERT INTO currencies (id, code, name) VALUES "
-                "(1, 'SGD', 'Singapore Dollar')"
+                "INSERT INTO currencies (id, code, name, country) VALUES "
+                "(1, 'SGD', 'Singapore Dollar', 'Singapore')"
             )
         )
         conn.execute(

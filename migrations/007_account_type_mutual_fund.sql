@@ -1,0 +1,4 @@
+DO $$ BEGIN
+  ALTER TYPE account_type ADD VALUE IF NOT EXISTS 'MUTUAL_FUND';
+EXCEPTION WHEN undefined_object THEN NULL;
+END $$;

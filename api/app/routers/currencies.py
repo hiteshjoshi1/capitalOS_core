@@ -17,6 +17,7 @@ def list_currencies(db: Session = Depends(get_db)):
 def create_currency(payload: CurrencyCreate, db: Session = Depends(get_db)):
     code = payload.code.strip().upper()
     name = payload.name.strip() if payload.name else None
+    country = payload.country.strip() if payload.country else None
 
     if not re.match(r"^[A-Z]{3}$", code):
         raise HTTPException(status_code=400, detail="invalid currency")
@@ -25,7 +26,7 @@ def create_currency(payload: CurrencyCreate, db: Session = Depends(get_db)):
     if existing:
         return existing
 
-    cur = Currency(code=code, name=name)
+    cur = Currency(code=code, name=name, country=country)
     db.add(cur)
     db.commit()
     db.refresh(cur)

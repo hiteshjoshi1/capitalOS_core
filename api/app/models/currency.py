@@ -7,3 +7,4 @@ class Currency(Base):
     id = Column(BigInteger, primary_key=True)
     code = Column(Text, nullable=False, unique=True)
     name = Column(Text, nullable=True)
+    country = Column(Text, nullable=True)

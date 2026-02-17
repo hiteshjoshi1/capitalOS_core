@@ -29,6 +29,7 @@ ps:
 
 # ---- DB helpers ----
 .PHONY: db-shell db-wait db-migrate db-reset
+.PHONY: db-seed-dummy db-clear-dummy
 
 db-shell:
 	docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)
@@ -54,6 +55,16 @@ db-reset:
 	docker compose down -v
 	docker compose up -d
 	$(MAKE) db-migrate
+
+db-seed-dummy: db-wait
+	@echo "Seeding dummy demo data..."
+	@docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy.sql
+	@echo "Dummy data seeded."
+
+db-clear-dummy: db-wait
+	@echo "Removing dummy demo data..."
+	@docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy_cleanup.sql
+	@echo "Dummy data removed."
 
 .PHONY: api-logs api-shell
 

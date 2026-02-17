@@ -4,7 +4,7 @@ from .base import Base
 
 # enum name must match DB enum: account_type
 AccountType = Enum(
-    "BANK", "BROKER", "EXCHANGE", "WALLET", "CREDIT_CARD", "LOAN",
+    "BANK", "BROKER", "EXCHANGE", "WALLET", "CREDIT_CARD", "LOAN", "MUTUAL_FUND",
     name="account_type",
     create_type=False,
 )

@@ -21,12 +21,6 @@ def account_options(db: Session = Depends(get_db)):
 
     q = text("""
         SELECT DISTINCT code AS currency FROM currencies WHERE code IS NOT NULL
-        UNION
-        SELECT DISTINCT currency FROM accounts WHERE currency IS NOT NULL
-        UNION
-        SELECT DISTINCT currency FROM transactions WHERE currency IS NOT NULL
-        UNION
-        SELECT DISTINCT currency FROM prices WHERE currency IS NOT NULL
         ORDER BY currency
     """)
     currencies = [r[0] for r in db.execute(q).fetchall()]
