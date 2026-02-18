@@ -103,7 +103,7 @@ export default function App() {
       {state === "ready" && (
         <>
           <section className="grid g-top">
-            <div className="card">
+            <div className="card netWorthCard">
               <h2>Net Worth</h2>
               <div className="big">{formatMoney(summary?.net_worth.total)}</div>
 
@@ -142,10 +142,17 @@ export default function App() {
                 <span className="dot"><i style={{ background: "var(--good)" }}></i>Crypto 15%</span>
               </div>
 
-              <div className="hintTag">Live</div>
-              <div className="muted">
-                Deltas + allocation bars are mocked.
+              <div className="mini" style={{ marginTop: 12 }}>
+                <h3>Net Worth Trend</h3>
+                <div style={{ height: 140, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <div className="muted" style={{ textAlign: "center", lineHeight: 1.4 }}>
+                    Placeholder chart area<br />
+                    Net worth over time (monthly snapshots)
+                  </div>
+                </div>
               </div>
+
+              <div className="hintTag">Live</div>
               <div className="actions">
                 <button className="btn" disabled>View holdings</button>
                 <button className="btn" disabled>View trends</button>
@@ -172,15 +179,7 @@ export default function App() {
                 <div className="mini">
                   <h3>Expenses</h3>
                   <div className="big small">{formatMoney(spendingSummary?.expense_total)}</div>
-                  <div className="muted">
-                    {spendingSummary?.expense_categories.length ? (
-                      spendingSummary.expense_categories.slice(0, 5).map((c) => (
-                        <div key={c.category}>{c.category} — {formatMoney(c.amount)}</div>
-                      ))
-                    ) : (
-                      <span>No categorized expenses yet.</span>
-                    )}
-                  </div>
+                  <div className="muted">Breakdown in the next card.</div>
                 </div>
               </div>
 
@@ -264,6 +263,35 @@ export default function App() {
           <div style={{ height: 14 }}></div>
 
           <section className="grid g-mid">
+            <div className="card">
+              <h2>Expense Breakdown</h2>
+              <div className="mini">
+                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>By category</div>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Category</th>
+                      <th className="right">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {spendingSummary?.expense_categories.length ? (
+                      spendingSummary.expense_categories.map((c) => (
+                        <tr key={c.category}>
+                          <td>{c.category}</td>
+                          <td className="right">{formatMoney(c.amount)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td className="muted" colSpan={2}>No categorized expenses yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="hintTag">Live</div>
+            </div>
             <div className="card">
               <h2>Top Holdings</h2>
               <table className="table">

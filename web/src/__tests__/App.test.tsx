@@ -155,6 +155,7 @@ describe("App", () => {
 
     expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
     expect(screen.getByText("DBS Altitude")).toBeInTheDocument();
+    expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();
     expect(screen.getByText("Allocation by Geography")).toBeInTheDocument();
     expect(screen.getByText("Allocation by Platform")).toBeInTheDocument();
     expect(screen.getByText("IBKR")).toBeInTheDocument();
