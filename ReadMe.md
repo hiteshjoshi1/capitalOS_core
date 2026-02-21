@@ -197,3 +197,38 @@ make db-shell
 ```bash
 make db-reset
 ```
+
+---
+
+## Ingestion (IBKR v1)
+
+### Where files and reports are stored
+
+- Raw uploads: `data/raw/<job_id>/...`
+- Import reports: `data/reports/<job_id>.json`
+
+The `api` container mounts `./data` to `/app/data` for local-first storage.
+
+### Ingest via UI
+
+1. Create an account (if none exist): `http://localhost:5173/accounts/new`
+2. Go to `http://localhost:5173/ingest`
+3. Select an account and upload an IBKR Activity Statement CSV.
+
+### Ingest via curl
+
+```bash
+curl -s -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://localhost:8000/ingest/ibkr?account_id=<ACCOUNT_ID>"
+```
+
+### Ingest smoke test
+
+```bash
+make ingest-smoke
+```
+
+### Signature and parser registry
+
+The ingestion pipeline computes a deterministic signature from the IBKR CSV (sections + headers + delimiter).
+Signatures are mapped to parser keys in `parser_registry`. Unknown signatures are marked `NEEDS_MAPPING`
+so you can register a new signature for a new file format.

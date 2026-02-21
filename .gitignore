@@ -92,3 +92,12 @@ web/coverage/
 # Misc
 #######################################
 *.tsbuildinfo
+
+#######################################
+# Ingestion artifacts
+#######################################
+data/
+!data/fixtures/
+!data/fixtures/**
+data/raw/
+data/reports/

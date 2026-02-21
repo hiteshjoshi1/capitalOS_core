@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
+from app.fx import get_rates
 from app.schemas.spending import (
     SpendingSummaryOut,
     CategoryAmount,
@@ -52,38 +53,40 @@ def spending_summary(
 
     totals_q = text("""
         SELECT
-          COALESCE(SUM(CASE WHEN type='INCOME' THEN amount ELSE 0 END),0) AS income,
-          COALESCE(SUM(CASE WHEN type IN ('EXPENSE','FEE','TAX','INTEREST') THEN -amount ELSE 0 END),0) AS expenses
+          type,
+          amount,
+          currency,
+          COALESCE(category, 'Uncategorized') AS category
         FROM transactions
         WHERE ts >= :start AND ts < :end
-          AND currency = :base_currency
     """)
-    totals = db.execute(totals_q, {"start": start, "end": end, "base_currency": base_currency}).mappings().one()
-    income_total = float(totals["income"])
-    expense_total = float(totals["expenses"])
+    rows = db.execute(totals_q, {"start": start, "end": end}).mappings().all()
+    currencies = {r["currency"] for r in rows if r["currency"]}
+    rates = get_rates(start, base_currency, currencies)
+
+    income_total = 0.0
+    expense_total = 0.0
+    income_categories: dict[str, float] = {}
+    expense_categories: dict[str, float] = {}
+    for r in rows:
+        cur = (r["currency"] or base_currency).upper()
+        amount = float(r["amount"]) * rates.get(cur, 1.0)
+        category = r["category"] or "Uncategorized"
+        if r["type"] == "INCOME":
+            income_total += amount
+            income_categories[category] = income_categories.get(category, 0.0) + amount
+        elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):
+            expense_total += -amount
+            expense_categories[category] = expense_categories.get(category, 0.0) + (-amount)
     net = income_total - expense_total
     savings_rate = (net / income_total) if income_total > 0 else None
 
-    categories_q = text("""
-        SELECT
-          COALESCE(category, 'Uncategorized') AS category,
-          COALESCE(SUM(CASE WHEN type='INCOME' THEN amount ELSE 0 END),0) AS income,
-          COALESCE(SUM(CASE WHEN type IN ('EXPENSE','FEE','TAX','INTEREST') THEN -amount ELSE 0 END),0) AS expenses
-        FROM transactions
-        WHERE ts >= :start AND ts < :end
-          AND currency = :base_currency
-        GROUP BY COALESCE(category, 'Uncategorized')
-        ORDER BY COALESCE(SUM(CASE WHEN type IN ('EXPENSE','FEE','TAX','INTEREST') THEN -amount ELSE 0 END),0) DESC
-    """)
-    rows = db.execute(categories_q, {"start": start, "end": end, "base_currency": base_currency}).mappings().all()
-
-    income_categories = []
-    expense_categories = []
-    for r in rows:
-        if float(r["income"]) > 0:
-            income_categories.append(CategoryAmount(category=r["category"], amount=float(r["income"])))
-        if float(r["expenses"]) > 0:
-            expense_categories.append(CategoryAmount(category=r["category"], amount=float(r["expenses"])))
+    income_categories_list = [
+        CategoryAmount(category=k, amount=v) for k, v in income_categories.items() if v > 0
+    ]
+    expense_categories_list = [
+        CategoryAmount(category=k, amount=v) for k, v in expense_categories.items() if v > 0
+    ]
 
     return SpendingSummaryOut(
         month=month,
@@ -92,8 +95,8 @@ def spending_summary(
         expense_total=expense_total,
         net=net,
         savings_rate=savings_rate,
-        income_categories=income_categories,
-        expense_categories=expense_categories,
+        income_categories=income_categories_list,
+        expense_categories=expense_categories_list,
     )
 
 
@@ -110,6 +113,7 @@ def credit_card_summary(
         SELECT
           a.id AS account_id,
           a.name AS account_name,
+          a.currency AS account_currency,
           cc.card_name,
           cc.issuer,
           cc.credit_limit,
@@ -124,19 +128,26 @@ def credit_card_summary(
     spend_q = text("""
         SELECT
           account_id,
-          COALESCE(SUM(-amount),0) AS spend
+          amount,
+          currency
         FROM transactions
         WHERE ts >= :start AND ts < :end
-          AND currency = :base_currency
           AND type IN ('EXPENSE','FEE','TAX','INTEREST')
-        GROUP BY account_id
     """)
-    spend_rows = db.execute(spend_q, {"start": start, "end": end, "base_currency": base_currency}).mappings().all()
-    spend_by_account = {int(r["account_id"]): float(r["spend"]) for r in spend_rows}
+    spend_rows = db.execute(spend_q, {"start": start, "end": end}).mappings().all()
+    currencies = {r["currency"] for r in spend_rows if r["currency"]}
+    rates = get_rates(start, base_currency, currencies)
+    spend_by_account: dict[int, float] = {}
+    for r in spend_rows:
+        cur = (r["currency"] or base_currency).upper()
+        amount = float(r["amount"]) * rates.get(cur, 1.0)
+        spend_by_account[int(r["account_id"])] = spend_by_account.get(int(r["account_id"]), 0.0) + (-amount)
 
     items = []
     for c in cards:
-        credit_limit = float(c["credit_limit"])
+        account_currency = (c["account_currency"] or base_currency).upper()
+        rate = get_rates(start, base_currency, [account_currency]).get(account_currency, 1.0)
+        credit_limit = float(c["credit_limit"]) * rate
         current_due = spend_by_account.get(int(c["account_id"]), 0.0)
         utilization = (current_due / credit_limit) if credit_limit > 0 else None
         due_date = _clamp_day(start, int(c["due_day"])).date().isoformat()

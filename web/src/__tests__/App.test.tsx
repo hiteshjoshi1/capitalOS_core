@@ -145,7 +145,7 @@ describe("App", () => {
     expect(screen.getByText(/S\$ 8,710/)).toBeInTheDocument();
     expect(screen.getByText(/30%/)).toBeInTheDocument();
 
-    const holdingsSection = screen.getByText("Top Holdings").closest(".card");
+    const holdingsSection = screen.getByText("Top Holdings (Overall)").closest(".card");
     expect(holdingsSection).not.toBeNull();
     if (holdingsSection) {
       const table = within(holdingsSection).getByRole("table");

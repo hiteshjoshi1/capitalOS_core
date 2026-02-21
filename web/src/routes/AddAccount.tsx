@@ -188,7 +188,8 @@ export default function AddAccount() {
           <div className="subtitle">Create a new account linked to a platform.</div>
         </div>
         <div className="pillRow">
-          <Link className="btn" to="/">Back to dashboard</Link>
+          <Link className="btn" to="/">Dashboard</Link>
+          <Link className="btn" to="/ingest">Ingest</Link>
         </div>
       </header>
 

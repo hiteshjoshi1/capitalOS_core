@@ -4,6 +4,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import "./index.css";
 import App from "./App.tsx";
 import AddAccount from "./routes/AddAccount.tsx";
+import Ingest from "./routes/Ingest.tsx";
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -11,6 +12,7 @@ createRoot(document.getElementById('root')!).render(
       <Routes>
         <Route path="/" element={<App />} />
         <Route path="/accounts/new" element={<AddAccount />} />
+        <Route path="/ingest" element={<Ingest />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

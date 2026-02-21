@@ -23,6 +23,7 @@ export default function App() {
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
   const [creditCardSummary, setCreditCardSummary] = useState<CreditCardSummary | null>(null);
   const [month, setMonth] = useState<string>(currentMonthYYYYMM());
+  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
 
   const mom = summary?.net_worth_change?.vs_prev_month;
   const yoy = summary?.net_worth_change?.vs_prev_year;
@@ -35,10 +36,10 @@ export default function App() {
         //hardcode
         const [h, s, pa, ss, cc] = await Promise.all([
           api.health(),
-          api.dashboardSummary(month, "prev_month,prev_year"),
-          api.platformAllocation(month),
-          api.spendingSummary(month),
-          api.creditCardSummary(month),
+          api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+          api.platformAllocation(month, baseCurrency),
+          api.spendingSummary(month, baseCurrency),
+          api.creditCardSummary(month, baseCurrency),
         ]);
         setHealth(h.status);
         setState("ready");
@@ -51,14 +52,15 @@ export default function App() {
         setState("error");
       }
     })();
-  }, [month]);
+  }, [month, baseCurrency]);
 
-  const baseCurrency =
-    summary?.base_currency ??
-    spendingSummary?.base_currency ??
-    creditCardSummary?.base_currency ??
+  const selectedBaseCurrency =
+    baseCurrency ||
+    summary?.base_currency ||
+    spendingSummary?.base_currency ||
+    creditCardSummary?.base_currency ||
     "SGD";
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
+  const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : `${selectedBaseCurrency} `;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
@@ -73,9 +75,23 @@ export default function App() {
         </div>
 
         <div className="pillRow">
+          <Link className="pill" to="/">Dashboard</Link>
+          <Link className="pill" to="/ingest">Ingest</Link>
           <span className="pill">API: {health}</span>
           <span className="pill">As of: {summary?.net_worth_as_of ?? "—"}</span>
-          <span className="pill">Base currency: {baseCurrency}</span>
+          <label className="pill">
+            <span>Base</span>
+            <select
+              className="monthInput"
+              value={selectedBaseCurrency}
+              onChange={(e) => setBaseCurrency(e.target.value)}
+            >
+              <option value="SGD">SGD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="INR">INR</option>
+            </select>
+          </label>
           <label className="pill monthControl">
             <span>Month</span>
             <input
@@ -292,33 +308,6 @@ export default function App() {
               </div>
               <div className="hintTag">Live</div>
             </div>
-            <div className="card">
-              <h2>Top Holdings</h2>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Asset</th>
-                    <th>Class</th>
-                    <th className="right">Value</th>
-                    <th className="right">% NW</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary?.top_holdings.map((h) => (
-                    <tr key={h.asset_id}>
-                      <td>{h.symbol}</td>
-                      <td className="muted">{h.asset_class}</td>
-                      <td className="right">{formatMoney(h.value)}</td>
-                      <td className="right">{h.percent_of_networth.toFixed(1)}%</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="actions">
-                <button className="btn" disabled>View holdings</button>
-              </div>
-            </div>
-
             <div className="card">
               <h2>Risk</h2>
               <div className="kpi">

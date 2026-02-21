@@ -8,6 +8,7 @@ from app.routers.accounts import router as accounts_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.currencies import router as currencies_router
 from app.routers.spending import router as spending_router
+from app.routers.ingest import router as ingest_router
 
 
 
@@ -31,3 +32,4 @@ app.include_router(accounts_router)
 app.include_router(dashboard_router)
 app.include_router(currencies_router)
 app.include_router(spending_router)
+app.include_router(ingest_router)

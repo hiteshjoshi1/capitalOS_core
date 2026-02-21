@@ -113,6 +113,34 @@ export type CreditCardSummary = {
   }>;
 };
 
+export type ImportJobListItem = {
+  id: number;
+  status: string;
+  platform: string;
+  account_id: number;
+  original_filename: string;
+  created_at: string | null;
+};
+
+export type ImportJobDetail = {
+  job: {
+    id: number;
+    status: string;
+    platform: string;
+    account_id: number;
+    original_filename: string;
+    stored_path: string;
+    file_sha256: string;
+    format_signature: string | null;
+    parser_key: string | null;
+    report_path: string | null;
+    error_message: string | null;
+    created_at: string | null;
+    updated_at: string | null;
+  };
+  report: Record<string, unknown> | string | null;
+};
+
 export type PlatformAllocation = {
   as_of: string | null;
   total: number;
@@ -187,13 +215,46 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  dashboardSummary: (month: string, compare?: string) =>
-  req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
-  platformAllocation: (month: string) =>
-    req<PlatformAllocation>(`/dashboard/platform-allocation?month=${encodeURIComponent(month)}`),
+  dashboardSummary: (month: string, compare?: string, baseCurrency = "SGD") =>
+  req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
+  platformAllocation: (month: string, baseCurrency = "SGD") =>
+    req<PlatformAllocation>(`/dashboard/platform-allocation?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   spendingSummary: (month: string, baseCurrency = "SGD") =>
     req<SpendingSummary>(`/spending/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardSummary: (month: string, baseCurrency = "SGD") =>
     req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  ingestUpload: async (accountId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/ingest/upload?account_id=${accountId}`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<Record<string, unknown>>;
+  },
+  ingestIbkr: async (accountId: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/ingest/ibkr?account_id=${accountId}`, {
+      method: "POST",
+      body: form,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+    return res.json() as Promise<Record<string, unknown>>;
+  },
+  ingestJobs: () => req<ImportJobListItem[]>("/ingest/jobs"),
+  ingestJob: (jobId: number) => req<ImportJobDetail>(`/ingest/jobs/${jobId}`),
+  registerIngestSignature: (jobId: number, parserKey: string) =>
+    req<Record<string, unknown>>(`/ingest/jobs/${jobId}/register`, {
+      method: "POST",
+      body: JSON.stringify({ parser_key: parserKey }),
+    }),
 
 };

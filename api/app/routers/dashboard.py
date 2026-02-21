@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
@@ -10,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.dashboard import PlatformAllocationOut, PlatformAllocationItem
+from app.fx import get_rates
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -29,10 +29,9 @@ def _add_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=y, month=m)
 
 
-def _anchor_ts(month_start: datetime, snapshot_day: int) -> datetime:
-    """Anchor timestamp: YYYY-MM-snapshot_day at 00:00Z."""
-    # snapshot_day assumed valid (1-28ish); 6 is always safe
-    return month_start.replace(day=snapshot_day, hour=0, minute=0, second=0, microsecond=0)
+def _anchor_ts(month_start: datetime) -> datetime:
+    """Anchor timestamp: end of month (00:00Z on next month start)."""
+    return _add_months(month_start, 1).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def _effective_as_of(db: Session, anchor_ts: datetime) -> Optional[datetime]:
@@ -54,24 +53,40 @@ def _effective_as_of(db: Session, anchor_ts: datetime) -> Optional[datetime]:
     return as_of
 
 
-def _networth_components(db: Session, as_of: Optional[datetime]) -> Dict[str, float]:
-    """Compute net worth components for a given snapshot timestamp."""
-    if as_of is None:
-        return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
-
+def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, float]:
+    """Compute net worth components using latest snapshot per account up to anchor_ts."""
     q = text("""
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        )
         SELECT
-          COALESCE(SUM(CASE WHEN a.asset_class='CASH' THEN p.cost_basis_base ELSE 0 END),0) AS cash,
-          COALESCE(SUM(CASE WHEN a.asset_class IN ('STOCK','FUND') THEN p.cost_basis_base ELSE 0 END),0) AS stocks_funds,
-          COALESCE(SUM(CASE WHEN a.asset_class='CRYPTO' THEN p.cost_basis_base ELSE 0 END),0) AS crypto
+          a.asset_class,
+          a.quote_currency,
+          p.cost_basis_base AS value
         FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN assets a ON a.id = p.asset_id
-        WHERE p.as_of = :as_of
     """)
-    r = db.execute(q, {"as_of": as_of}).mappings().one()
-    cash = float(r["cash"])
-    stocks_funds = float(r["stocks_funds"])
-    crypto = float(r["crypto"])
+    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    if not rows:
+        return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
+    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    rates = get_rates(anchor_ts, base_currency, currencies)
+    cash = 0.0
+    stocks_funds = 0.0
+    crypto = 0.0
+    for r in rows:
+        cur = (r["quote_currency"] or base_currency).upper()
+        value = float(r["value"]) * rates.get(cur, 1.0)
+        if r["asset_class"] == "CASH":
+            cash += value
+        elif r["asset_class"] in ("STOCK", "FUND"):
+            stocks_funds += value
+        elif r["asset_class"] == "CRYPTO":
+            crypto += value
     liabilities = 0.0  # later when loans modeled
     total = cash + stocks_funds + crypto - liabilities
     return {
@@ -83,111 +98,154 @@ def _networth_components(db: Session, as_of: Optional[datetime]) -> Dict[str, fl
     }
 
 
-def _geography(db: Session, as_of: Optional[datetime], total: float) -> List[Dict[str, Any]]:
-    if as_of is None or total <= 0:
+def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: str) -> List[Dict[str, Any]]:
+    if total <= 0:
         return []
     q = text("""
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        )
         SELECT
           COALESCE(a.home_country,'UNKNOWN') AS country,
-          SUM(p.cost_basis_base) AS value
+          a.quote_currency,
+          p.cost_basis_base AS value
         FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN assets a ON a.id = p.asset_id
-        WHERE p.as_of = :as_of
-        GROUP BY a.home_country
-        ORDER BY value DESC
     """)
-    rows = db.execute(q, {"as_of": as_of}).mappings().all()
-    out = []
+    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    rates = get_rates(anchor_ts, base_currency, currencies)
+    buckets: Dict[str, float] = {}
     for r in rows:
-        value = float(r["value"])
+        cur = (r["quote_currency"] or base_currency).upper()
+        value = float(r["value"]) * rates.get(cur, 1.0)
+        buckets[r["country"]] = buckets.get(r["country"], 0.0) + value
+    out = []
+    for country, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
         out.append({
-            "country": r["country"],
+            "country": country,
             "value": value,
             "percent": round((value / total) * 100, 2)
         })
     return out
 
 
-def _top_holdings(db: Session, as_of: Optional[datetime], total: float, limit: int = 5) -> List[Dict[str, Any]]:
-    if as_of is None or total <= 0:
+def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency: str, limit: int = 5) -> List[Dict[str, Any]]:
+    if total <= 0:
         return []
-    q = text(f"""
+    q = text("""
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        )
         SELECT
           a.id AS asset_id,
           a.symbol,
           a.asset_class,
+          a.quote_currency,
           p.cost_basis_base AS value
         FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN assets a ON a.id = p.asset_id
-        WHERE p.as_of = :as_of
-        ORDER BY p.cost_basis_base DESC
-        LIMIT {limit}
     """)
-    rows = db.execute(q, {"as_of": as_of}).mappings().all()
-    out = []
+    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    rates = get_rates(anchor_ts, base_currency, currencies)
+    agg: Dict[int, Dict[str, Any]] = {}
     for r in rows:
+        asset_id = int(r["asset_id"])
+        cur = (r["quote_currency"] or base_currency).upper()
+        value = float(r["value"]) * rates.get(cur, 1.0)
+        if asset_id not in agg:
+            agg[asset_id] = {
+                "asset_id": asset_id,
+                "symbol": r["symbol"],
+                "asset_class": r["asset_class"],
+                "value": 0.0,
+            }
+        agg[asset_id]["value"] += value
+    out = sorted(agg.values(), key=lambda x: x["value"], reverse=True)[:limit]
+    for r in out:
         value = float(r["value"])
-        out.append({
-            "asset_id": int(r["asset_id"]),
-            "symbol": r["symbol"],
-            "asset_class": r["asset_class"],
-            "value": value,
-            "percent_of_networth": round((value / total) * 100, 2)
-        })
+        r["percent_of_networth"] = round((value / total) * 100, 2)
     return out
 
 
 def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str) -> Dict[str, Any]:
-    # NOTE: amount is stored signed in your model. We'll treat:
-    # - income: sum(amount) where type=INCOME
-    # - expenses: sum(-amount) where type in expense-like and amount is negative => positive expenses
     q = text("""
         SELECT
-          COALESCE(SUM(CASE WHEN type='INCOME' THEN amount ELSE 0 END),0) AS income,
-          COALESCE(SUM(CASE WHEN type IN ('EXPENSE','FEE','TAX','INTEREST') THEN -amount ELSE 0 END),0) AS expenses
+          type,
+          amount,
+          currency
         FROM transactions
         WHERE ts >= :start AND ts < :end
-          AND currency = :base_currency
     """)
-    r = db.execute(q, {"start": start, "end": end, "base_currency": base_currency}).mappings().one()
-    income = float(r["income"])
-    expenses = float(r["expenses"])
+    rows = db.execute(q, {"start": start, "end": end}).mappings().all()
+    currencies = {r["currency"] for r in rows if r["currency"]}
+    rates = get_rates(start, base_currency, currencies)
+    income = 0.0
+    expenses = 0.0
+    for r in rows:
+        cur = (r["currency"] or base_currency).upper()
+        amount = float(r["amount"]) * rates.get(cur, 1.0)
+        if r["type"] == "INCOME":
+            income += amount
+        elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):
+            expenses += -amount
     net = income - expenses
     savings_rate = (net / income) if income > 0 else None
     return {"income": income, "expenses": expenses, "net": net, "savings_rate": savings_rate}
 
 
-def _platform_allocation(db: Session, as_of: Optional[datetime]) -> dict:
-    if as_of is None:
-        return {"as_of": None, "total": 0.0, "items": []}
-
+def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -> dict:
     q = text("""
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        )
         SELECT
           COALESCE(pl.code, a.platform) AS platform,
           pl.platform_type AS platform_type,
           COALESCE(pl.country, a.country) AS country,
-          SUM(p.cost_basis_base) AS value
+          a2.quote_currency AS quote_currency,
+          p.cost_basis_base AS value
         FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN accounts a ON a.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = a.platform_id
-        WHERE p.as_of = :as_of
-        GROUP BY COALESCE(pl.code, a.platform), pl.platform_type, COALESCE(pl.country, a.country)
-        ORDER BY value DESC
+        JOIN assets a2 ON a2.id = p.asset_id
     """)
-    rows = db.execute(q, {"as_of": as_of}).mappings().all()
-    total = sum(float(r["value"]) for r in rows)
-    items = []
+    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    if not rows:
+        return {"as_of": None, "total": 0.0, "items": []}
+    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    rates = get_rates(anchor_ts, base_currency, currencies)
+    buckets: Dict[tuple, float] = {}
     for r in rows:
-        value = float(r["value"])
+        key = (r["platform"], r["platform_type"], r["country"])
+        cur = (r["quote_currency"] or base_currency).upper()
+        value = float(r["value"]) * rates.get(cur, 1.0)
+        buckets[key] = buckets.get(key, 0.0) + value
+    total = sum(buckets.values())
+    items = []
+    for (platform, platform_type, country), value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
         percent = round((value / total) * 100, 2) if total > 0 else 0.0
         items.append({
-            "platform": r["platform"],
-            "platform_type": r["platform_type"],
-            "country": r["country"],
+            "platform": platform,
+            "platform_type": platform_type,
+            "country": country,
             "value": value,
             "percent": percent,
         })
-    return {"as_of": as_of.isoformat(), "total": total, "items": items}
+    return {"as_of": None, "total": total, "items": items}
 
 
 @router.get("/summary")
@@ -197,22 +255,17 @@ def dashboard_summary(
     compare: str = Query("", description="Comma-separated: prev_month,prev_year"),
     db: Session = Depends(get_db),
 ):
-    # Configurable snapshot day (default 6)
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
-    if snapshot_day < 1 or snapshot_day > 28:
-        raise HTTPException(status_code=500, detail="SNAPSHOT_DAY must be between 1 and 28")
-
     # Calendar month window for cashflow
     month_start = _parse_month(month)
     month_end = _add_months(month_start, 1)
 
     # Snapshot anchor + effective snapshot timestamp
-    anchor = _anchor_ts(month_start, snapshot_day)
+    anchor = _anchor_ts(month_start)
     as_of = _effective_as_of(db, anchor)
 
-    nw = _networth_components(db, as_of)
-    geo = _geography(db, as_of, nw["total"])
-    top = _top_holdings(db, as_of, nw["total"], limit=5)
+    nw = _networth_components(db, anchor, base_currency)
+    geo = _geography(db, anchor, nw["total"], base_currency)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=5)
     cf = _cashflow(db, month_start, month_end, base_currency)
 
     # Comparisons (Option A)
@@ -220,9 +273,9 @@ def dashboard_summary(
     changes = {}
 
     def _delta(label: str, other_month_start: datetime):
-        other_anchor = _anchor_ts(other_month_start, snapshot_day)
+        other_anchor = _anchor_ts(other_month_start)
         other_as_of = _effective_as_of(db, other_anchor)
-        other_nw = _networth_components(db, other_as_of)
+        other_nw = _networth_components(db, other_as_of, base_currency)
 
         cur = nw["total"]
         prev = other_nw["total"]
@@ -245,7 +298,7 @@ def dashboard_summary(
     return {
         "as_of_month": month,
         "base_currency": base_currency,
-        "snapshot_day": snapshot_day,
+        "snapshot_day": None,
         "net_worth_as_of": as_of.isoformat() if as_of else None,
         "net_worth": {
             "total": nw["total"],
@@ -264,18 +317,15 @@ def dashboard_summary(
 @router.get("/platform-allocation", response_model=PlatformAllocationOut)
 def platform_allocation(
     month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
 ):
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
-    if snapshot_day < 1 or snapshot_day > 28:
-        raise HTTPException(status_code=500, detail="SNAPSHOT_DAY must be between 1 and 28")
-
     month_start = _parse_month(month)
-    anchor = _anchor_ts(month_start, snapshot_day)
+    anchor = _anchor_ts(month_start)
     as_of = _effective_as_of(db, anchor)
-    payload = _platform_allocation(db, as_of)
+    payload = _platform_allocation(db, anchor, base_currency)
     return PlatformAllocationOut(
-        as_of=payload["as_of"],
+        as_of=as_of.isoformat() if as_of else None,
         total=payload["total"],
         items=[PlatformAllocationItem(**item) for item in payload["items"]],
     )

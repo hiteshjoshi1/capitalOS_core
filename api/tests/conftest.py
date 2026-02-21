@@ -1,4 +1,5 @@
 import os
+import json
 from datetime import datetime, timezone
 
 import pytest
@@ -8,7 +9,17 @@ from sqlalchemy.orm import sessionmaker
 
 # Ensure test DB URL is set before importing app modules that read env vars.
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:////tmp/capitalos_test.db"
+os.environ.setdefault("DATA_DIR", "/tmp/capitalos_test_data")
 os.environ.setdefault("SNAPSHOT_DAY", "6")
+os.environ.setdefault(
+    "FX_STATIC_RATES",
+    json.dumps(
+        {
+            "SGD": {"SGD": 1, "USD": 1, "HKD": 1, "INR": 1},
+            "USD": {"USD": 1, "SGD": 1, "HKD": 1, "INR": 1},
+        }
+    ),
+)
 
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -74,6 +85,36 @@ def setup_db():
         )
         conn.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS import_jobs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              account_id INTEGER NOT NULL,
+              platform TEXT NOT NULL,
+              original_filename TEXT NOT NULL,
+              stored_path TEXT NOT NULL,
+              file_sha256 TEXT NOT NULL,
+              format_signature TEXT,
+              parser_key TEXT,
+              status TEXT NOT NULL,
+              report_path TEXT,
+              error_message TEXT,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS parser_registry (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              format_signature TEXT NOT NULL UNIQUE,
+              parser_key TEXT NOT NULL,
+              version INTEGER NOT NULL DEFAULT 1,
+              created_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS credit_card_accounts (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               account_id INTEGER NOT NULL UNIQUE,
@@ -92,7 +133,9 @@ def setup_db():
             CREATE TABLE IF NOT EXISTS assets (
               id INTEGER PRIMARY KEY,
               symbol TEXT NOT NULL,
+              name TEXT,
               asset_class TEXT NOT NULL,
+              quote_currency TEXT,
               home_country TEXT
             )
             """
@@ -104,6 +147,8 @@ def setup_db():
               account_id INTEGER NOT NULL,
               asset_id INTEGER NOT NULL,
               as_of TIMESTAMP NOT NULL,
+              quantity REAL,
+              avg_cost REAL,
               cost_basis_base REAL NOT NULL
             )
             """
@@ -117,7 +162,11 @@ def setup_db():
               amount REAL NOT NULL,
               type TEXT NOT NULL,
               currency TEXT NOT NULL,
-              category TEXT
+              category TEXT,
+              merchant_counterparty TEXT,
+              platform_reference TEXT,
+              notes TEXT,
+              source TEXT
             )
             """
         )
@@ -135,6 +184,8 @@ def setup_db():
     yield
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS currencies")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS parser_registry")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS import_jobs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS credit_card_accounts")
         conn.exec_driver_sql("DROP TABLE IF EXISTS transactions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
@@ -155,6 +206,8 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM transactions")
         conn.exec_driver_sql("DELETE FROM prices")
         conn.exec_driver_sql("DELETE FROM currencies")
+        conn.exec_driver_sql("DELETE FROM parser_registry")
+        conn.exec_driver_sql("DELETE FROM import_jobs")
     yield
 
 
@@ -189,21 +242,21 @@ def seed_dashboard_data():
         )
         conn.execute(
             text(
-                "INSERT INTO assets (id, symbol, asset_class, home_country) VALUES "
-                "(1, 'AAPL', 'STOCK', 'US'), "
-                "(2, 'BTC', 'CRYPTO', 'GLOBAL'), "
-                "(3, 'CASH', 'CASH', 'SG')"
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(1, 'AAPL', 'Apple Inc.', 'STOCK', 'USD', 'US'), "
+                "(2, 'BTC', 'Bitcoin', 'CRYPTO', 'USD', 'GLOBAL'), "
+                "(3, 'CASH', 'Cash', 'CASH', 'SGD', 'SG')"
             )
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, cost_basis_base) VALUES "
-                "(1, 2, 1, :as_of_cur, 50000), "
-                "(2, 2, 2, :as_of_cur, 20000), "
-                "(3, 1, 3, :as_of_cur, 30000), "
-                "(4, 2, 1, :as_of_prev, 45000), "
-                "(5, 2, 2, :as_of_prev, 15000), "
-                "(6, 1, 3, :as_of_prev, 30000)"
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(1, 2, 1, :as_of_cur, 10, 5000, 50000), "
+                "(2, 2, 2, :as_of_cur, 1, 20000, 20000), "
+                "(3, 1, 3, :as_of_cur, 1, 30000, 30000), "
+                "(4, 2, 1, :as_of_prev, 9, 5000, 45000), "
+                "(5, 2, 2, :as_of_prev, 1, 15000, 15000), "
+                "(6, 1, 3, :as_of_prev, 1, 30000, 30000)"
             ),
             {"as_of_cur": as_of_cur, "as_of_prev": as_of_prev},
         )
