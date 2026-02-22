@@ -51,11 +51,11 @@ export default function Ingest() {
     }
   }
 
-  async function onRegisterSignature(jobId: number) {
+  async function onRegisterSignature(jobId: number, parserKey: string) {
     setRegistering(true);
     setErr("");
     try {
-      const result = await api.registerIngestSignature(jobId, "ibkr_activity_csv_v1");
+      const result = await api.registerIngestSignature(jobId, parserKey);
       setReport(result as Record<string, unknown>);
       const refreshed = await api.ingestJobs();
       setJobs(refreshed);
@@ -85,7 +85,9 @@ export default function Ingest() {
     job_id?: number;
     status?: string;
     platform?: string;
+    parser_key?: string | null;
     format_signature?: string;
+    signature_debug?: Record<string, unknown> | null;
     counts?: {
       rows_total?: number;
       transactions_parsed?: number;
@@ -108,6 +110,7 @@ export default function Ingest() {
         <div className="pillRow">
           <Link className="pill" to="/">Dashboard</Link>
           <Link className="pill" to="/ingest">Ingest</Link>
+          <Link className="pill" to="/crypto">Crypto</Link>
         </div>
       </header>
 
@@ -148,11 +151,11 @@ export default function Ingest() {
                   </select>
                 </label>
                 <label className="field">
-                  <span className="label">Statement CSV</span>
+                  <span className="label">Statement file</span>
                   <input
                     className="input"
                     type="file"
-                    accept=".csv"
+                    accept=".csv,.xls,.xlsx"
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
@@ -169,23 +172,44 @@ export default function Ingest() {
           {reportData && (
             <div className="card" style={{ marginTop: 14 }}>
               <div className="cardTitle">Import Report</div>
-              <div className="formGrid">
-                <div className="muted">Job #{reportData.job_id ?? "—"} · Status: {reportData.status ?? "—"}</div>
+                <div className="formGrid">
+                  <div className="muted">Job #{reportData.job_id ?? "—"} · Status: {reportData.status ?? "—"}</div>
+                  <div className="muted">
+                    Platform: {reportData.platform ?? "—"} · Parser: {reportData.parser_key ?? "—"}
+                  </div>
                 {reportData.status === "NEEDS_MAPPING" && (
                   <div className="mini">
                     <h3>Unknown format</h3>
                     <div className="muted">Signature: {reportData.format_signature ?? "—"}</div>
-                    {reportData.platform === "IBKR" && (
-                      <div className="actions">
+                    <div className="actions">
+                      {reportData.platform === "IBKR" && (
                         <button
                           className="btn"
                           disabled={!reportData.job_id || registering}
-                          onClick={() => onRegisterSignature(reportData.job_id ?? 0)}
+                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "ibkr_activity_csv_v1")}
                         >
-                          {registering ? "Registering…" : "Approve format"}
+                          {registering ? "Registering…" : "Approve as IBKR"}
                         </button>
-                      </div>
-                    )}
+                      )}
+                      {reportData.platform === "DBS" && (
+                        <button
+                          className="btn"
+                          disabled={!reportData.job_id || registering}
+                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "dbs_transaction_history_csv_v1")}
+                        >
+                          {registering ? "Registering…" : "Approve as DBS"}
+                        </button>
+                      )}
+                      {reportData.platform === "SHAREKHAN" && (
+                        <button
+                          className="btn"
+                          disabled={!reportData.job_id || registering}
+                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "sharekhan_holdings_xls_v1")}
+                        >
+                          {registering ? "Registering…" : "Approve as Sharekhan"}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 )}
                 {reportData.error_message && (

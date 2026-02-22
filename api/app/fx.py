@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Iterable
 
 import httpx
@@ -11,51 +10,63 @@ import httpx
 _CACHE: dict[tuple[str, str], tuple[float, dict[str, float]]] = {}
 _TTL_SECONDS = 900
 
+def _normalize_date(date: datetime) -> datetime:
+    now = datetime.now(tz=timezone.utc)
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return min(date, now)
 
-def _static_rates() -> dict | None:
-    raw = os.getenv("FX_STATIC_RATES", "")
-    if not raw:
-        return None
-    try:
-        return json.loads(raw)
-    except json.JSONDecodeError:
-        return None
+
+def _fetch_rates(date_key: str, base: str, symbols_set: set[str]) -> dict[str, float]:
+    if not symbols_set:
+        return {base: 1.0}
+    to_param = ",".join(sorted(symbols_set))
+    url = f"https://api.frankfurter.app/{date_key}"
+    params = {"from": base, "to": to_param}
+    resp = httpx.get(url, params=params, timeout=10)
+    resp.raise_for_status()
+    data = resp.json()
+    return {k.upper(): float(v) for k, v in data.get("rates", {}).items()}
 
 
 def get_rates(date: datetime, base: str, symbols: Iterable[str]) -> Dict[str, float]:
     base = base.upper()
     symbols_set = {s.upper() for s in symbols if s}
     symbols_set.discard(base)
+    if os.getenv("FX_DISABLE_REMOTE", "0") == "1":
+        return {s: 1.0 for s in symbols_set | {base}}
 
-    static = _static_rates()
-    if static and base in static:
-        rates = {k.upper(): float(v) for k, v in static[base].items()}
-        rates[base] = 1.0
-        return {s: rates.get(s, 1.0) for s in symbols_set | {base}}
-
-    date_key = date.date().isoformat()
+    date_key = _normalize_date(date).date().isoformat()
     cache_key = (date_key, base)
     cached = _CACHE.get(cache_key)
     now = time.time()
     if cached and now - cached[0] < _TTL_SECONDS:
         cached_rates = cached[1]
-        return {s: cached_rates.get(s, 1.0) for s in symbols_set | {base}}
+        cached_out = {s: cached_rates.get(s, 1.0) for s in symbols_set | {base}}
+        non_base_rates = [cached_out.get(s, 1.0) for s in symbols_set]
+        if symbols_set and all(r == 1.0 for r in non_base_rates):
+            cached = None
+        else:
+            return cached_out
 
-    if not symbols_set:
-        return {base: 1.0}
-
-    to_param = ",".join(sorted(symbols_set))
-    url = f"https://api.frankfurter.app/{date_key}"
-    params = {"from": base, "to": to_param}
-
-    resp = httpx.get(url, params=params, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-    raw_rates = {k.upper(): float(v) for k, v in data.get("rates", {}).items()}
+    raw_rates = _fetch_rates(date_key, base, symbols_set)
     # Frankfurter returns: 1 base = rate * symbol
     # We need symbol -> base, so invert.
     rates = {k: (1.0 / v) if v else 1.0 for k, v in raw_rates.items()}
     rates[base] = 1.0
+
+    missing = symbols_set.difference(raw_rates.keys())
+    if missing and base != "EUR":
+        # Fallback: fetch EUR rates and cross-convert if base or symbols missing.
+        fallback_symbols = set(missing)
+        fallback_symbols.add(base)
+        eur_raw = _fetch_rates(date_key, "EUR", fallback_symbols)
+        base_rate = eur_raw.get(base)
+        if base_rate:
+            for sym in missing:
+                sym_rate = eur_raw.get(sym)
+                if sym_rate:
+                    rates[sym] = base_rate / sym_rate
 
     _CACHE[cache_key] = (now, rates)
     return {s: rates.get(s, 1.0) for s in symbols_set | {base}}

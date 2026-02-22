@@ -104,11 +104,21 @@ api-smoke:
 api-test:
 	docker compose run --rm api pytest
 
+.PHONY: api-coverage
+
+api-coverage:
+	docker compose run --rm api pytest --cov=app --cov-report=term-missing
+
 .PHONY: ingest-smoke
 
 ingest-smoke:
 	@echo "Running ingest smoke..."
 	@ACCOUNT_ID=$$(curl -s http://localhost:8000/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \\\n	if [ -z \"$$ACCOUNT_ID\" ]; then \\\n		echo \"No accounts found. Create an account first.\"; \\\n		exit 1; \\\n	fi; \\\n	curl -s -F \"file=@data/fixtures/ibkr_activity_sample.csv\" \"http://localhost:8000/ingest/ibkr?account_id=$$ACCOUNT_ID\"; \\\n	echo
+
+.PHONY: crypto-smoke
+
+crypto-smoke:
+	curl -s "http://localhost:8000/crypto/summary?base_currency=USD"
 
 logs:
 	docker compose logs -f

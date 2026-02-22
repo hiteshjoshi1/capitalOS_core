@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
-import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary } from "./lib/api";
+import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary } from "./lib/api";
 import { Link } from "react-router-dom";
 import "./App.css";
 
@@ -22,9 +22,9 @@ export default function App() {
   const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
   const [creditCardSummary, setCreditCardSummary] = useState<CreditCardSummary | null>(null);
+  const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
   const [month, setMonth] = useState<string>(currentMonthYYYYMM());
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
-
   const mom = summary?.net_worth_change?.vs_prev_month;
   const yoy = summary?.net_worth_change?.vs_prev_year;
 
@@ -34,12 +34,13 @@ export default function App() {
       try {
         setState("loading");
         //hardcode
-        const [h, s, pa, ss, cc] = await Promise.all([
+        const [h, s, pa, ss, cc, cs] = await Promise.all([
           api.health(),
           api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
           api.platformAllocation(month, baseCurrency),
           api.spendingSummary(month, baseCurrency),
           api.creditCardSummary(month, baseCurrency),
+          api.cryptoSummary(baseCurrency),
         ]);
         setHealth(h.status);
         setState("ready");
@@ -47,6 +48,7 @@ export default function App() {
         setPlatformAllocation(pa);
         setSpendingSummary(ss);
         setCreditCardSummary(cc);
+        setCryptoSummary(cs);
       } catch (e: any) {
         setErr(e?.message ?? String(e));
         setState("error");
@@ -77,6 +79,9 @@ export default function App() {
         <div className="pillRow">
           <Link className="pill" to="/">Dashboard</Link>
           <Link className="pill" to="/ingest">Ingest</Link>
+          <Link className="pill" to="/crypto">Wallets</Link>
+          <Link className="pill" to="/crypto/holdings">Crypto Holdings</Link>
+          <Link className="pill" to="/holdings">Stock Holdings</Link>
           <span className="pill">API: {health}</span>
           <span className="pill">As of: {summary?.net_worth_as_of ?? "—"}</span>
           <label className="pill">
@@ -170,8 +175,8 @@ export default function App() {
 
               <div className="hintTag">Live</div>
               <div className="actions">
-                <button className="btn" disabled>View holdings</button>
-                <button className="btn" disabled>View trends</button>
+                <Link className="btn" to="/holdings">View stock holdings</Link>
+                <Link className="btn" to="/crypto/holdings">View crypto holdings</Link>
                 <button className="btn" disabled>Update snapshot</button>
               </div>
             </div>
@@ -274,6 +279,58 @@ export default function App() {
                 <button className="btn" disabled>Category mapping</button>
               </div>
             </div>
+
+            <div className="card">
+              <h2>Crypto Exposure</h2>
+              <div className="split">
+                <div className="mini">
+                  <h3>Total (base)</h3>
+                  <div className="big small">{formatMoney(cryptoSummary?.total_crypto_base)}</div>
+                  <div className="muted">
+                    USD {cryptoSummary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"}
+                  </div>
+                </div>
+                <div className="mini">
+                  <h3>Last refresh</h3>
+                  <div className="muted">
+                    {cryptoSummary?.last_refreshed_at ?? "—"}
+                  </div>
+                  <div className="muted">
+                    {cryptoSummary?.is_stale ? "Stale" : "Fresh"}{" "}
+                    {cryptoSummary?.refresh_triggered ? "(refreshing)" : ""}
+                  </div>
+                </div>
+              </div>
+              <div className="split" style={{ marginTop: 10 }}>
+                <div className="mini">
+                  <h3>ETH exposure</h3>
+                  <div className="big small">{formatMoney(cryptoSummary?.eth_exposure_base)}</div>
+                  <div className="muted">
+                    USD {cryptoSummary?.eth_exposure_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"}
+                  </div>
+                </div>
+                <div className="mini">
+                  <h3>Other tokens</h3>
+                  <div className="big small">{formatMoney(cryptoSummary?.token_exposure_base)}</div>
+                  <div className="muted">
+                    USD {cryptoSummary?.token_exposure_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="split" style={{ marginTop: 10 }}>
+                <div className="mini">
+                  <h3>Total ETH</h3>
+                  <div className="big small">{cryptoSummary?.eth.balance?.toFixed(4) ?? "0"}</div>
+                  <div className="muted">USD {cryptoSummary?.eth.value_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"}</div>
+                </div>
+                <div className="mini">
+                  <h3>Total SOL</h3>
+                  <div className="big small">{cryptoSummary?.sol.balance?.toFixed(4) ?? "0"}</div>
+                  <div className="muted">USD {cryptoSummary?.sol.value_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"}</div>
+                </div>
+              </div>
+              <div className="hintTag">Live</div>
+            </div>
           </section>
 
           <div style={{ height: 14 }}></div>
@@ -355,11 +412,7 @@ export default function App() {
               </div>
               <div className="hintTag">Live</div>
             </div>
-          </section>
 
-          <div style={{ height: 14 }}></div>
-
-          <section className="grid g-bot">
             <div className="card">
               <h2>Allocation by Platform</h2>
               <div className="mini">
@@ -390,7 +443,11 @@ export default function App() {
               </div>
               <div className="hintTag">Live</div>
             </div>
+          </section>
 
+          <div style={{ height: 14 }}></div>
+
+          <section className="grid g-bot">
             <div className="card">
               <h2>Trends (Monthly)</h2>
               <div className="mini" style={{ height: 250, display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -405,35 +462,6 @@ export default function App() {
                 <button className="btn" disabled>Spending trend</button>
                 <button className="btn" disabled>Export snapshot CSV</button>
               </div>
-            </div>
-
-            <div className="card">
-              <h2>Top Holdings (Overall)</h2>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Asset</th>
-                    <th>Class</th>
-                    <th>Geo</th>
-                    <th>Platform</th>
-                    <th className="right">% NW</th>
-                    <th className="right">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary?.top_holdings.map((h) => (
-                    <tr key={`overall-${h.asset_id}`}>
-                      <td>{h.symbol}</td>
-                      <td className="muted">{h.asset_class}</td>
-                      <td className="muted">—</td>
-                      <td className="muted">—</td>
-                      <td className="right">{h.percent_of_networth.toFixed(1)}%</td>
-                      <td className="right">{formatMoney(h.value)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="hintTag muted">Mocked</div>
             </div>
           </section>
 

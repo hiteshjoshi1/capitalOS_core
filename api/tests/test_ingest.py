@@ -1,12 +1,13 @@
 import os
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
 
 from app.ingestion.signature import compute_format_signature
 from app.ingestion.registry import register_signature
 
 
-def test_ibkr_ingest_creates_transactions(client: TestClient, db_engine):
+def test_ibkr_ingest_creates_transactions(client: TestClient, db_engine, tmp_path):
     data_dir = os.getenv("DATA_DIR", "/tmp/capitalos_test_data")
     os.makedirs(data_dir, exist_ok=True)
 
@@ -14,12 +15,19 @@ def test_ibkr_ingest_creates_transactions(client: TestClient, db_engine):
     db = Session()
     try:
         db.execute(
-            "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-            "(100, 'Test IBKR', 'IBKR', 'BROKER', 'USD', 'US')"
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(100, 'Test IBKR', 'IBKR', 'BROKER', 'USD', 'US')"
+            )
         )
         db.commit()
 
-        fixture_path = os.path.join("data", "fixtures", "ibkr_activity_sample.csv")
+        csv_content = """Cash Transactions,Header,Date,Amount,Currency,Type,Description
+Cash Transactions,Data,2026-02-02,10,USD,Dividend,Test
+"""
+        fixture = tmp_path / "ibkr.csv"
+        fixture.write_text(csv_content, encoding="utf-8")
+        fixture_path = str(fixture)
         signature, _ = compute_format_signature(fixture_path, platform_hint="IBKR")
         register_signature(db, signature, "ibkr_activity_csv_v1", 1)
     finally:

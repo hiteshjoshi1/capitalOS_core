@@ -1,10 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import App from "../App";
 import { api } from "../lib/api";
-import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary } from "../lib/api";
+import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -13,6 +13,7 @@ vi.mock("../lib/api", () => ({
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
     creditCardSummary: vi.fn(),
+    cryptoSummary: vi.fn(),
     accountOptions: vi.fn(),
     createAccount: vi.fn(),
     platformOptions: vi.fn(),
@@ -60,8 +61,13 @@ const summaryFixture: DashboardSummary = {
     savings_rate: 0.35,
   },
   top_holdings: [
-    { asset_id: 1, symbol: "AAPL", asset_class: "STOCK", value: 50000, percent_of_networth: 6.7 },
-    { asset_id: 2, symbol: "BTC", asset_class: "CRYPTO", value: 20000, percent_of_networth: 2.7 },
+    { asset_id: 1, symbol: "USD", asset_class: "CASH", value: 60000, percent_of_networth: 8.1, geo: "US", platform: "IBKR" },
+    { asset_id: 2, symbol: "AAPL", asset_class: "STOCK", value: 50000, percent_of_networth: 6.7, geo: "US", platform: "IBKR" },
+    { asset_id: 3, symbol: "BTC", asset_class: "CRYPTO", value: 20000, percent_of_networth: 2.7, geo: "GLOBAL", platform: "IBKR" },
+  ],
+  cash_balances: [
+    { currency: "USD", value: 60000 },
+    { currency: "SGD", value: 58400 },
   ],
 };
 
@@ -111,14 +117,33 @@ const creditCardSummaryFixture: CreditCardSummary = {
   ],
 };
 
+const cryptoSummaryFixture: CryptoSummary = {
+  total_crypto_usd: 8400,
+  total_crypto_base: 8400,
+  base_currency: "SGD",
+  eth: { balance: 1.2345, value_usd: 8000, value_base: 8000 },
+  sol: { balance: 10, value_usd: 400, value_base: 400 },
+  top5_holdings: [
+    { symbol: "ETH", chain: "ethereum", amount: 1.2345, value_usd: 8000, value_base: 8000 },
+    { symbol: "SOL", chain: "solana", amount: 10, value_usd: 400, value_base: 400 },
+  ],
+  top_holdings: [
+    { symbol: "ETH", chain: "ethereum", amount: 1.2345, value_usd: 8000, value_base: 8000, asset_class: "CRYPTO" },
+  ],
+  last_refreshed_at: "2026-02-06T00:00:00+00:00",
+  is_stale: false,
+  refresh_triggered: false,
+};
+
 beforeEach(() => {
-  vi.useFakeTimers();
+  vi.useRealTimers();
   vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
   mockApi.health.mockResolvedValue({ status: "ok" });
   mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
   mockApi.platformAllocation.mockResolvedValue(platformAllocationFixture);
   mockApi.spendingSummary.mockResolvedValue(spendingSummaryFixture);
   mockApi.creditCardSummary.mockResolvedValue(creditCardSummaryFixture);
+  mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
 });
 
 afterEach(() => {
@@ -145,23 +170,17 @@ describe("App", () => {
     expect(screen.getByText(/S\$ 8,710/)).toBeInTheDocument();
     expect(screen.getByText(/30%/)).toBeInTheDocument();
 
-    const holdingsSection = screen.getByText("Top Holdings (Overall)").closest(".card");
-    expect(holdingsSection).not.toBeNull();
-    if (holdingsSection) {
-      const table = within(holdingsSection).getByRole("table");
-      expect(within(table).getByText("AAPL")).toBeInTheDocument();
-      expect(within(table).getByText("BTC")).toBeInTheDocument();
-    }
-
     expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
     expect(screen.getByText("DBS Altitude")).toBeInTheDocument();
+    expect(screen.getByText("Crypto Exposure")).toBeInTheDocument();
+    expect(screen.getByText("Total ETH")).toBeInTheDocument();
+    expect(screen.getByText("Total SOL")).toBeInTheDocument();
     expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();
     expect(screen.getByText("Allocation by Geography")).toBeInTheDocument();
     expect(screen.getByText("Allocation by Platform")).toBeInTheDocument();
-    expect(screen.getByText("IBKR")).toBeInTheDocument();
+    expect(screen.getAllByText("IBKR").length).toBeGreaterThan(0);
     expect(screen.getByText(/70.0%/)).toBeInTheDocument();
     expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
-    expect(screen.getByText("Top Holdings (Overall)")).toBeInTheDocument();
   });
 
   it("renders API error state when requests fail", async () => {

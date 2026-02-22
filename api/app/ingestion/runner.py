@@ -15,6 +15,7 @@ from app.ingestion.validators import validate_transactions
 from app.ingestion.report import write_report
 from app.ingestion.parsers.ibkr_activity_csv_v1 import parse_ibkr_activity_csv
 from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_transaction_history_csv
+from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 from app.models.import_job import ImportJob
 
 
@@ -64,22 +65,41 @@ def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
     if row:
         return int(row[0])
 
-    db.execute(
-        text(
-            """
-            INSERT INTO assets (symbol, name, asset_class, quote_currency, home_country)
-            VALUES (:symbol, :name, :asset_class, :currency, :home_country)
-            ON CONFLICT (symbol, quote_currency) DO NOTHING
-            """
-        ),
-        {
-            "symbol": symbol,
-            "name": pos.get("name"),
-            "asset_class": pos.get("asset_class") or "OTHER",
-            "currency": currency,
-            "home_country": pos.get("home_country"),
-        },
-    )
+    dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    is_sqlite = getattr(dialect, "name", "") == "sqlite"
+    if is_sqlite:
+        db.execute(
+            text(
+                """
+                INSERT OR IGNORE INTO assets (symbol, name, asset_class, quote_currency, home_country)
+                VALUES (:symbol, :name, :asset_class, :currency, :home_country)
+                """
+            ),
+            {
+                "symbol": symbol,
+                "name": pos.get("name"),
+                "asset_class": pos.get("asset_class") or "OTHER",
+                "currency": currency,
+                "home_country": pos.get("home_country"),
+            },
+        )
+    else:
+        db.execute(
+            text(
+                """
+                INSERT INTO assets (symbol, name, asset_class, quote_currency, home_country)
+                VALUES (:symbol, :name, :asset_class, :currency, :home_country)
+                ON CONFLICT (symbol, quote_currency) DO NOTHING
+                """
+            ),
+            {
+                "symbol": symbol,
+                "name": pos.get("name"),
+                "asset_class": pos.get("asset_class") or "OTHER",
+                "currency": currency,
+                "home_country": pos.get("home_country"),
+            },
+        )
     row = db.execute(
         text(
             "SELECT id FROM assets WHERE symbol = :symbol AND quote_currency = :currency LIMIT 1"
@@ -163,11 +183,18 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
         db.add(job)
         db.commit()
 
-        delimiter = signature_debug["delimiter"]
+        delimiter = signature_debug.get("delimiter") if isinstance(signature_debug, dict) else None
+        parser_meta: dict[str, Any] = {}
         if parser_key == "ibkr_activity_csv_v1":
+            if not delimiter:
+                raise ValueError("Missing delimiter for IBKR CSV parsing")
             parsed, positions, section_counts = parse_ibkr_activity_csv(job.stored_path, delimiter)
         elif parser_key == "dbs_transaction_history_csv_v1":
+            if not delimiter:
+                raise ValueError("Missing delimiter for DBS CSV parsing")
             parsed, positions, section_counts = parse_dbs_transaction_history_csv(job.stored_path, delimiter)
+        elif parser_key == "sharekhan_holdings_xls_v1":
+            parsed, positions, section_counts, parser_meta = parse_sharekhan_holdings_xls(job.stored_path)
         else:
             job.status = "FAILED"
             job.error_message = f"Unsupported parser_key: {parser_key}"
@@ -319,6 +346,7 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                 "positions_inserted": positions_inserted,
             },
             preview=preview,
+            parser_meta=parser_meta,
         )
         return write_and_return(report)
     except Exception as exc:  # noqa: BLE001
@@ -335,6 +363,7 @@ def _report(
     warnings: list | None = None,
     counts: dict | None = None,
     preview: List[Dict[str, Any]] | None = None,
+    parser_meta: dict | None = None,
     error: str | None = None,
 ) -> dict:
     return {
@@ -356,6 +385,7 @@ def _report(
         },
         "validation_warnings": warnings or [],
         "preview_transactions": preview or [],
+        "parser_meta": parser_meta or {},
         "signature_debug": signature_debug,
         "error_message": error,
     }

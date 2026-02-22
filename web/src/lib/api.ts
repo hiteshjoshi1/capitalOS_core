@@ -63,6 +63,12 @@ export type DashboardSummary = {
     asset_class: string;
     value: number;
     percent_of_networth: number;
+    geo?: string;
+    platform?: string;
+  }>;
+  cash_balances?: Array<{
+    currency: string;
+    value: number;
   }>;
   snapshot_day: number;
 net_worth_as_of: string | null;
@@ -151,6 +157,84 @@ export type PlatformAllocation = {
     value: number;
     percent: number;
   }>;
+};
+
+export type CryptoWallet = {
+  id: string;
+  chain_type: string;
+  chain: string;
+  address: string;
+  label?: string | null;
+  status: string;
+  created_at?: string | null;
+  verified_at?: string | null;
+};
+
+export type CryptoWalletInitResponse = {
+  chain_type: string;
+  chain: string;
+  address: string;
+  message_to_sign: string;
+  nonce: string;
+  expires_at: string;
+};
+
+export type CryptoSummary = {
+  total_crypto_usd: number;
+  total_crypto_base: number;
+  base_currency: string;
+  eth_exposure_usd?: number;
+  eth_exposure_base?: number;
+  token_exposure_usd?: number;
+  token_exposure_base?: number;
+  token_count?: number;
+  priced_token_count?: number;
+  eth: { balance: number; value_usd: number; value_base: number };
+  sol: { balance: number; value_usd: number; value_base: number };
+  top5_holdings: Array<{
+    symbol: string;
+    chain: string;
+    amount: number;
+    value_usd: number;
+    value_base: number;
+    wallet_id?: string;
+  }>;
+  top_holdings: Array<{
+    symbol: string;
+    chain: string;
+    amount: number;
+    value_usd: number;
+    value_base: number;
+    asset_class: string;
+    wallet_id?: string;
+  }>;
+  wallet_exposure?: Array<{
+    wallet_id: string;
+    label?: string | null;
+    address: string;
+    chain_type: string;
+    chain: string;
+    total_usd: number;
+    total_base: number;
+  }>;
+  wallet_chain_exposure?: Array<{
+    wallet_id: string;
+    chain: string;
+    total_usd: number;
+    total_base: number;
+  }>;
+  last_refreshed_at: string | null;
+  is_stale: boolean;
+  refresh_triggered: boolean;
+};
+
+export type CryptoAllowlistItem = {
+  id: number;
+  chain: string;
+  contract_address: string;
+  symbol?: string | null;
+  name?: string | null;
+  created_at?: string | null;
 };
 
 
@@ -255,6 +339,30 @@ export const api = {
     req<Record<string, unknown>>(`/ingest/jobs/${jobId}/register`, {
       method: "POST",
       body: JSON.stringify({ parser_key: parserKey }),
+    }),
+  cryptoWallets: () => req<CryptoWallet[]>("/crypto/wallets"),
+  cryptoWalletInit: (payload: { chain_type: string; chain: string; address: string; label?: string }) =>
+    req<CryptoWalletInitResponse>("/crypto/wallets/init", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cryptoWalletVerify: (payload: { chain_type: string; chain: string; address: string; signature: string; public_key?: string }) =>
+    req<{ wallet_id: string; status: string }>("/crypto/wallets/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cryptoSummary: (baseCurrency = "USD") =>
+    req<CryptoSummary>(`/crypto/summary?base_currency=${encodeURIComponent(baseCurrency)}`),
+  cryptoRefreshNow: (adminKey?: string) =>
+    req<Record<string, unknown>>("/crypto/refresh-now", {
+      method: "POST",
+      headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
+    }),
+  cryptoAllowlist: () => req<CryptoAllowlistItem[]>("/crypto/allowlist"),
+  cryptoAllowlistAdd: (payload: { chain: string; contract_address: string }) =>
+    req<CryptoAllowlistItem>("/crypto/allowlist", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
 };

@@ -182,6 +182,46 @@ docker compose up -d --build api
 curl http://localhost:8000/health
 ```
 
+---
+
+## Crypto Wallet Tracking (EVM + Solana)
+
+### Environment Variables
+Set these in your `.env` (never commit secrets):
+
+- `ALCHEMY_API_KEY` (required for EVM balances)
+- `HELIUS_API_KEY` (required for Solana balances)
+- `COINGECKO_API_KEY` (optional; improves rate limits)
+- `CRYPTO_SIGNING_NONCE_TTL_SECONDS` (default `600`)
+- `CRYPTO_REFRESH_HOUR_LOCAL` (default `0`, Asia/Singapore time)
+- `CRYPTO_SCHEDULER_ENABLED` (default `1`, set `0` to disable scheduler)
+- `CRYPTO_SNAPSHOT_MAX_ITEMS` (default `500`)
+- `CRYPTO_ADMIN_KEY` (optional; protects `/crypto/refresh-now`)
+- `CRYPTO_ADMIN_MIN_INTERVAL_SECONDS` (default `60`)
+- `TZ` (default `Asia/Singapore`)
+
+### Wallet Verification Flow (curl)
+```bash
+curl -X POST http://localhost:8000/crypto/wallets/init \
+  -H "Content-Type: application/json" \
+  -d '{"chain_type":"evm","chain":"ethereum","address":"0x...","label":"Main"}'
+
+# Sign message with wallet, then:
+curl -X POST http://localhost:8000/crypto/wallets/verify \
+  -H "Content-Type: application/json" \
+  -d '{"wallet_id":"<id>","address":"0x...","signature":"0x..."}'
+```
+
+### Crypto Summary (curl)
+```bash
+curl "http://localhost:8000/crypto/summary?base_currency=SGD"
+```
+
+### Manual Refresh (admin)
+```bash
+curl -X POST http://localhost:8000/crypto/refresh-now -H "X-Admin-Key: <key>"
+```
+
 ### Logs
 ```bash
 make logs

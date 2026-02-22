@@ -127,8 +127,8 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> T
     if balance_value is not None and balances.currency:
         positions.append(
             {
-                "symbol": "CASH",
-                "name": "Cash Balance",
+                "symbol": balances.currency,
+                "name": f"{balances.currency} Cash",
                 "asset_class": "CASH",
                 "currency": balances.currency,
                 "quantity": balance_value,

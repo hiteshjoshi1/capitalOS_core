@@ -54,6 +54,8 @@ def _effective_as_of(db: Session, anchor_ts: datetime) -> Optional[datetime]:
 
 
 def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, float]:
+    if anchor_ts is None:
+        return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
     """Compute net worth components using latest snapshot per account up to anchor_ts."""
     q = text("""
         WITH latest AS (
@@ -72,7 +74,7 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
     if not rows:
-        return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
+        rows = []
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     cash = 0.0
@@ -87,6 +89,31 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
             stocks_funds += value
         elif r["asset_class"] == "CRYPTO":
             crypto += value
+    # Add crypto wallet snapshots (USD -> base_currency), latest per wallet
+    as_of_date = anchor_ts.date()
+    wallet_total = db.execute(
+        text(
+            """
+            WITH latest AS (
+              SELECT wallet_id, MAX(as_of_date) AS as_of_date
+              FROM crypto_wallet_snapshots
+              WHERE as_of_date <= :as_of_date
+              GROUP BY wallet_id
+            )
+            SELECT SUM(s.total_usd) AS total_usd
+            FROM crypto_wallet_snapshots s
+            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            WHERE w.status = 'active'
+            """
+        ),
+        {"as_of_date": as_of_date},
+    ).mappings().one()
+    wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
+    if wallet_usd:
+        usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
+        crypto += wallet_usd * usd_rate
+
     liabilities = 0.0  # later when loans modeled
     total = cash + stocks_funds + crypto - liabilities
     return {
@@ -134,7 +161,7 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
     return out
 
 
-def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency: str, limit: int = 5) -> List[Dict[str, Any]]:
+def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency: str, limit: int = 10) -> List[Dict[str, Any]]:
     if total <= 0:
         return []
     q = text("""
@@ -149,31 +176,83 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
           a.symbol,
           a.asset_class,
           a.quote_currency,
+          COALESCE(a.home_country, 'UNKNOWN') AS home_country,
+          COALESCE(pl.code, acc.platform) AS platform,
           p.cost_basis_base AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+        JOIN accounts acc ON acc.id = p.account_id
+        LEFT JOIN platforms pl ON pl.id = acc.platform_id
         JOIN assets a ON a.id = p.asset_id
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     agg: Dict[int, Dict[str, Any]] = {}
+    geo_bucket: Dict[int, Dict[str, float]] = {}
+    platform_bucket: Dict[int, Dict[str, float]] = {}
     for r in rows:
         asset_id = int(r["asset_id"])
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
+        display_symbol = r["symbol"]
+        if r["asset_class"] == "CASH" and r.get("quote_currency"):
+            display_symbol = r["quote_currency"]
         if asset_id not in agg:
             agg[asset_id] = {
                 "asset_id": asset_id,
-                "symbol": r["symbol"],
+                "symbol": display_symbol,
                 "asset_class": r["asset_class"],
                 "value": 0.0,
             }
         agg[asset_id]["value"] += value
+        geo = r["home_country"] or "UNKNOWN"
+        platform = r["platform"] or "UNKNOWN"
+        geo_bucket.setdefault(asset_id, {})[geo] = geo_bucket.setdefault(asset_id, {}).get(geo, 0.0) + value
+        platform_bucket.setdefault(asset_id, {})[platform] = platform_bucket.setdefault(asset_id, {}).get(platform, 0.0) + value
     out = sorted(agg.values(), key=lambda x: x["value"], reverse=True)[:limit]
     for r in out:
         value = float(r["value"])
         r["percent_of_networth"] = round((value / total) * 100, 2)
+        geo = geo_bucket.get(r["asset_id"], {})
+        platform = platform_bucket.get(r["asset_id"], {})
+        r["geo"] = max(geo.items(), key=lambda x: x[1])[0] if geo else "UNKNOWN"
+        r["platform"] = max(platform.items(), key=lambda x: x[1])[0] if platform else "UNKNOWN"
+    return out
+
+
+def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str) -> List[Dict[str, Any]]:
+    q = text("""
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        )
+        SELECT
+          a.quote_currency AS currency,
+          p.cost_basis_base AS value
+        FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+        JOIN assets a ON a.id = p.asset_id
+        WHERE a.asset_class = 'CASH'
+    """)
+    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    if not rows:
+        return []
+    currencies = {r["currency"] for r in rows if r["currency"]}
+    rates = get_rates(anchor_ts, base_currency, currencies)
+    buckets: Dict[str, float] = {}
+    for r in rows:
+        cur = (r["currency"] or base_currency).upper()
+        value = float(r["value"]) * rates.get(cur, 1.0)
+        buckets[cur] = buckets.get(cur, 0.0) + value
+    out = []
+    for currency, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
+        out.append({
+            "currency": currency,
+            "value": value,
+        })
     return out
 
 
@@ -265,7 +344,8 @@ def dashboard_summary(
 
     nw = _networth_components(db, anchor, base_currency)
     geo = _geography(db, anchor, nw["total"], base_currency)
-    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=5)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=10)
+    cash_balances = _cash_balances(db, anchor, base_currency)
     cf = _cashflow(db, month_start, month_end, base_currency)
 
     # Comparisons (Option A)
@@ -310,6 +390,7 @@ def dashboard_summary(
         "geography": geo,
         "cash_flow": cf,
         "top_holdings": top,
+        "cash_balances": cash_balances,
         "net_worth_change": changes if changes else None,
     }
 

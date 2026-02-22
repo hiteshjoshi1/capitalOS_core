@@ -1,5 +1,4 @@
 import os
-import json
 from datetime import datetime, timezone
 
 import pytest
@@ -11,15 +10,8 @@ from sqlalchemy.orm import sessionmaker
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:////tmp/capitalos_test.db"
 os.environ.setdefault("DATA_DIR", "/tmp/capitalos_test_data")
 os.environ.setdefault("SNAPSHOT_DAY", "6")
-os.environ.setdefault(
-    "FX_STATIC_RATES",
-    json.dumps(
-        {
-            "SGD": {"SGD": 1, "USD": 1, "HKD": 1, "INR": 1},
-            "USD": {"USD": 1, "SGD": 1, "HKD": 1, "INR": 1},
-        }
-    ),
-)
+os.environ.setdefault("CRYPTO_SCHEDULER_ENABLED", "0")
+os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -126,6 +118,95 @@ def setup_db():
             )
             """
         )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS crypto_wallets (
+              id TEXT PRIMARY KEY,
+              user_id INTEGER,
+              chain_type TEXT NOT NULL,
+              chain TEXT NOT NULL,
+              address TEXT NOT NULL,
+              label TEXT,
+              status TEXT NOT NULL,
+              refresh_in_progress INTEGER NOT NULL DEFAULT 0,
+              refresh_started_at TIMESTAMP,
+              created_at TIMESTAMP,
+              verified_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS crypto_wallet_verifications (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              wallet_id TEXT,
+              chain_type TEXT,
+              chain TEXT,
+              address TEXT,
+              nonce TEXT NOT NULL,
+              message TEXT NOT NULL,
+              expires_at TIMESTAMP NOT NULL,
+              used_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS crypto_wallet_snapshots (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              wallet_id TEXT NOT NULL,
+              as_of_date DATE NOT NULL,
+              fetched_at TIMESTAMP NOT NULL,
+              total_usd REAL,
+              source_versions TEXT
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS crypto_allowlist (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              chain TEXT NOT NULL,
+              contract_address TEXT NOT NULL,
+              symbol TEXT,
+              name TEXT,
+              created_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS crypto_wallet_snapshot_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              snapshot_id INTEGER NOT NULL,
+              asset_id INTEGER,
+              chain_type TEXT NOT NULL,
+              chain TEXT NOT NULL,
+              asset_kind TEXT NOT NULL,
+              contract_or_mint TEXT,
+              symbol TEXT,
+              name TEXT,
+              decimals INTEGER,
+              raw_amount TEXT,
+              normalized_amount REAL,
+              price_usd REAL,
+              value_usd REAL,
+              price_source TEXT
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS crypto_user_networth (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER,
+              as_of_date DATE NOT NULL,
+              total_usd REAL,
+              crypto_usd REAL,
+              updated_at TIMESTAMP
+            )
+            """
+        )
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.exec_driver_sql(
@@ -192,6 +273,12 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS assets")
         conn.exec_driver_sql("DROP TABLE IF EXISTS platforms")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallet_snapshot_items")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallet_snapshots")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallet_verifications")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallets")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_user_networth")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_allowlist")
     Base.metadata.drop_all(bind=engine)
 
 
@@ -208,6 +295,12 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM currencies")
         conn.exec_driver_sql("DELETE FROM parser_registry")
         conn.exec_driver_sql("DELETE FROM import_jobs")
+        conn.exec_driver_sql("DELETE FROM crypto_allowlist")
+        conn.exec_driver_sql("DELETE FROM crypto_wallet_snapshot_items")
+        conn.exec_driver_sql("DELETE FROM crypto_wallet_snapshots")
+        conn.exec_driver_sql("DELETE FROM crypto_wallet_verifications")
+        conn.exec_driver_sql("DELETE FROM crypto_wallets")
+        conn.exec_driver_sql("DELETE FROM crypto_user_networth")
     yield
 
 

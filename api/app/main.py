@@ -9,6 +9,8 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.currencies import router as currencies_router
 from app.routers.spending import router as spending_router
 from app.routers.ingest import router as ingest_router
+from app.routers.crypto import router as crypto_router
+from app.crypto.scheduler import start_scheduler
 
 
 
@@ -33,3 +35,9 @@ app.include_router(dashboard_router)
 app.include_router(currencies_router)
 app.include_router(spending_router)
 app.include_router(ingest_router)
+app.include_router(crypto_router)
+
+
+@app.on_event("startup")
+def _start_schedulers():
+    start_scheduler()
