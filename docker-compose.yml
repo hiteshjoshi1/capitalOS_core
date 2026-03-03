@@ -3,9 +3,9 @@ services:
     image: postgres:16
     container_name: capitalos-postgres
     environment:
-      POSTGRES_USER: capitalos
-      POSTGRES_PASSWORD: capitalos
-      POSTGRES_DB: capitalos
+      POSTGRES_USER: ${POSTGRES_USER:-capitalos}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capitalos}
+      POSTGRES_DB: ${POSTGRES_DB:-capitalos}
     ports:
       - "5432:5432"
     volumes:
