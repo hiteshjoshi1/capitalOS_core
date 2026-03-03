@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import os
 import logging
+import hashlib
+import base64
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 import time
+import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header
 from pydantic import BaseModel
@@ -13,13 +16,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.crypto.verify import verify_evm_signature, verify_solana_signature
+from app.crypto.verify import (
+    verify_evm_signature,
+    verify_solana_signature,
+    verify_solana_signature_debug,
+    verify_solana_signature_bytes_debug,
+)
 from app.crypto.ingest import ingest_wallet, upsert_snapshot, should_refresh, acquire_refresh_lock, release_refresh_lock
 from app.crypto.pricing import price_by_contract, lookup_contract_metadata
 from app.fx import get_rates
 
 router = APIRouter(prefix="/crypto", tags=["crypto"])
-logger = logging.getLogger("capitalos.crypto")
+logger = logging.getLogger("uvicorn.error")
+_SOLANA_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 
 
 class WalletInitIn(BaseModel):
@@ -35,6 +44,27 @@ class WalletVerifyIn(BaseModel):
     address: str
     signature: str
     public_key: Optional[str] = None
+    verification_id: Optional[int] = None
+
+
+class SolanaDebugVerifyIn(BaseModel):
+    address: str
+    message_bytes_b64: str
+    signature: str
+
+
+class SolanaVerifyOnchainIn(BaseModel):
+    address: str
+    signature: str
+    verification_id: int
+
+
+class SolanaSubmitTxIn(BaseModel):
+    tx_b64: str
+
+
+class SolanaPreflightIn(BaseModel):
+    tx_b64: str
 
 
 def _nonce_ttl() -> int:
@@ -50,7 +80,12 @@ def _validate_address(chain_type: str, address: str) -> None:
         if not address.startswith("0x") or len(address) < 42:
             raise HTTPException(status_code=400, detail="Invalid EVM address")
     elif chain_type == "solana":
-        if len(address) < 32:
+        try:
+            import base58
+            decoded = base58.b58decode(address)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid Solana address")
+        if len(decoded) != 32:
             raise HTTPException(status_code=400, detail="Invalid Solana address")
     else:
         raise HTTPException(status_code=400, detail="Unsupported chain_type")
@@ -63,6 +98,113 @@ def _validate_chain(chain_type: str, chain: str) -> None:
         raise HTTPException(status_code=400, detail="Unsupported EVM chain")
     if chain_type == "solana" and chain not in sol_chains:
         raise HTTPException(status_code=400, detail="Unsupported Solana chain")
+
+
+def _solana_rpc_urls() -> list[str]:
+    urls: list[str] = []
+    explicit = os.getenv("SOLANA_RPC_URL")
+    if explicit:
+        urls.append(explicit)
+    explicit_helius = os.getenv("HELIUS_RPC_URL")
+    if explicit_helius:
+        urls.append(explicit_helius)
+    helius = os.getenv("HELIUS_API_KEY")
+    if helius:
+        urls.append(f"https://mainnet.helius-rpc.com/?api-key={helius}")
+    # Always keep a public fallback in case provider-specific endpoints 404.
+    urls.append("https://api.mainnet-beta.solana.com")
+    return urls
+
+
+def _solana_rpc(method: str, params: list) -> dict:
+    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
+    last_exc: Exception | None = None
+    for url in _solana_rpc_urls():
+        try:
+            resp = httpx.post(url, json=payload, timeout=10)
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" in data:
+                err = data["error"]
+                code = err.get("code") if isinstance(err, dict) else None
+                # Skip endpoints that don't support the method
+                if code == -32601:
+                    logger.info("solana_rpc_method_missing method=%s url=%s", method, url)
+                    continue
+                raise HTTPException(status_code=400, detail=f"Solana RPC error: {err}")
+            return data.get("result")
+        except Exception as exc:  # noqa: BLE001
+            logger.info("solana_rpc_failed method=%s url=%s error=%s", method, url, exc)
+            last_exc = exc
+            continue
+    raise HTTPException(status_code=502, detail=f"Solana RPC failed: {last_exc}")
+
+
+def _verify_solana_onchain(signature: str, address: str, nonce: str, expires_at: datetime | None) -> None:
+    # Wait for the transaction to land (RPCs can be slow/lagged)
+    result = None
+    for _ in range(12):
+        status = _solana_rpc("getSignatureStatuses", [[signature]])
+        value = (status or {}).get("value", [None])[0]
+        if value and value.get("confirmationStatus") in ("processed", "confirmed", "finalized"):
+            result = _solana_rpc(
+                "getTransaction",
+                [signature, {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}],
+            )
+            if result:
+                break
+        time.sleep(1)
+    if not result:
+        raise HTTPException(status_code=400, detail="Transaction not found")
+    block_time = result.get("blockTime")
+    if expires_at and block_time:
+        if datetime.fromtimestamp(block_time, tz=timezone.utc) > expires_at + timedelta(minutes=5):
+            raise HTTPException(status_code=400, detail="Transaction too late for nonce")
+    tx = result.get("transaction") or {}
+    msg = tx.get("message") or {}
+    keys = msg.get("accountKeys") or []
+    fee_payer = None
+    if keys:
+        first = keys[0]
+        fee_payer = first.get("pubkey") if isinstance(first, dict) else first
+    if fee_payer != address:
+        raise HTTPException(status_code=400, detail="Transaction fee payer does not match wallet")
+    instructions = msg.get("instructions") or []
+    found_memo = False
+    memo_debug: list[str] = []
+    for inst in instructions:
+        program_id = inst.get("programId") if isinstance(inst, dict) else None
+        program = inst.get("program") if isinstance(inst, dict) else None
+        if program_id != _SOLANA_MEMO_PROGRAM and program != "spl-memo":
+            continue
+        memo_text = None
+        if isinstance(inst, dict) and "parsed" in inst:
+            parsed = inst.get("parsed")
+            if isinstance(parsed, dict):
+                info = parsed.get("info") or {}
+                memo_text = info.get("memo")
+            elif isinstance(parsed, str):
+                memo_text = parsed
+        data = inst.get("data") if isinstance(inst, dict) else None
+        if memo_text is None and data:
+            try:
+                memo_text = base58.b58decode(data).decode("utf-8", errors="ignore")
+            except Exception:
+                try:
+                    memo_text = base64.b64decode(data).decode("utf-8", errors="ignore")
+                except Exception:
+                    memo_text = None
+        if memo_text:
+            memo_debug.append(memo_text)
+        if memo_text and nonce in memo_text:
+            found_memo = True
+            break
+    if not found_memo:
+        logger.info(
+            "solana_memo_not_found",
+            extra={"nonce": nonce, "memos": memo_debug, "address": address},
+        )
+        raise HTTPException(status_code=400, detail="Nonce memo not found in transaction")
 
 
 @router.post("/wallets/init")
@@ -84,11 +226,12 @@ def wallet_init(payload: WalletInitIn, db: Session = Depends(get_db)):
     message = _message(nonce, normalized_address, payload.chain)
     expires_at = datetime.now(tz=timezone.utc) + timedelta(seconds=_nonce_ttl())
 
-    db.execute(
+    row = db.execute(
         text(
             """
             INSERT INTO crypto_wallet_verifications (wallet_id, chain_type, chain, address, nonce, message, expires_at)
             VALUES (NULL, :chain_type, :chain, :address, :nonce, :message, :expires_at)
+            RETURNING id
             """
         ),
         {
@@ -99,14 +242,17 @@ def wallet_init(payload: WalletInitIn, db: Session = Depends(get_db)):
             "message": message,
             "expires_at": expires_at,
         },
-    )
+    ).fetchone()
     db.commit()
 
     return {
+        "verification_id": row[0],
         "chain_type": payload.chain_type,
         "chain": payload.chain,
         "address": normalized_address,
         "message_to_sign": message,
+        "message_bytes_b64": base64.b64encode(message.encode("utf-8")).decode("utf-8"),
+        "message_hash": hashlib.sha256(message.encode("utf-8")).hexdigest(),
         "nonce": nonce,
         "expires_at": expires_at.isoformat(),
     }
@@ -118,23 +264,42 @@ def wallet_verify(payload: WalletVerifyIn, background: BackgroundTasks, db: Sess
     _validate_chain(payload.chain_type, payload.chain)
     normalized_address = payload.address.lower() if payload.chain_type == "evm" else payload.address
 
-    ver = db.execute(
-        text(
-            """
-            SELECT id, message, expires_at, used_at
-            FROM crypto_wallet_verifications
-            WHERE chain_type = :chain_type AND chain = :chain AND address = :address
-              AND used_at IS NULL
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ),
-        {
-            "chain_type": payload.chain_type,
-            "chain": payload.chain,
-            "address": normalized_address,
-        },
-    ).mappings().one_or_none()
+    if payload.verification_id is not None:
+        ver = db.execute(
+            text(
+                """
+                SELECT id, message, expires_at, used_at
+                FROM crypto_wallet_verifications
+                WHERE id = :id AND chain_type = :chain_type AND chain = :chain AND address = :address
+                  AND used_at IS NULL
+                LIMIT 1
+                """
+            ),
+            {
+                "id": payload.verification_id,
+                "chain_type": payload.chain_type,
+                "chain": payload.chain,
+                "address": normalized_address,
+            },
+        ).mappings().one_or_none()
+    else:
+        ver = db.execute(
+            text(
+                """
+                SELECT id, message, expires_at, used_at
+                FROM crypto_wallet_verifications
+                WHERE chain_type = :chain_type AND chain = :chain AND address = :address
+                  AND used_at IS NULL
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ),
+            {
+                "chain_type": payload.chain_type,
+                "chain": payload.chain,
+                "address": normalized_address,
+            },
+        ).mappings().one_or_none()
     if not ver:
         raise HTTPException(status_code=400, detail="Verification nonce missing")
     if ver["used_at"] is not None:
@@ -154,9 +319,31 @@ def wallet_verify(payload: WalletVerifyIn, background: BackgroundTasks, db: Sess
         addr = payload.address.lower()
         result = verify_evm_signature(ver["message"], payload.signature, addr)
     else:
+        msg_hash = hashlib.sha256(ver["message"].encode("utf-8")).hexdigest()
+        logger.info(
+            "solana_signature_received addr=%s sig_len=%s sig=%s message_hash=%s",
+            normalized_address,
+            len(payload.signature or ""),
+            payload.signature,
+            msg_hash,
+        )
         result = verify_solana_signature(ver["message"], payload.signature, payload.address)
     if not result.ok:
-        raise HTTPException(status_code=400, detail=result.error or "Invalid signature")
+        logger.info(
+            "wallet_verify_failed",
+            extra={
+                "chain_type": payload.chain_type,
+                "chain": payload.chain,
+                "address": normalized_address,
+                "error": result.error,
+                "sig_len": len(payload.signature or ""),
+            },
+        )
+        msg_hash = hashlib.sha256(ver["message"].encode("utf-8")).hexdigest()
+        raise HTTPException(
+            status_code=400,
+            detail=f"{result.error or 'Invalid signature'} (message_hash={msg_hash})",
+        )
 
     wallet = db.execute(
         text(
@@ -200,6 +387,73 @@ def wallet_verify(payload: WalletVerifyIn, background: BackgroundTasks, db: Sess
     )
     db.commit()
 
+    background.add_task(_refresh_wallet, str(wallet_id))
+    return {"wallet_id": str(wallet_id), "status": "active"}
+
+
+@router.post("/wallets/verify-onchain")
+def wallet_verify_onchain(
+    payload: SolanaVerifyOnchainIn, background: BackgroundTasks, db: Session = Depends(get_db)
+):
+    _validate_address("solana", payload.address)
+    normalized_address = payload.address
+    ver = db.execute(
+        text(
+            """
+            SELECT id, message, expires_at, used_at, nonce
+            FROM crypto_wallet_verifications
+            WHERE id = :id AND chain_type = 'solana' AND chain = 'solana' AND address = :address
+              AND used_at IS NULL
+            LIMIT 1
+            """
+        ),
+        {"id": payload.verification_id, "address": normalized_address},
+    ).mappings().one_or_none()
+    if not ver:
+        raise HTTPException(status_code=400, detail="Verification nonce missing")
+    expires_at = ver["expires_at"]
+    if isinstance(expires_at, str):
+        try:
+            expires_at = datetime.fromisoformat(expires_at)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid nonce expiry")
+    if isinstance(expires_at, datetime) and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    if isinstance(expires_at, datetime) and expires_at < datetime.now(tz=timezone.utc):
+        raise HTTPException(status_code=400, detail="Nonce expired")
+
+    _verify_solana_onchain(payload.signature, normalized_address, ver["nonce"], expires_at)
+
+    wallet = db.execute(
+        text(
+            "SELECT id FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
+        ),
+        {"address": normalized_address},
+    ).fetchone()
+    if wallet:
+        wallet_id = wallet[0]
+        db.execute(
+            text("UPDATE crypto_wallets SET status = 'active', verified_at = :now WHERE id = :id"),
+            {"id": wallet_id, "now": datetime.now(tz=timezone.utc)},
+        )
+    else:
+        row = db.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (chain_type, chain, address, status, created_at, verified_at)
+                VALUES ('solana', 'solana', :address, 'active', :now, :now)
+                RETURNING id
+                """
+            ),
+            {"address": normalized_address, "now": datetime.now(tz=timezone.utc)},
+        ).fetchone()
+        wallet_id = row[0]
+
+    db.execute(
+        text("UPDATE crypto_wallet_verifications SET used_at = :now, wallet_id = :wallet_id WHERE id = :id"),
+        {"id": ver["id"], "wallet_id": wallet_id, "now": datetime.now(tz=timezone.utc)},
+    )
+    db.commit()
     background.add_task(_refresh_wallet, str(wallet_id))
     return {"wallet_id": str(wallet_id), "status": "active"}
 
@@ -468,12 +722,19 @@ def crypto_allowlist(db: Session = Depends(get_db)):
 def crypto_allowlist_add(payload: AllowlistIn, db: Session = Depends(get_db)):
     chain = payload.chain.lower()
     contract = payload.contract_address.lower()
-    prices = price_by_contract(chain, [contract])
-    if contract not in prices:
-        raise HTTPException(status_code=400, detail="Token not priced by CoinGecko")
-    meta = lookup_contract_metadata(chain, contract)
-    symbol = meta.get("symbol") if isinstance(meta, dict) else None
-    name = meta.get("name") if isinstance(meta, dict) else None
+    if chain == "solana":
+        prices = price_by_mint([contract])
+        if contract not in prices:
+            raise HTTPException(status_code=400, detail="Token not priced by price providers")
+        symbol = None
+        name = None
+    else:
+        prices = price_by_contract(chain, [contract])
+        if contract not in prices:
+            raise HTTPException(status_code=400, detail="Token not priced by CoinGecko")
+        meta = lookup_contract_metadata(chain, contract)
+        symbol = meta.get("symbol") if isinstance(meta, dict) else None
+        name = meta.get("name") if isinstance(meta, dict) else None
     row = db.execute(
         text(
             """
@@ -514,3 +775,90 @@ def refresh_now(
     for r in rows:
         background.add_task(_refresh_wallet, str(r[0]))
     return {"status": "queued", "wallets_refreshed": len(rows)}
+
+
+@router.post("/debug/verify-sig")
+def debug_verify_sig(
+    payload: SolanaDebugVerifyIn,
+    x_admin_key: Optional[str] = Header(None),
+):
+    admin_key = os.getenv("CRYPTO_ADMIN_KEY", "")
+    if admin_key and x_admin_key != admin_key:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        message_bytes = base64.b64decode(payload.message_bytes_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Invalid message_bytes_b64: {exc}")
+    message = message_bytes.decode("utf-8", errors="replace")
+    result = verify_solana_signature_debug(message, payload.signature, payload.address)
+    return {
+        "ok": result.ok,
+        "error": result.error,
+        "matched_variant": result.matched_variant,
+        "decoder": result.decoder,
+        "decoded_len": result.decoded_len,
+    }
+
+
+@router.post("/debug/verify-bytes")
+def debug_verify_bytes(
+    payload: SolanaDebugVerifyIn,
+    x_admin_key: Optional[str] = Header(None),
+):
+    admin_key = os.getenv("CRYPTO_ADMIN_KEY", "")
+    if admin_key and x_admin_key != admin_key:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        message_bytes = base64.b64decode(payload.message_bytes_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Invalid message_bytes_b64: {exc}")
+    result = verify_solana_signature_bytes_debug(message_bytes, payload.signature, payload.address)
+    return {
+        "ok": result.ok,
+        "error": result.error,
+        "matched_variant": result.matched_variant,
+        "decoder": result.decoder,
+        "decoded_len": result.decoded_len,
+    }
+
+
+@router.get("/solana/blockhash")
+def solana_blockhash():
+    try:
+        result = _solana_rpc("getLatestBlockhash", [])
+        return {"blockhash": result["value"]["blockhash"]}
+    except HTTPException:
+        result = _solana_rpc("getRecentBlockhash", [])
+        return {"blockhash": result["value"]["blockhash"]}
+
+
+@router.post("/solana/submit")
+def solana_submit(payload: SolanaSubmitTxIn):
+    try:
+        tx_bytes = base64.b64decode(payload.tx_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Invalid tx_b64: {exc}")
+    raw_b64 = base64.b64encode(tx_bytes).decode("utf-8")
+    # Use sendTransaction (widely supported). Some providers return 404 for sendRawTransaction.
+    result = _solana_rpc("sendTransaction", [raw_b64, {"encoding": "base64"}])
+    return {"signature": result}
+
+
+@router.post("/solana/preflight")
+def solana_preflight(payload: SolanaPreflightIn):
+    try:
+        tx_bytes = base64.b64decode(payload.tx_b64)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=f"Invalid tx_b64: {exc}")
+    raw_b64 = base64.b64encode(tx_bytes).decode("utf-8")
+    # Basic health check
+    _solana_rpc("getHealth", [])
+    # Preflight simulate
+    result = _solana_rpc(
+        "simulateTransaction",
+        [raw_b64, {"sigVerify": False, "commitment": "processed", "encoding": "base64"}],
+    )
+    err = result.get("value", {}).get("err")
+    if err:
+        raise HTTPException(status_code=400, detail=f"Preflight failed: {err}")
+    return {"ok": True}

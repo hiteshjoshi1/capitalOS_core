@@ -42,6 +42,7 @@ export default function CryptoHoldings() {
           <Link className="pill" to="/">Dashboard</Link>
           <Link className="pill" to="/crypto">Wallets</Link>
           <Link className="pill" to="/holdings">Stock Holdings</Link>
+          <Link className="pill" to="/cash">Cash</Link>
           <label className="pill">
             <span>Base</span>
             <select

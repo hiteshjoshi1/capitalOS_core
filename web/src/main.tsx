@@ -18,6 +18,7 @@ import Ingest from "./routes/Ingest.tsx";
 import CryptoWallets from "./routes/CryptoWallets.tsx";
 import CryptoHoldings from "./routes/CryptoHoldings.tsx";
 import StockHoldings from "./routes/StockHoldings.tsx";
+import CashOverview from "./routes/CashOverview.tsx";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
 const chains = [mainnet, base, arbitrum, optimism, mantle, scroll];
@@ -64,6 +65,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="/crypto" element={<CryptoWallets />} />
                     <Route path="/crypto/holdings" element={<CryptoHoldings />} />
                     <Route path="/holdings" element={<StockHoldings />} />
+                    <Route path="/cash" element={<CashOverview />} />
                   </Routes>
                 </BrowserRouter>
               </RainbowKitProvider>

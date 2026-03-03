@@ -4,6 +4,7 @@ import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useDisconnect, useSignMessage } from "wagmi";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useWallet } from "@solana/wallet-adapter-react";
+import { Transaction, TransactionInstruction, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 
 import { api } from "../lib/api";
@@ -28,12 +29,13 @@ export default function CryptoWallets() {
   const [status, setStatus] = useState<string>("");
   const [label, setLabel] = useState<string>("");
   const [chainType, setChainType] = useState<"evm" | "solana">("evm");
+  const [useHardwareSolana, setUseHardwareSolana] = useState<boolean>(false);
 
   const { address, isConnected } = useAccount();
   const chainId = useChainId();
   const { signMessageAsync } = useSignMessage();
   const { disconnect } = useDisconnect();
-  const { publicKey, connected, signMessage, disconnect: disconnectSolana } = useWallet();
+  const { publicKey, connected, signMessage, sendTransaction, signTransaction, disconnect: disconnectSolana, wallet } = useWallet();
 
   const evmChain = useMemo(() => EVM_CHAIN_MAP[chainId] || "ethereum", [chainId]);
   const solAddress = publicKey?.toString() ?? "";
@@ -54,6 +56,13 @@ export default function CryptoWallets() {
     loadAllowlist().catch((e) => setError(e?.message ?? String(e)));
   }, []);
 
+  useEffect(() => {
+    const name = wallet?.adapter?.name?.toLowerCase() ?? "";
+    if (name.includes("ledger")) {
+      setUseHardwareSolana(true);
+    }
+  }, [wallet]);
+
   const verifyEvm = async () => {
     if (!isConnected || !address) {
       setError("Connect your EVM wallet first.");
@@ -63,50 +72,99 @@ export default function CryptoWallets() {
       setError("Wallet does not support message signing.");
       return;
     }
-    setError("");
-    setStatus("");
-    const init = await api.cryptoWalletInit({
-      chain_type: "evm",
-      chain: evmChain,
-      address,
-      label: label || undefined,
-    });
-    const signature = await signMessageAsync({ message: init.message_to_sign });
-    const res = await api.cryptoWalletVerify({
-      chain_type: "evm",
-      chain: evmChain,
-      address,
-      signature,
-    });
-    setStatus(`Wallet ${res.wallet_id} verified`);
-    setLabel("");
-    await loadWallets();
+    try {
+      setError("");
+      setStatus("");
+      const init = await api.cryptoWalletInit({
+        chain_type: "evm",
+        chain: evmChain,
+        address,
+        label: label || undefined,
+      });
+      const signature = await signMessageAsync({ message: init.message_to_sign });
+      const res = await api.cryptoWalletVerify({
+        chain_type: "evm",
+        chain: evmChain,
+        address,
+        signature,
+        verification_id: init.verification_id,
+      });
+      setStatus(`Wallet ${res.wallet_id} verified`);
+      setLabel("");
+      await loadWallets();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
   };
 
   const verifySolana = async () => {
-    if (!connected || !publicKey || !signMessage) {
+    if (!connected || !publicKey || (!signMessage && !useHardwareSolana)) {
       setError("Connect your Solana wallet first.");
       return;
     }
-    setError("");
-    setStatus("");
-    const init = await api.cryptoWalletInit({
-      chain_type: "solana",
-      chain: "solana",
-      address: solAddress,
-      label: label || undefined,
-    });
-    const signatureBytes = await signMessage(new TextEncoder().encode(init.message_to_sign));
-    const signature = bs58.encode(signatureBytes);
-    const res = await api.cryptoWalletVerify({
-      chain_type: "solana",
-      chain: "solana",
-      address: solAddress,
-      signature,
-    });
-    setStatus(`Wallet ${res.wallet_id} verified`);
-    setLabel("");
-    await loadWallets();
+    try {
+      setError("");
+      setStatus("");
+      const init = await api.cryptoWalletInit({
+        chain_type: "solana",
+        chain: "solana",
+        address: solAddress,
+        label: label || undefined,
+      });
+      console.log("solana_message_hash", init.message_hash);
+      console.log("solana_message_to_sign", init.message_to_sign);
+      console.log("solana_message_bytes_b64", init.message_bytes_b64);
+      if (useHardwareSolana) {
+        if (!signTransaction) {
+          throw new Error("Wallet does not support signing transactions.");
+        }
+        const memoProgram = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+        const memoIx = new TransactionInstruction({
+          programId: memoProgram,
+          keys: [],
+          data: new TextEncoder().encode(`CapitalOS verify nonce: ${init.nonce}`),
+        });
+        const tx = new Transaction().add(memoIx);
+        tx.feePayer = publicKey;
+        const blockhash = await api.solanaBlockhash();
+        tx.recentBlockhash = blockhash.blockhash;
+        const signed = await signTransaction(tx);
+        const raw = signed.serialize();
+        const rawB64 = btoa(String.fromCharCode(...raw));
+        await api.solanaPreflight({ tx_b64: rawB64 });
+        const sig = await api.solanaSubmit({ tx_b64: rawB64 });
+        const res = await api.cryptoWalletVerifyOnchain({
+          address: solAddress,
+          signature: sig.signature,
+          verification_id: init.verification_id ?? 0,
+        });
+        setStatus(`Wallet ${res.wallet_id} verified via on-chain memo`);
+      } else {
+        const messageBytes = init.message_bytes_b64
+          ? Uint8Array.from(atob(init.message_bytes_b64), (c) => c.charCodeAt(0))
+          : new TextEncoder().encode(init.message_to_sign);
+        const signatureBytes = await signMessage(messageBytes);
+        const sigHex = Array.from(signatureBytes ?? []).slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
+        console.log("solana_signature_bytes_len", signatureBytes?.length ?? 0, "hex_prefix", sigHex);
+        if (!signatureBytes || signatureBytes.length !== 64) {
+          throw new Error(`Invalid signature bytes length: ${signatureBytes?.length ?? 0}`);
+        }
+        const signature = bs58.encode(signatureBytes);
+        console.log("solana_signature_b58", signature, "len", signature.length);
+        const res = await api.cryptoWalletVerify({
+          chain_type: "solana",
+          chain: "solana",
+          address: solAddress,
+          signature,
+          verification_id: init.verification_id,
+        });
+        setStatus(`Wallet ${res.wallet_id} verified`);
+      }
+      setLabel("");
+      await loadWallets();
+    } catch (e: any) {
+      setError(e?.message ?? String(e));
+    }
   };
 
   const addAllowlist = async () => {
@@ -222,6 +280,14 @@ export default function CryptoWallets() {
                 <div className="muted" style={{ marginTop: 6 }}>
                   {connected && solAddress ? `Connected: ${solAddress}` : "Not connected"}
                 </div>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                  <input
+                    type="checkbox"
+                    checked={useHardwareSolana}
+                    onChange={(e) => setUseHardwareSolana(e.target.checked)}
+                  />
+                  <span>Using Ledger / hardware wallet (verify via on-chain memo)</span>
+                </label>
                 {connected && solAddress && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
                     <button className="btn" onClick={() => navigator.clipboard.writeText(solAddress)}>
@@ -267,6 +333,7 @@ export default function CryptoWallets() {
               <option value="optimism">Optimism</option>
               <option value="mantle">Mantle</option>
               <option value="scroll">Scroll</option>
+              <option value="solana">Solana</option>
             </select>
           </label>
           <label className="field">

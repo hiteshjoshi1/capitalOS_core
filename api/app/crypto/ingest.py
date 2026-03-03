@@ -213,6 +213,12 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
         adapter = _adapter(wallet["chain_type"], wallet["chain"])
         native = adapter.get_native_balance(wallet["address"])
         tokens = adapter.get_token_balances(wallet["address"])
+        allow_by_chain = _allowlist_from_db(db)
+        if allow_by_chain.get("solana"):
+            tokens = [
+                t for t in tokens
+                if t.contract_or_mint and t.contract_or_mint.lower() in allow_by_chain.get("solana", set())
+            ]
         try:
             prices = _fetch_prices(wallet["chain_type"], wallet["chain"], tokens)
         except Exception:

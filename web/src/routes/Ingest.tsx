@@ -209,6 +209,15 @@ export default function Ingest() {
                           {registering ? "Registering…" : "Approve as Sharekhan"}
                         </button>
                       )}
+                      {reportData.platform === "DBS_VICKERS" && (
+                        <button
+                          className="btn"
+                          disabled={!reportData.job_id || registering}
+                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "dbs_vickers_holdings_xls_v1")}
+                        >
+                          {registering ? "Registering…" : "Approve as DBS Vickers"}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}

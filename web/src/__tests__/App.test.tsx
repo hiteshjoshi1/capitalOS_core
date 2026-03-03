@@ -4,7 +4,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import App from "../App";
 import { api } from "../lib/api";
-import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary } from "../lib/api";
+import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary, StockExposure } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -14,6 +14,7 @@ vi.mock("../lib/api", () => ({
     spendingSummary: vi.fn(),
     creditCardSummary: vi.fn(),
     cryptoSummary: vi.fn(),
+    stockExposure: vi.fn(),
     accountOptions: vi.fn(),
     createAccount: vi.fn(),
     platformOptions: vi.fn(),
@@ -135,6 +136,20 @@ const cryptoSummaryFixture: CryptoSummary = {
   refresh_triggered: false,
 };
 
+const stockExposureFixture: StockExposure = {
+  as_of: "2026-02-06T00:00:00+00:00",
+  base_currency: "SGD",
+  total: 90000,
+  by_country: [
+    { key: "US", value: 60000, percent: 66.7 },
+    { key: "IN", value: 30000, percent: 33.3 },
+  ],
+  by_platform: [
+    { key: "IBKR", value: 70000, percent: 77.8 },
+    { key: "DBS", value: 20000, percent: 22.2 },
+  ],
+};
+
 beforeEach(() => {
   vi.useRealTimers();
   vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
@@ -144,6 +159,7 @@ beforeEach(() => {
   mockApi.spendingSummary.mockResolvedValue(spendingSummaryFixture);
   mockApi.creditCardSummary.mockResolvedValue(creditCardSummaryFixture);
   mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+  mockApi.stockExposure.mockResolvedValue(stockExposureFixture);
 });
 
 afterEach(() => {
@@ -172,9 +188,14 @@ describe("App", () => {
 
     expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
     expect(screen.getByText("DBS Altitude")).toBeInTheDocument();
+    expect(screen.getByText("Stock Exposure")).toBeInTheDocument();
+    expect(screen.getByText("Cash Exposure")).toBeInTheDocument();
     expect(screen.getByText("Crypto Exposure")).toBeInTheDocument();
     expect(screen.getByText("Total ETH")).toBeInTheDocument();
     expect(screen.getByText("Total SOL")).toBeInTheDocument();
+    expect(screen.getByText("Stock Exposure")).toBeInTheDocument();
+    expect(screen.getByText("By country")).toBeInTheDocument();
+    expect(screen.getByText("By platform")).toBeInTheDocument();
     expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();
     expect(screen.getByText("Allocation by Geography")).toBeInTheDocument();
     expect(screen.getByText("Allocation by Platform")).toBeInTheDocument();

@@ -48,6 +48,7 @@ export default function StockHoldings() {
         <div className="pillRow">
           <Link className="pill" to="/">Dashboard</Link>
           <Link className="pill" to="/crypto/holdings">Crypto Holdings</Link>
+          <Link className="pill" to="/cash">Cash</Link>
           <label className="pill">
             <span>Base</span>
             <select
@@ -98,7 +99,9 @@ export default function StockHoldings() {
                 </tr>
               </thead>
               <tbody>
-                {summary?.top_holdings?.map((h, idx) => (
+                {summary?.top_holdings
+                  ?.filter((h) => h.asset_class !== "CASH")
+                  .map((h, idx) => (
                   <tr key={h.asset_id}>
                     <td>{idx + 1}</td>
                     <td>{h.symbol}</td>
@@ -109,41 +112,13 @@ export default function StockHoldings() {
                     <td className="muted">{h.platform ?? "—"}</td>
                   </tr>
                 ))}
-                {summary && summary.top_holdings.length === 0 && (
+                {summary && summary.top_holdings.filter((h) => h.asset_class !== "CASH").length === 0 && (
                   <tr>
                     <td className="muted" colSpan={7}>No holdings available.</td>
                   </tr>
                 )}
               </tbody>
             </table>
-          </div>
-
-          <div className="card">
-            <h2>Cash Balances</h2>
-            <div className="mini">
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>By currency (base converted)</div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Currency</th>
-                    <th className="right">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary?.cash_balances?.map((c) => (
-                    <tr key={c.currency}>
-                      <td>{c.currency}</td>
-                      <td className="right">{formatMoney(c.value)}</td>
-                    </tr>
-                  ))}
-                  {summary?.cash_balances && summary.cash_balances.length === 0 && (
-                    <tr>
-                      <td className="muted" colSpan={2}>No cash balances yet.</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
         </section>
       )}

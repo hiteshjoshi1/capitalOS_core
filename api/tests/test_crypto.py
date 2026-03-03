@@ -2,6 +2,9 @@ from datetime import datetime, timezone
 
 from eth_account import Account
 from eth_account.messages import encode_defunct
+from nacl.signing import SigningKey
+import base58
+import base64
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
@@ -31,6 +34,7 @@ def test_crypto_wallet_init_and_verify(client: TestClient, monkeypatch):
             "chain": "ethereum",
             "address": acct.address,
             "signature": signed.signature.hex(),
+            "verification_id": data["verification_id"],
         },
     )
     assert verify.status_code == 200
@@ -73,3 +77,36 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
     assert body["total_crypto_usd"] == 123.45
     assert body["total_crypto_base"] == 123.45
     assert body["top5_holdings"][0]["symbol"] == "ETH"
+
+
+def test_verify_solana_signature_unit():
+    sk = SigningKey.generate()
+    vk = sk.verify_key
+    address = base58.b58encode(vk.encode()).decode("utf-8")
+    message = "CapitalOS test message"
+    raw_msg = message.encode("utf-8")
+    sig = sk.sign(raw_msg).signature
+
+    from app.crypto.verify import verify_solana_signature
+
+    sig_b58 = base58.b58encode(sig).decode("utf-8")
+    res_b58 = verify_solana_signature(message, sig_b58, address)
+    assert res_b58.ok
+
+    sig_b64 = base64.b64encode(sig).decode("utf-8")
+    res_b64 = verify_solana_signature(message, sig_b64, address)
+    assert res_b64.ok
+
+    sip_prefix = b"\x18" + b"Solana Signed Message:" + b"\n"
+    prefixed = sip_prefix + str(len(raw_msg)).encode("utf-8") + raw_msg
+    sig_prefixed = sk.sign(prefixed).signature
+    sig_prefixed_b58 = base58.b58encode(sig_prefixed).decode("utf-8")
+    res_prefixed = verify_solana_signature(message, sig_prefixed_b58, address)
+    assert res_prefixed.ok
+
+    lower_prefix = b"\x18" + b"solana signed message:" + b"\n"
+    prefixed_lower = lower_prefix + raw_msg
+    sig_lower = sk.sign(prefixed_lower).signature
+    sig_lower_b58 = base58.b58encode(sig_lower).decode("utf-8")
+    res_lower = verify_solana_signature(message, sig_lower_b58, address)
+    assert res_lower.ok

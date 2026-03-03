@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
-import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary } from "./lib/api";
+import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary, StockExposure } from "./lib/api";
 import { Link } from "react-router-dom";
 import "./App.css";
 
@@ -20,6 +20,7 @@ export default function App() {
   const [health, setHealth] = useState<string>("(unknown)");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
+  const [stockExposure, setStockExposure] = useState<StockExposure | null>(null);
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
   const [creditCardSummary, setCreditCardSummary] = useState<CreditCardSummary | null>(null);
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
@@ -34,10 +35,11 @@ export default function App() {
       try {
         setState("loading");
         //hardcode
-        const [h, s, pa, ss, cc, cs] = await Promise.all([
+        const [h, s, pa, se, ss, cc, cs] = await Promise.all([
           api.health(),
           api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
           api.platformAllocation(month, baseCurrency),
+          api.stockExposure(month, baseCurrency),
           api.spendingSummary(month, baseCurrency),
           api.creditCardSummary(month, baseCurrency),
           api.cryptoSummary(baseCurrency),
@@ -46,6 +48,7 @@ export default function App() {
         setState("ready");
         setSummary(s);
         setPlatformAllocation(pa);
+        setStockExposure(se);
         setSpendingSummary(ss);
         setCreditCardSummary(cc);
         setCryptoSummary(cs);
@@ -65,6 +68,10 @@ export default function App() {
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : `${selectedBaseCurrency} `;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const netWorthTotal = summary?.net_worth.total ?? 0;
+  const cashPct = netWorthTotal ? (summary?.net_worth.cash ?? 0) / netWorthTotal * 100 : 0;
+  const stocksPct = netWorthTotal ? (summary?.net_worth.stocks_funds ?? 0) / netWorthTotal * 100 : 0;
+  const cryptoPct = netWorthTotal ? (summary?.net_worth.crypto ?? 0) / netWorthTotal * 100 : 0;
 
   return (
     <div className="wrap">
@@ -82,6 +89,7 @@ export default function App() {
           <Link className="pill" to="/crypto">Wallets</Link>
           <Link className="pill" to="/crypto/holdings">Crypto Holdings</Link>
           <Link className="pill" to="/holdings">Stock Holdings</Link>
+          <Link className="pill" to="/cash">Cash</Link>
           <span className="pill">API: {health}</span>
           <span className="pill">As of: {summary?.net_worth_as_of ?? "—"}</span>
           <label className="pill">
@@ -152,15 +160,15 @@ export default function App() {
               </div>
 
               <div className="bar" title="Allocation (cash/stocks/crypto)">
-                <span style={{ width: "16%", background: "var(--warn)" }}></span>
-                <span style={{ width: "69%", background: "var(--accent)" }}></span>
-                <span style={{ width: "15%", background: "var(--good)" }}></span>
+                <span style={{ width: `${cashPct.toFixed(1)}%`, background: "var(--warn)" }}></span>
+                <span style={{ width: `${stocksPct.toFixed(1)}%`, background: "var(--accent)" }}></span>
+                <span style={{ width: `${cryptoPct.toFixed(1)}%`, background: "var(--good)" }}></span>
               </div>
 
               <div className="legend">
-                <span className="dot"><i style={{ background: "var(--warn)" }}></i>Cash 16%</span>
-                <span className="dot"><i style={{ background: "var(--accent)" }}></i>Stocks 69%</span>
-                <span className="dot"><i style={{ background: "var(--good)" }}></i>Crypto 15%</span>
+                <span className="dot"><i style={{ background: "var(--warn)" }}></i>Cash {cashPct.toFixed(1)}%</span>
+                <span className="dot"><i style={{ background: "var(--accent)" }}></i>Stocks {stocksPct.toFixed(1)}%</span>
+                <span className="dot"><i style={{ background: "var(--good)" }}></i>Crypto {cryptoPct.toFixed(1)}%</span>
               </div>
 
               <div className="mini" style={{ marginTop: 12 }}>
@@ -278,6 +286,120 @@ export default function App() {
                 <button className="btn" disabled>Spending details</button>
                 <button className="btn" disabled>Category mapping</button>
               </div>
+            </div>
+
+            <div className="card">
+              <h2>Stock Exposure</h2>
+              <div className="split">
+                <div className="mini">
+                  <h3>Total (base)</h3>
+                  <div className="big small">{formatMoney(stockExposure?.total)}</div>
+                  <div className="muted">{stockExposure?.as_of ?? "—"}</div>
+                </div>
+                <div className="mini">
+                  <h3>Top country</h3>
+                  <div className="big small">{stockExposure?.by_country?.[0]?.key ?? "—"}</div>
+                  <div className="muted">
+                    {stockExposure?.by_country?.[0]
+                      ? `${stockExposure.by_country[0].percent.toFixed(1)}%`
+                      : "—"}
+                  </div>
+                </div>
+              </div>
+              <div className="split" style={{ marginTop: 12 }}>
+                <div className="mini">
+                  <h3>By country</h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Country</th>
+                        <th className="right">Value</th>
+                        <th className="right">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockExposure?.by_country?.length ? (
+                        stockExposure.by_country.map((c) => (
+                          <tr key={c.key}>
+                            <td>{c.key}</td>
+                            <td className="right">{formatMoney(c.value)}</td>
+                            <td className="right">{c.percent.toFixed(1)}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="muted" colSpan={3}>No stock exposure data.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="mini">
+                  <h3>By platform</h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Platform</th>
+                        <th className="right">Value</th>
+                        <th className="right">%</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {stockExposure?.by_platform?.length ? (
+                        stockExposure.by_platform.map((p) => (
+                          <tr key={p.key}>
+                            <td>{p.key}</td>
+                            <td className="right">{formatMoney(p.value)}</td>
+                            <td className="right">{p.percent.toFixed(1)}%</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="muted" colSpan={3}>No stock exposure data.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="hintTag">Live</div>
+            </div>
+
+            <div className="card">
+              <h2>Cash Exposure</h2>
+              <div className="split">
+                <div className="mini">
+                  <h3>Total (base)</h3>
+                  <div className="big small">{formatMoney(summary?.net_worth.cash)}</div>
+                  <div className="muted">All bank + broker cash</div>
+                </div>
+                <div className="mini">
+                  <h3>By currency</h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>Currency</th>
+                        <th className="right">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {summary?.cash_balances?.length ? (
+                        summary.cash_balances.map((c) => (
+                          <tr key={c.currency}>
+                            <td>{c.currency}</td>
+                            <td className="right">{formatMoney(c.value)}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td className="muted" colSpan={2}>No cash balances yet.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+              <div className="hintTag">Live</div>
             </div>
 
             <div className="card">

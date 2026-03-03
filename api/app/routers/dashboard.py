@@ -8,7 +8,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.dashboard import PlatformAllocationOut, PlatformAllocationItem
+from app.schemas.dashboard import PlatformAllocationOut, PlatformAllocationItem, StockExposureOut, StockExposureItem
 from app.fx import get_rates
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -136,21 +136,43 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
           GROUP BY account_id
         )
         SELECT
-          COALESCE(a.home_country,'UNKNOWN') AS country,
+          a.symbol AS symbol,
+          a.home_country AS home_country,
           a.quote_currency,
+          COALESCE(pl.code, acc.platform) AS platform,
           p.cost_basis_base AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN assets a ON a.id = p.asset_id
+        JOIN accounts acc ON acc.id = p.account_id
+        LEFT JOIN platforms pl ON pl.id = acc.platform_id
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[str, float] = {}
+    def infer_country(symbol: str | None, home: str | None, platform: str | None, quote_currency: str | None) -> str:
+        if home:
+            return home
+        if platform and platform.upper() == "IBKR":
+            if symbol and symbol.isdigit():
+                return "HK"
+            if quote_currency and quote_currency.upper() == "HKD":
+                return "HK"
+            if quote_currency and quote_currency.upper() == "USD":
+                return "US"
+        if quote_currency and quote_currency.upper() == "USD":
+            return "US"
+        if quote_currency and quote_currency.upper() == "HKD":
+            return "HK"
+        if quote_currency and quote_currency.upper() == "INR":
+            return "IN"
+        return "UNKNOWN"
     for r in rows:
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
-        buckets[r["country"]] = buckets.get(r["country"], 0.0) + value
+        country = infer_country(r["symbol"], r["home_country"], r["platform"], r["quote_currency"])
+        buckets[country] = buckets.get(country, 0.0) + value
     out = []
     for country, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
         out.append({
@@ -327,6 +349,82 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -
     return {"as_of": None, "total": total, "items": items}
 
 
+def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dict:
+    q = text(
+        """
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        )
+        SELECT
+          COALESCE(pl.code, a.platform) AS platform,
+          a2.symbol AS symbol,
+          a2.home_country AS home_country,
+          a2.quote_currency AS quote_currency,
+          p.cost_basis_base AS value
+        FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+        JOIN accounts a ON a.id = p.account_id
+        LEFT JOIN platforms pl ON pl.id = a.platform_id
+        JOIN assets a2 ON a2.id = p.asset_id
+        WHERE a2.asset_class IN ('STOCK', 'FUND')
+        """
+    )
+    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    if not rows:
+        return {"as_of": None, "base_currency": base_currency, "total": 0.0, "by_country": [], "by_platform": []}
+    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    rates = get_rates(anchor_ts, base_currency, currencies)
+
+    by_country: Dict[str, float] = {}
+    by_platform: Dict[str, float] = {}
+    total = 0.0
+
+    def infer_country(symbol: str | None, home: str | None, platform: str | None, quote_currency: str | None) -> str:
+        if home:
+            return home
+        if platform and platform.upper() == "IBKR":
+            if symbol and symbol.isdigit():
+                return "HK"
+            if quote_currency and quote_currency.upper() == "HKD":
+                return "HK"
+            if quote_currency and quote_currency.upper() == "USD":
+                return "US"
+        if quote_currency and quote_currency.upper() == "USD":
+            return "US"
+        if quote_currency and quote_currency.upper() == "HKD":
+            return "HK"
+        if quote_currency and quote_currency.upper() == "INR":
+            return "IN"
+        return "UNKNOWN"
+
+    for r in rows:
+        cur = (r["quote_currency"] or base_currency).upper()
+        value = float(r["value"]) * rates.get(cur, 1.0)
+        total += value
+        platform = r["platform"] or "UNKNOWN"
+        country = infer_country(r["symbol"], r["home_country"], platform, r["quote_currency"])
+        by_platform[platform] = by_platform.get(platform, 0.0) + value
+        by_country[country] = by_country.get(country, 0.0) + value
+
+    def _to_items(bucket: Dict[str, float]) -> list[dict]:
+        items = []
+        for key, value in sorted(bucket.items(), key=lambda x: x[1], reverse=True):
+            percent = round((value / total) * 100, 2) if total > 0 else 0.0
+            items.append({"key": key, "value": value, "percent": percent})
+        return items
+
+    return {
+        "as_of": None,
+        "base_currency": base_currency,
+        "total": total,
+        "by_country": _to_items(by_country),
+        "by_platform": _to_items(by_platform),
+    }
+
+
 @router.get("/summary")
 def dashboard_summary(
     month: str = Query(..., description="YYYY-MM"),
@@ -409,4 +507,23 @@ def platform_allocation(
         as_of=as_of.isoformat() if as_of else None,
         total=payload["total"],
         items=[PlatformAllocationItem(**item) for item in payload["items"]],
+    )
+
+
+@router.get("/stock-exposure", response_model=StockExposureOut)
+def stock_exposure(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start)
+    as_of = _effective_as_of(db, anchor)
+    payload = _stock_exposure(db, anchor, base_currency)
+    return StockExposureOut(
+        as_of=as_of.isoformat() if as_of else None,
+        base_currency=base_currency,
+        total=payload["total"],
+        by_country=[StockExposureItem(**item) for item in payload["by_country"]],
+        by_platform=[StockExposureItem(**item) for item in payload["by_platform"]],
     )
