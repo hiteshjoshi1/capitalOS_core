@@ -14,6 +14,11 @@ Mode: Deterministic, verifiable, reproducible
 4. No hardcoded IDs.
 5. All logic must be testable via curl.
 6. Every change must be verifiable via a Makefile command.
+8. Never modify main branch
+9. Never delete unrelated files
+10. Do not refactor outside scope
+11. If acceptance criteria unclear, update plan doc and stop
+12. Max 3 retries per failing command
 
 ---
 
@@ -24,6 +29,7 @@ Mode: Deterministic, verifiable, reproducible
 - Node 18+
 - Python 3.12 (only inside container)
 - Postgres 16 (Docker)
+- timeout 60m codex exec ...
 
 ---
 
