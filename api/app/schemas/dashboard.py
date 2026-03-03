@@ -13,3 +13,17 @@ class PlatformAllocationOut(BaseModel):
     as_of: str | None = None
     total: float
     items: list[PlatformAllocationItem]
+
+
+class StockExposureItem(BaseModel):
+    key: str
+    value: float
+    percent: float
+
+
+class StockExposureOut(BaseModel):
+    as_of: str | None = None
+    base_currency: str
+    total: float
+    by_country: list[StockExposureItem]
+    by_platform: list[StockExposureItem]

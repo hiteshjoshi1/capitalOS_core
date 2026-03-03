@@ -16,6 +16,7 @@ from app.ingestion.report import write_report
 from app.ingestion.parsers.ibkr_activity_csv_v1 import parse_ibkr_activity_csv
 from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_transaction_history_csv
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
+from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
 from app.models.import_job import ImportJob
 
 
@@ -56,6 +57,13 @@ def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
     currency = pos.get("currency")
     if not symbol or not currency:
         return None
+    asset_class = (pos.get("asset_class") or "OTHER").upper()
+    if asset_class == "CASH":
+        # Normalize cash assets to use currency symbol (avoid duplicate CASH assets).
+        if symbol.upper() == "CASH":
+            symbol = currency.upper()
+        if not pos.get("name"):
+            pos["name"] = f"{symbol} Cash"
     row = db.execute(
         text(
             "SELECT id FROM assets WHERE symbol = :symbol AND quote_currency = :currency LIMIT 1"
@@ -78,7 +86,7 @@ def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
             {
                 "symbol": symbol,
                 "name": pos.get("name"),
-                "asset_class": pos.get("asset_class") or "OTHER",
+                "asset_class": asset_class,
                 "currency": currency,
                 "home_country": pos.get("home_country"),
             },
@@ -95,7 +103,7 @@ def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
             {
                 "symbol": symbol,
                 "name": pos.get("name"),
-                "asset_class": pos.get("asset_class") or "OTHER",
+                "asset_class": asset_class,
                 "currency": currency,
                 "home_country": pos.get("home_country"),
             },
@@ -195,6 +203,8 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
             parsed, positions, section_counts = parse_dbs_transaction_history_csv(job.stored_path, delimiter)
         elif parser_key == "sharekhan_holdings_xls_v1":
             parsed, positions, section_counts, parser_meta = parse_sharekhan_holdings_xls(job.stored_path)
+        elif parser_key == "dbs_vickers_holdings_xls_v1":
+            parsed, positions, section_counts, parser_meta = parse_dbs_vickers_holdings_xls(job.stored_path)
         else:
             job.status = "FAILED"
             job.error_message = f"Unsupported parser_key: {parser_key}"
@@ -254,7 +264,7 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                     "currency": tx["currency"],
                     "category": tx.get("category"),
                     "merchant": tx.get("merchant_counterparty"),
-                    "source": "IBKR",
+                    "source": job.platform,
                     "notes": f"fp:{fp}",
                 },
             )

@@ -24,16 +24,26 @@ def _parse_amount(value: str) -> float | None:
         return None
 
 
-def _parse_date(value: str) -> datetime | None:
+def _parse_date(value: str, fallback_year: int | None = None) -> datetime | None:
     text = value.strip()
     if not text:
         return None
-    for fmt in ("%d %b %Y", "%d %B %Y"):
+    for fmt in ("%d %b %Y", "%d %B %Y", "%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%d-%m-%y"):
         try:
             dt = datetime.strptime(text, fmt)
             return dt.replace(tzinfo=timezone.utc, hour=0, minute=0, second=0, microsecond=0)
         except ValueError:
             continue
+    if fallback_year and ("/" in text or "-" in text):
+        parts = text.replace("-", "/").split("/")
+        if len(parts) == 2:
+            try:
+                day = int(parts[0])
+                month = int(parts[1])
+                dt = datetime(fallback_year, month, day, tzinfo=timezone.utc)
+                return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+            except ValueError:
+                return None
     return None
 
 
@@ -42,6 +52,28 @@ def _extract_currency(text: str) -> str | None:
     if parts:
         return parts[0].upper()
     return None
+
+
+def _is_transfer(stmt_code: str, description: str, supplementary: str) -> bool:
+    code = stmt_code.strip().upper()
+    if code in {"TRF"}:
+        return True
+    text = f"{description} {supplementary}".upper()
+    keywords = [
+        "TRF",
+        "TRANSFER",
+        "SRS",
+        "CPF",
+        "GIRO",
+        "IBG",
+        "BILL",
+        "PAYNOW",
+        "TOPUP",
+        "TOP UP",
+        "TAX",
+        "IRAS",
+    ]
+    return any(k in text for k in keywords)
 
 
 def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> Tuple[List[Dict], List[Dict], Dict[str, int]]:
@@ -85,7 +117,8 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> T
         count += 1
         record = row_to_dict(row)
 
-        tx_date = _parse_date(record.get("Value Date", "")) or _parse_date(record.get("Transaction Date", ""))
+        fallback_year = balances.as_of.year if balances.as_of else None
+        tx_date = _parse_date(record.get("Transaction Date", ""), fallback_year) or _parse_date(record.get("Value Date", ""), fallback_year)
         if not tx_date:
             continue
 
@@ -106,6 +139,9 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> T
 
         description = record.get("Description", "").strip()
         stmt_code = record.get("Statement Code", "").strip()
+        supp_desc = record.get("Supplementary Code Description", "") or record.get("Supplementary Code", "")
+        if _is_transfer(stmt_code, description, supp_desc):
+            tx_type = "TRANSFER"
         category = "Bank::Transaction"
         if stmt_code:
             category = f"Bank::{stmt_code}"
@@ -118,7 +154,7 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> T
                 "currency": currency,
                 "category": category,
                 "merchant_counterparty": description or "DBS",
-                "notes": record.get("Supplementary Code Description", "") or record.get("Supplementary Code", ""),
+                "notes": supp_desc,
             }
         )
 

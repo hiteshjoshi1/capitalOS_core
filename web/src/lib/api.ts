@@ -171,10 +171,13 @@ export type CryptoWallet = {
 };
 
 export type CryptoWalletInitResponse = {
+  verification_id?: number;
   chain_type: string;
   chain: string;
   address: string;
   message_to_sign: string;
+  message_bytes_b64?: string;
+  message_hash?: string;
   nonce: string;
   expires_at: string;
 };
@@ -283,6 +286,20 @@ export type CurrencyCreate = {
   country?: string | null;
 };
 
+export type StockExposureItem = {
+  key: string;
+  value: number;
+  percent: number;
+};
+
+export type StockExposure = {
+  as_of: string | null;
+  base_currency: string;
+  total: number;
+  by_country: StockExposureItem[];
+  by_platform: StockExposureItem[];
+};
+
 export const api = {
   health: () => req<Health>("/health"),
   platforms: () => req<Platform[]>("/platforms"),
@@ -303,6 +320,8 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>
     req<PlatformAllocation>(`/dashboard/platform-allocation?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  stockExposure: (month: string, baseCurrency = "SGD") =>
+    req<StockExposure>(`/dashboard/stock-exposure?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   spendingSummary: (month: string, baseCurrency = "SGD") =>
     req<SpendingSummary>(`/spending/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardSummary: (month: string, baseCurrency = "SGD") =>
@@ -346,8 +365,24 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  cryptoWalletVerify: (payload: { chain_type: string; chain: string; address: string; signature: string; public_key?: string }) =>
+  cryptoWalletVerify: (payload: { chain_type: string; chain: string; address: string; signature: string; public_key?: string; verification_id?: number }) =>
     req<{ wallet_id: string; status: string }>("/crypto/wallets/verify", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  cryptoWalletVerifyOnchain: (payload: { address: string; signature: string; verification_id: number }) =>
+    req<{ wallet_id: string; status: string }>("/crypto/wallets/verify-onchain", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  solanaBlockhash: () => req<{ blockhash: string }>("/crypto/solana/blockhash"),
+  solanaSubmit: (payload: { tx_b64: string }) =>
+    req<{ signature: string }>("/crypto/solana/submit", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  solanaPreflight: (payload: { tx_b64: string }) =>
+    req<{ ok: boolean }>("/crypto/solana/preflight", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

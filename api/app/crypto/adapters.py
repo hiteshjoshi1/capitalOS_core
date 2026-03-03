@@ -133,45 +133,76 @@ class SolanaHeliusAdapter:
         if not self.api_key:
             raise ValueError("Missing HELIUS_API_KEY")
         self.timeout = timeout
+        self._balances_cache: dict[str, dict] = {}
+
+    def _get_balances(self, address: str) -> dict:
+        if address in self._balances_cache:
+            return self._balances_cache[address]
+        url = f"https://api.helius.xyz/v1/wallet/{address}/balances"
+        data = json_request(
+            "GET",
+            url,
+            params={"api-key": self.api_key, "showZeroBalance": "false", "showNfts": "false"},
+            timeout=self.timeout,
+        )
+        self._balances_cache[address] = data
+        return data
 
     def get_native_balance(self, address: str) -> NativeBalance:
-        url = f"https://api.helius.xyz/v0/wallets/{address}/balances"
-        data = json_request("GET", url, params={"api-key": self.api_key}, timeout=self.timeout)
-        lamports = int(data.get("nativeBalance", 0))
+        data = self._get_balances(address)
+        balances = data.get("balances", [])
+        native = next((b for b in balances if b.get("symbol") == "SOL"), None)
+        if native is None:
+            native = next(
+                (b for b in balances if b.get("mint") == "So11111111111111111111111111111111111111112"),
+                None,
+            )
+        decimals = int(native.get("decimals", 9)) if native else 9
+        balance = float(native.get("balance", 0)) if native else 0.0
+        lamports = int(balance * (10 ** decimals))
         decimals = 9
-        normalized = lamports / (10 ** decimals)
-        price = data.get("nativeBalanceUsd")
-        value_usd = price if isinstance(price, (int, float)) else None
+        normalized = balance
+        price = native.get("pricePerToken") if native else None
+        value_usd = native.get("usdValue") if native else None
         return NativeBalance(
             symbol="SOL",
             decimals=decimals,
             raw_amount=str(lamports),
             normalized_amount=normalized,
-            price_usd=None,
+            price_usd=price if isinstance(price, (int, float)) else None,
             value_usd=value_usd,
             price_source="helius" if value_usd is not None else None,
         )
 
     def get_token_balances(self, address: str) -> List[TokenBalance]:
-        url = f"https://api.helius.xyz/v0/wallets/{address}/balances"
-        data = json_request("GET", url, params={"api-key": self.api_key}, timeout=self.timeout)
+        data = self._get_balances(address)
         balances = []
-        for item in data.get("tokens", []):
-            amount = item.get("amount", 0)
+        for item in data.get("balances", []):
+            symbol = item.get("symbol")
+            if symbol == "SOL":
+                continue
+            balance = float(item.get("balance", 0) or 0)
+            if balance == 0:
+                continue
             decimals = item.get("decimals")
             mint = item.get("mint")
-            symbol = item.get("symbol")
             name = item.get("name")
-            normalized = amount / (10 ** decimals) if decimals else None
-            price = item.get("price")
-            value_usd = item.get("valueUsd")
+            normalized = balance
+            price = item.get("pricePerToken")
+            value_usd = item.get("usdValue")
+            raw_amount = None
+            if decimals is not None:
+                try:
+                    raw_amount = int(balance * (10 ** int(decimals)))
+                except Exception:
+                    raw_amount = None
             balances.append(
                 TokenBalance(
                     contract_or_mint=mint,
                     symbol=symbol,
                     name=name,
                     decimals=decimals,
-                    raw_amount=str(amount),
+                    raw_amount=str(raw_amount if raw_amount is not None else balance),
                     normalized_amount=normalized,
                     price_usd=price,
                     value_usd=value_usd,

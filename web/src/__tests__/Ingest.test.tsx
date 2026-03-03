@@ -111,6 +111,53 @@ describe("Ingest", () => {
     expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
   });
 
+  it("shows approve button for DBS Vickers mapping", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 3, name: "DBS Vickers", platform: "DBS_VICKERS", account_type: "BROKER", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.ingestUpload.mockResolvedValueOnce({
+      job_id: 12,
+      status: "NEEDS_MAPPING",
+      platform: "DBS_VICKERS",
+      account_id: 3,
+      format_signature: "sig",
+      counts: { rows_total: 0, transactions_parsed: 0, transactions_inserted: 0, duplicates_skipped: 0 },
+      section_summary: [],
+      preview_transactions: [],
+    });
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.registerIngestSignature.mockResolvedValueOnce({
+      job_id: 12,
+      status: "IMPORTED",
+      platform: "DBS_VICKERS",
+      account_id: 3,
+      counts: { rows_total: 1, transactions_parsed: 0, transactions_inserted: 0, duplicates_skipped: 0, positions_parsed: 1, positions_inserted: 1 },
+      section_summary: [],
+      preview_transactions: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <Ingest />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "3");
+
+    const file = new File(["data"], "dbs_vickers.xls", { type: "application/vnd.ms-excel" });
+    const input = screen.getByLabelText("Statement file") as HTMLInputElement;
+    await userEvent.upload(input, file);
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    const approve = await screen.findByRole("button", { name: "Approve as DBS Vickers" });
+    await userEvent.click(approve);
+
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(12, "dbs_vickers_holdings_xls_v1");
+    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+  });
+
   it("loads report from recent imports", async () => {
     mockApi.accounts.mockResolvedValueOnce([]);
     mockApi.ingestJobs.mockResolvedValueOnce([
