@@ -92,3 +92,56 @@ def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monk
     # 100000 INR * 0.01 = 1000 SGD, 2000 USD * 1.5 = 3000 SGD
     assert data["net_worth"]["stocks_funds"] == 4000.0
     assert data["net_worth"]["total"] == 4000.0
+
+
+def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, db_engine, monkeypatch):
+    from sqlalchemy import text
+    from datetime import datetime, timezone
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(20, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(20, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 20)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(20, 'AAPL', 'Apple', 'STOCK', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(20, 20, 20, :as_of, 10, 100, 1000)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (id, asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(20, 20, :as_of, 200, 'USD', 'eodhd_bulk', '2026-02-06', 'US', 'AAPL.US')"
+            ),
+            {"as_of": as_of},
+        )
+
+    def fake_rates(_date, base, symbols):
+        assert base == "USD"
+        return {"USD": 1.0}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+    # 10 qty * 200 latest price = 2000, replacing cost_basis_base=1000
+    assert data["net_worth"]["stocks_funds"] == 2000.0
+    assert data["net_worth"]["total"] == 2000.0

@@ -63,16 +63,31 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
           FROM positions
           WHERE as_of <= :anchor_ts
           GROUP BY account_id
+        ),
+        latest_prices AS (
+          SELECT p1.asset_id, p1.price, p1.currency
+          FROM prices p1
+          JOIN (
+            SELECT asset_id, MAX(trade_date) AS trade_date
+            FROM prices
+            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
+            GROUP BY asset_id
+          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
         )
         SELECT
           a.asset_class,
-          a.quote_currency,
-          p.cost_basis_base AS value
+          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
+          CASE
+            WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
+              THEN p.quantity * lp.price
+            ELSE p.cost_basis_base
+          END AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN assets a ON a.id = p.asset_id
+        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     if not rows:
         rows = []
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -134,20 +149,35 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
           FROM positions
           WHERE as_of <= :anchor_ts
           GROUP BY account_id
+        ),
+        latest_prices AS (
+          SELECT p1.asset_id, p1.price, p1.currency
+          FROM prices p1
+          JOIN (
+            SELECT asset_id, MAX(trade_date) AS trade_date
+            FROM prices
+            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
+            GROUP BY asset_id
+          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
         )
         SELECT
           a.symbol AS symbol,
           a.home_country AS home_country,
-          a.quote_currency,
+          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
           COALESCE(pl.code, acc.platform) AS platform,
-          p.cost_basis_base AS value
+          CASE
+            WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
+              THEN p.quantity * lp.price
+            ELSE p.cost_basis_base
+          END AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN assets a ON a.id = p.asset_id
         JOIN accounts acc ON acc.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
+        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[str, float] = {}
@@ -192,22 +222,37 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
           FROM positions
           WHERE as_of <= :anchor_ts
           GROUP BY account_id
+        ),
+        latest_prices AS (
+          SELECT p1.asset_id, p1.price, p1.currency
+          FROM prices p1
+          JOIN (
+            SELECT asset_id, MAX(trade_date) AS trade_date
+            FROM prices
+            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
+            GROUP BY asset_id
+          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
         )
         SELECT
           a.id AS asset_id,
           a.symbol,
           a.asset_class,
-          a.quote_currency,
+          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
           COALESCE(a.home_country, 'UNKNOWN') AS home_country,
           COALESCE(pl.code, acc.platform) AS platform,
-          p.cost_basis_base AS value
+          CASE
+            WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
+              THEN p.quantity * lp.price
+            ELSE p.cost_basis_base
+          END AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN accounts acc ON acc.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         JOIN assets a ON a.id = p.asset_id
+        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     agg: Dict[int, Dict[str, Any]] = {}
@@ -311,20 +356,35 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -
           FROM positions
           WHERE as_of <= :anchor_ts
           GROUP BY account_id
+        ),
+        latest_prices AS (
+          SELECT p1.asset_id, p1.price, p1.currency
+          FROM prices p1
+          JOIN (
+            SELECT asset_id, MAX(trade_date) AS trade_date
+            FROM prices
+            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
+            GROUP BY asset_id
+          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
         )
         SELECT
           COALESCE(pl.code, a.platform) AS platform,
           pl.platform_type AS platform_type,
           COALESCE(pl.country, a.country) AS country,
-          a2.quote_currency AS quote_currency,
-          p.cost_basis_base AS value
+          COALESCE(lp.currency, a2.quote_currency) AS quote_currency,
+          CASE
+            WHEN a2.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
+              THEN p.quantity * lp.price
+            ELSE p.cost_basis_base
+          END AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN accounts a ON a.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = a.platform_id
         JOIN assets a2 ON a2.id = p.asset_id
+        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     if not rows:
         return {"as_of": None, "total": 0.0, "items": []}
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -357,22 +417,37 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dic
           FROM positions
           WHERE as_of <= :anchor_ts
           GROUP BY account_id
+        ),
+        latest_prices AS (
+          SELECT p1.asset_id, p1.price, p1.currency
+          FROM prices p1
+          JOIN (
+            SELECT asset_id, MAX(trade_date) AS trade_date
+            FROM prices
+            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
+            GROUP BY asset_id
+          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
         )
         SELECT
           COALESCE(pl.code, a.platform) AS platform,
           a2.symbol AS symbol,
           a2.home_country AS home_country,
-          a2.quote_currency AS quote_currency,
-          p.cost_basis_base AS value
+          COALESCE(lp.currency, a2.quote_currency) AS quote_currency,
+          CASE
+            WHEN p.quantity IS NOT NULL AND lp.price IS NOT NULL
+              THEN p.quantity * lp.price
+            ELSE p.cost_basis_base
+          END AS value
         FROM positions p
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN accounts a ON a.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = a.platform_id
         JOIN assets a2 ON a2.id = p.asset_id
+        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
         WHERE a2.asset_class IN ('STOCK', 'FUND')
         """
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     if not rows:
         return {"as_of": None, "base_currency": base_currency, "total": 0.0, "by_country": [], "by_platform": []}
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}

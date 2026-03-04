@@ -35,7 +35,7 @@ export default function CryptoWallets() {
   const chainId = useChainId();
   const { signMessageAsync } = useSignMessage();
   const { disconnect } = useDisconnect();
-  const { publicKey, connected, signMessage, sendTransaction, signTransaction, disconnect: disconnectSolana, wallet } = useWallet();
+  const { publicKey, connected, signMessage, signTransaction, disconnect: disconnectSolana, wallet } = useWallet();
 
   const evmChain = useMemo(() => EVM_CHAIN_MAP[chainId] || "ethereum", [chainId]);
   const solAddress = publicKey?.toString() ?? "";
@@ -92,8 +92,8 @@ export default function CryptoWallets() {
       setStatus(`Wallet ${res.wallet_id} verified`);
       setLabel("");
       await loadWallets();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -122,7 +122,7 @@ export default function CryptoWallets() {
         const memoIx = new TransactionInstruction({
           programId: memoProgram,
           keys: [],
-          data: new TextEncoder().encode(`CapitalOS verify nonce: ${init.nonce}`),
+          data: new TextEncoder().encode(`CapitalOS verify nonce: ${init.nonce}`) as unknown as Buffer,
         });
         const tx = new Transaction().add(memoIx);
         tx.feePayer = publicKey;
@@ -143,7 +143,7 @@ export default function CryptoWallets() {
         const messageBytes = init.message_bytes_b64
           ? Uint8Array.from(atob(init.message_bytes_b64), (c) => c.charCodeAt(0))
           : new TextEncoder().encode(init.message_to_sign);
-        const signatureBytes = await signMessage(messageBytes);
+        const signatureBytes = await signMessage!(messageBytes);
         const sigHex = Array.from(signatureBytes ?? []).slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join("");
         console.log("solana_signature_bytes_len", signatureBytes?.length ?? 0, "hex_prefix", sigHex);
         if (!signatureBytes || signatureBytes.length !== 64) {
@@ -162,8 +162,8 @@ export default function CryptoWallets() {
       }
       setLabel("");
       await loadWallets();
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -181,8 +181,8 @@ export default function CryptoWallets() {
       setAllowlist((prev) => [item, ...prev.filter((p) => p.id !== item.id)]);
       setAllowContract("");
       setStatus(`Added ${item.symbol ?? item.contract_address} to allowlist`);
-    } catch (e: any) {
-      setError(e?.message ?? String(e));
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
     }
   };
 

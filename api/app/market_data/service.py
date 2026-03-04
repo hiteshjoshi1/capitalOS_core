@@ -1,0 +1,583 @@
+from __future__ import annotations
+
+import os
+import math
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from typing import Any
+
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
+from app.market_data.providers import EODDataProvider, EODHDProvider, FinnhubProvider, YahooProvider, EodQuote
+
+
+YAHOO_SUFFIX = {
+    "US": "",
+    "SGX": ".SI",
+    "HKEX": ".HK",
+    "NSE": ".NS",
+}
+
+EODHD_SUFFIX = {
+    "US": ".US",
+    "SGX": ".SI",
+    "HKEX": ".HK",
+    "NSE": ".NS",
+}
+
+
+@dataclass
+class SymbolMapRow:
+    asset_id: int
+    exchange_code: str
+    exchange_symbol: str
+    quote_currency: str
+    eodhd_symbol: str
+    finnhub_symbol: str
+    yahoo_symbol: str
+
+
+
+def configured_exchanges() -> list[str]:
+    raw = os.getenv("STOCK_EXCHANGES", "US,SGX,HKEX,NSE")
+    return [p.strip().upper() for p in raw.split(",") if p.strip()]
+
+
+
+def _daily_limit() -> int:
+    return int(os.getenv("STOCK_DAILY_SYMBOL_LIMIT", "20"))
+
+
+
+def _provider_chain(exchange_code: str) -> list[str]:
+    exchange_code = exchange_code.upper()
+    if exchange_code == "US":
+        raw = os.getenv("STOCK_PROVIDER_CHAIN_US", "finnhub,eodhd,yahoo")
+    else:
+        raw = os.getenv("STOCK_PROVIDER_CHAIN_NON_US", "eodhd,eoddata,yahoo")
+    chain = [p.strip().lower() for p in raw.split(",") if p.strip()]
+    return [p for p in chain if p in {"finnhub", "eodhd", "eoddata", "yahoo"}]
+
+
+
+def _default_eodhd_symbol(exchange_symbol: str, exchange_code: str) -> str:
+    return f"{exchange_symbol}{EODHD_SUFFIX.get(exchange_code, f'.{exchange_code}')}"
+
+
+
+def _default_finnhub_symbol(exchange_symbol: str) -> str:
+    return exchange_symbol
+
+
+
+def _default_yahoo_symbol(exchange_symbol: str, exchange_code: str) -> str:
+    suffix = YAHOO_SUFFIX.get(exchange_code, "")
+    return f"{exchange_symbol}{suffix}"
+
+
+
+def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[SymbolMapRow]:
+    limit_clause = ""
+    params: dict[str, Any] = {"exchange_code": exchange_code}
+    if daily_limit > 0:
+        limit_clause = "LIMIT :daily_limit"
+        params["daily_limit"] = daily_limit
+
+    rows = db.execute(
+        text(
+            f"""
+            SELECT m.asset_id,
+                   m.exchange_code,
+                   m.exchange_symbol,
+                   m.quote_currency,
+                   m.eodhd_symbol_override,
+                   m.yahoo_symbol_override,
+                   lp.latest_trade_date
+            FROM market_symbol_map m
+            JOIN assets a ON a.id = m.asset_id
+            LEFT JOIN (
+              SELECT asset_id, MAX(trade_date) AS latest_trade_date
+              FROM prices
+              WHERE trade_date IS NOT NULL
+              GROUP BY asset_id
+            ) lp ON lp.asset_id = m.asset_id
+            WHERE m.exchange_code = :exchange_code
+              AND m.is_active = TRUE
+              AND a.asset_class IN ('STOCK', 'FUND')
+            ORDER BY
+              CASE WHEN lp.latest_trade_date IS NULL THEN 0 ELSE 1 END,
+              lp.latest_trade_date ASC,
+              m.asset_id ASC
+            {limit_clause}
+            """
+        ),
+        params,
+    ).mappings().all()
+
+    out: list[SymbolMapRow] = []
+    for row in rows:
+        sym = str(row["exchange_symbol"] or "").strip().upper()
+        ex = str(row["exchange_code"]).strip().upper()
+        if not sym:
+            continue
+        eod_symbol = (row.get("eodhd_symbol_override") or _default_eodhd_symbol(sym, ex)).strip().upper()
+        yahoo_symbol = (row.get("yahoo_symbol_override") or _default_yahoo_symbol(sym, ex)).strip().upper()
+        out.append(
+            SymbolMapRow(
+                asset_id=int(row["asset_id"]),
+                exchange_code=ex,
+                exchange_symbol=sym,
+                quote_currency=str(row["quote_currency"]).upper(),
+                eodhd_symbol=eod_symbol,
+                finnhub_symbol=_default_finnhub_symbol(sym),
+                yahoo_symbol=yahoo_symbol,
+            )
+        )
+    return out
+
+
+
+def _insert_run(db: Session, provider: str, exchange_code: str, trade_date: date) -> int:
+    row = db.execute(
+        text(
+            """
+            INSERT INTO market_data_runs (provider, exchange_code, trade_date, status, started_at)
+            VALUES (:provider, :exchange_code, :trade_date, 'started', :started_at)
+            RETURNING id
+            """
+        ),
+        {
+            "provider": provider,
+            "exchange_code": exchange_code,
+            "trade_date": trade_date,
+            "started_at": datetime.now(tz=timezone.utc),
+        },
+    ).fetchone()
+    return int(row[0])
+
+
+
+def _finish_run(
+    db: Session,
+    run_id: int,
+    *,
+    status: str,
+    requested_symbols: int,
+    received_rows: int,
+    upserted_rows: int,
+    missing_symbols: int,
+    error_summary: str | None = None,
+) -> None:
+    db.execute(
+        text(
+            """
+            UPDATE market_data_runs
+            SET status = :status,
+                requested_symbols = :requested_symbols,
+                received_rows = :received_rows,
+                upserted_rows = :upserted_rows,
+                missing_symbols = :missing_symbols,
+                error_summary = :error_summary,
+                finished_at = :finished_at
+            WHERE id = :id
+            """
+        ),
+        {
+            "id": run_id,
+            "status": status,
+            "requested_symbols": requested_symbols,
+            "received_rows": received_rows,
+            "upserted_rows": upserted_rows,
+            "missing_symbols": missing_symbols,
+            "error_summary": error_summary,
+            "finished_at": datetime.now(tz=timezone.utc),
+        },
+    )
+
+
+
+def _insert_item(
+    db: Session,
+    *,
+    run_id: int,
+    asset_id: int,
+    provider: str,
+    exchange_code: str,
+    symbol: str,
+    trade_date: date,
+    status: str,
+    price: float | None,
+    currency: str | None,
+    source_note: str | None,
+) -> None:
+    db.execute(
+        text(
+            """
+            INSERT INTO market_data_run_items
+              (run_id, asset_id, provider, exchange_code, symbol, trade_date, status, price, currency, source_note, created_at)
+            VALUES
+              (:run_id, :asset_id, :provider, :exchange_code, :symbol, :trade_date, :status, :price, :currency, :source_note, :created_at)
+            """
+        ),
+        {
+            "run_id": run_id,
+            "asset_id": asset_id,
+            "provider": provider,
+            "exchange_code": exchange_code,
+            "symbol": symbol,
+            "trade_date": trade_date,
+            "status": status,
+            "price": price,
+            "currency": currency,
+            "source_note": source_note,
+            "created_at": datetime.now(tz=timezone.utc),
+        },
+    )
+
+
+
+def _upsert_price(
+    db: Session,
+    *,
+    asset_id: int,
+    trade_date: date,
+    price: float | None,
+    currency: str,
+    source: str,
+    exchange_code: str,
+    provider_symbol: str,
+) -> bool:
+    # Do not write anything if provider has no usable price.
+    if price is None or not math.isfinite(float(price)) or float(price) <= 0:
+        return False
+    now = datetime.now(tz=timezone.utc)
+    dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    is_sqlite = getattr(dialect, "name", "") == "sqlite"
+    if is_sqlite:
+        existing = db.execute(
+            text(
+                """
+                SELECT id FROM prices
+                WHERE asset_id = :asset_id AND trade_date = :trade_date AND source = :source
+                LIMIT 1
+                """
+            ),
+            {"asset_id": asset_id, "trade_date": trade_date, "source": source},
+        ).fetchone()
+        if existing:
+            db.execute(
+                text(
+                    """
+                    UPDATE prices
+                    SET price = :price,
+                        currency = :currency,
+                        ts = :ts,
+                        exchange_code = :exchange_code,
+                        provider_symbol = :provider_symbol
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "id": int(existing[0]),
+                    "price": price,
+                    "currency": currency,
+                    "ts": now,
+                    "exchange_code": exchange_code,
+                    "provider_symbol": provider_symbol,
+                },
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol)
+                    VALUES (:asset_id, :ts, :price, :currency, :source, :trade_date, :exchange_code, :provider_symbol)
+                    """
+                ),
+                {
+                    "asset_id": asset_id,
+                    "ts": now,
+                    "price": price,
+                    "currency": currency,
+                    "source": source,
+                    "trade_date": trade_date,
+                    "exchange_code": exchange_code,
+                    "provider_symbol": provider_symbol,
+                },
+            )
+        return True
+
+    db.execute(
+        text(
+            """
+            INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol)
+            VALUES (:asset_id, :ts, :price, :currency, :source, :trade_date, :exchange_code, :provider_symbol)
+            ON CONFLICT (asset_id, trade_date, source) WHERE trade_date IS NOT NULL
+            DO UPDATE SET
+              ts = EXCLUDED.ts,
+              price = EXCLUDED.price,
+              currency = EXCLUDED.currency,
+              exchange_code = EXCLUDED.exchange_code,
+              provider_symbol = EXCLUDED.provider_symbol
+            """
+        ),
+        {
+            "asset_id": asset_id,
+            "ts": now,
+            "price": price,
+            "currency": currency,
+            "source": source,
+            "trade_date": trade_date,
+            "exchange_code": exchange_code,
+            "provider_symbol": provider_symbol,
+        },
+    )
+    return True
+
+
+
+def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> dict[str, SymbolMapRow]:
+    out: dict[str, SymbolMapRow] = {}
+    for row in symbols:
+        if provider_name == "eodhd":
+            symbol = row.eodhd_symbol
+        elif provider_name == "finnhub":
+            symbol = row.finnhub_symbol
+        elif provider_name == "eoddata":
+            symbol = row.exchange_symbol
+        else:
+            symbol = row.yahoo_symbol
+        symbol = symbol.strip().upper()
+        if symbol:
+            out[symbol] = row
+    return out
+
+
+
+def _fetch_quotes(
+    provider_name: str,
+    *,
+    exchange_code: str,
+    symbols: list[str],
+    trade_date: date,
+    eodhd: EODHDProvider,
+    finnhub: FinnhubProvider,
+    eoddata: EODDataProvider,
+    yahoo: YahooProvider,
+) -> dict[str, EodQuote]:
+    if provider_name == "eodhd":
+        return eodhd.fetch_eod_single(symbols, trade_date=trade_date)
+    if provider_name == "finnhub":
+        return finnhub.fetch_quotes(symbols)
+    if provider_name == "eoddata":
+        return eoddata.fetch_quotes(exchange_code, symbols)
+    return yahoo.fetch_quotes(symbols)
+
+
+
+def run_exchange_refresh(
+    db: Session,
+    exchange_code: str,
+    *,
+    trade_date: date | None = None,
+    eodhd: EODHDProvider | None = None,
+    finnhub: FinnhubProvider | None = None,
+    eoddata: EODDataProvider | None = None,
+    yahoo: YahooProvider | None = None,
+) -> dict[str, Any]:
+    exchange_code = exchange_code.upper()
+    trade_date = trade_date or datetime.now(tz=timezone.utc).date()
+    eodhd = eodhd or EODHDProvider()
+    finnhub = finnhub or FinnhubProvider()
+    eoddata = eoddata or EODDataProvider()
+    yahoo = yahoo or YahooProvider()
+
+    daily_limit = _daily_limit()
+    symbols = _load_symbols(db, exchange_code, daily_limit=daily_limit)
+    if not symbols:
+        return {
+            "exchange_code": exchange_code,
+            "trade_date": trade_date.isoformat(),
+            "requested_symbols": 0,
+            "upserted_rows": 0,
+            "missing_symbols": 0,
+            "status": "success",
+            "providers": [],
+            "daily_limit": daily_limit,
+        }
+
+    unresolved = list(symbols)
+    requested_symbols = len(symbols)
+    total_upserted = 0
+    providers_used: list[str] = []
+    run_ids: dict[str, int] = {}
+
+    for step_idx, provider_name in enumerate(_provider_chain(exchange_code)):
+        if not unresolved:
+            break
+
+        by_symbol = _symbols_for_provider(provider_name, unresolved)
+        if not by_symbol:
+            continue
+
+        provider_symbols = list(by_symbol.keys())
+        run_id = _insert_run(db, provider=provider_name, exchange_code=exchange_code, trade_date=trade_date)
+        providers_used.append(provider_name)
+        run_ids[provider_name] = run_id
+
+        provider_error: str | None = None
+        quotes: dict[str, EodQuote] = {}
+        try:
+            quotes = _fetch_quotes(
+                provider_name,
+                exchange_code=exchange_code,
+                symbols=provider_symbols,
+                trade_date=trade_date,
+                eodhd=eodhd,
+                finnhub=finnhub,
+                eoddata=eoddata,
+                yahoo=yahoo,
+            )
+        except Exception as exc:  # noqa: BLE001
+            provider_error = str(exc)
+
+        upserted_rows = 0
+        next_unresolved: list[SymbolMapRow] = []
+        for provider_symbol, row in by_symbol.items():
+            quote = quotes.get(provider_symbol.upper())
+            if quote is None:
+                next_unresolved.append(row)
+                _insert_item(
+                    db,
+                    run_id=run_id,
+                    asset_id=row.asset_id,
+                    provider=provider_name,
+                    exchange_code=exchange_code,
+                    symbol=provider_symbol,
+                    trade_date=trade_date,
+                    status="missing",
+                    price=None,
+                    currency=row.quote_currency,
+                    source_note=provider_error,
+                )
+                continue
+
+            source = f"{provider_name}_market"
+            # Asset quote currency is source of truth for valuation conversion.
+            resolved_currency = (row.quote_currency or quote.currency or "USD").upper()
+            written = _upsert_price(
+                db,
+                asset_id=row.asset_id,
+                trade_date=quote.trade_date,
+                price=quote.close,
+                currency=resolved_currency,
+                source=source,
+                exchange_code=exchange_code,
+                provider_symbol=quote.symbol,
+            )
+            if not written:
+                next_unresolved.append(row)
+                _insert_item(
+                    db,
+                    run_id=run_id,
+                    asset_id=row.asset_id,
+                    provider=provider_name,
+                    exchange_code=exchange_code,
+                    symbol=quote.symbol,
+                    trade_date=trade_date,
+                    status="missing",
+                    price=None,
+                    currency=resolved_currency,
+                    source_note="missing/invalid price from provider",
+                )
+                continue
+            upserted_rows += 1
+            total_upserted += 1
+
+            _insert_item(
+                db,
+                run_id=run_id,
+                asset_id=row.asset_id,
+                provider=provider_name,
+                exchange_code=exchange_code,
+                symbol=quote.symbol,
+                trade_date=quote.trade_date,
+                status="upserted" if step_idx == 0 else "fallback_upserted",
+                price=quote.close,
+                currency=resolved_currency,
+                source_note=None if step_idx == 0 else "resolved via fallback",
+            )
+
+        missing_symbols = len(next_unresolved)
+        run_status = "failed" if provider_error and upserted_rows == 0 else ("partial" if missing_symbols else "success")
+        _finish_run(
+            db,
+            run_id,
+            status=run_status,
+            requested_symbols=len(provider_symbols),
+            received_rows=len(quotes),
+            upserted_rows=upserted_rows,
+            missing_symbols=missing_symbols,
+            error_summary=provider_error,
+        )
+        unresolved = next_unresolved
+
+    db.commit()
+    return {
+        "exchange_code": exchange_code,
+        "trade_date": trade_date.isoformat(),
+        "requested_symbols": requested_symbols,
+        "upserted_rows": total_upserted,
+        "missing_symbols": len(unresolved),
+        "status": "success" if not unresolved else "partial",
+        "providers": providers_used,
+        "run_ids": run_ids,
+        "daily_limit": daily_limit,
+    }
+
+
+
+def run_all_exchanges(db: Session, exchanges: list[str] | None = None) -> dict[str, Any]:
+    exchanges = exchanges or configured_exchanges()
+    results = [run_exchange_refresh(db, ex) for ex in exchanges]
+    return {"exchanges": results}
+
+
+
+def latest_status_by_exchange(db: Session) -> list[dict[str, Any]]:
+    rows = db.execute(
+        text(
+            """
+            SELECT r.id, r.provider, r.exchange_code, r.trade_date, r.status,
+                   r.requested_symbols, r.received_rows, r.upserted_rows, r.missing_symbols,
+                   r.started_at, r.finished_at, r.error_summary
+            FROM market_data_runs r
+            JOIN (
+              SELECT exchange_code, MAX(started_at) AS max_started
+              FROM market_data_runs
+              GROUP BY exchange_code
+            ) x ON x.exchange_code = r.exchange_code AND x.max_started = r.started_at
+            ORDER BY r.exchange_code
+            """
+        )
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+
+def list_runs(db: Session, limit: int = 50) -> list[dict[str, Any]]:
+    rows = db.execute(
+        text(
+            """
+            SELECT id, provider, exchange_code, trade_date, status,
+                   requested_symbols, received_rows, upserted_rows, missing_symbols,
+                   started_at, finished_at, error_summary
+            FROM market_data_runs
+            ORDER BY started_at DESC
+            LIMIT :limit
+            """
+        ),
+        {"limit": limit},
+    ).mappings().all()
+    return [dict(r) for r in rows]

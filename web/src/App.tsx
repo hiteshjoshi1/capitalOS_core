@@ -26,8 +26,6 @@ export default function App() {
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
   const [month, setMonth] = useState<string>(currentMonthYYYYMM());
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
-  const mom = summary?.net_worth_change?.vs_prev_month;
-  const yoy = summary?.net_worth_change?.vs_prev_year;
 
 
   useEffect(() => {
@@ -52,8 +50,8 @@ export default function App() {
         setSpendingSummary(ss);
         setCreditCardSummary(cc);
         setCryptoSummary(cs);
-      } catch (e: any) {
-        setErr(e?.message ?? String(e));
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : String(e));
         setState("error");
       }
     })();
@@ -90,6 +88,7 @@ export default function App() {
           <Link className="pill" to="/crypto/holdings">Crypto Holdings</Link>
           <Link className="pill" to="/holdings">Stock Holdings</Link>
           <Link className="pill" to="/cash">Cash</Link>
+          <Link className="pill" to="/market-data">Market Data</Link>
           <span className="pill">API: {health}</span>
           <span className="pill">As of: {summary?.net_worth_as_of ?? "—"}</span>
           <label className="pill">
