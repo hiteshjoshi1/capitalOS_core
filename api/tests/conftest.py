@@ -11,6 +11,7 @@ os.environ["DATABASE_URL"] = "sqlite+pysqlite:////tmp/capitalos_test.db"
 os.environ.setdefault("DATA_DIR", "/tmp/capitalos_test_data")
 os.environ.setdefault("SNAPSHOT_DAY", "6")
 os.environ.setdefault("CRYPTO_SCHEDULER_ENABLED", "0")
+os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 
 from app.db.session import get_db  # noqa: E402
@@ -258,7 +259,63 @@ def setup_db():
               asset_id INTEGER NOT NULL,
               ts TIMESTAMP NOT NULL,
               price REAL NOT NULL,
-              currency TEXT NOT NULL
+              currency TEXT NOT NULL,
+              source TEXT NOT NULL DEFAULT 'MANUAL',
+              trade_date DATE,
+              exchange_code TEXT,
+              provider_symbol TEXT
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS market_symbol_map (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              asset_id INTEGER NOT NULL,
+              exchange_code TEXT NOT NULL,
+              exchange_symbol TEXT NOT NULL,
+              quote_currency TEXT NOT NULL,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              eodhd_symbol_override TEXT,
+              yahoo_symbol_override TEXT,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS market_data_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              provider TEXT NOT NULL,
+              exchange_code TEXT NOT NULL,
+              trade_date DATE NOT NULL,
+              status TEXT NOT NULL,
+              requested_symbols INTEGER NOT NULL DEFAULT 0,
+              received_rows INTEGER NOT NULL DEFAULT 0,
+              upserted_rows INTEGER NOT NULL DEFAULT 0,
+              missing_symbols INTEGER NOT NULL DEFAULT 0,
+              started_at TIMESTAMP,
+              finished_at TIMESTAMP,
+              error_summary TEXT
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS market_data_run_items (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              run_id INTEGER NOT NULL,
+              asset_id INTEGER,
+              provider TEXT NOT NULL,
+              exchange_code TEXT NOT NULL,
+              symbol TEXT NOT NULL,
+              trade_date DATE NOT NULL,
+              status TEXT NOT NULL,
+              price REAL,
+              currency TEXT,
+              source_note TEXT,
+              created_at TIMESTAMP
             )
             """
         )
@@ -270,6 +327,9 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS credit_card_accounts")
         conn.exec_driver_sql("DROP TABLE IF EXISTS transactions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_run_items")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_runs")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS market_symbol_map")
         conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS assets")
         conn.exec_driver_sql("DROP TABLE IF EXISTS platforms")
@@ -292,6 +352,9 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM assets")
         conn.exec_driver_sql("DELETE FROM transactions")
         conn.exec_driver_sql("DELETE FROM prices")
+        conn.exec_driver_sql("DELETE FROM market_data_run_items")
+        conn.exec_driver_sql("DELETE FROM market_data_runs")
+        conn.exec_driver_sql("DELETE FROM market_symbol_map")
         conn.exec_driver_sql("DELETE FROM currencies")
         conn.exec_driver_sql("DELETE FROM parser_registry")
         conn.exec_driver_sql("DELETE FROM import_jobs")

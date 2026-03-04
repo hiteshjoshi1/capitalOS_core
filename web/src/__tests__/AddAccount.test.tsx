@@ -73,7 +73,7 @@ describe("AddAccount", () => {
     await userEvent.selectOptions(screen.getByLabelText("Account Platform"), "1");
     await userEvent.selectOptions(screen.getByLabelText("Account Type"), "BANK");
 
-    const accountCard = screen.getAllByText("Account Details")[0]?.closest(".card") ?? null;
+    const accountCard = screen.getAllByText("Account Details")[0]?.closest(".card") as HTMLElement | null;
     expect(accountCard).not.toBeNull();
     if (accountCard) {
       const scoped = within(accountCard);

@@ -204,7 +204,7 @@ describe("Ingest", () => {
     }
 
     expect(await screen.findByText(/Job #99/)).toBeInTheDocument();
-    const report = screen.getByText(/Status: IMPORTED/).closest(".card");
+    const report = screen.getByText(/Status: IMPORTED/).closest(".card") as HTMLElement | null;
     expect(report).not.toBeNull();
     if (report) {
       const scoped = within(report);

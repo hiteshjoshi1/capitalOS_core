@@ -27,8 +27,8 @@ export default function StockHoldings() {
         const data = await api.dashboardSummary(month, "prev_month,prev_year", baseCurrency);
         setSummary(data);
         setState("ready");
-      } catch (e: any) {
-        setErr(e?.message ?? String(e));
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : String(e));
         setState("error");
       }
     })();

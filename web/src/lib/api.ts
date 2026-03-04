@@ -300,6 +300,21 @@ export type StockExposure = {
   by_platform: StockExposureItem[];
 };
 
+export type MarketDataRun = {
+  id: number;
+  provider: string;
+  exchange_code: string;
+  trade_date: string;
+  status: string;
+  requested_symbols: number;
+  received_rows: number;
+  upserted_rows: number;
+  missing_symbols: number;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error_summary?: string | null;
+};
+
 export const api = {
   health: () => req<Health>("/health"),
   platforms: () => req<Platform[]>("/platforms"),
@@ -398,6 +413,14 @@ export const api = {
     req<CryptoAllowlistItem>("/crypto/allowlist", {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  marketDataStatus: () => req<{ status: MarketDataRun[] }>("/market-data/status"),
+  marketDataRuns: (limit = 50) =>
+    req<{ runs: MarketDataRun[] }>(`/market-data/runs?limit=${encodeURIComponent(String(limit))}`),
+  marketDataRefreshNow: (adminKey?: string) =>
+    req<{ status: string; exchanges: Array<Record<string, unknown>> }>("/market-data/refresh-now", {
+      method: "POST",
+      headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
     }),
 
 };
