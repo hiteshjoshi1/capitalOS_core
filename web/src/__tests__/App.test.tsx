@@ -62,9 +62,11 @@ const summaryFixture: DashboardSummary = {
     savings_rate: 0.35,
   },
   top_holdings: [
-    { asset_id: 1, symbol: "USD", asset_class: "CASH", value: 60000, percent_of_networth: 8.1, geo: "US", platform: "IBKR" },
-    { asset_id: 2, symbol: "AAPL", asset_class: "STOCK", value: 50000, percent_of_networth: 6.7, geo: "US", platform: "IBKR" },
-    { asset_id: 3, symbol: "BTC", asset_class: "CRYPTO", value: 20000, percent_of_networth: 2.7, geo: "GLOBAL", platform: "IBKR" },
+    { asset_id: 1, symbol: "TSLA", asset_class: "STOCK", value: 180000, percent_of_networth: 24.25, geo: "US", platform: "IBKR" },
+    { asset_id: 2, symbol: "AAPL", asset_class: "STOCK", value: 150000, percent_of_networth: 20.21, geo: "US", platform: "IBKR" },
+    { asset_id: 3, symbol: "NVDA", asset_class: "STOCK", value: 120000, percent_of_networth: 16.17, geo: "US", platform: "IBKR" },
+    { asset_id: 4, symbol: "MSFT", asset_class: "STOCK", value: 90000, percent_of_networth: 12.13, geo: "US", platform: "IBKR" },
+    { asset_id: 5, symbol: "USD", asset_class: "CASH", value: 60000, percent_of_networth: 8.08, geo: "SG", platform: "DBS" },
   ],
   cash_balances: [
     { currency: "USD", value: 60000 },
@@ -201,6 +203,9 @@ describe("App", () => {
     expect(screen.getByText("Allocation by Platform")).toBeInTheDocument();
     expect(screen.getAllByText("IBKR").length).toBeGreaterThan(0);
     expect(screen.getByText(/70.0%/)).toBeInTheDocument();
+    expect(screen.getByText("TSLA — 24.3%")).toBeInTheDocument();
+    expect(screen.getByText("80.8%")).toBeInTheDocument();
+    expect(screen.queryByText(/Mocked: risk analysis/i)).not.toBeInTheDocument();
     expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
   });
 

@@ -30,6 +30,18 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert changes["pct"] == 10000.0 / 90000.0
 
 
+def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_dashboard_data):
+    resp = client.get("/dashboard/summary?month=2026-02&compare=prev_month")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    top = data["top_holdings"]
+    cash_rows = [row for row in top if row["asset_class"] == "CASH"]
+    assert len(cash_rows) == 1
+    assert cash_rows[0]["symbol"] == "SGD"
+    assert cash_rows[0]["percent_of_networth"] == 30.0
+
+
 def test_platform_allocation(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/platform-allocation?month=2026-02")
     assert resp.status_code == 200
