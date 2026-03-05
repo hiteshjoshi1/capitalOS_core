@@ -1,6 +1,16 @@
 import { useEffect, useState } from "react";
 import { api } from "./lib/api";
 import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary, StockExposure } from "./lib/api";
+import {
+  computeLargestPositionRisk,
+  computeTop5ConcentrationRisk,
+  formatLargestPosition,
+  formatRiskPercent,
+  riskStateClassName,
+  RISK_LARGEST_POSITION_WARN_PCT,
+  RISK_TOP5_TARGET_MAX_PCT,
+  RISK_TOP5_TARGET_MIN_PCT,
+} from "./lib/risk";
 import { Link } from "react-router-dom";
 import "./App.css";
 
@@ -70,6 +80,8 @@ export default function App() {
   const cashPct = netWorthTotal ? (summary?.net_worth.cash ?? 0) / netWorthTotal * 100 : 0;
   const stocksPct = netWorthTotal ? (summary?.net_worth.stocks_funds ?? 0) / netWorthTotal * 100 : 0;
   const cryptoPct = netWorthTotal ? (summary?.net_worth.crypto ?? 0) / netWorthTotal * 100 : 0;
+  const riskLargest = computeLargestPositionRisk(summary?.top_holdings ?? [], netWorthTotal);
+  const riskTop5 = computeTop5ConcentrationRisk(summary?.top_holdings ?? [], netWorthTotal);
 
   return (
     <div className="wrap">
@@ -490,18 +502,25 @@ export default function App() {
               <h2>Risk</h2>
               <div className="kpi">
                 <div className="label">Largest position</div>
-                <div className="val">ETH — 14.2%</div>
-                <div className="delta">Concentration threshold: <span className="warn">15%</span></div>
+                <div className={`val ${riskStateClassName(riskLargest.state)}`}>{formatLargestPosition(riskLargest)}</div>
+                <div className="delta">
+                  Concentration threshold:{" "}
+                  <span className={riskStateClassName(riskLargest.state)}>{RISK_LARGEST_POSITION_WARN_PCT}%</span>
+                </div>
               </div>
               <div style={{ height: 10 }}></div>
               <div className="kpi">
                 <div className="label">Top 5 positions</div>
-                <div className="val">48.6%</div>
-                <div className="delta">Target band: 35–55%</div>
+                <div className={`val ${riskStateClassName(riskTop5.state)}`}>{formatRiskPercent(riskTop5.percent)}</div>
+                <div className="delta">
+                  Target band: {RISK_TOP5_TARGET_MIN_PCT}–{RISK_TOP5_TARGET_MAX_PCT}%
+                </div>
               </div>
-              <div className="muted" style={{ marginTop: 12 }}>
-                Mocked: risk analysis until holdings exposure aggregation is wired.
-              </div>
+              {!riskLargest.hasData || !riskTop5.hasData ? (
+                <div className="muted" style={{ marginTop: 12 }}>
+                  Insufficient holdings data for full risk concentration analysis.
+                </div>
+              ) : null}
               <div className="actions">
                 <button className="btn" disabled>Set thresholds</button>
                 <button className="btn" disabled>Risk breakdown</button>
