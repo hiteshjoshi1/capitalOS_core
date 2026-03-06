@@ -5,6 +5,7 @@ export const RISK_TOP5_TARGET_MIN_PCT = 35;
 export const RISK_TOP5_TARGET_MAX_PCT = 55;
 
 export type RiskState = "muted" | "in_band" | "warn" | "out_of_band";
+export type TopN = 3 | 5;
 
 export type LargestPositionRisk = {
   symbol: string | null;
@@ -17,6 +18,22 @@ export type Top5ConcentrationRisk = {
   percent: number;
   hasData: boolean;
   state: RiskState;
+};
+
+export type TopNConcentrationRisk = {
+  percent: number;
+  hasData: boolean;
+  hasFullSelection: boolean;
+  state: RiskState;
+  selectedN: TopN;
+  availableCount: number;
+};
+
+export type RiskDistributionItem = {
+  symbol: string;
+  assetClass: string;
+  value: number;
+  percent: number;
 };
 
 type Holding = DashboardSummary["top_holdings"][number];
@@ -37,12 +54,13 @@ function noLargestPositionData(): LargestPositionRisk {
   };
 }
 
-function noTop5Data(): Top5ConcentrationRisk {
-  return {
-    percent: 0,
-    hasData: false,
-    state: "muted",
-  };
+function sortHoldingsForRisk(holdings: Holding[]): Holding[] {
+  return [...holdings].sort((a, b) => {
+    if (b.value !== a.value) {
+      return b.value - a.value;
+    }
+    return a.symbol.localeCompare(b.symbol);
+  });
 }
 
 export function computeLargestPositionRisk(holdings: Holding[], netWorthTotal: number): LargestPositionRisk {
@@ -61,21 +79,62 @@ export function computeLargestPositionRisk(holdings: Holding[], netWorthTotal: n
 }
 
 export function computeTop5ConcentrationRisk(holdings: Holding[], netWorthTotal: number): Top5ConcentrationRisk {
-  if (holdings.length < 5 || netWorthTotal <= 0) {
-    return noTop5Data();
+  const top5 = computeTopNConcentrationRisk(holdings, netWorthTotal, 5);
+  return {
+    percent: top5.percent,
+    hasData: top5.hasData,
+    state: top5.state,
+  };
+}
+
+export function computeTopNConcentrationRisk(
+  holdings: Holding[],
+  netWorthTotal: number,
+  n: TopN,
+): TopNConcentrationRisk {
+  if (holdings.length === 0 || netWorthTotal <= 0) {
+    return {
+      percent: 0,
+      hasData: false,
+      hasFullSelection: false,
+      state: "muted",
+      selectedN: n,
+      availableCount: holdings.length,
+    };
   }
 
-  const sumTop5 = [...holdings]
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 5)
-    .reduce((acc, item) => acc + item.value, 0);
-  const percent = toPercent(sumTop5, netWorthTotal);
+  const sorted = sortHoldingsForRisk(holdings);
+  const selected = sorted.slice(0, n);
+  const sum = selected.reduce((acc, item) => acc + item.value, 0);
+  const percent = toPercent(sum, netWorthTotal);
   const inBand = percent >= RISK_TOP5_TARGET_MIN_PCT && percent <= RISK_TOP5_TARGET_MAX_PCT;
   return {
     percent,
-    hasData: true,
+    hasData: selected.length > 0,
+    hasFullSelection: holdings.length >= n,
     state: inBand ? "in_band" : "out_of_band",
+    selectedN: n,
+    availableCount: selected.length,
   };
+}
+
+export function buildTopNDistribution(
+  holdings: Holding[],
+  netWorthTotal: number,
+  n: TopN,
+): RiskDistributionItem[] {
+  if (holdings.length === 0 || netWorthTotal <= 0) {
+    return [];
+  }
+
+  return sortHoldingsForRisk(holdings)
+    .slice(0, n)
+    .map((item) => ({
+      symbol: item.symbol,
+      assetClass: item.asset_class,
+      value: item.value,
+      percent: toPercent(item.value, netWorthTotal),
+    }));
 }
 
 export function formatRiskPercent(percent: number): string {

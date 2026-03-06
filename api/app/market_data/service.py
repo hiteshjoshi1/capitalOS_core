@@ -410,6 +410,7 @@ def run_exchange_refresh(
     unresolved = list(symbols)
     requested_symbols = len(symbols)
     total_upserted = 0
+    total_invalid = 0
     providers_used: list[str] = []
     run_ids: dict[str, int] = {}
 
@@ -443,6 +444,7 @@ def run_exchange_refresh(
             provider_error = str(exc)
 
         upserted_rows = 0
+        invalid_rows = 0
         next_unresolved: list[SymbolMapRow] = []
         for provider_symbol, row in by_symbol.items():
             quote = quotes.get(provider_symbol.upper())
@@ -460,6 +462,26 @@ def run_exchange_refresh(
                     price=None,
                     currency=row.quote_currency,
                     source_note=provider_error,
+                )
+                continue
+
+            # If provider returns an invalid quote, record it and do not
+            # override existing rows or attempt fallback writes for this symbol.
+            if quote.close is None or not math.isfinite(float(quote.close)) or float(quote.close) <= 0:
+                invalid_rows += 1
+                total_invalid += 1
+                _insert_item(
+                    db,
+                    run_id=run_id,
+                    asset_id=row.asset_id,
+                    provider=provider_name,
+                    exchange_code=exchange_code,
+                    symbol=quote.symbol,
+                    trade_date=trade_date,
+                    status="invalid",
+                    price=quote.close,
+                    currency=(row.quote_currency or quote.currency or "USD").upper(),
+                    source_note="missing/invalid price from provider",
                 )
                 continue
 
@@ -509,7 +531,7 @@ def run_exchange_refresh(
                 source_note=None if step_idx == 0 else "resolved via fallback",
             )
 
-        missing_symbols = len(next_unresolved)
+        missing_symbols = len(next_unresolved) + invalid_rows
         run_status = "failed" if provider_error and upserted_rows == 0 else ("partial" if missing_symbols else "success")
         _finish_run(
             db,
@@ -529,8 +551,8 @@ def run_exchange_refresh(
         "trade_date": trade_date.isoformat(),
         "requested_symbols": requested_symbols,
         "upserted_rows": total_upserted,
-        "missing_symbols": len(unresolved),
-        "status": "success" if not unresolved else "partial",
+        "missing_symbols": len(unresolved) + total_invalid,
+        "status": "success" if (not unresolved and total_invalid == 0) else "partial",
         "providers": providers_used,
         "run_ids": run_ids,
         "daily_limit": daily_limit,
