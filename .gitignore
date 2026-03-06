@@ -101,3 +101,5 @@ data/
 !data/fixtures/**
 data/raw/
 data/reports/
+
+tasks/
