@@ -42,6 +42,21 @@ def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_das
     assert cash_rows[0]["percent_of_networth"] == 30.0
 
 
+def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient, seed_dashboard_data):
+    resp = client.get("/dashboard/summary?month=2026-02&compare=prev_month")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["net_worth"]["total"] > 0
+    assert len(data["top_holdings"]) >= 3
+    assert all(
+        {"symbol", "asset_class", "value"}.issubset(row.keys())
+        for row in data["top_holdings"][:3]
+    )
+    values = [row["value"] for row in data["top_holdings"][:3]]
+    assert values == sorted(values, reverse=True)
+
+
 def test_platform_allocation(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/platform-allocation?month=2026-02")
     assert resp.status_code == 200

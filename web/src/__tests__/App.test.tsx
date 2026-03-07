@@ -1,6 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
+import userEvent from "@testing-library/user-event";
 
 import App from "../App";
 import { api } from "../lib/api";
@@ -171,6 +172,7 @@ afterEach(() => {
 
 describe("App", () => {
   it("renders the happy path dashboard data", async () => {
+    const user = userEvent.setup();
     render(
       <MemoryRouter>
         <App />
@@ -205,8 +207,52 @@ describe("App", () => {
     expect(screen.getByText(/70.0%/)).toBeInTheDocument();
     expect(screen.getByText("TSLA — 24.3%")).toBeInTheDocument();
     expect(screen.getByText("80.8%")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Top 5" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Top 3" })).toHaveAttribute("aria-pressed", "false");
+    const riskTable = screen.getByTestId("risk-distribution-table");
+    expect(within(riskTable).getAllByRole("row")).toHaveLength(6);
+
+    await user.click(screen.getByRole("button", { name: "Top 3" }));
+    expect(screen.getByRole("button", { name: "Top 3" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("60.6%")).toBeInTheDocument();
+    expect(within(riskTable).getAllByRole("row")).toHaveLength(4);
     expect(screen.queryByText(/Mocked: risk analysis/i)).not.toBeInTheDocument();
     expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
+  });
+
+  it("shows helper text when fewer holdings than selected top N are available", async () => {
+    mockApi.dashboardSummary.mockResolvedValueOnce({
+      ...summaryFixture,
+      top_holdings: summaryFixture.top_holdings.slice(0, 4),
+    });
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("Showing 4 of requested 5 positions.")).toBeInTheDocument();
+  });
+
+  it("shows no-data state when holdings are missing or net worth is invalid", async () => {
+    mockApi.dashboardSummary.mockResolvedValueOnce({
+      ...summaryFixture,
+      net_worth: {
+        ...summaryFixture.net_worth,
+        total: 0,
+      },
+      top_holdings: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText("No holdings concentration data for this month or net worth is not positive.")).toBeInTheDocument();
+    expect(screen.getByText("Insufficient holdings data for full risk concentration analysis.")).toBeInTheDocument();
   });
 
   it("renders API error state when requests fail", async () => {
