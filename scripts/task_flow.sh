@@ -58,7 +58,7 @@ require_tool() {
   command -v "$tool" >/dev/null 2>&1 || die "Required tool not found: $tool"
 }
 
-run_with_caffeinate() {
+run_with_caffeinate_for_codex() {
   if [[ "$ENABLE_CAFFEINATE" == "1" ]] && command -v caffeinate >/dev/null 2>&1; then
     caffeinate -dimsu "$@"
     return
@@ -247,12 +247,12 @@ run_with_retries() {
 }
 
 prepare_branch_from_main() {
-  run_with_retries "Checkout main" run_with_caffeinate git checkout main
-  run_with_retries "Pull latest main" run_with_caffeinate git pull --rebase
+  run_with_retries "Checkout main" git checkout main
+  run_with_retries "Pull latest main" git pull --rebase
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    run_with_retries "Checkout existing branch $BRANCH" run_with_caffeinate git checkout "$BRANCH"
+    run_with_retries "Checkout existing branch $BRANCH" git checkout "$BRANCH"
   else
-    run_with_retries "Create branch $BRANCH" run_with_caffeinate git checkout -b "$BRANCH"
+    run_with_retries "Create branch $BRANCH" git checkout -b "$BRANCH"
   fi
 }
 
@@ -263,14 +263,14 @@ commit_and_push_task_file() {
     log "No task-file changes to commit."
     return 0
   fi
-  run_with_caffeinate git commit -m "$message"
-  run_with_retries "Push branch $BRANCH" run_with_caffeinate git push -u origin "$BRANCH"
+  git commit -m "$message"
+  run_with_retries "Push branch $BRANCH" git push -u origin "$BRANCH"
 }
 
 run_copilot_prompt() {
   local model="$1"
   local prompt="$2"
-  run_with_caffeinate copilot --model "$model" -p "$prompt" --no-color
+  copilot --model "$model" -p "$prompt" --no-color
 }
 
 run_copilot_prompt_visible() {
@@ -307,26 +307,37 @@ resolve_session_plan_output() {
   echo "$raw_output"
 }
 
+plan_command_pack() {
+  cat <<EOF
+Copy/paste commands for this task:
+make task-plan TASK=$TASK_FILE
+make task-build TASK=$TASK_FILE
+make task-review TASK=$TASK_FILE
+make task-rework TASK=$TASK_FILE
+make task-ship TASK=$TASK_FILE
+EOF
+}
+
 run_codex_prompt() {
   local prompt="$1"
   if command -v timeout >/dev/null 2>&1; then
-    run_with_caffeinate timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate_for_codex timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
     return
   fi
   if command -v gtimeout >/dev/null 2>&1; then
-    run_with_caffeinate gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate_for_codex gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
     return
   fi
-  run_with_caffeinate codex exec --full-auto --sandbox workspace-write "$prompt"
+  run_with_caffeinate_for_codex codex exec --full-auto --sandbox workspace-write "$prompt"
 }
 
 run_verification_suite() {
-  run_with_retries "make lint" run_with_caffeinate make lint
-  run_with_retries "make typecheck" run_with_caffeinate make typecheck
-  run_with_retries "make test-backend" run_with_caffeinate make test-backend
-  run_with_retries "make test-frontend" run_with_caffeinate make test-frontend
+  run_with_retries "make lint" make lint
+  run_with_retries "make typecheck" make typecheck
+  run_with_retries "make test-backend" make test-backend
+  run_with_retries "make test-frontend" make test-frontend
   if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
-    run_with_retries "make e2e" run_with_caffeinate make e2e
+    run_with_retries "make e2e" make e2e
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
   fi
@@ -403,6 +414,12 @@ Return concise markdown with:
 2) Risks
 3) Open questions (only if critical)
 4) Task breakdown aligned to acceptance criteria
+5) Command pack with exact copy/paste commands for this task file:
+   - make task-plan TASK=$TASK_FILE
+   - make task-build TASK=$TASK_FILE
+   - make task-review TASK=$TASK_FILE
+   - make task-rework TASK=$TASK_FILE
+   - make task-ship TASK=$TASK_FILE
 
 Do not write any code. Do not suggest scope expansion.
 
@@ -413,6 +430,7 @@ EOF
   output="$(run_copilot_prompt_visible "$PLAN_MODEL" "$prompt")"
   output="$(resolve_session_plan_output "$output")"
   append_task_block "Planning Output (${PLAN_MODEL})" "$output"
+  append_task_block "Workflow Commands" "$(plan_command_pack)"
   append_task_block "Human Gate Reminder" "Review the plan and set '- [x] Approved for implementation' before build."
   commit_and_push_task_file "plan: issue #${ISSUE_ID} with ${PLAN_MODEL}"
   log "Plan complete. Human approval gate must be checked before build."
@@ -457,7 +475,7 @@ EOF
   fi
 
   run_verification_suite
-  run_with_caffeinate git add -A
+  git add -A
   log "Auto-staged build outputs for review."
   append_task_block "Build Result" "Implementation and verification suite completed successfully."
 }
@@ -639,7 +657,7 @@ EOF
   fi
 
   run_verification_suite
-  run_with_caffeinate git add -A
+  git add -A
   log "Auto-staged rework outputs for review."
   append_review_status "$review_id" "Implemented" "NEEDS_REVIEW" "PENDING"
   append_task_block "Review Cycle ${review_id} - Rework Result" "Targeted rework implemented for latest review findings."
@@ -656,16 +674,16 @@ cmd_ship() {
 
   git add -A
   if ! git diff --cached --quiet; then
-    run_with_caffeinate git commit -m "feat: complete issue #${ISSUE_ID} workflow execution"
+    git commit -m "feat: complete issue #${ISSUE_ID} workflow execution"
   else
     log "No staged changes to commit before ship."
   fi
-  run_with_retries "Push branch $BRANCH" run_with_caffeinate git push -u origin "$BRANCH"
+  run_with_retries "Push branch $BRANCH" git push -u origin "$BRANCH"
 
   if gh pr view --head "$BRANCH" --json number >/dev/null 2>&1; then
     log "PR already exists for $BRANCH."
   else
-    run_with_caffeinate gh pr create \
+    gh pr create \
       --base main \
       --head "$BRANCH" \
       --title "Issue #${ISSUE_ID}: ${SLUG}" \
@@ -688,7 +706,7 @@ cmd_all() {
   local review_attempt rc
   for ((review_attempt=1; review_attempt<=MAX_RETRIES; review_attempt++)); do
     log "Review cycle attempt $review_attempt/$MAX_RETRIES"
-    run_with_caffeinate git add -A
+    git add -A
     if cmd_review "$task"; then
       append_task_block "Review Result" "Review approved on attempt $review_attempt."
       cmd_ship "$task"

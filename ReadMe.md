@@ -156,7 +156,7 @@ CapitalOS supports a local-first AI workflow with a mandatory human gate.
 Detailed reference: `docs/workflows/ai-task-flow.md`.
 All validation commands run locally on your machine by default.
 Optional GitHub validation exists as a manual workflow (`workflow_dispatch`) and does not auto-run on PRs.
-On macOS, workflow commands auto-use `caffeinate` so long-running agent steps do not sleep.
+On macOS, Codex implementation/rework commands auto-use `caffeinate` so long runs do not sleep.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -176,7 +176,7 @@ codex --version
 ```
 
 Optional:
-- Disable sleep-prevention wrapper for a run: `ENABLE_CAFFEINATE=0 make task-build TASK=...`
+- Disable Codex sleep-prevention wrapper for a run: `ENABLE_CAFFEINATE=0 make task-build TASK=...`
 
 ### 1) Create a task from template
 
@@ -193,6 +193,8 @@ Example:
 ```bash
 make task-plan TASK=tasks/issue-123-my-feature.md
 ```
+
+The planning output also includes a ready-to-copy command pack for this exact task file.
 
 ### 3) Human gate (required)
 
