@@ -1,28 +1,97 @@
-# Issue 103: ui-ux-refresh
+# Issue 103: UI/UX Refresh
 
 ## Objective
-- The current UX of the application sucks. It needs to look professional, like a personal finance dashboard that is actually made by proffesionals. The app should be minimalistic, clean and easy to navigate.
-- It needs a UI placeholder for a logged in USER.The "User" as a functionality (Signup/ Login) is not implemented yet. User Sign Up login is out of scope of this feature.
-- It needs a dark mode and light mode toggle that toggles between these modes.
-- There are too many tabs - Dashboard, Ingest, Wallets, Crypto Holdings, Stock Holdings,Cash, Market data. The stock, cash and crypto exposure cards in dashboard should have links that expand to the Stocks Holdings, Cash Holdings, Crypto Holdings pages. These should not be tabs at the top.
-- The settings like base currency should be inside User. The same goes for chosen month. 
-- Market Data should not be there in UI for a regular user. For an Admin, may be yes. For now since we do not have user functionality implemented. Hide this section, i can access it directly via http://localhost:5173/market-data
-- The tabs in the dashboard are hap hazard and does not create good UX. The information is good but needs to be better presented and visually scanable.
-- Remove - "Local-first personal finance control plane. Numbers below are placeholders until ingestion is wired end-to-end."
-- Expenses ingestion is not implemented yet , keep its cards as placeholder.
--  This PRD is about changing the Dashboard page and its UX only. We will change the other pages later in accordance with this design, while you can plan design and architecture wise for these pages, the implementation should be done in a seprate PRD
-- If some information can be better presented, suggest
-- This story should be UI first with minimal backend changes.
-- Ensure code quality, tests updation, linting and a solid build when implementing.
-
+- Make the dashboard look professional, minimal, and easy to scan.
+- Add a UI placeholder for a logged-in user (auth implementation is out of scope).
+- Add dark/light theme toggle.
+- Simplify top navigation; move settings (base currency, month) into user menu.
+- Remove Market Data from primary UI navigation (still accessible by direct URL).
+- Keep expense cards as placeholders because ingestion is not implemented yet.
+- Scope implementation to Dashboard page UI/UX only.
+- Keep backend changes minimal or none.
+- Ensure strong code quality, tests, linting, and build verification.
 
 ## Architecture Decisions
-- Decision 1:
-- Decision 2:
+### AD-1: No new component library
+Use existing CSS variables and extend them. Do not introduce MUI/shadcn.
+
+### AD-2: Theme toggle using `data-theme` + localStorage
+Implement light theme overrides in CSS and persist selected theme in localStorage.
+
+### AD-3: Navigation redesign
+Top navigation becomes: Dashboard, Ingest, User menu. Remove other tabs from top nav.
+User menu contains base currency selector, month picker, theme toggle, disabled sign-in placeholder.
+
+### AD-4: Dashboard information hierarchy
+Reorganize cards for better scanability:
+- Row 1: Net worth hero
+- Row 2: Cash flow + credit card expenses
+- Row 3: Stock/Crypto/Cash exposure drill-down cards
+- Row 4: Risk + Geography/Platform allocation
+- Row 5: Expense breakdown placeholder + trends placeholder
+
+### AD-5: Decompose `App.tsx`
+Extract dashboard cards into presentational components in `web/src/components/dashboard/`.
+Keep data fetching in `App.tsx`.
+
+### AD-6: No backend changes
+Use existing data contracts and endpoints only.
+
+### AD-7: User placeholder without auth
+Show avatar-based user menu without implementing login/signup.
+
+## Risks
+| # | Risk | Impact | Mitigation |
+|---|------|--------|------------|
+| R1 | Existing `App.test.tsx` depends on current structure | Test breakage | Update tests with new UI structure |
+| R2 | Light theme contrast quality | Accessibility regression | Validate contrast combinations |
+| R3 | Component extraction errors | Runtime/type issues | Keep strict TypeScript and run build/type checks |
+| R4 | Mobile layout regressions | UX issues on small screens | Validate responsive layout with existing breakpoints |
+| R5 | Accidental scope bleed into non-dashboard pages | Delay and risk | Keep changes dashboard-only for this PRD |
+
+## Open Questions
+None blocking.
+
+## Presentation Suggestions
+- Make exposure cards fully clickable with clear drill-down affordance.
+- Add utilization visual cues in credit card list (if within scope of dashboard polish).
+- Replace plain loading text with lightweight skeleton placeholders.
 
 ## Acceptance Criteria
-- [ ] Criterion 1
-- [ ] Criterion 2
+- [ ] AC-1: Top nav shows only Dashboard, Ingest, and User menu.
+- [ ] AC-2: User menu contains base currency selector, month picker, and theme toggle.
+- [ ] AC-3: Dark/light mode toggles dashboard theme and persists across reload.
+- [ ] AC-4: Header subtitle placeholder text is removed.
+- [ ] AC-5: Stock/Crypto/Cash exposure cards navigate to holdings routes.
+- [ ] AC-6: Market Data is hidden from primary nav; direct route still works.
+- [ ] AC-7: Dashboard layout is reorganized into clearer information hierarchy.
+- [ ] AC-8: Expense-related cards remain placeholders.
+- [ ] AC-9: `App.tsx` is decomposed into dashboard components.
+- [ ] AC-10: Frontend tests pass.
+- [ ] AC-11: Lint passes.
+- [ ] AC-12: Build passes.
+- [ ] AC-13: UI works on desktop and mobile breakpoints.
+
+## Task Breakdown
+### Phase 1: Foundation
+- T1: Add theme system (`data-theme` light/dark + persistence).
+- T2: Create top navigation and user menu components.
+- T3: Wire theme toggle and settings controls in menu.
+
+### Phase 2: Dashboard decomposition
+- T4: Extract dashboard card components.
+- T5: Refactor `App.tsx` to compose extracted components.
+- T6: Make exposure cards drill down to detailed pages.
+
+### Phase 3: Styling polish
+- T7: Redesign dashboard layout/grid and spacing.
+- T8: Tune light theme colors and readability.
+- T9: Improve loading placeholders.
+
+### Phase 4: Testing and verification
+- T10: Update existing UI tests for new structure.
+- T11: Add focused tests for key new components.
+- T12: Run lint, typecheck/build, and frontend tests; perform manual responsive check.
 
 ## Human Approval Gate
 - [ ] Approved for implementation
@@ -30,10 +99,18 @@
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Implement backend changes (if required)
-- [ ] Implement frontend changes (if required)
-- [ ] Add/update tests
-- [ ] Run verification commands
+- [ ] T1: Add theme system (`data-theme` + localStorage persistence)
+- [ ] T2: Build top nav and user menu components
+- [ ] T3: Move month/base-currency/theme controls into user menu
+- [ ] T4: Extract dashboard cards into components
+- [ ] T5: Refactor `App.tsx` composition/layout
+- [ ] T6: Add drill-down links from exposure cards
+- [ ] T7: Apply visual hierarchy and responsive layout polish
+- [ ] T8: Keep expense cards as placeholders
+- [ ] T9: Update/remove obsolete header/subtitle copy
+- [ ] T10: Update tests for new dashboard structure
+- [ ] T11: Run verification commands (`make lint`, `make typecheck`, `make test-frontend`)
+- [ ] T12: Run manual UI validation on desktop/mobile
 
 ## Implementation Reasoning Addendum (Codex Mutable)
 _Codex appends execution reasoning entries here._
@@ -49,63 +126,3 @@ _Failed command/rework retries are appended here._
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
-
-### Retry Entry (2026-03-07T10:39:01Z)
-
-```text
-Pull latest main failed on attempt 1 with exit code 0: git pull --rebase
-```
-
-### Retry Entry (2026-03-07T10:39:02Z)
-
-```text
-Pull latest main failed on attempt 2 with exit code 0: git pull --rebase
-```
-
-### Retry Entry (2026-03-07T10:39:02Z)
-
-```text
-Pull latest main failed on attempt 3 with exit code 0: git pull --rebase
-```
-
-### Retry Entry (2026-03-07T10:39:02Z)
-
-```text
-Pull latest main failed after 3 attempts.
-```
-
-### Planning Output (claude-opus-4.6) (2026-03-07T10:46:58Z)
-
-```text
-● Now let me check specific details needed for the plan — the exact nav
-  structure, the placeholder text, and existing test coverage.
-
-● Now I have a complete picture. Let me write the plan.
-
-● The task file is read-only (likely xattr-protected). I'll write the plan to
-  the session folder and output it.
-
-● Plan written to session plan.md. The task file at
-  tasks/issue-103-ui-ux-refresh.md is read-only — you'll need to copy the
-  acceptance criteria and architecture decisions into it manually, or unlock
-  the file with xattr -d com.apple.quarantine tasks/issue-103-ui-ux-refresh.md
-  first.
-
-  Summary of the plan:
-
-   - 7 architecture decisions: No new component library (extend CSS vars), data-theme toggle with
-  localStorage, nav reduced to Dashboard + Ingest + User dropdown, reorganized grid hierarchy,
-  App.tsx decomposed into ~8 card components, zero backend changes, user avatar placeholder with
-  dropdown.
-   - 5 risks: Test breakage (mitigated by updating tests), light theme contrast, component prop
-  typing, responsive regression, wallet provider tree (no actual risk).
-   - No blocking open questions.
-   - 12 tasks in 4 phases: Foundation (theme + layout) → Dashboard decomposition → Styling polish
-  → Tests & verification. All aligned to 13 acceptance criteria.
-```
-
-### Human Gate Reminder (2026-03-07T10:46:58Z)
-
-```text
-Review the plan and set '- [x] Approved for implementation' before build.
-```

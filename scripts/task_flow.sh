@@ -6,6 +6,7 @@ PLAN_MODEL="${PLAN_MODEL:-claude-opus-4.6}"
 REVIEW_MODEL="${REVIEW_MODEL:-claude-sonnet-4.6}"
 REVIEW_ESCALATION_MODEL="${REVIEW_ESCALATION_MODEL:-claude-opus-4.6}"
 CODEX_TIMEOUT_MINUTES="${CODEX_TIMEOUT_MINUTES:-60}"
+ENABLE_CAFFEINATE="${ENABLE_CAFFEINATE:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -34,6 +35,7 @@ Environment overrides:
   REVIEW_ESCALATION_MODEL=claude-opus-4.6
   MAX_RETRIES=3
   CODEX_TIMEOUT_MINUTES=60
+  ENABLE_CAFFEINATE=1
 EOF
 }
 
@@ -53,6 +55,14 @@ die() {
 require_tool() {
   local tool="$1"
   command -v "$tool" >/dev/null 2>&1 || die "Required tool not found: $tool"
+}
+
+run_with_caffeinate() {
+  if [[ "$ENABLE_CAFFEINATE" == "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -dimsu "$@"
+    return
+  fi
+  "$@"
 }
 
 validate_task_file() {
@@ -140,10 +150,13 @@ run_with_retries() {
 
   for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
     log "$label (attempt $attempt/$MAX_RETRIES)"
-    if "$@"; then
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    if [[ "$rc" -eq 0 ]]; then
       return 0
     fi
-    rc=$?
     append_retry_log "$label failed on attempt $attempt with exit code $rc: $*"
   done
 
@@ -152,12 +165,12 @@ run_with_retries() {
 }
 
 prepare_branch_from_main() {
-  run_with_retries "Checkout main" git checkout main
-  run_with_retries "Pull latest main" git pull --rebase
+  run_with_retries "Checkout main" run_with_caffeinate git checkout main
+  run_with_retries "Pull latest main" run_with_caffeinate git pull --rebase
   if git show-ref --verify --quiet "refs/heads/$BRANCH"; then
-    run_with_retries "Checkout existing branch $BRANCH" git checkout "$BRANCH"
+    run_with_retries "Checkout existing branch $BRANCH" run_with_caffeinate git checkout "$BRANCH"
   else
-    run_with_retries "Create branch $BRANCH" git checkout -b "$BRANCH"
+    run_with_retries "Create branch $BRANCH" run_with_caffeinate git checkout -b "$BRANCH"
   fi
 }
 
@@ -168,36 +181,70 @@ commit_and_push_task_file() {
     log "No task-file changes to commit."
     return 0
   fi
-  git commit -m "$message"
-  run_with_retries "Push branch $BRANCH" git push -u origin "$BRANCH"
+  run_with_caffeinate git commit -m "$message"
+  run_with_retries "Push branch $BRANCH" run_with_caffeinate git push -u origin "$BRANCH"
 }
 
 run_copilot_prompt() {
   local model="$1"
   local prompt="$2"
-  copilot --model "$model" -p "$prompt" -s --no-color --stream off
+  run_with_caffeinate copilot --model "$model" -p "$prompt" --no-color
+}
+
+run_copilot_prompt_visible() {
+  local model="$1"
+  local prompt="$2"
+  run_copilot_prompt "$model" "$prompt" 2>&1 | tee /dev/stderr
+}
+
+latest_copilot_session_plan() {
+  local session_root="$HOME/.copilot/session-state"
+  [[ -d "$session_root" ]] || return 1
+  find "$session_root" -type f -name plan.md -exec stat -f '%m %N' {} \; 2>/dev/null \
+    | sort -nr \
+    | head -n 1 \
+    | cut -d' ' -f2-
+}
+
+resolve_session_plan_output() {
+  local raw_output="$1"
+  if echo "$raw_output" | grep -qi "plan written to session plan.md"; then
+    local plan_file
+    plan_file="$(latest_copilot_session_plan || true)"
+    if [[ -n "$plan_file" && -s "$plan_file" ]]; then
+      {
+        echo "$raw_output"
+        echo
+        echo "Resolved full plan from: $plan_file"
+        echo
+        cat "$plan_file"
+      }
+      return 0
+    fi
+  fi
+  echo "$raw_output"
 }
 
 run_codex_prompt() {
   local prompt="$1"
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
     return
   fi
   if command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
     return
   fi
-  codex exec --full-auto --sandbox workspace-write "$prompt"
+  run_with_caffeinate codex exec --full-auto --sandbox workspace-write "$prompt"
 }
 
 run_verification_suite() {
-  run_with_retries "make lint" make lint
-  run_with_retries "make typecheck" make typecheck
-  run_with_retries "make test-backend" make test-backend
-  run_with_retries "make test-frontend" make test-frontend
+  run_with_retries "make lint" run_with_caffeinate make lint
+  run_with_retries "make typecheck" run_with_caffeinate make typecheck
+  run_with_retries "make test-backend" run_with_caffeinate make test-backend
+  run_with_retries "make test-frontend" run_with_caffeinate make test-frontend
   if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
-    run_with_retries "make e2e" make e2e
+    run_with_retries "make e2e" run_with_caffeinate make e2e
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
   fi
@@ -252,7 +299,8 @@ Current task file content:
 $(cat "$TASK_FILE")
 EOF
 )"
-  output="$(run_copilot_prompt "$PLAN_MODEL" "$prompt")"
+  output="$(run_copilot_prompt_visible "$PLAN_MODEL" "$prompt")"
+  output="$(resolve_session_plan_output "$output")"
   append_task_block "Planning Output (${PLAN_MODEL})" "$output"
   append_task_block "Human Gate Reminder" "Review the plan and set '- [x] Approved for implementation' before build."
   commit_and_push_task_file "plan: issue #${ISSUE_ID} with ${PLAN_MODEL}"
@@ -367,7 +415,7 @@ cmd_review() {
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
 
   local sonnet_output sonnet_status sonnet_risk
-  sonnet_output="$(run_sonnet_review)"
+  sonnet_output="$(run_sonnet_review 2>&1 | tee /dev/stderr)"
   sonnet_status="$(parse_status "$sonnet_output")"
   sonnet_risk="$(parse_risk "$sonnet_output")"
 
@@ -375,7 +423,7 @@ cmd_review() {
 
   if review_needs_escalation "$sonnet_status" "$sonnet_risk" "$sonnet_output"; then
     local opus_output opus_status
-    opus_output="$(run_opus_escalation_review "$sonnet_output")"
+    opus_output="$(run_opus_escalation_review "$sonnet_output" 2>&1 | tee /dev/stderr)"
     opus_status="$(parse_status "$opus_output")"
     append_task_block "Opus Escalation Review (${REVIEW_ESCALATION_MODEL})" "$opus_output"
     if [[ "$opus_status" == "APPROVED" ]]; then
@@ -422,16 +470,16 @@ cmd_ship() {
 
   git add -A
   if ! git diff --cached --quiet; then
-    git commit -m "feat: complete issue #${ISSUE_ID} workflow execution"
+    run_with_caffeinate git commit -m "feat: complete issue #${ISSUE_ID} workflow execution"
   else
     log "No staged changes to commit before ship."
   fi
-  run_with_retries "Push branch $BRANCH" git push -u origin "$BRANCH"
+  run_with_retries "Push branch $BRANCH" run_with_caffeinate git push -u origin "$BRANCH"
 
   if gh pr view --head "$BRANCH" --json number >/dev/null 2>&1; then
     log "PR already exists for $BRANCH."
   else
-    gh pr create \
+    run_with_caffeinate gh pr create \
       --base main \
       --head "$BRANCH" \
       --title "Issue #${ISSUE_ID}: ${SLUG}" \

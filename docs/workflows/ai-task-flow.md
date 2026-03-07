@@ -3,6 +3,7 @@
 This workflow is local-first and branch-safe.
 All verification runs locally on your machine by default.
 An optional manual GitHub Actions workflow exists and runs only when triggered explicitly.
+On macOS, workflow commands automatically run under `caffeinate` to prevent laptop sleep during long runs.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -67,6 +68,7 @@ Human gate:
 - Max 3 retries per failing command/rework cycle.
 - All blockers are appended into task file.
 - Codex must not modify immutable approved plan content.
+- `caffeinate` is enabled by default (`ENABLE_CAFFEINATE=1`); set `ENABLE_CAFFEINATE=0` to disable.
 
 ## E2E Definition and Trigger
 - Local E2E command is defined in `Makefile` target: `e2e`.

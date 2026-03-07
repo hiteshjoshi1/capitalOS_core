@@ -156,6 +156,7 @@ CapitalOS supports a local-first AI workflow with a mandatory human gate.
 Detailed reference: `docs/workflows/ai-task-flow.md`.
 All validation commands run locally on your machine by default.
 Optional GitHub validation exists as a manual workflow (`workflow_dispatch`) and does not auto-run on PRs.
+On macOS, workflow commands auto-use `caffeinate` so long-running agent steps do not sleep.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -173,6 +174,9 @@ gh auth status -h github.com
 copilot --version
 codex --version
 ```
+
+Optional:
+- Disable sleep-prevention wrapper for a run: `ENABLE_CAFFEINATE=0 make task-build TASK=...`
 
 ### 1) Create a task from template
 
