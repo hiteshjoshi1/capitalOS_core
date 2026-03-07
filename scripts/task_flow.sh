@@ -6,6 +6,7 @@ PLAN_MODEL="${PLAN_MODEL:-claude-opus-4.6}"
 REVIEW_MODEL="${REVIEW_MODEL:-claude-sonnet-4.6}"
 REVIEW_ESCALATION_MODEL="${REVIEW_ESCALATION_MODEL:-claude-opus-4.6}"
 CODEX_TIMEOUT_MINUTES="${CODEX_TIMEOUT_MINUTES:-60}"
+ENABLE_CAFFEINATE="${ENABLE_CAFFEINATE:-1}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -25,6 +26,7 @@ Usage:
   scripts/task_flow.sh plan  tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh build tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh review tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh rework tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh ship  tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh all   tasks/issue-<id>-<slug>.md
 
@@ -34,6 +36,7 @@ Environment overrides:
   REVIEW_ESCALATION_MODEL=claude-opus-4.6
   MAX_RETRIES=3
   CODEX_TIMEOUT_MINUTES=60
+  ENABLE_CAFFEINATE=1
 EOF
 }
 
@@ -53,6 +56,14 @@ die() {
 require_tool() {
   local tool="$1"
   command -v "$tool" >/dev/null 2>&1 || die "Required tool not found: $tool"
+}
+
+run_with_caffeinate_for_codex() {
+  if [[ "$ENABLE_CAFFEINATE" == "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    caffeinate -dimsu "$@"
+    return
+  fi
+  "$@"
 }
 
 validate_task_file() {
@@ -115,6 +126,64 @@ append_retry_log() {
   append_task_block "Retry Entry" "$body"
 }
 
+next_review_id() {
+  local max_id
+  max_id="$(grep -Eo '^### Review Cycle R[0-9]+' "$TASK_FILE" 2>/dev/null | sed -E 's/^### Review Cycle R([0-9]+).*$/\1/' | sort -n | tail -n1)"
+  if [[ -z "$max_id" ]]; then
+    echo "R1"
+  else
+    echo "R$((max_id + 1))"
+  fi
+}
+
+latest_review_id() {
+  local latest
+  latest="$(grep -Eo '^### Review Cycle R[0-9]+' "$TASK_FILE" 2>/dev/null | sed -E 's/^### Review Cycle (R[0-9]+).*$/\1/' | tail -n1)"
+  [[ -n "$latest" ]] || return 1
+  echo "$latest"
+}
+
+append_review_status() {
+  local review_id="$1"
+  local status="$2"
+  local result="$3"
+  local risk="$4"
+  append_task_block "Review Cycle ${review_id} - Status" "Review-ID: ${review_id}
+Status: ${status}
+Result: ${result}
+Risk: ${risk}"
+}
+
+review_status_exists() {
+  local review_id="$1"
+  local expected_status="$2"
+  awk -v rid="Review-ID: ${review_id}" -v st="Status: ${expected_status}" '
+    $0 == rid {in_block=1; next}
+    in_block && /^Status:/ { if ($0 == st) found=1; in_block=0 }
+    END { exit found ? 0 : 1 }
+  ' "$TASK_FILE"
+}
+
+extract_review_cycle_context() {
+  local review_id="$1"
+  awk -v rid="$review_id" '
+    /^### Review Cycle / {
+      if (capture && $0 !~ ("^### Review Cycle " rid " -")) exit
+    }
+    $0 ~ ("^### Review Cycle " rid " -") { capture=1 }
+    capture { print }
+  ' "$TASK_FILE"
+}
+
+extract_latest_legacy_review_context() {
+  local start_line
+  start_line="$(awk '/^### Sonnet Review / {line=NR} END {print line+0}' "$TASK_FILE")"
+  if [[ "$start_line" -le 0 ]]; then
+    return 1
+  fi
+  sed -n "${start_line},\$p" "$TASK_FILE"
+}
+
 immutable_hash() {
   grep -q "<!-- IMMUTABLE_PLAN_END -->" "$TASK_FILE" || die "Missing IMMUTABLE_PLAN_END marker in $TASK_FILE"
   awk '
@@ -133,6 +202,29 @@ assert_clean_worktree() {
   fi
 }
 
+has_unstaged_or_untracked_changes() {
+  [[ -n "$(git diff --name-only)" || -n "$(git ls-files --others --exclude-standard)" ]]
+}
+
+assert_review_inputs_staged() {
+  if ! has_unstaged_or_untracked_changes; then
+    return 0
+  fi
+  local unstaged untracked
+  unstaged="$(git diff --name-only)"
+  untracked="$(git ls-files --others --exclude-standard)"
+  log "Review requires a complete staged snapshot so reviewer sees all changes."
+  if [[ -n "$unstaged" ]]; then
+    log "Unstaged files:"
+    printf '%s\n' "$unstaged" | sed 's/^/  - /'
+  fi
+  if [[ -n "$untracked" ]]; then
+    log "Untracked files:"
+    printf '%s\n' "$untracked" | sed 's/^/  - /'
+  fi
+  die "Stage changes before review (example: git add -A), then rerun task-review."
+}
+
 run_with_retries() {
   local label="$1"
   shift
@@ -140,10 +232,13 @@ run_with_retries() {
 
   for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
     log "$label (attempt $attempt/$MAX_RETRIES)"
-    if "$@"; then
+    set +e
+    "$@"
+    rc=$?
+    set -e
+    if [[ "$rc" -eq 0 ]]; then
       return 0
     fi
-    rc=$?
     append_retry_log "$label failed on attempt $attempt with exit code $rc: $*"
   done
 
@@ -175,20 +270,65 @@ commit_and_push_task_file() {
 run_copilot_prompt() {
   local model="$1"
   local prompt="$2"
-  copilot --model "$model" -p "$prompt" -s --no-color --stream off
+  copilot --model "$model" -p "$prompt" --no-color
+}
+
+run_copilot_prompt_visible() {
+  local model="$1"
+  local prompt="$2"
+  run_copilot_prompt "$model" "$prompt" 2>&1 | tee /dev/stderr
+}
+
+latest_copilot_session_plan() {
+  local session_root="$HOME/.copilot/session-state"
+  [[ -d "$session_root" ]] || return 1
+  find "$session_root" -type f -name plan.md -exec stat -f '%m %N' {} \; 2>/dev/null \
+    | sort -nr \
+    | head -n 1 \
+    | cut -d' ' -f2-
+}
+
+resolve_session_plan_output() {
+  local raw_output="$1"
+  if echo "$raw_output" | grep -qi "plan written to session plan.md"; then
+    local plan_file
+    plan_file="$(latest_copilot_session_plan || true)"
+    if [[ -n "$plan_file" && -s "$plan_file" ]]; then
+      {
+        echo "$raw_output"
+        echo
+        echo "Resolved full plan from: $plan_file"
+        echo
+        cat "$plan_file"
+      }
+      return 0
+    fi
+  fi
+  echo "$raw_output"
+}
+
+plan_command_pack() {
+  cat <<EOF
+Copy/paste commands for this task:
+make task-plan TASK=$TASK_FILE
+make task-build TASK=$TASK_FILE
+make task-review TASK=$TASK_FILE
+make task-rework TASK=$TASK_FILE
+make task-ship TASK=$TASK_FILE
+EOF
 }
 
 run_codex_prompt() {
   local prompt="$1"
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate_for_codex timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
     return
   fi
   if command -v gtimeout >/dev/null 2>&1; then
-    gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate_for_codex gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
     return
   fi
-  codex exec --full-auto --sandbox workspace-write "$prompt"
+  run_with_caffeinate_for_codex codex exec --full-auto --sandbox workspace-write "$prompt"
 }
 
 run_verification_suite() {
@@ -201,6 +341,35 @@ run_verification_suite() {
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
   fi
+}
+
+collect_review_diff_names() {
+  {
+    git diff --name-only main...HEAD || true
+    git diff --cached --name-only || true
+    git diff --name-only || true
+  } | awk 'NF' | sort -u
+}
+
+collect_review_diff_stat() {
+  {
+    git diff --no-color --stat main...HEAD || true
+    git diff --cached --no-color --stat || true
+    git diff --no-color --stat || true
+  } | awk 'NF'
+}
+
+collect_review_diff_patch() {
+  {
+    echo "### COMMITTED_DIFF (main...HEAD)"
+    git diff --no-color main...HEAD || true
+    echo
+    echo "### STAGED_UNCOMMITTED_DIFF"
+    git diff --cached --no-color || true
+    echo
+    echo "### UNSTAGED_UNCOMMITTED_DIFF"
+    git diff --no-color || true
+  } | sed -n '1,4000p'
 }
 
 parse_status() {
@@ -245,6 +414,12 @@ Return concise markdown with:
 2) Risks
 3) Open questions (only if critical)
 4) Task breakdown aligned to acceptance criteria
+5) Command pack with exact copy/paste commands for this task file:
+   - make task-plan TASK=$TASK_FILE
+   - make task-build TASK=$TASK_FILE
+   - make task-review TASK=$TASK_FILE
+   - make task-rework TASK=$TASK_FILE
+   - make task-ship TASK=$TASK_FILE
 
 Do not write any code. Do not suggest scope expansion.
 
@@ -252,8 +427,10 @@ Current task file content:
 $(cat "$TASK_FILE")
 EOF
 )"
-  output="$(run_copilot_prompt "$PLAN_MODEL" "$prompt")"
+  output="$(run_copilot_prompt_visible "$PLAN_MODEL" "$prompt")"
+  output="$(resolve_session_plan_output "$output")"
   append_task_block "Planning Output (${PLAN_MODEL})" "$output"
+  append_task_block "Workflow Commands" "$(plan_command_pack)"
   append_task_block "Human Gate Reminder" "Review the plan and set '- [x] Approved for implementation' before build."
   commit_and_push_task_file "plan: issue #${ISSUE_ID} with ${PLAN_MODEL}"
   log "Plan complete. Human approval gate must be checked before build."
@@ -298,16 +475,23 @@ EOF
   fi
 
   run_verification_suite
+  git add -A
+  log "Auto-staged build outputs for review."
   append_task_block "Build Result" "Implementation and verification suite completed successfully."
 }
 
 run_sonnet_review() {
-  local diff_stat diff_names prompt
-  diff_stat="$(git diff --no-color --stat main...HEAD || true)"
-  diff_names="$(git diff --name-only main...HEAD || true)"
+  local diff_stat diff_names diff_patch prompt
+  diff_stat="$(collect_review_diff_stat)"
+  diff_names="$(collect_review_diff_names)"
+  diff_patch="$(collect_review_diff_patch)"
   prompt="$(cat <<EOF
 You are a strict reviewer for CapitalOS.
 Primary review model.
+
+Critical constraint:
+- Do NOT execute shell/file tools (no git, ls, glob, read/write calls).
+- Use only the provided task file and diff context below.
 
 Task file:
 $(cat "$TASK_FILE")
@@ -317,6 +501,9 @@ $diff_names
 
 Diff summary:
 $diff_stat
+
+Unified diff (truncated to first 4000 lines):
+$diff_patch
 
 Return EXACTLY:
 STATUS: APPROVED|NEEDS_FIXES|ESCALATE
@@ -336,16 +523,24 @@ EOF
 
 run_opus_escalation_review() {
   local sonnet_output="$1"
-  local prompt
+  local diff_patch prompt
+  diff_patch="$(collect_review_diff_patch)"
   prompt="$(cat <<EOF
 You are the escalation reviewer for CapitalOS.
 Primary review from Sonnet is below.
+
+Critical constraint:
+- Do NOT execute shell/file tools (no git, ls, glob, read/write calls).
+- Use only the provided Sonnet output, task file, and diff context.
 
 Sonnet review:
 $sonnet_output
 
 Task file:
 $(cat "$TASK_FILE")
+
+Unified diff (truncated to first 4000 lines):
+$diff_patch
 
 Return EXACTLY:
 STATUS: APPROVED|NEEDS_FIXES
@@ -365,19 +560,23 @@ cmd_review() {
   require_tool copilot
   validate_task_file "$1"
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
+  assert_review_inputs_staged
 
-  local sonnet_output sonnet_status sonnet_risk
-  sonnet_output="$(run_sonnet_review)"
+  local review_id sonnet_output sonnet_status sonnet_risk
+  review_id="$(next_review_id)"
+  sonnet_output="$(run_sonnet_review 2>&1 | tee /dev/stderr)"
   sonnet_status="$(parse_status "$sonnet_output")"
   sonnet_risk="$(parse_risk "$sonnet_output")"
 
-  append_task_block "Sonnet Review (${REVIEW_MODEL})" "$sonnet_output"
+  append_task_block "Review Cycle ${review_id} - Sonnet (${REVIEW_MODEL})" "$sonnet_output"
+  append_review_status "$review_id" "Reviewed" "$sonnet_status" "${sonnet_risk:-UNKNOWN}"
 
   if review_needs_escalation "$sonnet_status" "$sonnet_risk" "$sonnet_output"; then
     local opus_output opus_status
-    opus_output="$(run_opus_escalation_review "$sonnet_output")"
+    opus_output="$(run_opus_escalation_review "$sonnet_output" 2>&1 | tee /dev/stderr)"
     opus_status="$(parse_status "$opus_output")"
-    append_task_block "Opus Escalation Review (${REVIEW_ESCALATION_MODEL})" "$opus_output"
+    append_task_block "Review Cycle ${review_id} - Opus Escalation (${REVIEW_ESCALATION_MODEL})" "$opus_output"
+    append_review_status "$review_id" "Reviewed" "$opus_status" "$(parse_risk "$opus_output")"
     if [[ "$opus_status" == "APPROVED" ]]; then
       return 0
     fi
@@ -390,25 +589,78 @@ cmd_review() {
   return 2
 }
 
-run_codex_rework() {
-  local immutable_before immutable_after prompt
+cmd_rework() {
+  require_tool codex
+  validate_task_file "$1"
+  [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
+
+  local review_id review_context latest_result immutable_before immutable_after prompt parsed_status parsed_risk
+  review_id="$(latest_review_id || true)"
+  if [[ -z "$review_id" ]]; then
+    review_context="$(extract_latest_legacy_review_context || true)"
+    [[ -n "$review_context" ]] || die "No review cycle found. Run task-review first."
+    review_id="R0"
+    parsed_status="$(parse_status "$review_context")"
+    parsed_risk="$(parse_risk "$review_context")"
+    append_review_status "$review_id" "Reviewed" "${parsed_status:-UNKNOWN}" "${parsed_risk:-UNKNOWN}"
+  fi
+
+  if review_status_exists "$review_id" "Implemented"; then
+    die "Latest review cycle ($review_id) is already marked Implemented."
+  fi
+  if ! review_status_exists "$review_id" "Reviewed"; then
+    die "Latest review cycle ($review_id) is not marked Reviewed."
+  fi
+
+  latest_result="$(awk -v rid="Review-ID: ${review_id}" '
+    $0 == rid {in_block=1; next}
+    in_block && /^Result:/ {sub(/^Result:[ \t]*/, "", $0); print toupper($0); exit}
+    in_block && /^### / {in_block=0}
+  ' "$TASK_FILE")"
+
+  if [[ "$latest_result" == "APPROVED" ]]; then
+    die "Latest review cycle ($review_id) is APPROVED. No rework needed."
+  fi
+
+  if [[ "$review_id" != "R0" ]]; then
+    review_context="$(extract_review_cycle_context "$review_id")"
+    [[ -n "$review_context" ]] || die "Could not extract review context for $review_id."
+  fi
+
   immutable_before="$(immutable_hash)"
   prompt="$(cat <<EOF
-Rework the current branch implementation for $TASK_FILE based on the latest review findings.
+Implement ONLY the unresolved issues from latest review cycle ${review_id} in $TASK_FILE.
 
-Rules:
+Latest review context:
+$review_context
+
+Hard constraints:
 1) Do not modify content above <!-- IMMUTABLE_PLAN_END --> in $TASK_FILE.
-2) Fix only findings relevant to acceptance criteria and failing checks.
-3) Update mutable task sections with concise reasoning and verification evidence.
-4) Keep changes minimal and in-scope.
+2) Fix only findings and test gaps from the latest review cycle (${review_id}).
+3) Do not redo completed work or broad refactors.
+4) Keep changes minimal and in-scope with acceptance criteria.
+5) Update mutable sections in $TASK_FILE with concise implementation reasoning and verification evidence.
+6) Run verification:
+   - make lint
+   - make typecheck
+   - make test-backend
+   - make test-frontend
+   - make e2e only if Playwright exists
 EOF
 )"
-  run_with_retries "Codex rework pass" run_codex_prompt "$prompt"
+
+  run_with_retries "Codex rework pass (${review_id})" run_codex_prompt "$prompt"
   immutable_after="$(immutable_hash)"
   if [[ "$immutable_before" != "$immutable_after" ]]; then
-    append_retry_log "Plan integrity violation: immutable section changed during rework."
+    append_retry_log "Plan integrity violation: immutable section changed during rework for ${review_id}."
     die "Immutable approved plan content changed during rework."
   fi
+
+  run_verification_suite
+  git add -A
+  log "Auto-staged rework outputs for review."
+  append_review_status "$review_id" "Implemented" "NEEDS_REVIEW" "PENDING"
+  append_task_block "Review Cycle ${review_id} - Rework Result" "Targeted rework implemented for latest review findings."
 }
 
 cmd_ship() {
@@ -431,12 +683,24 @@ cmd_ship() {
   if gh pr view --head "$BRANCH" --json number >/dev/null 2>&1; then
     log "PR already exists for $BRANCH."
   else
-    gh pr create \
+    local pr_out pr_rc
+    set +e
+    pr_out="$(gh pr create \
       --base main \
       --head "$BRANCH" \
       --title "Issue #${ISSUE_ID}: ${SLUG}" \
-      --body "Automated by task_flow.sh with Opus plan, Codex implementation, Sonnet review, and Opus escalation-on-risk."
-    log "PR created for $BRANCH -> main."
+      --body "Automated by task_flow.sh with Opus plan, Codex implementation, Sonnet review, and Opus escalation-on-risk." 2>&1)"
+    pr_rc=$?
+    set -e
+
+    if [[ "$pr_rc" -eq 0 ]]; then
+      log "PR created for $BRANCH -> main."
+    elif echo "$pr_out" | grep -qi "already exists"; then
+      log "PR already exists for $BRANCH."
+    else
+      echo "$pr_out" >&2
+      die "Failed to create PR for $BRANCH."
+    fi
   fi
 }
 
@@ -454,6 +718,7 @@ cmd_all() {
   local review_attempt rc
   for ((review_attempt=1; review_attempt<=MAX_RETRIES; review_attempt++)); do
     log "Review cycle attempt $review_attempt/$MAX_RETRIES"
+    git add -A
     if cmd_review "$task"; then
       append_task_block "Review Result" "Review approved on attempt $review_attempt."
       cmd_ship "$task"
@@ -467,8 +732,7 @@ cmd_all() {
     if (( review_attempt == MAX_RETRIES )); then
       die "Reached max review/rework attempts ($MAX_RETRIES)."
     fi
-    run_codex_rework
-    run_verification_suite
+    cmd_rework "$task"
   done
 }
 
@@ -476,11 +740,23 @@ main() {
   [[ $# -eq 2 ]] || { usage; exit 1; }
   local cmd="$1"
   local task="$2"
+  local rc
 
   case "$cmd" in
     plan) cmd_plan "$task" ;;
     build) cmd_build "$task" ;;
-    review) cmd_review "$task" ;;
+    review)
+      set +e
+      cmd_review "$task"
+      rc=$?
+      set -e
+      if [[ "$rc" -eq 2 ]]; then
+        log "Review returned NEEDS_FIXES/ESCALATE. Findings recorded in $TASK_FILE."
+        exit 0
+      fi
+      exit "$rc"
+      ;;
+    rework) cmd_rework "$task" ;;
     ship) cmd_ship "$task" ;;
     all) cmd_all "$task" ;;
     *)

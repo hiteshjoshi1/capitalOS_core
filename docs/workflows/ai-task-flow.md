@@ -3,6 +3,7 @@
 This workflow is local-first and branch-safe.
 All verification runs locally on your machine by default.
 An optional manual GitHub Actions workflow exists and runs only when triggered explicitly.
+On macOS, only long-running Codex implementation/rework commands run under `caffeinate` to prevent sleep.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -24,6 +25,7 @@ Human gate:
 - Checks out `main`, pulls latest, and creates/switches `feature/issue-<id>-<slug>`.
 - Creates task file from `tasks/_template.md` when missing.
 - Runs Copilot with Opus to generate planning notes and appends output to task file.
+- Planning output includes copy/paste `make` commands with the exact task filename.
 - Commits and pushes the planning artifact.
 
 2. Human review
@@ -40,12 +42,22 @@ Human gate:
   - `make test-backend`
   - `make test-frontend`
   - `make e2e` 
+- Auto-stages changes (`git add -A`) at the end for review handoff.
 
 4. `review`
 - Runs Sonnet review against task file + current diff.
 - Escalates to Opus only when Sonnet marks uncertain/conflicting/high-risk.
+- Logs a new review cycle section each run (for example `Review Cycle R1`) and marks status `Reviewed`.
+- Requires all review inputs to be staged (manual `task-review`); otherwise exits with instruction.
 
-5. `ship`
+5. `rework`
+- Reads only the latest review cycle findings/test gaps.
+- Runs Codex to implement only missing items from that review cycle.
+- Marks latest review cycle status as `Implemented`.
+- Prevents duplicate rework for the same review cycle.
+- Auto-stages changes (`git add -A`) at the end for next review pass.
+
+6. `ship`
 - Commits branch changes.
 - Pushes branch.
 - Creates PR to `main` if one does not already exist.
@@ -54,6 +66,7 @@ Human gate:
 - `scripts/task_flow.sh plan tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh build tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh review tasks/issue-123-my-task.md`
+- `scripts/task_flow.sh rework tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh ship tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh all tasks/issue-123-my-task.md`
 
@@ -61,12 +74,15 @@ Human gate:
 - Runs `plan`.
 - Stops if human gate is not approved.
 - If approved, continues with `build -> review/rework loop -> ship`.
+- Auto-stages (`git add -A`) before each review cycle so reviewer sees complete snapshot.
 
 ## Guardrails
 - Never commits directly to `main`.
 - Max 3 retries per failing command/rework cycle.
 - All blockers are appended into task file.
 - Codex must not modify immutable approved plan content.
+- `caffeinate` is enabled by default (`ENABLE_CAFFEINATE=1`); set `ENABLE_CAFFEINATE=0` to disable.
+- `caffeinate` scope is Codex code-writing runs only (build/rework path).
 
 ## E2E Definition and Trigger
 - Local E2E command is defined in `Makefile` target: `e2e`.
