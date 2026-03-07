@@ -1,6 +1,8 @@
 # CapitalOS AI Task Flow (v2.2)
 
 This workflow is local-first and branch-safe.
+All verification runs locally on your machine by default.
+An optional manual GitHub Actions workflow exists and runs only when triggered explicitly.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -69,8 +71,8 @@ Human gate:
 ## E2E Definition and Trigger
 - Local E2E command is defined in `Makefile` target: `e2e`.
 - `scripts/task_flow.sh build` runs `make e2e` only when Playwright config exists (`web/playwright.config.ts` or `.js`).
-- CI E2E hook is in `.github/workflows/pr-validate.yml` step: `Optional E2E`.
 - If Playwright is not configured, E2E is skipped by design (not treated as failure).
+- Optional manual GitHub run is defined in `.github/workflows/pr-validate.yml` with `workflow_dispatch` only.
 
 ## How to Trigger a New Feature
 Input entrypoint for high-level task: task file objective section.

@@ -1,9 +1,7 @@
-name: PR Validate
+name: PR Validate (Manual)
 
 on:
-  pull_request:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
   validate:

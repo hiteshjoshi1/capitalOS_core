@@ -154,6 +154,8 @@ CapitalOS exists to support those habits.
 
 CapitalOS supports a local-first AI workflow with a mandatory human gate.
 Detailed reference: `docs/workflows/ai-task-flow.md`.
+All validation commands run locally on your machine by default.
+Optional GitHub validation exists as a manual workflow (`workflow_dispatch`) and does not auto-run on PRs.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -226,8 +228,8 @@ make task-all TASK=tasks/issue-123-my-feature.md
 
 - Local definition: `Makefile` target `e2e`.
 - `task-build` executes E2E only when Playwright config exists in `web/`.
-- CI definition: `.github/workflows/pr-validate.yml` step `Optional E2E`.
 - If Playwright is not configured, E2E is skipped.
+- Optional manual GitHub run is available in `.github/workflows/pr-validate.yml`.
 
 
 ### Prerequisites
