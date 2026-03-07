@@ -1,11 +1,18 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
 
 import App from "../App";
 import { api } from "../lib/api";
-import type { DashboardSummary, PlatformAllocation, SpendingSummary, CreditCardSummary, CryptoSummary, StockExposure } from "../lib/api";
+import type {
+  CreditCardSummary,
+  CryptoSummary,
+  DashboardSummary,
+  PlatformAllocation,
+  SpendingSummary,
+  StockExposure,
+} from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -55,7 +62,10 @@ const summaryFixture: DashboardSummary = {
     crypto: 136900,
     liabilities: 0,
   },
-  geography: [],
+  geography: [
+    { country: "US", value: 700000, percent: 70 },
+    { country: "SG", value: 300000, percent: 30 },
+  ],
   cash_flow: {
     income: 8200,
     expenses: 5300,
@@ -156,6 +166,7 @@ const stockExposureFixture: StockExposure = {
 beforeEach(() => {
   vi.useRealTimers();
   vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
+  window.localStorage.clear();
   mockApi.health.mockResolvedValue({ status: "ok" });
   mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
   mockApi.platformAllocation.mockResolvedValue(platformAllocationFixture);
@@ -168,47 +179,112 @@ beforeEach(() => {
 afterEach(() => {
   vi.clearAllMocks();
   vi.useRealTimers();
+  window.localStorage.clear();
 });
 
 describe("App", () => {
-  it("renders the happy path dashboard data", async () => {
+  it("renders refreshed dashboard structure with user menu and exposure links", async () => {
     const user = userEvent.setup();
     render(
       <MemoryRouter>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
-    expect(screen.getByText("CapitalOS — Dashboard")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    expect(screen.getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
+    expect(screen.queryByRole("link", { name: "Market Data" })).not.toBeInTheDocument();
+    expect(screen.getByText("vs 2026-01")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 10,000 (+10.0%)")).toBeInTheDocument();
+    expect(screen.getByText("vs 2025-02")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 50,000 (+50.0%)")).toBeInTheDocument();
 
+    await user.click(screen.getByLabelText("User menu"));
+    expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
 
-    expect(screen.getByText(/S\$ 742,180/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Stock Exposure details" })).toHaveAttribute("href", "/holdings");
+    expect(screen.getByRole("link", { name: "Crypto Exposure details" })).toHaveAttribute("href", "/crypto/holdings");
+    expect(screen.getByRole("link", { name: "Cash Exposure details" })).toHaveAttribute("href", "/cash");
+
     expect(screen.getByText("Cash Flow — 2026-02")).toBeInTheDocument();
-    expect(screen.getByText(/S\$ 12,480/)).toBeInTheDocument();
-    expect(screen.getByText(/S\$ 8,710/)).toBeInTheDocument();
-    expect(screen.getByText(/30%/)).toBeInTheDocument();
-
     expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
-    expect(screen.getByText("DBS Altitude")).toBeInTheDocument();
-    expect(screen.getByText("Stock Exposure")).toBeInTheDocument();
-    expect(screen.getByText("Cash Exposure")).toBeInTheDocument();
-    expect(screen.getByText("Crypto Exposure")).toBeInTheDocument();
-    expect(screen.getByText("Total ETH")).toBeInTheDocument();
-    expect(screen.getByText("Total SOL")).toBeInTheDocument();
-    expect(screen.getByText("Stock Exposure")).toBeInTheDocument();
-    expect(screen.getByText("By country")).toBeInTheDocument();
-    expect(screen.getByText("By platform")).toBeInTheDocument();
     expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Allocation by Geography")).toBeInTheDocument();
-    expect(screen.getByText("Allocation by Platform")).toBeInTheDocument();
-    expect(screen.getAllByText("IBKR").length).toBeGreaterThan(0);
-    expect(screen.getByText(/70.0%/)).toBeInTheDocument();
+    expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
+    expect(screen.getAllByText("Snapshot")).toHaveLength(2);
+  });
+
+  it("toggles and persists dashboard theme", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+    expect(document.documentElement).toHaveAttribute("data-theme", "dark");
+
+    await user.click(screen.getByLabelText("User menu"));
+    await user.click(screen.getByRole("button", { name: "Theme: Dark" }));
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    });
+    expect(window.localStorage.getItem("capitalos.theme")).toBe("light");
+
+    unmount();
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute("data-theme", "light");
+    });
+  });
+
+  it("closes the user menu on outside click", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+    const userMenuSummary = screen.getByLabelText("User menu");
+    const userMenu = userMenuSummary.closest("details");
+    expect(userMenu).not.toHaveAttribute("open");
+
+    await user.click(userMenuSummary);
+    expect(userMenu).toHaveAttribute("open");
+
+    await user.click(document.body);
+    await waitFor(() => {
+      expect(userMenu).not.toHaveAttribute("open");
+    });
+  });
+
+  it("keeps risk card top N interactions functional", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <App />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Risk")).toBeInTheDocument();
     expect(screen.getByText("TSLA — 24.3%")).toBeInTheDocument();
     expect(screen.getByText("80.8%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Top 5" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Top 3" })).toHaveAttribute("aria-pressed", "false");
+
     const riskTable = screen.getByTestId("risk-distribution-table");
     expect(within(riskTable).getAllByRole("row")).toHaveLength(6);
 
@@ -216,8 +292,6 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "Top 3" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByText("60.6%")).toBeInTheDocument();
     expect(within(riskTable).getAllByRole("row")).toHaveLength(4);
-    expect(screen.queryByText(/Mocked: risk analysis/i)).not.toBeInTheDocument();
-    expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
   });
 
   it("shows helper text when fewer holdings than selected top N are available", async () => {
@@ -229,7 +303,7 @@ describe("App", () => {
     render(
       <MemoryRouter>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(await screen.findByText("Showing 4 of requested 5 positions.")).toBeInTheDocument();
@@ -248,7 +322,7 @@ describe("App", () => {
     render(
       <MemoryRouter>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(await screen.findByText("No holdings concentration data for this month or net worth is not positive.")).toBeInTheDocument();
@@ -261,7 +335,7 @@ describe("App", () => {
     render(
       <MemoryRouter>
         <App />
-      </MemoryRouter>
+      </MemoryRouter>,
     );
 
     expect(await screen.findByText("API error")).toBeInTheDocument();

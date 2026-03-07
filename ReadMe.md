@@ -208,13 +208,31 @@ Review the task file and mark:
 make task-build TASK=tasks/issue-123-my-feature.md
 ```
 
+`task-build` auto-stages changes (`git add -A`) for review handoff.
+
 ### 5) Review (Sonnet, Opus escalation if needed)
 
 ```bash
 make task-review TASK=tasks/issue-123-my-feature.md
 ```
 
-### 6) Ship branch and open PR
+Note:
+- `task-review` expects a fully staged snapshot (`git add -A`) so reviewer sees all changes, including new files.
+
+### 6) Rework only latest review findings (if needed)
+
+```bash
+make task-rework TASK=tasks/issue-123-my-feature.md
+```
+
+`task-rework` auto-stages changes (`git add -A`) for the next review pass.
+
+Review tracking:
+- After `task-review`: latest review cycle status is `Reviewed`.
+- After `task-rework`: same cycle status is `Implemented`.
+- A new `task-review` creates a new review cycle section (for example `R2`) so findings remain separated.
+
+### 7) Ship branch and open PR
 
 ```bash
 make task-ship TASK=tasks/issue-123-my-feature.md
@@ -227,6 +245,7 @@ make task-all TASK=tasks/issue-123-my-feature.md
 ```
 
 `task-all` always stops for the human gate when approval is unchecked.
+It also auto-stages changes before each review cycle.
 
 ### E2E in this workflow
 
