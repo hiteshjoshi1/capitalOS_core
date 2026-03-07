@@ -1,0 +1,53 @@
+name: PR Validate
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Ensure .env exists
+        run: |
+          if [ ! -f .env ]; then
+            touch .env
+          fi
+
+      - name: Start postgres
+        run: docker compose up -d postgres
+
+      - name: Lint
+        run: make lint
+
+      - name: Typecheck
+        run: make typecheck
+
+      - name: Backend tests
+        run: make test-backend
+
+      - name: Frontend tests
+        run: make test-frontend
+
+      - name: Optional E2E
+        run: |
+          if [ -f web/playwright.config.ts ] || [ -f web/playwright.config.js ]; then
+            cd web
+            npm install
+            npx playwright install --with-deps chromium
+            cd ..
+            make e2e
+          else
+            echo "Playwright config not found. Skipping e2e."
+          fi
