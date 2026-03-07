@@ -683,12 +683,24 @@ cmd_ship() {
   if gh pr view --head "$BRANCH" --json number >/dev/null 2>&1; then
     log "PR already exists for $BRANCH."
   else
-    gh pr create \
+    local pr_out pr_rc
+    set +e
+    pr_out="$(gh pr create \
       --base main \
       --head "$BRANCH" \
       --title "Issue #${ISSUE_ID}: ${SLUG}" \
-      --body "Automated by task_flow.sh with Opus plan, Codex implementation, Sonnet review, and Opus escalation-on-risk."
-    log "PR created for $BRANCH -> main."
+      --body "Automated by task_flow.sh with Opus plan, Codex implementation, Sonnet review, and Opus escalation-on-risk." 2>&1)"
+    pr_rc=$?
+    set -e
+
+    if [[ "$pr_rc" -eq 0 ]]; then
+      log "PR created for $BRANCH -> main."
+    elif echo "$pr_out" | grep -qi "already exists"; then
+      log "PR already exists for $BRANCH."
+    else
+      echo "$pr_out" >&2
+      die "Failed to create PR for $BRANCH."
+    fi
   fi
 }
 
