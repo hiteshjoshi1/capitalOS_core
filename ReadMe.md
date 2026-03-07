@@ -150,6 +150,85 @@ CapitalOS exists to support those habits.
 
 # Running the application
 
+## AI Task Workflow
+
+CapitalOS supports a local-first AI workflow with a mandatory human gate.
+Detailed reference: `docs/workflows/ai-task-flow.md`.
+
+Model routing:
+- Planning/architecture: `claude-opus-4.6`
+- Implementation/checklist updates: Codex
+- Primary review/testing: `claude-sonnet-4.6`
+- Escalation review only (if Sonnet is uncertain/high-risk): `claude-opus-4.6`
+
+Canonical task file:
+- `tasks/issue-<id>-<slug>.md`
+
+### Preflight
+
+```bash
+gh auth status -h github.com
+copilot --version
+codex --version
+```
+
+### 1) Create a task from template
+
+```bash
+cp tasks/_template.md tasks/issue-123-my-feature.md
+```
+
+Add your high-level input in the task file under `## Objective`.
+Example:
+- "Update dashboard UI/UX for cleaner hierarchy, better risk-card readability, and improved mobile layout."
+
+### 2) Generate plan (Opus)
+
+```bash
+make task-plan TASK=tasks/issue-123-my-feature.md
+```
+
+### 3) Human gate (required)
+
+Review the task file and mark:
+
+```md
+- [x] Approved for implementation
+```
+
+### 4) Build and verify (Codex)
+
+```bash
+make task-build TASK=tasks/issue-123-my-feature.md
+```
+
+### 5) Review (Sonnet, Opus escalation if needed)
+
+```bash
+make task-review TASK=tasks/issue-123-my-feature.md
+```
+
+### 6) Ship branch and open PR
+
+```bash
+make task-ship TASK=tasks/issue-123-my-feature.md
+```
+
+### Optional: One command orchestration
+
+```bash
+make task-all TASK=tasks/issue-123-my-feature.md
+```
+
+`task-all` always stops for the human gate when approval is unchecked.
+
+### E2E in this workflow
+
+- Local definition: `Makefile` target `e2e`.
+- `task-build` executes E2E only when Playwright config exists in `web/`.
+- CI definition: `.github/workflows/pr-validate.yml` step `Optional E2E`.
+- If Playwright is not configured, E2E is skipped.
+
 
 ### Prerequisites
 - Docker + Docker Compose

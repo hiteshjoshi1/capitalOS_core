@@ -80,7 +80,7 @@ db-query:
 	docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) -c "$(QUERY)"
 
 # ---- Quality gates ----
-.PHONY: lint typecheck test-backend test-frontend e2e verify
+.PHONY: lint typecheck test-backend test-frontend e2e verify task-plan task-build task-review task-ship task-all
 
 # Frontend lint + optional backend lint if ruff is installed in API image.
 lint:
@@ -104,6 +104,27 @@ e2e:
 	cd $(WEB_DIR) && npm install && npx playwright test
 
 verify: lint typecheck test-backend test-frontend
+
+# ---- AI task workflow ----
+task-plan:
+	@test -n "$(TASK)" || (echo "Usage: make task-plan TASK=tasks/issue-<id>-<slug>.md" && exit 2)
+	./scripts/task_flow.sh plan "$(TASK)"
+
+task-build:
+	@test -n "$(TASK)" || (echo "Usage: make task-build TASK=tasks/issue-<id>-<slug>.md" && exit 2)
+	./scripts/task_flow.sh build "$(TASK)"
+
+task-review:
+	@test -n "$(TASK)" || (echo "Usage: make task-review TASK=tasks/issue-<id>-<slug>.md" && exit 2)
+	./scripts/task_flow.sh review "$(TASK)"
+
+task-ship:
+	@test -n "$(TASK)" || (echo "Usage: make task-ship TASK=tasks/issue-<id>-<slug>.md" && exit 2)
+	./scripts/task_flow.sh ship "$(TASK)"
+
+task-all:
+	@test -n "$(TASK)" || (echo "Usage: make task-all TASK=tasks/issue-<id>-<slug>.md" && exit 2)
+	./scripts/task_flow.sh all "$(TASK)"
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
 .PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test

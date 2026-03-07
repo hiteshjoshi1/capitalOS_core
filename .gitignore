@@ -102,4 +102,5 @@ data/
 data/raw/
 data/reports/
 
-tasks/
+tasks/private/
+tasks/*.local.md
