@@ -30,6 +30,7 @@ Human gate:
 1. `plan`
 - Verifies clean worktree.
 - Checks out `main`, pulls latest, and creates/switches `feature/issue-<id>-<slug>` (reuses existing branch; does not recreate).
+- If already on the target issue branch, allows local changes only in that task file and plans in place.
 - Creates task file from `tasks/_template.md` when missing.
 - Runs Copilot with Opus and writes a clean structured plan into the task file (CLI transcript stays in terminal output, not in the file).
 - Planning output includes copy/paste `make` commands with the exact task filename.

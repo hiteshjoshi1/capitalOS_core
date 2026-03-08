@@ -1,7 +1,7 @@
 # Issue 105: Citibank Credit Card Parser
 
 ## Objective
-- I am going to place a citibank credit card statement in the data/fixtures folder
+- I have placed citibank credit card statement (citi_credit_card_sample.csv) in the data/fixtures folder
 - This file would have roughly 3 months of statement
 - The task is to write a parser for this file
 - While this file has 3 months worth of data, new uploads of citibank cc would only have data for 1 month. We should not rely on that assumption and ingest as much as we can and take note of the dates of the expenditures

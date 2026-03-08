@@ -235,6 +235,24 @@ assert_prepare_safe_worktree() {
   fi
 }
 
+assert_plan_safe_worktree_for_task_file_only() {
+  local status_lines other_changes
+  status_lines="$(git status --porcelain)"
+  if [[ -z "$status_lines" ]]; then
+    return 0
+  fi
+
+  other_changes="$(printf '%s\n' "$status_lines" | awk -v tf="$TASK_FILE" '
+    {
+      path = substr($0, 4)
+      if (path != tf) print $0
+    }
+  ')"
+  if [[ -n "$other_changes" ]]; then
+    die "Working tree has changes beyond $TASK_FILE. Commit/stash them before task-plan."
+  fi
+}
+
 has_unstaged_or_untracked_changes() {
   [[ -n "$(git diff --name-only)" || -n "$(git ls-files --others --exclude-standard)" ]]
 }
@@ -546,8 +564,17 @@ cmd_plan() {
   require_tool git
   require_tool copilot
   validate_task_file "$1"
-  assert_clean_worktree
-  prepare_branch_from_main
+
+  local current_branch
+  current_branch="$(git rev-parse --abbrev-ref HEAD)"
+  if [[ "$current_branch" == "$BRANCH" ]]; then
+    assert_plan_safe_worktree_for_task_file_only
+    log "Planning on existing branch $BRANCH with task-file-only local changes."
+  else
+    assert_clean_worktree
+    prepare_branch_from_main
+  fi
+
   ensure_task_file_exists
   assert_task_path_writable
 

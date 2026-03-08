@@ -205,6 +205,7 @@ make task-plan TASK=tasks/issue-123-my-feature.md
 ```
 
 `task-plan` reuses the existing issue branch if it already exists (it does not recreate it).
+If you are already on that issue branch, `task-plan` allows staged/unstaged edits only in the same task file.
 The planning output also includes a ready-to-copy command pack for this exact task file.
 
 ### 4) Human gate (required)
