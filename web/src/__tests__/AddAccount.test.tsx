@@ -22,7 +22,7 @@ vi.mock("../lib/api", () => ({
 const mockApi = vi.mocked(api, true);
 
 const platformsFixture: Platform[] = [
-  { id: 1, code: "DBS", name: "DBS Bank", platform_type: "BANK", country: "SG", website: null },
+  { id: 1, code: "CITI", name: "Citibank", platform_type: "BANK", country: "US", website: null },
 ];
 
 const optionsFixture: AccountOptions = {
@@ -55,7 +55,7 @@ describe("AddAccount", () => {
     mockApi.createAccount.mockResolvedValueOnce({
       id: 1,
       name: "DBS Savings",
-      platform: "DBS",
+      platform: "CITI",
       platform_id: 1,
       account_type: "BANK",
       currency: "SGD",
@@ -80,14 +80,16 @@ describe("AddAccount", () => {
       await userEvent.type(scoped.getByLabelText("Account Currency"), "sgd");
     }
 
-    expect(screen.getByLabelText("Account Country")).toHaveValue("SG");
+    expect(screen.getByLabelText("Account Country")).toHaveValue("US");
+    await userEvent.clear(screen.getByLabelText("Account Country"));
+    await userEvent.type(screen.getByLabelText("Account Country"), "sg");
 
     await userEvent.click(screen.getByRole("button", { name: "Create account" }));
 
     expect(mockApi.createAccount).toHaveBeenCalledWith({
       name: "DBS Savings",
       platform_id: 1,
-      platform: "DBS",
+      platform: "CITI",
       account_type: "BANK",
       currency: "SGD",
       country: "SG",
@@ -185,5 +187,25 @@ describe("AddAccount", () => {
 
     expect(await screen.findByText("Load error")).toBeInTheDocument();
     expect(screen.getByText(/No options/)).toBeInTheDocument();
+  });
+
+  it("renders user menu with add account action", async () => {
+    const user = userEvent.setup();
+    mockApi.platforms.mockResolvedValueOnce(platformsFixture);
+    mockApi.accountOptions.mockResolvedValueOnce(optionsFixture);
+    mockApi.platformOptions.mockResolvedValueOnce(platformOptionsFixture);
+    mockApi.currencies.mockResolvedValueOnce([
+      { id: 1, code: "SGD", name: "Singapore Dollar", country: "Singapore" },
+    ]);
+
+    render(
+      <MemoryRouter>
+        <AddAccount />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("Account Details");
+    await user.click(screen.getByLabelText("User menu"));
+    expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
   });
 });

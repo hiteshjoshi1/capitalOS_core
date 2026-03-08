@@ -86,38 +86,48 @@ export default function DashboardHeader({
             <span>User</span>
           </summary>
           <div className="userMenuPanel">
-            <div className="cardTitle">Settings</div>
-            <label className="field">
-              <span className="label">Base Currency</span>
-              <select
-                className="input"
-                aria-label="Base currency"
-                value={baseCurrency}
-                onChange={(event) => onBaseCurrencyChange(event.target.value)}
-              >
-                {BASE_CURRENCY_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="label">Month</span>
-              <input
-                className="input"
-                aria-label="Month"
-                type="month"
-                value={month}
-                onChange={(event) => onMonthChange(event.target.value)}
-              />
-            </label>
-            <button className="btn" type="button" onClick={onToggleTheme}>
-              Theme: {theme === "dark" ? "Dark" : "Light"}
-            </button>
-            <button className="btn" type="button" disabled>
-              Sign in (coming soon)
-            </button>
+            <section className="userMenuSection" aria-label="Manage">
+              <div className="cardTitle">Manage</div>
+              <Link className="menuLink menuLinkPrimary" to="/accounts/new">
+                <span aria-hidden="true">+</span>
+                <span>Add Account</span>
+              </Link>
+            </section>
+
+            <section className="userMenuSection" aria-label="Settings">
+              <div className="cardTitle">Settings</div>
+              <label className="field">
+                <span className="label">Base Currency</span>
+                <select
+                  className="input"
+                  aria-label="Base currency"
+                  value={baseCurrency}
+                  onChange={(event) => onBaseCurrencyChange(event.target.value)}
+                >
+                  {BASE_CURRENCY_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">Month</span>
+                <input
+                  className="input"
+                  aria-label="Month"
+                  type="month"
+                  value={month}
+                  onChange={(event) => onMonthChange(event.target.value)}
+                />
+              </label>
+              <button className="btn" type="button" onClick={onToggleTheme}>
+                Theme: {theme === "dark" ? "Dark" : "Light"}
+              </button>
+              <button className="btn" type="button" disabled>
+                Sign in (coming soon)
+              </button>
+            </section>
           </div>
         </details>
       </div>

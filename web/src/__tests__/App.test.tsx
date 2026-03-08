@@ -202,6 +202,8 @@ describe("App", () => {
     expect(screen.getByText("+S$ 50,000 (+50.0%)")).toBeInTheDocument();
 
     await user.click(screen.getByLabelText("User menu"));
+    expect(screen.getByText("Manage")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();

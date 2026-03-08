@@ -181,6 +181,28 @@ a {
   z-index: 40;
 }
 
+.userMenuSection {
+  display: grid;
+  gap: 8px;
+}
+
+.menuLink {
+  color: var(--text);
+  font-size: 13px;
+  text-decoration: none;
+}
+
+.menuLinkPrimary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.menuLink:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
 .dashboardRow {
   margin-top: 2px;
 }

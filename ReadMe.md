@@ -157,6 +157,7 @@ Detailed reference: `docs/workflows/ai-task-flow.md`.
 All validation commands run locally on your machine by default.
 Optional GitHub validation exists as a manual workflow (`workflow_dispatch`) and does not auto-run on PRs.
 On macOS, Codex implementation/rework commands auto-use `caffeinate` so long runs do not sleep.
+Copilot planner/reviewer runs in text-only tool mode by default (no shell/write/url tools), which avoids planner permission failures and keeps task file writes deterministic via `task_flow.sh`.
 
 Model routing:
 - Planning/architecture: `claude-opus-4.6`
@@ -177,6 +178,7 @@ codex --version
 
 Optional:
 - Disable Codex sleep-prevention wrapper for a run: `ENABLE_CAFFEINATE=0 make task-build TASK=...`
+- Enable Copilot tool calls explicitly (normally keep off): `COPILOT_TOOL_MODE=tools-enabled make task-plan TASK=...`
 
 ### 1) Create a task from template
 
