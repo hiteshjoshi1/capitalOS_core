@@ -69,6 +69,20 @@ run_with_caffeinate_for_codex() {
   "$@"
 }
 
+enable_stage_caffeinate_if_needed() {
+  local stage="$1"
+  case "$stage" in
+    plan|build|review|rework|all) ;;
+    *) return 0 ;;
+  esac
+
+  if [[ "$ENABLE_CAFFEINATE" == "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    # Keep machine awake for the lifetime of this script process.
+    caffeinate -dimsu -w $$ >/dev/null 2>&1 &
+    log "caffeinate enabled for stage: $stage"
+  fi
+}
+
 validate_task_file() {
   TASK_FILE="$1"
   TASK_BASENAME="$(basename "$TASK_FILE")"
@@ -442,14 +456,17 @@ validate_generated_task_file_content() {
   grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
 }
 
-ensure_workflow_commands_in_task_file() {
+normalize_workflow_commands_in_task_file() {
   local content="$1"
-  if grep -q '^## Workflow Commands' <<<"$content"; then
-    echo "$content"
-    return 0
-  fi
+  local without_existing
+  without_existing="$(printf '%s\n' "$content" | awk '
+    BEGIN { skip=0 }
+    /^## Workflow Commands[[:space:]]*$/ { skip=1; next }
+    skip && /^## / { skip=0 }
+    !skip { print }
+  ')"
   cat <<EOF
-$content
+$without_existing
 
 ## Workflow Commands
 
@@ -618,7 +635,7 @@ EOF
   planned_task="$(resolve_plan_task_file_output "$raw_output" || true)"
   [[ -n "$planned_task" ]] || die "Planner output did not include a valid task document. No task file changes were written."
 
-  planned_task="$(ensure_workflow_commands_in_task_file "$planned_task")"
+  planned_task="$(normalize_workflow_commands_in_task_file "$planned_task")"
   validate_generated_task_file_content "$planned_task" || die "Planner output failed required task-file structure checks."
 
   printf '%s\n' "$planned_task" > "$TASK_FILE"
@@ -931,6 +948,8 @@ main() {
   local cmd="$1"
   local task="$2"
   local rc
+
+  enable_stage_caffeinate_if_needed "$cmd"
 
   case "$cmd" in
     prepare) cmd_prepare "$task" ;;

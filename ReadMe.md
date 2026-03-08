@@ -156,7 +156,7 @@ CapitalOS supports a local-first AI workflow with a mandatory human gate.
 Detailed reference: `docs/workflows/ai-task-flow.md`.
 All validation commands run locally on your machine by default.
 Optional GitHub validation exists as a manual workflow (`workflow_dispatch`) and does not auto-run on PRs.
-On macOS, Codex implementation/rework commands auto-use `caffeinate` so long runs do not sleep.
+On macOS, workflow stages (`task-plan`, `task-build`, `task-review`, `task-rework`, `task-all`) auto-use `caffeinate` so long runs do not sleep.
 Copilot planner/reviewer runs in text-only tool mode by default (no shell/write/url tools), which avoids planner permission failures and keeps task file writes deterministic via `task_flow.sh`.
 
 Model routing:
@@ -206,6 +206,7 @@ make task-plan TASK=tasks/issue-123-my-feature.md
 
 `task-plan` reuses the existing issue branch if it already exists (it does not recreate it).
 If you are already on that issue branch, `task-plan` allows staged/unstaged edits only in the same task file.
+The `Workflow Commands` section is normalized to canonical `make task-* TASK=<file>` commands.
 The planning output also includes a ready-to-copy command pack for this exact task file.
 
 ### 4) Human gate (required)

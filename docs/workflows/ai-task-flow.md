@@ -3,7 +3,7 @@
 This workflow is local-first and branch-safe.
 All verification runs locally on your machine by default.
 An optional manual GitHub Actions workflow exists and runs only when triggered explicitly.
-On macOS, only long-running Codex implementation/rework commands run under `caffeinate` to prevent sleep.
+On macOS, all main stages (`plan`, `build`, `review`, `rework`, `all`) run under `caffeinate` to prevent sleep until the stage exits.
 Copilot planner/reviewer runs in `text-only` tool mode by default (no shell/write/url tools), so task files are generated from model output and not by direct Copilot file writes.
 
 Model routing:
@@ -34,6 +34,7 @@ Human gate:
 - Creates task file from `tasks/_template.md` when missing.
 - Runs Copilot with Opus and writes a clean structured plan into the task file (CLI transcript stays in terminal output, not in the file).
 - Planning output includes copy/paste `make` commands with the exact task filename.
+- Workflow command section is normalized by script to canonical `make task-* TASK=<file>` commands.
 - Commits and pushes the planning artifact.
 
 2. Human review
@@ -91,7 +92,7 @@ Human gate:
 - All blockers are appended into task file.
 - Codex must not modify immutable approved plan content.
 - `caffeinate` is enabled by default (`ENABLE_CAFFEINATE=1`); set `ENABLE_CAFFEINATE=0` to disable.
-- `caffeinate` scope is Codex code-writing runs only (build/rework path).
+- `caffeinate` scope covers `plan`, `build`, `review`, `rework`, and `all`.
 - Copilot tool mode defaults to `COPILOT_TOOL_MODE=text-only`; set `COPILOT_TOOL_MODE=tools-enabled` only if you explicitly want Copilot tool calls.
 
 ## E2E Definition and Trigger
