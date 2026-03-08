@@ -80,7 +80,7 @@ db-query:
 	docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) -c "$(QUERY)"
 
 # ---- Quality gates ----
-.PHONY: lint typecheck test-backend test-frontend e2e verify task-plan task-build task-review task-rework task-ship task-all
+.PHONY: lint typecheck test-backend test-frontend e2e verify task-prepare task-plan task-build task-review task-rework task-ship task-all
 
 # Frontend lint + optional backend lint if ruff is installed in API image.
 lint:
@@ -106,6 +106,10 @@ e2e:
 verify: lint typecheck test-backend test-frontend
 
 # ---- AI task workflow ----
+task-prepare:
+	@test -n "$(TASK)" || (echo "Usage: make task-prepare TASK=tasks/issue-<id>-<slug>.md" && exit 2)
+	./scripts/task_flow.sh prepare "$(TASK)"
+
 task-plan:
 	@test -n "$(TASK)" || (echo "Usage: make task-plan TASK=tasks/issue-<id>-<slug>.md" && exit 2)
 	./scripts/task_flow.sh plan "$(TASK)"

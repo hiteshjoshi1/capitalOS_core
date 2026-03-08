@@ -190,15 +190,24 @@ Add your high-level input in the task file under `## Objective`.
 Example:
 - "Update dashboard UI/UX for cleaner hierarchy, better risk-card readability, and improved mobile layout."
 
-### 2) Generate plan (Opus)
+### 2) Prepare branch from latest main
+
+```bash
+make task-prepare TASK=tasks/issue-123-my-feature.md
+```
+
+This creates/switches `feature/issue-<id>-<slug>` from latest `main`, carries your task file into that branch, and commits it.
+
+### 3) Generate plan (Opus)
 
 ```bash
 make task-plan TASK=tasks/issue-123-my-feature.md
 ```
 
+`task-plan` reuses the existing issue branch if it already exists (it does not recreate it).
 The planning output also includes a ready-to-copy command pack for this exact task file.
 
-### 3) Human gate (required)
+### 4) Human gate (required)
 
 Review the task file and mark:
 
@@ -206,7 +215,7 @@ Review the task file and mark:
 - [x] Approved for implementation
 ```
 
-### 4) Build and verify (Codex)
+### 5) Build and verify (Codex)
 
 ```bash
 make task-build TASK=tasks/issue-123-my-feature.md
@@ -214,7 +223,7 @@ make task-build TASK=tasks/issue-123-my-feature.md
 
 `task-build` auto-stages changes (`git add -A`) for review handoff.
 
-### 5) Review (Sonnet, Opus escalation if needed)
+### 6) Review (Sonnet, Opus escalation if needed)
 
 ```bash
 make task-review TASK=tasks/issue-123-my-feature.md
@@ -223,7 +232,7 @@ make task-review TASK=tasks/issue-123-my-feature.md
 Note:
 - `task-review` expects a fully staged snapshot (`git add -A`) so reviewer sees all changes, including new files.
 
-### 6) Rework only latest review findings (if needed)
+### 7) Rework only latest review findings (if needed)
 
 ```bash
 make task-rework TASK=tasks/issue-123-my-feature.md
@@ -236,7 +245,7 @@ Review tracking:
 - After `task-rework`: same cycle status is `Implemented`.
 - A new `task-review` creates a new review cycle section (for example `R2`) so findings remain separated.
 
-### 7) Ship branch and open PR
+### 8) Ship branch and open PR
 
 ```bash
 make task-ship TASK=tasks/issue-123-my-feature.md

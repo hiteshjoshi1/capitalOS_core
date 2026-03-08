@@ -21,9 +21,15 @@ Human gate:
   - `- [x] Approved for implementation`
 
 ## Lifecycle
+0. `prepare`
+- Uses your local task file as input.
+- Verifies no other working-tree changes are present.
+- Checks out `main`, pulls latest, creates/switches `feature/issue-<id>-<slug>`, restores the task file there, commits, and pushes.
+- Leaves branch clean and ready for `plan`.
+
 1. `plan`
 - Verifies clean worktree.
-- Checks out `main`, pulls latest, and creates/switches `feature/issue-<id>-<slug>`.
+- Checks out `main`, pulls latest, and creates/switches `feature/issue-<id>-<slug>` (reuses existing branch; does not recreate).
 - Creates task file from `tasks/_template.md` when missing.
 - Runs Copilot with Opus and writes a clean structured plan into the task file (CLI transcript stays in terminal output, not in the file).
 - Planning output includes copy/paste `make` commands with the exact task filename.
@@ -64,6 +70,7 @@ Human gate:
 - Creates PR to `main` if one does not already exist.
 
 ## Commands
+- `scripts/task_flow.sh prepare tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh plan tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh build tasks/issue-123-my-task.md`
 - `scripts/task_flow.sh review tasks/issue-123-my-task.md`
@@ -96,8 +103,9 @@ Human gate:
 Input entrypoint for high-level task: task file objective section.
 
 Git behavior for this step:
-- Create the new task file first and run `make task-plan ...` without pre-committing.
-- `task-plan` checks out `main`, pulls latest, creates/switches `feature/issue-<id>-<slug>`, and commits the task file on that feature branch.
+- Create the new task file first and run `make task-prepare ...`.
+- `task-prepare` checks out `main`, pulls latest, creates/switches `feature/issue-<id>-<slug>`, and commits the task file on that feature branch.
+- `task-plan` then reuses that existing branch (no branch recreation).
 - Do not commit the task file on `main` first.
 - Keep tracked local changes clean before running, or branch switching can fail.
 
@@ -107,6 +115,7 @@ Example (UI/UX refresh):
 2. Write your high-level prompt in `## Objective`, for example:
 - "Refresh dashboard UI/UX for clarity and hierarchy; improve risk card readability and mobile spacing."
 3. Start workflow:
+- `make task-prepare TASK=tasks/issue-103-ui-ux-refresh.md`
 - `make task-plan TASK=tasks/issue-103-ui-ux-refresh.md`
 4. Review generated plan and check:
 - `- [x] Approved for implementation`

@@ -24,6 +24,7 @@ BRANCH=""
 usage() {
   cat <<'EOF'
 Usage:
+  scripts/task_flow.sh prepare tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh plan  tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh build tasks/issue-<id>-<slug>.md
   scripts/task_flow.sh review tasks/issue-<id>-<slug>.md
@@ -213,6 +214,24 @@ is_human_approved() {
 assert_clean_worktree() {
   if ! git diff --quiet || ! git diff --cached --quiet; then
     die "Working tree is dirty. Commit/stash changes before running workflow commands."
+  fi
+}
+
+assert_prepare_safe_worktree() {
+  local status_lines other_changes
+  status_lines="$(git status --porcelain)"
+  if [[ -z "$status_lines" ]]; then
+    return 0
+  fi
+
+  other_changes="$(printf '%s\n' "$status_lines" | awk -v tf="$TASK_FILE" '
+    {
+      path = substr($0, 4)
+      if (path != tf) print $0
+    }
+  ')"
+  if [[ -n "$other_changes" ]]; then
+    die "Working tree has changes beyond $TASK_FILE. Commit/stash them before task-prepare."
   fi
 }
 
@@ -501,6 +520,26 @@ review_needs_escalation() {
     return 0
   fi
   return 1
+}
+
+cmd_prepare() {
+  require_tool git
+  validate_task_file "$1"
+  [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE. Create it first."
+  assert_prepare_safe_worktree
+
+  local task_snapshot
+  task_snapshot="$(mktemp)"
+  cp "$TASK_FILE" "$task_snapshot"
+
+  prepare_branch_from_main
+  mkdir -p "$(dirname "$TASK_FILE")"
+  cp "$task_snapshot" "$TASK_FILE"
+  rm -f "$task_snapshot"
+  assert_task_path_writable
+
+  commit_and_push_task_file "chore: bootstrap issue #${ISSUE_ID} task file"
+  log "Branch ready for planning: $BRANCH"
 }
 
 cmd_plan() {
@@ -867,6 +906,7 @@ main() {
   local rc
 
   case "$cmd" in
+    prepare) cmd_prepare "$task" ;;
     plan) cmd_plan "$task" ;;
     build) cmd_build "$task" ;;
     review)
