@@ -7,6 +7,7 @@ REVIEW_MODEL="${REVIEW_MODEL:-claude-sonnet-4.6}"
 REVIEW_ESCALATION_MODEL="${REVIEW_ESCALATION_MODEL:-claude-opus-4.6}"
 CODEX_TIMEOUT_MINUTES="${CODEX_TIMEOUT_MINUTES:-60}"
 ENABLE_CAFFEINATE="${ENABLE_CAFFEINATE:-1}"
+COPILOT_TOOL_MODE="${COPILOT_TOOL_MODE:-text-only}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -37,6 +38,7 @@ Environment overrides:
   MAX_RETRIES=3
   CODEX_TIMEOUT_MINUTES=60
   ENABLE_CAFFEINATE=1
+  COPILOT_TOOL_MODE=text-only
 EOF
 }
 
@@ -102,6 +104,18 @@ ensure_task_file_exists() {
     "$TASK_TEMPLATE" > "$TASK_FILE"
 
   log "Created task file from template: $TASK_FILE"
+}
+
+assert_task_path_writable() {
+  local task_dir
+  task_dir="$(dirname "$TASK_FILE")"
+
+  [[ -d "$task_dir" ]] || die "Task directory does not exist: $task_dir"
+  [[ -w "$task_dir" ]] || die "Task directory is not writable: $task_dir"
+
+  if [[ -f "$TASK_FILE" ]]; then
+    [[ -w "$TASK_FILE" ]] || die "Task file is not writable: $TASK_FILE"
+  fi
 }
 
 append_task_block() {
@@ -270,7 +284,25 @@ commit_and_push_task_file() {
 run_copilot_prompt() {
   local model="$1"
   local prompt="$2"
-  copilot --model "$model" -p "$prompt" --no-color
+  local args=(
+    copilot
+    --model "$model"
+    -p "$prompt"
+    --no-color
+  )
+
+  if [[ "$COPILOT_TOOL_MODE" == "text-only" ]]; then
+    # Keep planning/review deterministic and avoid Copilot CLI tool permission failures.
+    args+=(
+      --no-ask-user
+      --disable-builtin-mcps
+      --deny-tool write
+      --deny-tool shell
+      --deny-tool url
+    )
+  fi
+
+  "${args[@]}"
 }
 
 run_copilot_prompt_visible() {
@@ -288,33 +320,109 @@ latest_copilot_session_plan() {
     | cut -d' ' -f2-
 }
 
-resolve_session_plan_output() {
-  local raw_output="$1"
-  if echo "$raw_output" | grep -qi "plan written to session plan.md"; then
-    local plan_file
-    plan_file="$(latest_copilot_session_plan || true)"
-    if [[ -n "$plan_file" && -s "$plan_file" ]]; then
-      {
-        echo "$raw_output"
-        echo
-        echo "Resolved full plan from: $plan_file"
-        echo
-        cat "$plan_file"
-      }
-      return 0
-    fi
-  fi
-  echo "$raw_output"
+extract_between_task_markers() {
+  local text="$1"
+  printf '%s\n' "$text" | awk '
+    /^[[:space:]]*<<<TASK_FILE_START>>>[[:space:]]*$/ { capture=1; next }
+    /^[[:space:]]*<<<TASK_FILE_END>>>[[:space:]]*$/ { capture=0; found=1; exit }
+    capture { print }
+    END { if (!found) exit 1 }
+  '
 }
 
-plan_command_pack() {
+extract_task_file_from_fenced_block() {
+  local text="$1"
+  printf '%s\n' "$text" | awk '
+    BEGIN { in_fence=0; found=0; block="" }
+    /^[[:space:]]*```/ {
+      if (!in_fence) {
+        in_fence=1
+        block=""
+        next
+      }
+      in_fence=0
+      if (index(block, "<!-- IMMUTABLE_PLAN_END -->") > 0 && index(block, "# Issue ") > 0) {
+        printf "%s", block
+        found=1
+        exit
+      }
+      block=""
+      next
+    }
+    in_fence { block = block $0 ORS }
+    END { if (!found) exit 1 }
+  '
+}
+
+resolve_plan_task_file_output() {
+  local raw_output="$1"
+  local extracted plan_file session_plan
+
+  extracted="$(extract_between_task_markers "$raw_output" 2>/dev/null || true)"
+  if [[ -n "$extracted" ]]; then
+    echo "$extracted"
+    return 0
+  fi
+
+  extracted="$(extract_task_file_from_fenced_block "$raw_output" 2>/dev/null || true)"
+  if [[ -n "$extracted" ]]; then
+    echo "$extracted"
+    return 0
+  fi
+
+  if echo "$raw_output" | grep -qi "plan written to session plan.md"; then
+    plan_file="$(latest_copilot_session_plan || true)"
+    if [[ -n "$plan_file" && -s "$plan_file" ]]; then
+      session_plan="$(cat "$plan_file")"
+      extracted="$(extract_between_task_markers "$session_plan" 2>/dev/null || true)"
+      if [[ -n "$extracted" ]]; then
+        echo "$extracted"
+        return 0
+      fi
+      extracted="$(extract_task_file_from_fenced_block "$session_plan" 2>/dev/null || true)"
+      if [[ -n "$extracted" ]]; then
+        echo "$extracted"
+        return 0
+      fi
+      if grep -q "<!-- IMMUTABLE_PLAN_END -->" <<<"$session_plan" && grep -q "^# Issue " <<<"$session_plan"; then
+        echo "$session_plan"
+        return 0
+      fi
+    fi
+  fi
+
+  return 1
+}
+
+validate_generated_task_file_content() {
+  local content="$1"
+  grep -Eq '^# Issue [0-9]+:' <<<"$content" || return 1
+  grep -q '^## Objective' <<<"$content" || return 1
+  grep -q '^## Architecture Decisions' <<<"$content" || return 1
+  grep -q '^## Acceptance Criteria' <<<"$content" || return 1
+  grep -q '^## Human Approval Gate' <<<"$content" || return 1
+  grep -q '^## Task Checklist' <<<"$content" || return 1
+  grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
+}
+
+ensure_workflow_commands_in_task_file() {
+  local content="$1"
+  if grep -q '^## Workflow Commands' <<<"$content"; then
+    echo "$content"
+    return 0
+  fi
   cat <<EOF
-Copy/paste commands for this task:
+$content
+
+## Workflow Commands
+
+\`\`\`bash
 make task-plan TASK=$TASK_FILE
 make task-build TASK=$TASK_FILE
 make task-review TASK=$TASK_FILE
 make task-rework TASK=$TASK_FILE
 make task-ship TASK=$TASK_FILE
+\`\`\`
 EOF
 }
 
@@ -402,36 +510,52 @@ cmd_plan() {
   assert_clean_worktree
   prepare_branch_from_main
   ensure_task_file_exists
+  assert_task_path_writable
 
-  local prompt output
+  local prompt
   prompt="$(cat <<EOF
 You are planning work for CapitalOS.
 Model role: architecture/planning.
 Task file: $TASK_FILE
 
-Return concise markdown with:
-1) Architecture decisions (deterministic)
-2) Risks
-3) Open questions (only if critical)
-4) Task breakdown aligned to acceptance criteria
-5) Command pack with exact copy/paste commands for this task file:
-   - make task-plan TASK=$TASK_FILE
-   - make task-build TASK=$TASK_FILE
-   - make task-review TASK=$TASK_FILE
-   - make task-rework TASK=$TASK_FILE
-   - make task-ship TASK=$TASK_FILE
+Return ONLY the final task markdown between these exact markers:
+<<<TASK_FILE_START>>>
+...full task file markdown...
+<<<TASK_FILE_END>>>
 
-Do not write any code. Do not suggest scope expansion.
+Requirements:
+1) Provide a complete task file document (not partial notes) with sections:
+   - Objective
+   - Architecture Decisions
+   - Risks
+   - Open Questions
+   - Acceptance Criteria
+   - Human Approval Gate
+   - Task Checklist
+   - Workflow Commands (exact commands with TASK=$TASK_FILE)
+   - Implementation Reasoning Addendum (Codex Mutable)
+   - Verification Evidence (Codex Mutable)
+   - Review Findings (Sonnet Primary, Opus Escalation)
+   - Retry Log (Max 3)
+   - Automation Log (Mutable)
+2) Keep marker exactly: <!-- IMMUTABLE_PLAN_END -->
+3) Keep output deterministic and scoped to requested feature.
+4) Do not edit files directly; only return final markdown content between markers.
+5) Do not include tool logs or transcripts inside the marked output.
 
 Current task file content:
 $(cat "$TASK_FILE")
 EOF
 )"
-  output="$(run_copilot_prompt_visible "$PLAN_MODEL" "$prompt")"
-  output="$(resolve_session_plan_output "$output")"
-  append_task_block "Planning Output (${PLAN_MODEL})" "$output"
-  append_task_block "Workflow Commands" "$(plan_command_pack)"
-  append_task_block "Human Gate Reminder" "Review the plan and set '- [x] Approved for implementation' before build."
+  local raw_output planned_task
+  raw_output="$(run_copilot_prompt_visible "$PLAN_MODEL" "$prompt")"
+  planned_task="$(resolve_plan_task_file_output "$raw_output" || true)"
+  [[ -n "$planned_task" ]] || die "Planner output did not include a valid task document. No task file changes were written."
+
+  planned_task="$(ensure_workflow_commands_in_task_file "$planned_task")"
+  validate_generated_task_file_content "$planned_task" || die "Planner output failed required task-file structure checks."
+
+  printf '%s\n' "$planned_task" > "$TASK_FILE"
   commit_and_push_task_file "plan: issue #${ISSUE_ID} with ${PLAN_MODEL}"
   log "Plan complete. Human approval gate must be checked before build."
 }
@@ -475,9 +599,9 @@ EOF
   fi
 
   run_verification_suite
+  append_task_block "Build Result" "Implementation and verification suite completed successfully."
   git add -A
   log "Auto-staged build outputs for review."
-  append_task_block "Build Result" "Implementation and verification suite completed successfully."
 }
 
 run_sonnet_review() {
@@ -657,10 +781,10 @@ EOF
   fi
 
   run_verification_suite
-  git add -A
-  log "Auto-staged rework outputs for review."
   append_review_status "$review_id" "Implemented" "NEEDS_REVIEW" "PENDING"
   append_task_block "Review Cycle ${review_id} - Rework Result" "Targeted rework implemented for latest review findings."
+  git add -A
+  log "Auto-staged rework outputs for review."
 }
 
 cmd_ship() {

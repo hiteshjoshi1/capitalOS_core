@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
@@ -23,6 +23,7 @@ const EMPTY_FORM: FormState = {
 };
 
 export default function AddAccount() {
+  const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
@@ -41,6 +42,37 @@ export default function AddAccount() {
     website: "",
   });
   const [currencySearch, setCurrencySearch] = useState<string>("");
+  const [countrySearch, setCountrySearch] = useState<string>("");
+
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent) => {
+      const menu = menuRef.current;
+      if (!menu || !menu.open) {
+        return;
+      }
+      const target = event.target as Node | null;
+      if (target && !menu.contains(target)) {
+        menu.open = false;
+      }
+    };
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") {
+        return;
+      }
+      const menu = menuRef.current;
+      if (menu?.open) {
+        menu.open = false;
+      }
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -81,6 +113,7 @@ export default function AddAccount() {
         ...prev,
         country: selectedPlatform.country ?? "",
       }));
+      setCountrySearch(selectedPlatform.country ?? "");
     }
   }, [selectedPlatform]);
 
@@ -88,7 +121,8 @@ export default function AddAccount() {
     form.name.trim().length > 0 &&
     form.platformId !== "" &&
     form.accountType !== "" &&
-    form.currency.trim().length > 0;
+    form.currency.trim().length > 0 &&
+    form.country.trim().length > 0;
 
   async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -113,10 +147,12 @@ export default function AddAccount() {
         platform: selectedPlatform.code,
         account_type: form.accountType,
         currency: form.currency.trim().toUpperCase(),
-        country: selectedPlatform.country ?? null,
+        country: form.country.trim().toUpperCase() || null,
       });
       setSuccess("Account created.");
       setForm(EMPTY_FORM);
+      setCurrencySearch("");
+      setCountrySearch("");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setErr(msg);
@@ -180,6 +216,13 @@ export default function AddAccount() {
     );
   }, [currencyOptions, currencySearch]);
 
+  const filteredCountries = useMemo(() => {
+    const countries = options?.countries ?? [];
+    const q = countrySearch.trim().toUpperCase();
+    if (!q) return countries;
+    return countries.filter((country) => country.toUpperCase().includes(q));
+  }, [options?.countries, countrySearch]);
+
   return (
     <div className="wrap">
       <header className="header">
@@ -187,9 +230,33 @@ export default function AddAccount() {
           <div className="title">Add Account</div>
           <div className="subtitle">Create a new account linked to a platform.</div>
         </div>
-        <div className="pillRow">
-          <Link className="btn" to="/">Dashboard</Link>
-          <Link className="btn" to="/ingest">Ingest</Link>
+        <div className="dashboardNavArea">
+          <nav className="pillRow topNavLinks" aria-label="Primary navigation">
+            <Link className="pill topNavLink" to="/">
+              Dashboard
+            </Link>
+            <Link className="pill topNavLink" to="/ingest">
+              Ingest
+            </Link>
+          </nav>
+
+          <details className="userMenu" ref={menuRef}>
+            <summary className="pill userMenuSummary" aria-label="User menu">
+              <span className="avatar" aria-hidden="true">
+                U
+              </span>
+              <span>User</span>
+            </summary>
+            <div className="userMenuPanel">
+              <section className="userMenuSection" aria-label="Manage">
+                <div className="cardTitle">Manage</div>
+                <Link className="menuLink menuLinkPrimary" to="/accounts/new">
+                  <span aria-hidden="true">+</span>
+                  <span>Add Account</span>
+                </Link>
+              </section>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -306,7 +373,26 @@ export default function AddAccount() {
 
             <label className="field">
               <span className="label">Country</span>
-              <input className="input" type="text" value={form.country} aria-label="Account Country" readOnly />
+              <input
+                className="input"
+                type="text"
+                list="country-options"
+                value={countrySearch}
+                aria-label="Account Country"
+                onChange={(e) => {
+                  const next = e.target.value.toUpperCase();
+                  setCountrySearch(next);
+                  setForm((prev) => ({ ...prev, country: next }));
+                }}
+                placeholder="Start typing to filter"
+                required
+              />
+              <datalist id="country-options">
+                {filteredCountries.map((country) => (
+                  <option key={country} value={country} />
+                ))}
+              </datalist>
+              <span className="hint">Type to filter and select a country.</span>
             </label>
 
 

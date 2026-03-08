@@ -60,20 +60,23 @@ def create_account(payload: AccountCreate, db: Session = Depends(get_db)):
         db.flush()
 
     platform_code = payload.platform.strip()
-    country = payload.country
+    country = payload.country.strip().upper() if payload.country and payload.country.strip() else None
+    if country is not None and not re.match(r"^[A-Z]{2,3}$", country):
+        raise HTTPException(status_code=400, detail="invalid country")
+
     if payload.platform_id is not None:
         platform = db.query(Platform).filter(Platform.id == payload.platform_id).one_or_none()
         if platform is None:
             raise HTTPException(status_code=400, detail="platform_id not found")
         platform_code = platform.code
-        country = platform.country
     else:
         if not platform_code:
             raise HTTPException(status_code=400, detail="platform is required")
         platform = db.query(Platform).filter(Platform.code == platform_code).one_or_none()
         if platform is None:
             raise HTTPException(status_code=400, detail="platform not found")
-        country = platform.country
+
+    country = country or platform.country
 
     acc = Account(
         name=payload.name.strip(),

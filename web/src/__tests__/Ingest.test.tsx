@@ -24,9 +24,8 @@ describe("Ingest", () => {
   });
 
   it("uploads a file and shows report", async () => {
-    mockApi.accounts.mockResolvedValueOnce([
-      { id: 1, name: "DBS Savings", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" },
-    ]);
+    const account = { id: 1, name: "Primary Savings", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" };
+    mockApi.accounts.mockResolvedValueOnce([account]);
     mockApi.ingestJobs.mockResolvedValueOnce([]);
     mockApi.ingestUpload.mockResolvedValueOnce({
       job_id: 10,
@@ -49,6 +48,7 @@ describe("Ingest", () => {
     );
 
     await screen.findByText("Upload Statement CSV");
+    expect(screen.getByRole("option", { name: `${account.name} (${account.currency})` })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Account"), "1");
 
     const file = new File(["data"], "dbs.csv", { type: "text/csv" });

@@ -57,7 +57,7 @@ def test_accounts_create_and_list(client: TestClient, db_engine):
         conn.execute(
             text(
                 "INSERT INTO platforms (id, code, name, platform_type, country, website) VALUES "
-                "(1, 'DBS', 'DBS Bank', 'BANK', 'SG', NULL)"
+                "(1, 'CITI', 'Citibank', 'BANK', 'US', NULL)"
             )
         )
 
@@ -74,7 +74,8 @@ def test_accounts_create_and_list(client: TestClient, db_engine):
     created = create.json()
     assert created["name"] == "DBS Savings"
     assert created["platform_id"] == 1
-    assert created["platform"] == "DBS"
+    assert created["platform"] == "CITI"
+    assert created["country"] == "SG"
 
     with db_engine.begin() as conn:
         cur = conn.execute(text("SELECT code FROM currencies WHERE code='SGD'")).fetchone()
