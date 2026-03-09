@@ -493,13 +493,72 @@ run_codex_prompt() {
   run_with_caffeinate_for_codex codex exec --full-auto --sandbox workspace-write "$prompt"
 }
 
+run_with_retries_and_codex_fix() {
+  local label="$1"
+  shift
+  local cmd=("$@")
+  local cmd_str attempt rc output_file output prompt
+  printf -v cmd_str '%q ' "${cmd[@]}"
+  cmd_str="${cmd_str% }"
+
+  for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
+    log "$label (attempt $attempt/$MAX_RETRIES)"
+    output_file="$(mktemp)"
+    set +e
+    "${cmd[@]}" 2>&1 | tee "$output_file"
+    rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$rc" -eq 0 ]]; then
+      rm -f "$output_file"
+      return 0
+    fi
+
+    output="$(sed -n '1,1200p' "$output_file")"
+    rm -f "$output_file"
+    append_retry_log "$label failed on attempt $attempt with exit code $rc: $cmd_str"
+
+    if (( attempt == MAX_RETRIES )); then
+      append_retry_log "$label failed after $MAX_RETRIES attempts."
+      return 1
+    fi
+
+    prompt="$(cat <<EOF
+Fix the failing verification command in the current branch.
+
+Task file: $TASK_FILE
+Failed command: $cmd_str
+Attempt: $attempt of $MAX_RETRIES
+Exit code: $rc
+
+Failure output (truncated):
+$output
+
+Constraints:
+1) Keep changes minimal and scoped to resolving this failure.
+2) Do not modify content above <!-- IMMUTABLE_PLAN_END --> in $TASK_FILE.
+3) If task file updates are needed, update only mutable sections.
+4) After changes, run only this command to validate:
+   $cmd_str
+EOF
+)"
+    log "Invoking Codex auto-fix for: $label"
+    set +e
+    run_codex_prompt "$prompt"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+      append_retry_log "Codex auto-fix failed for '$label' on attempt $attempt with exit code $rc."
+    fi
+  done
+}
+
 run_verification_suite() {
-  run_with_retries "make lint" make lint
-  run_with_retries "make typecheck" make typecheck
-  run_with_retries "make test-backend" make test-backend
-  run_with_retries "make test-frontend" make test-frontend
+  run_with_retries_and_codex_fix "make lint" make lint
+  run_with_retries_and_codex_fix "make typecheck" make typecheck
+  run_with_retries_and_codex_fix "make test-backend" make test-backend
+  run_with_retries_and_codex_fix "make test-frontend" make test-frontend
   if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
-    run_with_retries "make e2e" make e2e
+    run_with_retries_and_codex_fix "make e2e" make e2e
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
   fi

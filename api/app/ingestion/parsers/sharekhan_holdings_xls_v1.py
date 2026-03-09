@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Any
+from typing import Any, Dict, List
 
 import pandas as pd
 
+from app.ingestion.parsers import ParseResult
 
 @dataclass
 class SheetSelection:
@@ -124,19 +125,29 @@ def _select_html_table(tables: list[pd.DataFrame]) -> tuple[pd.DataFrame, SheetS
     return None
 
 
-def parse_sharekhan_holdings_xls(file_path: str) -> Tuple[List[Dict], List[Dict], Dict[str, int], Dict[str, Any]]:
+def parse_sharekhan_holdings_xls(file_path: str) -> ParseResult:
     if _is_html_file(file_path):
         tables = pd.read_html(file_path)
         found = _select_html_table(tables)
         if not found:
-            return [], [], {"rows_parsed": 0}, {"sheet_name": None, "header_row_index": None}
+            return ParseResult(
+                transactions=[],
+                positions=[],
+                section_counts={"rows_parsed": 0},
+                parser_meta={"sheet_name": None, "header_row_index": None},
+            )
         df, selection = found
     else:
         engine = _pick_engine(file_path)
         xls = pd.ExcelFile(file_path, engine=engine)
         selection = _select_sheet(xls)
         if selection is None:
-            return [], [], {"rows_parsed": 0}, {"sheet_name": None, "header_row_index": None}
+            return ParseResult(
+                transactions=[],
+                positions=[],
+                section_counts={"rows_parsed": 0},
+                parser_meta={"sheet_name": None, "header_row_index": None},
+            )
         df = pd.read_excel(xls, sheet_name=selection.name, header=selection.header_row)
     df = df.dropna(how="all")
     columns = [str(c).strip() for c in df.columns.tolist()]
@@ -202,4 +213,9 @@ def parse_sharekhan_holdings_xls(file_path: str) -> Tuple[List[Dict], List[Dict]
         "header_row_index": selection.header_row,
         "preview_positions": preview,
     }
-    return [], positions, {"rows_parsed": len(df)}, meta
+    return ParseResult(
+        transactions=[],
+        positions=positions,
+        section_counts={"rows_parsed": len(df)},
+        parser_meta=meta,
+    )

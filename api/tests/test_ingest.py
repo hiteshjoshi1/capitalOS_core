@@ -66,11 +66,11 @@ Open Positions,Data,AAPL,Apple Inc.,Stock,10,150,1500,USD
 
     sig, debug = compute_format_signature(str(fixture), platform_hint="IBKR")
     delimiter = debug["delimiter"]
-    txs, positions, sections = parse_ibkr_activity_csv(str(fixture), delimiter)
+    result = parse_ibkr_activity_csv(str(fixture), delimiter)
     assert sig
-    assert sections.get("Open Positions") == 2
-    assert len(positions) == 1
-    pos = positions[0]
+    assert result.section_counts.get("Open Positions") == 2
+    assert len(result.positions) == 1
+    pos = result.positions[0]
     assert pos["symbol"] == "AAPL"
     assert pos["asset_class"] == "STOCK"
     assert pos["quantity"] == 10.0

@@ -27,6 +27,28 @@ def test_signature_flat_csv(tmp_path: Path):
     assert "transaction date" in debug["header"][0]
 
 
+def test_signature_citi_cc_headerless_stable(tmp_path: Path):
+    csv_content_one = (
+        "\"06/03/2026\",\"MERCHANT ONE SG\",\"-97.41\",\"\",\"'4147464004225540'\"\n"
+        "\"05/03/2026\",\"PAYMENT - THANK YOU\",\"100.00\",\"\",\"'4147464004225540'\"\n"
+    )
+    csv_content_two = (
+        "\"01/02/2026\",\"OTHER MERCHANT SG\",\"-12.30\",\"\",\"'9999888877776666'\"\n"
+        "\"31/01/2026\",\"LATE CHARGE FEE\",\"-5.00\",\"\",\"'9999888877776666'\"\n"
+    )
+    fixture_one = tmp_path / "citi_1.csv"
+    fixture_two = tmp_path / "citi_2.csv"
+    fixture_one.write_text(csv_content_one, encoding="utf-8")
+    fixture_two.write_text(csv_content_two, encoding="utf-8")
+
+    sig_one, debug_one = compute_format_signature(str(fixture_one), platform_hint="CITI")
+    sig_two, debug_two = compute_format_signature(str(fixture_two), platform_hint="CITI")
+    assert sig_one == sig_two
+    assert debug_one["file_kind"] == "citi_credit_card_csv"
+    assert debug_two["file_kind"] == "citi_credit_card_csv"
+    assert debug_one["column_count"] == 5
+
+
 def test_signature_html_table(tmp_path: Path):
     html = """<html><body>
     <table>

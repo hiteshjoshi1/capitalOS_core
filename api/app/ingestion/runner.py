@@ -4,11 +4,13 @@ import hashlib
 import os
 import shutil
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from typing import Any, Callable, Dict, List
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.ingestion.parsers import ParseResult
+from app.ingestion.parsers.citi_credit_card_csv_v1 import parse_citi_credit_card_csv
 from app.ingestion.signature import compute_format_signature
 from app.ingestion.registry import lookup_parser_key
 from app.ingestion.validators import validate_transactions
@@ -18,6 +20,18 @@ from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_trans
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
 from app.models.import_job import ImportJob
+
+PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
+    "ibkr_activity_csv_v1": ("csv", parse_ibkr_activity_csv),
+    "dbs_transaction_history_csv_v1": ("csv", parse_dbs_transaction_history_csv),
+    "sharekhan_holdings_xls_v1": ("excel", parse_sharekhan_holdings_xls),
+    "dbs_vickers_holdings_xls_v1": ("excel", parse_dbs_vickers_holdings_xls),
+    "citi_credit_card_csv_v1": ("csv", parse_citi_credit_card_csv),
+}
+
+CSV_PARSERS = {
+    parser_key for parser_key, (kind, _) in PARSER_REGISTRY.items() if kind == "csv"
+}
 
 
 def _now() -> datetime:
@@ -43,6 +57,12 @@ def _fingerprint(account_id: int, tx: Dict[str, Any]) -> str:
         tx.get("category", "") or "",
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _compose_notes(fp: str, parser_notes: Any) -> str:
+    if parser_notes is None or str(parser_notes).strip() == "":
+        return f"fp:{fp}"
+    return f"{parser_notes} | fp:{fp}"
 
 
 def _snapshot_as_of() -> datetime:
@@ -192,23 +212,28 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
         db.commit()
 
         delimiter = signature_debug.get("delimiter") if isinstance(signature_debug, dict) else None
-        parser_meta: dict[str, Any] = {}
-        if parser_key == "ibkr_activity_csv_v1":
-            if not delimiter:
-                raise ValueError("Missing delimiter for IBKR CSV parsing")
-            parsed, positions, section_counts = parse_ibkr_activity_csv(job.stored_path, delimiter)
-        elif parser_key == "dbs_transaction_history_csv_v1":
-            if not delimiter:
-                raise ValueError("Missing delimiter for DBS CSV parsing")
-            parsed, positions, section_counts = parse_dbs_transaction_history_csv(job.stored_path, delimiter)
-        elif parser_key == "sharekhan_holdings_xls_v1":
-            parsed, positions, section_counts, parser_meta = parse_sharekhan_holdings_xls(job.stored_path)
-        elif parser_key == "dbs_vickers_holdings_xls_v1":
-            parsed, positions, section_counts, parser_meta = parse_dbs_vickers_holdings_xls(job.stored_path)
-        else:
+        parser_entry = PARSER_REGISTRY.get(parser_key)
+        if parser_entry is None:
             job.status = "FAILED"
             job.error_message = f"Unsupported parser_key: {parser_key}"
             return write_and_return(_report(job, status="FAILED", error=job.error_message))
+
+        kind, parser_fn = parser_entry
+        if kind == "csv":
+            if parser_key in CSV_PARSERS and not delimiter:
+                raise ValueError(f"Missing delimiter for parser {parser_key}")
+            result = parser_fn(job.stored_path, delimiter)
+        elif kind == "excel":
+            result = parser_fn(job.stored_path)
+        else:
+            job.status = "FAILED"
+            job.error_message = f"Unsupported parser kind for {parser_key}: {kind}"
+            return write_and_return(_report(job, status="FAILED", error=job.error_message))
+
+        parsed = result.transactions
+        positions = result.positions
+        section_counts = result.section_counts
+        parser_meta = result.parser_meta
 
         warnings = validate_transactions(parsed)
         job.status = "VALIDATED"
@@ -265,7 +290,7 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                     "category": tx.get("category"),
                     "merchant": tx.get("merchant_counterparty"),
                     "source": job.platform,
-                    "notes": f"fp:{fp}",
+                    "notes": _compose_notes(fp, tx.get("notes")),
                 },
             )
             inserted += 1
