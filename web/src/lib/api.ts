@@ -119,6 +119,40 @@ export type CreditCardSummary = {
   }>;
 };
 
+export type CreditCardTransaction = {
+  account_id: number;
+  account_name: string;
+  card_name: string;
+  issuer: string;
+  ts: string;
+  description: string;
+  amount: number;
+  type: string;
+  category: string | null;
+  merchant_counterparty: string | null;
+  notes: string | null;
+};
+
+export type CreditCardRecurringPayment = {
+  account_id: number;
+  account_name: string;
+  card_name: string;
+  issuer: string;
+  merchant_counterparty: string;
+  months_present: number;
+  current_month_amount: number;
+};
+
+export type CreditCardDetail = {
+  month: string;
+  base_currency: string;
+  total_spend: number;
+  cards: CreditCardSummary["cards"];
+  transactions: CreditCardTransaction[];
+  top_purchases: CreditCardTransaction[];
+  recurring_payments: CreditCardRecurringPayment[];
+};
+
 export type ImportJobListItem = {
   id: number;
   status: string;
@@ -341,6 +375,8 @@ export const api = {
     req<SpendingSummary>(`/spending/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardSummary: (month: string, baseCurrency = "SGD") =>
     req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  creditCardTransactions: (month: string, baseCurrency = "SGD") =>
+    req<CreditCardDetail>(`/spending/credit-card-transactions?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   ingestUpload: async (accountId: number, file: File) => {
     const form = new FormData();
     form.append("file", file);

@@ -22,6 +22,7 @@ import ExposureLinkCard from "./components/dashboard/ExposureLinkCard";
 import NetWorthHeroCard from "./components/dashboard/NetWorthHeroCard";
 import PlaceholderCard from "./components/dashboard/PlaceholderCard";
 import RiskCard from "./components/dashboard/RiskCard";
+import CreditCardCard from "./components/dashboard/CreditCardCard";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type Theme = "dark" | "light";
@@ -157,14 +158,10 @@ export default function App() {
               description="Cash flow ingestion is pending final category mapping."
               footer={spendingSummary ? `Latest preview month: ${spendingSummary.month}` : "No cash flow preview data."}
             />
-            <PlaceholderCard
-              title="Expenses — Credit Cards"
-              description="Credit card expense workflows are staged for the ingestion module."
-              footer={
-                creditCardSummary
-                  ? `Configured cards: ${creditCardSummary.cards.length}`
-                  : "No credit card summary data."
-              }
+            <CreditCardCard
+              month={month}
+              summary={creditCardSummary}
+              formatMoney={formatMoney}
             />
           </section>
 

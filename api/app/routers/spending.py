@@ -13,6 +13,9 @@ from app.schemas.spending import (
     CategoryAmount,
     CreditCardSummaryOut,
     CreditCardItem,
+    CreditCardDetailOut,
+    CreditCardTransactionItem,
+    CreditCardRecurringPaymentItem,
 )
 
 router = APIRouter(prefix="/spending", tags=["spending"])
@@ -40,6 +43,102 @@ def _clamp_day(dt: datetime, day: int) -> datetime:
     last_day = (month_end - timedelta(days=1)).day
     safe_day = min(day, last_day)
     return dt.replace(day=safe_day)
+
+
+def _tx_iso(value: datetime | str) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc).isoformat()
+        return value.astimezone(timezone.utc).isoformat()
+    return str(value)
+
+
+def _month_key(value: datetime | str) -> str:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m")
+    as_text = str(value)
+    return as_text[:7]
+
+
+def _credit_cards(db: Session):
+    cards_q = text("""
+        SELECT
+          a.id AS account_id,
+          a.name AS account_name,
+          a.currency AS account_currency,
+          COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
+          COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
+          COALESCE(cc.credit_limit, 0) AS credit_limit,
+          COALESCE(cc.statement_day, 1) AS statement_day,
+          COALESCE(cc.due_day, 1) AS due_day
+        FROM accounts a
+        LEFT JOIN credit_card_accounts cc ON cc.account_id = a.id
+        WHERE a.account_type = 'CREDIT_CARD'
+        ORDER BY a.name
+    """)
+    return db.execute(cards_q).mappings().all()
+
+
+def _spend_by_account(
+    db: Session,
+    start: datetime,
+    end: datetime,
+    base_currency: str,
+) -> dict[int, float]:
+    spend_q = text("""
+        SELECT
+          t.account_id,
+          t.amount,
+          t.currency
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        WHERE t.ts >= :start AND t.ts < :end
+          AND a.account_type = 'CREDIT_CARD'
+          AND t.type IN ('EXPENSE','FEE','TAX','INTEREST')
+    """)
+    spend_rows = db.execute(spend_q, {"start": start, "end": end}).mappings().all()
+    currencies = {r["currency"] for r in spend_rows if r["currency"]}
+    rates = get_rates(start, base_currency, currencies)
+    spend: dict[int, float] = {}
+    for row in spend_rows:
+        cur = (row["currency"] or base_currency).upper()
+        converted = float(row["amount"]) * rates.get(cur, 1.0)
+        account_id = int(row["account_id"])
+        spend[account_id] = spend.get(account_id, 0.0) + (-converted)
+    return spend
+
+
+def _credit_card_items(
+    cards,
+    spend_by_account: dict[int, float],
+    start: datetime,
+    base_currency: str,
+) -> list[CreditCardItem]:
+    account_currencies = {(c["account_currency"] or base_currency).upper() for c in cards}
+    account_rates = get_rates(start, base_currency, account_currencies)
+    items: list[CreditCardItem] = []
+    for card in cards:
+        account_currency = (card["account_currency"] or base_currency).upper()
+        rate = account_rates.get(account_currency, 1.0)
+        credit_limit = float(card["credit_limit"]) * rate
+        current_due = spend_by_account.get(int(card["account_id"]), 0.0)
+        utilization = (current_due / credit_limit) if credit_limit > 0 else None
+        due_date = _clamp_day(start, int(card["due_day"])).date().isoformat()
+        items.append(
+            CreditCardItem(
+                account_id=int(card["account_id"]),
+                account_name=card["account_name"],
+                card_name=card["card_name"],
+                issuer=card["issuer"],
+                credit_limit=credit_limit,
+                statement_day=int(card["statement_day"]),
+                due_day=int(card["due_day"]),
+                due_date=due_date,
+                current_due=current_due,
+                utilization=utilization,
+            )
+        )
+    return items
 
 
 @router.get("/summary", response_model=SpendingSummaryOut)
@@ -109,62 +208,9 @@ def credit_card_summary(
     start = _parse_month(month)
     end = _month_end(start)
 
-    cards_q = text("""
-        SELECT
-          a.id AS account_id,
-          a.name AS account_name,
-          a.currency AS account_currency,
-          cc.card_name,
-          cc.issuer,
-          cc.credit_limit,
-          cc.statement_day,
-          cc.due_day
-        FROM credit_card_accounts cc
-        JOIN accounts a ON a.id = cc.account_id
-        ORDER BY a.name
-    """)
-    cards = db.execute(cards_q).mappings().all()
-
-    spend_q = text("""
-        SELECT
-          account_id,
-          amount,
-          currency
-        FROM transactions
-        WHERE ts >= :start AND ts < :end
-          AND type IN ('EXPENSE','FEE','TAX','INTEREST')
-    """)
-    spend_rows = db.execute(spend_q, {"start": start, "end": end}).mappings().all()
-    currencies = {r["currency"] for r in spend_rows if r["currency"]}
-    rates = get_rates(start, base_currency, currencies)
-    spend_by_account: dict[int, float] = {}
-    for r in spend_rows:
-        cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates.get(cur, 1.0)
-        spend_by_account[int(r["account_id"])] = spend_by_account.get(int(r["account_id"]), 0.0) + (-amount)
-
-    items = []
-    for c in cards:
-        account_currency = (c["account_currency"] or base_currency).upper()
-        rate = get_rates(start, base_currency, [account_currency]).get(account_currency, 1.0)
-        credit_limit = float(c["credit_limit"]) * rate
-        current_due = spend_by_account.get(int(c["account_id"]), 0.0)
-        utilization = (current_due / credit_limit) if credit_limit > 0 else None
-        due_date = _clamp_day(start, int(c["due_day"])).date().isoformat()
-        items.append(
-            CreditCardItem(
-                account_id=int(c["account_id"]),
-                account_name=c["account_name"],
-                card_name=c["card_name"],
-                issuer=c["issuer"],
-                credit_limit=credit_limit,
-                statement_day=int(c["statement_day"]),
-                due_day=int(c["due_day"]),
-                due_date=due_date,
-                current_due=current_due,
-                utilization=utilization,
-            )
-        )
+    cards = _credit_cards(db)
+    spend = _spend_by_account(db, start, end, base_currency)
+    items = _credit_card_items(cards, spend, start, base_currency)
 
     total_spend = sum(i.current_due for i in items)
     return CreditCardSummaryOut(
@@ -172,4 +218,152 @@ def credit_card_summary(
         base_currency=base_currency,
         total_spend=total_spend,
         cards=items,
+    )
+
+
+@router.get("/credit-card-transactions", response_model=CreditCardDetailOut)
+def credit_card_transactions(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    start = _parse_month(month)
+    end = _month_end(start)
+    lookback_start = _add_months(start, -2)
+
+    cards = _credit_cards(db)
+    spend = _spend_by_account(db, start, end, base_currency)
+    card_items = _credit_card_items(cards, spend, start, base_currency)
+
+    tx_q = text("""
+        SELECT
+          t.account_id,
+          a.name AS account_name,
+          COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
+          COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
+          t.ts,
+          t.amount,
+          t.type,
+          t.currency,
+          t.category,
+          t.merchant_counterparty,
+          t.notes
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
+        WHERE t.ts >= :start AND t.ts < :end
+          AND a.account_type = 'CREDIT_CARD'
+        ORDER BY t.ts DESC, t.id DESC
+    """)
+    tx_rows = db.execute(tx_q, {"start": start, "end": end}).mappings().all()
+    tx_currencies = {r["currency"] for r in tx_rows if r["currency"]}
+    tx_rates = get_rates(start, base_currency, tx_currencies)
+
+    transactions: list[CreditCardTransactionItem] = []
+    for row in tx_rows:
+        cur = (row["currency"] or base_currency).upper()
+        converted = float(row["amount"]) * tx_rates.get(cur, 1.0)
+        description = row["merchant_counterparty"] or row["category"] or "Transaction"
+        transactions.append(
+            CreditCardTransactionItem(
+                account_id=int(row["account_id"]),
+                account_name=row["account_name"],
+                card_name=row["card_name"],
+                issuer=row["issuer"],
+                ts=_tx_iso(row["ts"]),
+                description=description,
+                amount=converted,
+                type=row["type"],
+                category=row["category"],
+                merchant_counterparty=row["merchant_counterparty"],
+                notes=row["notes"],
+            )
+        )
+
+    top_purchases = sorted(
+        (tx for tx in transactions if tx.type == "EXPENSE"),
+        key=lambda tx: abs(tx.amount),
+        reverse=True,
+    )[:5]
+
+    recurring_q = text("""
+        SELECT
+          t.account_id,
+          a.name AS account_name,
+          COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
+          COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
+          t.ts,
+          t.amount,
+          t.currency,
+          t.merchant_counterparty
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
+        WHERE t.ts >= :lookback_start AND t.ts < :end
+          AND a.account_type = 'CREDIT_CARD'
+          AND t.type = 'EXPENSE'
+          AND COALESCE(TRIM(t.merchant_counterparty), '') <> ''
+        ORDER BY t.ts DESC, t.id DESC
+    """)
+    recurring_rows = db.execute(
+        recurring_q, {"lookback_start": lookback_start, "end": end}
+    ).mappings().all()
+    recurring_currencies = {r["currency"] for r in recurring_rows if r["currency"]}
+    recurring_rates = get_rates(start, base_currency, recurring_currencies)
+
+    recurring_index: dict[tuple[int, str], dict] = {}
+    for row in recurring_rows:
+        merchant = str(row["merchant_counterparty"]).strip()
+        key = (int(row["account_id"]), merchant)
+        cur = (row["currency"] or base_currency).upper()
+        converted = float(row["amount"]) * recurring_rates.get(cur, 1.0)
+        record = recurring_index.setdefault(
+            key,
+            {
+                "account_id": int(row["account_id"]),
+                "account_name": row["account_name"],
+                "card_name": row["card_name"],
+                "issuer": row["issuer"],
+                "merchant_counterparty": merchant,
+                "months": set(),
+                "current_month_amount": 0.0,
+            },
+        )
+        month_key = _month_key(row["ts"])
+        record["months"].add(month_key)
+        if month_key == month:
+            record["current_month_amount"] += -converted
+
+    recurring_payments: list[CreditCardRecurringPaymentItem] = []
+    for record in recurring_index.values():
+        months_present = len(record["months"])
+        current_month_amount = float(record["current_month_amount"])
+        if months_present < 2 or current_month_amount <= 0:
+            continue
+        recurring_payments.append(
+            CreditCardRecurringPaymentItem(
+                account_id=record["account_id"],
+                account_name=record["account_name"],
+                card_name=record["card_name"],
+                issuer=record["issuer"],
+                merchant_counterparty=record["merchant_counterparty"],
+                months_present=months_present,
+                current_month_amount=current_month_amount,
+            )
+        )
+
+    recurring_payments.sort(
+        key=lambda item: (item.current_month_amount, item.merchant_counterparty.lower()),
+        reverse=True,
+    )
+
+    total_spend = sum(item.current_due for item in card_items)
+    return CreditCardDetailOut(
+        month=month,
+        base_currency=base_currency,
+        total_spend=total_spend,
+        cards=card_items,
+        transactions=transactions,
+        top_purchases=top_purchases,
+        recurring_payments=recurring_payments,
     )

@@ -446,15 +446,17 @@ def seed_spending_data():
         )
         conn.execute(
             text(
-                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category) VALUES "
-                "(1, '2026-02-05 12:00:00+00:00', 10, 12000, 'INCOME', 'SGD', 'Salary'), "
-                "(2, '2026-02-08 09:00:00+00:00', 10, 480, 'INCOME', 'SGD', 'Dividends'), "
-                "(3, '2026-02-10 12:00:00+00:00', 10, -3200, 'EXPENSE', 'SGD', 'Rent'), "
-                "(4, '2026-02-12 12:00:00+00:00', 10, -800, 'EXPENSE', 'SGD', 'Education'), "
-                "(5, '2026-02-15 12:00:00+00:00', 10, -620, 'EXPENSE', 'SGD', 'Transport'), "
-                "(6, '2026-02-18 12:00:00+00:00', 10, -1100, 'EXPENSE', 'SGD', 'Recurring bills'), "
-                "(7, '2026-02-20 12:00:00+00:00', 11, -1780, 'EXPENSE', 'SGD', 'Dining'), "
-                "(8, '2026-02-22 12:00:00+00:00', 11, -1210, 'EXPENSE', 'SGD', 'Groceries')"
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(1, '2026-02-05 12:00:00+00:00', 10, 12000, 'INCOME', 'SGD', 'Salary', 'Employer', NULL), "
+                "(2, '2026-02-08 09:00:00+00:00', 10, 480, 'INCOME', 'SGD', 'Dividends', 'Broker', NULL), "
+                "(3, '2026-02-10 12:00:00+00:00', 10, -3200, 'EXPENSE', 'SGD', 'Rent', 'Landlord', NULL), "
+                "(4, '2026-02-12 12:00:00+00:00', 10, -800, 'EXPENSE', 'SGD', 'Education', 'Course', NULL), "
+                "(5, '2026-02-15 12:00:00+00:00', 10, -620, 'EXPENSE', 'SGD', 'Transport', 'Transit', NULL), "
+                "(6, '2026-02-18 12:00:00+00:00', 10, -1100, 'EXPENSE', 'SGD', 'Recurring bills', 'Utilities', NULL), "
+                "(7, '2026-02-20 12:00:00+00:00', 11, -1780, 'EXPENSE', 'SGD', 'Dining', 'Hawker Center', 'Weekend meals'), "
+                "(8, '2026-02-22 12:00:00+00:00', 11, -1210, 'EXPENSE', 'SGD', 'Groceries', 'Netflix', 'Annual plan'), "
+                "(9, '2026-01-22 12:00:00+00:00', 11, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', 'Monthly plan'), "
+                "(10, '2025-12-22 12:00:00+00:00', 11, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', 'Monthly plan')"
             )
         )
     return True

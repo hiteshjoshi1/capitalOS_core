@@ -20,6 +20,7 @@ import CryptoHoldings from "./routes/CryptoHoldings.tsx";
 import StockHoldings from "./routes/StockHoldings.tsx";
 import CashOverview from "./routes/CashOverview.tsx";
 import MarketData from "./routes/MarketData.tsx";
+import CreditCards from "./routes/CreditCards.tsx";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
 const chains = [mainnet, base, arbitrum, optimism, mantle, scroll] as const;
@@ -67,6 +68,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route path="/crypto/holdings" element={<CryptoHoldings />} />
                     <Route path="/holdings" element={<StockHoldings />} />
                     <Route path="/cash" element={<CashOverview />} />
+                    <Route path="/credit-cards" element={<CreditCards />} />
                     <Route path="/market-data" element={<MarketData />} />
                   </Routes>
                 </BrowserRouter>

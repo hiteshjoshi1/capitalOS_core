@@ -214,6 +214,7 @@ describe("App", () => {
 
     expect(screen.getByText("Cash Flow — 2026-02")).toBeInTheDocument();
     expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Credit cards details" })).toHaveAttribute("href", "/credit-cards");
     expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();
     expect(screen.getByText("Trends (Monthly)")).toBeInTheDocument();
     expect(screen.getAllByText("Snapshot")).toHaveLength(2);
