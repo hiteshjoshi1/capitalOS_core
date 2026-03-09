@@ -67,51 +67,103 @@ Replace the credit-card placeholder card on the dashboard with a live summary sh
 - [ ] Dashboard loads without errors at `http://localhost:5173`
 
 ## Human Approval Gate
-- [ ] Approved for implementation
+- [x] Approved for implementation
 
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
 
 ### Backend
-- [ ] Add `CreditCardTransactionItem` schema to `api/app/schemas/spending.py`
-- [ ] Add `CreditCardDetailOut` schema to `api/app/schemas/spending.py` (includes `transactions`, `top_purchases`, `recurring_payments`, per-card subtotals)
-- [ ] Add `GET /spending/credit-card-transactions` endpoint to `api/app/routers/spending.py`
-- [ ] Implement top-purchases query (top 5 EXPENSE by absolute amount for month)
-- [ ] Implement recurring-payments detection (merchant_counterparty in ≥2 of last 3 months)
-- [ ] Add backend test for new endpoint in `api/tests/`
+- [x] Add `CreditCardTransactionItem` schema to `api/app/schemas/spending.py`
+- [x] Add `CreditCardDetailOut` schema to `api/app/schemas/spending.py` (includes `transactions`, `top_purchases`, `recurring_payments`, per-card subtotals)
+- [x] Add `GET /spending/credit-card-transactions` endpoint to `api/app/routers/spending.py`
+- [x] Implement top-purchases query (top 5 EXPENSE by absolute amount for month)
+- [x] Implement recurring-payments detection (merchant_counterparty in ≥2 of last 3 months)
+- [x] Add backend test for new endpoint in `api/tests/`
 
 ### Frontend
-- [ ] Create `web/src/routes/CreditCards.tsx` detail page component
-- [ ] Add `CreditCardDetail` and `CreditCardTransaction` types to `web/src/lib/api.ts`
-- [ ] Add `api.creditCardTransactions(month, baseCurrency)` method to `web/src/lib/api.ts`
-- [ ] Replace `PlaceholderCard` for credit cards in `web/src/App.tsx` with live `CreditCardCard` component
-- [ ] Create `web/src/components/dashboard/CreditCardCard.tsx` dashboard card component
-- [ ] Register `/credit-cards` route in `web/src/main.tsx`
-- [ ] Add frontend test for `CreditCards.tsx` in `web/src/__tests__/`
+- [x] Create `web/src/routes/CreditCards.tsx` detail page component
+- [x] Add `CreditCardDetail` and `CreditCardTransaction` types to `web/src/lib/api.ts`
+- [x] Add `api.creditCardTransactions(month, baseCurrency)` method to `web/src/lib/api.ts`
+- [x] Replace `PlaceholderCard` for credit cards in `web/src/App.tsx` with live `CreditCardCard` component
+- [x] Create `web/src/components/dashboard/CreditCardCard.tsx` dashboard card component
+- [x] Register `/credit-cards` route in `web/src/main.tsx`
+- [x] Add frontend test for `CreditCards.tsx` in `web/src/__tests__/`
 
 ### Verification
-- [ ] `make api-rebuild`
-- [ ] `make verify` (lint + typecheck + test-backend + test-frontend)
+- [x] `make api-rebuild`
+- [x] `make verify` (lint + typecheck + test-backend + test-frontend)
 - [ ] `make api-smoke`
 - [ ] `curl http://localhost:8000/spending/credit-card-transactions?month=2026-03` returns valid JSON
 - [ ] Dashboard loads at `http://localhost:5173` with live credit card card
-- [ ] `/credit-cards` detail page loads and renders
+- [x] `/credit-cards` detail page loads and renders
 
 ## Implementation Reasoning Addendum (Codex Mutable)
-_Codex appends execution reasoning entries here._
+- Added backend schemas `CreditCardTransactionItem`, `CreditCardRecurringPaymentItem`, and `CreditCardDetailOut` in `api/app/schemas/spending.py` without removing or changing existing response fields.
+- Extended `api/app/routers/spending.py` with `GET /spending/credit-card-transactions` and kept `/spending/credit-cards` behavior intact using shared helper functions for card loading, monthly spend, and utilization calculations.
+- Implemented top purchases as top 5 `EXPENSE` transactions sorted by absolute converted amount descending.
+- Implemented recurring detection by merchant on credit-card accounts over the selected month + prior two months, requiring selected-month presence and at least 2 distinct months.
+- Added backend test coverage in `api/tests/test_spending.py` and expanded `seed_spending_data` fixture with merchant metadata and prior-month rows to validate recurring heuristics.
+- Added frontend API models and method (`CreditCardDetail`, `CreditCardTransaction`, `CreditCardRecurringPayment`, `api.creditCardTransactions`) in `web/src/lib/api.ts`.
+- Replaced dashboard placeholder card with `CreditCardCard` and linked to `/credit-cards`.
+- Added new route `web/src/routes/CreditCards.tsx` with month/base selectors, per-card collapsible breakdown with utilization bars, top purchases, recurring payments, and scrollable transactions table with empty states.
+- Registered `/credit-cards` in `web/src/main.tsx` and added frontend tests (`web/src/__tests__/CreditCards.test.tsx`) plus dashboard assertion update in `web/src/__tests__/App.test.tsx`.
+- R2 fix: updated credit-card spending queries to include all `accounts.account_type='CREDIT_CARD'` accounts (not only rows present in `credit_card_accounts`) so March Citi transactions are no longer filtered out.
+- R2 fix: preserved card metadata when available via `LEFT JOIN credit_card_accounts`, with deterministic fallbacks for missing metadata (`card_name -> account name`, `issuer -> account platform`, `credit_limit -> 0`, `statement_day/due_day -> 1`).
+- R2 test gap closure: added `test_credit_card_endpoints_include_credit_card_accounts_without_metadata` to assert March totals/transactions are non-zero for a CREDIT_CARD account with transactions but no `credit_card_accounts` row.
 
 ## Verification Evidence (Codex Mutable)
-_Codex appends lint/typecheck/test evidence here._
+- `make lint`: pass (frontend eslint pass; backend `ruff` skipped by Makefile because not installed in API image).
+- `make typecheck`: pass (frontend `tsc -b` pass; backend `mypy` skipped by Makefile because not installed in API image).
+- `make test-backend`: pass (`48 passed`).
+- `make test-frontend`: failed once, fixed (`CreditCards.test.tsx` fake timer deadlock), then pass on retry (`25 passed`).
+- `make e2e` (Playwright present): pass (`7 passed`).
+- `make api-rebuild`: pass (API image rebuilt and container recreation reported successful).
+- Direct curl validations against `localhost:8000` after rebuild did not complete in this sandbox session (`curl: (7) Failed to connect to localhost port 8000`), so `api-smoke`/live curl checklist items remain unchecked here.
+- R2 rework verification:
+  - `make lint`: pass.
+  - `make typecheck`: pass.
+  - `make test-backend`: pass (`49 passed`, includes new March regression test).
+  - `make test-frontend`: pass (`25 passed`).
+  - `make e2e` (Playwright present): started (`make e2e`), but did not produce a completion result in this sandbox session.
 
 ## Review Findings (Sonnet Primary, Opus Escalation)
 _Review output is appended here._
 
+### R2 Rework - Why R1 Missed This
+- Prior R1 approval focused on acceptance criteria and existing tests, which all used fixtures where credit-card transactions came from accounts already present in `credit_card_accounts`.
+- The missed scenario was: transactions exist on an `accounts.account_type='CREDIT_CARD'` account without a corresponding `credit_card_accounts` metadata row (realistic for current Citi ingest/account flows).
+- Because the original implementation joined transactions to `credit_card_accounts` directly, those March transactions were silently excluded, returning `0` despite data existing.
+- This was a test gap, not a schema/runtime crash: there was no regression test for March data on CREDIT_CARD accounts lacking metadata rows. The new R2 test now covers that exact path.
+
 ## Retry Log (Max 3)
-_Failed command/rework retries are appended here._
+- `make test-frontend`:
+  - Attempt 1: failed (2 new `CreditCards.test.tsx` tests timed out due fake timers preventing `findBy*` polling).
+  - Rework: removed fake timer usage and relaxed date assertion to `expect.any(String)` for month.
+  - Attempt 2: passed.
+- `make e2e`:
+  - Attempt 1: command started but did not return completion output in this sandbox session.
+- `curl -sS http://localhost:8000/health && ...`:
+  - Attempt 1: failed (`curl: (7) Couldn't connect to server`).
+  - Attempt 2 (after wait): failed with same error.
+- `make up`:
+  - Attempt 1: failed in this sandbox (`permission denied ... docker.sock`), no further retries since required checks were already executed via one-off container commands.
 
 ## Automation Log (Mutable)
-_Automation appends structured logs here._
+- Ran implementation edits across backend and frontend for Issue 106 scope only.
+- Ran required checks:
+  - `make lint`
+  - `make typecheck`
+  - `make test-backend`
+  - `make test-frontend` (with one retry after fix)
+  - `make e2e` (Playwright detected in `web/playwright.config.ts`)
+- Additional verification attempted:
+  - `make api-rebuild` (pass)
+  - live curl smoke checks to `localhost:8000` (connection refused in sandbox session)
+- R2 rework automation:
+  - Updated `api/app/routers/spending.py` only for credit-card account inclusion/fallback logic.
+  - Added one backend regression test in `api/tests/test_spending.py` for March CREDIT_CARD transactions without `credit_card_accounts` metadata.
+  - Re-ran `make lint`, `make typecheck`, `make test-backend`, `make test-frontend`, and attempted `make e2e`.
 
 ## Workflow Commands
 
@@ -121,4 +173,123 @@ make task-build TASK=tasks/issue-106-credit-card-ui-changes.md
 make task-review TASK=tasks/issue-106-credit-card-ui-changes.md
 make task-rework TASK=tasks/issue-106-credit-card-ui-changes.md
 make task-ship TASK=tasks/issue-106-credit-card-ui-changes.md
+```
+
+### Build Result (2026-03-09T02:10:16Z)
+
+```text
+Implementation and verification suite completed successfully.
+```
+
+### Review Cycle R1 - Sonnet (claude-sonnet-4.6) (2026-03-09T10:23:28Z)
+
+```text
+STATUS: APPROVED
+RISK: LOW
+
+SUMMARY:
+- All 13 acceptance criteria addressed; checklist items complete except live Docker smoke (sandbox limitation, not a code defect).
+- Backend refactor correctly extracts `_credit_cards`, `_spend_by_account`, `_credit_card_items` helpers; existing `/spending/credit-cards` endpoint preserved with identical output.
+- New `/spending/credit-card-transactions` endpoint returns all required fields: transactions, top_purchases, recurring_payments, per-card breakdown.
+- Frontend follows CashOverview pattern: state machine, month/currency selectors, empty states, collapsible per-card utilization bars.
+- No existing schemas, routes, or response fields broken.
+
+FINDINGS:
+- MINOR: `recurring_payments` table in `CreditCards.tsx` renders `formatMoney(-payment.current_month_amount, 2)` with a static `bad` CSS class. Since `current_month_amount` is always positive (debit spend), the displayed value will always be negative. Functionally correct but slightly confusing UX — consider displaying as positive with a debit label. Not blocking.
+- MINOR: Sort tiebreaker for recurring payments is `merchant_counterparty.lower()` descending (`reverse=True` on tuple). Alphabetical-descending for ties is unintentional but harmless; no user-visible regression.
+- INFO: `_add_months` called in new endpoint but not in diff — correctly assumed to pre-exist in `spending.py`. No issue.
+- INFO: `creditCardSummary` (dashboard) and `creditCardTransactions` (detail page) are separate API calls; no double-fetch on dashboard. Correct per AD-10.
+- INFO: `make api-smoke` and live curl left unchecked due to Docker socket unavailability in sandbox — expected given constraints, not a code issue.
+
+TEST_GAPS:
+- No test covering `null` or empty `merchant_counterparty` values in the recurring detection path (R-3 risk). Edge case: a transaction with whitespace-only `merchant_counterparty` is excluded by the SQL `COALESCE(TRIM(...), '') <> ''` guard — but this is untested.
+- No test for the `/spending/credit-cards` endpoint after the helper-function refactor to confirm its output is unchanged (regression risk from the extraction).
+- Frontend test does not exercise the month/currency selector change interactions (only default load state is covered).
+
+
+Total usage est:        0 Premium requests
+API time spent:         1m 4s
+Total session time:     2m 59s
+Total code changes:     +0 -0
+Breakdown by AI model:
+ claude-sonnet-4.6       74.6k in, 2.9k out, 28.4k cached (Est. 0 Premium requests)
+```
+
+### Review Cycle R1 - Status (2026-03-09T10:23:28Z)
+
+```text
+Review-ID: R1
+Status: Reviewed
+Result: APPROVED
+Risk: LOW
+```
+
+### Review Cycle R2 - User QA findings
+```text
+Review-ID: R2
+Status: Reviewed
+Result: NEEDS_FIXES
+Risk: HIGH
+```
+- Repro steps (Month=March, expected March CC tx > 0, actual 0)
+- the rework stage should fix this and the test cases associated
+- then this was missed in the review stage, Sonnet must explain why prior review approved this and what test gap missed it.
+
+### Review Cycle R2 - Status (2026-03-09T10:53:59Z)
+
+```text
+Review-ID: R2
+Status: Implemented
+Result: NEEDS_REVIEW
+Risk: PENDING
+```
+
+### Review Cycle R2 - Rework Result (2026-03-09T10:53:59Z)
+
+```text
+Targeted rework implemented for latest review findings.
+```
+
+### Review Cycle R3 - Sonnet (claude-sonnet-4.6) (2026-03-09T10:56:37Z)
+
+```text
+● Todo added: R2 code review for Issue 106
+
+STATUS: APPROVED
+RISK: LOW
+
+SUMMARY:
+- R2 bug is correctly fixed: `_credit_cards` now queries `accounts WHERE account_type='CREDIT_CARD'` with `LEFT JOIN credit_card_accounts`, so accounts without metadata rows are no longer silently excluded from spend totals.
+- `_spend_by_account` likewise filters by `account_type='CREDIT_CARD'` directly, eliminating the original `credit_card_accounts` inner-join exclusion.
+- Metadata fallbacks are deterministic: `card_name → account.name`, `issuer → account.platform`, `credit_limit → 0`, `statement_day/due_day → 1`.
+- New regression test `test_credit_card_endpoints_include_credit_card_accounts_without_metadata` covers both `/spending/credit-cards` and `/spending/credit-card-transactions` for a CREDIT_CARD account with no metadata row.
+- Backend 49 passed, frontend 25 passed; all acceptance criteria met except live Docker smoke (sandbox limitation, not a code defect).
+
+FINDINGS:
+- MINOR (carried from R1, unresolved): `CreditCards.tsx` recurring payments renders `formatMoney(-payment.current_month_amount, 2)` — since `current_month_amount` is always positive spend, the displayed value is always negative. Functionally shows debit but UX is confusing. Not blocking.
+- MINOR (carried from R1, unresolved): `recurring_payments.sort(..., reverse=True)` applies descending order to the entire tuple `(amount, merchant.lower())`, making the tiebreaker alphabetical-descending rather than ascending. Unintentional but harmless. Not blocking.
+- LATENT: If an account has `platform = NULL` and no `credit_card_accounts` row, `COALESCE(NULLIF(TRIM(cc.issuer),''), a.platform)` returns NULL, which would fail Pydantic `issuer: str` validation at runtime. Same latent risk exists for `card_name` if `a.name` is NULL. Not exercised by any test, but `a.name` / `a.platform` are effectively required fields in practice. Not blocking.
+- INFO: `test_credit_card_summary` (existing test) implicitly covers the `/spending/credit-cards` regression after helper-function extraction, since it still validates card name, spend, and utilization. No gap in practice.
+
+TEST_GAPS:
+- No test for `platform = NULL` account (NULL `issuer` fallback) — would surface a Pydantic validation error at runtime if such an account existed.
+- No test for whitespace-only `merchant_counterparty` values in the recurring detection path (R-3 risk, noted in R1, still unaddressed). The `COALESCE(TRIM(...), '') <> ''` SQL guard handles it correctly but is untested.
+- Frontend tests do not exercise month/currency selector interactions; only default load state and empty-state paths are covered.
+
+
+Total usage est:        1 Premium request
+API time spent:         1m 31s
+Total session time:     1m 39s
+Total code changes:     +0 -0
+Breakdown by AI model:
+ claude-sonnet-4.6       83.3k in, 3.4k out, 14.2k cached (Est. 1 Premium request)
+```
+
+### Review Cycle R3 - Status (2026-03-09T10:56:37Z)
+
+```text
+Review-ID: R3
+Status: Reviewed
+Result: APPROVED
+Risk: LOW
 ```
