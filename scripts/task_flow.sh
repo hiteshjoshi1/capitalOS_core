@@ -69,6 +69,20 @@ run_with_caffeinate_for_codex() {
   "$@"
 }
 
+enable_stage_caffeinate_if_needed() {
+  local stage="$1"
+  case "$stage" in
+    plan|build|review|rework|all) ;;
+    *) return 0 ;;
+  esac
+
+  if [[ "$ENABLE_CAFFEINATE" == "1" ]] && command -v caffeinate >/dev/null 2>&1; then
+    # Keep machine awake for the lifetime of this script process.
+    caffeinate -dimsu -w $$ >/dev/null 2>&1 &
+    log "caffeinate enabled for stage: $stage"
+  fi
+}
+
 validate_task_file() {
   TASK_FILE="$1"
   TASK_BASENAME="$(basename "$TASK_FILE")"
@@ -232,6 +246,24 @@ assert_prepare_safe_worktree() {
   ')"
   if [[ -n "$other_changes" ]]; then
     die "Working tree has changes beyond $TASK_FILE. Commit/stash them before task-prepare."
+  fi
+}
+
+assert_plan_safe_worktree_for_task_file_only() {
+  local status_lines other_changes
+  status_lines="$(git status --porcelain)"
+  if [[ -z "$status_lines" ]]; then
+    return 0
+  fi
+
+  other_changes="$(printf '%s\n' "$status_lines" | awk -v tf="$TASK_FILE" '
+    {
+      path = substr($0, 4)
+      if (path != tf) print $0
+    }
+  ')"
+  if [[ -n "$other_changes" ]]; then
+    die "Working tree has changes beyond $TASK_FILE. Commit/stash them before task-plan."
   fi
 }
 
@@ -424,14 +456,17 @@ validate_generated_task_file_content() {
   grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
 }
 
-ensure_workflow_commands_in_task_file() {
+normalize_workflow_commands_in_task_file() {
   local content="$1"
-  if grep -q '^## Workflow Commands' <<<"$content"; then
-    echo "$content"
-    return 0
-  fi
+  local without_existing
+  without_existing="$(printf '%s\n' "$content" | awk '
+    BEGIN { skip=0 }
+    /^## Workflow Commands[[:space:]]*$/ { skip=1; next }
+    skip && /^## / { skip=0 }
+    !skip { print }
+  ')"
   cat <<EOF
-$content
+$without_existing
 
 ## Workflow Commands
 
@@ -458,13 +493,72 @@ run_codex_prompt() {
   run_with_caffeinate_for_codex codex exec --full-auto --sandbox workspace-write "$prompt"
 }
 
+run_with_retries_and_codex_fix() {
+  local label="$1"
+  shift
+  local cmd=("$@")
+  local cmd_str attempt rc output_file output prompt
+  printf -v cmd_str '%q ' "${cmd[@]}"
+  cmd_str="${cmd_str% }"
+
+  for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
+    log "$label (attempt $attempt/$MAX_RETRIES)"
+    output_file="$(mktemp)"
+    set +e
+    "${cmd[@]}" 2>&1 | tee "$output_file"
+    rc=${PIPESTATUS[0]}
+    set -e
+    if [[ "$rc" -eq 0 ]]; then
+      rm -f "$output_file"
+      return 0
+    fi
+
+    output="$(sed -n '1,1200p' "$output_file")"
+    rm -f "$output_file"
+    append_retry_log "$label failed on attempt $attempt with exit code $rc: $cmd_str"
+
+    if (( attempt == MAX_RETRIES )); then
+      append_retry_log "$label failed after $MAX_RETRIES attempts."
+      return 1
+    fi
+
+    prompt="$(cat <<EOF
+Fix the failing verification command in the current branch.
+
+Task file: $TASK_FILE
+Failed command: $cmd_str
+Attempt: $attempt of $MAX_RETRIES
+Exit code: $rc
+
+Failure output (truncated):
+$output
+
+Constraints:
+1) Keep changes minimal and scoped to resolving this failure.
+2) Do not modify content above <!-- IMMUTABLE_PLAN_END --> in $TASK_FILE.
+3) If task file updates are needed, update only mutable sections.
+4) After changes, run only this command to validate:
+   $cmd_str
+EOF
+)"
+    log "Invoking Codex auto-fix for: $label"
+    set +e
+    run_codex_prompt "$prompt"
+    rc=$?
+    set -e
+    if [[ "$rc" -ne 0 ]]; then
+      append_retry_log "Codex auto-fix failed for '$label' on attempt $attempt with exit code $rc."
+    fi
+  done
+}
+
 run_verification_suite() {
-  run_with_retries "make lint" make lint
-  run_with_retries "make typecheck" make typecheck
-  run_with_retries "make test-backend" make test-backend
-  run_with_retries "make test-frontend" make test-frontend
+  run_with_retries_and_codex_fix "make lint" make lint
+  run_with_retries_and_codex_fix "make typecheck" make typecheck
+  run_with_retries_and_codex_fix "make test-backend" make test-backend
+  run_with_retries_and_codex_fix "make test-frontend" make test-frontend
   if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
-    run_with_retries "make e2e" make e2e
+    run_with_retries_and_codex_fix "make e2e" make e2e
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
   fi
@@ -546,8 +640,17 @@ cmd_plan() {
   require_tool git
   require_tool copilot
   validate_task_file "$1"
-  assert_clean_worktree
-  prepare_branch_from_main
+
+  local current_branch
+  current_branch="$(git rev-parse --abbrev-ref HEAD)"
+  if [[ "$current_branch" == "$BRANCH" ]]; then
+    assert_plan_safe_worktree_for_task_file_only
+    log "Planning on existing branch $BRANCH with task-file-only local changes."
+  else
+    assert_clean_worktree
+    prepare_branch_from_main
+  fi
+
   ensure_task_file_exists
   assert_task_path_writable
 
@@ -591,7 +694,7 @@ EOF
   planned_task="$(resolve_plan_task_file_output "$raw_output" || true)"
   [[ -n "$planned_task" ]] || die "Planner output did not include a valid task document. No task file changes were written."
 
-  planned_task="$(ensure_workflow_commands_in_task_file "$planned_task")"
+  planned_task="$(normalize_workflow_commands_in_task_file "$planned_task")"
   validate_generated_task_file_content "$planned_task" || die "Planner output failed required task-file structure checks."
 
   printf '%s\n' "$planned_task" > "$TASK_FILE"
@@ -904,6 +1007,8 @@ main() {
   local cmd="$1"
   local task="$2"
   local rc
+
+  enable_stage_caffeinate_if_needed "$cmd"
 
   case "$cmd" in
     prepare) cmd_prepare "$task" ;;

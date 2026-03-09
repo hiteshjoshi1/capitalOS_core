@@ -9,11 +9,11 @@ def test_dbs_parser_extracts_cash_and_transactions(tmp_path: Path):
     content = """Account Details For:,DBS Multiplier\nStatement as at:,19 Feb 2026\nCurrency:,SGD - Singapore Dollar\nAvailable Balance:,SGD 1000.00\nLedger Balance:,SGD 900.00\nTransaction Date,Value Date,Statement Code,Description,Supplementary Code,Supplementary Code Description,Client Reference,Additional Reference,Status,Currency,Debit Amount,Credit Amount\n19 Feb 2026,19 Feb 2026,GR,Salary,IBG,Payments,REF,OTHR,Settled,SGD,,500\n"""
     fixture = tmp_path / "dbs.csv"
     fixture.write_text(content, encoding="utf-8")
-    txs, positions, _ = parse_dbs_transaction_history_csv(str(fixture))
-    assert len(txs) == 1
-    assert txs[0]["type"] == "INCOME"
-    assert positions
-    assert positions[0]["asset_class"] == "CASH"
+    result = parse_dbs_transaction_history_csv(str(fixture))
+    assert len(result.transactions) == 1
+    assert result.transactions[0]["type"] == "INCOME"
+    assert result.positions
+    assert result.positions[0]["asset_class"] == "CASH"
 
 
 def test_dbs_parser_marks_transfers(tmp_path: Path):
@@ -27,9 +27,9 @@ Transaction Date,Value Date,Statement Code,Description,Supplementary Code,Supple
     fixture = tmp_path / "dbs_transfer.csv"
     fixture.write_text(content)
 
-    txs, positions, _ = parse_dbs_transaction_history_csv(str(fixture))
-    assert len(txs) == 1
-    assert txs[0]["type"] == "TRANSFER"
+    result = parse_dbs_transaction_history_csv(str(fixture))
+    assert len(result.transactions) == 1
+    assert result.transactions[0]["type"] == "TRANSFER"
 
 
 def test_dbs_parser_prefers_transaction_date(tmp_path: Path):
@@ -43,21 +43,21 @@ Transaction Date,Value Date,Statement Code,Description,Supplementary Code,Supple
     fixture = tmp_path / "dbs_dates.csv"
     fixture.write_text(content)
 
-    txs, positions, _ = parse_dbs_transaction_history_csv(str(fixture))
-    assert len(txs) == 1
-    assert txs[0]["ts"].date().isoformat() == "2026-02-18"
-    assert positions[0]["currency"] == "SGD"
+    result = parse_dbs_transaction_history_csv(str(fixture))
+    assert len(result.transactions) == 1
+    assert result.transactions[0]["ts"].date().isoformat() == "2026-02-18"
+    assert result.positions[0]["currency"] == "SGD"
 
 
 def test_ibkr_parser_sections(tmp_path: Path):
     content = """Cash Transactions,Header,Date,Amount,Currency,Type,Description\nCash Transactions,Data,2026-02-02,10,USD,Dividend,Test\nTrades,Header,Date,Buy/Sell,Symbol,Net Cash,Currency\nTrades,Data,2026-02-03,BUY,AAPL,-1000,USD\nOpen Positions,Header,Symbol,Description,Asset Class,Quantity,Cost Price,Cost Basis,Currency\nOpen Positions,Data,AAPL,Apple Inc.,Stock,10,150,1500,USD\nForex Balances,Header,Asset Category,Description,Quantity\nForex Balances,Data,Forex,USD,500\n"""
     fixture = tmp_path / "ibkr.csv"
     fixture.write_text(content, encoding="utf-8")
-    txs, positions, sections = parse_ibkr_activity_csv(str(fixture), ",")
-    assert sections["Cash Transactions"] == 2
-    assert sections["Trades"] == 2
-    assert len(txs) == 2
-    assert len(positions) == 2
+    result = parse_ibkr_activity_csv(str(fixture), ",")
+    assert result.section_counts["Cash Transactions"] == 2
+    assert result.section_counts["Trades"] == 2
+    assert len(result.transactions) == 2
+    assert len(result.positions) == 2
 
 
 def test_sharekhan_parser_html(tmp_path: Path):
@@ -69,10 +69,10 @@ def test_sharekhan_parser_html(tmp_path: Path):
     </body></html>"""
     fixture = tmp_path / "sharekhan.xls"
     fixture.write_text(html, encoding="utf-8")
-    _, positions, counts, meta = parse_sharekhan_holdings_xls(str(fixture))
-    assert counts["rows_parsed"] == 1
-    assert positions[0]["symbol"] == "RELIANCE"
-    assert meta["sheet_name"].startswith("HTML_TABLE")
+    result = parse_sharekhan_holdings_xls(str(fixture))
+    assert result.section_counts["rows_parsed"] == 1
+    assert result.positions[0]["symbol"] == "RELIANCE"
+    assert result.parser_meta["sheet_name"].startswith("HTML_TABLE")
 
 
 def test_dbs_vickers_parser_html(tmp_path: Path):
@@ -87,10 +87,10 @@ def test_dbs_vickers_parser_html(tmp_path: Path):
     fixture.write_text(html, encoding="utf-8")
     from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
 
-    _, positions, counts, meta = parse_dbs_vickers_holdings_xls(str(fixture))
-    assert counts["rows_parsed"] == 2
-    assert len(positions) == 1
-    assert positions[0]["symbol"] == "S68"
-    assert positions[0]["quantity"] == 150
-    assert positions[0]["currency"] == "SGD"
-    assert meta["sheet_name"].startswith("HTML_TABLE")
+    result = parse_dbs_vickers_holdings_xls(str(fixture))
+    assert result.section_counts["rows_parsed"] == 2
+    assert len(result.positions) == 1
+    assert result.positions[0]["symbol"] == "S68"
+    assert result.positions[0]["quantity"] == 150
+    assert result.positions[0]["currency"] == "SGD"
+    assert result.parser_meta["sheet_name"].startswith("HTML_TABLE")

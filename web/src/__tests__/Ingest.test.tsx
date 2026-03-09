@@ -158,6 +158,53 @@ describe("Ingest", () => {
     expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
   });
 
+  it("shows approve button for Citi CC mapping", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 4, name: "Citi", platform: "CITI", account_type: "CREDIT_CARD", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.ingestUpload.mockResolvedValueOnce({
+      job_id: 13,
+      status: "NEEDS_MAPPING",
+      platform: "CITI",
+      account_id: 4,
+      format_signature: "sig",
+      counts: { rows_total: 0, transactions_parsed: 0, transactions_inserted: 0, duplicates_skipped: 0 },
+      section_summary: [],
+      preview_transactions: [],
+    });
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.registerIngestSignature.mockResolvedValueOnce({
+      job_id: 13,
+      status: "IMPORTED",
+      platform: "CITI",
+      account_id: 4,
+      counts: { rows_total: 51, transactions_parsed: 51, transactions_inserted: 51, duplicates_skipped: 0 },
+      section_summary: [],
+      preview_transactions: [],
+    });
+
+    render(
+      <MemoryRouter>
+        <Ingest />
+      </MemoryRouter>
+    );
+
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "4");
+
+    const file = new File(["data"], "citi_credit_card_sample.csv", { type: "text/csv" });
+    const input = screen.getByLabelText("Statement file") as HTMLInputElement;
+    await userEvent.upload(input, file);
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    const approve = await screen.findByRole("button", { name: "Approve as Citi CC" });
+    await userEvent.click(approve);
+
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(13, "citi_credit_card_csv_v1");
+    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+  });
+
   it("loads report from recent imports", async () => {
     mockApi.accounts.mockResolvedValueOnce([]);
     mockApi.ingestJobs.mockResolvedValueOnce([

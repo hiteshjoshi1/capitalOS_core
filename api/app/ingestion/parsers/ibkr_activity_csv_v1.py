@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import csv
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple, Any
+from typing import Any, Dict, List
 
+from app.ingestion.parsers import ParseResult
 
 def _parse_datetime(value: str) -> datetime:
     value = value.strip()
@@ -163,7 +164,7 @@ def _normalize_cash_balance(row: Dict[str, str]) -> Dict[str, Any] | None:
     }
 
 
-def parse_ibkr_activity_csv(file_path: str, delimiter: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int]]:
+def parse_ibkr_activity_csv(file_path: str, delimiter: str) -> ParseResult:
     transactions: List[Dict[str, Any]] = []
     positions: List[Dict[str, Any]] = []
     section_counts: Dict[str, int] = {}
@@ -196,4 +197,8 @@ def parse_ibkr_activity_csv(file_path: str, delimiter: str) -> Tuple[List[Dict[s
                 cash = _normalize_cash_balance(data)
                 if cash:
                     positions.append(cash)
-    return transactions, positions, section_counts
+    return ParseResult(
+        transactions=transactions,
+        positions=positions,
+        section_counts=section_counts,
+    )

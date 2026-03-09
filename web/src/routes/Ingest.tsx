@@ -5,6 +5,15 @@ import type { Account, ImportJobListItem } from "../lib/api";
 import "../App.css";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type PlatformParserConfig = { label: string; parserKey: string };
+
+const PLATFORM_PARSERS: Record<string, PlatformParserConfig> = {
+  IBKR: { label: "Approve as IBKR", parserKey: "ibkr_activity_csv_v1" },
+  DBS: { label: "Approve as DBS", parserKey: "dbs_transaction_history_csv_v1" },
+  SHAREKHAN: { label: "Approve as Sharekhan", parserKey: "sharekhan_holdings_xls_v1" },
+  DBS_VICKERS: { label: "Approve as DBS Vickers", parserKey: "dbs_vickers_holdings_xls_v1" },
+  CITI: { label: "Approve as Citi CC", parserKey: "citi_credit_card_csv_v1" },
+};
 
 export default function Ingest() {
   const [state, setState] = useState<LoadState>("idle");
@@ -99,6 +108,7 @@ export default function Ingest() {
     preview_transactions?: Array<Record<string, unknown>>;
     error_message?: string | null;
   } | null;
+  const platformParser = reportData?.platform ? PLATFORM_PARSERS[reportData.platform] : undefined;
 
   return (
     <div className="wrap">
@@ -182,40 +192,13 @@ export default function Ingest() {
                     <h3>Unknown format</h3>
                     <div className="muted">Signature: {reportData.format_signature ?? "—"}</div>
                     <div className="actions">
-                      {reportData.platform === "IBKR" && (
+                      {platformParser && (
                         <button
                           className="btn"
                           disabled={!reportData.job_id || registering}
-                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "ibkr_activity_csv_v1")}
+                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, platformParser.parserKey)}
                         >
-                          {registering ? "Registering…" : "Approve as IBKR"}
-                        </button>
-                      )}
-                      {reportData.platform === "DBS" && (
-                        <button
-                          className="btn"
-                          disabled={!reportData.job_id || registering}
-                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "dbs_transaction_history_csv_v1")}
-                        >
-                          {registering ? "Registering…" : "Approve as DBS"}
-                        </button>
-                      )}
-                      {reportData.platform === "SHAREKHAN" && (
-                        <button
-                          className="btn"
-                          disabled={!reportData.job_id || registering}
-                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "sharekhan_holdings_xls_v1")}
-                        >
-                          {registering ? "Registering…" : "Approve as Sharekhan"}
-                        </button>
-                      )}
-                      {reportData.platform === "DBS_VICKERS" && (
-                        <button
-                          className="btn"
-                          disabled={!reportData.job_id || registering}
-                          onClick={() => onRegisterSignature(reportData.job_id ?? 0, "dbs_vickers_holdings_xls_v1")}
-                        >
-                          {registering ? "Registering…" : "Approve as DBS Vickers"}
+                          {registering ? "Registering…" : platformParser.label}
                         </button>
                       )}
                     </div>

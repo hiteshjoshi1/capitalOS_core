@@ -3,8 +3,9 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
+from app.ingestion.parsers import ParseResult
 
 @dataclass
 class DbsBalances:
@@ -76,7 +77,7 @@ def _is_transfer(stmt_code: str, description: str, supplementary: str) -> bool:
     return any(k in text for k in keywords)
 
 
-def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> Tuple[List[Dict], List[Dict], Dict[str, int]]:
+def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> ParseResult:
     with open(file_path, "r", encoding="utf-8-sig", newline="") as f:
         rows = list(csv.reader(f, delimiter=delimiter))
 
@@ -101,7 +102,7 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> T
             break
 
     if header_idx is None:
-        return [], [], {}
+        return ParseResult(transactions=[], positions=[], section_counts={})
 
     headers = [h.strip() for h in rows[header_idx]]
     data_rows = rows[header_idx + 1 :]
@@ -175,4 +176,8 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> T
         )
 
     section_counts = {"transactions": count}
-    return parsed, positions, section_counts
+    return ParseResult(
+        transactions=parsed,
+        positions=positions,
+        section_counts=section_counts,
+    )

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Any
+from typing import Any, Dict, List
 
 import pandas as pd
 
+from app.ingestion.parsers import ParseResult
 
 @dataclass
 class TableSelection:
@@ -108,12 +109,17 @@ def _normalize_columns(columns: list[str]) -> Dict[str, str]:
     return mapping
 
 
-def parse_dbs_vickers_holdings_xls(file_path: str) -> Tuple[List[Dict], List[Dict], Dict[str, int], Dict[str, Any]]:
+def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
     if _is_html_file(file_path):
         tables = pd.read_html(file_path)
         found = _select_html_table(tables)
         if not found:
-            return [], [], {"rows_parsed": 0}, {"sheet_name": None, "header_row_index": None}
+            return ParseResult(
+                transactions=[],
+                positions=[],
+                section_counts={"rows_parsed": 0},
+                parser_meta={"sheet_name": None, "header_row_index": None},
+            )
         df, selection = found
     else:
         engine = _pick_engine(file_path)
@@ -122,7 +128,12 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> Tuple[List[Dict], List[Dic
         df = pd.read_excel(xls, sheet_name=sheet_name, header=None, nrows=30)
         header_row = _find_header_row(df)
         if header_row is None:
-            return [], [], {"rows_parsed": 0}, {"sheet_name": sheet_name, "header_row_index": None}
+            return ParseResult(
+                transactions=[],
+                positions=[],
+                section_counts={"rows_parsed": 0},
+                parser_meta={"sheet_name": sheet_name, "header_row_index": None},
+            )
         df = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
         selection = TableSelection(name=sheet_name, header_row=header_row, columns=[_clean_header(c) for c in df.columns])
 
@@ -203,4 +214,9 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> Tuple[List[Dict], List[Dic
         "header_row_index": selection.header_row,
         "preview_positions": preview,
     }
-    return [], positions, {"rows_parsed": rows_parsed}, meta
+    return ParseResult(
+        transactions=[],
+        positions=positions,
+        section_counts={"rows_parsed": rows_parsed},
+        parser_meta=meta,
+    )

@@ -2,9 +2,14 @@ from __future__ import annotations
 
 import csv
 import hashlib
-from typing import Tuple, Dict, List, Any
+import re
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+_CITI_CC_DATE_RE = re.compile(r"^\d{2}/\d{2}/\d{4}$")
+_CITI_CC_AMOUNT_RE = re.compile(r"^[+-]?\d+(?:\.\d+)?$")
+_CITI_CC_CARD_RE = re.compile(r"^'?\d{12,19}'?$")
 
 
 def _detect_delimiter(sample: str) -> str:
@@ -25,15 +30,98 @@ def _detect_delimiter(sample: str) -> str:
     return best
 
 
-def _detect_ibkr(lines: list[str], delimiter: str) -> bool:
+def _detect_ibkr(lines: list[str], delimiter: str, platform_hint: str | None) -> Optional[Tuple[str, dict]]:
     reader = csv.reader(lines, delimiter=delimiter)
+    seen_record_type = False
     for row in reader:
         if len(row) < 2:
             continue
         record_type = row[1].strip().lower()
         if record_type in {"header", "data"}:
-            return True
-    return False
+            seen_record_type = True
+            break
+    if not seen_record_type:
+        return None
+
+    reader = csv.reader(lines, delimiter=delimiter)
+    sections: Dict[str, Dict[str, List[str]]] = {}
+    record_types: Dict[str, set[str]] = {}
+
+    for row in reader:
+        if len(row) < 2:
+            continue
+        section = row[0].strip().lower()
+        record_type = row[1].strip().lower()
+        record_types.setdefault(section, set()).add(record_type)
+        if record_type == "header":
+            header_fields = [c.strip().lower() for c in row[2:]]
+            sections.setdefault(section, {})["header"] = header_fields
+
+    section_names = sorted(sections.keys())
+    signature_parts = [
+        "file_kind=ibkr_activity_csv",
+        f"delimiter={delimiter}",
+        f"platform_hint={platform_hint or ''}",
+        "sections=" + "|".join(section_names),
+    ]
+    for section in section_names:
+        header = sections.get(section, {}).get("header", [])
+        types = sorted(record_types.get(section, set()))
+        signature_parts.append(f"section={section}")
+        signature_parts.append(f"record_types={','.join(types)}")
+        signature_parts.append("header=" + ",".join(header))
+
+    normalized = "\n".join(signature_parts)
+    signature = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    debug = {
+        "file_kind": "ibkr_activity_csv",
+        "delimiter": delimiter,
+        "platform_hint": platform_hint,
+        "sections": section_names,
+        "section_headers": {k: v.get("header", []) for k, v in sections.items()},
+        "record_types": {k: sorted(list(v)) for k, v in record_types.items()},
+    }
+    return signature, debug
+
+
+def _is_citi_cc_row(row: list[str]) -> bool:
+    if len(row) != 5:
+        return False
+    if not _CITI_CC_DATE_RE.match(row[0].strip()):
+        return False
+    if not _CITI_CC_AMOUNT_RE.match(row[2].strip().replace(",", "")):
+        return False
+    if row[3].strip() != "":
+        return False
+    if not _CITI_CC_CARD_RE.match(row[4].strip()):
+        return False
+    return True
+
+
+def _detect_citi_cc(lines: list[str], delimiter: str, platform_hint: str | None) -> Optional[Tuple[str, dict]]:
+    reader = csv.reader(lines, delimiter=delimiter)
+    non_empty_rows = [row for row in reader if row and any(cell.strip() for cell in row)]
+    if len(non_empty_rows) < 2:
+        return None
+    probe_rows = non_empty_rows[:5]
+    if not all(_is_citi_cc_row(row) for row in probe_rows):
+        return None
+
+    signature_parts = [
+        "file_kind=citi_credit_card_csv",
+        f"delimiter={delimiter}",
+        f"platform_hint={platform_hint or ''}",
+        "column_count=5",
+    ]
+    normalized = "\n".join(signature_parts)
+    signature = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    debug = {
+        "file_kind": "citi_credit_card_csv",
+        "delimiter": delimiter,
+        "platform_hint": platform_hint,
+        "column_count": 5,
+    }
+    return signature, debug
 
 
 def _pick_engine(path: str) -> str | None:
@@ -224,62 +312,7 @@ def _find_flat_header(lines: list[str], delimiter: str) -> List[str]:
     return header_row or []
 
 
-def compute_format_signature(file_path: str, platform_hint: str | None = None, max_lines: int = 50) -> Tuple[str, dict]:
-    if file_path.lower().endswith((".xls", ".xlsx")):
-        return _excel_signature(file_path, platform_hint, max_lines)
-
-    lines: list[str] = []
-    with open(file_path, "r", encoding="utf-8-sig", newline="") as f:
-        for _ in range(max_lines):
-            line = f.readline()
-            if not line:
-                break
-            lines.append(line)
-
-    sample = "".join(lines)
-    delimiter = _detect_delimiter(sample)
-    if _detect_ibkr(lines, delimiter):
-        reader = csv.reader(lines, delimiter=delimiter)
-
-        sections: Dict[str, Dict[str, List[str]]] = {}
-        record_types: Dict[str, set] = {}
-
-        for row in reader:
-            if len(row) < 2:
-                continue
-            section = row[0].strip().lower()
-            record_type = row[1].strip().lower()
-            record_types.setdefault(section, set()).add(record_type)
-            if record_type == "header":
-                header_fields = [c.strip().lower() for c in row[2:]]
-                sections.setdefault(section, {})["header"] = header_fields
-
-        section_names = sorted(sections.keys())
-        signature_parts = [
-            "file_kind=ibkr_activity_csv",
-            f"delimiter={delimiter}",
-            f"platform_hint={platform_hint or ''}",
-            "sections=" + "|".join(section_names),
-        ]
-        for section in section_names:
-            header = sections.get(section, {}).get("header", [])
-            types = sorted(record_types.get(section, set()))
-            signature_parts.append(f"section={section}")
-            signature_parts.append(f"record_types={','.join(types)}")
-            signature_parts.append("header=" + ",".join(header))
-
-        normalized = "\n".join(signature_parts)
-        signature = hashlib.sha256(normalized.encode("utf-8")).hexdigest()
-        debug = {
-            "file_kind": "ibkr_activity_csv",
-            "delimiter": delimiter,
-            "platform_hint": platform_hint,
-            "sections": section_names,
-            "section_headers": {k: v.get("header", []) for k, v in sections.items()},
-            "record_types": {k: sorted(list(v)) for k, v in record_types.items()},
-        }
-        return signature, debug
-
+def _flat_csv_signature(lines: list[str], delimiter: str, platform_hint: str | None) -> Tuple[str, dict]:
     header_fields = _find_flat_header(lines, delimiter)
     signature_parts = [
         "file_kind=flat_csv",
@@ -296,3 +329,31 @@ def compute_format_signature(file_path: str, platform_hint: str | None = None, m
         "header": header_fields,
     }
     return signature, debug
+
+
+_CSV_DETECTORS: list[Callable[[list[str], str, str | None], Optional[Tuple[str, dict]]]] = [
+    _detect_ibkr,
+    _detect_citi_cc,
+]
+
+
+def compute_format_signature(file_path: str, platform_hint: str | None = None, max_lines: int = 50) -> Tuple[str, dict]:
+    if file_path.lower().endswith((".xls", ".xlsx")):
+        return _excel_signature(file_path, platform_hint, max_lines)
+
+    lines: list[str] = []
+    with open(file_path, "r", encoding="utf-8-sig", newline="") as f:
+        for _ in range(max_lines):
+            line = f.readline()
+            if not line:
+                break
+            lines.append(line)
+
+    sample = "".join(lines)
+    delimiter = _detect_delimiter(sample)
+    for detector in _CSV_DETECTORS:
+        detected = detector(lines, delimiter, platform_hint)
+        if detected is not None:
+            return detected
+
+    return _flat_csv_signature(lines, delimiter, platform_hint)
