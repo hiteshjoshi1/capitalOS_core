@@ -104,3 +104,4 @@ data/reports/
 
 tasks/private/
 tasks/*.local.md
+.task-cache/

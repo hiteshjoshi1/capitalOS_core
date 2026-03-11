@@ -80,7 +80,7 @@ db-query:
 	docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) -c "$(QUERY)"
 
 # ---- Quality gates ----
-.PHONY: lint typecheck test-backend test-frontend e2e verify task-prepare task-plan task-build task-review task-rework task-ship task-all
+.PHONY: lint typecheck test-backend test-frontend e2e verify task-prepare task-plan task-build task-review task-rework task-ship task-all task-cache-clean
 
 # Frontend lint + optional backend lint if ruff is installed in API image.
 lint:
@@ -133,6 +133,9 @@ task-ship:
 task-all:
 	@test -n "$(TASK)" || (echo "Usage: make task-all TASK=tasks/issue-<id>-<slug>.md" && exit 2)
 	./scripts/task_flow.sh all "$(TASK)"
+
+task-cache-clean:
+	rm -rf .task-cache/
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
 .PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test

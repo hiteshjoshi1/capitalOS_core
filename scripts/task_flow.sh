@@ -1,17 +1,29 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-MAX_RETRIES="${MAX_RETRIES:-3}"
-PLAN_MODEL="${PLAN_MODEL:-claude-opus-4.6}"
-REVIEW_MODEL="${REVIEW_MODEL:-claude-sonnet-4.6}"
-REVIEW_ESCALATION_MODEL="${REVIEW_ESCALATION_MODEL:-claude-opus-4.6}"
-CODEX_TIMEOUT_MINUTES="${CODEX_TIMEOUT_MINUTES:-60}"
-ENABLE_CAFFEINATE="${ENABLE_CAFFEINATE:-1}"
-COPILOT_TOOL_MODE="${COPILOT_TOOL_MODE:-text-only}"
+MAX_RETRIES="${MAX_RETRIES-}"
+PLAN_MODEL="${PLAN_MODEL-}"
+REVIEW_MODEL="${REVIEW_MODEL-}"
+REVIEW_ESCALATION_MODEL="${REVIEW_ESCALATION_MODEL-}"
+CODEX_TIMEOUT_MINUTES="${CODEX_TIMEOUT_MINUTES-}"
+ENABLE_CAFFEINATE="${ENABLE_CAFFEINATE-}"
+COPILOT_TOOL_MODE="${COPILOT_TOOL_MODE-}"
+CONTEXT7_ENABLED="${CONTEXT7_ENABLED-}"
+COPILOT_MCP_CONFIG="${COPILOT_MCP_CONFIG-}"
+NO_CACHE="${NO_CACHE-}"
+VERBOSE=0
+CONTEXT7_AVAILABLE_STATE=""
+CONTEXT7_WARNING_EMITTED=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ "${TASK_FLOW_RUNTIME_ACTIVE:-0}" == "1" && -n "${TASK_FLOW_REPO_ROOT:-}" ]]; then
+  REPO_ROOT="$TASK_FLOW_REPO_ROOT"
+else
+  REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+fi
 TASK_TEMPLATE="$REPO_ROOT/tasks/_template.md"
+MODEL_CONFIG_FILE="$REPO_ROOT/.ai-models.env"
+CACHE_DIR="$REPO_ROOT/.task-cache"
 
 cd "$REPO_ROOT"
 
@@ -24,22 +36,25 @@ BRANCH=""
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/task_flow.sh prepare tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh plan  tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh build tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh review tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh rework tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh ship  tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh all   tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] prepare tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] plan    tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] build   tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] review  tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] rework  tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] ship    tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] all     tasks/issue-<id>-<slug>.md
 
 Environment overrides:
-  PLAN_MODEL=claude-opus-4.6
-  REVIEW_MODEL=claude-sonnet-4.6
-  REVIEW_ESCALATION_MODEL=claude-opus-4.6
+  PLAN_MODEL=<planner model>
+  REVIEW_MODEL=<primary reviewer model>
+  REVIEW_ESCALATION_MODEL=<escalation reviewer model>
   MAX_RETRIES=3
   CODEX_TIMEOUT_MINUTES=60
   ENABLE_CAFFEINATE=1
   COPILOT_TOOL_MODE=text-only
+  CONTEXT7_ENABLED=0
+  COPILOT_MCP_CONFIG=~/.copilot/mcp-config.json
+  NO_CACHE=0
 EOF
 }
 
@@ -59,6 +74,248 @@ die() {
 require_tool() {
   local tool="$1"
   command -v "$tool" >/dev/null 2>&1 || die "Required tool not found: $tool"
+}
+
+stage_requires_self_integrity() {
+  local stage="$1"
+  case "$stage" in
+    plan|build|review|rework|all) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+file_sha256() {
+  local path="$1"
+  shasum -a 256 "$path" | awk '{print $1}'
+}
+
+validate_pipeline_script_if_changed() {
+  local before_hash="$1"
+  local script_path="$REPO_ROOT/scripts/task_flow.sh"
+  local after_hash
+
+  after_hash="$(file_sha256 "$script_path")"
+  if [[ "$before_hash" == "$after_hash" ]]; then
+    return 0
+  fi
+
+  log "Detected script change during run; validating syntax: $script_path"
+  if ! bash -n "$script_path"; then
+    log "ERROR: Self-integrity check failed: invalid syntax in modified scripts/task_flow.sh"
+    return 1
+  fi
+
+  log "Self-integrity check passed for modified scripts/task_flow.sh"
+}
+
+activate_runtime_self_integrity() {
+  local source_script="$REPO_ROOT/scripts/task_flow.sh"
+  local runtime_script before_hash rc
+
+  runtime_script="$(mktemp "/tmp/task_flow.runtime.XXXXXX")"
+  before_hash="$(file_sha256 "$source_script")"
+  cp "$source_script" "$runtime_script"
+  chmod 700 "$runtime_script"
+
+  log "Self-integrity mode active; runtime script path: $runtime_script"
+
+  set +e
+  TASK_FLOW_RUNTIME_ACTIVE=1 \
+  TASK_FLOW_REPO_ROOT="$REPO_ROOT" \
+  bash "$runtime_script" "$@"
+  rc=$?
+  set -e
+
+  rm -f "$runtime_script"
+
+  if ! validate_pipeline_script_if_changed "$before_hash"; then
+    die "Self-integrity check failed. Fix scripts/task_flow.sh syntax before rerunning."
+  fi
+
+  exit "$rc"
+}
+
+require_non_empty_config() {
+  local name="$1"
+  local value="$2"
+  [[ -n "$value" ]] || die "Missing required config value: $name"
+}
+
+require_binary_flag_config() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[01]$ ]] || die "Config $name must be 0 or 1 (got: $value)"
+}
+
+require_positive_integer_config() {
+  local name="$1"
+  local value="$2"
+  [[ "$value" =~ ^[0-9]+$ ]] || die "Config $name must be a positive integer (got: $value)"
+  (( value >= 1 )) || die "Config $name must be >= 1 (got: $value)"
+}
+
+print_model_routing_table() {
+  log "Active model routing:"
+  log "  PLAN_MODEL=$PLAN_MODEL"
+  log "  REVIEW_MODEL=$REVIEW_MODEL"
+  log "  REVIEW_ESCALATION_MODEL=$REVIEW_ESCALATION_MODEL"
+  log "  CODEX_TIMEOUT_MINUTES=$CODEX_TIMEOUT_MINUTES"
+  log "  MAX_RETRIES=$MAX_RETRIES"
+  log "  COPILOT_TOOL_MODE=$COPILOT_TOOL_MODE"
+  log "  CONTEXT7_ENABLED=$CONTEXT7_ENABLED"
+  log "  COPILOT_MCP_CONFIG=$COPILOT_MCP_CONFIG"
+  log "  NO_CACHE=$NO_CACHE"
+}
+
+load_model_config() {
+  local env_plan_set=0 env_plan=""
+  local env_review_set=0 env_review=""
+  local env_escalation_set=0 env_escalation=""
+  local env_timeout_set=0 env_timeout=""
+  local env_caffeinate_set=0 env_caffeinate=""
+  local env_tool_mode_set=0 env_tool_mode=""
+  local env_context7_set=0 env_context7=""
+  local env_mcp_config_set=0 env_mcp_config=""
+  local env_retries_set=0 env_retries=""
+  local env_no_cache_set=0 env_no_cache=""
+
+  if [[ -n "${PLAN_MODEL:-}" ]]; then env_plan_set=1; env_plan="$PLAN_MODEL"; fi
+  if [[ -n "${REVIEW_MODEL:-}" ]]; then env_review_set=1; env_review="$REVIEW_MODEL"; fi
+  if [[ -n "${REVIEW_ESCALATION_MODEL:-}" ]]; then env_escalation_set=1; env_escalation="$REVIEW_ESCALATION_MODEL"; fi
+  if [[ -n "${CODEX_TIMEOUT_MINUTES:-}" ]]; then env_timeout_set=1; env_timeout="$CODEX_TIMEOUT_MINUTES"; fi
+  if [[ -n "${ENABLE_CAFFEINATE:-}" ]]; then env_caffeinate_set=1; env_caffeinate="$ENABLE_CAFFEINATE"; fi
+  if [[ -n "${COPILOT_TOOL_MODE:-}" ]]; then env_tool_mode_set=1; env_tool_mode="$COPILOT_TOOL_MODE"; fi
+  if [[ -n "${CONTEXT7_ENABLED:-}" ]]; then env_context7_set=1; env_context7="$CONTEXT7_ENABLED"; fi
+  if [[ -n "${COPILOT_MCP_CONFIG:-}" ]]; then env_mcp_config_set=1; env_mcp_config="$COPILOT_MCP_CONFIG"; fi
+  if [[ -n "${MAX_RETRIES:-}" ]]; then env_retries_set=1; env_retries="$MAX_RETRIES"; fi
+  if [[ -n "${NO_CACHE:-}" ]]; then env_no_cache_set=1; env_no_cache="$NO_CACHE"; fi
+
+  [[ -f "$MODEL_CONFIG_FILE" ]] || die "Model config file not found: $MODEL_CONFIG_FILE"
+  set -a
+  # shellcheck source=/dev/null
+  source "$MODEL_CONFIG_FILE"
+  set +a
+
+  # Re-apply caller-provided environment overrides after sourcing defaults.
+  if (( env_plan_set )); then PLAN_MODEL="$env_plan"; fi
+  if (( env_review_set )); then REVIEW_MODEL="$env_review"; fi
+  if (( env_escalation_set )); then REVIEW_ESCALATION_MODEL="$env_escalation"; fi
+  if (( env_timeout_set )); then CODEX_TIMEOUT_MINUTES="$env_timeout"; fi
+  if (( env_caffeinate_set )); then ENABLE_CAFFEINATE="$env_caffeinate"; fi
+  if (( env_tool_mode_set )); then COPILOT_TOOL_MODE="$env_tool_mode"; fi
+  if (( env_context7_set )); then CONTEXT7_ENABLED="$env_context7"; fi
+  if (( env_mcp_config_set )); then COPILOT_MCP_CONFIG="$env_mcp_config"; fi
+  if (( env_retries_set )); then MAX_RETRIES="$env_retries"; fi
+  if (( env_no_cache_set )); then NO_CACHE="$env_no_cache"; fi
+
+  if [[ -z "${COPILOT_MCP_CONFIG:-}" ]]; then
+    COPILOT_MCP_CONFIG="$HOME/.copilot/mcp-config.json"
+  fi
+
+  require_non_empty_config "PLAN_MODEL" "${PLAN_MODEL:-}"
+  require_non_empty_config "REVIEW_MODEL" "${REVIEW_MODEL:-}"
+  require_non_empty_config "REVIEW_ESCALATION_MODEL" "${REVIEW_ESCALATION_MODEL:-}"
+  require_non_empty_config "CODEX_TIMEOUT_MINUTES" "${CODEX_TIMEOUT_MINUTES:-}"
+  require_non_empty_config "ENABLE_CAFFEINATE" "${ENABLE_CAFFEINATE:-}"
+  require_non_empty_config "COPILOT_TOOL_MODE" "${COPILOT_TOOL_MODE:-}"
+  require_non_empty_config "CONTEXT7_ENABLED" "${CONTEXT7_ENABLED:-}"
+  require_non_empty_config "COPILOT_MCP_CONFIG" "${COPILOT_MCP_CONFIG:-}"
+  require_non_empty_config "MAX_RETRIES" "${MAX_RETRIES:-}"
+  require_non_empty_config "NO_CACHE" "${NO_CACHE:-}"
+
+  require_positive_integer_config "CODEX_TIMEOUT_MINUTES" "$CODEX_TIMEOUT_MINUTES"
+  require_positive_integer_config "MAX_RETRIES" "$MAX_RETRIES"
+  require_binary_flag_config "ENABLE_CAFFEINATE" "$ENABLE_CAFFEINATE"
+  require_binary_flag_config "CONTEXT7_ENABLED" "$CONTEXT7_ENABLED"
+  require_binary_flag_config "NO_CACHE" "$NO_CACHE"
+
+  case "$COPILOT_TOOL_MODE" in
+    text-only|tools-enabled) ;;
+    *) die "Config COPILOT_TOOL_MODE must be text-only or tools-enabled (got: $COPILOT_TOOL_MODE)" ;;
+  esac
+
+  export PLAN_MODEL REVIEW_MODEL REVIEW_ESCALATION_MODEL
+  export CODEX_TIMEOUT_MINUTES ENABLE_CAFFEINATE COPILOT_TOOL_MODE CONTEXT7_ENABLED COPILOT_MCP_CONFIG MAX_RETRIES NO_CACHE
+
+  if (( VERBOSE )); then
+    print_model_routing_table
+  fi
+}
+
+git_tree_hash() {
+  {
+    git rev-parse HEAD^{tree} 2>/dev/null || echo "NO_HEAD_TREE"
+    git diff --no-color
+    git diff --cached --no-color
+    git ls-files --others --exclude-standard | sort
+  } | shasum -a 256 | awk '{print $1}'
+}
+
+cache_key() {
+  local phase="$1"
+  local model="$2"
+  local task_content="$3"
+  local tree_hash
+  tree_hash="$(git_tree_hash)"
+  printf '%s\n%s\n%s\n%s\n' "$phase" "$model" "$task_content" "$tree_hash" \
+    | shasum -a 256 \
+    | awk '{print $1}'
+}
+
+cache_get() {
+  local phase="$1"
+  local model="$2"
+  local key="$3"
+  local cache_file="$CACHE_DIR/${key}.txt"
+
+  if [[ "$NO_CACHE" == "1" ]]; then
+    return 1
+  fi
+
+  if [[ -f "$cache_file" ]]; then
+    log "[CACHE HIT] phase=$phase model=$model key=$key"
+    cat "$cache_file"
+    return 0
+  fi
+
+  return 1
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  value="${value//$'\r'/\\r}"
+  value="${value//$'\t'/\\t}"
+  printf '%s' "$value"
+}
+
+cache_put() {
+  local phase="$1"
+  local model="$2"
+  local key="$3"
+  local content="$4"
+  local cache_file="$CACHE_DIR/${key}.txt"
+  local meta_file="$CACHE_DIR/${key}.meta"
+  local git_ref
+
+  if [[ "$NO_CACHE" == "1" ]]; then
+    return 0
+  fi
+
+  local ts_escaped model_escaped phase_escaped git_ref_escaped task_file_escaped
+  mkdir -p "$CACHE_DIR"
+  printf '%s' "$content" > "$cache_file"
+  git_ref="$(git rev-parse --short HEAD 2>/dev/null || echo "UNBORN")"
+  ts_escaped="$(json_escape "$(timestamp)")"
+  model_escaped="$(json_escape "$model")"
+  phase_escaped="$(json_escape "$phase")"
+  git_ref_escaped="$(json_escape "$git_ref")"
+  task_file_escaped="$(json_escape "$TASK_FILE")"
+  cat > "$meta_file" <<EOF
+{"timestamp":"$ts_escaped","model":"$model_escaped","phase":"$phase_escaped","git_ref":"$git_ref_escaped","task_file":"$task_file_escaped"}
+EOF
 }
 
 run_with_caffeinate_for_codex() {
@@ -332,34 +589,161 @@ commit_and_push_task_file() {
   run_with_retries "Push branch $BRANCH" git push -u origin "$BRANCH"
 }
 
+copilot_installed() {
+  if [[ "$CONTEXT7_AVAILABLE_STATE" == "available" ]]; then
+    return 0
+  fi
+  if [[ "$CONTEXT7_AVAILABLE_STATE" == "unavailable" ]]; then
+    return 1
+  fi
+
+  if command -v copilot >/dev/null 2>&1; then
+    CONTEXT7_AVAILABLE_STATE="available"
+  else
+    CONTEXT7_AVAILABLE_STATE="unavailable"
+  fi
+
+  [[ "$CONTEXT7_AVAILABLE_STATE" == "available" ]]
+}
+
+context7_configured() {
+  local config_file="${COPILOT_MCP_CONFIG:-$HOME/.copilot/mcp-config.json}"
+  [[ -f "$config_file" ]] || return 1
+  grep -Eiq '"mcpServers"[[:space:]]*:' "$config_file" || return 1
+  grep -Eiq '"context7"[[:space:]]*:' "$config_file" || return 1
+}
+
+phase_supports_context7() {
+  local phase="$1"
+  [[ "$phase" == "plan" || "$phase" == "review" ]]
+}
+
+should_enable_context7_for_phase() {
+  local phase="$1"
+  [[ "$CONTEXT7_ENABLED" == "1" ]] || return 1
+  phase_supports_context7 "$phase" || return 1
+
+  if ! copilot_installed; then
+    if (( CONTEXT7_WARNING_EMITTED == 0 )); then
+      log "WARN: CONTEXT7_ENABLED=1 but Copilot CLI is not available. Continuing without Context7."
+      CONTEXT7_WARNING_EMITTED=1
+    fi
+    return 1
+  fi
+
+  if ! context7_configured; then
+    if (( CONTEXT7_WARNING_EMITTED == 0 )); then
+      log "WARN: CONTEXT7_ENABLED=1 but Context7 MCP is not configured in $COPILOT_MCP_CONFIG."
+      log "WARN: Add context7 under mcpServers in that file, then rerun."
+      CONTEXT7_WARNING_EMITTED=1
+    fi
+    return 1
+  fi
+
+  return 0
+}
+
 run_copilot_prompt() {
   local model="$1"
   local prompt="$2"
-  local args=(
+  local phase="${3:-generic}"
+  local base_args=(
     copilot
     --model "$model"
     -p "$prompt"
     --no-color
   )
+  local args_with_context7 args_without_context7 output_file error_file rc
 
   if [[ "$COPILOT_TOOL_MODE" == "text-only" ]]; then
     # Keep planning/review deterministic and avoid Copilot CLI tool permission failures.
-    args+=(
+    args_without_context7=(
+      "${base_args[@]}"
       --no-ask-user
       --disable-builtin-mcps
       --deny-tool write
       --deny-tool shell
       --deny-tool url
     )
+
+    if should_enable_context7_for_phase "$phase"; then
+      args_with_context7=(
+        "${base_args[@]}"
+        --no-ask-user
+        --allow-tool context7
+        --deny-tool write
+        --deny-tool shell
+        --deny-tool url
+      )
+
+      output_file="$(mktemp)"
+      error_file="$(mktemp)"
+      set +e
+      "${args_with_context7[@]}" >"$output_file" 2>"$error_file"
+      rc=$?
+      set -e
+      if [[ "$rc" -eq 0 ]]; then
+        if (( VERBOSE )) && [[ -s "$error_file" ]]; then
+          log "Context7 stderr output (first 20 lines):"
+          sed -n '1,20p' "$error_file" >&2
+        fi
+        cat "$output_file"
+        rm -f "$output_file"
+        rm -f "$error_file"
+        return 0
+      fi
+
+      if (( CONTEXT7_WARNING_EMITTED == 0 )); then
+        log "WARN: Context7 tool invocation failed. Falling back without Context7 for this run."
+        log "WARN: Configure an MCP tool named 'context7' in $COPILOT_MCP_CONFIG, then rerun with CONTEXT7_ENABLED=1."
+        CONTEXT7_WARNING_EMITTED=1
+      fi
+      if (( VERBOSE )); then
+        log "Context7 failure output (first 20 lines):"
+        sed -n '1,20p' "$error_file" >&2
+      fi
+      rm -f "$output_file"
+      rm -f "$error_file"
+      "${args_without_context7[@]}"
+      return 0
+    fi
+
+    "${args_without_context7[@]}"
+    return 0
   fi
 
-  "${args[@]}"
+  "${base_args[@]}"
 }
 
 run_copilot_prompt_visible() {
   local model="$1"
   local prompt="$2"
-  run_copilot_prompt "$model" "$prompt" 2>&1 | tee /dev/stderr
+  local phase="${3:-generic}"
+  run_copilot_prompt "$model" "$prompt" "$phase" 2>&1 | tee /dev/stderr
+}
+
+run_copilot_prompt_with_cache() {
+  local phase="$1"
+  local model="$2"
+  local prompt="$3"
+  local task_content="$4"
+  local visible="${5:-0}"
+  local key output
+
+  key="$(cache_key "$phase" "$model" "$task_content")"
+  if output="$(cache_get "$phase" "$model" "$key")"; then
+    printf '%s' "$output"
+    return 0
+  fi
+
+  if [[ "$visible" == "1" ]]; then
+    output="$(run_copilot_prompt_visible "$model" "$prompt" "$phase")"
+  else
+    output="$(run_copilot_prompt "$model" "$prompt" "$phase")"
+  fi
+
+  cache_put "$phase" "$model" "$key" "$output"
+  printf '%s' "$output"
 }
 
 latest_copilot_session_plan() {
@@ -654,7 +1038,9 @@ cmd_plan() {
   ensure_task_file_exists
   assert_task_path_writable
 
-  local prompt
+  local task_content prompt
+  task_content="$(cat "$TASK_FILE")"
+
   prompt="$(cat <<EOF
 You are planning work for CapitalOS.
 Model role: architecture/planning.
@@ -686,11 +1072,11 @@ Requirements:
 5) Do not include tool logs or transcripts inside the marked output.
 
 Current task file content:
-$(cat "$TASK_FILE")
+$task_content
 EOF
 )"
   local raw_output planned_task
-  raw_output="$(run_copilot_prompt_visible "$PLAN_MODEL" "$prompt")"
+  raw_output="$(run_copilot_prompt_with_cache "plan" "$PLAN_MODEL" "$prompt" "$task_content" "1")"
   planned_task="$(resolve_plan_task_file_output "$raw_output" || true)"
   [[ -n "$planned_task" ]] || die "Planner output did not include a valid task document. No task file changes were written."
 
@@ -747,10 +1133,11 @@ EOF
 }
 
 run_sonnet_review() {
-  local diff_stat diff_names diff_patch prompt
+  local diff_stat diff_names diff_patch task_content prompt
   diff_stat="$(collect_review_diff_stat)"
   diff_names="$(collect_review_diff_names)"
   diff_patch="$(collect_review_diff_patch)"
+  task_content="$(cat "$TASK_FILE")"
   prompt="$(cat <<EOF
 You are a strict reviewer for CapitalOS.
 Primary review model.
@@ -760,7 +1147,7 @@ Critical constraint:
 - Use only the provided task file and diff context below.
 
 Task file:
-$(cat "$TASK_FILE")
+$task_content
 
 Changed files:
 $diff_names
@@ -784,13 +1171,14 @@ TEST_GAPS:
 Use STATUS=ESCALATE when uncertain, conflicting, or high-risk.
 EOF
 )"
-  run_copilot_prompt "$REVIEW_MODEL" "$prompt"
+  run_copilot_prompt_with_cache "review" "$REVIEW_MODEL" "$prompt" "$task_content"
 }
 
 run_opus_escalation_review() {
   local sonnet_output="$1"
-  local diff_patch prompt
+  local diff_patch task_content prompt
   diff_patch="$(collect_review_diff_patch)"
+  task_content="$(cat "$TASK_FILE")"
   prompt="$(cat <<EOF
 You are the escalation reviewer for CapitalOS.
 Primary review from Sonnet is below.
@@ -803,7 +1191,7 @@ Sonnet review:
 $sonnet_output
 
 Task file:
-$(cat "$TASK_FILE")
+$task_content
 
 Unified diff (truncated to first 4000 lines):
 $diff_patch
@@ -819,7 +1207,7 @@ TEST_GAPS:
 - ...
 EOF
 )"
-  run_copilot_prompt "$REVIEW_ESCALATION_MODEL" "$prompt"
+  run_copilot_prompt_with_cache "review" "$REVIEW_ESCALATION_MODEL" "$prompt" "$task_content"
 }
 
 cmd_review() {
@@ -1003,11 +1391,28 @@ cmd_all() {
 }
 
 main() {
+  local original_args=("$@")
+  local args=()
+  local arg
+  for arg in "$@"; do
+    if [[ "$arg" == "--verbose" ]]; then
+      VERBOSE=1
+    else
+      args+=("$arg")
+    fi
+  done
+
+  set -- "${args[@]}"
   [[ $# -eq 2 ]] || { usage; exit 1; }
   local cmd="$1"
   local task="$2"
   local rc
 
+  if stage_requires_self_integrity "$cmd" && [[ "${TASK_FLOW_RUNTIME_ACTIVE:-0}" != "1" ]]; then
+    activate_runtime_self_integrity "${original_args[@]}"
+  fi
+
+  load_model_config
   enable_stage_caffeinate_if_needed "$cmd"
 
   case "$cmd" in
