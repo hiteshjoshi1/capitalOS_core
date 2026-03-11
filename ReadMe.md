@@ -165,6 +165,43 @@ Model routing:
 - Primary review/testing: `claude-sonnet-4.6`
 - Escalation review only (if Sonnet is uncertain/high-risk): `claude-opus-4.6`
 
+#### How config works
+- Workflow model/runtime settings are loaded from repo-root `.ai-models.env`.
+- Supported keys: `PLAN_MODEL`, `REVIEW_MODEL`, `REVIEW_ESCALATION_MODEL`, `CODEX_TIMEOUT_MINUTES`, `ENABLE_CAFFEINATE`, `COPILOT_TOOL_MODE`, `CONTEXT7_ENABLED`, `COPILOT_MCP_CONFIG`, `MAX_RETRIES`, `NO_CACHE`.
+- Environment variables still override `.ai-models.env` values.
+- Use verbose mode to print active routing/config: `./scripts/task_flow.sh --verbose plan tasks/issue-123-my-feature.md`.
+
+#### How cache works
+- Plan/review prompts use a read-through cache at `.task-cache/` (local, gitignored).
+- Cache key is SHA-256 over: phase + model + full task content + git tree hash.
+- `build` and `rework` are never cached.
+- Clear cache with `make task-cache-clean`.
+
+#### How to disable/tune
+- Disable cache for a run: `NO_CACHE=1 make task-plan TASK=...`
+- Change retry budget: `MAX_RETRIES=2 make task-build TASK=...`
+- Change planner/reviewer model per run with env overrides (same variable names as `.ai-models.env`).
+- Optional Context7 MCP for plan/review: set `CONTEXT7_ENABLED=1`. If Context7 invocation fails, workflow logs a warning and automatically retries without Context7.
+- Context7 config path defaults to `~/.copilot/mcp-config.json` (override with `COPILOT_MCP_CONFIG=...`).
+
+#### Context7 setup (standard)
+1. Create/update `~/.copilot/mcp-config.json`:
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp",
+      "headers": {
+        "CONTEXT7_API_KEY": "YOUR_CONTEXT7_API_KEY"
+      },
+      "tools": ["resolve-library-id", "get-library-docs"]
+    }
+  }
+}
+```
+2. Enable for a run: `CONTEXT7_ENABLED=1 make task-plan TASK=...`
+
 Canonical task file:
 - `tasks/issue-<id>-<slug>.md`
 

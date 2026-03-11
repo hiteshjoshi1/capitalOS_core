@@ -12,6 +12,31 @@ Model routing:
 - Primary review/testing: `claude-sonnet-4.6`
 - Escalation review only (uncertain/high-risk Sonnet review): `claude-opus-4.6`
 
+## Configuration
+- Workflow runtime config is loaded from repo-root `.ai-models.env`.
+- Keys: `PLAN_MODEL`, `REVIEW_MODEL`, `REVIEW_ESCALATION_MODEL`, `CODEX_TIMEOUT_MINUTES`, `ENABLE_CAFFEINATE`, `COPILOT_TOOL_MODE`, `CONTEXT7_ENABLED`, `COPILOT_MCP_CONFIG`, `MAX_RETRIES`, `NO_CACHE`.
+- Existing shell env overrides remain supported and take precedence over `.ai-models.env`.
+- `./scripts/task_flow.sh --verbose ...` prints the active routing table.
+
+## Task Context
+- `plan` and `review` send the full task file content to the model (no compaction).
+- Task file on disk is used as-is for prompt context.
+
+## Caching
+- Cache directory: `.task-cache/` (gitignored).
+- Applies only to `plan` and `review` model calls.
+- Cache key: `sha256(phase + model + full_task_content + git_tree_hash)`.
+- Cache stores response text (`.txt`) and metadata (`.meta`).
+- Set `NO_CACHE=1` to bypass cache.
+- Clear cache with `make task-cache-clean`.
+
+## Context7 Integration
+- Optional and off by default: `CONTEXT7_ENABLED=0`.
+- When enabled and configured, `plan`/`review` Copilot calls include `--allow-tool context7`.
+- Config file path: `COPILOT_MCP_CONFIG` (defaults to `~/.copilot/mcp-config.json`).
+- If Context7 invocation fails, workflow logs a warning and retries the same call without Context7.
+- Expected config shape includes `mcpServers.context7` (HTTP MCP endpoint).
+
 Canonical task artifact:
 - `tasks/issue-<id>-<slug>.md`
 
