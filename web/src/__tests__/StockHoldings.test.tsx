@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -79,10 +80,11 @@ const summaryFixture: DashboardSummary = {
 };
 
 describe("StockHoldings", () => {
-  it("renders updated navigation and native-currency detail columns", async () => {
+  it("renders dashboard-style header nav and native-currency detail columns", async () => {
+    const user = userEvent.setup();
     mockApi.dashboardSummary.mockResolvedValueOnce(summaryFixture);
 
-    render(
+    const { container } = render(
       <MemoryRouter>
         <StockHoldings />
       </MemoryRouter>,
@@ -90,11 +92,22 @@ describe("StockHoldings", () => {
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
 
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(nav.children).toHaveLength(3);
+    expect(nav.children[0]).toHaveTextContent("Dashboard");
+    expect(nav.children[2]).toHaveTextContent("Ingest");
     expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: "User" })).toHaveAttribute("href", "/accounts/new");
     expect(screen.getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
+    expect(within(nav).getByLabelText("User menu")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "User" })).not.toBeInTheDocument();
+    expect(container.querySelector("header .pillRow")?.children.length).toBe(3);
     expect(screen.queryByRole("link", { name: "Crypto Holdings" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Cash" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("User menu"));
+    expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
+    expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toBeInTheDocument();
 
     expect(screen.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();
