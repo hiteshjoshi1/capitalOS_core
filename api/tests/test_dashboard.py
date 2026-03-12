@@ -50,7 +50,7 @@ def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient
     assert data["net_worth"]["total"] > 0
     assert len(data["top_holdings"]) >= 3
     assert all(
-        {"symbol", "asset_class", "value"}.issubset(row.keys())
+        {"symbol", "asset_class", "value", "quantity", "avg_cost", "latest_price", "quote_currency"}.issubset(row.keys())
         for row in data["top_holdings"][:3]
     )
     values = [row["value"] for row in data["top_holdings"][:3]]
@@ -172,3 +172,137 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
     # 10 qty * 200 latest price = 2000, replacing cost_basis_base=1000
     assert data["net_worth"]["stocks_funds"] == 2000.0
     assert data["net_worth"]["total"] == 2000.0
+
+
+def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: TestClient, db_engine, monkeypatch):
+    from sqlalchemy import text
+    from datetime import datetime, timezone
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(30, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(30, 'IBKR One', 'IBKR', 'BROKER', 'HKD', 'HK', 30), "
+                "(31, 'IBKR Two', 'IBKR', 'BROKER', 'HKD', 'HK', 30)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(30, '700', 'Tencent', 'STOCK', 'HKD', NULL)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(30, 30, 30, :as_of, 10, 100, 1000), "
+                "(31, 31, 30, :as_of, 20, 200, 4000)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (id, asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(30, 30, :as_of, 150, 'HKD', 'eodhd_bulk', '2026-02-06', 'HKEX', '700.HK')"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO market_symbol_map (id, asset_id, exchange_code, exchange_symbol, quote_currency, is_active) VALUES "
+                "(30, 30, 'HKEX', '700', 'HKD', 1)"
+            )
+        )
+
+    def fake_rates(_date, base, symbols):
+        assert base == "HKD"
+        return {"HKD": 1.0}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&base_currency=HKD")
+    assert resp.status_code == 200
+    data = resp.json()
+    row = next(item for item in data["top_holdings"] if item["symbol"] == "700")
+
+    assert row["geo"] == "HK"
+    assert row["quantity"] == 30.0
+    assert row["avg_cost"] == pytest.approx((100.0 * 10.0 + 200.0 * 20.0) / 30.0)
+    assert row["latest_price"] == 150.0
+    assert row["quote_currency"] == "HKD"
+
+
+def test_dashboard_top_holdings_limit_is_15(client: TestClient, db_engine, monkeypatch):
+    from sqlalchemy import text
+    from datetime import datetime, timezone
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(40, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(40, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 40)"
+            )
+        )
+        asset_rows = []
+        position_rows = []
+        for idx in range(18):
+            asset_id = 400 + idx
+            value = 20000 - (idx * 100)
+            asset_rows.append(
+                {
+                    "id": asset_id,
+                    "symbol": f"STK{idx + 1}",
+                    "name": f"Stock {idx + 1}",
+                }
+            )
+            position_rows.append(
+                {
+                    "id": asset_id,
+                    "account_id": 40,
+                    "asset_id": asset_id,
+                    "as_of": as_of,
+                    "quantity": 10,
+                    "avg_cost": 10,
+                    "cost_basis_base": value,
+                }
+            )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) "
+                "VALUES (:id, :symbol, :name, 'STOCK', 'USD', 'US')"
+            ),
+            asset_rows,
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) "
+                "VALUES (:id, :account_id, :asset_id, :as_of, :quantity, :avg_cost, :cost_basis_base)"
+            ),
+            position_rows,
+        )
+
+    def fake_rates(_date, base, symbols):
+        assert base == "USD"
+        return {"USD": 1.0}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+    non_cash = [row for row in data["top_holdings"] if row["asset_class"] != "CASH"]
+    assert len(non_cash) == 15

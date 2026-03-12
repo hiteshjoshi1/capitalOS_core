@@ -53,6 +53,44 @@ def _effective_as_of(db: Session, anchor_ts: datetime) -> Optional[datetime]:
     return as_of
 
 
+def _infer_country(
+    symbol: str | None,
+    home: str | None,
+    platform: str | None,
+    quote_currency: str | None,
+    exchange_code: str | None = None,
+) -> str:
+    if home:
+        return home
+
+    exchange_country_map = {
+        "US": "US",
+        "HKEX": "HK",
+        "NSE": "IN",
+        "SGX": "SG",
+    }
+    if exchange_code:
+        mapped = exchange_country_map.get(exchange_code.upper())
+        if mapped:
+            return mapped
+
+    if platform and platform.upper() == "IBKR":
+        if symbol and symbol.isdigit():
+            return "HK"
+        if quote_currency and quote_currency.upper() == "HKD":
+            return "HK"
+        if quote_currency and quote_currency.upper() == "USD":
+            return "US"
+
+    if quote_currency and quote_currency.upper() == "USD":
+        return "US"
+    if quote_currency and quote_currency.upper() == "HKD":
+        return "HK"
+    if quote_currency and quote_currency.upper() == "INR":
+        return "IN"
+    return "UNKNOWN"
+
+
 def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, float]:
     if anchor_ts is None:
         return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
@@ -181,27 +219,10 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[str, float] = {}
-    def infer_country(symbol: str | None, home: str | None, platform: str | None, quote_currency: str | None) -> str:
-        if home:
-            return home
-        if platform and platform.upper() == "IBKR":
-            if symbol and symbol.isdigit():
-                return "HK"
-            if quote_currency and quote_currency.upper() == "HKD":
-                return "HK"
-            if quote_currency and quote_currency.upper() == "USD":
-                return "US"
-        if quote_currency and quote_currency.upper() == "USD":
-            return "US"
-        if quote_currency and quote_currency.upper() == "HKD":
-            return "HK"
-        if quote_currency and quote_currency.upper() == "INR":
-            return "IN"
-        return "UNKNOWN"
     for r in rows:
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
-        country = infer_country(r["symbol"], r["home_country"], r["platform"], r["quote_currency"])
+        country = _infer_country(r["symbol"], r["home_country"], r["platform"], r["quote_currency"])
         buckets[country] = buckets.get(country, 0.0) + value
     out = []
     for country, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
@@ -223,6 +244,14 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
           WHERE as_of <= :anchor_ts
           GROUP BY account_id
         ),
+        map_exchange AS (
+          SELECT
+            m.asset_id,
+            MIN(UPPER(m.exchange_code)) AS exchange_code
+          FROM market_symbol_map m
+          WHERE m.is_active = TRUE
+          GROUP BY m.asset_id
+        ),
         latest_prices AS (
           SELECT p1.asset_id, p1.price, p1.currency
           FROM prices p1
@@ -238,8 +267,12 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
           a.symbol,
           a.asset_class,
           COALESCE(lp.currency, a.quote_currency) AS quote_currency,
-          COALESCE(a.home_country, 'UNKNOWN') AS home_country,
+          a.home_country AS home_country,
+          mx.exchange_code AS exchange_code,
           COALESCE(pl.code, acc.platform) AS platform,
+          p.quantity AS quantity,
+          p.avg_cost AS avg_cost,
+          lp.price AS latest_price,
           CASE
             WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
               THEN p.quantity * lp.price
@@ -250,6 +283,7 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
         JOIN accounts acc ON acc.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         JOIN assets a ON a.id = p.asset_id
+        LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
@@ -271,15 +305,44 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
                 "symbol": display_symbol,
                 "asset_class": r["asset_class"],
                 "value": 0.0,
+                "quantity": 0.0,
+                "avg_cost": None,
+                "latest_price": float(r["latest_price"]) if r["latest_price"] is not None else None,
+                "quote_currency": (r["quote_currency"] or "").upper() or None,
+                "_avg_cost_numerator": 0.0,
+                "_avg_cost_denominator": 0.0,
+                "_has_quantity": False,
             }
         agg[asset_id]["value"] += value
-        geo = r["home_country"] or "UNKNOWN"
+        quantity = float(r["quantity"]) if r["quantity"] is not None else None
+        if quantity is not None:
+            agg[asset_id]["quantity"] += quantity
+            agg[asset_id]["_has_quantity"] = True
+            if r["avg_cost"] is not None and quantity > 0:
+                agg[asset_id]["_avg_cost_numerator"] += float(r["avg_cost"]) * quantity
+                agg[asset_id]["_avg_cost_denominator"] += quantity
+        if not agg[asset_id]["quote_currency"] and r["quote_currency"]:
+            agg[asset_id]["quote_currency"] = str(r["quote_currency"]).upper()
+        if agg[asset_id]["latest_price"] is None and r["latest_price"] is not None:
+            agg[asset_id]["latest_price"] = float(r["latest_price"])
+        geo = _infer_country(
+            r["symbol"],
+            r["home_country"],
+            r["platform"],
+            r["quote_currency"],
+            r["exchange_code"],
+        )
         platform = r["platform"] or "UNKNOWN"
         geo_bucket.setdefault(asset_id, {})[geo] = geo_bucket.setdefault(asset_id, {}).get(geo, 0.0) + value
         platform_bucket.setdefault(asset_id, {})[platform] = platform_bucket.setdefault(asset_id, {}).get(platform, 0.0) + value
     out = sorted(agg.values(), key=lambda x: x["value"], reverse=True)[:limit]
     for r in out:
         value = float(r["value"])
+        den = float(r.pop("_avg_cost_denominator"))
+        num = float(r.pop("_avg_cost_numerator"))
+        has_quantity = bool(r.pop("_has_quantity"))
+        r["quantity"] = r["quantity"] if has_quantity else None
+        r["avg_cost"] = (num / den) if den > 0 else None
         r["percent_of_networth"] = round((value / total) * 100, 2)
         geo = geo_bucket.get(r["asset_id"], {})
         platform = platform_bucket.get(r["asset_id"], {})
@@ -457,30 +520,12 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dic
     by_platform: Dict[str, float] = {}
     total = 0.0
 
-    def infer_country(symbol: str | None, home: str | None, platform: str | None, quote_currency: str | None) -> str:
-        if home:
-            return home
-        if platform and platform.upper() == "IBKR":
-            if symbol and symbol.isdigit():
-                return "HK"
-            if quote_currency and quote_currency.upper() == "HKD":
-                return "HK"
-            if quote_currency and quote_currency.upper() == "USD":
-                return "US"
-        if quote_currency and quote_currency.upper() == "USD":
-            return "US"
-        if quote_currency and quote_currency.upper() == "HKD":
-            return "HK"
-        if quote_currency and quote_currency.upper() == "INR":
-            return "IN"
-        return "UNKNOWN"
-
     for r in rows:
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
         total += value
         platform = r["platform"] or "UNKNOWN"
-        country = infer_country(r["symbol"], r["home_country"], platform, r["quote_currency"])
+        country = _infer_country(r["symbol"], r["home_country"], platform, r["quote_currency"])
         by_platform[platform] = by_platform.get(platform, 0.0) + value
         by_country[country] = by_country.get(country, 0.0) + value
 
@@ -517,7 +562,7 @@ def dashboard_summary(
 
     nw = _networth_components(db, anchor, base_currency)
     geo = _geography(db, anchor, nw["total"], base_currency)
-    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=10)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=15)
     cash_balances = _cash_balances(db, anchor, base_currency)
     cf = _cashflow(db, month_start, month_end, base_currency)
 

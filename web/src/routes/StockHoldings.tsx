@@ -37,6 +37,14 @@ export default function StockHoldings() {
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatQuantity = (value?: number | null) =>
+    value == null ? "—" : value.toLocaleString(undefined, { maximumFractionDigits: 4 });
+  const formatNativeMoney = (value?: number | null, quoteCurrency?: string, maximumFractionDigits = 2) => {
+    if (value == null || !quoteCurrency) {
+      return "—";
+    }
+    return `${quoteCurrency.toUpperCase()} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  };
 
   return (
     <div className="wrap">
@@ -47,8 +55,8 @@ export default function StockHoldings() {
         </div>
         <div className="pillRow">
           <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/crypto/holdings">Crypto Holdings</Link>
-          <Link className="pill" to="/cash">Cash</Link>
+          <Link className="pill" to="/accounts/new">User</Link>
+          <Link className="pill" to="/ingest">Ingest</Link>
           <label className="pill">
             <span>Base</span>
             <select
@@ -94,6 +102,9 @@ export default function StockHoldings() {
                   <th>Class</th>
                   <th className="right">% NW</th>
                   <th className="right">Value</th>
+                  <th className="right">Shares</th>
+                  <th className="right">Purchase Price</th>
+                  <th className="right">Current Price</th>
                   <th>Geo</th>
                   <th>Platform</th>
                 </tr>
@@ -108,13 +119,16 @@ export default function StockHoldings() {
                     <td className="muted">{h.asset_class}</td>
                     <td className="right">{h.percent_of_networth.toFixed(1)}%</td>
                     <td className="right">{formatMoney(h.value)}</td>
+                    <td className="right">{formatQuantity(h.quantity)}</td>
+                    <td className="right">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
+                    <td className="right">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
                     <td className="muted">{h.geo ?? "—"}</td>
                     <td className="muted">{h.platform ?? "—"}</td>
                   </tr>
                 ))}
                 {summary && summary.top_holdings.filter((h) => h.asset_class !== "CASH").length === 0 && (
                   <tr>
-                    <td className="muted" colSpan={7}>No holdings available.</td>
+                    <td className="muted" colSpan={10}>No holdings available.</td>
                   </tr>
                 )}
               </tbody>

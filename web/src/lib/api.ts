@@ -63,6 +63,10 @@ export type DashboardSummary = {
     asset_class: string;
     value: number;
     percent_of_networth: number;
+    quantity?: number;
+    avg_cost?: number | null;
+    latest_price?: number | null;
+    quote_currency?: string;
     geo?: string;
     platform?: string;
   }>;
