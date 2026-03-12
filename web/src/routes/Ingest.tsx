@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Account, ImportJobListItem } from "../lib/api";
 import "../App.css";
+import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type PlatformParserConfig = { label: string; parserKey: string };
@@ -111,19 +112,11 @@ export default function Ingest() {
   const platformParser = reportData?.platform ? PLATFORM_PARSERS[reportData.platform] : undefined;
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div className="titleBlock">
-          <div className="title">CapitalOS — Ingest</div>
-          <div className="subtitle">Upload a statement CSV. We will detect the format and show a report.</div>
-        </div>
-        <div className="pillRow">
-          <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/ingest">Ingest</Link>
-          <Link className="pill" to="/crypto">Crypto</Link>
-        </div>
-      </header>
-
+    <PageShell
+      title="CapitalOS — Ingest"
+      subtitle="Upload a statement CSV. We will detect the format and show a report."
+      activeRoute="/ingest"
+    >
       {state === "loading" && <div className="card">Loading…</div>}
 
       {state === "error" && (
@@ -315,6 +308,6 @@ export default function Ingest() {
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

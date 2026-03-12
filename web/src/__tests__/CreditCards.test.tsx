@@ -1,9 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import CreditCards from "../routes/CreditCards";
 import { api } from "../lib/api";
+import { ThemeProvider } from "../context/ThemeContext";
 import type { CreditCardDetail } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
@@ -13,6 +15,13 @@ vi.mock("../lib/api", () => ({
 }));
 
 const mockApi = vi.mocked(api, true);
+
+function currentMonthYYYYMM() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  return `${y}-${m}`;
+}
 
 const detailFixture: CreditCardDetail = {
   month: "2026-02",
@@ -113,20 +122,26 @@ describe("CreditCards route", () => {
 
   it("renders card breakdown, top purchases, recurring payments, and transactions", async () => {
     render(
-      <MemoryRouter>
-        <CreditCards />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <CreditCards />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     expect(await screen.findByText("Card Breakdown")).toBeInTheDocument();
-    expect(mockApi.creditCardTransactions).toHaveBeenCalledWith(expect.any(String), "SGD");
+    expect(mockApi.creditCardTransactions).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
 
     expect(screen.getByText("Configured cards: 1")).toBeInTheDocument();
     expect(screen.getByText("Top Purchases")).toBeInTheDocument();
     expect(screen.getByText("Recurring Payments")).toBeInTheDocument();
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(screen.getAllByText("Netflix").length).toBeGreaterThan(0);
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(nav).getAllByRole("link")).toHaveLength(1);
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    expect(within(nav).queryByRole("link", { name: "Credit Cards" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
   });
 
   it("renders empty states when no credit card data exists", async () => {
@@ -141,14 +156,35 @@ describe("CreditCards route", () => {
     });
 
     render(
-      <MemoryRouter>
-        <CreditCards />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <CreditCards />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     expect(await screen.findByText("Card Breakdown")).toBeInTheDocument();
     expect(screen.getByText("No purchases for this month.")).toBeInTheDocument();
     expect(screen.getByText("No recurring payments detected in the last 3 months.")).toBeInTheDocument();
     expect(screen.getAllByText("No credit card transactions for this month.").length).toBeGreaterThan(0);
+  });
+
+  it("keeps month fixed when base currency changes", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CreditCards />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    await screen.findByText("Card Breakdown");
+    await user.selectOptions(screen.getByRole("combobox"), "USD");
+
+    expect(mockApi.creditCardTransactions).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
+    expect(mockApi.creditCardTransactions).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
+    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
   });
 });

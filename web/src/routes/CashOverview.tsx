@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { DashboardSummary, CryptoSummary } from "../lib/api";
 import "../App.css";
+import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -20,7 +20,7 @@ export default function CashOverview() {
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
-  const [month, setMonth] = useState<string>(currentMonthYYYYMM());
+  const [month] = useState<string>(currentMonthYYYYMM());
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
 
   useEffect(() => {
@@ -53,41 +53,27 @@ export default function CashOverview() {
   const stablecoinTotal = stablecoins.reduce((acc, t) => acc + (t.value_base ?? 0), 0);
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div className="titleBlock">
-          <div className="title">Cash Overview</div>
-          <div className="subtitle">Bank cash, broker cash, and stablecoin balances.</div>
-        </div>
-        <div className="pillRow">
-          <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/holdings">Stock Holdings</Link>
-          <Link className="pill" to="/crypto/holdings">Crypto Holdings</Link>
-          <label className="pill">
-            <span>Base</span>
-            <select
-              className="monthInput"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
-          <label className="pill monthControl">
-            <span>Month</span>
-            <input
-              className="monthInput"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-            />
-          </label>
-        </div>
-      </header>
-
+    <PageShell
+      title="Cash Overview"
+      subtitle="Bank cash, broker cash, and stablecoin balances."
+      activeRoute="/cash"
+      secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
+      headerActions={(
+        <label className="pill">
+          <span>Base</span>
+          <select
+            className="monthInput"
+            value={baseCurrency}
+            onChange={(e) => setBaseCurrency(e.target.value)}
+          >
+            <option value="SGD">SGD</option>
+            <option value="USD">USD</option>
+            <option value="HKD">HKD</option>
+            <option value="INR">INR</option>
+          </select>
+        </label>
+      )}
+    >
       {state === "loading" && <div className="card">Loading…</div>}
       {state === "error" && (
         <div className="card error">
@@ -160,6 +146,6 @@ export default function CashOverview() {
           </div>
         </section>
       )}
-    </div>
+    </PageShell>
   );
 }

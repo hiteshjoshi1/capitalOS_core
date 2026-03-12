@@ -5,7 +5,7 @@ test("happy path: dashboard to cash and market data", async ({ page }) => {
   await expect(page.getByText("CapitalOS Dashboard")).toBeVisible();
 
   await page.goto("/cash");
-  await expect(page.getByText("Cash Overview")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Cash Overview" })).toBeVisible();
 
   await page.goto("/");
   await expect(page.getByText("CapitalOS Dashboard")).toBeVisible();

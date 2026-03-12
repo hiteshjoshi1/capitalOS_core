@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import StockHoldings from "../routes/StockHoldings";
 import { api } from "../lib/api";
+import { ThemeProvider } from "../context/ThemeContext";
 import type { DashboardSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
@@ -84,30 +85,32 @@ describe("StockHoldings", () => {
     const user = userEvent.setup();
     mockApi.dashboardSummary.mockResolvedValueOnce(summaryFixture);
 
-    const { container } = render(
-      <MemoryRouter>
-        <StockHoldings />
-      </MemoryRouter>,
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
     );
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
 
     const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(nav.children).toHaveLength(3);
+    expect(nav.children).toHaveLength(2);
     expect(nav.children[0]).toHaveTextContent("Dashboard");
-    expect(nav.children[2]).toHaveTextContent("Ingest");
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
-    expect(within(nav).getByLabelText("User menu")).toBeInTheDocument();
+    expect(nav.children[1]).toHaveTextContent("Ingest");
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    const ingestLink = within(nav).getByRole("link", { name: "Ingest" });
+    expect(ingestLink).toHaveAttribute("href", "/ingest");
+    expect(ingestLink).toHaveClass("topNavLinkActive");
+    expect(screen.getByLabelText("User menu")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "User" })).not.toBeInTheDocument();
-    expect(container.querySelector("header .pillRow")?.children.length).toBe(3);
-    expect(screen.queryByRole("link", { name: "Crypto Holdings" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Cash" })).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
 
     await user.click(screen.getByLabelText("User menu"));
     expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
-    expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
-    expect(screen.getByLabelText("Month")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
 
     expect(screen.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();

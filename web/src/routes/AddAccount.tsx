@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
 import "../App.css";
+import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -23,7 +24,6 @@ const EMPTY_FORM: FormState = {
 };
 
 export default function AddAccount() {
-  const menuRef = useRef<HTMLDetailsElement | null>(null);
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
@@ -43,36 +43,6 @@ export default function AddAccount() {
   });
   const [currencySearch, setCurrencySearch] = useState<string>("");
   const [countrySearch, setCountrySearch] = useState<string>("");
-
-  useEffect(() => {
-    const handlePointerDown = (event: MouseEvent) => {
-      const menu = menuRef.current;
-      if (!menu || !menu.open) {
-        return;
-      }
-      const target = event.target as Node | null;
-      if (target && !menu.contains(target)) {
-        menu.open = false;
-      }
-    };
-
-    const handleEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") {
-        return;
-      }
-      const menu = menuRef.current;
-      if (menu?.open) {
-        menu.open = false;
-      }
-    };
-
-    document.addEventListener("pointerdown", handlePointerDown);
-    document.addEventListener("keydown", handleEscape);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown);
-      document.removeEventListener("keydown", handleEscape);
-    };
-  }, []);
 
   useEffect(() => {
     (async () => {
@@ -224,42 +194,11 @@ export default function AddAccount() {
   }, [options?.countries, countrySearch]);
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div>
-          <div className="title">Add Account</div>
-          <div className="subtitle">Create a new account linked to a platform.</div>
-        </div>
-        <div className="dashboardNavArea">
-          <nav className="pillRow topNavLinks" aria-label="Primary navigation">
-            <Link className="pill topNavLink" to="/">
-              Dashboard
-            </Link>
-            <Link className="pill topNavLink" to="/ingest">
-              Ingest
-            </Link>
-          </nav>
-
-          <details className="userMenu" ref={menuRef}>
-            <summary className="pill userMenuSummary" aria-label="User menu">
-              <span className="avatar" aria-hidden="true">
-                U
-              </span>
-              <span>User</span>
-            </summary>
-            <div className="userMenuPanel">
-              <section className="userMenuSection" aria-label="Manage">
-                <div className="cardTitle">Manage</div>
-                <Link className="menuLink menuLinkPrimary" to="/accounts/new">
-                  <span aria-hidden="true">+</span>
-                  <span>Add Account</span>
-                </Link>
-              </section>
-            </div>
-          </details>
-        </div>
-      </header>
-
+    <PageShell
+      title="Add Account"
+      subtitle="Create a new account linked to a platform."
+      activeRoute="/accounts/new"
+    >
       {state === "loading" && <div className="card">Loading…</div>}
 
       {state === "error" && (
@@ -524,6 +463,6 @@ export default function AddAccount() {
 
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }

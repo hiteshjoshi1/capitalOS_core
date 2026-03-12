@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-
 import { api } from "../lib/api";
 import type { MarketDataRun } from "../lib/api";
+import PageShell from "../components/PageShell";
+import "../App.css";
 
 export default function MarketData() {
   const [status, setStatus] = useState<MarketDataRun[]>([]);
@@ -44,22 +44,16 @@ export default function MarketData() {
   };
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div className="titleBlock">
-          <div className="title">Market Data</div>
-          <div className="subtitle">Daily stock price refresh status by exchange.</div>
-        </div>
-        <div className="pillRow">
-          <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/holdings">Stock Holdings</Link>
-          <Link className="pill" to="/ingest">Ingest</Link>
-          <button className="btn" onClick={onRefresh} disabled={refreshing}>
-            {refreshing ? "Refreshing..." : "Refresh now"}
-          </button>
-        </div>
-      </header>
-
+    <PageShell
+      title="Market Data"
+      subtitle="Daily stock price refresh status by exchange."
+      activeRoute="/market-data"
+      headerActions={(
+        <button className="btn" onClick={onRefresh} disabled={refreshing}>
+          {refreshing ? "Refreshing..." : "Refresh now"}
+        </button>
+      )}
+    >
       {loading && <div className="card">Loading…</div>}
       {error && (
         <div className="card error">
@@ -137,6 +131,6 @@ export default function MarketData() {
           </div>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

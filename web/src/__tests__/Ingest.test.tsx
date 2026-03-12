@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import Ingest from "../routes/Ingest";
 import { api } from "../lib/api";
+import { ThemeProvider } from "../context/ThemeContext";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -42,12 +43,19 @@ describe("Ingest", () => {
     ]);
 
     render(
-      <MemoryRouter>
-        <Ingest />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Upload Statement CSV");
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(nav).getAllByRole("link")).toHaveLength(1);
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    expect(within(nav).queryByRole("link", { name: "Ingest" })).not.toBeInTheDocument();
+
     expect(screen.getByRole("option", { name: `${account.name} (${account.currency})` })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Account"), "1");
 
@@ -91,9 +99,11 @@ describe("Ingest", () => {
     });
 
     render(
-      <MemoryRouter>
-        <Ingest />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Upload Statement CSV");
@@ -138,9 +148,11 @@ describe("Ingest", () => {
     });
 
     render(
-      <MemoryRouter>
-        <Ingest />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Upload Statement CSV");
@@ -185,9 +197,11 @@ describe("Ingest", () => {
     });
 
     render(
-      <MemoryRouter>
-        <Ingest />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Upload Statement CSV");
@@ -238,9 +252,11 @@ describe("Ingest", () => {
     });
 
     render(
-      <MemoryRouter>
-        <Ingest />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Recent Imports");

@@ -217,7 +217,7 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
         conn.execute(
             text(
                 "INSERT INTO market_symbol_map (id, asset_id, exchange_code, exchange_symbol, quote_currency, is_active) VALUES "
-                "(30, 30, 'HKEX', '700', 'HKD', 1)"
+                "(30, 30, 'HKEX', '700', 'HKD', TRUE)"
             )
         )
 

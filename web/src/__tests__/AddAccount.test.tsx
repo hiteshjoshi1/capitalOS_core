@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 
 import AddAccount from "../routes/AddAccount";
 import { api } from "../lib/api";
+import { ThemeProvider } from "../context/ThemeContext";
 import type { AccountOptions, Platform } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
@@ -63,9 +64,11 @@ describe("AddAccount", () => {
     });
 
     render(
-      <MemoryRouter>
-        <AddAccount />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <AddAccount />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     const nameInput = await screen.findByLabelText("Account Name");
@@ -140,9 +143,11 @@ describe("AddAccount", () => {
     });
 
     render(
-      <MemoryRouter>
-        <AddAccount />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <AddAccount />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Account Details");
@@ -180,9 +185,11 @@ describe("AddAccount", () => {
     mockApi.currencies.mockResolvedValueOnce([]);
 
     render(
-      <MemoryRouter>
-        <AddAccount />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <AddAccount />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     expect(await screen.findByText("Load error")).toBeInTheDocument();
@@ -199,13 +206,25 @@ describe("AddAccount", () => {
     ]);
 
     render(
-      <MemoryRouter>
-        <AddAccount />
-      </MemoryRouter>
+      <ThemeProvider>
+        <MemoryRouter>
+          <AddAccount />
+        </MemoryRouter>
+      </ThemeProvider>
     );
 
     await screen.findByText("Account Details");
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(nav).getAllByRole("link")).toHaveLength(1);
+    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
+    expect(within(nav).queryByRole("link", { name: "Add Account" })).not.toBeInTheDocument();
+
     await user.click(screen.getByLabelText("User menu"));
-    expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
+    const userMenu = screen.getByLabelText("User menu").closest("details");
+    expect(userMenu).not.toBeNull();
+    if (!userMenu) {
+      throw new Error("User menu container not found");
+    }
+    expect(within(userMenu).getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
   });
 });
