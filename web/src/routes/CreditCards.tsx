@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { CreditCardDetail } from "../lib/api";
 import "../App.css";
+import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -21,7 +21,7 @@ export default function CreditCards() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [detail, setDetail] = useState<CreditCardDetail | null>(null);
-  const [month, setMonth] = useState<string>(currentMonthYYYYMM());
+  const [month] = useState<string>(currentMonthYYYYMM());
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
 
   useEffect(() => {
@@ -44,32 +44,22 @@ export default function CreditCards() {
     value == null ? "-" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div className="titleBlock">
-          <div className="title">Credit Cards</div>
-          <div className="subtitle">Per-card money-out breakdown, top purchases, and recurring payments.</div>
-        </div>
-        <div className="pillRow">
-          <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/cash">Cash</Link>
-          <Link className="pill" to="/holdings">Stock Holdings</Link>
-          <label className="pill">
-            <span>Base</span>
-            <select className="monthInput" value={baseCurrency} onChange={(e) => setBaseCurrency(e.target.value)}>
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
-          <label className="pill monthControl">
-            <span>Month</span>
-            <input className="monthInput" type="month" value={month} onChange={(e) => setMonth(e.target.value)} />
-          </label>
-        </div>
-      </header>
-
+    <PageShell
+      title="Credit Cards"
+      subtitle="Per-card money-out breakdown, top purchases, and recurring payments."
+      activeRoute="/credit-cards"
+      headerActions={(
+        <label className="pill">
+          <span>Base</span>
+          <select className="monthInput" value={baseCurrency} onChange={(e) => setBaseCurrency(e.target.value)}>
+            <option value="SGD">SGD</option>
+            <option value="USD">USD</option>
+            <option value="HKD">HKD</option>
+            <option value="INR">INR</option>
+          </select>
+        </label>
+      )}
+    >
       {state === "loading" && <div className="card">Loading...</div>}
       {state === "error" && (
         <div className="card error">
@@ -210,6 +200,6 @@ export default function CreditCards() {
           </section>
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

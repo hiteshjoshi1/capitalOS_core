@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { CryptoSummary } from "../lib/api";
 import "../App.css";
+import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -32,33 +32,27 @@ export default function CryptoHoldings() {
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div className="titleBlock">
-          <div className="title">Crypto Holdings</div>
-          <div className="subtitle">Detailed wallet, token, and chain-level exposure.</div>
-        </div>
-        <div className="pillRow">
-          <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/crypto">Wallets</Link>
-          <Link className="pill" to="/holdings">Stock Holdings</Link>
-          <Link className="pill" to="/cash">Cash</Link>
-          <label className="pill">
-            <span>Base</span>
-            <select
-              className="monthInput"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
-        </div>
-      </header>
-
+    <PageShell
+      title="Crypto Holdings"
+      subtitle="Detailed wallet, token, and chain-level exposure."
+      activeRoute="/crypto/holdings"
+      secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
+      headerActions={(
+        <label className="pill">
+          <span>Base</span>
+          <select
+            className="monthInput"
+            value={baseCurrency}
+            onChange={(e) => setBaseCurrency(e.target.value)}
+          >
+            <option value="SGD">SGD</option>
+            <option value="USD">USD</option>
+            <option value="HKD">HKD</option>
+            <option value="INR">INR</option>
+          </select>
+        </label>
+      )}
+    >
       {state === "loading" && <div className="card">Loading…</div>}
       {state === "error" && (
         <div className="card error">
@@ -227,6 +221,6 @@ export default function CryptoHoldings() {
           )}
         </section>
       )}
-    </div>
+    </PageShell>
   );
 }

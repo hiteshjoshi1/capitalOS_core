@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 
 import App from "../App";
 import { api } from "../lib/api";
+import { ThemeProvider } from "../context/ThemeContext";
 import type {
   CreditCardSummary,
   CryptoSummary,
@@ -183,19 +184,26 @@ afterEach(() => {
 });
 
 describe("App", () => {
+  function renderApp() {
+    return render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <App />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+  }
+
   it("renders refreshed dashboard structure with user menu and exposure links", async () => {
     const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
     expect(screen.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(screen.getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
-    expect(screen.queryByRole("link", { name: "Market Data" })).not.toBeInTheDocument();
+    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
+    expect(within(nav).queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
+    expect(within(nav).getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
+    expect(within(nav).queryByRole("link", { name: "Market Data" })).not.toBeInTheDocument();
     expect(screen.getByText("vs 2026-01")).toBeInTheDocument();
     expect(screen.getByText("+S$ 10,000 (+10.0%)")).toBeInTheDocument();
     expect(screen.getByText("vs 2025-02")).toBeInTheDocument();
@@ -203,7 +211,10 @@ describe("App", () => {
 
     await user.click(screen.getByLabelText("User menu"));
     expect(screen.getByText("Manage")).toBeInTheDocument();
+    expect(screen.getByText("Settings")).toBeInTheDocument();
+    expect(screen.getByText("API: ok")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
+    expect(screen.getByRole("link", { name: "Market Data" })).toHaveAttribute("href", "/market-data");
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
@@ -222,11 +233,7 @@ describe("App", () => {
 
   it("toggles and persists dashboard theme", async () => {
     const user = userEvent.setup();
-    const { unmount } = render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    const { unmount } = renderApp();
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
     expect(document.documentElement).toHaveAttribute("data-theme", "dark");
@@ -240,11 +247,7 @@ describe("App", () => {
     expect(window.localStorage.getItem("capitalos.theme")).toBe("light");
 
     unmount();
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
     await waitFor(() => {
@@ -254,11 +257,7 @@ describe("App", () => {
 
   it("closes the user menu on outside click", async () => {
     const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
     const userMenuSummary = screen.getByLabelText("User menu");
@@ -274,13 +273,26 @@ describe("App", () => {
     });
   });
 
+  it("closes the user menu on Escape key", async () => {
+    const user = userEvent.setup();
+    renderApp();
+
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+    const userMenuSummary = screen.getByLabelText("User menu");
+    const userMenu = userMenuSummary.closest("details");
+
+    await user.click(userMenuSummary);
+    expect(userMenu).toHaveAttribute("open");
+
+    await user.keyboard("{Escape}");
+    await waitFor(() => {
+      expect(userMenu).not.toHaveAttribute("open");
+    });
+  });
+
   it("keeps risk card top N interactions functional", async () => {
     const user = userEvent.setup();
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("Risk")).toBeInTheDocument();
     expect(screen.getByText("TSLA — 24.3%")).toBeInTheDocument();
@@ -303,11 +315,7 @@ describe("App", () => {
       top_holdings: summaryFixture.top_holdings.slice(0, 4),
     });
 
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("Showing 4 of requested 5 positions.")).toBeInTheDocument();
   });
@@ -322,11 +330,7 @@ describe("App", () => {
       top_holdings: [],
     });
 
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("No holdings concentration data for this month or net worth is not positive.")).toBeInTheDocument();
     expect(screen.getByText("Insufficient holdings data for full risk concentration analysis.")).toBeInTheDocument();
@@ -335,11 +339,7 @@ describe("App", () => {
   it("renders API error state when requests fail", async () => {
     mockApi.health.mockRejectedValueOnce(new Error("Network down"));
 
-    render(
-      <MemoryRouter>
-        <App />
-      </MemoryRouter>,
-    );
+    renderApp();
 
     expect(await screen.findByText("API error")).toBeInTheDocument();
     expect(screen.getByText(/Network down/)).toBeInTheDocument();

@@ -122,14 +122,14 @@ test("loads dashboard shell", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Ingest" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Market Data" })).toHaveCount(0);
+  await page.getByLabel("User menu").click();
+  await expect(page.getByRole("link", { name: "Market Data" })).toBeVisible();
 });
 
 test("navigates to cash overview", async ({ page }) => {
   await page.goto("/cash");
-  await expect(page.getByText("Cash Overview")).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Cash Overview" })).toBeVisible();
 });
 
 test("navigates via dashboard exposure cards", async ({ page }) => {

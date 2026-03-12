@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useDisconnect, useSignMessage } from "wagmi";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
@@ -10,6 +9,7 @@ import bs58 from "bs58";
 import { api } from "../lib/api";
 import type { CryptoWallet, CryptoAllowlistItem } from "../lib/api";
 import "../App.css";
+import PageShell from "../components/PageShell";
 
 const EVM_CHAIN_MAP: Record<number, string> = {
   1: "ethereum",
@@ -187,20 +187,12 @@ export default function CryptoWallets() {
   };
 
   return (
-    <div className="wrap">
-      <header className="header">
-        <div className="titleBlock">
-          <div className="title">Crypto Wallets</div>
-          <div className="subtitle">Connect a wallet, sign a message, and verify ownership.</div>
-        </div>
-        <div className="pillRow">
-          <Link className="pill" to="/">Dashboard</Link>
-          <Link className="pill" to="/ingest">Ingest</Link>
-          <span className="pill">Crypto</span>
-          <span className="pill">Wallets: {walletCount}</span>
-        </div>
-      </header>
-
+    <PageShell
+      title="Crypto Wallets"
+      subtitle="Connect a wallet, sign a message, and verify ownership."
+      activeRoute="/crypto"
+      headerActions={<span className="pill">Wallets: {walletCount}</span>}
+    >
       {error && (
         <div className="card error">
           <div className="cardTitle">Error</div>
@@ -404,6 +396,6 @@ export default function CryptoWallets() {
           </tbody>
         </table>
       </div>
-    </div>
+    </PageShell>
   );
 }
