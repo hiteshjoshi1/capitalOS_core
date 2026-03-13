@@ -8,6 +8,7 @@ import type {
   SpendingSummary,
   StockExposure,
 } from "./lib/api";
+import { useSelectedMonth } from "./lib/selectedMonth";
 import {
   buildTopNDistribution,
   computeLargestPositionRisk,
@@ -22,16 +23,10 @@ import NetWorthHeroCard from "./components/dashboard/NetWorthHeroCard";
 import PlaceholderCard from "./components/dashboard/PlaceholderCard";
 import RiskCard from "./components/dashboard/RiskCard";
 import CreditCardCard from "./components/dashboard/CreditCardCard";
+import MonthControl from "./components/MonthControl";
 import PageShell from "./components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-
-function currentMonthYYYYMM() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
 
 export default function App() {
   const [state, setState] = useState<LoadState>("idle");
@@ -43,7 +38,7 @@ export default function App() {
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
   const [creditCardSummary, setCreditCardSummary] = useState<CreditCardSummary | null>(null);
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
-  const [month, setMonth] = useState<string>(currentMonthYYYYMM());
+  const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
 
@@ -118,18 +113,7 @@ export default function App() {
           </label>
         </>
       )}
-      headerActions={(
-        <label className="pill monthControl">
-          <span>Month</span>
-          <input
-            className="monthInput"
-            aria-label="Month"
-            type="month"
-            value={month}
-            onChange={(event) => setMonth(event.target.value)}
-          />
-        </label>
-      )}
+      headerActions={<MonthControl month={month} onMonthChange={setMonth} />}
     >
       <div className="dashboardWrap">
         {state === "loading" ? <DashboardLoading /> : null}

@@ -1,23 +1,18 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { DashboardSummary } from "../lib/api";
+import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
+import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
-
-function currentMonthYYYYMM() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
-}
 
 export default function StockHoldings() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [month] = useState<string>(currentMonthYYYYMM());
+  const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
 
   useEffect(() => {
@@ -53,20 +48,23 @@ export default function StockHoldings() {
       activeRoute="/holdings"
       secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
       headerActions={(
-        <label className="pill">
-          <span>Base</span>
-          <select
-            className="monthInput"
-            aria-label="Base currency"
-            value={baseCurrency}
-            onChange={(event) => setBaseCurrency(event.target.value)}
-          >
-            <option value="SGD">SGD</option>
-            <option value="USD">USD</option>
-            <option value="HKD">HKD</option>
-            <option value="INR">INR</option>
-          </select>
-        </label>
+        <>
+          <MonthControl month={month} onMonthChange={setMonth} />
+          <label className="pill">
+            <span>Base</span>
+            <select
+              className="monthInput"
+              aria-label="Base currency"
+              value={baseCurrency}
+              onChange={(event) => setBaseCurrency(event.target.value)}
+            >
+              <option value="SGD">SGD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="INR">INR</option>
+            </select>
+          </label>
+        </>
       )}
     >
       {state === "loading" && <div className="card">Loading…</div>}

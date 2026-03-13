@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.models.parser_registry import ParserRegistry
 from app.ingestion.parsers.uob_account_xls_v1 import UOB_ACCOUNT_XLS_HEADERS
+from app.ingestion.parsers.uob_credit_card_xls_v1 import UOB_CREDIT_CARD_XLS_HEADERS
 
 
 def _normalize_header(header: object) -> list[str]:
@@ -40,6 +41,9 @@ def _infer_parser_key(signature_debug: dict | None, _platform_hint: str | None) 
     has_uob_header = _has_ordered_header_subset(header, UOB_ACCOUNT_XLS_HEADERS)
     if file_kind == "excel" and has_uob_header:
         return "uob_account_xls_v1"
+    has_uob_cc_header = _has_ordered_header_subset(header, UOB_CREDIT_CARD_XLS_HEADERS)
+    if file_kind == "excel" and has_uob_cc_header:
+        return "uob_credit_card_xls_v1"
     return None
 
 

@@ -16,6 +16,7 @@ const PLATFORM_PARSERS: Record<string, PlatformParserConfig> = {
   DBS_VICKERS: { label: "Approve as DBS Vickers", parserKey: "dbs_vickers_holdings_xls_v1" },
   CITI: { label: "Approve as Citi CC", parserKey: "citi_credit_card_csv_v1" },
   UOB: { label: "Approve as UOB", parserKey: "uob_account_xls_v1" },
+  UOB_CC: { label: "Approve as UOB CC", parserKey: "uob_credit_card_xls_v1" },
 };
 
 const UOB_HEADERS = [
@@ -24,6 +25,16 @@ const UOB_HEADERS = [
   "withdrawal",
   "deposit",
   "available balance",
+] as const;
+
+const UOB_CC_HEADERS = [
+  "transaction date",
+  "posting date",
+  "description",
+  "foreign currency type",
+  "transaction amount(foreign)",
+  "local currency type",
+  "transaction amount(local)",
 ] as const;
 
 function hasOrderedHeaderSubset(header: unknown, expected: readonly string[]): boolean {
@@ -50,12 +61,21 @@ function resolvePlatformParser(
   ) {
     return PLATFORM_PARSERS.UOB;
   }
+  if (
+    signatureDebug?.file_kind === "excel" &&
+    hasOrderedHeaderSubset(signatureDebug.header, UOB_CC_HEADERS)
+  ) {
+    return PLATFORM_PARSERS.UOB_CC;
+  }
   if (!platform) return undefined;
   const normalized = platform
     .trim()
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, "_")
     .replace(/^_+|_+$/g, "");
+  if (normalized === "UOB_CC" || normalized === "UOB_CREDIT_CARD") {
+    return PLATFORM_PARSERS.UOB_CC;
+  }
   if (normalized === "UOB" || normalized.startsWith("UOB_")) {
     return PLATFORM_PARSERS.UOB;
   }
