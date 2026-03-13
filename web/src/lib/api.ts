@@ -197,6 +197,15 @@ export type PlatformAllocation = {
   }>;
 };
 
+export type CashDeposits = {
+  total: number;
+  items: Array<{
+    source: string;
+    value: number;
+    percent: number;
+  }>;
+};
+
 export type CryptoWallet = {
   id: string;
   chain_type: string;
@@ -371,6 +380,8 @@ export const api = {
     }),
   dashboardSummary: (month: string, compare?: string, baseCurrency = "SGD") =>
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
+  cashDeposits: (month: string, baseCurrency = "SGD") =>
+    req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>
     req<PlatformAllocation>(`/dashboard/platform-allocation?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockExposure: (month: string, baseCurrency = "SGD") =>

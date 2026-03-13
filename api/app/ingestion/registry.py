@@ -6,6 +6,14 @@ from app.models.parser_registry import ParserRegistry
 from app.ingestion.parsers.uob_account_xls_v1 import UOB_ACCOUNT_XLS_HEADERS
 from app.ingestion.parsers.uob_credit_card_xls_v1 import UOB_CREDIT_CARD_XLS_HEADERS
 
+OCBC_ACCOUNT_CSV_HEADERS = (
+    "transaction date",
+    "value date",
+    "description",
+    "withdrawals(sgd)",
+    "deposits(sgd)",
+)
+
 
 def _normalize_header(header: object) -> list[str]:
     if not isinstance(header, list):
@@ -44,6 +52,9 @@ def _infer_parser_key(signature_debug: dict | None, _platform_hint: str | None) 
     has_uob_cc_header = _has_ordered_header_subset(header, UOB_CREDIT_CARD_XLS_HEADERS)
     if file_kind == "excel" and has_uob_cc_header:
         return "uob_credit_card_xls_v1"
+    has_ocbc_header = _has_ordered_header_subset(header, OCBC_ACCOUNT_CSV_HEADERS)
+    if file_kind == "flat_csv" and has_ocbc_header:
+        return "ocbc_account_csv_v1"
     return None
 
 

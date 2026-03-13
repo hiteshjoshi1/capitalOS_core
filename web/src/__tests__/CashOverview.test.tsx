@@ -6,10 +6,11 @@ import { MemoryRouter } from "react-router-dom";
 import CashOverview from "../routes/CashOverview";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { DashboardSummary, CryptoSummary } from "../lib/api";
+import type { CashDeposits, DashboardSummary, CryptoSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
+    cashDeposits: vi.fn(),
     dashboardSummary: vi.fn(),
     cryptoSummary: vi.fn(),
   },
@@ -61,8 +62,17 @@ const cryptoSummaryFixture: CryptoSummary = {
   refresh_triggered: false,
 };
 
+const cashDepositsFixture: CashDeposits = {
+  total: 40000,
+  items: [
+    { source: "DBS", value: 25000, percent: 62.5 },
+    { source: "OCBC", value: 15000, percent: 37.5 },
+  ],
+};
+
 describe("CashOverview route", () => {
   beforeEach(() => {
+    mockApi.cashDeposits.mockResolvedValue(cashDepositsFixture);
     mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
     mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
   });
@@ -78,7 +88,10 @@ describe("CashOverview route", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("Cash Balances")).toBeInTheDocument();
+    expect(await screen.findByText("Cash Deposits")).toBeInTheDocument();
+    expect(screen.getByText("Cash Balances")).toBeInTheDocument();
+    expect(screen.getByText("DBS")).toBeInTheDocument();
+    expect(screen.getByText("62.5%")).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Primary navigation" });
     expect(within(nav).getAllByRole("link")).toHaveLength(2);
     expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
@@ -87,10 +100,12 @@ describe("CashOverview route", () => {
     expect(ingestLink).toHaveClass("topNavLinkActive");
 
     expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "SGD");
+    expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
     expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
 
     await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
 
     expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "USD");
+    expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
   });
 });

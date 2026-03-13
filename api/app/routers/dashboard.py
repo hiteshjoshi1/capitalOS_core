@@ -8,10 +8,19 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.schemas.dashboard import PlatformAllocationOut, PlatformAllocationItem, StockExposureOut, StockExposureItem
+from app.schemas.dashboard import (
+    CashDepositsItem,
+    CashDepositsOut,
+    PlatformAllocationItem,
+    PlatformAllocationOut,
+    StockExposureItem,
+    StockExposureOut,
+)
 from app.fx import get_rates
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+
+_UPPERCASE_SOURCE_CODES = {"DBS", "OCBC", "UOB", "IBKR", "POSB", "CITI", "HSBC", "SCB"}
 
 
 def _parse_month(month: str) -> datetime:
@@ -386,6 +395,99 @@ def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str) -> List
     return out
 
 
+def _display_source(value: str | None) -> str:
+    if not value:
+        return "UNKNOWN"
+    text = value.strip()
+    if not text:
+        return "UNKNOWN"
+    upper_text = text.upper()
+    if upper_text in _UPPERCASE_SOURCE_CODES or (text.isupper() and len(text) <= 4):
+        return upper_text
+    return text.lower().title()
+
+
+def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, Any]:
+    buckets: Dict[str, float] = {}
+
+    cash_rows = db.execute(
+        text(
+            """
+            WITH latest AS (
+              SELECT account_id, MAX(as_of) AS as_of
+              FROM positions
+              WHERE as_of <= :anchor_ts
+              GROUP BY account_id
+            )
+            SELECT
+              COALESCE(pl.code, acc.platform) AS source,
+              a.quote_currency AS quote_currency,
+              p.cost_basis_base AS value
+            FROM positions p
+            JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+            JOIN accounts acc ON acc.id = p.account_id
+            LEFT JOIN platforms pl ON pl.id = acc.platform_id
+            JOIN assets a ON a.id = p.asset_id
+            WHERE a.asset_class = 'CASH'
+            """
+        ),
+        {"anchor_ts": anchor_ts},
+    ).mappings().all()
+    cash_currencies = {row["quote_currency"] for row in cash_rows if row["quote_currency"]}
+    cash_rates = get_rates(anchor_ts, base_currency, cash_currencies) if cash_currencies else {}
+    for row in cash_rows:
+        source = _display_source(row["source"])
+        quote_currency = (row["quote_currency"] or base_currency).upper()
+        # Positions are persisted in their asset quote currency by current ingestion flows,
+        # so cash deposits must use the same FX conversion path as the dashboard summary.
+        value = float(row["value"]) * cash_rates.get(quote_currency, 1.0)
+        buckets[source] = buckets.get(source, 0.0) + value
+
+    wallet_rows = db.execute(
+        text(
+            """
+            WITH latest AS (
+              SELECT wallet_id, MAX(as_of_date) AS as_of_date
+              FROM crypto_wallet_snapshots
+              WHERE as_of_date <= :as_of_date
+              GROUP BY wallet_id
+            )
+            SELECT
+              i.chain AS source,
+              SUM(i.value_usd) AS value_usd
+            FROM crypto_wallet_snapshots s
+            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+            WHERE w.status = 'active'
+              AND UPPER(COALESCE(i.symbol, '')) IN ('USDC', 'USDT')
+            GROUP BY i.chain
+            """
+        ),
+        {"as_of_date": anchor_ts.date()},
+    ).mappings().all()
+    if wallet_rows:
+        usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
+        for row in wallet_rows:
+            if row["value_usd"] is None:
+                continue
+            source = _display_source(row["source"])
+            value = float(row["value_usd"]) * usd_rate
+            buckets[source] = buckets.get(source, 0.0) + value
+
+    total = sum(buckets.values())
+    items = []
+    for source, value in sorted(buckets.items(), key=lambda item: item[1], reverse=True):
+        items.append(
+            {
+                "source": source,
+                "value": value,
+                "percent": round((value / total) * 100, 2) if total > 0 else 0.0,
+            }
+        )
+    return {"items": items, "total": total}
+
+
 def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str) -> Dict[str, Any]:
     q = text("""
         SELECT
@@ -627,6 +729,21 @@ def platform_allocation(
         as_of=as_of.isoformat() if as_of else None,
         total=payload["total"],
         items=[PlatformAllocationItem(**item) for item in payload["items"]],
+    )
+
+
+@router.get("/cash-deposits", response_model=CashDepositsOut)
+def cash_deposits(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start)
+    payload = _cash_deposits(db, anchor, base_currency)
+    return CashDepositsOut(
+        total=payload["total"],
+        items=[CashDepositsItem(**item) for item in payload["items"]],
     )
 
 

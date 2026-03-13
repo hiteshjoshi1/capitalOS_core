@@ -17,6 +17,7 @@ from app.ingestion.validators import validate_transactions
 from app.ingestion.report import write_report
 from app.ingestion.parsers.ibkr_activity_csv_v1 import parse_ibkr_activity_csv
 from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_transaction_history_csv
+from app.ingestion.parsers.ocbc_account_csv_v1 import parse_ocbc_account_csv
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
 from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
@@ -26,6 +27,7 @@ from app.models.import_job import ImportJob
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "ibkr_activity_csv_v1": ("csv", parse_ibkr_activity_csv),
     "dbs_transaction_history_csv_v1": ("csv", parse_dbs_transaction_history_csv),
+    "ocbc_account_csv_v1": ("csv", parse_ocbc_account_csv),
     "sharekhan_holdings_xls_v1": ("excel", parse_sharekhan_holdings_xls),
     "dbs_vickers_holdings_xls_v1": ("excel", parse_dbs_vickers_holdings_xls),
     "uob_account_xls_v1": ("excel", parse_uob_account_xls),

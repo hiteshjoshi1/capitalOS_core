@@ -1,5 +1,7 @@
-from fastapi.testclient import TestClient
 import pytest
+from fastapi.testclient import TestClient
+
+from app.routers.dashboard import _display_source
 
 
 def test_dashboard_invalid_month(client: TestClient):
@@ -71,6 +73,160 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     assert items[0]["value"] == 70000.0
     assert items[1]["platform"] == "DBS"
     assert items[1]["value"] == 30000.0
+
+
+def test_dashboard_cash_deposits_matches_cash_total(client: TestClient, seed_dashboard_data):
+    resp = client.get("/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["total"] == 30000.0
+    assert data["items"] == [
+        {
+            "source": "DBS",
+            "value": 30000.0,
+            "percent": 100.0,
+        }
+    ]
+
+
+def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClient, db_engine, monkeypatch):
+    from sqlalchemy import text
+    from datetime import datetime, timezone
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(50, 'OCBC', 'OCBC Bank', 'BANK', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(50, 'OCBC 360', 'OCBC', 'BANK', 'SGD', 'SG', 50)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(50, 'SGD', 'SGD Cash', 'CASH', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(50, 50, 50, :as_of, 1, 1000, 1000)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-eth', 'evm', 'ethereum', '0xabc', 'Main wallet', 'active', :as_of), "
+                "('wallet-sol', 'svm', 'solana', 'So111', 'Sol wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(50, 'wallet-eth', '2026-02-05', :as_of, 30), "
+                "(51, 'wallet-sol', '2026-02-05', :as_of, 20)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(50, 50, 'evm', 'ETHEREUM', 'token', 'USDC', 30, 30), "
+                "(51, 51, 'svm', 'solana', 'token', 'USDT', 20, 20)"
+            )
+        )
+
+    def fake_rates(_date, base, symbols):
+        assert base == "SGD"
+        rates = {"SGD": 1.0}
+        if "USD" in symbols:
+            rates["USD"] = 1.5
+        return rates
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["total"] == 1075.0
+    assert data["items"] == [
+        {"source": "OCBC", "value": 1000.0, "percent": 93.02},
+        {"source": "Ethereum", "value": 45.0, "percent": 4.19},
+        {"source": "Solana", "value": 30.0, "percent": 2.79},
+    ]
+
+
+def test_dashboard_cash_deposits_converts_non_sgd_cash_positions(client: TestClient, db_engine, monkeypatch):
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(60, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(60, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 60)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(60, 'USD', 'USD Cash', 'CASH', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(60, 60, 60, :as_of, 1, 200, 200)"
+            ),
+            {"as_of": as_of},
+        )
+
+    def fake_rates(_date, base, symbols):
+        assert base == "SGD"
+        assert symbols == {"USD"}
+        return {"USD": 1.5}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["total"] == 300.0
+    assert data["items"] == [{"source": "IBKR", "value": 300.0, "percent": 100.0}]
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("ethereum", "Ethereum"),
+        ("ETHEREUM", "Ethereum"),
+        ("OCBC", "OCBC"),
+        ("IBKR", "IBKR"),
+        ("", "UNKNOWN"),
+        (None, "UNKNOWN"),
+    ],
+)
+def test_display_source_normalizes_values(raw_value: str | None, expected: str):
+    assert _display_source(raw_value) == expected
 
 
 def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monkeypatch):
