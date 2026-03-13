@@ -25,7 +25,14 @@ def _require_account_platform(db: Session, account_id: int) -> str:
     from sqlalchemy import text
 
     row = db.execute(
-        text("SELECT platform FROM accounts WHERE id = :account_id"),
+        text(
+            """
+            SELECT COALESCE(p.code, a.platform)
+            FROM accounts AS a
+            LEFT JOIN platforms AS p ON p.id = a.platform_id
+            WHERE a.id = :account_id
+            """
+        ),
         {"account_id": account_id},
     ).fetchone()
     if not row:

@@ -143,7 +143,7 @@ def _is_html_file(path: str) -> bool:
 
 
 def _find_header_row_excel(df: pd.DataFrame) -> int | None:
-    tokens = {"available", "qty", "hold", "market", "scrip", "symbol", "isin"}
+    tokens = {"available", "qty", "hold", "market", "scrip", "symbol", "isin", "transaction", "withdrawal", "deposit"}
     for idx, row in df.iterrows():
         values = [str(v).strip().lower() for v in row.tolist()]
         if not any(values):

@@ -3,11 +3,57 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.parser_registry import ParserRegistry
+from app.ingestion.parsers.uob_account_xls_v1 import UOB_ACCOUNT_XLS_HEADERS
 
 
-def lookup_parser_key(db: Session, signature: str) -> str | None:
-    row = db.query(ParserRegistry).filter(ParserRegistry.format_signature == signature).one_or_none()
-    return row.parser_key if row else None
+def _normalize_header(header: object) -> list[str]:
+    if not isinstance(header, list):
+        return []
+    normalized: list[str] = []
+    for value in header:
+        text = str(value).strip().lower()
+        if not text or text == "nan" or text.startswith("unnamed:"):
+            continue
+        normalized.append(text)
+    return normalized
+
+
+def _has_ordered_header_subset(header: object, expected: tuple[str, ...]) -> bool:
+    normalized = _normalize_header(header)
+    if not normalized:
+        return False
+    next_index = 0
+    for value in normalized:
+        if value != expected[next_index]:
+            continue
+        next_index += 1
+        if next_index == len(expected):
+            return True
+    return False
+
+
+def _infer_parser_key(signature_debug: dict | None, _platform_hint: str | None) -> str | None:
+    header = signature_debug.get("header") if isinstance(signature_debug, dict) else None
+    file_kind = signature_debug.get("file_kind") if isinstance(signature_debug, dict) else None
+    # UOB bank statements are currently identified by this ordered header shape.
+    # R6 showed platform labels are not reliable enough to be the gating factor.
+    has_uob_header = _has_ordered_header_subset(header, UOB_ACCOUNT_XLS_HEADERS)
+    if file_kind == "excel" and has_uob_header:
+        return "uob_account_xls_v1"
+    return None
+
+
+def lookup_parser_key(
+    db: Session | None,
+    signature: str,
+    signature_debug: dict | None = None,
+    platform_hint: str | None = None,
+) -> str | None:
+    if db is not None:
+        row = db.query(ParserRegistry).filter(ParserRegistry.format_signature == signature).one_or_none()
+        if row:
+            return row.parser_key
+    return _infer_parser_key(signature_debug, platform_hint)
 
 
 def register_signature(db: Session, signature: str, parser_key: str, version: int = 1) -> ParserRegistry:

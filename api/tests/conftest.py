@@ -435,7 +435,7 @@ def seed_spending_data():
             text(
                 "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
                 "(10, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(11, 'DBS Credit Card', 'DBS_CARDS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "(11, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
             )
         )
         conn.execute(
