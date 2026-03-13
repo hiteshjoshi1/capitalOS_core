@@ -19,6 +19,7 @@ from app.ingestion.parsers.ibkr_activity_csv_v1 import parse_ibkr_activity_csv
 from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_transaction_history_csv
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
+from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
 from app.models.import_job import ImportJob
 
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
@@ -26,6 +27,7 @@ PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "dbs_transaction_history_csv_v1": ("csv", parse_dbs_transaction_history_csv),
     "sharekhan_holdings_xls_v1": ("excel", parse_sharekhan_holdings_xls),
     "dbs_vickers_holdings_xls_v1": ("excel", parse_dbs_vickers_holdings_xls),
+    "uob_account_xls_v1": ("excel", parse_uob_account_xls),
     "citi_credit_card_csv_v1": ("csv", parse_citi_credit_card_csv),
 }
 
@@ -190,7 +192,12 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
         db.add(job)
         db.commit()
 
-        parser_key = lookup_parser_key(db, signature)
+        parser_key = lookup_parser_key(
+            db,
+            signature,
+            signature_debug=signature_debug,
+            platform_hint=job.platform,
+        )
         if not parser_key:
             job.status = "NEEDS_MAPPING"
             job.updated_at = _now()

@@ -18,14 +18,14 @@ ON CONFLICT (symbol, quote_currency) DO NOTHING;
 
 -- Accounts
 WITH p AS (
-  SELECT id, code FROM platforms WHERE code IN ('DBS','IBKR','SHAREKHAN','DBS_CARDS')
+  SELECT id, code FROM platforms WHERE code IN ('DBS','IBKR','SHAREKHAN')
 )
 INSERT INTO accounts (name, platform, account_type, currency, country, platform_id)
 VALUES
   ('DUMMY - DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', (SELECT id FROM p WHERE code='DBS')),
   ('DUMMY - IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', (SELECT id FROM p WHERE code='IBKR')),
   ('DUMMY - Sharekhan Trading', 'SHAREKHAN', 'BROKER', 'INR', 'IN', (SELECT id FROM p WHERE code='SHAREKHAN')),
-  ('DUMMY - DBS Credit Card', 'DBS_CARDS', 'CREDIT_CARD', 'SGD', 'SG', (SELECT id FROM p WHERE code='DBS_CARDS'));
+  ('DUMMY - DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', (SELECT id FROM p WHERE code='DBS'));
 
 -- Credit card metadata
 INSERT INTO credit_card_accounts (account_id, card_name, issuer, credit_limit, statement_day, due_day)
