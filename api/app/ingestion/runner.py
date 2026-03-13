@@ -20,6 +20,7 @@ from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_trans
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
 from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
+from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_xls
 from app.models.import_job import ImportJob
 
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
@@ -28,6 +29,7 @@ PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "sharekhan_holdings_xls_v1": ("excel", parse_sharekhan_holdings_xls),
     "dbs_vickers_holdings_xls_v1": ("excel", parse_dbs_vickers_holdings_xls),
     "uob_account_xls_v1": ("excel", parse_uob_account_xls),
+    "uob_credit_card_xls_v1": ("excel", parse_uob_credit_card_xls),
     "citi_credit_card_csv_v1": ("csv", parse_citi_credit_card_csv),
 }
 

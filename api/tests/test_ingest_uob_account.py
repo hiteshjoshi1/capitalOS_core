@@ -32,9 +32,13 @@ def test_uob_signature_stable_and_matches_registered_source():
     sig_one, debug_one = compute_format_signature(str(fixture), platform_hint="UOB")
     sig_two, debug_two = compute_format_signature(str(fixture), platform_hint="UOB")
 
-    migration_sql = (
-        Path(__file__).resolve().parents[2] / "migrations" / "023_register_uob_account_parser.sql"
-    ).read_text(encoding="utf-8")
+    migration_candidates = [
+        Path("/app/migrations/023_register_uob_account_parser.sql"),
+        Path(__file__).resolve().parents[2] / "migrations" / "023_register_uob_account_parser.sql",
+        Path(__file__).resolve().parents[1] / "migrations" / "023_register_uob_account_parser.sql",
+    ]
+    migration_path = next((candidate for candidate in migration_candidates if candidate.exists()), None)
+    migration_sql = migration_path.read_text(encoding="utf-8") if migration_path else None
 
     assert sig_one == sig_two
     assert debug_one == debug_two
@@ -47,7 +51,10 @@ def test_uob_signature_stable_and_matches_registered_source():
         "deposit",
         "available balance",
     ]
-    assert sig_one in migration_sql
+    if migration_sql is not None:
+        assert sig_one in migration_sql
+    else:
+        assert sig_one == "d648dffea3a088441247548b7e50a3cf9e338efc1571aa0b37d8b625ee783770"
     assert (
         lookup_parser_key(None, sig_one, signature_debug=debug_one, platform_hint="UOB")
         == "uob_account_xls_v1"

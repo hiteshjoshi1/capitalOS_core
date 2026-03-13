@@ -328,6 +328,69 @@ describe("Ingest", () => {
     expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
   });
 
+  it("shows approve button for UOB CC mapping when the signature headers match a card statement", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 16, name: "UOB Card", platform: "UOB", account_type: "CREDIT_CARD", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.ingestUpload.mockResolvedValueOnce({
+      job_id: 16,
+      status: "NEEDS_MAPPING",
+      platform: "UOB",
+      account_id: 16,
+      format_signature: "sig",
+      signature_debug: {
+        file_kind: "excel",
+        header: [
+          "transaction date",
+          "posting date",
+          "description",
+          "foreign currency type",
+          "transaction amount(foreign)",
+          "local currency type",
+          "transaction amount(local)",
+          "Unnamed: 7",
+        ],
+      },
+      counts: { rows_total: 0, transactions_parsed: 0, transactions_inserted: 0, duplicates_skipped: 0 },
+      section_summary: [],
+      preview_transactions: [],
+    });
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.registerIngestSignature.mockResolvedValueOnce({
+      job_id: 16,
+      status: "IMPORTED",
+      platform: "UOB",
+      account_id: 16,
+      parser_key: "uob_credit_card_xls_v1",
+      counts: { rows_total: 11, transactions_parsed: 11, transactions_inserted: 11, duplicates_skipped: 0 },
+      section_summary: [],
+      preview_transactions: [],
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "16");
+
+    const file = new File(["data"], "uob_credit_card.xls", { type: "application/vnd.ms-excel" });
+    const input = screen.getByLabelText("Statement file") as HTMLInputElement;
+    await userEvent.upload(input, file);
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    const approve = await screen.findByRole("button", { name: "Approve as UOB CC" });
+    await userEvent.click(approve);
+
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(16, "uob_credit_card_xls_v1");
+    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+  });
+
   it("loads report from recent imports", async () => {
     mockApi.accounts.mockResolvedValueOnce([]);
     mockApi.ingestJobs.mockResolvedValueOnce([

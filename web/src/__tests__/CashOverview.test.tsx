@@ -87,9 +87,9 @@ describe("CashOverview route", () => {
     expect(ingestLink).toHaveClass("topNavLinkActive");
 
     expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "SGD");
-    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
 
-    await user.selectOptions(screen.getByRole("combobox"), "USD");
+    await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
 
     expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "USD");
   });

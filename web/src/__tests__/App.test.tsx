@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import userEvent from "@testing-library/user-event";
@@ -343,5 +343,18 @@ describe("App", () => {
 
     expect(await screen.findByText("API error")).toBeInTheDocument();
     expect(screen.getByText(/Network down/)).toBeInTheDocument();
+  });
+
+  it("persists the selected month for other pages", async () => {
+    renderApp();
+
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
+
+    await waitFor(() => {
+      expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-01", "prev_month,prev_year", "SGD");
+    });
+    expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-01");
   });
 });

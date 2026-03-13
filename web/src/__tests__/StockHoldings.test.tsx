@@ -106,7 +106,7 @@ describe("StockHoldings", () => {
     expect(screen.getByLabelText("User menu")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "User" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toBeInTheDocument();
 
     await user.click(screen.getByLabelText("User menu"));
     expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");

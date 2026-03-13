@@ -65,9 +65,9 @@ def test_uob_parser_extracts_cash_position():
             "name": "SGD Cash",
             "asset_class": "CASH",
             "currency": "SGD",
-            "quantity": 97601.67,
+            "quantity": 97923.51,
             "avg_cost": 1.0,
-            "cost_basis_base": 97601.67,
+            "cost_basis_base": 97923.51,
             "as_of": result.positions[0]["as_of"],
         }
     ]

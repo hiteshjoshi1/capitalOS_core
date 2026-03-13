@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { CryptoSummary } from "../lib/api";
+import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
+import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -10,6 +12,7 @@ export default function CryptoHoldings() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<CryptoSummary | null>(null);
+  const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [showDust, setShowDust] = useState<boolean>(false);
 
@@ -38,19 +41,23 @@ export default function CryptoHoldings() {
       activeRoute="/crypto/holdings"
       secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
       headerActions={(
-        <label className="pill">
-          <span>Base</span>
-          <select
-            className="monthInput"
-            value={baseCurrency}
-            onChange={(e) => setBaseCurrency(e.target.value)}
-          >
-            <option value="SGD">SGD</option>
-            <option value="USD">USD</option>
-            <option value="HKD">HKD</option>
-            <option value="INR">INR</option>
-          </select>
-        </label>
+        <>
+          <MonthControl month={month} onMonthChange={setMonth} />
+          <label className="pill">
+            <span>Base</span>
+            <select
+              className="monthInput"
+              aria-label="Base currency"
+              value={baseCurrency}
+              onChange={(e) => setBaseCurrency(e.target.value)}
+            >
+              <option value="SGD">SGD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="INR">INR</option>
+            </select>
+          </label>
+        </>
       )}
     >
       {state === "loading" && <div className="card">Loading…</div>}

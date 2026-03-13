@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -112,11 +112,13 @@ const detailFixture: CreditCardDetail = {
 
 describe("CreditCards route", () => {
   beforeEach(() => {
+    window.localStorage.clear();
     mockApi.creditCardTransactions.mockResolvedValue(detailFixture);
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+    window.localStorage.clear();
     cleanup();
   });
 
@@ -141,7 +143,7 @@ describe("CreditCards route", () => {
     expect(within(nav).getAllByRole("link")).toHaveLength(1);
     expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
     expect(within(nav).queryByRole("link", { name: "Credit Cards" })).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
   });
 
   it("renders empty states when no credit card data exists", async () => {
@@ -181,10 +183,30 @@ describe("CreditCards route", () => {
     );
 
     await screen.findByText("Card Breakdown");
-    await user.selectOptions(screen.getByRole("combobox"), "USD");
+    await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
 
     expect(mockApi.creditCardTransactions).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
     expect(mockApi.creditCardTransactions).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
-    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
+  });
+
+  it("uses the persisted dashboard month and updates it when changed", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-02");
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CreditCards />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("Card Breakdown")).toBeInTheDocument();
+    expect(mockApi.creditCardTransactions).toHaveBeenCalledWith("2026-02", "SGD");
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-03" } });
+
+    expect(mockApi.creditCardTransactions).toHaveBeenCalledWith("2026-03", "SGD");
+    expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-03");
   });
 });
