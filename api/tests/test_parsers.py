@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.ingestion.parsers.dbs_transaction_history_csv_v1 import parse_dbs_transaction_history_csv
 from app.ingestion.parsers.ibkr_activity_csv_v1 import parse_ibkr_activity_csv
+from app.ingestion.parsers.ocbc_account_csv_v1 import parse_ocbc_account_csv
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 
 
@@ -94,3 +95,17 @@ def test_dbs_vickers_parser_html(tmp_path: Path):
     assert result.positions[0]["quantity"] == 150
     assert result.positions[0]["currency"] == "SGD"
     assert result.parser_meta["sheet_name"].startswith("HTML_TABLE")
+
+
+def test_ocbc_parser_extracts_fixture_rows():
+    fixture_name = "ocbc_TransactionHistory_20260313165630.csv"
+    candidates = [
+        Path("/app/data/fixtures") / fixture_name,
+        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
+        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
+    ]
+    fixture = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    result = parse_ocbc_account_csv(str(fixture))
+
+    assert len(result.transactions) == 20
+    assert result.positions[0]["quantity"] == 25136.91

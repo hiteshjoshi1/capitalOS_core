@@ -15,6 +15,17 @@ class PlatformAllocationOut(BaseModel):
     items: list[PlatformAllocationItem]
 
 
+class CashDepositsItem(BaseModel):
+    source: str
+    value: float
+    percent: float
+
+
+class CashDepositsOut(BaseModel):
+    total: float
+    items: list[CashDepositsItem]
+
+
 class StockExposureItem(BaseModel):
     key: str
     value: float

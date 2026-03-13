@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { DashboardSummary, CryptoSummary } from "../lib/api";
+import type { CashDeposits, DashboardSummary, CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
@@ -15,6 +15,7 @@ export default function CashOverview() {
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
+  const [cashDeposits, setCashDeposits] = useState<CashDeposits | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
 
@@ -22,12 +23,14 @@ export default function CashOverview() {
     (async () => {
       try {
         setState("loading");
-        const [dash, crypto] = await Promise.all([
+        const [dash, crypto, deposits] = await Promise.all([
           api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
           api.cryptoSummary(baseCurrency),
+          api.cashDeposits(month, baseCurrency),
         ]);
         setSummary(dash);
         setCryptoSummary(crypto);
+        setCashDeposits(deposits);
         setState("ready");
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -82,68 +85,109 @@ export default function CashOverview() {
       )}
 
       {state === "ready" && (
-        <section className="grid g-mid">
-          <div className="card">
-            <h2>Cash Balances</h2>
-            <div className="mini">
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>By currency (base converted)</div>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Currency</th>
-                    <th className="right">Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {summary?.cash_balances?.map((c) => (
-                    <tr key={c.currency}>
-                      <td>{c.currency}</td>
-                      <td className="right">{formatMoney(c.value)}</td>
-                    </tr>
-                  ))}
-                  {summary?.cash_balances && summary.cash_balances.length === 0 && (
+        <>
+          <section className="grid" style={{ marginBottom: 16 }}>
+            <div className="card">
+              <h2>Cash Deposits</h2>
+              <div className="mini">
+                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Grouped by bank, broker, or wallet source</div>
+                <table className="table">
+                  <thead>
                     <tr>
-                      <td className="muted" colSpan={2}>No cash balances yet.</td>
+                      <th>Source</th>
+                      <th className="right">Value</th>
+                      <th className="right">% of Total</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {cashDeposits?.items.map((item) => (
+                      <tr key={item.source}>
+                        <td>{item.source}</td>
+                        <td className="right">{formatMoney(item.value)}</td>
+                        <td className="right">{item.percent.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</td>
+                      </tr>
+                    ))}
+                    {cashDeposits && cashDeposits.items.length === 0 && (
+                      <tr>
+                        <td className="muted" colSpan={3}>No cash deposits yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                  <tfoot>
+                    <tr>
+                      <th>Total</th>
+                      <th className="right">{formatMoney(cashDeposits?.total)}</th>
+                      <th className="right">{cashDeposits?.total ? "100%" : "0%"}</th>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             </div>
-          </div>
+          </section>
 
-          <div className="card">
-            <h2>Stablecoins</h2>
-            <div className="mini">
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
-              <div className="big small">{formatMoney(stablecoinTotal)}</div>
-              <table className="table" style={{ marginTop: 8 }}>
-                <thead>
-                  <tr>
-                    <th>Token</th>
-                    <th className="right">Qty</th>
-                    <th className="right">Value</th>
-                    <th>Chain</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {stablecoins.map((t) => (
-                    <tr key={`${t.symbol}-${t.chain}-${t.wallet_id ?? ""}`}>
-                      <td>{t.symbol}</td>
-                      <td className="right">{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
-                      <td className="right">{formatMoney(t.value_base)}</td>
-                      <td className="muted">{t.chain.toUpperCase()}</td>
-                    </tr>
-                  ))}
-                  {stablecoins.length === 0 && (
+          <section className="grid g-mid">
+            <div className="card">
+              <h2>Cash Balances</h2>
+              <div className="mini">
+                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>By currency (base converted)</div>
+                <table className="table">
+                  <thead>
                     <tr>
-                      <td className="muted" colSpan={4}>No stablecoin balances found.</td>
+                      <th>Currency</th>
+                      <th className="right">Value</th>
                     </tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {summary?.cash_balances?.map((c) => (
+                      <tr key={c.currency}>
+                        <td>{c.currency}</td>
+                        <td className="right">{formatMoney(c.value)}</td>
+                      </tr>
+                    ))}
+                    {summary?.cash_balances && summary.cash_balances.length === 0 && (
+                      <tr>
+                        <td className="muted" colSpan={2}>No cash balances yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        </section>
+
+            <div className="card">
+              <h2>Stablecoins</h2>
+              <div className="mini">
+                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
+                <div className="big small">{formatMoney(stablecoinTotal)}</div>
+                <table className="table" style={{ marginTop: 8 }}>
+                  <thead>
+                    <tr>
+                      <th>Token</th>
+                      <th className="right">Qty</th>
+                      <th className="right">Value</th>
+                      <th>Chain</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stablecoins.map((t) => (
+                      <tr key={`${t.symbol}-${t.chain}-${t.wallet_id ?? ""}`}>
+                        <td>{t.symbol}</td>
+                        <td className="right">{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
+                        <td className="right">{formatMoney(t.value_base)}</td>
+                        <td className="muted">{t.chain.toUpperCase()}</td>
+                      </tr>
+                    ))}
+                    {stablecoins.length === 0 && (
+                      <tr>
+                        <td className="muted" colSpan={4}>No stablecoin balances found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </section>
+        </>
       )}
     </PageShell>
   );
