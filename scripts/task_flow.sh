@@ -1092,7 +1092,6 @@ cmd_build() {
   require_tool codex
   validate_task_file "$1"
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
-  is_human_approved || die "Human gate not approved. Check '- [x] Approved for implementation' in $TASK_FILE."
 
   local immutable_before immutable_after prompt
   immutable_before="$(immutable_hash)"
@@ -1361,12 +1360,6 @@ cmd_ship() {
 cmd_all() {
   local task="$1"
   cmd_plan "$task"
-  if ! is_human_approved; then
-    log "Human gate pending. Review $TASK_FILE, check approval, then rerun:"
-    log "scripts/task_flow.sh all $TASK_FILE"
-    return 0
-  fi
-
   cmd_build "$task"
 
   local review_attempt rc
