@@ -11,12 +11,15 @@ COPILOT_TOOL_MODE="${COPILOT_TOOL_MODE-}"
 CONTEXT7_ENABLED="${CONTEXT7_ENABLED-}"
 COPILOT_MCP_CONFIG="${COPILOT_MCP_CONFIG-}"
 NO_CACHE="${NO_CACHE-}"
+ALLOWED_AUX_FILES="${ALLOWED_AUX_FILES-}"
 VERBOSE=0
 CONTEXT7_AVAILABLE_STATE=""
 CONTEXT7_WARNING_EMITTED=0
 REVIEW_VERIFY_SUMMARY=""
 REVIEW_VERIFY_DETAILS=""
 REVIEW_VERIFY_ANY_FAIL=0
+REVIEW_ALLOWED_AUX_FILES_DISPLAY="(none)"
+declare -a REVIEW_GIT_PATHSPEC=()
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${TASK_FLOW_RUNTIME_ACTIVE:-0}" == "1" && -n "${TASK_FLOW_REPO_ROOT:-}" ]]; then
@@ -58,6 +61,7 @@ Environment overrides:
   CONTEXT7_ENABLED=0
   COPILOT_MCP_CONFIG=~/.copilot/mcp-config.json
   NO_CACHE=0
+  ALLOWED_AUX_FILES=scripts/task_flow.sh
 EOF
 }
 
@@ -168,6 +172,7 @@ print_model_routing_table() {
   log "  CONTEXT7_ENABLED=$CONTEXT7_ENABLED"
   log "  COPILOT_MCP_CONFIG=$COPILOT_MCP_CONFIG"
   log "  NO_CACHE=$NO_CACHE"
+  log "  ALLOWED_AUX_FILES=${ALLOWED_AUX_FILES:-<none>}"
 }
 
 load_model_config() {
@@ -181,6 +186,7 @@ load_model_config() {
   local env_mcp_config_set=0 env_mcp_config=""
   local env_retries_set=0 env_retries=""
   local env_no_cache_set=0 env_no_cache=""
+  local env_allowed_aux_set=0 env_allowed_aux=""
 
   if [[ -n "${PLAN_MODEL:-}" ]]; then env_plan_set=1; env_plan="$PLAN_MODEL"; fi
   if [[ -n "${REVIEW_MODEL:-}" ]]; then env_review_set=1; env_review="$REVIEW_MODEL"; fi
@@ -192,6 +198,7 @@ load_model_config() {
   if [[ -n "${COPILOT_MCP_CONFIG:-}" ]]; then env_mcp_config_set=1; env_mcp_config="$COPILOT_MCP_CONFIG"; fi
   if [[ -n "${MAX_RETRIES:-}" ]]; then env_retries_set=1; env_retries="$MAX_RETRIES"; fi
   if [[ -n "${NO_CACHE:-}" ]]; then env_no_cache_set=1; env_no_cache="$NO_CACHE"; fi
+  if [[ -n "${ALLOWED_AUX_FILES:-}" ]]; then env_allowed_aux_set=1; env_allowed_aux="$ALLOWED_AUX_FILES"; fi
 
   [[ -f "$MODEL_CONFIG_FILE" ]] || die "Model config file not found: $MODEL_CONFIG_FILE"
   set -a
@@ -210,6 +217,7 @@ load_model_config() {
   if (( env_mcp_config_set )); then COPILOT_MCP_CONFIG="$env_mcp_config"; fi
   if (( env_retries_set )); then MAX_RETRIES="$env_retries"; fi
   if (( env_no_cache_set )); then NO_CACHE="$env_no_cache"; fi
+  if (( env_allowed_aux_set )); then ALLOWED_AUX_FILES="$env_allowed_aux"; fi
 
   if [[ -z "${COPILOT_MCP_CONFIG:-}" ]]; then
     COPILOT_MCP_CONFIG="$HOME/.copilot/mcp-config.json"
@@ -238,7 +246,7 @@ load_model_config() {
   esac
 
   export PLAN_MODEL REVIEW_MODEL REVIEW_ESCALATION_MODEL
-  export CODEX_TIMEOUT_MINUTES ENABLE_CAFFEINATE COPILOT_TOOL_MODE CONTEXT7_ENABLED COPILOT_MCP_CONFIG MAX_RETRIES NO_CACHE
+  export CODEX_TIMEOUT_MINUTES ENABLE_CAFFEINATE COPILOT_TOOL_MODE CONTEXT7_ENABLED COPILOT_MCP_CONFIG MAX_RETRIES NO_CACHE ALLOWED_AUX_FILES
 
   if (( VERBOSE )); then
     print_model_routing_table
@@ -569,7 +577,7 @@ validate_rework_analysis_and_matrix() {
     [[ "$value" != "<required>" ]] || die "Rework analysis for ${review_id} still has placeholder in ${field}."
   done
 
-  grep -q '^ENTRY [0-9][0-9]*$' <<<"$matrix_block" || die "Rework answer matrix for ${review_id} must include at least one ENTRY block."
+  grep -Eq '^ENTRY([[:space:]]+|[[:space:]]*:[[:space:]]*)[0-9][0-9]*$' <<<"$matrix_block" || die "Rework answer matrix for ${review_id} must include at least one ENTRY block."
   matrix_fields=(
     REVIEWER_FINDING
     HUMAN_COMMENT
@@ -1144,32 +1152,55 @@ run_review_verification_suite() {
   fi
 }
 
+refresh_review_diff_filter() {
+  local item
+  local -a normalized=()
+
+  REVIEW_GIT_PATHSPEC=(.)
+  REVIEW_ALLOWED_AUX_FILES_DISPLAY="(none)"
+
+  [[ -n "${ALLOWED_AUX_FILES:-}" ]] || return 0
+
+  while IFS= read -r item; do
+    [[ -n "$item" ]] || continue
+    normalized+=("$item")
+    REVIEW_GIT_PATHSPEC+=(":(exclude)$item")
+  done < <(printf '%s\n' "$ALLOWED_AUX_FILES" | tr ',;' '\n' | awk '{$1=$1}; NF')
+
+  if [[ "${#normalized[@]}" -gt 0 ]]; then
+    REVIEW_ALLOWED_AUX_FILES_DISPLAY="$(printf '%s\n' "${normalized[@]}" | sed 's/^/- /')"
+  fi
+}
+
 collect_review_diff_names() {
+  refresh_review_diff_filter
   {
-    git diff --name-only main...HEAD || true
-    git diff --cached --name-only || true
-    git diff --name-only || true
+    git diff --name-only main...HEAD -- "${REVIEW_GIT_PATHSPEC[@]}" || true
+    git diff --cached --name-only -- "${REVIEW_GIT_PATHSPEC[@]}" || true
+    git diff --name-only -- "${REVIEW_GIT_PATHSPEC[@]}" || true
   } | awk 'NF' | sort -u
 }
 
 collect_review_diff_stat() {
+  refresh_review_diff_filter
   {
-    git diff --no-color --stat main...HEAD || true
-    git diff --cached --no-color --stat || true
-    git diff --no-color --stat || true
+    git diff --no-color --stat main...HEAD -- "${REVIEW_GIT_PATHSPEC[@]}" || true
+    git diff --cached --no-color --stat -- "${REVIEW_GIT_PATHSPEC[@]}" || true
+    git diff --no-color --stat -- "${REVIEW_GIT_PATHSPEC[@]}" || true
   } | awk 'NF'
 }
 
 collect_review_diff_patch() {
+  refresh_review_diff_filter
   {
     echo "### COMMITTED_DIFF (main...HEAD)"
-    git diff --no-color main...HEAD || true
+    git diff --no-color main...HEAD -- "${REVIEW_GIT_PATHSPEC[@]}" || true
     echo
     echo "### STAGED_UNCOMMITTED_DIFF"
-    git diff --cached --no-color || true
+    git diff --cached --no-color -- "${REVIEW_GIT_PATHSPEC[@]}" || true
     echo
     echo "### UNSTAGED_UNCOMMITTED_DIFF"
-    git diff --no-color || true
+    git diff --no-color -- "${REVIEW_GIT_PATHSPEC[@]}" || true
   } | sed -n '1,4000p'
 }
 
@@ -1330,6 +1361,7 @@ EOF
 
 run_sonnet_review() {
   local diff_stat diff_names diff_patch task_content prompt
+  refresh_review_diff_filter
   diff_stat="$(collect_review_diff_stat)"
   diff_names="$(collect_review_diff_names)"
   diff_patch="$(collect_review_diff_patch)"
@@ -1350,6 +1382,13 @@ $REVIEW_VERIFY_SUMMARY
 
 Deterministic verification rerun details:
 $REVIEW_VERIFY_DETAILS
+
+Approved auxiliary files allowlist:
+$REVIEW_ALLOWED_AUX_FILES_DISPLAY
+
+Allowlist rule:
+- Treat allowlisted files as explicitly approved auxiliary workflow/config changes.
+- Do not raise out-of-scope findings solely because allowlisted files changed.
 
 Changed files:
 $diff_names
@@ -1380,6 +1419,7 @@ EOF
 run_opus_escalation_review() {
   local sonnet_output="$1"
   local diff_patch task_content prompt
+  refresh_review_diff_filter
   diff_patch="$(collect_review_diff_patch)"
   task_content="$(cat "$TASK_FILE")"
   prompt="$(cat <<EOF
@@ -1401,6 +1441,13 @@ $REVIEW_VERIFY_SUMMARY
 
 Deterministic verification rerun details:
 $REVIEW_VERIFY_DETAILS
+
+Approved auxiliary files allowlist:
+$REVIEW_ALLOWED_AUX_FILES_DISPLAY
+
+Allowlist rule:
+- Treat allowlisted files as explicitly approved auxiliary workflow/config changes.
+- Do not raise out-of-scope findings solely because allowlisted files changed.
 
 Unified diff (truncated to first 4000 lines):
 $diff_patch
