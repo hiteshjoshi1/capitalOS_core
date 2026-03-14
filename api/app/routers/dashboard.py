@@ -142,6 +142,8 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
     cash = 0.0
     stocks_funds = 0.0
     crypto = 0.0
+    # Positions contribute cash and brokerage holdings only.
+    # Crypto net worth is sourced from wallet snapshots below.
     for r in rows:
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
@@ -149,8 +151,6 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
             cash += value
         elif r["asset_class"] in ("STOCK", "FUND"):
             stocks_funds += value
-        elif r["asset_class"] == "CRYPTO":
-            crypto += value
     # Add crypto wallet snapshots (USD -> base_currency), latest per wallet
     as_of_date = anchor_ts.date()
     wallet_total = db.execute(
@@ -223,6 +223,7 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
         JOIN accounts acc ON acc.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
+        WHERE a.asset_class <> 'CRYPTO'
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -294,6 +295,7 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
         JOIN assets a ON a.id = p.asset_id
         LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
+        WHERE a.asset_class <> 'CRYPTO'
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -548,6 +550,7 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -
         LEFT JOIN platforms pl ON pl.id = a.platform_id
         JOIN assets a2 ON a2.id = p.asset_id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
+        WHERE a2.asset_class <> 'CRYPTO'
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
     if not rows:
