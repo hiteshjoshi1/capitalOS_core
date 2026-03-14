@@ -144,6 +144,20 @@ _Codex appends lint/typecheck/test evidence here._
   - `/crypto/summary?base_currency=SGD` returned `total_crypto_base = 122378.04219759625`.
   - Absolute delta = `1.4551915228366852e-11`; percentage delta = `1.1890952794350783e-14%` (`< 1%`).
   - `/dashboard/platform-allocation?month=2026-03&base_currency=SGD` returned platforms `IBKR`, `DBS`, `UOB`, `SHAREKHAN`, `OCBC`; `COINBASE` no longer appears.
+- R2 rework rerun after cleanup and sync from `main`:
+  - `git status --short --branch --ignored` showed no staged files; only local unstaged edits remain in `scripts/task_flow.sh` and this task file.
+  - `git diff --cached --name-only` returned empty.
+  - `git status --short --ignored data` reported `!! data/`.
+  - `git check-ignore -v` mapped the four flagged fixture files to `.gitignore:99:data/`.
+  - `grep -n '^data/' .gitignore` returned line `99:data/`.
+  - `git diff --name-only origin/main..HEAD` and `git show --name-only --pretty=format:'COMMIT %H %s' HEAD` each showed only `api/app/routers/dashboard.py`, `api/tests/conftest.py`, `api/tests/test_dashboard.py`, and `tasks/issue-114-networth-card-crypto-bugfix.md`.
+  - `git log --all --oneline -- data/fixtures/citi_credit_card_sample.csv data/fixtures/ocbc_TransactionHistory_20260313165630.csv data/fixtures/uob_account_transaction_history.xls data/fixtures/uob_credit_card_transaction_history.xls` returned no commits.
+  - `git log --oneline origin/main..HEAD -- Makefile .gitignore api/app/ingestion scripts/task_flow.sh` returned no commits.
+  - `make lint` passed.
+  - `make typecheck` passed.
+  - `make test-backend` passed: 92 tests.
+  - `make test-frontend` passed: 10 files, 36 tests.
+  - Playwright was present in `web/package.json` and `web/node_modules/@playwright/test`; `make e2e` passed: 7 tests.
 
 ## Review Findings (Sonnet Primary, Opus Escalation)
 _Review output is appended here._
@@ -182,6 +196,10 @@ _Automation appends structured logs here._
 - Ran `make lint`, `make typecheck`, `make test-backend`, `make test-frontend`, `make e2e`, `make api-rebuild`, and local Python syntax compilation.
 - Ran live Postgres diagnostics through the API container, deleted the confirmed COINBASE CRYPTO `positions` plus orphaned CRYPTO `assets`, and re-ran the diagnostics to confirm zero remaining rows.
 - Captured runtime `/dashboard/summary`, `/crypto/summary`, `/dashboard/platform-allocation`, and `/health` responses from inside the API container to avoid host-network sandbox limits.
+- Rechecked git index hygiene, ignore rules, branch-only history, and flagged fixture-path history after the cleanup/pull from `main`.
+- Reconfirmed the approved issue-114 CRYPTO exclusions in `dashboard.py` and the matching wallet-snapshot regressions in `test_dashboard.py`.
+- Reran `make lint`, `make typecheck`, `make test-backend`, `make test-frontend`, and `make e2e`; all passed in this pass.
+- Updated the R2 rework analysis and answer matrix to reflect the resolved privacy/scope blockers and current ship state.
 
 ## Workflow Commands
 
@@ -511,4 +529,142 @@ Review-ID: R2
 Status: Reviewed
 Result: NEEDS_FIXES
 Risk: HIGH
+```
+
+### Review Cycle R2 - Human Input (2026-03-14T14:25:10Z)
+
+```text
+HUMAN_QUESTIONS: I removed the files flagged. I also fixed the pipeline changes in other branch, merged them to main and pulled them here
+UNRESOLVED_COMMENTS: Check if the reviews raised by Sonnet for this particular change are still fixed or not.  Also check if any unwanted files are going to github or committed already
+RESPONSE_REQUIREMENTS: None
+```
+
+### Review Cycle R2 - Rework Analysis
+
+```text
+ROOT_CAUSE: R2 blockers were caused by staged-index contamination and a transient `.gitignore` weakening rather than issue-114 dashboard logic, and the current recheck shows those ship blockers no longer present in the branch commit range.
+FINDINGS_ADDRESSED: Rechecked that the flagged `data/fixtures/` files are ignored, `.gitignore` still contains `data/`, `origin/main..HEAD` and `HEAD` still contain only the four issue-114 files, and the approved CRYPTO exclusions plus wallet-snapshot net-worth behavior remain in router/test code after syncing from `main`.
+CHANGE_MADE: Updated only this task note in this pass to record the post-cleanup, post-merge recheck. No product code changes were required because the Sonnet-raised issue-114 logic remains intact and the earlier privacy/scope blockers are cleared; `scripts/task_flow.sh` remains only a local unstaged modification outside the issue-114 commit range.
+VALIDATION_PERFORMED: Re-ran `git status --short --branch --ignored`, `git diff --cached --name-only`, `git status --short --ignored data`, `git check-ignore -v`, `grep -n '^data/' .gitignore`, `git diff --name-only origin/main..HEAD`, `git show --name-only --pretty=format:'COMMIT %H %s' HEAD`, `git log --all --oneline -- <flagged paths>`, `git log --oneline origin/main..HEAD -- scripts/task_flow.sh Makefile .gitignore api/app/ingestion`, `git diff --name-only HEAD -- scripts/task_flow.sh`, and source inspection of `api/app/routers/dashboard.py` plus `api/tests/test_dashboard.py`; then reran `make lint`, `make typecheck`, `make test-backend`, `make test-frontend`, and `make e2e`.
+UNRESOLVED_ASSUMPTIONS: Assumes local fetched refs are representative of what could reach GitHub; this pass found no evidence of committed PII for the exact flagged filenames in local reachable history.
+```
+
+### Review Cycle R2 - Rework Answer Matrix
+
+```text
+ENTRY: 1
+REVIEWER_FINDING: [CRITICAL — PRIVACY BLOCKER] Real PII was previously staged in `data/fixtures/`.
+HUMAN_COMMENT: I removed the files flagged.
+ROOT_CAUSE: Sensitive local fixture files had been added to the git index before ignore protection was restored.
+CHANGE_MADE: Updated this task note to record the post-cleanup state; no product code or tracked fixture changes were needed because the earlier staged `data/` entries were already removed and the flagged files now exist only as ignored local files.
+VERIFICATION_PERFORMED: `git diff --cached --name-only` returned empty; `git status --short --ignored data` reported `!! data/`; `git check-ignore -v` mapped the four flagged files to `.gitignore:99:data/`; `git log --all --oneline -- data/fixtures/citi_credit_card_sample.csv data/fixtures/ocbc_TransactionHistory_20260313165630.csv data/fixtures/uob_account_transaction_history.xls data/fixtures/uob_credit_card_transaction_history.xls` returned no commits.
+STATUS: RESOLVED
+
+ENTRY: 2
+REVIEWER_FINDING: [BLOCKER] `.gitignore` had been staged as `data/*` instead of `data/`.
+HUMAN_COMMENT: I removed the files flagged.
+ROOT_CAUSE: The index temporarily held a weakened ignore rule during the earlier contaminated staging state.
+CHANGE_MADE: Updated this task note to record the current `.gitignore` state; no repo code change was required because the directory-level `data/` guard is already restored in the working tree and branch history.
+VERIFICATION_PERFORMED: `grep -n '^data/' .gitignore` returned line 99 as `data/`, with separate entries for `data/raw/` and `data/reports/`.
+STATUS: RESOLVED
+
+ENTRY: 3
+REVIEWER_FINDING: [BLOCKER] Out-of-scope staged changes in `Makefile`, `api/app/ingestion/`, and related files had to be removed from the issue-114 ship set.
+HUMAN_COMMENT: I also fixed the pipeline changes in other branch, merged them to main and pulled them here.
+ROOT_CAUSE: Earlier staging mixed unrelated pipeline/ingestion work into the issue-114 review set.
+CHANGE_MADE: Updated this task note to record the current ship set; no product code change was required because the branch-only diff from `origin/main` is already back to the four expected issue-114 files.
+VERIFICATION_PERFORMED: `git diff --cached --name-only` returned empty; `git diff --name-only origin/main..HEAD` listed only `api/app/routers/dashboard.py`, `api/tests/conftest.py`, `api/tests/test_dashboard.py`, and `tasks/issue-114-networth-card-crypto-bugfix.md`; `git log --oneline origin/main..HEAD -- Makefile .gitignore api/app/ingestion` returned no commits.
+STATUS: RESOLVED
+
+ENTRY: 4
+REVIEWER_FINDING: [MINOR] `scripts/task_flow.sh` had been staged and should not be bundled into issue-114.
+HUMAN_COMMENT: I also fixed the pipeline changes in other branch, merged them to main and pulled them here.
+ROOT_CAUSE: Workflow-internal changes were previously mixed into the issue branch review context.
+CHANGE_MADE: Updated this task note to record the current workflow-file state; no product code change was required because `scripts/task_flow.sh` is absent from `origin/main..HEAD` and `HEAD` and remains only a local unstaged modification.
+VERIFICATION_PERFORMED: `git diff --name-only HEAD -- scripts/task_flow.sh` returned `scripts/task_flow.sh`, showing a local unstaged modification, and `git log --oneline origin/main..HEAD -- scripts/task_flow.sh` returned no commits, showing it is not part of the issue-114 branch history.
+STATUS: RESOLVED
+
+ENTRY: 5
+REVIEWER_FINDING: Human follow-up: confirm whether the Sonnet-reviewed issue-114 logic is still fixed after pulling from `main`.
+HUMAN_COMMENT: Check if the reviews raised by Sonnet for this particular change are still fixed or not.
+ROOT_CAUSE: Pulling post-review changes from `main` required a fresh source-level regression check on the approved dashboard behavior.
+CHANGE_MADE: Updated this task note to record the current source and test-state; no product code change was required because the approved issue-114 implementation remains intact in the current working tree after syncing from `main`.
+VERIFICATION_PERFORMED: Source inspection confirmed `_networth_components()` remains the active dashboard net-worth path and no longer adds CRYPTO positions, while `_geography()`, `_top_holdings()`, and `_platform_allocation()` each still retain `WHERE ... asset_class <> 'CRYPTO'`; `api/tests/test_dashboard.py` still asserts wallet-sourced crypto totals and CRYPTO exclusion from top holdings, geography, and platform allocation; `make test-backend`, `make test-frontend`, and `make e2e` all passed on this rerun.
+STATUS: RESOLVED
+
+ENTRY: 6
+REVIEWER_FINDING: Human follow-up: check whether any unwanted files are going to GitHub or are already committed.
+HUMAN_COMMENT: Also check if any unwanted files are going to github or committed already.
+ROOT_CAUSE: Prior staged contamination created a risk that unwanted files could be accidentally committed or pushed with the issue branch.
+CHANGE_MADE: Updated this task note to record the current branch and working-tree state; no product code change was required because no unwanted files are currently staged or present in `HEAD`/`origin/main..HEAD`, while local unstaged edits exist only in `scripts/task_flow.sh` and this task file.
+VERIFICATION_PERFORMED: `git status --short --branch --ignored` showed no staged files and only local unstaged edits in `scripts/task_flow.sh` plus this task file; `git diff --cached --name-only` returned empty; `git show --name-only --pretty=format:'COMMIT %H %s' HEAD` listed only the issue-114 files; `git diff --name-only origin/main..HEAD` matched that same four-file set; `git log --all` for the exact flagged fixture filenames returned no commits.
+STATUS: RESOLVED
+```
+
+### Review Cycle R2 - Status (2026-03-14T14:59:57Z)
+
+```text
+Review-ID: R2
+Status: Implemented
+Result: NEEDS_REVIEW
+Risk: PENDING
+```
+
+### Review Cycle R2 - Rework Result (2026-03-14T14:59:57Z)
+
+```text
+Two-pass rework completed (analysis -> implementation) for latest review findings.
+```
+
+### Review Cycle R3 - Verification Rerun (2026-03-14T15:13:08Z)
+
+```text
+- make lint: PASS (exit 0)
+- make typecheck: PASS (exit 0)
+- make test-backend: PASS (exit 0)
+- make test-frontend: PASS (exit 0)
+- make api-smoke (runtime): PASS (exit 0)
+- make e2e (UI smoke): PASS (exit 0)
+
+```
+
+### Review Cycle R3 - Sonnet (claude-sonnet-4.6) (2026-03-14T15:14:12Z)
+
+```text
+
+Total usage est:        1 Premium request
+API time spent:         55s
+Total session time:     1m 1s
+Total code changes:     +0 -0
+Breakdown by AI model:
+ claude-sonnet-4.6       128.0k in, 2.7k out, 14.3k cached (Est. 1 Premium request)
+● SQL: Track R3 review findings
+  └ Executed 2 statement(s)
+
+STATUS: APPROVED
+RISK: LOW
+
+SUMMARY:
+- All 7 ACs are met. Code fix is surgical and correct: CRYPTO branch removed from `_networth_components()`, and `asset_class <> 'CRYPTO'` filters added to `_geography()`, `_top_holdings()`, and `_platform_allocation()`.
+- All R2 privacy/scope blockers are resolved: no PII in the diff, `data/` guard intact at `.gitignore:99`, committed diff is clean (4 issue-114 files + 1 minor workflow config).
+- Live Postgres cleanup confirmed: 7 CRYPTO positions and 7 orphaned assets deleted; post-cleanup AC1 delta is ~0% (1.45e-11 absolute).
+- R3 verification rerun: lint ✅, typecheck ✅, test-backend 92 ✅, test-frontend 36 ✅, api-smoke ✅, e2e 7 ✅.
+- Smoke output confirms no CRYPTO entries in `top_holdings` and COINBASE absent from platform-allocation.
+
+FINDINGS:
+- **[MINOR] `.ai-models.env` in committed diff**: Adds `ALLOWED_AUX_FILES=scripts/task_flow.sh` — workflow-internal config, non-breaking, no product/API/UI impact. Acceptable but was not explicitly listed in the issue-114 file scope.
+- **[ACCEPTABLE] Checklist item 2.2 deferred**: COINBASE account deletion was skipped because the account retains 591 live transactions with no safe predicate to isolate experiment data. The decision is explicitly documented in the task file. No AC requires account deletion.
+- **[ACCEPTABLE] Checklist items 4.5/4.6 not ticked**: `make api-smoke` passes in the R3 verification rerun output; browser check is adequately covered by 7 passing Playwright e2e tests.
+
+TEST_GAPS:
+- None remaining for issue-114 scope. Regression suite covers wallet-sourced crypto value, CRYPTO exclusion from all four positions-derived views, and cleanup-SQL end-state (zero CRYPTO positions, zero orphaned CRYPTO assets).
+```
+
+### Review Cycle R3 - Status (2026-03-14T15:14:12Z)
+
+```text
+Review-ID: R3
+Status: Reviewed
+Result: APPROVED
+Risk: LOW
 ```

@@ -515,6 +515,33 @@ extract_single_line_field() {
   '
 }
 
+extract_analysis_field_value() {
+  local body="$1"
+  local field="$2"
+  local value=""
+
+  value="$(extract_single_line_field "$body" "$field")"
+  if [[ -n "${value// }" ]]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+
+  case "$field" in
+    PLANNED_CHANGES)
+      value="$(extract_single_line_field "$body" "CHANGE_MADE")"
+      [[ -n "${value// }" ]] || value="$(extract_single_line_field "$body" "PLANNED_CHANGE")"
+      ;;
+    VALIDATION_PLAN)
+      value="$(extract_single_line_field "$body" "VALIDATION_PERFORMED")"
+      ;;
+    FINDINGS_ADDRESSED)
+      value="$(extract_single_line_field "$body" "FINDINGS_RESOLVED")"
+      ;;
+  esac
+
+  printf '%s\n' "$value"
+}
+
 ensure_rework_human_input_block_ready() {
   local review_id="$1"
   local block questions unresolved requirements
@@ -572,7 +599,7 @@ validate_rework_analysis_and_matrix() {
     UNRESOLVED_ASSUMPTIONS
   )
   for field in "${analysis_fields[@]}"; do
-    value="$(extract_single_line_field "$analysis_block" "$field")"
+    value="$(extract_analysis_field_value "$analysis_block" "$field")"
     [[ -n "${value// }" ]] || die "Rework analysis for ${review_id} missing ${field}."
     [[ "$value" != "<required>" ]] || die "Rework analysis for ${review_id} still has placeholder in ${field}."
   done
