@@ -418,6 +418,29 @@ def seed_dashboard_data():
         )
         conn.execute(
             text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-btc', 'evm', 'ethereum', '0xbtc', 'BTC Wallet', 'active', :as_of_cur)"
+            ),
+            {"as_of_cur": as_of_cur},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(101, 'wallet-btc', '2026-02-06', :as_of_cur, 20000), "
+                "(102, 'wallet-btc', '2026-01-06', :as_of_prev, 15000)"
+            ),
+            {"as_of_cur": as_of_cur, "as_of_prev": as_of_prev},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(101, 101, 'evm', 'ethereum', 'native', 'BTC', 1, 20000), "
+                "(102, 102, 'evm', 'ethereum', 'native', 'BTC', 1, 15000)"
+            )
+        )
+        conn.execute(
+            text(
                 "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category) VALUES "
                 "(1, '2026-02-05 12:00:00+00:00', 1, 5000, 'INCOME', 'SGD', NULL), "
                 "(2, '2026-02-10 12:00:00+00:00', 1, -2000, 'EXPENSE', 'SGD', 'Rent'), "

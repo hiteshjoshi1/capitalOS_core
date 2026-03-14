@@ -24,12 +24,197 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert data["cash_flow"]["savings_rate"] == pytest.approx(3899.0 / 5999.0, rel=1e-4)
 
     top = data["top_holdings"]
-    assert len(top) == 3
+    assert len(top) == 2
     assert top[0]["symbol"] == "AAPL"
 
     changes = data["net_worth_change"]["vs_prev_month"]
     assert changes["abs"] == 10000.0
     assert changes["pct"] == 10000.0 / 90000.0
+
+
+def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, db_engine, monkeypatch):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(70, 'DBS', 'DBS Bank', 'BANK', 'SG'), "
+                "(71, 'COINBASE', 'Coinbase', 'EXCHANGE', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(70, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 70), "
+                "(71, 'Coinbase', 'COINBASE', 'EXCHANGE', 'USD', 'US', 71)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(70, 'SGD', 'SGD Cash', 'CASH', 'SGD', 'SG'), "
+                "(71, 'BTC', 'Bitcoin', 'CRYPTO', 'USD', 'GLOBAL')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(70, 70, 70, :as_of, 1, 1000, 1000), "
+                "(71, 71, 71, :as_of, 1, 999, 999)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-70', 'evm', 'ethereum', '0x70', 'Main wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(70, 'wallet-70', '2026-02-06', :as_of, 123.45)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(70, 70, 'evm', 'ethereum', 'native', 'ETH', 1, 123.45)"
+            )
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.routers.crypto.get_rates", fake_rates)
+
+    dashboard_resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
+    assert dashboard_resp.status_code == 200
+    dashboard_body = dashboard_resp.json()
+
+    crypto_resp = client.get("/crypto/summary?base_currency=USD")
+    assert crypto_resp.status_code == 200
+    crypto_body = crypto_resp.json()
+
+    allocation_resp = client.get("/dashboard/platform-allocation?month=2026-02&base_currency=SGD")
+    assert allocation_resp.status_code == 200
+    allocation_body = allocation_resp.json()
+
+    assert dashboard_body["net_worth"]["cash"] == 1000.0
+    assert dashboard_body["net_worth"]["crypto"] == 123.45
+    assert dashboard_body["net_worth"]["total"] == 1123.45
+    assert crypto_body["total_crypto_base"] == 123.45
+    assert dashboard_body["net_worth"]["crypto"] == crypto_body["total_crypto_base"]
+    assert [row["symbol"] for row in dashboard_body["top_holdings"]] == ["SGD"]
+    assert all(row["asset_class"] != "CRYPTO" for row in dashboard_body["top_holdings"])
+    assert all(row["platform"] != "COINBASE" for row in dashboard_body["top_holdings"])
+    assert dashboard_body["geography"] == [{"country": "SG", "value": 1000.0, "percent": 89.01}]
+    assert allocation_body["total"] == 1000.0
+    assert allocation_body["items"] == [
+        {"platform": "DBS", "platform_type": "BANK", "country": "SG", "value": 1000.0, "percent": 100.0}
+    ]
+
+
+def test_crypto_positions_cleanup_sql_removes_orphaned_assets(db_engine):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(72, 'COINBASE', 'Coinbase', 'EXCHANGE', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(72, 'Coinbase', 'COINBASE', 'EXCHANGE', 'USD', 'US', 72)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(72, 'ETH', 'Ether', 'CRYPTO', 'USD', 'GLOBAL')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(72, 72, 72, :as_of, 2, 500, 1000)"
+            ),
+            {"as_of": as_of},
+        )
+
+        before_positions = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM positions p
+                JOIN assets a ON a.id = p.asset_id
+                WHERE a.asset_class = 'CRYPTO'
+                """
+            )
+        ).scalar_one()
+        assert before_positions == 1
+
+        conn.execute(
+            text(
+                """
+                DELETE FROM positions
+                WHERE asset_id IN (
+                  SELECT id FROM assets WHERE asset_class = 'CRYPTO'
+                )
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                DELETE FROM assets
+                WHERE asset_class = 'CRYPTO'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM positions p WHERE p.asset_id = assets.id
+                  )
+                """
+            )
+        )
+
+        after_positions = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM positions p
+                JOIN assets a ON a.id = p.asset_id
+                WHERE a.asset_class = 'CRYPTO'
+                """
+            )
+        ).scalar_one()
+        orphan_assets = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM assets a
+                WHERE a.asset_class = 'CRYPTO'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM positions p WHERE p.asset_id = a.id
+                  )
+                """
+            )
+        ).scalar_one()
+
+    assert after_positions == 0
+    assert orphan_assets == 0
 
 
 def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_dashboard_data):
@@ -50,12 +235,12 @@ def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient
     data = resp.json()
 
     assert data["net_worth"]["total"] > 0
-    assert len(data["top_holdings"]) >= 3
+    assert len(data["top_holdings"]) >= 2
     assert all(
         {"symbol", "asset_class", "value", "quantity", "avg_cost", "latest_price", "quote_currency"}.issubset(row.keys())
-        for row in data["top_holdings"][:3]
+        for row in data["top_holdings"][:2]
     )
-    values = [row["value"] for row in data["top_holdings"][:3]]
+    values = [row["value"] for row in data["top_holdings"]]
     assert values == sorted(values, reverse=True)
 
 
@@ -64,13 +249,13 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     assert resp.status_code == 200
     data = resp.json()
 
-    assert data["total"] == 100000.0
+    assert data["total"] == 80000.0
     assert data["as_of"] is not None
 
     items = data["items"]
     assert len(items) == 2
     assert items[0]["platform"] == "IBKR"
-    assert items[0]["value"] == 70000.0
+    assert items[0]["value"] == 50000.0
     assert items[1]["platform"] == "DBS"
     assert items[1]["value"] == 30000.0
 
