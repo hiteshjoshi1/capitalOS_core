@@ -14,6 +14,9 @@ NO_CACHE="${NO_CACHE-}"
 VERBOSE=0
 CONTEXT7_AVAILABLE_STATE=""
 CONTEXT7_WARNING_EMITTED=0
+REVIEW_VERIFY_SUMMARY=""
+REVIEW_VERIFY_DETAILS=""
+REVIEW_VERIFY_ANY_FAIL=0
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${TASK_FLOW_RUNTIME_ACTIVE:-0}" == "1" && -n "${TASK_FLOW_REPO_ROOT:-}" ]]; then
@@ -461,6 +464,127 @@ extract_review_cycle_context() {
   ' "$TASK_FILE"
 }
 
+extract_latest_named_text_block() {
+  local title_prefix="$1"
+  awk -v prefix="### " -v title="$title_prefix" '
+    function starts_with(s, p) { return index(s, p) == 1 }
+    /^### / {
+      capture_title = (starts_with($0, prefix title " (") || $0 == (prefix title))
+      in_block = 0
+      next
+    }
+    capture_title && /^```text$/ {
+      in_block = 1
+      block = ""
+      next
+    }
+    capture_title && in_block && /^```$/ {
+      last = block
+      capture_title = 0
+      in_block = 0
+      next
+    }
+    capture_title && in_block {
+      block = block $0 ORS
+    }
+    END {
+      if (length(last) > 0) {
+        printf "%s", last
+      }
+    }
+  ' "$TASK_FILE"
+}
+
+extract_single_line_field() {
+  local body="$1"
+  local field="$2"
+  printf '%s\n' "$body" | awk -F':' -v key="$field" '
+    $1 == key {
+      sub(/^[^:]*:[[:space:]]*/, "", $0)
+      print
+      exit
+    }
+  '
+}
+
+ensure_rework_human_input_block_ready() {
+  local review_id="$1"
+  local block questions unresolved requirements
+
+  block="$(extract_latest_named_text_block "Review Cycle ${review_id} - Human Input")"
+  if [[ -z "$block" ]]; then
+    append_task_block "Review Cycle ${review_id} - Human Input" "HUMAN_QUESTIONS: <required>
+UNRESOLVED_COMMENTS: <required>
+RESPONSE_REQUIREMENTS: <required>"
+    die "Missing structured human input for ${review_id}. Fill 'Review Cycle ${review_id} - Human Input' and rerun task-rework."
+  fi
+
+  questions="$(extract_single_line_field "$block" "HUMAN_QUESTIONS")"
+  unresolved="$(extract_single_line_field "$block" "UNRESOLVED_COMMENTS")"
+  requirements="$(extract_single_line_field "$block" "RESPONSE_REQUIREMENTS")"
+
+  [[ -n "${questions// }" ]] || die "Review cycle ${review_id} human input is missing HUMAN_QUESTIONS."
+  [[ "$questions" != "<required>" ]] || die "Review cycle ${review_id} HUMAN_QUESTIONS still has placeholder text."
+  [[ -n "${unresolved// }" ]] || die "Review cycle ${review_id} human input is missing UNRESOLVED_COMMENTS."
+  [[ "$unresolved" != "<required>" ]] || die "Review cycle ${review_id} UNRESOLVED_COMMENTS still has placeholder text."
+  [[ -n "${requirements// }" ]] || die "Review cycle ${review_id} human input is missing RESPONSE_REQUIREMENTS."
+  [[ "$requirements" != "<required>" ]] || die "Review cycle ${review_id} RESPONSE_REQUIREMENTS still has placeholder text."
+}
+
+ensure_rework_analysis_and_matrix_present() {
+  local review_id="$1"
+  local analysis_block matrix_block
+
+  analysis_block="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Analysis")"
+  if [[ -z "$analysis_block" ]]; then
+    die "Missing rework analysis block for ${review_id}. Run task-rework analysis pass first."
+  fi
+
+  matrix_block="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Answer Matrix")"
+  if [[ -z "$matrix_block" ]]; then
+    die "Missing rework answer matrix for ${review_id}. Run task-rework analysis pass first."
+  fi
+}
+
+validate_rework_analysis_and_matrix() {
+  local review_id="$1"
+  local analysis_block matrix_block value
+  local analysis_fields matrix_fields
+
+  ensure_rework_analysis_and_matrix_present "$review_id"
+
+  analysis_block="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Analysis")"
+  matrix_block="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Answer Matrix")"
+
+  analysis_fields=(
+    ROOT_CAUSE
+    FINDINGS_ADDRESSED
+    PLANNED_CHANGES
+    VALIDATION_PLAN
+    UNRESOLVED_ASSUMPTIONS
+  )
+  for field in "${analysis_fields[@]}"; do
+    value="$(extract_single_line_field "$analysis_block" "$field")"
+    [[ -n "${value// }" ]] || die "Rework analysis for ${review_id} missing ${field}."
+    [[ "$value" != "<required>" ]] || die "Rework analysis for ${review_id} still has placeholder in ${field}."
+  done
+
+  grep -q '^ENTRY [0-9][0-9]*$' <<<"$matrix_block" || die "Rework answer matrix for ${review_id} must include at least one ENTRY block."
+  matrix_fields=(
+    REVIEWER_FINDING
+    HUMAN_COMMENT
+    ROOT_CAUSE
+    CHANGE_MADE
+    VERIFICATION_PERFORMED
+    STATUS
+  )
+  for field in "${matrix_fields[@]}"; do
+    value="$(extract_single_line_field "$matrix_block" "$field")"
+    [[ -n "${value// }" ]] || die "Rework answer matrix for ${review_id} missing ${field}."
+    [[ "$value" != "<required>" ]] || die "Rework answer matrix for ${review_id} still has placeholder in ${field}."
+  done
+}
+
 extract_latest_legacy_review_context() {
   local start_line
   start_line="$(awk '/^### Sonnet Review / {line=NR} END {print line+0}' "$TASK_FILE")"
@@ -837,6 +961,7 @@ validate_generated_task_file_content() {
   grep -q '^## Acceptance Criteria' <<<"$content" || return 1
   grep -q '^## Human Approval Gate' <<<"$content" || return 1
   grep -q '^## Task Checklist' <<<"$content" || return 1
+  grep -q '^## Human Rework Input (Mutable)' <<<"$content" || return 1
   grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
 }
 
@@ -945,6 +1070,77 @@ run_verification_suite() {
     run_with_retries_and_codex_fix "make e2e" make e2e
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
+  fi
+}
+
+run_review_command_capture() {
+  local label="$1"
+  shift
+  local cmd=("$@")
+  local output_file rc status output cmd_str
+
+  output_file="$(mktemp)"
+  printf -v cmd_str '%q ' "${cmd[@]}"
+  cmd_str="${cmd_str% }"
+
+  set +e
+  "${cmd[@]}" >"$output_file" 2>&1
+  rc=$?
+  set -e
+
+  if [[ "$rc" -eq 0 ]]; then
+    status="PASS"
+  else
+    status="FAIL"
+    REVIEW_VERIFY_ANY_FAIL=1
+  fi
+
+  output="$(sed -n '1,240p' "$output_file")"
+  rm -f "$output_file"
+
+  REVIEW_VERIFY_SUMMARY+="- ${label}: ${status} (exit ${rc})"$'\n'
+  REVIEW_VERIFY_DETAILS+="### ${label}"$'\n'
+  REVIEW_VERIFY_DETAILS+="STATUS: ${status}"$'\n'
+  REVIEW_VERIFY_DETAILS+="EXIT_CODE: ${rc}"$'\n'
+  REVIEW_VERIFY_DETAILS+="COMMAND: ${cmd_str}"$'\n'
+  REVIEW_VERIFY_DETAILS+="OUTPUT:"$'\n'
+  REVIEW_VERIFY_DETAILS+="${output}"$'\n\n'
+}
+
+run_review_verification_suite() {
+  REVIEW_VERIFY_SUMMARY=""
+  REVIEW_VERIFY_DETAILS=""
+  REVIEW_VERIFY_ANY_FAIL=0
+
+  run_review_command_capture "make lint" make lint
+  run_review_command_capture "make typecheck" make typecheck
+  run_review_command_capture "make test-backend" make test-backend
+  run_review_command_capture "make test-frontend" make test-frontend
+  run_review_command_capture "make api-smoke (runtime)" make api-smoke
+
+  if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
+    run_review_command_capture "make e2e (UI smoke)" make e2e
+  else
+    REVIEW_VERIFY_SUMMARY+="- make e2e (UI smoke): SKIP (Playwright not configured)"$'\n'
+    REVIEW_VERIFY_DETAILS+="### make e2e (UI smoke)"$'\n'
+    REVIEW_VERIFY_DETAILS+="STATUS: SKIP"$'\n'
+    REVIEW_VERIFY_DETAILS+="EXIT_CODE: 0"$'\n'
+    REVIEW_VERIFY_DETAILS+="COMMAND: make e2e"$'\n'
+    REVIEW_VERIFY_DETAILS+="OUTPUT:"$'\n'
+    REVIEW_VERIFY_DETAILS+="Playwright config not found in web/."$'\n\n'
+  fi
+
+  if [[ -d "$REPO_ROOT/web/playwright-report" ]]; then
+    REVIEW_VERIFY_DETAILS+="### UI Artifact Index: web/playwright-report"$'\n'
+    REVIEW_VERIFY_DETAILS+="STATUS: INFO"$'\n'
+    REVIEW_VERIFY_DETAILS+="OUTPUT:"$'\n'
+    REVIEW_VERIFY_DETAILS+="$(find "$REPO_ROOT/web/playwright-report" -maxdepth 2 -type f | sed "s|$REPO_ROOT/||" | sed -n '1,80p')"$'\n\n'
+  fi
+  if [[ -d "$REPO_ROOT/web/test-results" ]]; then
+    REVIEW_VERIFY_DETAILS+="### UI Artifact Index: web/test-results"$'\n'
+    REVIEW_VERIFY_DETAILS+="STATUS: INFO"$'\n'
+    REVIEW_VERIFY_DETAILS+="OUTPUT:"$'\n'
+    REVIEW_VERIFY_DETAILS+="$(find "$REPO_ROOT/web/test-results" -maxdepth 3 -type f | sed "s|$REPO_ROOT/||" | sed -n '1,120p')"$'\n\n'
   fi
 }
 
@@ -1064,6 +1260,7 @@ Requirements:
    - Implementation Reasoning Addendum (Codex Mutable)
    - Verification Evidence (Codex Mutable)
    - Review Findings (Sonnet Primary, Opus Escalation)
+   - Human Rework Input (Mutable)
    - Retry Log (Max 3)
    - Automation Log (Mutable)
 2) Keep marker exactly: <!-- IMMUTABLE_PLAN_END -->
@@ -1148,6 +1345,12 @@ Critical constraint:
 Task file:
 $task_content
 
+Deterministic verification rerun summary:
+$REVIEW_VERIFY_SUMMARY
+
+Deterministic verification rerun details:
+$REVIEW_VERIFY_DETAILS
+
 Changed files:
 $diff_names
 
@@ -1168,6 +1371,7 @@ TEST_GAPS:
 - ...
 
 Use STATUS=ESCALATE when uncertain, conflicting, or high-risk.
+If any deterministic verification command failed, STATUS must be NEEDS_FIXES.
 EOF
 )"
   run_copilot_prompt_with_cache "review" "$REVIEW_MODEL" "$prompt" "$task_content"
@@ -1192,6 +1396,12 @@ $sonnet_output
 Task file:
 $task_content
 
+Deterministic verification rerun summary:
+$REVIEW_VERIFY_SUMMARY
+
+Deterministic verification rerun details:
+$REVIEW_VERIFY_DETAILS
+
 Unified diff (truncated to first 4000 lines):
 $diff_patch
 
@@ -1215,11 +1425,25 @@ cmd_review() {
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
   assert_review_inputs_staged
 
+  local previous_review_id
+  previous_review_id="$(latest_review_id || true)"
+  if [[ -n "$previous_review_id" ]] && review_status_exists "$previous_review_id" "Implemented"; then
+    validate_rework_analysis_and_matrix "$previous_review_id"
+  fi
+
   local review_id sonnet_output sonnet_status sonnet_risk
   review_id="$(next_review_id)"
+  run_review_verification_suite
+  append_task_block "Review Cycle ${review_id} - Verification Rerun" "$REVIEW_VERIFY_SUMMARY"
   sonnet_output="$(run_sonnet_review 2>&1 | tee /dev/stderr)"
   sonnet_status="$(parse_status "$sonnet_output")"
   sonnet_risk="$(parse_risk "$sonnet_output")"
+
+  if [[ "$REVIEW_VERIFY_ANY_FAIL" -eq 1 && "$sonnet_status" == "APPROVED" ]]; then
+    sonnet_output="$(printf '%s\n\nSYSTEM_NOTE:\n- Deterministic verification rerun had failures; overriding STATUS to NEEDS_FIXES.' "$sonnet_output")"
+    sonnet_status="NEEDS_FIXES"
+    sonnet_risk="${sonnet_risk:-MEDIUM}"
+  fi
 
   append_task_block "Review Cycle ${review_id} - Sonnet (${REVIEW_MODEL})" "$sonnet_output"
   append_review_status "$review_id" "Reviewed" "$sonnet_status" "${sonnet_risk:-UNKNOWN}"
@@ -1247,7 +1471,8 @@ cmd_rework() {
   validate_task_file "$1"
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
 
-  local review_id review_context latest_result immutable_before immutable_after prompt parsed_status parsed_risk
+  local review_id review_context latest_result immutable_before immutable_after parsed_status parsed_risk
+  local human_input analysis_prompt implementation_prompt analysis_summary matrix_summary
   review_id="$(latest_review_id || true)"
   if [[ -z "$review_id" ]]; then
     review_context="$(extract_latest_legacy_review_context || true)"
@@ -1280,20 +1505,83 @@ cmd_rework() {
     [[ -n "$review_context" ]] || die "Could not extract review context for $review_id."
   fi
 
+  ensure_rework_human_input_block_ready "$review_id"
+  human_input="$(extract_latest_named_text_block "Review Cycle ${review_id} - Human Input")"
+  [[ -n "$human_input" ]] || die "Could not extract structured human input for ${review_id}."
+
   immutable_before="$(immutable_hash)"
-  prompt="$(cat <<EOF
-Implement ONLY the unresolved issues from latest review cycle ${review_id} in $TASK_FILE.
+  analysis_prompt="$(cat <<EOF
+Analysis pass for latest review cycle ${review_id} in $TASK_FILE.
 
 Latest review context:
 $review_context
 
+Structured human input:
+$human_input
+
 Hard constraints:
 1) Do not modify content above <!-- IMMUTABLE_PLAN_END --> in $TASK_FILE.
-2) Fix only findings and test gaps from the latest review cycle (${review_id}).
-3) Do not redo completed work or broad refactors.
-4) Keep changes minimal and in-scope with acceptance criteria.
-5) Update mutable sections in $TASK_FILE with concise implementation reasoning and verification evidence.
-6) Run verification:
+2) This is analysis only. Do NOT implement code changes in this pass.
+3) Update/create exactly these blocks in $TASK_FILE as markdown headings with \`\`\`text fenced bodies:
+   - Review Cycle ${review_id} - Rework Analysis
+   - Review Cycle ${review_id} - Rework Answer Matrix
+4) Fill Rework Analysis with required one-line fields:
+   ROOT_CAUSE:
+   FINDINGS_ADDRESSED:
+   PLANNED_CHANGES:
+   VALIDATION_PLAN:
+   UNRESOLVED_ASSUMPTIONS:
+5) Fill Rework Answer Matrix with one ENTRY per unresolved reviewer finding and human comment.
+   Each entry must include one-line fields:
+   REVIEWER_FINDING:
+   HUMAN_COMMENT:
+   ROOT_CAUSE:
+   CHANGE_MADE:
+   VERIFICATION_PERFORMED:
+   STATUS:
+6) STATUS values in this analysis pass must be one of:
+   PLANNED | NEEDS_INPUT | BLOCKED
+7) Do not run make commands in this pass.
+EOF
+)"
+
+  run_with_retries "Codex rework analysis pass (${review_id})" run_codex_prompt "$analysis_prompt"
+  immutable_after="$(immutable_hash)"
+  if [[ "$immutable_before" != "$immutable_after" ]]; then
+    append_retry_log "Plan integrity violation: immutable section changed during rework for ${review_id}."
+    die "Immutable approved plan content changed during rework."
+  fi
+  validate_rework_analysis_and_matrix "$review_id"
+
+  analysis_summary="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Analysis")"
+  matrix_summary="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Answer Matrix")"
+  immutable_before="$(immutable_hash)"
+  implementation_prompt="$(cat <<EOF
+Implementation pass for latest review cycle ${review_id} in $TASK_FILE.
+
+Latest review context:
+$review_context
+
+Structured human input:
+$human_input
+
+Approved analysis plan:
+$analysis_summary
+
+Answer matrix to complete:
+$matrix_summary
+
+Hard constraints:
+1) Do not modify content above <!-- IMMUTABLE_PLAN_END --> in $TASK_FILE.
+2) Implement only findings/test gaps from latest review cycle (${review_id}) and structured human input.
+3) Keep changes minimal and in-scope with acceptance criteria.
+4) Do not redo completed work or broad refactors.
+5) Update mutable sections in $TASK_FILE with implementation reasoning and verification evidence.
+6) Update Review Cycle ${review_id} - Rework Answer Matrix (keep heading + \`\`\`text fenced body):
+   - Keep same entries.
+   - Fill CHANGE_MADE and VERIFICATION_PERFORMED with what was actually done.
+   - Set STATUS to one of: RESOLVED | PARTIAL | BLOCKED.
+7) Run verification:
    - make lint
    - make typecheck
    - make test-backend
@@ -1302,16 +1590,17 @@ Hard constraints:
 EOF
 )"
 
-  run_with_retries "Codex rework pass (${review_id})" run_codex_prompt "$prompt"
+  run_with_retries "Codex rework implementation pass (${review_id})" run_codex_prompt "$implementation_prompt"
   immutable_after="$(immutable_hash)"
   if [[ "$immutable_before" != "$immutable_after" ]]; then
-    append_retry_log "Plan integrity violation: immutable section changed during rework for ${review_id}."
-    die "Immutable approved plan content changed during rework."
+    append_retry_log "Plan integrity violation: immutable section changed during rework implementation for ${review_id}."
+    die "Immutable approved plan content changed during rework implementation."
   fi
+  validate_rework_analysis_and_matrix "$review_id"
 
   run_verification_suite
   append_review_status "$review_id" "Implemented" "NEEDS_REVIEW" "PENDING"
-  append_task_block "Review Cycle ${review_id} - Rework Result" "Targeted rework implemented for latest review findings."
+  append_task_block "Review Cycle ${review_id} - Rework Result" "Two-pass rework completed (analysis -> implementation) for latest review findings."
   git add -A
   log "Auto-staged rework outputs for review."
 }

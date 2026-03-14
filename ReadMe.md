@@ -270,6 +270,14 @@ make task-review TASK=tasks/issue-123-my-feature.md
 
 Note:
 - `task-review` expects a fully staged snapshot (`git add -A`) so reviewer sees all changes, including new files.
+- `task-review` now reruns verification independently before model review:
+  - `make lint`
+  - `make typecheck`
+  - `make test-backend`
+  - `make test-frontend`
+  - `make api-smoke`
+  - `make e2e` when Playwright is configured (UI smoke)
+- Reviewer receives code diff + task file + verification outputs + UI artifact index and cannot run arbitrary tools.
 
 ### 7) Rework only latest review findings (if needed)
 
@@ -278,11 +286,31 @@ make task-rework TASK=tasks/issue-123-my-feature.md
 ```
 
 `task-rework` auto-stages changes (`git add -A`) for the next review pass.
+`task-rework` now runs in two passes:
+- Analysis pass (`diagnose -> justify`) writes:
+  - `Review Cycle R<n> - Rework Analysis`
+  - `Review Cycle R<n> - Rework Answer Matrix`
+- Implementation pass (`patch -> verify`) updates the same matrix with change and verification status.
+  
+Required answer-matrix fields per entry:
+- `REVIEWER_FINDING`
+- `HUMAN_COMMENT`
+- `ROOT_CAUSE`
+- `CHANGE_MADE`
+- `VERIFICATION_PERFORMED`
+- `STATUS`
+
+Before `task-rework`, add structured human input for the current cycle:
+- `### Review Cycle R<n> - Human Input`
+- `HUMAN_QUESTIONS: ...`
+- `UNRESOLVED_COMMENTS: ...`
+- `RESPONSE_REQUIREMENTS: ...`
 
 Review tracking:
 - After `task-review`: latest review cycle status is `Reviewed`.
 - After `task-rework`: same cycle status is `Implemented`.
 - A new `task-review` creates a new review cycle section (for example `R2`) so findings remain separated.
+- `task-review` fails fast if latest implemented cycle is missing rework analysis or answer matrix.
 
 ### 8) Ship branch and open PR
 
