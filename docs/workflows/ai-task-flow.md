@@ -79,17 +79,45 @@ Human gate:
 - Auto-stages changes (`git add -A`) at the end for review handoff.
 
 4. `review`
-- Runs Sonnet review against task file + current diff.
+- Independently reruns deterministic verification in bash (no model tool execution):
+  - `make lint`
+  - `make typecheck`
+  - `make test-backend`
+  - `make test-frontend`
+  - `make api-smoke`
+  - `make e2e` when Playwright is configured (used as UI smoke)
+- Captures verification output and UI artifact index (`web/playwright-report`, `web/test-results`) as review evidence.
+- Runs Sonnet review against task file + current diff + captured verification/UI evidence.
 - Escalates to Opus only when Sonnet marks uncertain/conflicting/high-risk.
 - Logs a new review cycle section each run (for example `Review Cycle R1`) and marks status `Reviewed`.
 - Requires all review inputs to be staged (manual `task-review`); otherwise exits with instruction.
 
 5. `rework`
-- Reads only the latest review cycle findings/test gaps.
-- Runs Codex to implement only missing items from that review cycle.
+- Requires structured human input for latest cycle under:
+  - `### Review Cycle R<n> - Human Input`
+  - `HUMAN_QUESTIONS: ...`
+  - `UNRESOLVED_COMMENTS: ...`
+  - `RESPONSE_REQUIREMENTS: ...`
+- Runs two-pass Codex rework:
+  - Analysis pass first (diagnose/justify only), writing:
+    - `Review Cycle R<n> - Rework Analysis`
+    - `Review Cycle R<n> - Rework Answer Matrix`
+  - Implementation pass second (patch/verify), updating same answer matrix with actual changes and verification.
+- Required answer-matrix fields per entry:
+  - `REVIEWER_FINDING`
+  - `HUMAN_COMMENT`
+  - `ROOT_CAUSE`
+  - `CHANGE_MADE`
+  - `VERIFICATION_PERFORMED`
+  - `STATUS`
 - Marks latest review cycle status as `Implemented`.
 - Prevents duplicate rework for the same review cycle.
 - Auto-stages changes (`git add -A`) at the end for next review pass.
+
+Review gate enforcement:
+- `task-review` fails fast if latest implemented cycle is missing either:
+  - `Rework Analysis`, or
+  - `Rework Answer Matrix`.
 
 6. `ship`
 - Commits branch changes.

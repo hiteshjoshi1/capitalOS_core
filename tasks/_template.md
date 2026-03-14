@@ -31,6 +31,13 @@ _Codex appends lint/typecheck/test evidence here._
 ## Review Findings (Sonnet Primary, Opus Escalation)
 _Review output is appended here._
 
+## Human Rework Input (Mutable)
+_Before running `task-rework`, add/update:_
+- `### Review Cycle R<n> - Human Input` with a `text` block containing:
+  `HUMAN_QUESTIONS: ...`
+  `UNRESOLVED_COMMENTS: ...`
+  `RESPONSE_REQUIREMENTS: ...`
+
 ## Retry Log (Max 3)
 _Failed command/rework retries are appended here._
 
