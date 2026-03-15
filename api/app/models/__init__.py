@@ -4,6 +4,8 @@ from .import_job import ImportJob
 from .parser_registry import ParserRegistry
 from .platform import Platform
 from .currency import Currency
+from .category import CategoryOverride, CategoryRule, CategoryTaxonomy
+from .transaction import Transaction
 from .crypto import (
     CryptoWallet,
     CryptoWalletVerification,
@@ -17,6 +19,10 @@ __all__ = [
     "Account",
     "Platform",
     "Currency",
+    "CategoryTaxonomy",
+    "CategoryRule",
+    "CategoryOverride",
+    "Transaction",
     "CreditCardAccount",
     "ImportJob",
     "ParserRegistry",

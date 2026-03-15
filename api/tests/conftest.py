@@ -121,6 +121,67 @@ def setup_db():
         )
         conn.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS transactions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              ts TIMESTAMP NOT NULL,
+              account_id INTEGER NOT NULL,
+              amount REAL NOT NULL,
+              type TEXT NOT NULL,
+              currency TEXT NOT NULL,
+              category TEXT,
+              merchant_counterparty TEXT,
+              platform_reference TEXT,
+              notes TEXT,
+              source TEXT
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS category_taxonomy (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL UNIQUE,
+              name TEXT NOT NULL,
+              parent_id INTEGER,
+              display_order INTEGER NOT NULL DEFAULT 0,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS category_rules (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              name TEXT NOT NULL,
+              priority INTEGER NOT NULL DEFAULT 100,
+              merchant_pattern TEXT,
+              description_pattern TEXT,
+              source_category_pattern TEXT,
+              txn_type TEXT,
+              min_amount REAL,
+              max_amount REAL,
+              target_category_id INTEGER NOT NULL,
+              active INTEGER NOT NULL DEFAULT 1,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS category_overrides (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              transaction_id INTEGER NOT NULL UNIQUE,
+              category_id INTEGER NOT NULL,
+              source TEXT NOT NULL,
+              rule_id INTEGER,
+              created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS crypto_wallets (
               id TEXT PRIMARY KEY,
               user_id INTEGER,
@@ -325,6 +386,9 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS parser_registry")
         conn.exec_driver_sql("DROP TABLE IF EXISTS import_jobs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS credit_card_accounts")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS category_overrides")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS category_rules")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS category_taxonomy")
         conn.exec_driver_sql("DROP TABLE IF EXISTS transactions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_run_items")
@@ -345,6 +409,9 @@ def setup_db():
 @pytest.fixture(autouse=True)
 def clear_db():
     with engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM category_overrides")
+        conn.exec_driver_sql("DELETE FROM category_rules")
+        conn.exec_driver_sql("DELETE FROM category_taxonomy")
         conn.exec_driver_sql("DELETE FROM accounts")
         conn.exec_driver_sql("DELETE FROM platforms")
         conn.exec_driver_sql("DELETE FROM credit_card_accounts")
