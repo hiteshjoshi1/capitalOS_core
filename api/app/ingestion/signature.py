@@ -125,6 +125,16 @@ def _detect_citi_cc(lines: list[str], delimiter: str, platform_hint: str | None)
 
 
 def _pick_engine(path: str) -> str | None:
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(8)
+        # Some uploads are XLSX content with a legacy .xls filename.
+        if magic.startswith(b"PK\x03\x04"):
+            return "openpyxl"
+        if magic.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"):
+            return "xlrd"
+    except OSError:
+        pass
     lower = path.lower()
     if lower.endswith(".xls"):
         return "xlrd"
