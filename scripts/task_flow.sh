@@ -1037,11 +1037,76 @@ run_codex_prompt() {
   run_with_caffeinate_for_codex codex exec --full-auto --sandbox workspace-write "$prompt"
 }
 
+collect_current_changed_paths() {
+  {
+    git diff --name-only || true
+    git diff --cached --name-only || true
+    git ls-files --others --exclude-standard || true
+  } | awk 'NF' | sed 's#^\./##' | sort -u
+}
+
+collect_branch_scope_paths() {
+  git diff --name-only main...HEAD 2>/dev/null | awk 'NF' | sed 's#^\./##' | sort -u
+}
+
+collect_task_declared_paths() {
+  [[ -f "$TASK_FILE" ]] || return 0
+  grep -oE '`[^`]+`' "$TASK_FILE" 2>/dev/null \
+    | sed -E 's/^`//; s/`$//' \
+    | awk '
+      NF == 0 { next }
+      index($0, " ") > 0 { next }
+      $0 ~ /^https?:\/\// { next }
+      $0 ~ /^\// { next }
+      $0 ~ /^make$/ { next }
+      index($0, "/") == 0 { next }
+      { print }
+    ' \
+    | sed 's#^\./##' \
+    | sort -u
+}
+
+collect_allowed_aux_paths() {
+  [[ -n "${ALLOWED_AUX_FILES:-}" ]] || return 0
+  printf '%s\n' "$ALLOWED_AUX_FILES" | tr ',;' '\n' | awk '{$1=$1}; NF' | sed 's#^\./##' | sort -u
+}
+
+build_autofix_scope_allowlist() {
+  local baseline_paths="$1"
+  {
+    printf '%s\n' "$TASK_FILE"
+    printf '%s\n' "$baseline_paths"
+    collect_branch_scope_paths
+    collect_task_declared_paths
+    collect_allowed_aux_paths
+  } | awk 'NF' | sed 's#^\./##' | sort -u
+}
+
+find_out_of_scope_new_paths() {
+  local baseline_paths="$1"
+  local after_paths="$2"
+  local allowed_paths="$3"
+  local new_paths path
+
+  new_paths="$(comm -13 \
+    <(printf '%s\n' "$baseline_paths" | awk 'NF' | sort -u) \
+    <(printf '%s\n' "$after_paths" | awk 'NF' | sort -u) \
+  )"
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if ! grep -Fxq "$path" <<<"$allowed_paths"; then
+      printf '%s\n' "$path"
+    fi
+  done <<<"$new_paths"
+}
+
 run_with_retries_and_codex_fix() {
   local label="$1"
   shift
   local cmd=("$@")
   local cmd_str attempt rc output_file output prompt
+  local baseline_paths after_paths allowed_paths out_of_scope_paths
   printf -v cmd_str '%q ' "${cmd[@]}"
   cmd_str="${cmd_str% }"
 
@@ -1086,10 +1151,23 @@ Constraints:
 EOF
 )"
     log "Invoking Codex auto-fix for: $label"
+    baseline_paths="$(collect_current_changed_paths)"
+    allowed_paths="$(build_autofix_scope_allowlist "$baseline_paths")"
     set +e
     run_codex_prompt "$prompt"
     rc=$?
     set -e
+
+    after_paths="$(collect_current_changed_paths)"
+    out_of_scope_paths="$(find_out_of_scope_new_paths "$baseline_paths" "$after_paths" "$allowed_paths")"
+    if [[ -n "${out_of_scope_paths// }" ]]; then
+      append_retry_log "Scope gate blocked auto-fix for '$label'. New out-of-scope files detected:
+$out_of_scope_paths"
+      die "Auto-fix touched out-of-scope files for '$label':
+$out_of_scope_paths
+Review/discard these edits or explicitly allow them (ALLOWED_AUX_FILES / task plan), then rerun."
+    fi
+
     if [[ "$rc" -ne 0 ]]; then
       append_retry_log "Codex auto-fix failed for '$label' on attempt $attempt with exit code $rc."
     fi
