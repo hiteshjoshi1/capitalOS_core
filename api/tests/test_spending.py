@@ -52,6 +52,8 @@ def test_credit_card_transactions_detail(client: TestClient, seed_spending_data)
     assert first_tx["amount"] == -1210.0
     assert first_tx["type"] == "EXPENSE"
     assert first_tx["category"] == "Groceries"
+    assert first_tx["resolved_category"] == "Groceries"
+    assert first_tx["category_source"] == "parser"
 
     assert [abs(item["amount"]) for item in data["top_purchases"]] == [1780.0, 1210.0]
     assert len(data["recurring_payments"]) == 1

@@ -47,6 +47,8 @@ class CreditCardTransactionItem(BaseModel):
     amount: float
     type: str
     category: str | None
+    resolved_category: str | None = None
+    category_source: str | None = None
     merchant_counterparty: str | None
     notes: str | None
 

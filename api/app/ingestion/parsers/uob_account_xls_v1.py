@@ -42,6 +42,16 @@ class ParsedRow:
 
 
 def _pick_engine(path: str) -> str | None:
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(8)
+        # Some bank exports have .xls extension but are actually XLSX (ZIP container).
+        if magic.startswith(b"PK\x03\x04"):
+            return "openpyxl"
+        if magic.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1"):
+            return "xlrd"
+    except OSError:
+        pass
     lower = path.lower()
     if lower.endswith(".xls"):
         return "xlrd"

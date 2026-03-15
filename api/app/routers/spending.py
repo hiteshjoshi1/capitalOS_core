@@ -152,12 +152,14 @@ def spending_summary(
 
     totals_q = text("""
         SELECT
-          type,
-          amount,
-          currency,
-          COALESCE(category, 'Uncategorized') AS category
-        FROM transactions
-        WHERE ts >= :start AND ts < :end
+          t.type,
+          t.amount,
+          t.currency,
+          COALESCE(ct.name, NULLIF(TRIM(t.category), ''), 'Uncategorized') AS category
+        FROM transactions t
+        LEFT JOIN category_overrides co ON co.transaction_id = t.id
+        LEFT JOIN category_taxonomy ct ON ct.id = co.category_id
+        WHERE t.ts >= :start AND t.ts < :end
     """)
     rows = db.execute(totals_q, {"start": start, "end": end}).mappings().all()
     currencies = {r["currency"] for r in rows if r["currency"]}
@@ -246,11 +248,21 @@ def credit_card_transactions(
           t.type,
           t.currency,
           t.category,
+          COALESCE(ct.name, NULLIF(TRIM(t.category), ''), 'Uncategorized') AS resolved_category,
+          CASE
+            WHEN co.source IS NOT NULL THEN co.source
+            WHEN t.category IS NOT NULL
+                 AND TRIM(t.category) <> ''
+                 AND LOWER(TRIM(t.category)) <> 'uncategorized' THEN 'parser'
+            ELSE 'uncategorized'
+          END AS category_source,
           t.merchant_counterparty,
           t.notes
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
         LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
+        LEFT JOIN category_overrides co ON co.transaction_id = t.id
+        LEFT JOIN category_taxonomy ct ON ct.id = co.category_id
         WHERE t.ts >= :start AND t.ts < :end
           AND a.account_type = 'CREDIT_CARD'
         ORDER BY t.ts DESC, t.id DESC
@@ -263,7 +275,7 @@ def credit_card_transactions(
     for row in tx_rows:
         cur = (row["currency"] or base_currency).upper()
         converted = float(row["amount"]) * tx_rates.get(cur, 1.0)
-        description = row["merchant_counterparty"] or row["category"] or "Transaction"
+        description = row["merchant_counterparty"] or row["resolved_category"] or row["category"] or "Transaction"
         transactions.append(
             CreditCardTransactionItem(
                 account_id=int(row["account_id"]),
@@ -275,6 +287,8 @@ def credit_card_transactions(
                 amount=converted,
                 type=row["type"],
                 category=row["category"],
+                resolved_category=row["resolved_category"],
+                category_source=row["category_source"],
                 merchant_counterparty=row["merchant_counterparty"],
                 notes=row["notes"],
             )

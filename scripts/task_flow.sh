@@ -30,6 +30,7 @@ fi
 TASK_TEMPLATE="$REPO_ROOT/tasks/_template.md"
 MODEL_CONFIG_FILE="$REPO_ROOT/.ai-models.env"
 CACHE_DIR="$REPO_ROOT/.task-cache"
+FAILURE_LOG_DIR="$CACHE_DIR/failures"
 
 cd "$REPO_ROOT"
 
@@ -423,6 +424,73 @@ append_retry_log() {
   append_task_block "Retry Entry" "$body"
 }
 
+sanitize_label_for_filename() {
+  printf '%s' "$1" | tr ' /:' '---' | tr -cd '[:alnum:]_.-'
+}
+
+persist_failure_output() {
+  local label="$1"
+  local command="$2"
+  local attempt="$3"
+  local exit_code="$4"
+  local output="$5"
+  local safe_label ts file_path
+
+  safe_label="$(sanitize_label_for_filename "$label")"
+  ts="$(date -u +"%Y%m%dT%H%M%SZ")"
+  mkdir -p "$FAILURE_LOG_DIR"
+  file_path="$FAILURE_LOG_DIR/${ts}_${safe_label}_attempt${attempt}.log"
+
+  {
+    echo "timestamp=$(timestamp)"
+    echo "label=$label"
+    echo "command=$command"
+    echo "attempt=$attempt"
+    echo "exit_code=$exit_code"
+    echo "----- output -----"
+    printf '%s\n' "$output"
+  } >"$file_path"
+
+  printf '%s\n' "$file_path"
+}
+
+classify_failure_output() {
+  local output="$1"
+
+  if grep -Eiq \
+    'permission denied while trying to connect to the docker daemon socket|docker\.sock:.*operation not permitted|cannot connect to the docker daemon|unable to get image|pull access denied|failed to solve.*network|connection refused|temporary failure in name resolution|no such host|network is unreachable|dial tcp: lookup|tls handshake timeout|i/o timeout|context deadline exceeded|proxyconnect tcp|x509:' \
+    <<<"$output"; then
+    echo "INFRA"
+    return 0
+  fi
+
+  echo "CODE"
+}
+
+path_fingerprint() {
+  local path="$1"
+  if [[ -e "$path" ]]; then
+    shasum -a 256 "$path" | awk '{print $1}'
+  else
+    echo "__ABSENT__"
+  fi
+}
+
+collect_paths_fingerprint_snapshot() {
+  local paths="$1"
+  local path
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    printf '%s\t%s\n' "$path" "$(path_fingerprint "$path")"
+  done <<<"$paths"
+}
+
+snapshot_fingerprint_for_path() {
+  local snapshot="$1"
+  local path="$2"
+  awk -F'\t' -v p="$path" '$1 == p { print $2; found=1; exit } END { if (!found) print "" }' <<<"$snapshot"
+}
+
 next_review_id() {
   local max_id
   max_id="$(grep -Eo '^### Review Cycle R[0-9]+' "$TASK_FILE" 2>/dev/null | sed -E 's/^### Review Cycle R([0-9]+).*$/\1/' | sort -n | tail -n1)"
@@ -703,7 +771,7 @@ assert_review_inputs_staged() {
     log "Untracked files:"
     printf '%s\n' "$untracked" | sed 's/^/  - /'
   fi
-  die "Stage changes before review (example: git add -A), then rerun task-review."
+  die "Stage changes before review (use scoped staging for task files), then rerun task-review."
 }
 
 run_with_retries() {
@@ -1072,21 +1140,52 @@ collect_allowed_aux_paths() {
 }
 
 build_autofix_scope_allowlist() {
-  local baseline_paths="$1"
   {
     printf '%s\n' "$TASK_FILE"
-    printf '%s\n' "$baseline_paths"
-    collect_branch_scope_paths
     collect_task_declared_paths
     collect_allowed_aux_paths
   } | awk 'NF' | sed 's#^\./##' | sort -u
 }
 
-find_out_of_scope_new_paths() {
+is_path_allowlisted() {
+  local path="$1"
+  local allowed_paths="$2"
+  local allowed
+
+  while IFS= read -r allowed; do
+    [[ -n "$allowed" ]] || continue
+    if [[ "$allowed" == */ ]]; then
+      [[ "$path" == "$allowed"* ]] && return 0
+      continue
+    fi
+    if [[ -d "$allowed" ]]; then
+      [[ "$path" == "$allowed/"* || "$path" == "$allowed" ]] && return 0
+      continue
+    fi
+    [[ "$path" == "$allowed" ]] && return 0
+  done <<<"$allowed_paths"
+  return 1
+}
+
+collect_out_of_scope_changed_paths() {
+  local allowed_paths="$1"
+  local changed path
+  changed="$(collect_current_changed_paths)"
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if ! is_path_allowlisted "$path" "$allowed_paths"; then
+      printf '%s\n' "$path"
+    fi
+  done <<<"$changed"
+}
+
+find_out_of_scope_touched_paths() {
   local baseline_paths="$1"
-  local after_paths="$2"
-  local allowed_paths="$3"
-  local new_paths path
+  local baseline_snapshot="$2"
+  local after_paths="$3"
+  local allowed_paths="$4"
+  local new_paths path before_fp after_fp
 
   new_paths="$(comm -13 \
     <(printf '%s\n' "$baseline_paths" | awk 'NF' | sort -u) \
@@ -1095,23 +1194,90 @@ find_out_of_scope_new_paths() {
 
   while IFS= read -r path; do
     [[ -n "$path" ]] || continue
-    if ! grep -Fxq "$path" <<<"$allowed_paths"; then
+    if ! is_path_allowlisted "$path" "$allowed_paths"; then
       printf '%s\n' "$path"
     fi
   done <<<"$new_paths"
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if is_path_allowlisted "$path" "$allowed_paths"; then
+      continue
+    fi
+    before_fp="$(snapshot_fingerprint_for_path "$baseline_snapshot" "$path")"
+    after_fp="$(path_fingerprint "$path")"
+    if [[ "$before_fp" != "$after_fp" ]]; then
+      printf '%s\n' "$path"
+    fi
+  done <<<"$baseline_paths"
+}
+
+stage_scoped_changes() {
+  local stage_label="$1"
+  local strict_mode="${2:-1}"
+  local allowed_paths changed_paths blocked_paths path
+
+  allowed_paths="$(build_autofix_scope_allowlist)"
+  changed_paths="$(collect_current_changed_paths)"
+  blocked_paths=""
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    if is_path_allowlisted "$path" "$allowed_paths"; then
+      git add -- "$path"
+    else
+      blocked_paths+="$path"$'\n'
+    fi
+  done <<<"$changed_paths"
+
+  if [[ -n "${blocked_paths// }" ]]; then
+    blocked_paths="$(printf '%s\n' "$blocked_paths" | awk 'NF' | sort -u)"
+    append_retry_log "Scope stage gate skipped out-of-scope files during ${stage_label}:
+$blocked_paths"
+    if [[ "$strict_mode" == "1" ]]; then
+      die "Out-of-scope files detected during ${stage_label}:
+$blocked_paths
+Review/discard these edits or explicitly allow them (ALLOWED_AUX_FILES / task plan), then rerun."
+    fi
+    log "Skipped out-of-scope files during ${stage_label}."
+  fi
 }
 
 run_with_retries_and_codex_fix() {
   local label="$1"
   shift
   local cmd=("$@")
-  local cmd_str attempt rc output_file output prompt
-  local baseline_paths after_paths allowed_paths out_of_scope_paths
+  local cmd_str rc output_file output prompt failure_class failure_log
+  local baseline_paths baseline_snapshot after_paths allowed_paths out_of_scope_paths
+  local auto_fix_rc
   printf -v cmd_str '%q ' "${cmd[@]}"
   cmd_str="${cmd_str% }"
 
-  for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
-    log "$label (attempt $attempt/$MAX_RETRIES)"
+  log "$label (attempt 1/$MAX_RETRIES)"
+  output_file="$(mktemp)"
+  set +e
+  "${cmd[@]}" 2>&1 | tee "$output_file"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    rm -f "$output_file"
+    return 0
+  fi
+  output="$(sed -n '1,1200p' "$output_file")"
+  rm -f "$output_file"
+  failure_log="$(persist_failure_output "$label" "$cmd_str" "1" "$rc" "$output")"
+  append_retry_log "$label failed on attempt 1 with exit code $rc: $cmd_str
+Failure log: $failure_log"
+  failure_class="$(classify_failure_output "$output")"
+  if [[ "$failure_class" == "INFRA" ]]; then
+    append_retry_log "Infra failure detected for '$label'. Auto-fix skipped."
+    die "Detected infrastructure/environment failure for '$label' (not a code failure).
+Check Docker daemon/socket/network health, then rerun.
+Failure log: $failure_log"
+  fi
+
+  if (( MAX_RETRIES >= 2 )); then
+    log "$label (attempt 2/$MAX_RETRIES, unchanged rerun)"
     output_file="$(mktemp)"
     set +e
     "${cmd[@]}" 2>&1 | tee "$output_file"
@@ -1121,26 +1287,42 @@ run_with_retries_and_codex_fix() {
       rm -f "$output_file"
       return 0
     fi
-
     output="$(sed -n '1,1200p' "$output_file")"
     rm -f "$output_file"
-    append_retry_log "$label failed on attempt $attempt with exit code $rc: $cmd_str"
-
-    if (( attempt == MAX_RETRIES )); then
-      append_retry_log "$label failed after $MAX_RETRIES attempts."
-      return 1
+    failure_log="$(persist_failure_output "$label" "$cmd_str" "2" "$rc" "$output")"
+    append_retry_log "$label failed on attempt 2 with exit code $rc: $cmd_str
+Failure log: $failure_log"
+    failure_class="$(classify_failure_output "$output")"
+    if [[ "$failure_class" == "INFRA" ]]; then
+      append_retry_log "Infra failure detected for '$label' on unchanged rerun. Auto-fix skipped."
+      die "Detected infrastructure/environment failure for '$label' on unchanged rerun.
+Check Docker daemon/socket/network health, then rerun.
+Failure log: $failure_log"
     fi
+  else
+    append_retry_log "$label failed and MAX_RETRIES=$MAX_RETRIES does not allow unchanged rerun/auto-fix."
+    return 1
+  fi
 
-    prompt="$(cat <<EOF
+  if (( MAX_RETRIES < 3 )); then
+    append_retry_log "$label failed after unchanged rerun. MAX_RETRIES=$MAX_RETRIES prevents auto-fix."
+    return 1
+  fi
+
+  allowed_paths="$(build_autofix_scope_allowlist)"
+  prompt="$(cat <<EOF
 Fix the failing verification command in the current branch.
 
 Task file: $TASK_FILE
 Failed command: $cmd_str
-Attempt: $attempt of $MAX_RETRIES
+Attempt: 3 of $MAX_RETRIES
 Exit code: $rc
 
 Failure output (truncated):
 $output
+
+Allowed write paths (strict):
+$allowed_paths
 
 Constraints:
 1) Keep changes minimal and scoped to resolving this failure.
@@ -1148,35 +1330,54 @@ Constraints:
 3) If task file updates are needed, update only mutable sections.
 4) After changes, run only this command to validate:
    $cmd_str
+5) Do not modify files outside the allowed write paths list.
 EOF
 )"
-    log "Invoking Codex auto-fix for: $label"
-    baseline_paths="$(collect_current_changed_paths)"
-    allowed_paths="$(build_autofix_scope_allowlist "$baseline_paths")"
-    set +e
-    run_codex_prompt "$prompt"
-    rc=$?
-    set -e
+  log "Invoking Codex auto-fix for: $label"
+  baseline_paths="$(collect_current_changed_paths)"
+  baseline_snapshot="$(collect_paths_fingerprint_snapshot "$baseline_paths")"
+  set +e
+  run_codex_prompt "$prompt"
+  auto_fix_rc=$?
+  set -e
+  if [[ "$auto_fix_rc" -ne 0 ]]; then
+    append_retry_log "Codex auto-fix process failed for '$label' with exit code $auto_fix_rc."
+    return 1
+  fi
 
-    after_paths="$(collect_current_changed_paths)"
-    out_of_scope_paths="$(find_out_of_scope_new_paths "$baseline_paths" "$after_paths" "$allowed_paths")"
-    if [[ -n "${out_of_scope_paths// }" ]]; then
-      append_retry_log "Scope gate blocked auto-fix for '$label'. New out-of-scope files detected:
+  after_paths="$(collect_current_changed_paths)"
+  out_of_scope_paths="$(find_out_of_scope_touched_paths "$baseline_paths" "$baseline_snapshot" "$after_paths" "$allowed_paths" | awk 'NF' | sort -u)"
+  if [[ -n "${out_of_scope_paths// }" ]]; then
+    append_retry_log "Scope gate blocked auto-fix for '$label'. Out-of-scope files touched:
 $out_of_scope_paths"
-      die "Auto-fix touched out-of-scope files for '$label':
+    die "Auto-fix touched out-of-scope files for '$label':
 $out_of_scope_paths
 Review/discard these edits or explicitly allow them (ALLOWED_AUX_FILES / task plan), then rerun."
-    fi
+  fi
 
-    if [[ "$rc" -ne 0 ]]; then
-      append_retry_log "Codex auto-fix failed for '$label' on attempt $attempt with exit code $rc."
-    fi
-  done
+  log "$label (attempt 3/$MAX_RETRIES, post-fix validation)"
+  output_file="$(mktemp)"
+  set +e
+  "${cmd[@]}" 2>&1 | tee "$output_file"
+  rc=${PIPESTATUS[0]}
+  set -e
+  if [[ "$rc" -eq 0 ]]; then
+    rm -f "$output_file"
+    return 0
+  fi
+  output="$(sed -n '1,1200p' "$output_file")"
+  rm -f "$output_file"
+  failure_log="$(persist_failure_output "$label" "$cmd_str" "3" "$rc" "$output")"
+  append_retry_log "$label failed on attempt 3 with exit code $rc: $cmd_str
+Failure log: $failure_log"
+  append_retry_log "$label failed after one unchanged rerun + one auto-fix cycle."
+  return 1
 }
 
 run_verification_suite() {
   run_with_retries_and_codex_fix "make lint" make lint
   run_with_retries_and_codex_fix "make typecheck" make typecheck
+  run_with_retries "make api-rebuild (fresh backend image)" make api-rebuild
   run_with_retries_and_codex_fix "make test-backend" make test-backend
   run_with_retries_and_codex_fix "make test-frontend" make test-frontend
   if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
@@ -1190,7 +1391,7 @@ run_review_command_capture() {
   local label="$1"
   shift
   local cmd=("$@")
-  local output_file rc status output cmd_str
+  local output_file rc status output full_output cmd_str failure_log
 
   output_file="$(mktemp)"
   printf -v cmd_str '%q ' "${cmd[@]}"
@@ -1208,10 +1409,16 @@ run_review_command_capture() {
     REVIEW_VERIFY_ANY_FAIL=1
   fi
 
+  full_output="$(cat "$output_file")"
   output="$(sed -n '1,240p' "$output_file")"
   rm -f "$output_file"
 
-  REVIEW_VERIFY_SUMMARY+="- ${label}: ${status} (exit ${rc})"$'\n'
+  if [[ "$status" == "FAIL" ]]; then
+    failure_log="$(persist_failure_output "review-${label}" "$cmd_str" "1" "$rc" "$full_output")"
+    REVIEW_VERIFY_SUMMARY+="- ${label}: ${status} (exit ${rc}, log: ${failure_log})"$'\n'
+  else
+    REVIEW_VERIFY_SUMMARY+="- ${label}: ${status} (exit ${rc})"$'\n'
+  fi
   REVIEW_VERIFY_DETAILS+="### ${label}"$'\n'
   REVIEW_VERIFY_DETAILS+="STATUS: ${status}"$'\n'
   REVIEW_VERIFY_DETAILS+="EXIT_CODE: ${rc}"$'\n'
@@ -1227,6 +1434,7 @@ run_review_verification_suite() {
 
   run_review_command_capture "make lint" make lint
   run_review_command_capture "make typecheck" make typecheck
+  run_review_command_capture "make api-rebuild (fresh backend image)" make api-rebuild
   run_review_command_capture "make test-backend" make test-backend
   run_review_command_capture "make test-frontend" make test-frontend
   run_review_command_capture "make api-smoke (runtime)" make api-smoke
@@ -1444,10 +1652,14 @@ Hard constraints:
 4) Run required checks:
    - make lint
    - make typecheck
+   - make api-rebuild
    - make test-backend
    - make test-frontend
    - make e2e only if Playwright exists
-5) If a command fails, fix and retry up to ${MAX_RETRIES} times per failing command.
+5) Verification retry policy is deterministic:
+   - first failure: rerun once unchanged
+   - if still failing: one scoped auto-fix cycle
+   - stop after that and log blocker
 EOF
 )"
 
@@ -1460,8 +1672,8 @@ EOF
 
   run_verification_suite
   append_task_block "Build Result" "Implementation and verification suite completed successfully."
-  git add -A
-  log "Auto-staged build outputs for review."
+  stage_scoped_changes "build" "1"
+  log "Auto-staged scoped build outputs for review."
 }
 
 run_sonnet_review() {
@@ -1736,6 +1948,7 @@ Hard constraints:
 7) Run verification:
    - make lint
    - make typecheck
+   - make api-rebuild
    - make test-backend
    - make test-frontend
    - make e2e only if Playwright exists
@@ -1753,8 +1966,8 @@ EOF
   run_verification_suite
   append_review_status "$review_id" "Implemented" "NEEDS_REVIEW" "PENDING"
   append_task_block "Review Cycle ${review_id} - Rework Result" "Two-pass rework completed (analysis -> implementation) for latest review findings."
-  git add -A
-  log "Auto-staged rework outputs for review."
+  stage_scoped_changes "rework" "1"
+  log "Auto-staged scoped rework outputs for review."
 }
 
 cmd_ship() {
@@ -1766,7 +1979,9 @@ cmd_ship() {
   current_branch="$(git rev-parse --abbrev-ref HEAD)"
   [[ "$current_branch" != "main" ]] || die "Refusing to ship from main branch."
 
-  git add -A
+  if has_unstaged_or_untracked_changes; then
+    die "Ship requires a fully staged snapshot with no unstaged/untracked files. Run task-review after scoped staging."
+  fi
   if ! git diff --cached --quiet; then
     git commit -m "feat: complete issue #${ISSUE_ID} workflow execution"
   else
@@ -1806,7 +2021,7 @@ cmd_all() {
   local review_attempt rc
   for ((review_attempt=1; review_attempt<=MAX_RETRIES; review_attempt++)); do
     log "Review cycle attempt $review_attempt/$MAX_RETRIES"
-    git add -A
+    stage_scoped_changes "all/review-attempt-$review_attempt" "1"
     if cmd_review "$task"; then
       append_task_block "Review Result" "Review approved on attempt $review_attempt."
       cmd_ship "$task"
