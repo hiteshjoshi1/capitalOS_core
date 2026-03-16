@@ -35,6 +35,40 @@ def test_credit_card_summary(client: TestClient, seed_spending_data):
     assert card["utilization"] == 2990.0 / 20000.0
 
 
+def test_cash_flow_detail(client: TestClient, seed_spending_data):
+    resp = client.get("/spending/cash-flow-detail?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["month"] == "2026-02"
+    assert data["base_currency"] == "SGD"
+    assert data["income_total"] == 12480.0
+    assert data["expense_total"] == 8710.0
+    assert data["net"] == 3770.0
+    assert data["savings_rate"] == 3770.0 / 12480.0
+    assert data["income"]["transaction_count"] == 2
+    assert data["income"]["included_types"] == ["INCOME"]
+    assert data["expenses"]["transaction_count"] == 6
+    assert data["expenses"]["included_types"] == ["EXPENSE", "FEE", "TAX", "INTEREST"]
+
+    employer_tx = data["income"]["transactions"][1]
+    assert employer_tx["merchant_counterparty"] == "Employer"
+    assert employer_tx["resolved_category"] == "Salary"
+    assert employer_tx["resolved_category_id"] is None
+    assert employer_tx["category_source"] == "parser"
+    assert employer_tx["base_amount"] == 12000.0
+
+    rent_tx = next(
+        item for item in data["expenses"]["transactions"] if item["merchant_counterparty"] == "Landlord"
+    )
+    assert rent_tx["account_name"] == "DBS Savings"
+    assert rent_tx["account_type"] == "BANK"
+    assert rent_tx["raw_category"] == "Rent"
+    assert rent_tx["resolved_category"] == "Rent"
+    assert rent_tx["resolved_category_id"] is None
+    assert rent_tx["base_amount"] == -3200.0
+
+
 def test_credit_card_transactions_detail(client: TestClient, seed_spending_data):
     resp = client.get("/spending/credit-card-transactions?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200

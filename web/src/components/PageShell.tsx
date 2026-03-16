@@ -13,6 +13,7 @@ type PageShellProps = {
   headerActions?: ReactNode;
   activeRoute: string;
   secondaryNavItem?: NavItem;
+  unmappedCount?: number;
   userMenuSettings?: ReactNode;
   children: ReactNode;
 };
@@ -21,6 +22,7 @@ const MENU_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", to: "/" },
   { label: "Holdings", to: "/holdings" },
   { label: "Cash", to: "/cash" },
+  { label: "Cash Flow Mapping", to: "/cash-flow/mapping" },
   { label: "Credit Cards", to: "/credit-cards" },
   { label: "Crypto Wallets", to: "/crypto" },
   { label: "Crypto Holdings", to: "/crypto/holdings" },
@@ -60,6 +62,7 @@ export default function PageShell({
   headerActions,
   activeRoute,
   secondaryNavItem,
+  unmappedCount,
   userMenuSettings,
   children,
 }: PageShellProps) {
@@ -156,8 +159,18 @@ export default function PageShell({
                 <div className="cardTitle">Navigate</div>
                 <div className="userMenuNavLinks">
                   {MENU_NAV_ITEMS.map((item) => (
-                    <Link key={`menu-${item.to}`} className="menuLink" to={item.to} onClick={closeUserMenu}>
-                      {item.label}
+                    <Link
+                      key={`menu-${item.to}`}
+                      className={`menuLink${item.to === "/cash-flow/mapping" ? " menuLinkWithBadge" : ""}`}
+                      to={item.to}
+                      onClick={closeUserMenu}
+                    >
+                      <span>{item.label}</span>
+                      {item.to === "/cash-flow/mapping" && unmappedCount != null && unmappedCount > 0 ? (
+                        <span className="menuBadge" aria-label={`${unmappedCount} unmapped transactions`}>
+                          {unmappedCount}
+                        </span>
+                      ) : null}
                     </Link>
                   ))}
                 </div>

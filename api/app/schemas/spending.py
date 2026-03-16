@@ -17,6 +17,43 @@ class SpendingSummaryOut(BaseModel):
     expense_categories: list[CategoryAmount]
 
 
+class CashFlowTransactionItem(BaseModel):
+    transaction_id: int
+    ts: str
+    account_id: int
+    account_name: str
+    account_type: str
+    amount: float
+    currency: str
+    base_amount: float
+    type: str
+    raw_category: str | None
+    resolved_category: str
+    resolved_category_id: int | None = None
+    category_source: str
+    merchant_counterparty: str | None
+    notes: str | None
+
+
+class CashFlowDetailSection(BaseModel):
+    total: float
+    transaction_count: int
+    included_types: list[str]
+    transactions: list[CashFlowTransactionItem]
+
+
+class CashFlowDetailOut(BaseModel):
+    month: str
+    base_currency: str
+    income_total: float
+    expense_total: float
+    net: float
+    savings_rate: float | None
+    calculation: str
+    income: CashFlowDetailSection
+    expenses: CashFlowDetailSection
+
+
 class CreditCardItem(BaseModel):
     account_id: int
     account_name: str

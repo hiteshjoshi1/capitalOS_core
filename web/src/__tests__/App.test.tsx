@@ -18,6 +18,7 @@ import type {
 vi.mock("../lib/api", () => ({
   api: {
     health: vi.fn(),
+    unmappedTransactions: vi.fn(),
     dashboardSummary: vi.fn(),
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
@@ -169,6 +170,32 @@ beforeEach(() => {
   vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
   window.localStorage.clear();
   mockApi.health.mockResolvedValue({ status: "ok" });
+  mockApi.unmappedTransactions.mockResolvedValue([
+    {
+      transaction_id: 101,
+      ts: "2026-02-03T00:00:00+00:00",
+      account_id: 1,
+      account_name: "DBS Savings",
+      amount: -18.2,
+      currency: "SGD",
+      type: "EXPENSE",
+      raw_category: null,
+      merchant_counterparty: "NTUC",
+      notes: null,
+    },
+    {
+      transaction_id: 102,
+      ts: "2026-02-04T00:00:00+00:00",
+      account_id: 2,
+      account_name: "OCBC 360",
+      amount: -44.1,
+      currency: "SGD",
+      type: "EXPENSE",
+      raw_category: "Uncategorized",
+      merchant_counterparty: "Grab",
+      notes: null,
+    },
+  ]);
   mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
   mockApi.platformAllocation.mockResolvedValue(platformAllocationFixture);
   mockApi.spendingSummary.mockResolvedValue(spendingSummaryFixture);
@@ -215,15 +242,17 @@ describe("App", () => {
     expect(screen.getByText("API: ok")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
     expect(screen.getByRole("link", { name: "Market Data" })).toHaveAttribute("href", "/market-data");
+    expect(screen.getByRole("link", { name: /Cash Flow Mapping/i })).toHaveAttribute("href", "/cash-flow/mapping");
+    expect(screen.getByLabelText("2 unmapped transactions")).toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
 
+    expect(screen.getByRole("link", { name: "Cash Flow details" })).toHaveAttribute("href", "/cash-flow");
     expect(screen.getByRole("link", { name: "Stock Exposure details" })).toHaveAttribute("href", "/holdings");
     expect(screen.getByRole("link", { name: "Crypto Exposure details" })).toHaveAttribute("href", "/crypto/holdings");
     expect(screen.getByRole("link", { name: "Cash Exposure details" })).toHaveAttribute("href", "/cash");
 
-    expect(screen.getByText("Cash Flow — 2026-02")).toBeInTheDocument();
     expect(screen.getByText("Expenses — Credit Cards")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Credit cards details" })).toHaveAttribute("href", "/credit-cards");
     expect(screen.getByText("Expense Breakdown")).toBeInTheDocument();

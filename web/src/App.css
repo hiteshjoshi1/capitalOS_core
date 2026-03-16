@@ -212,6 +212,12 @@ a {
   text-decoration: none;
 }
 
+.menuLinkWithBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .menuLinkPrimary {
   display: inline-flex;
   align-items: center;
@@ -221,6 +227,20 @@ a {
 .menuLink:hover {
   color: var(--accent);
   text-decoration: underline;
+}
+
+.menuBadge {
+  display: inline-flex;
+  min-width: 18px;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--warn);
+  color: white;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
 }
 
 .dashboardRow {
@@ -592,6 +612,61 @@ a.btn {
 
 .table tr:last-child td {
   border-bottom: none;
+}
+
+.mappingTableWrap {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+.mappingTable {
+  min-width: 920px;
+}
+
+.cashFlowTableWrap {
+  overflow-x: auto;
+}
+
+.cashFlowTable {
+  min-width: 1140px;
+}
+
+.cashFlowExplain {
+  display: grid;
+  gap: 8px;
+}
+
+.cashFlowExplain p {
+  margin: 0;
+}
+
+.cashFlowFormula {
+  max-width: 78ch;
+}
+
+.cashFlowHint {
+  max-width: 78ch;
+}
+
+.cashFlowEditor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 280px;
+}
+
+.mappingRow.isPending {
+  opacity: 0.7;
+}
+
+.overrideSelect {
+  min-width: 190px;
+}
+
+.overrideError {
+  margin-top: 6px;
+  color: var(--bad);
+  font-size: 12px;
 }
 
 .tag {
