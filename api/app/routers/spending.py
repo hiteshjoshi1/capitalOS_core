@@ -11,6 +11,9 @@ from app.fx import get_rates
 from app.schemas.spending import (
     SpendingSummaryOut,
     CategoryAmount,
+    CashFlowDetailOut,
+    CashFlowDetailSection,
+    CashFlowTransactionItem,
     CreditCardSummaryOut,
     CreditCardItem,
     CreditCardDetailOut,
@@ -19,6 +22,8 @@ from app.schemas.spending import (
 )
 
 router = APIRouter(prefix="/spending", tags=["spending"])
+INCOME_TYPES = ("INCOME",)
+EXPENSE_TYPES = ("EXPENSE", "FEE", "TAX", "INTEREST")
 
 
 def _parse_month(month: str) -> datetime:
@@ -58,6 +63,69 @@ def _month_key(value: datetime | str) -> str:
         return value.strftime("%Y-%m")
     as_text = str(value)
     return as_text[:7]
+
+
+def _cash_flow_rows(db: Session, start: datetime, end: datetime):
+    cash_flow_q = text("""
+        SELECT
+          t.id AS transaction_id,
+          t.ts,
+          t.account_id,
+          a.name AS account_name,
+          a.account_type,
+          t.amount,
+          t.currency,
+          t.type,
+          t.category AS raw_category,
+          COALESCE(override_ct.name, NULLIF(TRIM(t.category), ''), 'Uncategorized') AS resolved_category,
+          COALESCE(override_ct.id, parser_ct.id) AS resolved_category_id,
+          COALESCE(resolved_ct.code, '') AS resolved_category_code,
+          COALESCE(resolved_parent_ct.code, '') AS resolved_parent_category_code,
+          CASE
+            WHEN co.source IS NOT NULL THEN co.source
+            WHEN t.category IS NOT NULL
+                 AND TRIM(t.category) <> ''
+                 AND LOWER(TRIM(t.category)) <> 'uncategorized' THEN 'parser'
+            ELSE 'uncategorized'
+          END AS category_source,
+          t.merchant_counterparty,
+          t.notes
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN category_overrides co ON co.transaction_id = t.id
+        LEFT JOIN category_taxonomy override_ct ON override_ct.id = co.category_id
+        LEFT JOIN (
+          SELECT MIN(id) AS id, LOWER(TRIM(name)) AS normalized_name
+          FROM category_taxonomy
+          GROUP BY LOWER(TRIM(name))
+          HAVING COUNT(*) = 1
+        ) parser_ct
+          ON parser_ct.normalized_name = LOWER(TRIM(COALESCE(t.category, '')))
+        LEFT JOIN category_taxonomy resolved_ct
+          ON resolved_ct.id = COALESCE(override_ct.id, parser_ct.id)
+        LEFT JOIN category_taxonomy resolved_parent_ct
+          ON resolved_parent_ct.id = resolved_ct.parent_id
+        WHERE t.ts >= :start AND t.ts < :end
+          AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST')
+        ORDER BY t.ts DESC, t.id DESC
+    """)
+    return db.execute(cash_flow_q, {"start": start, "end": end}).mappings().all()
+
+
+def _is_transfer_resolved_category(row) -> bool:
+    resolved_code = str(row.get("resolved_category_code") or "").strip().lower()
+    parent_code = str(row.get("resolved_parent_category_code") or "").strip().lower()
+    return resolved_code == "transfer" or parent_code == "transfer"
+
+
+def _cash_flow_bucket(row) -> str | None:
+    if _is_transfer_resolved_category(row):
+        return None
+    if row["type"] in INCOME_TYPES:
+        return "income"
+    if row["type"] in EXPENSE_TYPES:
+        return "expense"
+    return None
 
 
 def _credit_cards(db: Session):
@@ -149,19 +217,7 @@ def spending_summary(
 ):
     start = _parse_month(month)
     end = _month_end(start)
-
-    totals_q = text("""
-        SELECT
-          t.type,
-          t.amount,
-          t.currency,
-          COALESCE(ct.name, NULLIF(TRIM(t.category), ''), 'Uncategorized') AS category
-        FROM transactions t
-        LEFT JOIN category_overrides co ON co.transaction_id = t.id
-        LEFT JOIN category_taxonomy ct ON ct.id = co.category_id
-        WHERE t.ts >= :start AND t.ts < :end
-    """)
-    rows = db.execute(totals_q, {"start": start, "end": end}).mappings().all()
+    rows = _cash_flow_rows(db, start, end)
     currencies = {r["currency"] for r in rows if r["currency"]}
     rates = get_rates(start, base_currency, currencies)
 
@@ -172,11 +228,12 @@ def spending_summary(
     for r in rows:
         cur = (r["currency"] or base_currency).upper()
         amount = float(r["amount"]) * rates.get(cur, 1.0)
-        category = r["category"] or "Uncategorized"
-        if r["type"] == "INCOME":
+        category = r["resolved_category"] or "Uncategorized"
+        bucket = _cash_flow_bucket(r)
+        if bucket == "income":
             income_total += amount
             income_categories[category] = income_categories.get(category, 0.0) + amount
-        elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):
+        elif bucket == "expense":
             expense_total += -amount
             expense_categories[category] = expense_categories.get(category, 0.0) + (-amount)
     net = income_total - expense_total
@@ -198,6 +255,84 @@ def spending_summary(
         savings_rate=savings_rate,
         income_categories=income_categories_list,
         expense_categories=expense_categories_list,
+    )
+
+
+@router.get("/cash-flow-detail", response_model=CashFlowDetailOut)
+def cash_flow_detail(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    start = _parse_month(month)
+    end = _month_end(start)
+    rows = _cash_flow_rows(db, start, end)
+    currencies = {r["currency"] for r in rows if r["currency"]}
+    rates = get_rates(start, base_currency, currencies)
+
+    income_total = 0.0
+    expense_total = 0.0
+    income_transactions: list[CashFlowTransactionItem] = []
+    expense_transactions: list[CashFlowTransactionItem] = []
+
+    for row in rows:
+        currency = (row["currency"] or base_currency).upper()
+        base_amount = float(row["amount"]) * rates.get(currency, 1.0)
+        item = CashFlowTransactionItem(
+            transaction_id=int(row["transaction_id"]),
+            ts=_tx_iso(row["ts"]),
+            account_id=int(row["account_id"]),
+            account_name=row["account_name"],
+            account_type=row["account_type"],
+            amount=float(row["amount"]),
+            currency=currency,
+            base_amount=base_amount,
+            type=row["type"],
+            raw_category=row["raw_category"],
+            resolved_category=row["resolved_category"] or "Uncategorized",
+            resolved_category_id=(
+                int(row["resolved_category_id"])
+                if row["resolved_category_id"] is not None
+                else None
+            ),
+            category_source=row["category_source"] or "uncategorized",
+            merchant_counterparty=row["merchant_counterparty"],
+            notes=row["notes"],
+        )
+        bucket = _cash_flow_bucket(row)
+        if bucket == "income":
+            income_total += base_amount
+            income_transactions.append(item)
+        elif bucket == "expense":
+            expense_total += -base_amount
+            expense_transactions.append(item)
+
+    net = income_total - expense_total
+    savings_rate = (net / income_total) if income_total > 0 else None
+
+    return CashFlowDetailOut(
+        month=month,
+        base_currency=base_currency,
+        income_total=income_total,
+        expense_total=expense_total,
+        net=net,
+        savings_rate=savings_rate,
+        calculation=(
+            "Net = income_total - expense_total using month-scoped transactions with types "
+            "INCOME, EXPENSE, FEE, TAX, INTEREST, excluding rows resolved under Transfer."
+        ),
+        income=CashFlowDetailSection(
+            total=income_total,
+            transaction_count=len(income_transactions),
+            included_types=list(INCOME_TYPES),
+            transactions=income_transactions,
+        ),
+        expenses=CashFlowDetailSection(
+            total=expense_total,
+            transaction_count=len(expense_transactions),
+            included_types=list(EXPENSE_TYPES),
+            transactions=expense_transactions,
+        ),
     )
 
 

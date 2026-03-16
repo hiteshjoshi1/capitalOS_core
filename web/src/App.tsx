@@ -41,6 +41,7 @@ export default function App() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
+  const [unmappedCount, setUnmappedCount] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     (async () => {
@@ -70,6 +71,18 @@ export default function App() {
     })();
   }, [month, baseCurrency]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        setUnmappedCount(undefined);
+        const transactions = await api.unmappedTransactions(month);
+        setUnmappedCount(transactions.length);
+      } catch {
+        setUnmappedCount(undefined);
+      }
+    })();
+  }, [month]);
+
   const selectedBaseCurrency =
     baseCurrency ||
     summary?.base_currency ||
@@ -93,6 +106,7 @@ export default function App() {
     <PageShell
       title="CapitalOS Dashboard"
       activeRoute="/"
+      unmappedCount={unmappedCount}
       userMenuSettings={(
         <>
           <div className="muted">API: {health}</div>
@@ -141,10 +155,15 @@ export default function App() {
             </section>
 
             <section className="grid dashboardRow row2">
-              <PlaceholderCard
-                title={`Cash Flow — ${month}`}
-                description="Cash flow ingestion is pending final category mapping."
-                footer={spendingSummary ? `Latest preview month: ${spendingSummary.month}` : "No cash flow preview data."}
+              <ExposureLinkCard
+                title="Cash Flow"
+                value={formatMoney(spendingSummary?.net)}
+                subtitle={
+                  spendingSummary
+                    ? `${spendingSummary.month} | Income ${formatMoney(spendingSummary.income_total)} | Expenses ${formatMoney(spendingSummary.expense_total)}`
+                    : `No cash flow summary for ${month}`
+                }
+                to="/cash-flow"
               />
               <CreditCardCard
                 month={month}

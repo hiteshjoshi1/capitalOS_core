@@ -105,6 +105,43 @@ export type SpendingSummary = {
   expense_categories: Array<{ category: string; amount: number }>;
 };
 
+export type CashFlowTransaction = {
+  transaction_id: number;
+  ts: string;
+  account_id: number;
+  account_name: string;
+  account_type: string;
+  amount: number;
+  currency: string;
+  base_amount: number;
+  type: string;
+  raw_category: string | null;
+  resolved_category: string;
+  resolved_category_id: number | null;
+  category_source: string;
+  merchant_counterparty: string | null;
+  notes: string | null;
+};
+
+export type CashFlowDetailSection = {
+  total: number;
+  transaction_count: number;
+  included_types: string[];
+  transactions: CashFlowTransaction[];
+};
+
+export type CashFlowDetail = {
+  month: string;
+  base_currency: string;
+  income_total: number;
+  expense_total: number;
+  net: number;
+  savings_rate: number | null;
+  calculation: string;
+  income: CashFlowDetailSection;
+  expenses: CashFlowDetailSection;
+};
+
 export type CreditCardSummary = {
   month: string;
   base_currency: string;
@@ -287,6 +324,41 @@ export type CryptoAllowlistItem = {
   created_at?: string | null;
 };
 
+export type CategoryTaxonomy = {
+  id: number;
+  code: string;
+  name: string;
+  parent_id: number | null;
+  display_order: number;
+};
+
+export type UnmappedTransaction = {
+  transaction_id: number;
+  ts: string;
+  account_id: number;
+  account_name: string;
+  amount: number;
+  currency: string;
+  type: string;
+  raw_category: string | null;
+  merchant_counterparty: string | null;
+  notes: string | null;
+};
+
+export type CategoryOverridePayload = {
+  transaction_id: number;
+  category_id: number;
+};
+
+export type CategoryResolution = {
+  transaction_id: number;
+  raw_category: string | null;
+  override_category: string | null;
+  resolved_category: string;
+  source: string;
+  rule_id: number | null;
+  rule_name: string | null;
+};
 
 export type Health = { status: string };
 
@@ -364,6 +436,18 @@ export type MarketDataRun = {
 
 export const api = {
   health: () => req<Health>("/health"),
+  categories: () => req<CategoryTaxonomy[]>("/categories"),
+  unmappedTransactions: (month: string, accountId?: number) =>
+    req<UnmappedTransaction[]>(
+      `/categories/unmapped?month=${encodeURIComponent(month)}${
+        accountId == null ? "" : `&account_id=${encodeURIComponent(String(accountId))}`
+      }`
+    ),
+  categoryOverride: (payload: CategoryOverridePayload) =>
+    req<CategoryResolution>("/categories/override", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   platforms: () => req<Platform[]>("/platforms"),
   platformOptions: () => req<PlatformOptions>("/platforms/options"),
   createPlatform: (payload: PlatformCreate) =>
@@ -388,6 +472,8 @@ export const api = {
     req<StockExposure>(`/dashboard/stock-exposure?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   spendingSummary: (month: string, baseCurrency = "SGD") =>
     req<SpendingSummary>(`/spending/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  cashFlowDetail: (month: string, baseCurrency = "SGD") =>
+    req<CashFlowDetail>(`/spending/cash-flow-detail?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardSummary: (month: string, baseCurrency = "SGD") =>
     req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardTransactions: (month: string, baseCurrency = "SGD") =>

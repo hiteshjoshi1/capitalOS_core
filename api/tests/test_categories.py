@@ -194,3 +194,49 @@ def test_spending_endpoints_use_resolved_categories(client: TestClient, db_engin
     assert hawker_tx["category"] == "Dining"
     assert hawker_tx["resolved_category"] == "Rideshare"
     assert hawker_tx["category_source"] == "manual"
+
+    cash_flow_resp = client.get("/spending/cash-flow-detail?month=2026-02&base_currency=SGD")
+    assert cash_flow_resp.status_code == 200
+    expense_transactions = {
+        item["merchant_counterparty"]: item
+        for item in cash_flow_resp.json()["expenses"]["transactions"]
+    }
+    cash_flow_hawker_tx = expense_transactions["Hawker Center"]
+    assert cash_flow_hawker_tx["raw_category"] == "Dining"
+    assert cash_flow_hawker_tx["resolved_category"] == "Rideshare"
+    assert cash_flow_hawker_tx["resolved_category_id"] == category_ids["rideshare"]
+    assert cash_flow_hawker_tx["category_source"] == "manual"
+
+
+def test_transfer_override_excludes_row_from_cash_flow_totals(
+    client: TestClient, db_engine, seed_spending_data
+):
+    category_ids = _seed_category_reference_data(db_engine)
+
+    override_resp = client.post(
+        "/categories/override",
+        json={"transaction_id": 1, "category_id": category_ids["internal_transfer"]},
+    )
+    assert override_resp.status_code == 200
+    assert override_resp.json()["resolved_category"] == "Internal Transfer"
+
+    summary_resp = client.get("/spending/summary?month=2026-02&base_currency=SGD")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    assert summary["income_total"] == 480.0
+    assert summary["expense_total"] == 8710.0
+    assert summary["net"] == -8230.0
+    income_categories = {item["category"]: item["amount"] for item in summary["income_categories"]}
+    assert income_categories == {"Dividends": 480.0}
+
+    cash_flow_resp = client.get("/spending/cash-flow-detail?month=2026-02&base_currency=SGD")
+    assert cash_flow_resp.status_code == 200
+    cash_flow = cash_flow_resp.json()
+    assert cash_flow["income_total"] == 480.0
+    assert cash_flow["net"] == -8230.0
+    assert cash_flow["income"]["transaction_count"] == 1
+    assert [item["merchant_counterparty"] for item in cash_flow["income"]["transactions"]] == ["Broker"]
+    assert all(
+        item["merchant_counterparty"] != "Employer"
+        for item in cash_flow["income"]["transactions"]
+    )
