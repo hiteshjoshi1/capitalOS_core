@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import re
 from typing import Dict, List
 
 from app.ingestion.parsers import ParseResult
@@ -55,26 +56,60 @@ def _extract_currency(text: str) -> str | None:
     return None
 
 
-def _is_transfer(stmt_code: str, description: str, supplementary: str) -> bool:
+_SALARY_PATTERNS = (
+    re.compile(r"\bSALARY\b"),
+    re.compile(r"\bPAYROLL\b"),
+    re.compile(r"\bSAL\b"),
+    re.compile(r"\bPAY\b.*\b(PTE|LTD|LIMITED|LLC|INC|CO|COMPANY)\b"),
+)
+_SELF_TRANSFER_COUNTERPARTIES = (
+    "IBKR",
+    "INTERACTIVE BROKERS",
+    "COINBASE",
+    "UOB",
+    "OCBC",
+    "DBS VICKERS",
+    "POSB",
+)
+_DIRECT_TRANSFER_KEYWORDS = (
+    "TRF",
+    "TRANSFER",
+    "PAYNOW",
+    "TOPUP",
+    "TOP UP",
+)
+_CONTEXTUAL_TRANSFER_KEYWORDS = (
+    "GIRO",
+    "IBG",
+)
+
+
+def _combined_text(description: str, supplementary: str) -> str:
+    return f"{description} {supplementary}".upper().strip()
+
+
+def _is_salary(description: str, supplementary: str) -> bool:
+    text = _combined_text(description, supplementary)
+    return any(pattern.search(text) for pattern in _SALARY_PATTERNS)
+
+
+def _is_self_transfer(description: str, supplementary: str) -> bool:
+    text = _combined_text(description, supplementary)
+    return any(counterparty in text for counterparty in _SELF_TRANSFER_COUNTERPARTIES)
+
+
+def _is_transfer(stmt_code: str, description: str, supplementary: str, amount: float) -> bool:
     code = stmt_code.strip().upper()
-    if code in {"TRF"}:
+    if amount > 0 and _is_salary(description, supplementary):
+        return False
+    if code == "TRF":
         return True
-    text = f"{description} {supplementary}".upper()
-    keywords = [
-        "TRF",
-        "TRANSFER",
-        "SRS",
-        "CPF",
-        "GIRO",
-        "IBG",
-        "BILL",
-        "PAYNOW",
-        "TOPUP",
-        "TOP UP",
-        "TAX",
-        "IRAS",
-    ]
-    return any(k in text for k in keywords)
+    text = _combined_text(description, supplementary)
+    if _is_self_transfer(description, supplementary):
+        return True
+    if any(keyword in text for keyword in _DIRECT_TRANSFER_KEYWORDS):
+        return True
+    return any(keyword in text for keyword in _CONTEXTUAL_TRANSFER_KEYWORDS) and _is_self_transfer(description, supplementary)
 
 
 def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> ParseResult:
@@ -141,10 +176,12 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> P
         description = record.get("Description", "").strip()
         stmt_code = record.get("Statement Code", "").strip()
         supp_desc = record.get("Supplementary Code Description", "") or record.get("Supplementary Code", "")
-        if _is_transfer(stmt_code, description, supp_desc):
+        if _is_transfer(stmt_code, description, supp_desc, amount):
             tx_type = "TRANSFER"
         category = "Bank::Transaction"
-        if stmt_code:
+        if tx_type == "INCOME" and _is_salary(description, supp_desc):
+            category = "Salary"
+        elif stmt_code:
             category = f"Bank::{stmt_code}"
 
         parsed.append(

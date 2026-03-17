@@ -6,27 +6,42 @@ from app.ingestion.parsers.ocbc_account_csv_v1 import parse_ocbc_account_csv
 from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_holdings_xls
 
 
-def test_dbs_parser_extracts_cash_and_transactions(tmp_path: Path):
-    content = """Account Details For:,DBS Multiplier\nStatement as at:,19 Feb 2026\nCurrency:,SGD - Singapore Dollar\nAvailable Balance:,SGD 1000.00\nLedger Balance:,SGD 900.00\nTransaction Date,Value Date,Statement Code,Description,Supplementary Code,Supplementary Code Description,Client Reference,Additional Reference,Status,Currency,Debit Amount,Credit Amount\n19 Feb 2026,19 Feb 2026,GR,Salary,IBG,Payments,REF,OTHR,Settled,SGD,,500\n"""
-    fixture = tmp_path / "dbs.csv"
+def _write_dbs_fixture(tmp_path: Path, name: str, row: str) -> Path:
+    content = (
+        "Account Details For:,DBS Multiplier\n"
+        "Statement as at:,19 Feb 2026\n"
+        "Currency:,SGD - Singapore Dollar\n"
+        "Available Balance:,SGD 1000.00\n"
+        "Ledger Balance:,SGD 900.00\n"
+        "Transaction Date,Value Date,Statement Code,Description,Supplementary Code,Supplementary Code Description,"
+        "Client Reference,Additional Reference,Status,Currency,Debit Amount,Credit Amount\n"
+        f"{row}\n"
+    )
+    fixture = tmp_path / name
     fixture.write_text(content, encoding="utf-8")
+    return fixture
+
+
+def test_dbs_parser_extracts_cash_and_transactions(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs.csv",
+        "19 Feb 2026,19 Feb 2026,GR,Salary,IBG,Payments,REF,OTHR,Settled,SGD,,500",
+    )
     result = parse_dbs_transaction_history_csv(str(fixture))
     assert len(result.transactions) == 1
     assert result.transactions[0]["type"] == "INCOME"
+    assert result.transactions[0]["category"] == "Salary"
     assert result.positions
     assert result.positions[0]["asset_class"] == "CASH"
 
 
 def test_dbs_parser_marks_transfers(tmp_path: Path):
-    content = """Account Details For:,DBS Multiplier
-Statement as at:,19 Feb 2026
-Currency:,SGD - Singapore Dollar
-Available Balance:,SGD 1000.00
-Transaction Date,Value Date,Statement Code,Description,Supplementary Code,Supplementary Code Description,Client Reference,Additional Reference,Status,Currency,Debit Amount,Credit Amount
-19 Feb 2026,19 Feb 2026,ADV,TRF FT251009IB00249524,IBG,Payments,REF,OTHR,Settled,SGD,10000,
-"""
-    fixture = tmp_path / "dbs_transfer.csv"
-    fixture.write_text(content)
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_transfer.csv",
+        "19 Feb 2026,19 Feb 2026,ADV,TRF FT251009IB00249524,IBG,Payments,REF,OTHR,Settled,SGD,10000,",
+    )
 
     result = parse_dbs_transaction_history_csv(str(fixture))
     assert len(result.transactions) == 1
@@ -34,20 +49,78 @@ Transaction Date,Value Date,Statement Code,Description,Supplementary Code,Supple
 
 
 def test_dbs_parser_prefers_transaction_date(tmp_path: Path):
-    content = """Account Details For:,DBS Multiplier
-Statement as at:,19 Feb 2026
-Currency:,SGD - Singapore Dollar
-Available Balance:,SGD 1000.00
-Transaction Date,Value Date,Statement Code,Description,Supplementary Code,Supplementary Code Description,Client Reference,Additional Reference,Status,Currency,Debit Amount,Credit Amount
-18 Feb 2026,19 Feb 2026,GR,Salary,IBG,Payments,REF,OTHR,Settled,SGD,,500
-"""
-    fixture = tmp_path / "dbs_dates.csv"
-    fixture.write_text(content)
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_dates.csv",
+        "18 Feb 2026,19 Feb 2026,GR,Salary,IBG,Payments,REF,OTHR,Settled,SGD,,500",
+    )
 
     result = parse_dbs_transaction_history_csv(str(fixture))
     assert len(result.transactions) == 1
     assert result.transactions[0]["ts"].date().isoformat() == "2026-02-18"
     assert result.positions[0]["currency"] == "SGD"
+
+
+def test_dbs_parser_keeps_salary_giro_credit_as_income(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_salary_giro.csv",
+        "19 Feb 2026,19 Feb 2026,GR,PAY PARTIOR PTE. LTD.,GIRO,SALARY FEB 2026,REF,OTHR,Settled,SGD,,7800",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "INCOME"
+    assert result.transactions[0]["category"] == "Salary"
+
+
+def test_dbs_parser_keeps_salary_ibg_credit_as_income(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_salary_ibg.csv",
+        "19 Feb 2026,19 Feb 2026,GR,PAY PARTIOR PTE. LTD. SALARY_MAR,IBG,Payroll credit,REF,OTHR,Settled,SGD,,7800",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "INCOME"
+    assert result.transactions[0]["category"] == "Salary"
+
+
+def test_dbs_parser_marks_non_salary_giro_self_transfer(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_giro_transfer.csv",
+        "19 Feb 2026,19 Feb 2026,ADV,GIRO TO UOB ONE ACCOUNT,IBG,Savings transfer,REF,OTHR,Settled,SGD,500,",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "TRANSFER"
+
+
+def test_dbs_parser_marks_ibkr_self_transfer(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_ibkr_transfer.csv",
+        "19 Feb 2026,19 Feb 2026,ADV,Transfer to IBKR,IBG,Brokerage top up,REF,OTHR,Settled,SGD,1000,",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "TRANSFER"
+
+
+def test_dbs_parser_marks_paynow_transfer(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_paynow_transfer.csv",
+        "19 Feb 2026,19 Feb 2026,ADV,PayNow Transfer to friend,,Instant transfer,REF,OTHR,Settled,SGD,50,",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "TRANSFER"
 
 
 def test_ibkr_parser_sections(tmp_path: Path):
