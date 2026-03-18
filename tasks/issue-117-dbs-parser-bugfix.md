@@ -559,3 +559,395 @@ EOF
 ```text
 Codex rework analysis pass (R3) failed after 3 attempts.
 ```
+
+
+### Review Cycle R4 - Human Input (2026-03-18T10:13:00Z)
+
+```text
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+```
+### Retry Entry (2026-03-18T10:46:11Z)
+
+```text
+Builder rework analysis pass (R4) failed on attempt 1 with exit code 1: run_builder_prompt Analysis pass for latest review cycle R4 in tasks/issue-117-dbs-parser-bugfix.md.
+
+Latest review context:
+### Review Cycle R4 - Human Input (2026-03-18T10:13:00Z)
+
+```text
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+```
+
+Structured human input:
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+
+Hard constraints:
+1 Do not modify content above <!-- IMMUTABLE_PLAN_END --> in tasks/issue-117-dbs-parser-bugfix.md.
+2) This is analysis only. Do NOT implement code changes in this pass.
+3) Update/create exactly these blocks in tasks/issue-117-dbs-parser-bugfix.md as markdown headings with ```text fenced bodies:
+   - Review Cycle R4 - Rework Analysis
+   - Review Cycle R4 - Rework Answer Matrix
+4) Fill Rework Analysis with required one-line fields:
+   ROOT_CAUSE:
+   FINDINGS_ADDRESSED:
+   PLANNED_CHANGES:
+   VALIDATION_PLAN:
+   UNRESOLVED_ASSUMPTIONS:
+5) Fill Rework Answer Matrix with one ENTRY per unresolved reviewer finding and human comment.
+   Each entry must include one-line fields:
+   REVIEWER_FINDING:
+   HUMAN_COMMENT:
+   ROOT_CAUSE:
+   CHANGE_MADE:
+   VERIFICATION_PERFORMED:
+   STATUS:
+6) STATUS values in this analysis pass must be one of:
+   PLANNED | NEEDS_INPUT | BLOCKED
+7) Do not run make commands in this pass.
+EOF
+)
+```
+
+### Retry Entry (2026-03-18T10:46:27Z)
+
+```text
+Builder rework analysis pass (R4) failed on attempt 2 with exit code 1: run_builder_prompt Analysis pass for latest review cycle R4 in tasks/issue-117-dbs-parser-bugfix.md.
+
+Latest review context:
+### Review Cycle R4 - Human Input (2026-03-18T10:13:00Z)
+
+```text
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+```
+
+Structured human input:
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+
+Hard constraints:
+1 Do not modify content above <!-- IMMUTABLE_PLAN_END --> in tasks/issue-117-dbs-parser-bugfix.md.
+2) This is analysis only. Do NOT implement code changes in this pass.
+3) Update/create exactly these blocks in tasks/issue-117-dbs-parser-bugfix.md as markdown headings with ```text fenced bodies:
+   - Review Cycle R4 - Rework Analysis
+   - Review Cycle R4 - Rework Answer Matrix
+4) Fill Rework Analysis with required one-line fields:
+   ROOT_CAUSE:
+   FINDINGS_ADDRESSED:
+   PLANNED_CHANGES:
+   VALIDATION_PLAN:
+   UNRESOLVED_ASSUMPTIONS:
+5) Fill Rework Answer Matrix with one ENTRY per unresolved reviewer finding and human comment.
+   Each entry must include one-line fields:
+   REVIEWER_FINDING:
+   HUMAN_COMMENT:
+   ROOT_CAUSE:
+   CHANGE_MADE:
+   VERIFICATION_PERFORMED:
+   STATUS:
+6) STATUS values in this analysis pass must be one of:
+   PLANNED | NEEDS_INPUT | BLOCKED
+7) Do not run make commands in this pass.
+EOF
+)
+```
+
+### Retry Entry (2026-03-18T10:46:42Z)
+
+```text
+Builder rework analysis pass (R4) failed on attempt 3 with exit code 1: run_builder_prompt Analysis pass for latest review cycle R4 in tasks/issue-117-dbs-parser-bugfix.md.
+
+Latest review context:
+### Review Cycle R4 - Human Input (2026-03-18T10:13:00Z)
+
+```text
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+```
+
+Structured human input:
+Review-ID: R4
+Status: Reviewed
+Reviewed: Hitesh
+HUMAN_QUESTIONS: Pipeline issue (codex -> copilot builder) is now fixed. Confirm the active rework is running on the new pipeline path and not the old codex path.
+- Why does DBS salary still not show up in UI for February and March after parser + migration changes?
+- Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+
+RESPONSE_REQUIREMENTS: Treat this as a fresh rework cycle after pipeline repair.
+- Query and paste the exact DBS salary row(s) from the database for the affected months.
+- Show all relevant fields from transactions, including id, source, date, amount, type, category, merchant_counterparty, and notes.
+- Query and show any duplicate or stale rows for the same salary event, especially rows still typed as TRANSFER.
+- Verify /spending/cash-flow-detail for the affected months and show whether the salary appears under income.
+- Verify /dashboard/summary for the affected months and show whether cash_flow.income includes the salary.
+- Explicitly explain the root cause of why salary is still missing in the UI.
+- Implement the fix and provide before/after DB evidence plus API evidence.
+
+UNRESOLVED_COMMENTS: The actual requirement is still not met: DBS salary is missing from UI cashflow for February and March.
+- Previous cycles incorrectly relied on tests instead of proving the real affected data path.
+- Do not assume the migration worked; prove it with DB evidence.
+- Do not mark success unless the real DBS salary data already in the database is visible in the API/UI outputs.
+
+Hard constraints:
+1 Do not modify content above <!-- IMMUTABLE_PLAN_END --> in tasks/issue-117-dbs-parser-bugfix.md.
+2) This is analysis only. Do NOT implement code changes in this pass.
+3) Update/create exactly these blocks in tasks/issue-117-dbs-parser-bugfix.md as markdown headings with ```text fenced bodies:
+   - Review Cycle R4 - Rework Analysis
+   - Review Cycle R4 - Rework Answer Matrix
+4) Fill Rework Analysis with required one-line fields:
+   ROOT_CAUSE:
+   FINDINGS_ADDRESSED:
+   PLANNED_CHANGES:
+   VALIDATION_PLAN:
+   UNRESOLVED_ASSUMPTIONS:
+5) Fill Rework Answer Matrix with one ENTRY per unresolved reviewer finding and human comment.
+   Each entry must include one-line fields:
+   REVIEWER_FINDING:
+   HUMAN_COMMENT:
+   ROOT_CAUSE:
+   CHANGE_MADE:
+   VERIFICATION_PERFORMED:
+   STATUS:
+6) STATUS values in this analysis pass must be one of:
+   PLANNED | NEEDS_INPUT | BLOCKED
+7) Do not run make commands in this pass.
+EOF
+)
+```
+
+### Retry Entry (2026-03-18T10:46:42Z)
+
+```text
+Builder rework analysis pass (R4) failed after 3 attempts.
+```
+
+### Review Cycle R4 - Rework Analysis
+
+```text
+PIPELINE: Copilot Builder (GitHub Copilot CLI, claude-sonnet-4.6) — NOT the old Codex path. This is a fresh verification pass at 2026-03-18T11:52:09Z after pipeline repair. Previous 3 R4 attempts failed with exit code 1 at pipeline level before analysis could run.
+
+ROOT_CAUSE: Migration 028_fix_dbs_salary_type.sql was never applied in prior R1–R3 cycles. It was applied during the R4 Rework Result pass (2026-03-18T10:55:35Z). This pass re-queries the live DB and APIs directly to confirm the fix persists and is visible end-to-end. All 4 PARTIOR salary rows confirmed type=INCOME, category=Salary in live DB. February salary confirmed visible in API income list (id=748, amount=20560). March salary does not yet exist in DB (data ends ~2026-03-07; salary expected ~2026-03-25) — this is not a bug.
+
+FINDINGS_ADDRESSED:
+  1. DB live (2026-03-18T11:52Z): id=748 | DBS | 2026-02-25 | 20560 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_FEB26 | notes: Payments or Collections via GIRO | fp:78b66ff428647eb8e4aaf82ef495299c938fb37eafa14113ee59edd33e542c31
+  2. DB live: id=533 | DBS | 2026-01-23 | 20560 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_JAN26 | fp:9955fc3a0d6eb42b91d7ac99b2707a6989616a67566539105f6eb15f1dc3bc79
+  3. DB live: id=555 | DBS | 2025-12-23 | 20560 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_DEC25 | fp:7ed1b97344a9575e3cb426fb9a08d388affe0ad25109fac96f8875f0f8dfcce5
+  4. DB live: id=578 | DBS | 2025-11-25 | 18501 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_NOV25 | fp:87e95a814157f0c4dc6bc43014d2cc971b38cf4f4935a3361e5438e46fef8bf3
+  5. Zero TRANSFER rows for PARTIOR: SELECT ... WHERE merchant_counterparty ILIKE '%PARTIOR%' AND type='TRANSFER' → 0 rows.
+  6. Zero March 2026 PARTIOR rows: SELECT ... WHERE ts >= '2026-03-01' → 0 rows. March salary not yet received.
+  7. API /spending/cash-flow-detail?month=2026-02 → income.total=21098.16, income.transaction_count=12, id=748 amount=20560 resolved_category=Salary present in income.transactions list.
+  8. API /dashboard/summary?month=2026-02 → cash_flow.income=21098.16, cash_flow.net=20105.07 — salary fully counted.
+  9. API /spending/cash-flow-detail?month=2026-03 → income_total=234.41 (interest/dividends only, no PARTIOR salary yet — correct).
+  10. API /dashboard/summary?month=2026-03 → cash_flow.income=4834.41 (investment dividends, no salary yet — correct).
+
+PLANNED_CHANGES:
+  None. February: fully resolved — migration applied, data correct, API confirmed. March: no salary row exists yet; will be ingested and auto-classified as INCOME via fixed parser when the March payroll arrives (~2026-03-25).
+
+VALIDATION_PLAN:
+  - DONE (2026-03-18T11:52Z): Live DB SELECT on PARTIOR → 4 rows, all INCOME/Salary, 0 TRANSFER rows.
+  - DONE: Live DB SELECT on March 2026 PARTIOR → 0 rows (salary not yet received).
+  - DONE: curl /spending/cash-flow-detail?month=2026-02 → income.total=21098.16, id=748/20560/Salary confirmed.
+  - DONE: curl /dashboard/summary?month=2026-02 → cash_flow.income=21098.16 confirmed.
+  - DONE: curl /spending/cash-flow-detail?month=2026-03 → income_total=234.41 (no salary, correct).
+  - DONE: curl /dashboard/summary?month=2026-03 → cash_flow.income=4834.41 (no salary yet, correct).
+
+UNRESOLVED_ASSUMPTIONS:
+  - March salary (SALARY_MAR26) has not arrived yet (~2026-03-25 expected). Fixed parser will classify it as INCOME on ingestion. No migration needed for future rows.
+  - Migration 028 is idempotent; safe to re-run if data is ever re-seeded.
+```
+
+### Review Cycle R4 - Rework Answer Matrix
+
+```text
+ENTRY 1
+REVIEWER_FINDING: DBS salary missing from UI cashflow for February and March after parser + migration changes.
+HUMAN_COMMENT: Previous cycles incorrectly relied on tests instead of proving the real affected data path. Do not assume the migration worked; prove it with DB evidence.
+ROOT_CAUSE: Migration 028 was unapplied through R1–R3. Applied in R4 Rework Result pass (2026-03-18T10:55:35Z). Live DB (2026-03-18T11:52Z) confirms: id=748 | DBS | 2026-02-25 | 20560 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_FEB26. February salary IS visible in API. March: no SALARY_MAR26 row in DB yet — salary not received; expected ~2026-03-25.
+CHANGE_MADE: Migration 028 applied (R4 Rework Result, documented). No new code changes required.
+VERIFICATION_PERFORMED: Live DB query (docker exec psql): 4 PARTIOR rows all INCOME/Salary. 0 TRANSFER rows. API /spending/cash-flow-detail?month=2026-02 income.total=21098.16; id=748 amount=20560 resolved_category=Salary in income.transactions. API /dashboard/summary?month=2026-02 cash_flow.income=21098.16.
+STATUS: PLANNED
+
+ENTRY 2
+REVIEWER_FINDING: Is the remaining failure due to migration mismatch, duplicate stale TRANSFER rows, incorrect category/rule state, or dashboard/query filtering?
+HUMAN_COMMENT: Explicitly explain the root cause of why salary is still missing in the UI.
+ROOT_CAUSE: Root cause was un-applied migration 028 — NOT SQL logic mismatch, NOT duplicate rows, NOT category override conflict, NOT dashboard query filtering. Once migration applied, salary appeared immediately because dashboard WHERE type IN ('INCOME',...) is correct. No residual TRANSFER rows for PARTIOR. No duplicates.
+CHANGE_MADE: Migration 028 applied. No further changes needed.
+VERIFICATION_PERFORMED: Live DB: 0 PARTIOR rows with type=TRANSFER. 0 duplicate PARTIOR rows. /dashboard/summary?month=2026-02 cash_flow.income=21098.16 proves the query filter is not the issue.
+STATUS: PLANNED
+
+ENTRY 3
+REVIEWER_FINDING: Why does DBS salary still not show up in UI for February AND March?
+HUMAN_COMMENT: Query and paste exact DBS salary row(s) from the database for the affected months.
+ROOT_CAUSE: February RESOLVED — id=748 | source=DBS | date=2026-02-25 | amount=20560 | type=INCOME | category=Salary | merchant_counterparty=PAY PARTIOR PTE. LTD. SALARY_FEB26 | notes=Payments or Collections via GIRO | fp:78b66ff428647eb8e4aaf82ef495299c938fb37eafa14113ee59edd33e542c31. March: no SALARY_MAR26 row in DB — 0 rows for ts >= '2026-03-01' matching PARTIOR. Salary expected ~2026-03-25; absence is not a bug.
+CHANGE_MADE: No code change for March. February fully resolved by migration 028.
+VERIFICATION_PERFORMED: DB: SELECT id,source,ts::date,amount,type,category,merchant_counterparty,notes FROM transactions WHERE merchant_counterparty ILIKE '%PARTIOR%' → 4 rows shown above. March SELECT → 0 rows. /spending/cash-flow-detail?month=2026-03 income_total=234.41. /dashboard/summary?month=2026-03 income=4834.41. Both correct.
+STATUS: PLANNED
+
+ENTRY 4
+REVIEWER_FINDING: Confirm the active rework is running on the new pipeline path and not the old codex path.
+HUMAN_COMMENT: Pipeline issue (codex -> copilot builder) is now fixed.
+ROOT_CAUSE: N/A — pipeline confirmation. Previous 3 R4 attempts (10:46:11Z, 10:46:27Z, 10:46:42Z) failed at pipeline level (exit code 1) before analysis executed. This pass (2026-03-18T11:52:09Z) runs on GitHub Copilot CLI (claude-sonnet-4.6) — the Copilot Builder pipeline.
+CHANGE_MADE: No code change. Pipeline confirmed: live docker exec psql queries executed, live curl to localhost:8000 executed, task file updated with fresh evidence.
+VERIFICATION_PERFORMED: docker exec capitalos-postgres psql returned live data. curl http://localhost:8000/spending/cash-flow-detail?month=2026-02 returned valid JSON with income.total=21098.16. curl http://localhost:8000/dashboard/summary?month=2026-02 returned cash_flow.income=21098.16. Running on GitHub Copilot CLI (claude-sonnet-4.6), not Codex.
+STATUS: PLANNED
+```
+
+### Review Cycle R4 - Rework Result (2026-03-18T10:55:35Z)
+
+```text
+STATUS: COMPLETE
+PIPELINE: Copilot Builder (claude-sonnet-4.6)
+
+ROOT_CAUSE: Migration 028_fix_dbs_salary_type.sql was never applied to the running Postgres instance. Parser fix was correct, but historical DBS salary rows remained typed as TRANSFER, causing them to be excluded from cash-flow queries.
+
+CHANGES_IMPLEMENTED:
+- Executed migration 028_fix_dbs_salary_type.sql directly on Postgres
+- Reclassified DBS salary rows from TRANSFER → INCOME
+- Normalized category from Bank::GR → Salary
+- Verified no duplicate rows or conflicting transfer rows exist
+
+DB_BEFORE:
+- id=748 | TRANSFER | Bank::GR | PAY PARTIOR PTE. LTD. SALARY_FEB26 | 20560 | 2026-02-25
+- id=533 | TRANSFER | Bank::GR | PAY PARTIOR PTE. LTD. SALARY_JAN26 | 20560 | 2026-01-23
+- id=555 | TRANSFER | Bank::GR | PAY PARTIOR PTE. LTD. SALARY_DEC25 | 20560 | 2025-12-23
+- id=578 | TRANSFER | Bank::GR | PAY PARTIOR PTE. LTD. SALARY_NOV25 | 18501 | 2025-11-25
+
+DB_AFTER:
+- id=748 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_FEB26 | 20560 | 2026-02-25
+- id=533 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_JAN26 | 20560 | 2026-01-23
+- id=555 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_DEC25 | 20560 | 2025-12-23
+- id=578 | INCOME | Salary | PAY PARTIOR PTE. LTD. SALARY_NOV25 | 18501 | 2025-11-25
+
+API_BEFORE:
+- /dashboard/summary?month=2026-02 → cash_flow.income = 538.16 SGD
+- /spending/cash-flow-detail?month=2026-02 → income_total = 538.16 SGD (salary missing)
+
+API_AFTER:
+- /dashboard/summary?month=2026-02 → cash_flow.income = 21098.16 SGD
+- /spending/cash-flow-detail?month=2026-02 → income_total = 21098.16 SGD
+- PAY PARTIOR PTE. LTD. SALARY_FEB26 = 20560 appears correctly under income
+
+MARCH_STATUS:
+- No SALARY_MAR26 row exists in DB yet (expected ~2026-03-25)
+- Current March income reflects only interest/dividends and is correct
+
+VERIFICATION:
+- Migration affected 4 rows (UPDATE 4, DELETE 0)
+- No duplicate salary rows present
+- No residual TRANSFER rows for salary
+- Cash-flow and dashboard endpoints now correctly include salary
+
+OUTCOME:
+- Requirement 1 (DBS salary classification + visibility) is now fully satisfied
+- Requirement validated on real production data (not just tests)
+```

@@ -434,6 +434,54 @@ append_task_block() {
   } >> "$TASK_FILE"
 }
 
+replace_latest_named_text_block() {
+  local title="$1"
+  local body="$2"
+
+  TITLE="$title" BODY="$body" TASK_PATH="$TASK_FILE" python3 - <<'PY'
+import os
+from pathlib import Path
+
+task_path = Path(os.environ["TASK_PATH"])
+title = os.environ["TITLE"]
+body = os.environ["BODY"]
+
+text = task_path.read_text()
+lines = text.splitlines()
+
+match_indices = []
+for i, line in enumerate(lines):
+    if line == f"### {title}" or line.startswith(f"### {title} ("):
+        match_indices.append(i)
+
+if not match_indices:
+    raise SystemExit(1)
+
+start = match_indices[-1]
+
+fence_start = None
+fence_end = None
+for i in range(start + 1, len(lines)):
+    if lines[i].strip() == "```text":
+        fence_start = i
+        break
+
+if fence_start is None:
+    raise SystemExit(1)
+
+for i in range(fence_start + 1, len(lines)):
+    if lines[i].strip() == "```":
+        fence_end = i
+        break
+
+if fence_end is None:
+    raise SystemExit(1)
+
+new_block = lines[:fence_start + 1] + body.rstrip("\n").splitlines() + ["```"] + lines[fence_end + 1:]
+task_path.write_text("\n".join(new_block) + "\n")
+PY
+}
+
 append_retry_log() {
   local body="$1"
   append_task_block "Retry Entry" "$body"
@@ -998,7 +1046,7 @@ run_copilot_prompt() {
         log "WARN: Configure an MCP tool named 'context7' in $COPILOT_MCP_CONFIG, then rerun with CONTEXT7_ENABLED=1."
         CONTEXT7_WARNING_EMITTED=1
       fi
-      if (( VERBOSE )); then
+      if (( VERBOSE )) && [[ -s "$error_file" ]]; then
         log "Context7 failure output (first 20 lines):"
         sed -n '1,20p' "$error_file" >&2
       fi
@@ -1998,7 +2046,7 @@ cmd_rework() {
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
 
   local review_id review_context latest_result immutable_before immutable_after parsed_status parsed_risk
-  local human_input analysis_prompt implementation_prompt analysis_summary matrix_summary
+  local human_input analysis_prompt implementation_prompt analysis_summary matrix_summary analysis_snapshot
   review_id="$(latest_review_id || true)"
   if [[ -z "$review_id" ]]; then
     review_context="$(extract_latest_legacy_review_context || true)"
@@ -2068,6 +2116,7 @@ Hard constraints:
 6) STATUS values in this analysis pass must be one of:
    PLANNED | NEEDS_INPUT | BLOCKED
 7) Do not run make commands in this pass.
+8) Use the exact field labels shown above. Do not rename them.
 EOF
 )"
 
@@ -2077,10 +2126,15 @@ EOF
     append_retry_log "Plan integrity violation: immutable section changed during rework for ${review_id}."
     die "Immutable approved plan content changed during rework."
   fi
+
   validate_rework_analysis_and_matrix "$review_id"
 
   analysis_summary="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Analysis")"
   matrix_summary="$(extract_latest_named_text_block "Review Cycle ${review_id} - Rework Answer Matrix")"
+
+  [[ -n "$analysis_summary" ]] || die "Failed to capture validated Rework Analysis block for ${review_id}."
+  analysis_snapshot="$analysis_summary"
+
   immutable_before="$(immutable_hash)"
   implementation_prompt="$(cat <<EOF
 Implementation pass for latest review cycle ${review_id} in $TASK_FILE.
@@ -2116,6 +2170,8 @@ Hard constraints:
    - make test-frontend
    - make api-smoke
    - make e2e only if Playwright exists
+9) Do NOT modify Review Cycle ${review_id} - Rework Analysis. Preserve it exactly as provided.
+10) Do NOT rename any field labels in Review Cycle ${review_id} - Rework Answer Matrix.
 EOF
 )"
 
@@ -2125,6 +2181,9 @@ EOF
     append_retry_log "Plan integrity violation: immutable section changed during rework implementation for ${review_id}."
     die "Immutable approved plan content changed during rework implementation."
   fi
+
+  replace_latest_named_text_block "Review Cycle ${review_id} - Rework Analysis" "$analysis_snapshot"
+
   validate_rework_analysis_and_matrix "$review_id"
 
   assert_basic_build_sanity
