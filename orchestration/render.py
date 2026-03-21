@@ -80,6 +80,9 @@ def _render_review_cycle(state: PipelineState) -> list[str]:
             if ar.test_gaps:
                 lines.append("- test_gaps:")
                 lines.extend([f"  - {x}" for x in ar.test_gaps])
+            if ar.semantic_verification:
+                lines.append("- semantic_verification:")
+                lines.extend([f"  - {x}" for x in ar.semantic_verification])
 
         if cycle.escalation_review:
             er = cycle.escalation_review
@@ -94,6 +97,9 @@ def _render_review_cycle(state: PipelineState) -> list[str]:
             if er.test_gaps:
                 lines.append("- test_gaps:")
                 lines.extend([f"  - {x}" for x in er.test_gaps])
+            if er.semantic_verification:
+                lines.append("- semantic_verification:")
+                lines.extend([f"  - {x}" for x in er.semantic_verification])
 
         if cycle.human_review:
             hr = cycle.human_review

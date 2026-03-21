@@ -2,6 +2,10 @@ from orchestration.models.pipeline import PipelineState
 from orchestration.models.review import AgentReview
 
 
+def _bullets(items: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in items) if items else "- None"
+
+
 def build_review_prompt(state: PipelineState) -> str:
     verification_summary = ""
     if state.build_output and state.build_output.verification:
@@ -16,6 +20,7 @@ def build_review_prompt(state: PipelineState) -> str:
             f"- {item.path}: {item.reason or 'approved without recorded rationale'}"
             for item in state.approved_extra_files
         )
+    semantic_requirements = state.get_semantic_requirements()
 
     return f"""
 You are the primary agent reviewer.
@@ -31,6 +36,7 @@ Required JSON shape:
   "summary": "string",
   "findings": ["string"],
   "test_gaps": ["string"],
+  "semantic_verification": ["string"],
   "verification_considered": true
 }}
 
@@ -51,6 +57,9 @@ Changed files observed by the pipeline:
 Approved extra files:
 {approved_extra_files or "None"}
 
+Semantic requirements to verify against implementation:
+{_bullets(semantic_requirements)}
+
 Source review human guidance:
 - source_review_id: {source_review.review_id if source_review else "None"}
 - decision: {source_human_review.decision if source_human_review else "none"}
@@ -65,6 +74,9 @@ Review rules:
 2) Do not claim anything about git history, branch diffs, staged-vs-committed state, or PR readiness unless that evidence is explicitly provided or you directly verify it with a tool.
 3) If you decide `needs_fixes`, make the findings concrete and actionable for the next rework cycle.
 4) If this review follows a rework cycle, explicitly verify whether the source review's human response requirements and unresolved comments were addressed.
+5) Perform a grounded semantic verification pass against the implementation, not just string presence or stage summaries.
+6) For each semantic requirement above, either record concrete evidence in `semantic_verification` or raise a concrete finding/test gap that explains what is still missing.
+7) If the task changes documentation or workflow behavior, compare the docs against the real implementation sources (for example Makefile, CLI, routing, or task commands) rather than treating command mentions as sufficient.
 """.strip()
 
 
@@ -73,6 +85,7 @@ def build_escalation_review_prompt(state: PipelineState, primary_review: AgentRe
     if state.build_output and state.build_output.verification:
         verification_summary = state.build_output.verification.summary
     changed_files = state.build_output.changed_files if state.build_output else []
+    semantic_requirements = state.get_semantic_requirements()
 
     return f"""
 You are the escalation reviewer.
@@ -88,6 +101,7 @@ Required JSON shape:
   "summary": "string",
   "findings": ["string"],
   "test_gaps": ["string"],
+  "semantic_verification": ["string"],
   "verification_considered": true
 }}
 
@@ -104,10 +118,16 @@ Verification:
 Changed files observed by the pipeline:
 {chr(10).join(f"- {path}" for path in changed_files) or "None"}
 
+Semantic requirements to verify against implementation:
+{_bullets(semantic_requirements)}
+
 Review rules:
 1) Base findings only on the evidence above and the repository state you directly inspect.
 2) Do not claim anything about git history, branch diffs, staged-vs-committed state, or PR readiness unless that evidence is explicitly provided or you directly verify it with a tool.
 3) If you decide `needs_fixes`, make the findings concrete and actionable for the next rework cycle.
+4) Perform a grounded semantic verification pass against the implementation, not just string presence or stage summaries.
+5) For each semantic requirement above, either record concrete evidence in `semantic_verification` or raise a concrete finding/test gap that explains what is still missing.
+6) If the task changes documentation or workflow behavior, compare the docs against the real implementation sources (for example Makefile, CLI, routing, or task commands) rather than treating command mentions as sufficient.
 
 Do not return escalate unless absolutely unavoidable.
 """.strip()

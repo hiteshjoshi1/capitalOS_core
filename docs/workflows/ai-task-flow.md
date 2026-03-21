@@ -105,90 +105,105 @@ prepare
         -> optional escalation review
         -> human review
         -> repeat until approved
+```
 
+## Stage Meanings
 
-Stage meanings
-prepare
+### prepare
 
-ensures task file exists
+Ensures task file exists, prepares or switches to the correct issue branch, and bootstraps workflow context for the issue.
 
-prepares or switches to the correct issue branch
+```bash
+make task-prepare TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-bootstraps workflow context for the issue
+### plan
 
-plan
+Generates a structured implementation plan, records acceptance criteria, checklist, and planned file paths, and captures immutable plan hash.
 
-generates a structured implementation plan
+```bash
+make task-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-records acceptance criteria, checklist, and planned file paths
+### human_approval_gate
 
-captures immutable plan hash
+Mandatory human gate after planning that blocks build until approved.
 
-human_approval_gate
+```bash
+make task-approve-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved",...}'
+```
 
-mandatory human gate after planning
+### build
 
-blocks build until approved
+Implements the feature, runs verification suite, stages scoped changes, and preserves immutable plan region.
 
-build
+```bash
+make task-build TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-implements the feature
+### agent_review
 
-runs verification suite
+Performs structured model review on build or rework output. May approve, request fixes, or escalate.
 
-stages scoped changes
+```bash
+make task-agent-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-preserves immutable plan region
+### escalation_review
 
-agent_review
+Second-pass review for uncertain or high-risk cases.
 
-performs structured model review on build or rework output
+### human_review
 
-may approve, request fixes, or escalate
+Human review after agent review that can approve or request fixes.
 
-escalation_review
+```bash
+make task-human-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved",...}'
+```
 
-second-pass review for uncertain or high-risk cases
+### rework_analysis
 
-human_review
+Analyzes latest findings and human comments, and produces structured rework plan and answer matrix.
 
-human review after agent review
+### rework_implementation
 
-can approve or request fixes
+Applies the rework, reruns verification, and returns to review loop.
 
-rework_analysis
+```bash
+make task-rework TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-analyzes latest findings and human comments
+### ship
 
-produces structured rework plan and answer matrix
+Final guarded ship step that commits and pushes branch, and optionally opens PR.
 
-rework_implementation
+```bash
+make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-applies the rework
+### respond
 
-reruns verification
+Generates structured JSON response for the current workflow state. Used internally by the pipeline to format responses at stage boundaries.
 
-returns to review loop
+```bash
+make task-respond TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
 
-ship
-
-final guarded ship step
-
-commits and pushes branch
-
-optionally opens PR
-
-Canonical Task File
+## Canonical Task File
 
 Task files live under:
 
-tasks/issue-<id>-<slug>.md
+`tasks/issue-<id>-<slug>.md`
 
 Example:
 
-tasks/issue-103-ui-ux-refresh.md
-Canonical Make Commands
-Core workflow commands
+`tasks/issue-103-ui-ux-refresh.md`
+
+## Canonical Make Commands
+
+### Core workflow commands
+
+```bash
 make task-prepare TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-build TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
@@ -196,53 +211,77 @@ make task-agent-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-rework TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
-Human gate resume commands
+make task-respond TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
+
+### Human gate resume commands
+
+```bash
 make task-approve-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
 make task-human-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
 make task-resume TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
-State and debugging commands
+```
+
+### State and debugging commands
+
+```bash
 make task-export-state TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-import-state TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 STATE_FILE=.task-flow/exports/issue-123.json
 make task-restore-state TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123-restored STATE_FILE=.task-flow/exports/issue-123.json RESTART_AT=human_review
 make task-state-show TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-orch-smoke
-End-to-End Feature Workflow
+```
+
+## End-to-End Feature Workflow
 
 This is the canonical operator path for implementing a new feature.
 
-Step 0 — Preflight
+### Step 0 — Preflight
 
 Run a quick workflow smoke test and standard verification:
 
+```bash
 make task-orch-smoke
 make verify
+```
 
 If you also need the app running locally:
 
+```bash
 make up
 make db-migrate
 make api-up
 make web-up
-Step 1 — Create the task file
+```
+
+### Step 1 — Create the task file
 
 Create a new issue task file:
 
+```bash
 cp tasks/_template.md tasks/issue-123-my-feature.md
+```
 
 Example:
 
+```bash
 cp tasks/_template.md tasks/issue-103-ui-ux-refresh.md
-Step 2 — Write the initial objective
+```
+### Step 2 — Write the initial objective
 
 Edit the task file and write the initial human problem statement.
 
 At minimum, fill:
 
+```
 ## Objective
+```
 
 If known, also fill or refine:
 
+```
 ## Acceptance Criteria
+```
 
 any architecture notes or constraints
 
@@ -252,278 +291,286 @@ Refresh dashboard UI/UX for clearer hierarchy, better risk-card readability, and
 
 Keep this high level and human-authored. The planner will refine it.
 
-Step 3 — Choose a stable thread id
+### Step 3 — Choose a stable thread id
 
 Pick a thread id for the issue and keep using it throughout the workflow.
 
 Example:
 
-issue-103
-Step 4 — Prepare the workflow context
+`issue-103`
+### Step 4 — Prepare the workflow context
 
 Run:
 
+```bash
 make task-prepare TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+```
 
 What this does:
 
-ensures the task file exists
+- ensures the task file exists
+- prepares the issue branch
+- initializes workflow context for that task
 
-prepares the issue branch
-
-initializes workflow context for that task
-
-Step 5 — Generate the plan
+### Step 5 — Generate the plan
 
 Run:
 
+```bash
 make task-plan TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+```
 
 What happens:
 
-planner reads the task markdown as human context
-
-produces structured PlanOutput
-
-records:
-
-plan summary
-
-architecture decisions
-
-risks
-
-acceptance criteria
-
-checklist
-
-planned paths
-
-captures immutable plan hash
-
-renders the plan summary into the task markdown
+- planner reads the task markdown as human context
+- produces structured PlanOutput
+- records:
+  - plan summary
+  - architecture decisions
+  - risks
+  - acceptance criteria
+  - checklist
+  - planned paths
+- captures immutable plan hash
+- renders the plan summary into the task markdown
 
 At this point the workflow has not started implementation.
 
-Step 6 — Review the generated plan as a human
+### Step 6 — Review the generated plan as a human
 
 Open the task file and review:
 
-objective clarity
-
-architecture choices
-
-scope boundaries
-
-acceptance criteria
-
-checklist sanity
-
-planned paths
+- objective clarity
+- architecture choices
+- scope boundaries
+- acceptance criteria
+- checklist sanity
+- planned paths
 
 Questions to ask:
 
-Is the scope too broad?
+- Is the scope too broad?
+- Are the acceptance criteria testable?
+- Are the planned files reasonable?
+- Is anything missing?
+- Would I approve this if a human engineer proposed it?
 
-Are the acceptance criteria testable?
+### Step 7 — Approve or reject the plan
 
-Are the planned files reasonable?
+#### Approve the plan
 
-Is anything missing?
-
-Would I approve this if a human engineer proposed it?
-
-Step 7 — Approve or reject the plan
-Approve the plan
+```bash
 make task-approve-plan \
   TASK=tasks/issue-103-ui-ux-refresh.md \
   THREAD_ID=issue-103 \
   RESUME_JSON='{"gate_type":"plan_approval","decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
-Reject or request fixes to the plan
+```
+
+#### Reject or request fixes to the plan
+
+```bash
 make task-approve-plan \
   TASK=tasks/issue-103-ui-ux-refresh.md \
   THREAD_ID=issue-103 \
   RESUME_JSON='{"gate_type":"plan_approval","decision":"needs_fixes","reviewer":"Hitesh","notes":"Scope is too broad; narrow to dashboard cards only","questions":["Can this be split into two tasks?"],"response_requirements":["Reduce scope and tighten acceptance criteria"],"unresolved_comments":["Do not touch unrelated layout areas"]}'
+```
 
 If you reject, the workflow should not proceed into build until the plan is corrected.
 
-Step 8 — Build the feature
+### Step 8 — Build the feature
 
 If running stepwise:
 
+```bash
 make task-build TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+```
 
 If running full workflow, task-all will continue after plan approval.
 
 What happens during build:
 
-immutable plan region is checked
-
-builder implements the feature
-
-verification suite runs
-
-retry policy is applied
-
-one scoped builder auto-fix pass may be attempted on repeated code failures
-
-changed files are staged if within allowed scope
-
-markdown execution journal is updated
+- immutable plan region is checked
+- builder implements the feature
+- verification suite runs
+- retry policy is applied
+- one scoped builder auto-fix pass may be attempted on repeated code failures
+- changed files are staged if within allowed scope
+- markdown execution journal is updated
 
 Typical verification includes:
 
+```bash
 make lint
 make typecheck
 make test-backend
 make test-frontend
 make api-smoke
 make e2e   # if Playwright is configured
-Step 9 — Run agent review
+```
+
+### Step 9 — Run agent review
 
 Run:
 
+```bash
 make task-agent-review TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+```
 
 Possible outcomes:
 
-approved
-
-needs_fixes
-
-escalate
+- approved
+- needs_fixes
+- escalate
 
 If the review is high-risk or uncertain, the graph may route into escalation review during full workflow execution.
 
-Step 10 — Complete human review
+### Step 10 — Complete human review
 
 When the workflow pauses for human review, inspect:
 
-rendered review cycle in task markdown
-
-summary of findings
-
-test gaps
-
-changed files
+- rendered review cycle in task markdown
+- summary of findings
+- test gaps
+- changed files
+- verification outcome
 
 verification outcome
 
 Then resume the human review gate.
 
-Approve
+#### Approve
+
+```bash
 make task-human-review \
   TASK=tasks/issue-103-ui-ux-refresh.md \
   THREAD_ID=issue-103 \
   RESUME_JSON='{"decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
-Request fixes
+```
+
+#### Request fixes
+
+```bash
 make task-human-review \
   TASK=tasks/issue-103-ui-ux-refresh.md \
   THREAD_ID=issue-103 \
   RESUME_JSON='{"decision":"needs_fixes","reviewer":"Hitesh","notes":"Please fix the routing edge case and make the acceptance criteria coverage clearer","questions":["Was the edge case tested?"],"response_requirements":["Show the exact fix and verification evidence"],"unresolved_comments":["Do not ship until this is corrected"]}'
+```
 
 If both:
 
-effective agent review = approved
-
-human review = approved
+- effective agent review = approved
+- human review = approved
 
 then the workflow can ship.
 
 If either requests fixes, the workflow enters rework.
 
-Step 11 — Rework loop
+### Step 11 — Rework loop
 
 If human or agent review requests fixes, the workflow goes through:
 
-rework_analysis
-
-rework_implementation
-
-review again
+- rework_analysis
+- rework_implementation
+- review again
 
 You can trigger rework directly if operating manually:
 
+```bash
 make task-rework TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
-Rework analysis
+```
+
+#### Rework analysis
 
 Produces:
 
-root cause
+- root cause
+- findings addressed
+- planned changes
+- validation plan
+- answer matrix
 
-findings addressed
-
-planned changes
-
-validation plan
-
-answer matrix
-
-Rework implementation
+#### Rework implementation
 
 Applies the changes and reruns verification.
 
 Then the workflow returns to:
 
-agent review
-
-optional escalation review
-
-human review
+- agent review
+- optional escalation review
+- human review
 
 This loop continues until both sides approve.
 
-Step 12 — Ship
+### Step 12 — Ship
 
 Once the final review cycle is approved and blockers are clear:
 
+```bash
 make task-ship TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+```
 
 What happens:
 
-final ship checks run
+- final ship checks run
+- branch is pushed
+- PR may be created if enabled in orchestration config
 
-branch is pushed
-
-PR may be created if enabled in orchestration config
-
-Fast Path (Recommended for normal usage)
+## Fast Path (Recommended for normal usage)
 
 The simplest operator path is:
 
 1. Create the task file
+
+```bash
 cp tasks/_template.md tasks/issue-123-my-feature.md
+```
+
 2. Write the objective
 
 Edit the file.
 
 3. Start the full workflow
+
+```bash
 make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
+
 4. Approve the plan when interrupted
+
+```bash
 make task-approve-plan \
   TASK=tasks/issue-123-my-feature.md \
   THREAD_ID=issue-123 \
   RESUME_JSON='{"gate_type":"plan_approval","decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
+```
+
 5. Approve or reject human review when interrupted
 
 Approve:
 
+```bash
 make task-human-review \
   TASK=tasks/issue-123-my-feature.md \
   THREAD_ID=issue-123 \
   RESUME_JSON='{"decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
+```
 
 Or request fixes:
 
+```bash
 make task-human-review \
   TASK=tasks/issue-123-my-feature.md \
   THREAD_ID=issue-123 \
   RESUME_JSON='{"decision":"needs_fixes","reviewer":"Hitesh","notes":"Please address the routing issue","questions":["Was the edge case covered?"],"response_requirements":["Show the exact routing fix"],"unresolved_comments":["Do not ship until corrected"]}'
+```
 
 If you reject with needs_fixes, the workflow continues through rework and returns to human review again.
 
-JSON Resume Payload Examples
-Plan approval — approved
+## JSON Resume Payload Examples
+
+### Plan approval — approved
+
+```json
 {
   "gate_type": "plan_approval",
   "decision": "approved",
@@ -533,7 +580,11 @@ Plan approval — approved
   "response_requirements": [],
   "unresolved_comments": []
 }
-Plan approval — needs fixes
+```
+
+### Plan approval — needs fixes
+
+```json
 {
   "gate_type": "plan_approval",
   "decision": "needs_fixes",
@@ -543,7 +594,11 @@ Plan approval — needs fixes
   "response_requirements": ["Reduce scope"],
   "unresolved_comments": ["Do not touch unrelated modules"]
 }
-Human review — approved
+```
+
+### Human review — approved
+
+```json
 {
   "decision": "approved",
   "reviewer": "Hitesh",
@@ -552,7 +607,11 @@ Human review — approved
   "response_requirements": [],
   "unresolved_comments": []
 }
-Human review — needs fixes
+```
+
+### Human review — needs fixes
+
+```json
 {
   "decision": "needs_fixes",
   "reviewer": "Hitesh",
@@ -561,95 +620,103 @@ Human review — needs fixes
   "response_requirements": ["Show fix"],
   "unresolved_comments": ["Do not ship"]
 }
-State Export, Import, and Restore
-Export current workflow state
+```
+
+## State Export, Import, and Restore
+
+### Export current workflow state
+
+```bash
 make task-export-state TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
-Inspect exported state
+```
+
+### Inspect exported state
+
+```bash
 make task-import-state TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103 STATE_FILE=.task-flow/exports/issue-103.json
-Restore into a new thread
+```
+
+### Restore into a new thread
+
+```bash
 make task-restore-state \
   TASK=tasks/issue-103-ui-ux-refresh.md \
   THREAD_ID=issue-103-restored \
   STATE_FILE=.task-flow/exports/issue-103.json \
   RESTART_AT=human_review
-When to use restore
+```
+
+### When to use restore
 
 Use restore when:
 
-checkpoint DB is lost or corrupted
+- checkpoint DB is lost or corrupted
 
-moving machines or environments
+- moving machines or environments
 
-graph or state schema changed and you want a clean restart point
+- graph or state schema changed and you want a clean restart point
 
-you want to branch from an earlier workflow snapshot
+- you want to branch from an earlier workflow snapshot
 
-you need to recover from bad human input
+- you need to recover from bad human input
 
-Testing the Pipeline
+## Testing the Pipeline
 
 There are two useful layers of testing.
 
 1. Quick orchestration smoke test
+
+```bash
 make task-orch-smoke
+```
+
 2. Full orchestration test suite
 
 Run:
 
+```bash
 pytest orchestration/tests -q
-Useful individual tests
+```
+
+### Useful individual tests
+
+```bash
 pytest orchestration/tests/test_routing.py -q
 pytest orchestration/tests/test_state_machine.py -q
 pytest orchestration/tests/test_integrity.py -q
 pytest orchestration/tests/test_e2e_mocked.py -q
 pytest orchestration/tests/test_escalation_rework_ship.py -q
+```
 
 These tests validate workflow logic without requiring live model calls.
 
-Guardrails
+## Guardrails
 
 The workflow is designed to enforce these rules:
 
-structured state is authoritative
+- structured state is authoritative
+- human approval is mandatory before build
+- immutable plan region must not change during mutable stages
+- verification is required before approval and ship
+- out-of-scope changes are blocked
+- ship is blocked if blockers remain
+- workflow should never intentionally ship from base branch
+- markdown is rendered from state rather than reparsed as the primary workflow database
 
-human approval is mandatory before build
-
-immutable plan region must not change during mutable stages
-
-verification is required before approval and ship
-
-out-of-scope changes are blocked
-
-ship is blocked if blockers remain
-
-workflow should never intentionally ship from base branch
-
-markdown is rendered from state rather than reparsed as the primary workflow database
-
-Practical Advice
+## Practical Advice
 
 If you are implementing a real feature, do this:
 
-create the task file
-
-write a clear objective and constraints
-
-run task-all
-
-inspect the generated plan carefully
-
-only approve the plan if you would approve it from a human engineer
-
-during human review, push hard on:
-
-scope creep
-
-weak verification
-
-unclear evidence
-
-unnecessary refactors
-
-only ship once findings are actually closed, not just summarized nicely
+- create the task file
+- write a clear objective and constraints
+- run task-all
+- inspect the generated plan carefully
+- only approve the plan if you would approve it from a human engineer
+- during human review, push hard on:
+  - scope creep
+  - weak verification
+  - unclear evidence
+  - unnecessary refactors
+- only ship once findings are actually closed, not just summarized nicely
 
 The quality of the workflow depends more on discipline than on model choice.

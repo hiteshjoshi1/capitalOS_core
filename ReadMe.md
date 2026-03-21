@@ -175,3 +175,227 @@ Optional, for AI workflow features:
 
 ```bash
 make up
+```
+
+Wait for services to be ready (Postgres, API, Web).
+
+### 2. Stop services
+
+```bash
+make down
+```
+
+Stops all running containers.
+
+### 3. Verify API health
+
+```bash
+curl http://localhost:8000/health
+```
+
+### 4. Access the application
+
+- **Frontend**: http://localhost:5173
+- **API docs**: http://localhost:8000/docs
+- **OpenAPI spec**: http://localhost:8000/openapi.json
+
+### 5. Run initial migrations
+
+```bash
+make db-migrate
+```
+
+### 6. (Optional) Seed dummy data
+
+```bash
+make db-seed-dummy
+```
+
+---
+
+## AI Task Pipeline
+
+CapitalOS uses a LangGraph-based AI task orchestration pipeline for feature development.
+
+### Pipeline Overview
+
+The pipeline consists of seven core stages:
+
+1. **prepare** — Ensure task file exists, switch to issue branch, bootstrap workflow context
+2. **plan** — Generate structured implementation plan with acceptance criteria
+3. **human_approval_gate** — Mandatory human review of plan before build
+4. **build** — Implement feature, run verification suite, stage scoped changes
+5. **agent_review** — Model reviews build output, approves or requests fixes
+6. **human_review** — Human review after agent review
+7. **ship** — Commit, push, and optionally open PR
+
+If fixes are needed, the **rework** stage analyzes findings and re-implements, then returns to review loop.
+
+### Running a Task
+
+```bash
+# Prepare the task and branch
+make task-prepare TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Generate implementation plan
+make task-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Approve the plan (after human review)
+make task-approve-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved",...}'
+
+# Build the feature
+make task-build TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Agent review
+make task-agent-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Human review (after agent review)
+make task-human-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved",...}'
+
+# Ship the feature
+make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
+
+Or run all stages end-to-end (with gates):
+
+```bash
+make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
+
+For complete workflow documentation, see [`docs/workflows/ai-task-flow.md`](docs/workflows/ai-task-flow.md).
+
+---
+
+## Verification Commands
+
+### Run all quality gates
+
+```bash
+make verify
+```
+
+This runs:
+- Linting (ruff for Python, eslint for TypeScript)
+- Type checking (mypy for Python, tsc for TypeScript)
+- Backend tests (pytest)
+- Frontend tests (vitest)
+
+### Individual verification commands
+
+```bash
+# Lint code
+make lint
+
+# Type check
+make typecheck
+
+# Run backend tests
+make test-backend
+
+# Run frontend tests
+make test-frontend
+
+# Run E2E tests (if configured)
+make e2e
+```
+
+### Database verification
+
+```bash
+# Check database connectivity
+make db-wait
+
+# Query database
+make db-query QUERY='SELECT * FROM accounts LIMIT 5;'
+
+# Open database shell
+make db-shell
+```
+
+### API smoke tests
+
+```bash
+# Quick API health check
+make api-smoke
+
+# Test ingestion pipeline (requires account)
+make ingest-smoke
+
+# Test crypto endpoints
+make crypto-smoke
+```
+
+---
+
+## Development Workflow
+
+### Making changes
+
+1. Create a task file: `tasks/issue-<id>-<slug>.md`
+2. Run `make task-all TASK=<task-file> THREAD_ID=<thread-id>`
+3. Review output and respond to gates as needed
+4. Verify changes: `make verify`
+5. Ship when approved: `make task-ship TASK=<task-file> THREAD_ID=<thread-id>`
+
+### Rebuilding services
+
+```bash
+# Rebuild API container
+make api-rebuild
+
+# Rebuild web container
+make web-rebuild
+```
+
+### Resetting database
+
+```bash
+# WARNING: This destroys all data
+make db-reset
+```
+
+---
+
+## Project Structure
+
+```
+capitalos/
+├── api/                    # FastAPI backend
+│   ├── app/                # Application code
+│   │   ├── models/         # SQLAlchemy models
+│   │   ├── routers/        # API endpoints
+│   │   ├── services/       # Business logic
+│   │   └── main.py         # FastAPI app
+│   ├── tests/              # Backend tests
+│   └── Dockerfile
+├── web/                    # React frontend (Vite)
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   ├── types/          # TypeScript types
+│   │   └── main.tsx        # Entry point
+│   ├── package.json
+│   └── Dockerfile
+├── migrations/             # SQL migrations
+├── orchestration/          # LangGraph task pipeline
+├── tasks/                  # Task definition files
+├── docs/                   # Documentation
+├── docker-compose.yml      # Service orchestration
+├── Makefile                # Build and task commands
+└── ReadMe.md               # This file
+```
+
+---
+
+## Contributing
+
+1. Follow the project principles in AGENTS.md
+2. Use the AI task pipeline for all features
+3. Ensure all changes pass `make verify`
+4. Keep changes scoped and deterministic
+5. Never break the API contract
+
+---
+
+## License
+
+MIT

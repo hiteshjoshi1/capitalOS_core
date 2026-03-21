@@ -61,6 +61,7 @@ class AgentReview(BaseModel):
     summary: str
     findings: List[str] = Field(default_factory=list)
     test_gaps: List[str] = Field(default_factory=list)
+    semantic_verification: List[str] = Field(default_factory=list)
     verification_considered: bool = True
     created_at: datetime = Field(default_factory=utc_now)
 
