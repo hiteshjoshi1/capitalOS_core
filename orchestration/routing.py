@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from orchestration.services.config import get_config
 from orchestration.state import GraphState, load_pipeline_state
 
 
@@ -48,6 +49,9 @@ def route_after_agent_review(state: GraphState) -> str:
     if cycle.agent_review.decision == "approved":
         return "human_review"
 
+    if len(pipeline.rework_cycles) >= get_config().max_rework_cycles:
+        return "human_review"
+
     return "rework_analysis"
 
 
@@ -57,6 +61,8 @@ def route_after_escalation_review(state: GraphState) -> str:
     if not cycle or not cycle.escalation_review:
         return "__end__"
     if cycle.escalation_review.decision == "approved":
+        return "human_review"
+    if len(pipeline.rework_cycles) >= get_config().max_rework_cycles:
         return "human_review"
     return "rework_analysis"
 

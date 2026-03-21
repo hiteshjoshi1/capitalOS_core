@@ -6,6 +6,7 @@ def build_review_prompt(state: PipelineState) -> str:
     verification_summary = ""
     if state.build_output and state.build_output.verification:
         verification_summary = state.build_output.verification.summary
+    changed_files = state.build_output.changed_files if state.build_output else []
     approved_extra_files = ""
     if state.approved_extra_files:
         approved_extra_files = "\n".join(
@@ -41,8 +42,16 @@ Build summary:
 Verification:
 {verification_summary}
 
+Changed files observed by the pipeline:
+{chr(10).join(f"- {path}" for path in changed_files) or "None"}
+
 Approved extra files:
 {approved_extra_files or "None"}
+
+Review rules:
+1) Base findings only on the evidence above and the repository state you directly inspect.
+2) Do not claim anything about git history, branch diffs, staged-vs-committed state, or PR readiness unless that evidence is explicitly provided or you directly verify it with a tool.
+3) If you decide `needs_fixes`, make the findings concrete and actionable for the next rework cycle.
 """.strip()
 
 
@@ -50,6 +59,7 @@ def build_escalation_review_prompt(state: PipelineState, primary_review: AgentRe
     verification_summary = ""
     if state.build_output and state.build_output.verification:
         verification_summary = state.build_output.verification.summary
+    changed_files = state.build_output.changed_files if state.build_output else []
 
     return f"""
 You are the escalation reviewer.
@@ -77,6 +87,14 @@ Primary review:
 
 Verification:
 {verification_summary}
+
+Changed files observed by the pipeline:
+{chr(10).join(f"- {path}" for path in changed_files) or "None"}
+
+Review rules:
+1) Base findings only on the evidence above and the repository state you directly inspect.
+2) Do not claim anything about git history, branch diffs, staged-vs-committed state, or PR readiness unless that evidence is explicitly provided or you directly verify it with a tool.
+3) If you decide `needs_fixes`, make the findings concrete and actionable for the next rework cycle.
 
 Do not return escalate unless absolutely unavoidable.
 """.strip()

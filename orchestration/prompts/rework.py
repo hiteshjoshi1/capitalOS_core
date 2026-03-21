@@ -1,8 +1,14 @@
 from orchestration.models.pipeline import PipelineState
 
 
+def _bullets(items: list[str]) -> str:
+    return "\n".join(f"- {item}" for item in items) if items else "- None"
+
+
 def build_rework_analysis_prompt(state: PipelineState) -> str:
     cycle = state.get_active_review_cycle()
+    effective_review = cycle.escalation_review or cycle.agent_review if cycle else None
+    human_review = cycle.human_review if cycle else None
     return f"""
 You are doing rework analysis.
 
@@ -28,12 +34,52 @@ Required JSON shape:
     }}
   ]
 }}
+
+Latest review context:
+- review_id: {cycle.review_id if cycle else ""}
+- review_source: {cycle.source if cycle else ""}
+- review_status: {cycle.status if cycle else ""}
+- review_decision: {effective_review.decision if effective_review else ""}
+- risk: {effective_review.risk if effective_review else ""}
+- summary: {effective_review.summary if effective_review else ""}
+
+Reviewer findings:
+{_bullets(effective_review.findings if effective_review else [])}
+
+Reviewer test gaps:
+{_bullets(effective_review.test_gaps if effective_review else [])}
+
+Human review comments:
+- decision: {human_review.decision if human_review else "none"}
+- notes: {human_review.notes if human_review and human_review.notes else "None"}
+
+Human questions:
+{_bullets(human_review.questions if human_review else [])}
+
+Human unresolved comments:
+{_bullets(human_review.unresolved_comments if human_review else [])}
+
+Human response requirements:
+{_bullets(human_review.response_requirements if human_review else [])}
+
+Previous rework cycles:
+{_bullets([
+    f"{rework.rework_cycle_id}: status={rework.status}; root_cause={rework.analysis.root_cause if rework.analysis else 'n/a'}"
+    for rework in state.rework_cycles
+])}
+
+Requirements:
+1) Base your analysis on the review findings and human comments above.
+2) Every `findings_addressed` entry must map back to a concrete reviewer finding, test gap, or human response requirement.
+3) If a reviewer claim cannot be justified by the provided evidence, call that out explicitly in `unresolved_assumptions` instead of accepting it as fact.
 """.strip()
 
 
 def build_rework_implementation_prompt(state: PipelineState) -> str:
     rework = state.get_active_rework_cycle()
     analysis = rework.analysis if rework else None
+    cycle = state.get_active_review_cycle()
+    human_review = cycle.human_review if cycle else None
     return f"""
 You are implementing a rework.
 
@@ -52,13 +98,23 @@ Required JSON shape:
 }}
 
 Planned changes:
-{chr(10).join(f"- {x}" for x in (analysis.planned_changes if analysis else []))}
+{_bullets(analysis.planned_changes if analysis else [])}
 
 Validation plan:
-{chr(10).join(f"- {x}" for x in (analysis.validation_plan if analysis else []))}
+{_bullets(analysis.validation_plan if analysis else [])}
+
+Findings addressed:
+{_bullets(analysis.findings_addressed if analysis else [])}
+
+Human response requirements:
+{_bullets(human_review.response_requirements if human_review else [])}
+
+Human unresolved comments:
+{_bullets(human_review.unresolved_comments if human_review else [])}
 
 Hard constraints:
 1) Actually modify the repo to address the rework findings before returning.
 2) Keep changes scoped to the current rework cycle.
 3) Do not claim filesystem write restrictions unless a real tool invocation fails and you include the concrete failed command in your summary.
+4) Do not invent git-history, branch-diff, or commit-state claims unless you directly verified them with a tool during this implementation.
 """.strip()

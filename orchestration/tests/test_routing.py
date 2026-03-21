@@ -123,6 +123,40 @@ def test_route_after_agent_review_needs_fixes_goes_to_rework():
     assert route_after_agent_review(dump_pipeline_state(state)) == "rework_analysis"
 
 
+def test_route_after_agent_review_needs_fixes_goes_to_human_review_after_max_reworks(
+    monkeypatch,
+):
+    state = _base_state(execution_mode="workflow")
+    state.rework_cycles.extend(
+        [
+            ReworkCycle(rework_cycle_id="W1", source_review_id="R1", status="implementation_complete"),
+            ReworkCycle(rework_cycle_id="W2", source_review_id="R2", status="implementation_complete"),
+        ]
+    )
+    cycle = ReviewCycle(
+        review_id="R3",
+        source="rework",
+        source_rework_cycle_id="W2",
+        agent_review=AgentReview(
+            review_id="R3",
+            model_name="reviewer",
+            decision="needs_fixes",
+            risk="medium",
+            summary="still not correct",
+        ),
+        status="needs_fixes",
+    )
+    state.review_cycles.append(cycle)
+    state.active_review_cycle_id = "R3"
+
+    monkeypatch.setattr(
+        "orchestration.routing.get_config",
+        lambda: type("Cfg", (), {"max_rework_cycles": 2})(),
+    )
+
+    assert route_after_agent_review(dump_pipeline_state(state)) == "human_review"
+
+
 def test_route_after_agent_review_step_advances_to_escalation_when_high_risk():
     state = _base_state(execution_mode="step")
     cycle = ReviewCycle(
@@ -208,6 +242,40 @@ def test_route_after_escalation_review_needs_fixes_goes_to_rework():
     state.active_review_cycle_id = "R1"
 
     assert route_after_escalation_review(dump_pipeline_state(state)) == "rework_analysis"
+
+
+def test_route_after_escalation_review_needs_fixes_goes_to_human_review_after_max_reworks(
+    monkeypatch,
+):
+    state = _base_state(execution_mode="workflow")
+    state.rework_cycles.extend(
+        [
+            ReworkCycle(rework_cycle_id="W1", source_review_id="R1", status="implementation_complete"),
+            ReworkCycle(rework_cycle_id="W2", source_review_id="R2", status="implementation_complete"),
+        ]
+    )
+    cycle = ReviewCycle(
+        review_id="R3",
+        source="rework",
+        source_rework_cycle_id="W2",
+        escalation_review=AgentReview(
+            review_id="R3",
+            model_name="reviewer_escalation",
+            decision="needs_fixes",
+            risk="medium",
+            summary="still not correct",
+        ),
+        status="needs_fixes",
+    )
+    state.review_cycles.append(cycle)
+    state.active_review_cycle_id = "R3"
+
+    monkeypatch.setattr(
+        "orchestration.routing.get_config",
+        lambda: type("Cfg", (), {"max_rework_cycles": 2})(),
+    )
+
+    assert route_after_escalation_review(dump_pipeline_state(state)) == "human_review"
 
 
 def test_route_after_rework_analysis_step_advances_to_rework_implementation():

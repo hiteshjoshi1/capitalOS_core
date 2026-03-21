@@ -25,6 +25,7 @@ class ModelRoutingConfig(BaseModel):
     copilot_tool_mode: Literal["text-only", "tools-enabled"] = "tools-enabled"
 
     max_retries: int = Field(default=3, ge=1)
+    max_rework_cycles: int = Field(default=2, ge=1)
     codex_timeout_minutes: int = Field(default=60, ge=1)
     build_max_autopilot_continues: int = Field(default=12, ge=1)
 
@@ -46,6 +47,7 @@ class ModelRoutingConfig(BaseModel):
             review_escalation_model=os.getenv("REVIEW_ESCALATION_MODEL", "claude-opus-4.6"),
             copilot_tool_mode=os.getenv("COPILOT_TOOL_MODE", "tools-enabled"),
             max_retries=int(os.getenv("MAX_RETRIES", "3")),
+            max_rework_cycles=int(os.getenv("MAX_REWORK_CYCLES", "2")),
             codex_timeout_minutes=int(os.getenv("CODEX_TIMEOUT_MINUTES", "60")),
             build_max_autopilot_continues=int(os.getenv("BUILD_MAX_AUTOPILOT_CONTINUES", "12")),
             create_pr_on_ship=os.getenv("CREATE_PR_ON_SHIP", "0") == "1",
