@@ -37,6 +37,8 @@ def build_rework_implementation_prompt(state: PipelineState) -> str:
     return f"""
 You are implementing a rework.
 
+Apply the rework changes in the repository before you respond.
+
 Return strict JSON only.
 
 Required JSON shape:
@@ -51,4 +53,12 @@ Required JSON shape:
 
 Planned changes:
 {chr(10).join(f"- {x}" for x in (analysis.planned_changes if analysis else []))}
+
+Validation plan:
+{chr(10).join(f"- {x}" for x in (analysis.validation_plan if analysis else []))}
+
+Hard constraints:
+1) Actually modify the repo to address the rework findings before returning.
+2) Keep changes scoped to the current rework cycle.
+3) Do not claim filesystem write restrictions unless a real tool invocation fails and you include the concrete failed command in your summary.
 """.strip()

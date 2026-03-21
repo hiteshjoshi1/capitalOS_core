@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from orchestration.models.rework import ReworkImplementationResult
+from orchestration.models.stage import PipelineStage
 from orchestration.prompts.rework import build_rework_implementation_prompt
 from orchestration.render import render_task_file
 from orchestration.services.builder_fix import BuilderFixService
@@ -14,7 +15,7 @@ from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_s
 
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
-    pipeline.current_stage = "rework_implementation"
+    pipeline.current_stage = PipelineStage.REWORK_IMPLEMENTATION
     pipeline.workflow_status = "running"
 
     cfg = get_config()
@@ -25,7 +26,10 @@ def run(state: GraphState) -> GraphState:
     if not rework or not rework.analysis:
         raise RuntimeError("Cannot implement rework without an active rework analysis.")
 
-    impl = LLMService(model=cfg.builder_model).complete_structured(
+    impl = LLMService(
+        PipelineStage.REWORK_IMPLEMENTATION,
+        repo_root=pipeline.issue.repo_root,
+    ).complete_structured(
         build_rework_implementation_prompt(pipeline),
         ReworkImplementationResult,
     )

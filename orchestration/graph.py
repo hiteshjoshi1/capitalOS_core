@@ -75,6 +75,7 @@ def build_graph(checkpointer):
         {
             "escalation_review": "escalation_review",
             "human_review": "human_review",
+            "rework_analysis": "rework_analysis",
             "__end__": END,
         },
     )
@@ -83,13 +84,14 @@ def build_graph(checkpointer):
         route_after_escalation_review,
         {
             "human_review": "human_review",
+            "rework_analysis": "rework_analysis",
             "__end__": END,
         },
     )
     graph.add_conditional_edges(
         "human_review",
         route_after_human_review,
-        {"ship": "ship", "rework_analysis": "rework_analysis", "__end__": END},
+        {"ship": "ship", "agent_review": "agent_review", "rework_analysis": "rework_analysis", "__end__": END},
     )
     graph.add_conditional_edges(
         "rework_analysis",

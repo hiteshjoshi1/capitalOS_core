@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from orchestration.models.review import AgentReview
+from orchestration.models.stage import PipelineStage
+from orchestration.models.stage import PipelineStage
 from orchestration.prompts.review import build_escalation_review_prompt
 from orchestration.render import render_task_file
 from orchestration.services.config import get_config
@@ -10,7 +12,7 @@ from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_s
 
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
-    pipeline.current_stage = "agent_review"
+    pipeline.current_stage = PipelineStage.ESCALATION_REVIEW
     pipeline.workflow_status = "running"
 
     cfg = get_config()
@@ -18,7 +20,7 @@ def run(state: GraphState) -> GraphState:
     if not cycle or not cycle.agent_review:
         raise RuntimeError("Escalation review requires an active primary review cycle.")
 
-    escalation = LLMService(model=cfg.review_escalation_model).complete_structured(
+    escalation = LLMService(PipelineStage.ESCALATION_REVIEW).complete_structured(
         build_escalation_review_prompt(pipeline, cycle.agent_review),
         AgentReview,
     )

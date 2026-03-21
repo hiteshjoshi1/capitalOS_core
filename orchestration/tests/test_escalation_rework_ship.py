@@ -5,6 +5,7 @@ from pathlib import Path
 from langgraph.types import Command
 
 from orchestration.graph import build_graph
+from orchestration.models.stage import PipelineStage
 from orchestration.services.persistence import get_checkpointer
 
 
@@ -112,7 +113,7 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
             )
 
         if name == "AgentReview":
-            if self.model == "reviewer":
+            if self.stage == PipelineStage.AGENT_REVIEW:
                 call_counters["agent_review"] += 1
                 if call_counters["agent_review"] == 1:
                     return model_cls(
@@ -137,7 +138,7 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
                         verification_considered=True,
                     )
 
-            if self.model == "reviewer_escalation":
+            if self.stage == PipelineStage.ESCALATION_REVIEW:
                 call_counters["escalation_review"] += 1
                 return model_cls(
                     review_id="R1",
@@ -259,24 +260,7 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
     )
 
     snapshot = graph.get_state(config)
-    assert snapshot.interrupts, "Expected interrupt at human review after escalation"
-
-    graph.invoke(
-        Command(
-            resume={
-                "decision": "needs_fixes",
-                "reviewer": "Hitesh",
-                "notes": "Please address the routing issue.",
-                "questions": ["Was the edge case covered?"],
-                "response_requirements": ["Show the exact routing fix."],
-                "unresolved_comments": ["Do not ship until corrected."],
-            }
-        ),
-        config=config,
-    )
-
-    snapshot = graph.get_state(config)
-    assert snapshot.interrupts, "Expected second human review interrupt after re-review"
+    assert snapshot.interrupts, "Expected human review interrupt after rework and re-review"
 
     result = graph.invoke(
         Command(

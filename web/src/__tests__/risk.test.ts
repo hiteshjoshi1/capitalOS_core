@@ -101,7 +101,7 @@ describe("risk helpers", () => {
     expect(distribution.map((item) => item.symbol)).toEqual(["AAPL", "MSFT", "TSLA"]);
   });
 
-  it("includes CASH holdings in concentration and distribution", () => {
+  it("excludes CASH holdings from concentration and distribution", () => {
     const cashHolding: Holding = {
       asset_id: 100,
       symbol: "CASH",
@@ -113,10 +113,15 @@ describe("risk helpers", () => {
 
     const top3 = computeTopNConcentrationRisk(holdings, 500, 3);
     expect(top3.hasData).toBe(true);
-    expect(top3.percent).toBeCloseTo(70.0, 4);
+    // CASH should be excluded, so only AAPL (100) + MSFT (50) = 150
+    expect(top3.percent).toBeCloseTo(30.0, 4);
 
     const distribution = buildTopNDistribution(holdings, 500, 3);
-    expect(distribution[0].symbol).toBe("CASH");
-    expect(distribution[0].assetClass).toBe("CASH");
+    // CASH should not appear in distribution
+    expect(distribution.length).toBe(2);
+    expect(distribution[0].symbol).toBe("AAPL");
+    expect(distribution[0].assetClass).toBe("STOCK");
+    expect(distribution[1].symbol).toBe("MSFT");
+    expect(distribution[1].assetClass).toBe("STOCK");
   });
 });

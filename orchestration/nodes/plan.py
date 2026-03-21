@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from orchestration.models.plan import PlanOutput
+from orchestration.models.stage import PipelineStage
+from orchestration.models.stage import PipelineStage
 from orchestration.render import render_task_file
 from orchestration.services.config import get_config
 from orchestration.services.llm import LLMService
@@ -11,7 +13,7 @@ from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_s
 
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
-    pipeline.current_stage = "plan"
+    pipeline.current_stage = PipelineStage.PLAN
     pipeline.workflow_status = "running"
 
     cfg = get_config()
@@ -19,7 +21,7 @@ def run(state: GraphState) -> GraphState:
     md.ensure_required_markers(pipeline.issue.task_file)
     task_markdown = md.read(pipeline.issue.task_file)
 
-    planner = LLMService(model=cfg.planner_model)
+    planner = LLMService(PipelineStage.PLAN)
     plan = planner.complete_structured(build_plan_prompt(task_markdown), PlanOutput)
     plan.planner_model = cfg.planner_model
     plan.immutable_plan_hash = md.immutable_hash(task_markdown)

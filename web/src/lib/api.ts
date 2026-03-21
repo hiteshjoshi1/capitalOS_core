@@ -92,6 +92,7 @@ net_worth_change: null | {
     compare_month: string;
   };
 };
+cash_percent: number;
 };
 
 export type SpendingSummary = {

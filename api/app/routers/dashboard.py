@@ -11,6 +11,7 @@ from app.db.session import get_db
 from app.schemas.dashboard import (
     CashDepositsItem,
     CashDepositsOut,
+    DashboardSummaryResponse,
     PlatformAllocationItem,
     PlatformAllocationOut,
     StockExposureItem,
@@ -247,6 +248,8 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
 def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency: str, limit: int = 10) -> List[Dict[str, Any]]:
     if total <= 0:
         return []
+    
+    # Combined query: positions (stocks/funds, excluding CASH) UNION ALL crypto wallet snapshots (grouped by base_asset)
     q = text("""
         WITH latest AS (
           SELECT account_id, MAX(as_of) AS as_of
@@ -271,71 +274,121 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
             WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
             GROUP BY asset_id
           ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
+        ),
+        -- Positions: stocks/funds, excluding CASH
+        positions_holdings AS (
+          SELECT
+            a.id AS asset_id,
+            a.symbol AS symbol,
+            CAST(a.asset_class AS TEXT) AS asset_class,
+            CAST(COALESCE(lp.currency, a.quote_currency) AS TEXT) AS quote_currency,
+            CAST(a.home_country AS TEXT) AS home_country,
+            CAST(mx.exchange_code AS TEXT) AS exchange_code,
+            CAST(COALESCE(pl.code, acc.platform) AS TEXT) AS platform,
+            p.quantity AS quantity,
+            p.avg_cost AS avg_cost,
+            lp.price AS latest_price,
+            CASE
+              WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
+                THEN p.quantity * lp.price
+              ELSE p.cost_basis_base
+            END AS value
+          FROM positions p
+          JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+          JOIN accounts acc ON acc.id = p.account_id
+          LEFT JOIN platforms pl ON pl.id = acc.platform_id
+          JOIN assets a ON a.id = p.asset_id
+          LEFT JOIN map_exchange mx ON mx.asset_id = a.id
+          LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
+          WHERE a.asset_class <> 'CRYPTO' AND a.asset_class <> 'CASH'
+        ),
+        -- Crypto: wallet snapshots grouped by base_asset (or symbol if base_asset is null)
+        latest_wallets AS (
+          SELECT wallet_id, MAX(as_of_date) AS as_of_date
+          FROM crypto_wallet_snapshots
+          WHERE as_of_date <= :as_of_date
+          GROUP BY wallet_id
+        ),
+        crypto_holdings AS (
+          SELECT
+            CAST(NULL AS BIGINT) AS asset_id,
+            CAST(UPPER(COALESCE(ca.base_asset, i.symbol)) AS TEXT) AS symbol,
+            CAST('CRYPTO' AS TEXT) AS asset_class,
+            CAST('USD' AS TEXT) AS quote_currency,
+            CAST(NULL AS TEXT) AS home_country,
+            CAST(NULL AS TEXT) AS exchange_code,
+            CAST('CRYPTO' AS TEXT) AS platform,
+            CAST(NULL AS NUMERIC) AS quantity,
+            CAST(NULL AS NUMERIC) AS avg_cost,
+            CAST(NULL AS NUMERIC) AS latest_price,
+            SUM(i.value_usd) AS value
+          FROM crypto_wallet_snapshots s
+          JOIN latest_wallets lw ON lw.wallet_id = s.wallet_id AND lw.as_of_date = s.as_of_date
+          JOIN crypto_wallets w ON w.id = s.wallet_id
+          JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+          LEFT JOIN crypto_assets ca ON (ca.id = i.asset_id) 
+                                      OR (i.asset_id IS NULL AND LOWER(ca.symbol) = LOWER(i.symbol) AND ca.chain = i.chain)
+          WHERE w.status = 'active'
+          GROUP BY COALESCE(ca.base_asset, i.symbol)
         )
-        SELECT
-          a.id AS asset_id,
-          a.symbol,
-          a.asset_class,
-          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
-          a.home_country AS home_country,
-          mx.exchange_code AS exchange_code,
-          COALESCE(pl.code, acc.platform) AS platform,
-          p.quantity AS quantity,
-          p.avg_cost AS avg_cost,
-          lp.price AS latest_price,
-          CASE
-            WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
-              THEN p.quantity * lp.price
-            ELSE p.cost_basis_base
-          END AS value
-        FROM positions p
-        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
-        JOIN accounts acc ON acc.id = p.account_id
-        LEFT JOIN platforms pl ON pl.id = acc.platform_id
-        JOIN assets a ON a.id = p.asset_id
-        LEFT JOIN map_exchange mx ON mx.asset_id = a.id
-        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
-        WHERE a.asset_class <> 'CRYPTO'
+        SELECT * FROM positions_holdings
+        UNION ALL
+        SELECT * FROM crypto_holdings
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "as_of_date": anchor_ts.date()}).mappings().all()
+    
+    # USD rate for crypto conversion
+    usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
+    
+    # Collect all unique currencies for FX conversion
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
-    agg: Dict[int, Dict[str, Any]] = {}
-    geo_bucket: Dict[int, Dict[str, float]] = {}
-    platform_bucket: Dict[int, Dict[str, float]] = {}
+    rates["USD"] = usd_rate  # Ensure USD is in rates
+    
+    # Aggregate by symbol (for crypto grouped by base_asset) or asset_id (for positions)
+    agg: Dict[tuple, Dict[str, Any]] = {}
+    geo_bucket: Dict[tuple, Dict[str, float]] = {}
+    platform_bucket: Dict[tuple, Dict[str, float]] = {}
+    
     for r in rows:
-        asset_id = int(r["asset_id"])
+        # Skip rows with NULL value
+        if r["value"] is None:
+            continue
+            
+        # Key: (asset_id, symbol, asset_class) - for crypto, asset_id is None so symbol is the grouping key
+        key = (r["asset_id"], r["symbol"], r["asset_class"])
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
-        display_symbol = r["symbol"]
-        if r["asset_class"] == "CASH" and r.get("quote_currency"):
-            display_symbol = r["quote_currency"]
-        if asset_id not in agg:
-            agg[asset_id] = {
-                "asset_id": asset_id,
-                "symbol": display_symbol,
+        
+        if key not in agg:
+            agg[key] = {
+                "asset_id": r["asset_id"],
+                "symbol": r["symbol"],
                 "asset_class": r["asset_class"],
                 "value": 0.0,
                 "quantity": 0.0,
                 "avg_cost": None,
                 "latest_price": float(r["latest_price"]) if r["latest_price"] is not None else None,
-                "quote_currency": (r["quote_currency"] or "").upper() or None,
+                "quote_currency": cur if r["quote_currency"] else None,
                 "_avg_cost_numerator": 0.0,
                 "_avg_cost_denominator": 0.0,
                 "_has_quantity": False,
             }
-        agg[asset_id]["value"] += value
+        
+        agg[key]["value"] += value
         quantity = float(r["quantity"]) if r["quantity"] is not None else None
         if quantity is not None:
-            agg[asset_id]["quantity"] += quantity
-            agg[asset_id]["_has_quantity"] = True
+            agg[key]["quantity"] += quantity
+            agg[key]["_has_quantity"] = True
             if r["avg_cost"] is not None and quantity > 0:
-                agg[asset_id]["_avg_cost_numerator"] += float(r["avg_cost"]) * quantity
-                agg[asset_id]["_avg_cost_denominator"] += quantity
-        if not agg[asset_id]["quote_currency"] and r["quote_currency"]:
-            agg[asset_id]["quote_currency"] = str(r["quote_currency"]).upper()
-        if agg[asset_id]["latest_price"] is None and r["latest_price"] is not None:
-            agg[asset_id]["latest_price"] = float(r["latest_price"])
+                agg[key]["_avg_cost_numerator"] += float(r["avg_cost"]) * quantity
+                agg[key]["_avg_cost_denominator"] += quantity
+        
+        if not agg[key]["quote_currency"] and r["quote_currency"]:
+            agg[key]["quote_currency"] = str(r["quote_currency"]).upper()
+        if agg[key]["latest_price"] is None and r["latest_price"] is not None:
+            agg[key]["latest_price"] = float(r["latest_price"])
+        
         geo = _infer_country(
             r["symbol"],
             r["home_country"],
@@ -344,9 +397,12 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
             r["exchange_code"],
         )
         platform = r["platform"] or "UNKNOWN"
-        geo_bucket.setdefault(asset_id, {})[geo] = geo_bucket.setdefault(asset_id, {}).get(geo, 0.0) + value
-        platform_bucket.setdefault(asset_id, {})[platform] = platform_bucket.setdefault(asset_id, {}).get(platform, 0.0) + value
+        geo_bucket.setdefault(key, {})[geo] = geo_bucket.setdefault(key, {}).get(geo, 0.0) + value
+        platform_bucket.setdefault(key, {})[platform] = platform_bucket.setdefault(key, {}).get(platform, 0.0) + value
+    
+    # Sort by value and take top N
     out = sorted(agg.values(), key=lambda x: x["value"], reverse=True)[:limit]
+    
     for r in out:
         value = float(r["value"])
         den = float(r.pop("_avg_cost_denominator"))
@@ -355,10 +411,13 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
         r["quantity"] = r["quantity"] if has_quantity else None
         r["avg_cost"] = (num / den) if den > 0 else None
         r["percent_of_networth"] = round((value / total) * 100, 2)
-        geo = geo_bucket.get(r["asset_id"], {})
-        platform = platform_bucket.get(r["asset_id"], {})
+        
+        key = (r["asset_id"], r["symbol"], r["asset_class"])
+        geo = geo_bucket.get(key, {})
+        platform = platform_bucket.get(key, {})
         r["geo"] = max(geo.items(), key=lambda x: x[1])[0] if geo else "UNKNOWN"
         r["platform"] = max(platform.items(), key=lambda x: x[1])[0] if platform else "UNKNOWN"
+    
     return out
 
 
@@ -650,7 +709,7 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dic
     }
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=DashboardSummaryResponse)
 def dashboard_summary(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
@@ -698,6 +757,9 @@ def dashboard_summary(
     if "prev_year" in compare_set:
         _delta("vs_prev_year", _add_months(month_start, -12))
 
+    # Compute cash_percent
+    cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
+
     return {
         "as_of_month": month,
         "base_currency": base_currency,
@@ -715,6 +777,7 @@ def dashboard_summary(
         "top_holdings": top,
         "cash_balances": cash_balances,
         "net_worth_change": changes if changes else None,
+        "cash_percent": cash_percent,
     }
 
 

@@ -113,14 +113,67 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
     assert dashboard_body["net_worth"]["total"] == 1123.45
     assert crypto_body["total_crypto_base"] == 123.45
     assert dashboard_body["net_worth"]["crypto"] == crypto_body["total_crypto_base"]
-    assert [row["symbol"] for row in dashboard_body["top_holdings"]] == ["SGD"]
-    assert all(row["asset_class"] != "CRYPTO" for row in dashboard_body["top_holdings"])
-    assert all(row["platform"] != "COINBASE" for row in dashboard_body["top_holdings"])
+    # After changes: CASH is excluded, CRYPTO (ETH) is included in top_holdings
+    assert [row["symbol"] for row in dashboard_body["top_holdings"]] == ["ETH"]
+    assert any(row["asset_class"] == "CRYPTO" for row in dashboard_body["top_holdings"])
+    assert all(row["asset_class"] != "CASH" for row in dashboard_body["top_holdings"])
     assert dashboard_body["geography"] == [{"country": "SG", "value": 1000.0, "percent": 89.01}]
     assert allocation_body["total"] == 1000.0
     assert allocation_body["items"] == [
         {"platform": "DBS", "platform_type": "BANK", "country": "SG", "value": 1000.0, "percent": 100.0}
     ]
+
+
+def test_dashboard_eth_derivative_grouping(client: TestClient, db_engine, monkeypatch):
+    """Verify ETH+wETH+stETH+wstETH collapse into single position."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-eth-test', 'evm', 'ethereum', '0xabc123', 'ETH Test Wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(80, 'wallet-eth-test', '2026-02-06', :as_of, 10000)"
+            ),
+            {"as_of": as_of},
+        )
+        # Create 4 separate ETH derivative items
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd, base_asset) VALUES "
+                "(80, 80, 'evm', 'ethereum', 'native', 'ETH', 1.0, 3000, 'ETH'), "
+                "(81, 80, 'evm', 'ethereum', 'token', 'wETH', 0.5, 1500, 'ETH'), "
+                "(82, 80, 'evm', 'ethereum', 'token', 'stETH', 1.2, 3600, 'ETH'), "
+                "(83, 80, 'evm', 'ethereum', 'token', 'wstETH', 0.6, 1900, 'ETH')"
+            )
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Verify ETH derivatives are collapsed into single position
+    eth_holdings = [h for h in data["top_holdings"] if h["symbol"] == "ETH"]
+    assert len(eth_holdings) == 1, "ETH derivatives should be collapsed into one position"
+    
+    # Verify total value = sum of all ETH derivatives
+    expected_total = 3000 + 1500 + 3600 + 1900  # 10000
+    assert eth_holdings[0]["value"] == expected_total
+    assert eth_holdings[0]["asset_class"] == "CRYPTO"
 
 
 def test_crypto_positions_cleanup_sql_removes_orphaned_assets(db_engine):
@@ -223,10 +276,15 @@ def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_das
     data = resp.json()
 
     top = data["top_holdings"]
+    # After changes: CASH is excluded from top_holdings
     cash_rows = [row for row in top if row["asset_class"] == "CASH"]
-    assert len(cash_rows) == 1
-    assert cash_rows[0]["symbol"] == "SGD"
-    assert cash_rows[0]["percent_of_networth"] == 30.0
+    assert len(cash_rows) == 0
+    # Verify cash_percent is exposed and correctly computed
+    assert "cash_percent" in data
+    assert data["cash_percent"] > 0
+    # Validate computed cash_percent = (cash / total) * 100
+    expected_cash_percent = round((data["net_worth"]["cash"] / data["net_worth"]["total"]) * 100, 2)
+    assert data["cash_percent"] == expected_cash_percent
 
 
 def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient, seed_dashboard_data):

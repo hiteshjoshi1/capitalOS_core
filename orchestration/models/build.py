@@ -23,9 +23,16 @@ class RetryEntry(BaseModel):
     created_at: datetime = Field(default_factory=utc_now)
 
 
+class ExtraChangedFile(BaseModel):
+    path: str
+    reason: str = ""
+    reason_source: str = "unknown"  # builder | inferred | unknown | approved
+
+
 class BuildOutput(BaseModel):
     summary: str
     changed_files: List[str] = Field(default_factory=list)
+    extra_changed_files: List[ExtraChangedFile] = Field(default_factory=list)
     completed_checklist_item_ids: List[str] = Field(default_factory=list)
     implementation_notes: List[str] = Field(default_factory=list)
     verification: Optional[VerificationEvidence] = None

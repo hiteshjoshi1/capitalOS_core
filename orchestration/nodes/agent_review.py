@@ -1,23 +1,75 @@
 from __future__ import annotations
 
 from orchestration.models.review import AgentReview, ReviewCycle
+from orchestration.models.stage import PipelineStage
 from orchestration.prompts.review import build_review_prompt
 from orchestration.render import render_task_file
 from orchestration.services.config import get_config
+from orchestration.services.git import GitService
 from orchestration.services.llm import LLMService
+from orchestration.services.scope import ScopePolicyService
 from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_state
 
 
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
-    pipeline.current_stage = "agent_review"
+    pipeline.current_stage = PipelineStage.AGENT_REVIEW
     pipeline.workflow_status = "running"
 
     cfg = get_config()
     review_id = pipeline.next_review_id()
     source = "rework" if pipeline.active_rework_cycle_id else "build"
+    scope = ScopePolicyService(pipeline)
+    git = GitService(pipeline.issue.repo_root)
+    changed_files = git.changed_files()
+    pending_extra_paths = scope.find_unapproved_extra_files(changed_files)
 
-    reviewer = LLMService(model=cfg.reviewer_model)
+    if pending_extra_paths:
+        known_extra = {}
+        if pipeline.build_output:
+            known_extra = {
+                item.path: item
+                for item in pipeline.build_output.extra_changed_files
+                if item.path
+            }
+
+        extra_changed_files = [
+            known_extra.get(path) or scope.infer_extra_file_reason(path)
+            for path in pending_extra_paths
+        ]
+        cycle = ReviewCycle(
+            review_id=review_id,
+            source=source,
+            source_rework_cycle_id=pipeline.active_rework_cycle_id,
+            agent_review=AgentReview(
+                review_id=review_id,
+                model_name=cfg.reviewer_model,
+                decision="needs_fixes",
+                risk="medium",
+                summary=(
+                    "Review paused because files outside the approved scope were changed. "
+                    "Human approval is required before substantive review can continue."
+                ),
+                findings=[
+                    "Unapproved extra changed files were detected outside the planned paths."
+                ],
+                test_gaps=[],
+                verification_considered=bool(
+                    pipeline.build_output and pipeline.build_output.verification
+                ),
+            ),
+            extra_changed_files=extra_changed_files,
+            status="scope_gate_pending",
+        )
+
+        pipeline.review_cycles.append(cycle)
+        pipeline.active_review_cycle_id = review_id
+        pipeline.workflow_status = "waiting_for_human"
+
+        render_task_file(pipeline)
+        return dump_pipeline_state(pipeline)
+
+    reviewer = LLMService(PipelineStage.AGENT_REVIEW)
     agent_review = reviewer.complete_structured(build_review_prompt(pipeline), AgentReview)
     agent_review.review_id = review_id
     agent_review.model_name = cfg.reviewer_model

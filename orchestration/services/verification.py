@@ -21,6 +21,7 @@ class VerificationService:
         infra_markers = [
             "permission denied while trying to connect to the docker daemon socket",
             "cannot connect to the docker daemon",
+            "secitemcopymatching failed",
             "temporary failure in name resolution",
             "network is unreachable",
             "tls handshake timeout",
@@ -29,6 +30,37 @@ class VerificationService:
         ]
         lowered = output.lower()
         return "infra" if any(x in lowered for x in infra_markers) else "code"
+
+    def _extract_failure_reason(self, output: str) -> str:
+        lines = [line.strip() for line in output.splitlines() if line.strip()]
+        if not lines:
+            return "Verification command failed."
+
+        preferred_markers = [
+            "permission denied while trying to connect to the docker daemon socket",
+            "cannot connect to the docker daemon",
+            "secitemcopymatching failed",
+            "temporary failure in name resolution",
+            "network is unreachable",
+            "tls handshake timeout",
+            "context deadline exceeded",
+            "connection refused",
+            "testinglibraryelementerror",
+            "operationalerror",
+            "unrecognized token",
+            "unable to find an element",
+        ]
+        for marker in preferred_markers:
+            for line in lines:
+                if marker in line.lower():
+                    return line[:300]
+
+        for line in lines:
+            lowered = line.lower()
+            if "error" in lowered or "failed" in lowered or "unable" in lowered:
+                return line[:300]
+
+        return lines[-1][:300]
 
     def _run_raw(self, command: str) -> tuple[int, str]:
         proc = subprocess.run(
@@ -78,6 +110,8 @@ class VerificationService:
                 )
 
             classification = self._classify_failure(output)
+            reason = self._extract_failure_reason(output)
+            entry_max_attempts = min(max_attempts, 2) if classification == "infra" else max_attempts
             failure_log = self.artifacts.persist_failure_output(
                 label=name,
                 command=command,
@@ -89,16 +123,19 @@ class VerificationService:
             entry = RetryEntry(
                 label=name,
                 attempt=attempt,
-                max_attempts=max_attempts,
+                max_attempts=entry_max_attempts,
                 command=command,
                 exit_code=code,
                 classification=classification,
                 failure_log_path=failure_log,
-                notes="Verification attempt failed.",
+                notes=f"Failure reason: {reason}",
             )
-            retry_entries.append(entry)
 
             if classification == "infra":
+                entry.notes = f"Infra failure: {reason}"
+                retry_entries.append(entry)
+                if attempt < min(max_attempts, 2):
+                    continue
                 return (
                     VerificationCommandResult(
                         name=name,
@@ -112,8 +149,47 @@ class VerificationService:
                     retry_entries,
                 )
 
-            if attempt == 2 and on_code_retry_fix is not None:
+            if on_code_retry_fix is None:
+                entry.notes = f"Code failure with no auto-fix available: {reason}"
+                retry_entries.append(entry)
+                return (
+                    VerificationCommandResult(
+                        name=name,
+                        command=command,
+                        status="fail",
+                        exit_code=code,
+                        output_excerpt=output[:4000],
+                        artifact_paths=self._collect_known_artifacts(),
+                        failure_log_path=failure_log,
+                    ),
+                    retry_entries,
+                )
+
+            if attempt >= max_attempts:
+                entry.notes = f"Code failure after max retry budget: {reason}"
+                retry_entries.append(entry)
+                break
+
+            try:
                 on_code_retry_fix(name, command, code, output)
+            except Exception as exc:
+                entry.notes = f"Auto-fix failed after code failure: {exc}"
+                retry_entries.append(entry)
+                return (
+                    VerificationCommandResult(
+                        name=name,
+                        command=command,
+                        status="fail",
+                        exit_code=code,
+                        output_excerpt=(output + f"\n\nAuto-fix failed: {exc}")[:4000],
+                        artifact_paths=self._collect_known_artifacts(),
+                        failure_log_path=failure_log,
+                    ),
+                    retry_entries,
+                )
+
+            entry.notes = f"Code failure analyzed and auto-fix applied: {reason}"
+            retry_entries.append(entry)
 
         final = retry_entries[-1]
         return (

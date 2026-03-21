@@ -1,7 +1,58 @@
 from __future__ import annotations
 
+from orchestration.models.build import ExtraChangedFile
 from orchestration.models.pipeline import PipelineState
 from orchestration.services.task_markdown import TaskMarkdownService
+
+
+def _human_gate_label(gate_name: str) -> str:
+    if gate_name == "plan_approval":
+        return "Plan Approval"
+    if gate_name == "human_review":
+        return "Human Review"
+    if gate_name.startswith("extra_files_approval"):
+        return "Extra Files Approval"
+    return gate_name.replace("_", " ").title()
+
+
+def _render_extra_changed_files(items: list[ExtraChangedFile]) -> list[str]:
+    if not items:
+        return []
+    lines = ["#### Extra Files Outside Planned Scope"]
+    for item in items:
+        reason = item.reason or "No reason recorded."
+        lines.append(
+            f"- `{item.path}`: {reason} (source: `{item.reason_source or 'unknown'}`)"
+        )
+    return lines
+
+
+def _render_human_gate_decisions(state: PipelineState) -> list[str]:
+    lines: list[str] = ["## Human Gate Decisions", ""]
+
+    if not state.human_gate_decisions:
+        lines.extend(["_No human gate decisions yet._", ""])
+        return lines
+
+    for gate_name in sorted(state.human_gate_decisions):
+        decision = state.human_gate_decisions[gate_name]
+        lines.append(f"### {_human_gate_label(gate_name)}")
+        lines.append(f"- decision: `{decision.decision}`")
+        lines.append(f"- reviewer: `{decision.reviewer}`")
+        lines.append(f"- decided_at: `{decision.decided_at.isoformat()}`")
+        lines.append(f"- notes: {decision.notes or '_none_'}")
+        if decision.questions:
+            lines.append("- questions:")
+            lines.extend([f"  - {x}" for x in decision.questions])
+        if decision.response_requirements:
+            lines.append("- response_requirements:")
+            lines.extend([f"  - {x}" for x in decision.response_requirements])
+        if decision.unresolved_comments:
+            lines.append("- unresolved_comments:")
+            lines.extend([f"  - {x}" for x in decision.unresolved_comments])
+        lines.append("")
+
+    return lines
 
 
 def _render_review_cycle(state: PipelineState) -> list[str]:
@@ -59,6 +110,25 @@ def _render_review_cycle(state: PipelineState) -> list[str]:
             if hr.unresolved_comments:
                 lines.append("- unresolved_comments:")
                 lines.extend([f"  - {x}" for x in hr.unresolved_comments])
+
+        if cycle.extra_changed_files:
+            lines.extend(_render_extra_changed_files(cycle.extra_changed_files))
+
+        if cycle.extra_files_review:
+            er = cycle.extra_files_review
+            lines.append("#### Extra Files Approval")
+            lines.append(f"- reviewer: `{er.reviewer}`")
+            lines.append(f"- decision: `{er.decision}`")
+            lines.append(f"- notes: {er.notes or '_none_'}")
+            if er.questions:
+                lines.append("- questions:")
+                lines.extend([f"  - {x}" for x in er.questions])
+            if er.response_requirements:
+                lines.append("- response_requirements:")
+                lines.extend([f"  - {x}" for x in er.response_requirements])
+            if er.unresolved_comments:
+                lines.append("- unresolved_comments:")
+                lines.extend([f"  - {x}" for x in er.unresolved_comments])
 
         lines.append("")
 
@@ -160,6 +230,14 @@ def render_execution_journal(state: PipelineState) -> str:
             lines.append("### Changed Files")
             lines.extend(f"- `{x}`" for x in state.build_output.changed_files)
             lines.append("")
+        if state.build_output.extra_changed_files:
+            lines.append("### Extra Files Outside Planned Scope")
+            for item in state.build_output.extra_changed_files:
+                lines.append(
+                    f"- `{item.path}`: {item.reason or 'No reason recorded.'} "
+                    f"(source: `{item.reason_source or 'unknown'}`)"
+                )
+            lines.append("")
         if state.build_output.verification:
             lines.extend(
                 [
@@ -169,17 +247,21 @@ def render_execution_journal(state: PipelineState) -> str:
                 ]
             )
 
+    lines.extend(_render_human_gate_decisions(state))
     lines.extend(_render_review_cycle(state))
     lines.extend(_render_rework_cycles(state))
 
     if state.retry_log:
         lines.append("## Retry Log")
         for entry in state.retry_log:
-            lines.append(
+            line = (
                 f"- {entry.label}: attempt {entry.attempt}/{entry.max_attempts}, "
                 f"class={entry.classification}, exit={entry.exit_code}, "
                 f"log={entry.failure_log_path or 'n/a'}"
             )
+            if entry.notes:
+                line += f", notes={entry.notes}"
+            lines.append(line)
         lines.append("")
 
     if state.blockers:

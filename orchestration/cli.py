@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from langgraph.types import Command
 
@@ -26,6 +27,7 @@ STEP_ENTRYPOINT_MAP = {
 
 
 RESUME_COMMANDS = {"resume", "approve-plan", "human-review"}
+INTERACTIVE_COMMANDS = {"respond"}
 
 
 def parse_args() -> argparse.Namespace:
@@ -43,6 +45,7 @@ def parse_args() -> argparse.Namespace:
             "ship",
             "all",
             "resume",
+            "respond",
             "export-state",
             "import-state",
             "restore-state",
@@ -123,6 +126,63 @@ def make_initial_state(args: argparse.Namespace, entrypoint: str, mode: str) -> 
     return {"pipeline": pipeline.model_dump(mode="json")}
 
 
+def load_existing_pipeline_state(graph, config: dict[str, Any]) -> PipelineState | None:
+    history_fn = getattr(graph, "get_state_history", None)
+    if callable(history_fn):
+        for snapshot in history_fn(config):
+            pipeline = _pipeline_from_snapshot(snapshot)
+            if pipeline is not None and _is_usable_pipeline_state(pipeline):
+                return pipeline
+
+    snapshot = graph.get_state(config)
+    pipeline = _pipeline_from_snapshot(snapshot)
+    if pipeline is not None and _is_usable_pipeline_state(pipeline):
+        return pipeline
+    return None
+
+
+def _pipeline_from_snapshot(snapshot: Any) -> PipelineState | None:
+    values = getattr(snapshot, "values", None) or {}
+    raw_pipeline = values.get("pipeline")
+    if not raw_pipeline:
+        return None
+    return PipelineState.model_validate(raw_pipeline)
+
+
+def _is_usable_pipeline_state(pipeline: PipelineState) -> bool:
+    return any(
+        [
+            pipeline.prepare_result is not None,
+            pipeline.plan_output is not None,
+            pipeline.build_output is not None,
+            bool(pipeline.review_cycles),
+            bool(pipeline.rework_cycles),
+            bool(pipeline.human_gate_decisions),
+            pipeline.ship_result is not None,
+            bool(pipeline.blockers),
+            bool(pipeline.errors),
+            bool(pipeline.retry_log),
+            pipeline.current_stage not in {"dispatch"},
+            pipeline.workflow_status != "not_started",
+        ]
+    )
+
+
+def make_step_state(
+    args: argparse.Namespace,
+    entrypoint: str,
+    graph,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    existing = load_existing_pipeline_state(graph, config)
+    if existing is None:
+        return make_initial_state(args, entrypoint, "step")
+
+    existing.requested_entrypoint = entrypoint  # type: ignore[assignment]
+    existing.execution_mode = "step"  # type: ignore[assignment]
+    return {"pipeline": existing.model_dump(mode="json")}
+
+
 def parse_resume_payload(args: argparse.Namespace) -> dict[str, Any]:
     if not args.resume_json:
         raise SystemExit("--resume-json is required for this command")
@@ -135,11 +195,127 @@ def parse_resume_payload(args: argparse.Namespace) -> dict[str, Any]:
     return payload
 
 
+def load_pending_interrupt(graph, config: dict[str, Any]) -> dict[str, Any]:
+    snapshot = graph.get_state(config)
+    if not snapshot.interrupts:
+        raise SystemExit("No pending human interrupt for this thread.")
+    return snapshot.interrupts[0].value
+
+
+def _parse_list_input(raw: str) -> list[str]:
+    return [item.strip() for item in raw.split("|") if item.strip()]
+
+
+def _prompt_non_empty(label: str, input_fn: Callable[[str], str]) -> str:
+    while True:
+        value = input_fn(label).strip()
+        if value:
+            return value
+        print("Value is required.")
+
+
+def _prompt_decision(input_fn: Callable[[str], str]) -> str:
+    while True:
+        raw = input_fn("Approve? [y/N]: ").strip().lower()
+        if raw in {"y", "yes"}:
+            return "approved"
+        if raw in {"", "n", "no"}:
+            return "needs_fixes"
+        print("Enter 'y' for approve or 'n' for needs_fixes.")
+
+
+def build_interactive_resume_payload(
+    interrupt: dict[str, Any],
+    input_fn: Callable[[str], str] = input,
+    print_fn: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    gate = interrupt.get("gate")
+    if not gate:
+        raise SystemExit("Pending interrupt does not include a gate name.")
+
+    print_fn(f"Pending gate: {gate}")
+    if gate == "plan_approval":
+        summary = interrupt.get("plan_summary")
+        if summary:
+            print_fn(f"Plan summary: {summary}")
+    elif gate == "extra_files_approval":
+        files = interrupt.get("extra_changed_files") or []
+        if files:
+            print_fn("Extra files requiring approval:")
+            for item in files:
+                path = item.get("path", "")
+                reason = item.get("reason") or "No reason recorded."
+                print_fn(f"- {path}: {reason}")
+    elif gate == "human_review":
+        review_id = interrupt.get("review_id")
+        agent_review = interrupt.get("agent_review") or {}
+        if review_id:
+            print_fn(f"Review cycle: {review_id}")
+        if agent_review:
+            print_fn(f"Agent decision: {agent_review.get('decision')}")
+            print_fn(f"Agent summary: {agent_review.get('summary')}")
+
+    decision = _prompt_decision(input_fn)
+    reviewer = _prompt_non_empty("Reviewer name: ", input_fn)
+    if decision == "needs_fixes":
+        notes = _prompt_non_empty("Notes: ", input_fn)
+    else:
+        notes = input_fn("Notes: ").strip()
+    questions = _parse_list_input(
+        input_fn("Questions (optional, separate with ' | '): ").strip()
+    )
+    response_requirements: list[str] = []
+    unresolved_comments: list[str] = []
+    if decision == "needs_fixes":
+        response_requirements = _parse_list_input(
+            input_fn(
+                "Response requirements (optional, separate with ' | '): "
+            ).strip()
+        )
+        unresolved_comments = _parse_list_input(
+            input_fn(
+                "Unresolved comments (optional, separate with ' | '): "
+            ).strip()
+        )
+
+    payload = {
+        "gate_type": gate,
+        "decision": decision,
+        "reviewer": reviewer,
+        "notes": notes,
+        "questions": questions,
+        "response_requirements": response_requirements,
+        "unresolved_comments": unresolved_comments,
+    }
+    return payload
+
+
 def print_result(graph, config: dict[str, Any], result: Any) -> None:
     print(json.dumps(result, indent=2, default=str))
 
     snapshot = graph.get_state(config)
+    values = getattr(snapshot, "values", None) or {}
+    raw_pipeline = values.get("pipeline") if isinstance(values, dict) else None
+    summary: dict[str, Any] = {}
+    if raw_pipeline:
+        pipeline = PipelineState.model_validate(raw_pipeline)
+        summary = {
+            "current_stage": pipeline.current_stage,
+            "workflow_status": pipeline.workflow_status,
+        }
+        if snapshot.next:
+            summary["next_nodes"] = list(snapshot.next)
     if snapshot.interrupts:
+        if summary:
+            first_interrupt = snapshot.interrupts[0].value
+            summary.update(
+                {
+                    "status": "interrupted",
+                    "interrupt_gate": first_interrupt.get("gate"),
+                    "message": f"Waiting for human input at `{first_interrupt.get('gate')}`.",
+                }
+            )
+            print(json.dumps({"summary": summary}, indent=2, default=str))
         print(
             json.dumps(
                 {
@@ -150,6 +326,21 @@ def print_result(graph, config: dict[str, Any], result: Any) -> None:
                 default=str,
             )
         )
+        return
+
+    if summary:
+        if pipeline.workflow_status == "shipped":
+            summary.update({"status": "completed", "message": "Workflow shipped successfully."})
+        elif pipeline.workflow_status == "blocked":
+            summary.update({"status": "blocked", "message": "Workflow blocked. Check task markdown or blockers."})
+        else:
+            summary.update(
+                {
+                    "status": "completed",
+                    "message": f"Execution reached `{pipeline.current_stage}` with workflow status `{pipeline.workflow_status}`.",
+                }
+            )
+        print(json.dumps({"summary": summary}, indent=2, default=str))
 
 
 def main() -> None:
@@ -209,8 +400,17 @@ def main() -> None:
         print_result(graph, config, result)
         return
 
+    if args.command in INTERACTIVE_COMMANDS:
+        if not sys.stdin.isatty():
+            raise SystemExit("Interactive respond command requires a TTY.")
+        interrupt = load_pending_interrupt(graph, config)
+        payload = build_interactive_resume_payload(interrupt)
+        result = graph.invoke(Command(resume=payload), config=config)
+        print_result(graph, config, result)
+        return
+
     entrypoint = STEP_ENTRYPOINT_MAP[args.command]
-    state = make_initial_state(args, entrypoint, "step")
+    state = make_step_state(args, entrypoint, graph, config)
     result = graph.invoke(state, config=config)
     print_result(graph, config, result)
 

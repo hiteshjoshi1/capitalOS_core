@@ -101,6 +101,9 @@ export default function App() {
   const riskTopN = computeTopNConcentrationRisk(holdings, netWorthTotal, selectedTopN);
   const topNDistribution = buildTopNDistribution(holdings, netWorthTotal, selectedTopN);
   const hasRiskDistribution = riskTopN.hasData && topNDistribution.length > 0;
+  
+  // Compute cashPercent from backend response (fallback to local calculation)
+  const cashPercent = summary?.cash_percent ?? (netWorthTotal > 0 ? (summary?.net_worth.cash ?? 0) / netWorthTotal * 100 : 0);
 
   return (
     <PageShell
@@ -202,6 +205,7 @@ export default function App() {
                 hasRiskDistribution={hasRiskDistribution}
                 topNDistribution={topNDistribution}
                 formatMoney={formatMoney}
+                cashPercent={cashPercent}
               />
               <AllocationCard
                 title="Allocation by Geography"

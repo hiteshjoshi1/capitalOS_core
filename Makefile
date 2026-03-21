@@ -140,7 +140,7 @@ e2e:
 verify: lint typecheck test-backend test-frontend
 
 # ---- LangGraph task workflow ----
-.PHONY: task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-export-state task-import-state task-restore-state task-state-show task-orch-smoke
+.PHONY: task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-state-show task-orch-smoke
 
 task-prepare:
 	$(call require_task,task-prepare)
@@ -194,6 +194,11 @@ task-resume:
 	$(call require_thread,task-resume)
 	$(call require_resume_json,task-resume)
 	$(PYTHON) -m $(ORCH_MODULE) resume $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)'
+
+task-respond:
+	$(call require_task,task-respond)
+	$(call require_thread,task-respond)
+	$(PYTHON) -m $(ORCH_MODULE) respond $(ORCH_BASE_ARGS)
 
 task-export-state:
 	$(call require_task,task-export-state)

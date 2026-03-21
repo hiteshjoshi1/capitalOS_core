@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from langgraph.types import interrupt
 
-from orchestration.models.review import HumanReview
+from orchestration.models.review import HumanDecision, HumanReview
 from orchestration.render import render_task_file
 from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_state
 
@@ -15,6 +15,42 @@ def run(state: GraphState) -> GraphState:
     cycle = pipeline.get_active_review_cycle()
     if not cycle:
         raise RuntimeError("No active review cycle available for human review.")
+
+    if cycle.extra_changed_files and cycle.extra_files_review is None:
+        payload = {
+            "gate": "extra_files_approval",
+            "review_id": cycle.review_id,
+            "extra_changed_files": [
+                item.model_dump(mode="json") for item in cycle.extra_changed_files
+            ],
+            "expected_resume_schema": {
+                "gate_type": "extra_files_approval",
+                "decision": "approved|needs_fixes",
+                "reviewer": "non-empty string",
+                "notes": "string; required if needs_fixes",
+                "questions": ["string"],
+                "response_requirements": ["string"],
+                "unresolved_comments": ["string"],
+            },
+        }
+
+        decision_raw = interrupt(payload)
+        decision_raw.setdefault("gate_type", "extra_files_approval")
+
+        decision = HumanDecision.model_validate(decision_raw)
+        cycle.extra_files_review = decision
+        pipeline.human_gate_decisions[f"extra_files_approval:{cycle.review_id}"] = decision
+
+        if decision.decision == "approved":
+            pipeline.approve_extra_files(cycle.extra_changed_files)
+            cycle.status = "scope_approved"
+            pipeline.workflow_status = "running"
+        else:
+            cycle.status = "needs_fixes"
+            pipeline.workflow_status = "needs_fixes"
+
+        render_task_file(pipeline)
+        return dump_pipeline_state(pipeline)
 
     effective_review = cycle.escalation_review or cycle.agent_review
     if not effective_review:

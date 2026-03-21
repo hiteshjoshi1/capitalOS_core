@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from orchestration.models.build import ExtraChangedFile
 
 
 def utc_now() -> datetime:
@@ -11,7 +13,7 @@ def utc_now() -> datetime:
 
 ReviewDecision = Literal["approved", "needs_fixes", "escalate"]
 ReviewRisk = Literal["low", "medium", "high"]
-GateType = Literal["plan_approval", "human_review"]
+GateType = Literal["plan_approval", "human_review", "extra_files_approval"]
 
 
 class StrictHumanPayload(BaseModel):
@@ -50,6 +52,8 @@ class HumanDecision(StrictHumanPayload):
 
 
 class AgentReview(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     review_id: str
     model_name: str
     decision: ReviewDecision
@@ -82,7 +86,9 @@ class ReviewCycle(BaseModel):
     agent_review: Optional[AgentReview] = None
     escalation_review: Optional[AgentReview] = None
     human_review: Optional[HumanReview] = None
-    status: Literal["in_review", "approved", "needs_fixes"] = "in_review"
+    extra_changed_files: List[ExtraChangedFile] = Field(default_factory=list)
+    extra_files_review: Optional[HumanDecision] = None
+    status: Literal["in_review", "approved", "needs_fixes", "scope_gate_pending", "scope_approved"] = "in_review"
     created_at: datetime = Field(default_factory=utc_now)
 
     def effective_agent_decision(self) -> Optional[str]:

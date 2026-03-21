@@ -20,7 +20,15 @@ class BuilderFixService:
         exit_code: int,
         output: str,
     ) -> None:
-        allowed_paths = [self.state.issue.task_file, *self.cfg.allowed_aux_files]
+        allowed_paths = {self.state.issue.task_file, *self.cfg.allowed_aux_files}
+        if self.state.plan_output is not None:
+            allowed_paths.update(self.state.plan_output.allowed_paths())
+        if self.state.build_output is not None:
+            allowed_paths.update(self.state.build_output.changed_files)
+        rework = self.state.get_active_rework_cycle()
+        if rework and rework.implementation is not None:
+            allowed_paths.update(rework.implementation.changed_files)
+
         prompt = dedent(
             f"""
             Fix the failing verification command in the current branch.
@@ -34,7 +42,7 @@ class BuilderFixService:
             {output[:6000]}
 
             Allowed write paths:
-            {chr(10).join(f"- {p}" for p in allowed_paths)}
+            {chr(10).join(f"- {p}" for p in sorted(allowed_paths))}
 
             Hard constraints:
             1) Do not modify the immutable region of the task file.

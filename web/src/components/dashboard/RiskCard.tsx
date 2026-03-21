@@ -16,6 +16,7 @@ type RiskCardProps = {
   hasRiskDistribution: boolean;
   topNDistribution: RiskDistributionItem[];
   formatMoney: (value?: number, maximumFractionDigits?: number) => string;
+  cashPercent: number;
 };
 
 export default function RiskCard({
@@ -26,10 +27,17 @@ export default function RiskCard({
   hasRiskDistribution,
   topNDistribution,
   formatMoney,
+  cashPercent,
 }: RiskCardProps) {
   return (
     <div className="card riskCard">
       <h2>Risk</h2>
+      <div className="kpi">
+        <div className="label">Cash</div>
+        <div className="val">{cashPercent.toFixed(1)}%</div>
+        <div className="delta muted">% of net worth</div>
+      </div>
+      <div style={{ height: 10 }}></div>
       <div className="kpi">
         <div className="label">Largest position</div>
         <div className={`val ${riskStateClassName(riskLargest.state)}`}>{formatLargestPosition(riskLargest)}</div>

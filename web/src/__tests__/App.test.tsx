@@ -79,12 +79,13 @@ const summaryFixture: DashboardSummary = {
     { asset_id: 2, symbol: "AAPL", asset_class: "STOCK", value: 150000, percent_of_networth: 20.21, geo: "US", platform: "IBKR" },
     { asset_id: 3, symbol: "NVDA", asset_class: "STOCK", value: 120000, percent_of_networth: 16.17, geo: "US", platform: "IBKR" },
     { asset_id: 4, symbol: "MSFT", asset_class: "STOCK", value: 90000, percent_of_networth: 12.13, geo: "US", platform: "IBKR" },
-    { asset_id: 5, symbol: "USD", asset_class: "CASH", value: 60000, percent_of_networth: 8.08, geo: "SG", platform: "DBS" },
+    { asset_id: 5, symbol: "GOOGL", asset_class: "STOCK", value: 60000, percent_of_networth: 8.08, geo: "US", platform: "IBKR" },
   ],
   cash_balances: [
     { currency: "USD", value: 60000 },
     { currency: "SGD", value: 58400 },
   ],
+  cash_percent: 15.96,
 };
 
 const platformAllocationFixture: PlatformAllocation = {

@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.plan import PlanOutput
-from orchestration.models.build import BuildOutput, RetryEntry
+from orchestration.models.build import BuildOutput, RetryEntry, ExtraChangedFile
 from orchestration.models.review import ReviewCycle, HumanDecision
 from orchestration.models.rework import ReworkCycle
 from orchestration.models.ship import ShipResult
@@ -23,6 +23,7 @@ StageName = Literal[
     "human_approval_gate",
     "build",
     "agent_review",
+    "escalation_review",
     "human_review",
     "rework_analysis",
     "rework_implementation",
@@ -72,6 +73,7 @@ class PipelineState(BaseModel):
     human_gate_decisions: Dict[str, HumanDecision] = Field(default_factory=dict)
 
     ship_result: Optional[ShipResult] = None
+    approved_extra_files: List[ExtraChangedFile] = Field(default_factory=list)
     blockers: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     retry_log: List[RetryEntry] = Field(default_factory=list)
@@ -91,6 +93,37 @@ class PipelineState(BaseModel):
         self.retry_log.append(entry)
         if self.build_output is not None:
             self.build_output.retry_entries.append(entry)
+
+    @staticmethod
+    def is_build_blocker(blocker: str) -> bool:
+        return blocker == "Verification suite failed during build." or blocker.startswith(
+            (
+                "Out-of-scope changed files detected during build:",
+                "Build validation failed:",
+            )
+        )
+
+    def reset_build_state(self) -> None:
+        previous_retries = []
+        if self.build_output is not None:
+            previous_retries = list(self.build_output.retry_entries)
+
+        if previous_retries:
+            self.retry_log = [entry for entry in self.retry_log if entry not in previous_retries]
+
+        self.build_output = None
+        self.blockers = [blocker for blocker in self.blockers if not self.is_build_blocker(blocker)]
+
+    def approved_extra_file_paths(self) -> set[str]:
+        return {item.path for item in self.approved_extra_files if item.path}
+
+    def approve_extra_files(self, files: list[ExtraChangedFile]) -> None:
+        merged = {item.path: item for item in self.approved_extra_files if item.path}
+        for item in files:
+            if not item.path:
+                continue
+            merged[item.path] = item.model_copy(update={"reason_source": "approved"})
+        self.approved_extra_files = [merged[path] for path in sorted(merged)]
 
     def get_active_review_cycle(self) -> Optional[ReviewCycle]:
         if not self.active_review_cycle_id:
