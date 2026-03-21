@@ -42,8 +42,16 @@ def run(state: GraphState) -> GraphState:
         raise RuntimeError("Ship blocked: verification failures remain in build output.")
 
     git = GitService(pipeline.issue.repo_root)
-    if git.current_branch() == cfg.base_branch:
+    current_branch = git.current_branch()
+    if current_branch == cfg.base_branch:
         raise RuntimeError(f"Refusing to ship from base branch `{cfg.base_branch}`.")
+    if pipeline.issue.branch != current_branch:
+        emit_progress(
+            "ship",
+            current_action="Reconciling stale branch metadata with the checked-out branch",
+            evidence=[f"state_branch={pipeline.issue.branch}", f"current_branch={current_branch}"],
+        )
+        pipeline.issue.branch = current_branch
 
     git.add(pipeline.issue.task_file)
     emit_progress("ship", current_action="Creating final workflow commit and pushing branch")

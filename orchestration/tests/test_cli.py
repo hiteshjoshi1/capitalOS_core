@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from orchestration.cli import (
     _pipeline_with_interrupt_context,
     build_interactive_resume_payload,
+    make_initial_state,
     load_pending_interrupt,
     make_step_state,
 )
@@ -94,6 +95,13 @@ def test_make_step_state_bootstraps_when_thread_has_no_state() -> None:
     assert bootstrapped.execution_mode == "step"
     assert bootstrapped.plan_output is None
     assert bootstrapped.human_gate_decisions == {}
+
+
+def test_make_initial_state_uses_issue_branch_naming() -> None:
+    state = make_initial_state(_args(), "plan", "step")
+
+    bootstrapped = PipelineState.model_validate(state["pipeline"])
+    assert bootstrapped.issue.branch == "issue-118-risk-and-test-pipeline"
 
 
 def test_make_step_state_ignores_latest_blank_checkpoint_and_recovers_approved_state() -> None:

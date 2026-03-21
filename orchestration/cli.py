@@ -107,7 +107,7 @@ def make_initial_state(args: argparse.Namespace, entrypoint: str, mode: str) -> 
     slug = args.slug or infer_slug(args.task_file)
     title = args.title or infer_title(slug)
     repo_root = str(Path(args.repo_root).resolve())
-    branch = f"feature/issue-{issue_id}-{slug}"
+    branch = f"issue-{issue_id}-{slug}"
 
     issue = IssueMetadata(
         issue_id=issue_id,
