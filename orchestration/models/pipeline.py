@@ -141,6 +141,66 @@ class PipelineState(BaseModel):
                 return cycle
         return None
 
+    def get_rework_context_review_cycle(self) -> Optional[ReviewCycle]:
+        active = self.get_active_review_cycle()
+        if active is None:
+            return None
+        if not active.extra_changed_files:
+            return active
+
+        active_index = None
+        for idx, cycle in enumerate(self.review_cycles):
+            if cycle.review_id == active.review_id:
+                active_index = idx
+                break
+
+        if active_index is None:
+            return active
+
+        for cycle in reversed(self.review_cycles[:active_index]):
+            if not cycle.extra_changed_files:
+                return cycle
+        return active
+
+    def get_semantic_requirements(self) -> list[str]:
+        requirements: list[str] = []
+
+        if self.plan_output:
+            requirements.extend(
+                f"Acceptance criterion: {item}"
+                for item in self.plan_output.acceptance_criteria
+                if item and item.strip()
+            )
+
+        source_cycle: Optional[ReviewCycle] = None
+        active_rework = self.get_active_rework_cycle()
+        if active_rework is not None:
+            source_cycle = self.get_review_cycle(active_rework.source_review_id)
+
+        if source_cycle is None:
+            source_cycle = self.get_rework_context_review_cycle() or self.get_active_review_cycle()
+
+        if source_cycle and source_cycle.human_review:
+            requirements.extend(
+                f"Human response requirement: {item}"
+                for item in source_cycle.human_review.response_requirements
+                if item and item.strip()
+            )
+            requirements.extend(
+                f"Human unresolved concern: {item}"
+                for item in source_cycle.human_review.unresolved_comments
+                if item and item.strip()
+            )
+
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for item in requirements:
+            if item in seen:
+                continue
+            seen.add(item)
+            deduped.append(item)
+        return deduped
+
     def get_active_rework_cycle(self) -> Optional[ReworkCycle]:
         if not self.active_rework_cycle_id:
             return None

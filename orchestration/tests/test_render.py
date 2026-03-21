@@ -106,3 +106,30 @@ def test_render_execution_journal_includes_extra_files_context() -> None:
     assert "Workflow support change required to let the review gate resume correctly." in rendered
     assert "#### Extra Files Approval" in rendered
     assert "Support file change is acceptable." in rendered
+
+
+def test_render_execution_journal_includes_semantic_verification() -> None:
+    state = _base_state()
+    state.review_cycles.append(
+        ReviewCycle(
+            review_id="R1",
+            source="build",
+            agent_review=AgentReview(
+                review_id="R1",
+                model_name="reviewer",
+                decision="needs_fixes",
+                risk="medium",
+                summary="Docs still mismatch behavior.",
+                findings=["Fix the respond command description."],
+                semantic_verification=[
+                    "Compared ai-task-flow.md against Makefile and found task-respond documented with the wrong semantics."
+                ],
+            ),
+            status="needs_fixes",
+        )
+    )
+
+    rendered = render_execution_journal(state)
+
+    assert "- semantic_verification:" in rendered
+    assert "Compared ai-task-flow.md against Makefile and found task-respond documented with the wrong semantics." in rendered
