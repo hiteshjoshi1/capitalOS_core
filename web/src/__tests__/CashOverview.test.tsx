@@ -47,6 +47,7 @@ const summaryFixture: DashboardSummary = {
   },
   top_holdings: [],
   cash_balances: [{ currency: "SGD", value: 25000 }],
+  cash_percent: 40.0,
 };
 
 const cryptoSummaryFixture: CryptoSummary = {

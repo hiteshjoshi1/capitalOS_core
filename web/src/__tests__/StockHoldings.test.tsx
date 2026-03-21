@@ -78,6 +78,7 @@ const summaryFixture: DashboardSummary = {
     },
   ],
   cash_balances: [{ currency: "USD", value: 50000 }],
+  cash_percent: 10.0,
 };
 
 describe("StockHoldings", () => {

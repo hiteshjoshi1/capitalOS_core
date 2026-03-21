@@ -3,8 +3,10 @@ set -euo pipefail
 
 MAX_RETRIES="${MAX_RETRIES-}"
 PLAN_MODEL="${PLAN_MODEL-}"
+BUILD_MODEL="${BUILD_MODEL-}"
 REVIEW_MODEL="${REVIEW_MODEL-}"
 REVIEW_ESCALATION_MODEL="${REVIEW_ESCALATION_MODEL-}"
+BUILD_MAX_AUTOPILOT_CONTINUES="${BUILD_MAX_AUTOPILOT_CONTINUES-}"
 CODEX_TIMEOUT_MINUTES="${CODEX_TIMEOUT_MINUTES-}"
 ENABLE_CAFFEINATE="${ENABLE_CAFFEINATE-}"
 COPILOT_TOOL_MODE="${COPILOT_TOOL_MODE-}"
@@ -43,18 +45,21 @@ BRANCH=""
 usage() {
   cat <<'EOF'
 Usage:
-  scripts/task_flow.sh [--verbose] prepare tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh [--verbose] plan    tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh [--verbose] build   tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh [--verbose] review  tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh [--verbose] rework  tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh [--verbose] ship    tasks/issue-<id>-<slug>.md
-  scripts/task_flow.sh [--verbose] all     tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] prepare      tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] plan         tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] build        tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] review       tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] review-input tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] rework       tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] ship         tasks/issue-<id>-<slug>.md
+  scripts/task_flow.sh [--verbose] all          tasks/issue-<id>-<slug>.md
 
 Environment overrides:
   PLAN_MODEL=<planner model>
+  BUILD_MODEL=<builder model>
   REVIEW_MODEL=<primary reviewer model>
   REVIEW_ESCALATION_MODEL=<escalation reviewer model>
+  BUILD_MAX_AUTOPILOT_CONTINUES=12
   MAX_RETRIES=3
   CODEX_TIMEOUT_MINUTES=60
   ENABLE_CAFFEINATE=1
@@ -87,7 +92,7 @@ require_tool() {
 stage_requires_self_integrity() {
   local stage="$1"
   case "$stage" in
-    plan|build|review|rework|all) return 0 ;;
+    plan|build|review|review-input|rework|all) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -165,8 +170,10 @@ require_positive_integer_config() {
 print_model_routing_table() {
   log "Active model routing:"
   log "  PLAN_MODEL=$PLAN_MODEL"
+  log "  BUILD_MODEL=$BUILD_MODEL"
   log "  REVIEW_MODEL=$REVIEW_MODEL"
   log "  REVIEW_ESCALATION_MODEL=$REVIEW_ESCALATION_MODEL"
+  log "  BUILD_MAX_AUTOPILOT_CONTINUES=$BUILD_MAX_AUTOPILOT_CONTINUES"
   log "  CODEX_TIMEOUT_MINUTES=$CODEX_TIMEOUT_MINUTES"
   log "  MAX_RETRIES=$MAX_RETRIES"
   log "  COPILOT_TOOL_MODE=$COPILOT_TOOL_MODE"
@@ -178,8 +185,10 @@ print_model_routing_table() {
 
 load_model_config() {
   local env_plan_set=0 env_plan=""
+  local env_build_set=0 env_build=""
   local env_review_set=0 env_review=""
   local env_escalation_set=0 env_escalation=""
+  local env_build_autopilot_set=0 env_build_autopilot=""
   local env_timeout_set=0 env_timeout=""
   local env_caffeinate_set=0 env_caffeinate=""
   local env_tool_mode_set=0 env_tool_mode=""
@@ -190,8 +199,10 @@ load_model_config() {
   local env_allowed_aux_set=0 env_allowed_aux=""
 
   if [[ -n "${PLAN_MODEL:-}" ]]; then env_plan_set=1; env_plan="$PLAN_MODEL"; fi
+  if [[ -n "${BUILD_MODEL:-}" ]]; then env_build_set=1; env_build="$BUILD_MODEL"; fi
   if [[ -n "${REVIEW_MODEL:-}" ]]; then env_review_set=1; env_review="$REVIEW_MODEL"; fi
   if [[ -n "${REVIEW_ESCALATION_MODEL:-}" ]]; then env_escalation_set=1; env_escalation="$REVIEW_ESCALATION_MODEL"; fi
+  if [[ -n "${BUILD_MAX_AUTOPILOT_CONTINUES:-}" ]]; then env_build_autopilot_set=1; env_build_autopilot="$BUILD_MAX_AUTOPILOT_CONTINUES"; fi
   if [[ -n "${CODEX_TIMEOUT_MINUTES:-}" ]]; then env_timeout_set=1; env_timeout="$CODEX_TIMEOUT_MINUTES"; fi
   if [[ -n "${ENABLE_CAFFEINATE:-}" ]]; then env_caffeinate_set=1; env_caffeinate="$ENABLE_CAFFEINATE"; fi
   if [[ -n "${COPILOT_TOOL_MODE:-}" ]]; then env_tool_mode_set=1; env_tool_mode="$COPILOT_TOOL_MODE"; fi
@@ -207,10 +218,11 @@ load_model_config() {
   source "$MODEL_CONFIG_FILE"
   set +a
 
-  # Re-apply caller-provided environment overrides after sourcing defaults.
   if (( env_plan_set )); then PLAN_MODEL="$env_plan"; fi
+  if (( env_build_set )); then BUILD_MODEL="$env_build"; fi
   if (( env_review_set )); then REVIEW_MODEL="$env_review"; fi
   if (( env_escalation_set )); then REVIEW_ESCALATION_MODEL="$env_escalation"; fi
+  if (( env_build_autopilot_set )); then BUILD_MAX_AUTOPILOT_CONTINUES="$env_build_autopilot"; fi
   if (( env_timeout_set )); then CODEX_TIMEOUT_MINUTES="$env_timeout"; fi
   if (( env_caffeinate_set )); then ENABLE_CAFFEINATE="$env_caffeinate"; fi
   if (( env_tool_mode_set )); then COPILOT_TOOL_MODE="$env_tool_mode"; fi
@@ -225,8 +237,10 @@ load_model_config() {
   fi
 
   require_non_empty_config "PLAN_MODEL" "${PLAN_MODEL:-}"
+  require_non_empty_config "BUILD_MODEL" "${BUILD_MODEL:-}"
   require_non_empty_config "REVIEW_MODEL" "${REVIEW_MODEL:-}"
   require_non_empty_config "REVIEW_ESCALATION_MODEL" "${REVIEW_ESCALATION_MODEL:-}"
+  require_non_empty_config "BUILD_MAX_AUTOPILOT_CONTINUES" "${BUILD_MAX_AUTOPILOT_CONTINUES:-}"
   require_non_empty_config "CODEX_TIMEOUT_MINUTES" "${CODEX_TIMEOUT_MINUTES:-}"
   require_non_empty_config "ENABLE_CAFFEINATE" "${ENABLE_CAFFEINATE:-}"
   require_non_empty_config "COPILOT_TOOL_MODE" "${COPILOT_TOOL_MODE:-}"
@@ -235,6 +249,7 @@ load_model_config() {
   require_non_empty_config "MAX_RETRIES" "${MAX_RETRIES:-}"
   require_non_empty_config "NO_CACHE" "${NO_CACHE:-}"
 
+  require_positive_integer_config "BUILD_MAX_AUTOPILOT_CONTINUES" "$BUILD_MAX_AUTOPILOT_CONTINUES"
   require_positive_integer_config "CODEX_TIMEOUT_MINUTES" "$CODEX_TIMEOUT_MINUTES"
   require_positive_integer_config "MAX_RETRIES" "$MAX_RETRIES"
   require_binary_flag_config "ENABLE_CAFFEINATE" "$ENABLE_CAFFEINATE"
@@ -246,7 +261,8 @@ load_model_config() {
     *) die "Config COPILOT_TOOL_MODE must be text-only or tools-enabled (got: $COPILOT_TOOL_MODE)" ;;
   esac
 
-  export PLAN_MODEL REVIEW_MODEL REVIEW_ESCALATION_MODEL
+  export PLAN_MODEL BUILD_MODEL REVIEW_MODEL REVIEW_ESCALATION_MODEL
+  export BUILD_MAX_AUTOPILOT_CONTINUES
   export CODEX_TIMEOUT_MINUTES ENABLE_CAFFEINATE COPILOT_TOOL_MODE CONTEXT7_ENABLED COPILOT_MCP_CONFIG MAX_RETRIES NO_CACHE ALLOWED_AUX_FILES
 
   if (( VERBOSE )); then
@@ -341,12 +357,11 @@ run_with_caffeinate_for_codex() {
 enable_stage_caffeinate_if_needed() {
   local stage="$1"
   case "$stage" in
-    plan|build|review|rework|all) ;;
+    plan|build|review|review-input|rework|all) ;;
     *) return 0 ;;
   esac
 
   if [[ "$ENABLE_CAFFEINATE" == "1" ]] && command -v caffeinate >/dev/null 2>&1; then
-    # Keep machine awake for the lifetime of this script process.
     caffeinate -dimsu -w $$ >/dev/null 2>&1 &
     log "caffeinate enabled for stage: $stage"
   fi
@@ -365,7 +380,7 @@ validate_task_file() {
 
   ISSUE_ID="${BASH_REMATCH[1]}"
   SLUG="${BASH_REMATCH[2]}"
-  BRANCH="feature/issue-${ISSUE_ID}-${SLUG}"
+  BRANCH="issue-${ISSUE_ID}-${SLUG}"
 }
 
 task_title_from_slug() {
@@ -571,11 +586,20 @@ extract_latest_named_text_block() {
   ' "$TASK_FILE"
 }
 
+extract_markdown_section_body() {
+  local heading="$1"
+  awk -v section="## " -v heading="$heading" '
+    $0 == (section heading) { capture=1; next }
+    capture && /^## / { exit }
+    capture { print }
+  ' "$TASK_FILE"
+}
+
 extract_single_line_field() {
   local body="$1"
   local field="$2"
   printf '%s\n' "$body" | awk -F':' -v key="$field" '
-    $1 == key {
+    toupper($1) == toupper(key) {
       sub(/^[^:]*:[[:space:]]*/, "", $0)
       print
       exit
@@ -610,21 +634,56 @@ extract_analysis_field_value() {
   printf '%s\n' "$value"
 }
 
+append_review_human_input_placeholder() {
+  local review_id="$1"
+
+  if [[ -n "$(extract_latest_named_text_block "Review Cycle ${review_id} - Human Input")" ]]; then
+    log "Human input block already exists for ${review_id}; not appending duplicate."
+    return 0
+  fi
+
+  append_task_block "Review Cycle ${review_id} - Human Input" "Reviewed: <your-name>
+Status: <PENDING|IN_PROGRESS|COMPLETE>
+HUMAN_QUESTIONS:
+- <question 1>
+- <question 2>
+
+RESPONSE_REQUIREMENTS:
+- <what the rework output must explicitly answer>
+- <what evidence is required>
+
+UNRESOLVED_COMMENTS:
+- <comment 1>
+- <comment 2>"
+}
+
 ensure_rework_human_input_block_ready() {
   local review_id="$1"
-  local block questions unresolved requirements
+  local block reviewed status questions unresolved requirements
 
   block="$(extract_latest_named_text_block "Review Cycle ${review_id} - Human Input")"
   if [[ -z "$block" ]]; then
-    append_task_block "Review Cycle ${review_id} - Human Input" "HUMAN_QUESTIONS: <required>
-UNRESOLVED_COMMENTS: <required>
-RESPONSE_REQUIREMENTS: <required>"
-    die "Missing structured human input for ${review_id}. Fill 'Review Cycle ${review_id} - Human Input' and rerun task-rework."
+    append_review_human_input_placeholder "$review_id"
+    die "Missing structured human input for ${review_id}. Fill 'Review Cycle ${review_id} - Human Input' and rerun task-rework.
+Hint: run make task-review-input TASK=$TASK_FILE"
   fi
 
+  reviewed="$(extract_single_line_field "$block" "REVIEWED")"
+  status="$(extract_single_line_field "$block" "STATUS")"
   questions="$(extract_single_line_field "$block" "HUMAN_QUESTIONS")"
   unresolved="$(extract_single_line_field "$block" "UNRESOLVED_COMMENTS")"
   requirements="$(extract_single_line_field "$block" "RESPONSE_REQUIREMENTS")"
+
+  [[ -n "${reviewed// }" ]] || die "Review cycle ${review_id} human input is missing Reviewed/REVIEWED."
+  [[ -n "${status// }" ]] || die "Review cycle ${review_id} human input is missing Status/STATUS."
+
+  grep -Eq '^(HUMAN_QUESTIONS):' <<<"$block" || die "Review cycle ${review_id} human input is missing HUMAN_QUESTIONS section."
+  grep -Eq '^(UNRESOLVED_COMMENTS):' <<<"$block" || die "Review cycle ${review_id} human input is missing UNRESOLVED_COMMENTS section."
+  grep -Eq '^(RESPONSE_REQUIREMENTS):' <<<"$block" || die "Review cycle ${review_id} human input is missing RESPONSE_REQUIREMENTS section."
+
+  if ! grep -Eiq '^Reviewed:[[:space:]]*[^<].*$|^REVIEWED:[[:space:]]*yes$' <<<"$block"; then
+    die "Review cycle ${review_id} human input must be explicitly filled before rework."
+  fi
 
   [[ -n "${questions// }" ]] || die "Review cycle ${review_id} human input is missing HUMAN_QUESTIONS."
   [[ "$questions" != "<required>" ]] || die "Review cycle ${review_id} HUMAN_QUESTIONS still has placeholder text."
@@ -632,6 +691,18 @@ RESPONSE_REQUIREMENTS: <required>"
   [[ "$unresolved" != "<required>" ]] || die "Review cycle ${review_id} UNRESOLVED_COMMENTS still has placeholder text."
   [[ -n "${requirements// }" ]] || die "Review cycle ${review_id} human input is missing RESPONSE_REQUIREMENTS."
   [[ "$requirements" != "<required>" ]] || die "Review cycle ${review_id} RESPONSE_REQUIREMENTS still has placeholder text."
+}
+
+cmd_review_input() {
+  validate_task_file "$1"
+  [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
+
+  local review_id
+  review_id="$(latest_review_id || true)"
+  [[ -n "$review_id" ]] || die "No review cycle found. Run task-review first."
+
+  append_review_human_input_placeholder "$review_id"
+  log "Appended review input placeholder for ${review_id} in $TASK_FILE"
 }
 
 ensure_rework_analysis_and_matrix_present() {
@@ -707,6 +778,10 @@ immutable_hash() {
 
 is_human_approved() {
   grep -Eiq '^- \[[xX]\] Approved for implementation' "$TASK_FILE"
+}
+
+assert_human_approval_gate_passed() {
+  is_human_approved || die "Build blocked: Human Approval Gate is not approved in $TASK_FILE."
 }
 
 assert_clean_worktree() {
@@ -883,7 +958,6 @@ run_copilot_prompt() {
   local args_with_context7 args_without_context7 output_file error_file rc
 
   if [[ "$COPILOT_TOOL_MODE" == "text-only" ]]; then
-    # Keep planning/review deterministic and avoid Copilot CLI tool permission failures.
     args_without_context7=(
       "${base_args[@]}"
       --no-ask-user
@@ -915,8 +989,7 @@ run_copilot_prompt() {
           sed -n '1,20p' "$error_file" >&2
         fi
         cat "$output_file"
-        rm -f "$output_file"
-        rm -f "$error_file"
+        rm -f "$output_file" "$error_file"
         return 0
       fi
 
@@ -929,8 +1002,7 @@ run_copilot_prompt() {
         log "Context7 failure output (first 20 lines):"
         sed -n '1,20p' "$error_file" >&2
       fi
-      rm -f "$output_file"
-      rm -f "$error_file"
+      rm -f "$output_file" "$error_file"
       "${args_without_context7[@]}"
       return 0
     fi
@@ -1064,7 +1136,7 @@ validate_generated_task_file_content() {
   grep -q '^## Acceptance Criteria' <<<"$content" || return 1
   grep -q '^## Human Approval Gate' <<<"$content" || return 1
   grep -q '^## Task Checklist' <<<"$content" || return 1
-  grep -q '^## Human Rework Input (Mutable)' <<<"$content" || return 1
+  grep -q '^## Human Rework Input \(Mutable\)' <<<"$content" || return 1
   grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
 }
 
@@ -1086,23 +1158,36 @@ $without_existing
 make task-plan TASK=$TASK_FILE
 make task-build TASK=$TASK_FILE
 make task-review TASK=$TASK_FILE
+make task-review-input TASK=$TASK_FILE
 make task-rework TASK=$TASK_FILE
 make task-ship TASK=$TASK_FILE
 \`\`\`
 EOF
 }
 
-run_codex_prompt() {
+run_builder_prompt() {
   local prompt="$1"
+  local args=(
+    copilot
+    --model "$BUILD_MODEL"
+    --autopilot
+    --allow-all
+    --max-autopilot-continues "$BUILD_MAX_AUTOPILOT_CONTINUES"
+    --no-ask-user
+    --no-color
+    --silent
+    -p "$prompt"
+  )
+
   if command -v timeout >/dev/null 2>&1; then
-    run_with_caffeinate_for_codex timeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate_for_codex timeout "${CODEX_TIMEOUT_MINUTES}m" "${args[@]}"
     return
   fi
   if command -v gtimeout >/dev/null 2>&1; then
-    run_with_caffeinate_for_codex gtimeout "${CODEX_TIMEOUT_MINUTES}m" codex exec --full-auto --sandbox workspace-write "$prompt"
+    run_with_caffeinate_for_codex gtimeout "${CODEX_TIMEOUT_MINUTES}m" "${args[@]}"
     return
   fi
-  run_with_caffeinate_for_codex codex exec --full-auto --sandbox workspace-write "$prompt"
+  run_with_caffeinate_for_codex "${args[@]}"
 }
 
 collect_current_changed_paths() {
@@ -1111,10 +1196,6 @@ collect_current_changed_paths() {
     git diff --cached --name-only || true
     git ls-files --others --exclude-standard || true
   } | awk 'NF' | sed 's#^\./##' | sort -u
-}
-
-collect_branch_scope_paths() {
-  git diff --name-only main...HEAD 2>/dev/null | awk 'NF' | sed 's#^\./##' | sort -u
 }
 
 collect_task_declared_paths() {
@@ -1165,19 +1246,6 @@ is_path_allowlisted() {
     [[ "$path" == "$allowed" ]] && return 0
   done <<<"$allowed_paths"
   return 1
-}
-
-collect_out_of_scope_changed_paths() {
-  local allowed_paths="$1"
-  local changed path
-  changed="$(collect_current_changed_paths)"
-
-  while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
-    if ! is_path_allowlisted "$path" "$allowed_paths"; then
-      printf '%s\n' "$path"
-    fi
-  done <<<"$changed"
 }
 
 find_out_of_scope_touched_paths() {
@@ -1243,7 +1311,7 @@ Review/discard these edits or explicitly allow them (ALLOWED_AUX_FILES / task pl
   fi
 }
 
-run_with_retries_and_codex_fix() {
+run_with_retries_and_builder_fix() {
   local label="$1"
   shift
   local cmd=("$@")
@@ -1333,15 +1401,15 @@ Constraints:
 5) Do not modify files outside the allowed write paths list.
 EOF
 )"
-  log "Invoking Codex auto-fix for: $label"
+  log "Invoking builder auto-fix for: $label"
   baseline_paths="$(collect_current_changed_paths)"
   baseline_snapshot="$(collect_paths_fingerprint_snapshot "$baseline_paths")"
   set +e
-  run_codex_prompt "$prompt"
+  run_builder_prompt "$prompt"
   auto_fix_rc=$?
   set -e
   if [[ "$auto_fix_rc" -ne 0 ]]; then
-    append_retry_log "Codex auto-fix process failed for '$label' with exit code $auto_fix_rc."
+    append_retry_log "Builder auto-fix process failed for '$label' with exit code $auto_fix_rc."
     return 1
   fi
 
@@ -1375,13 +1443,14 @@ Failure log: $failure_log"
 }
 
 run_verification_suite() {
-  run_with_retries_and_codex_fix "make lint" make lint
-  run_with_retries_and_codex_fix "make typecheck" make typecheck
+  run_with_retries_and_builder_fix "make lint" make lint
+  run_with_retries_and_builder_fix "make typecheck" make typecheck
   run_with_retries "make api-rebuild (fresh backend image)" make api-rebuild
-  run_with_retries_and_codex_fix "make test-backend" make test-backend
-  run_with_retries_and_codex_fix "make test-frontend" make test-frontend
+  run_with_retries_and_builder_fix "make test-backend" make test-backend
+  run_with_retries_and_builder_fix "make test-frontend" make test-frontend
+  run_with_retries_and_builder_fix "make api-smoke (runtime)" make api-smoke
   if [[ -f "$REPO_ROOT/web/playwright.config.ts" || -f "$REPO_ROOT/web/playwright.config.js" ]]; then
-    run_with_retries_and_codex_fix "make e2e" make e2e
+    run_with_retries_and_builder_fix "make e2e" make e2e
   else
     append_task_block "Verification Note" "Playwright not configured; skipped make e2e."
   fi
@@ -1540,6 +1609,82 @@ review_needs_escalation() {
   return 1
 }
 
+assert_no_open_mandatory_checklist_items() {
+  local open_items
+  open_items="$(
+    awk '
+      /^## Task Checklist/ {in_checklist=1; next}
+      /^## / && in_checklist {exit}
+      in_checklist && /^- \[ \]/ && $0 !~ /HUMAN_ONLY:/ && $0 !~ /POST_SHIP:/ {print}
+    ' "$TASK_FILE"
+  )"
+
+  if [[ -n "${open_items// }" ]]; then
+    die "Build blocked: mandatory task checklist items are still unfinished:
+$open_items"
+  fi
+}
+
+assert_no_checked_placeholder_checklist_items() {
+  local placeholder_items
+  placeholder_items="$(
+    awk '
+      /^## Task Checklist/ {in_checklist=1; next}
+      /^## / && in_checklist {exit}
+      in_checklist && /^- \[[xX]\]/ {
+        if ($0 ~ /<required>|<todo>|<placeholder>|TODO|TBD|PENDING|<not done>/) print
+      }
+    ' "$TASK_FILE"
+  )"
+
+  if [[ -n "${placeholder_items// }" ]]; then
+    die "Build blocked: some checked Task Checklist items still contain placeholder text:
+$placeholder_items"
+  fi
+}
+
+assert_required_task_sections_populated() {
+  local impl verification
+  impl="$(extract_markdown_section_body "Implementation Reasoning Addendum (Codex Mutable)")"
+  verification="$(extract_markdown_section_body "Verification Evidence (Codex Mutable)")"
+
+  [[ -n "${impl// }" ]] || die "Build blocked: Implementation Reasoning Addendum (Codex Mutable) is empty."
+  [[ -n "${verification// }" ]] || die "Build blocked: Verification Evidence (Codex Mutable) is empty."
+}
+
+assert_no_unfinished_markers_in_scope() {
+  local changed path
+  changed="$(collect_current_changed_paths)"
+
+  while IFS= read -r path; do
+    [[ -n "$path" ]] || continue
+    [[ -f "$path" ]] || continue
+
+    if grep -nE 'TODO|FIXME|XXX|NOT_IMPLEMENTED|stubbed|placeholder|throw new Error\("TODO' "$path" >/dev/null 2>&1; then
+      die "Unfinished implementation markers found in changed file: $path"
+    fi
+  done <<<"$changed"
+}
+
+assert_basic_build_sanity() {
+  local changed py_errors=""
+  changed="$(collect_current_changed_paths)"
+  [[ -n "${changed// }" ]] || die "Post-build sanity: no files were modified."
+
+  while IFS= read -r f; do
+    [[ "$f" == *.py ]] || continue
+    [[ -f "$f" ]] || continue
+    if ! python3 -m py_compile "$f" 2>/dev/null; then
+      py_errors+="$f"$'\n'
+    fi
+  done <<<"$changed"
+
+  if [[ -n "${py_errors// }" ]]; then
+    die "Post-build sanity: Python syntax errors detected in:
+$py_errors"
+  fi
+}
+
 cmd_prepare() {
   require_tool git
   validate_task_file "$1"
@@ -1610,7 +1755,8 @@ Requirements:
 2) Keep marker exactly: <!-- IMMUTABLE_PLAN_END -->
 3) Keep output deterministic and scoped to requested feature.
 4) Do not edit files directly; only return final markdown content between markers.
-5) Do not include tool logs or transcripts inside the marked output.
+5) The Task Checklist must contain only actionable implementation items. Mark reviewer-only or post-ship items with HUMAN_ONLY: or POST_SHIP: prefixes.
+6) Do not include tool logs or transcripts inside the marked output.
 
 Current task file content:
 $task_content
@@ -1630,9 +1776,11 @@ EOF
 }
 
 cmd_build() {
-  require_tool codex
+  require_tool copilot
   validate_task_file "$1"
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
+
+  assert_human_approval_gate_passed
 
   local immutable_before immutable_after prompt
   immutable_before="$(immutable_hash)"
@@ -1649,29 +1797,39 @@ Hard constraints:
    - Retry Log
    - Automation Log
 3) Keep changes in-scope for the task acceptance criteria.
-4) Run required checks:
+4) Complete all mandatory Task Checklist items. Do not leave unfinished mandatory items unchecked.
+5) Do not mark checklist items complete unless the implementation is actually finished.
+6) Write concrete evidence into Verification Evidence (commands run, results, key artifacts).
+7) Run required checks:
    - make lint
    - make typecheck
    - make api-rebuild
    - make test-backend
    - make test-frontend
+   - make api-smoke
    - make e2e only if Playwright exists
-5) Verification retry policy is deterministic:
+8) Verification retry policy is deterministic:
    - first failure: rerun once unchanged
    - if still failing: one scoped auto-fix cycle
    - stop after that and log blocker
 EOF
 )"
 
-  run_with_retries "Codex implementation pass" run_codex_prompt "$prompt"
+  run_with_retries "Builder implementation pass" run_builder_prompt "$prompt"
   immutable_after="$(immutable_hash)"
   if [[ "$immutable_before" != "$immutable_after" ]]; then
     append_retry_log "Plan integrity violation: immutable section changed by implementation pass."
     die "Immutable approved plan content changed in $TASK_FILE."
   fi
 
+  assert_basic_build_sanity
   run_verification_suite
-  append_task_block "Build Result" "Implementation and verification suite completed successfully."
+  assert_no_open_mandatory_checklist_items
+  assert_no_checked_placeholder_checklist_items
+  assert_required_task_sections_populated
+  assert_no_unfinished_markers_in_scope
+
+  append_task_block "Build Result" "Implementation, sanity checks, and verification suite completed successfully."
   stage_scoped_changes "build" "1"
   log "Auto-staged scoped build outputs for review."
 }
@@ -1813,25 +1971,29 @@ cmd_review() {
   append_review_status "$review_id" "Reviewed" "$sonnet_status" "${sonnet_risk:-UNKNOWN}"
 
   if review_needs_escalation "$sonnet_status" "$sonnet_risk" "$sonnet_output"; then
-    local opus_output opus_status
+    local opus_output opus_status opus_risk
     opus_output="$(run_opus_escalation_review "$sonnet_output" 2>&1 | tee /dev/stderr)"
     opus_status="$(parse_status "$opus_output")"
+    opus_risk="$(parse_risk "$opus_output")"
     append_task_block "Review Cycle ${review_id} - Opus Escalation (${REVIEW_ESCALATION_MODEL})" "$opus_output"
-    append_review_status "$review_id" "Reviewed" "$opus_status" "$(parse_risk "$opus_output")"
+    append_review_status "$review_id" "Reviewed" "$opus_status" "${opus_risk:-UNKNOWN}"
     if [[ "$opus_status" == "APPROVED" ]]; then
       return 0
     fi
+    append_review_human_input_placeholder "$review_id"
     return 2
   fi
 
   if [[ "$sonnet_status" == "APPROVED" ]]; then
     return 0
   fi
+
+  append_review_human_input_placeholder "$review_id"
   return 2
 }
 
 cmd_rework() {
-  require_tool codex
+  require_tool copilot
   validate_task_file "$1"
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
 
@@ -1909,7 +2071,7 @@ Hard constraints:
 EOF
 )"
 
-  run_with_retries "Codex rework analysis pass (${review_id})" run_codex_prompt "$analysis_prompt"
+  run_with_retries "Builder rework analysis pass (${review_id})" run_builder_prompt "$analysis_prompt"
   immutable_after="$(immutable_hash)"
   if [[ "$immutable_before" != "$immutable_after" ]]; then
     append_retry_log "Plan integrity violation: immutable section changed during rework for ${review_id}."
@@ -1940,22 +2102,24 @@ Hard constraints:
 2) Implement only findings/test gaps from latest review cycle (${review_id}) and structured human input.
 3) Keep changes minimal and in-scope with acceptance criteria.
 4) Do not redo completed work or broad refactors.
-5) Update mutable sections in $TASK_FILE with implementation reasoning and verification evidence.
-6) Update Review Cycle ${review_id} - Rework Answer Matrix (keep heading + \`\`\`text fenced body):
+5) Complete all mandatory checklist items that remain open for this rework scope.
+6) Update mutable sections in $TASK_FILE with implementation reasoning and verification evidence.
+7) Update Review Cycle ${review_id} - Rework Answer Matrix (keep heading + \`\`\`text fenced body):
    - Keep same entries.
    - Fill CHANGE_MADE and VERIFICATION_PERFORMED with what was actually done.
    - Set STATUS to one of: RESOLVED | PARTIAL | BLOCKED.
-7) Run verification:
+8) Run verification:
    - make lint
    - make typecheck
    - make api-rebuild
    - make test-backend
    - make test-frontend
+   - make api-smoke
    - make e2e only if Playwright exists
 EOF
 )"
 
-  run_with_retries "Codex rework implementation pass (${review_id})" run_codex_prompt "$implementation_prompt"
+  run_with_retries "Builder rework implementation pass (${review_id})" run_builder_prompt "$implementation_prompt"
   immutable_after="$(immutable_hash)"
   if [[ "$immutable_before" != "$immutable_after" ]]; then
     append_retry_log "Plan integrity violation: immutable section changed during rework implementation for ${review_id}."
@@ -1963,7 +2127,10 @@ EOF
   fi
   validate_rework_analysis_and_matrix "$review_id"
 
+  assert_basic_build_sanity
   run_verification_suite
+  assert_required_task_sections_populated
+  assert_no_unfinished_markers_in_scope
   append_review_status "$review_id" "Implemented" "NEEDS_REVIEW" "PENDING"
   append_task_block "Review Cycle ${review_id} - Rework Result" "Two-pass rework completed (analysis -> implementation) for latest review findings."
   stage_scoped_changes "rework" "1"
@@ -1998,7 +2165,7 @@ cmd_ship() {
       --base main \
       --head "$BRANCH" \
       --title "Issue #${ISSUE_ID}: ${SLUG}" \
-      --body "Automated by task_flow.sh with Opus plan, Codex implementation, Sonnet review, and Opus escalation-on-risk." 2>&1)"
+      --body "Automated by task_flow.sh with Copilot plan, Copilot builder, Sonnet review, and escalation-on-risk." 2>&1)"
     pr_rc=$?
     set -e
 
@@ -2079,6 +2246,7 @@ main() {
       fi
       exit "$rc"
       ;;
+    review-input) cmd_review_input "$task" ;;
     rework) cmd_rework "$task" ;;
     ship) cmd_ship "$task" ;;
     all) cmd_all "$task" ;;

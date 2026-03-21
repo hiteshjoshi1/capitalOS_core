@@ -47,6 +47,7 @@ class CryptoAsset(Base):
     symbol = Column(Text, nullable=True)
     name = Column(Text, nullable=True)
     decimals = Column(BigInteger, nullable=True)
+    base_asset = Column(Text, nullable=True)
 
 
 class CryptoWalletSnapshot(Base):

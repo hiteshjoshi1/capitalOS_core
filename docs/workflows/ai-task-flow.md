@@ -1,180 +1,655 @@
-# CapitalOS AI Task Flow (v2.2)
+# CapitalOS AI Task Flow
 
-This workflow is local-first and branch-safe.
-All verification runs locally on your machine by default.
-An optional manual GitHub Actions workflow exists and runs only when triggered explicitly.
-On macOS, all main stages (`plan`, `build`, `review`, `rework`, `all`) run under `caffeinate` to prevent sleep until the stage exits.
-Copilot planner/reviewer runs in `text-only` tool mode by default (no shell/write/url tools), so task files are generated from model output and not by direct Copilot file writes.
+This document is the authoritative operator guide for implementing features using the CapitalOS AI orchestration pipeline.
 
-Model routing:
-- Planning/architecture: `claude-opus-4.6`
-- Implementation/checklist updates: Codex
-- Primary review/testing: `claude-sonnet-4.6`
-- Escalation review only (uncertain/high-risk Sonnet review): `claude-opus-4.6`
+It explains:
 
-## Configuration
-- Workflow runtime config is loaded from repo-root `.ai-models.env`.
-- Keys: `PLAN_MODEL`, `REVIEW_MODEL`, `REVIEW_ESCALATION_MODEL`, `CODEX_TIMEOUT_MINUTES`, `ENABLE_CAFFEINATE`, `COPILOT_TOOL_MODE`, `CONTEXT7_ENABLED`, `COPILOT_MCP_CONFIG`, `MAX_RETRIES`, `NO_CACHE`.
-- Existing shell env overrides remain supported and take precedence over `.ai-models.env`.
-- `./scripts/task_flow.sh --verbose ...` prints the active routing table.
+- the pipeline architecture
+- the exact step-by-step operator flow from new task to ship
+- the canonical Make commands
+- the JSON payloads for human resume points
+- export / import / restore flows
+- how to test the pipeline
 
-## Task Context
-- `plan` and `review` send the full task file content to the model (no compaction).
-- Task file on disk is used as-is for prompt context.
+---
 
-## Caching
-- Cache directory: `.task-cache/` (gitignored).
-- Applies only to `plan` and `review` model calls.
-- Cache key: `sha256(phase + model + full_task_content + git_tree_hash)`.
-- Cache stores response text (`.txt`) and metadata (`.meta`).
-- Set `NO_CACHE=1` to bypass cache.
-- Clear cache with `make task-cache-clean`.
+## Purpose
 
-## Context7 Integration
-- Optional and off by default: `CONTEXT7_ENABLED=0`.
-- When enabled and configured, `plan`/`review` Copilot calls include `--allow-tool context7`.
-- Config file path: `COPILOT_MCP_CONFIG` (defaults to `~/.copilot/mcp-config.json`).
-- If Context7 invocation fails, workflow logs a warning and retries the same call without Context7.
-- Expected config shape includes `mcpServers.context7` (HTTP MCP endpoint).
+The CapitalOS AI task flow is designed to support local-first, resumable, human-gated feature delivery.
 
-Canonical task artifact:
-- `tasks/issue-<id>-<slug>.md`
+The workflow is:
 
-Human gate:
-- Planning and implementation are separated by mandatory human approval in the task file:
-  - `## Human Approval Gate`
-  - `- [x] Approved for implementation`
+- local-first
+- branch-safe
+- resumable
+- explicit about human approvals
+- based on structured state rather than markdown parsing
 
-## Lifecycle
-0. `prepare`
-- Uses your local task file as input.
-- Verifies no other working-tree changes are present.
-- Checks out `main`, pulls latest, creates/switches `feature/issue-<id>-<slug>`, restores the task file there, commits, and pushes.
-- Leaves branch clean and ready for `plan`.
+---
 
-1. `plan`
-- Verifies clean worktree.
-- Checks out `main`, pulls latest, and creates/switches `feature/issue-<id>-<slug>` (reuses existing branch; does not recreate).
-- If already on the target issue branch, allows local changes only in that task file and plans in place.
-- Creates task file from `tasks/_template.md` when missing.
-- Runs Copilot with Opus and writes a clean structured plan into the task file (CLI transcript stays in terminal output, not in the file).
-- Planning output includes copy/paste `make` commands with the exact task filename.
-- Workflow command section is normalized by script to canonical `make task-* TASK=<file>` commands.
-- Commits and pushes the planning artifact.
+## Core Architecture
 
-2. Human review
-- Review task file.
-- Finalize architecture/acceptance criteria.
-- Mark `Approved for implementation` as checked.
+The workflow is implemented in Python under `orchestration/` using:
 
-3. `build`
-- Runs Codex implementation.
-- Enforces plan integrity: immutable section (above `<!-- IMMUTABLE_PLAN_END -->`) must not change.
-- Runs verification commands with max 3 retries:
-  - `make lint`
-  - `make typecheck`
-  - `make test-backend`
-  - `make test-frontend`
-  - `make e2e` 
-- Auto-stages changes (`git add -A`) at the end for review handoff.
+- **LangGraph** for orchestration, routing, interrupts, checkpoints, and resumability
+- **Pydantic** for typed shared state and stage outputs
 
-4. `review`
-- Independently reruns deterministic verification in bash (no model tool execution):
-  - `make lint`
-  - `make typecheck`
-  - `make test-backend`
-  - `make test-frontend`
-  - `make api-smoke`
-  - `make e2e` when Playwright is configured (used as UI smoke)
-- Captures verification output and UI artifact index (`web/playwright-report`, `web/test-results`) as review evidence.
-- Runs Sonnet review against task file + current diff + captured verification/UI evidence.
-- Escalates to Opus only when Sonnet marks uncertain/conflicting/high-risk.
-- Logs a new review cycle section each run (for example `Review Cycle R1`) and marks status `Reviewed`.
-- Requires all review inputs to be staged (manual `task-review`); otherwise exits with instruction.
+### Core design rules
 
-5. `rework`
-- Requires structured human input for latest cycle under:
-  - `### Review Cycle R<n> - Human Input`
-  - `HUMAN_QUESTIONS: ...`
-  - `UNRESOLVED_COMMENTS: ...`
-  - `RESPONSE_REQUIREMENTS: ...`
-- Runs two-pass Codex rework:
-  - Analysis pass first (diagnose/justify only), writing:
-    - `Review Cycle R<n> - Rework Analysis`
-    - `Review Cycle R<n> - Rework Answer Matrix`
-  - Implementation pass second (patch/verify), updating same answer matrix with actual changes and verification.
-- Required answer-matrix fields per entry:
-  - `REVIEWER_FINDING`
-  - `HUMAN_COMMENT`
-  - `ROOT_CAUSE`
-  - `CHANGE_MADE`
-  - `VERIFICATION_PERFORMED`
-  - `STATUS`
-- Marks latest review cycle status as `Implemented`.
-- Prevents duplicate rework for the same review cycle.
-- Auto-stages changes (`git add -A`) at the end for next review pass.
+#### 1. Structured state is the machine source of truth
+Workflow decisions and transitions are driven by typed structured state.
 
-Review gate enforcement:
-- `task-review` fails fast if latest implemented cycle is missing either:
-  - `Rework Analysis`, or
-  - `Rework Answer Matrix`.
+Examples include:
 
-6. `ship`
-- Commits branch changes.
-- Pushes branch.
-- Creates PR to `main` if one does not already exist.
+- issue metadata
+- current stage
+- workflow status
+- plan output
+- build output
+- verification evidence
+- review cycles
+- rework cycles
+- ship result
 
-## Commands
-- `scripts/task_flow.sh prepare tasks/issue-123-my-task.md`
-- `scripts/task_flow.sh plan tasks/issue-123-my-task.md`
-- `scripts/task_flow.sh build tasks/issue-123-my-task.md`
-- `scripts/task_flow.sh review tasks/issue-123-my-task.md`
-- `scripts/task_flow.sh rework tasks/issue-123-my-task.md`
-- `scripts/task_flow.sh ship tasks/issue-123-my-task.md`
-- `scripts/task_flow.sh all tasks/issue-123-my-task.md`
+#### 2. Markdown is a human-facing artifact
+Task markdown files remain important, but they are not the workflow database.
 
-`all` behavior:
-- Runs `plan`.
-- Stops if human gate is not approved.
-- If approved, continues with `build -> review/rework loop -> ship`.
-- Auto-stages (`git add -A`) before each review cycle so reviewer sees complete snapshot.
+Task files are used for:
 
-## Guardrails
-- Never commits directly to `main`.
-- Max 3 retries per failing command/rework cycle.
-- All blockers are appended into task file.
-- Codex must not modify immutable approved plan content.
-- `caffeinate` is enabled by default (`ENABLE_CAFFEINATE=1`); set `ENABLE_CAFFEINATE=0` to disable.
-- `caffeinate` scope covers `plan`, `build`, `review`, `rework`, and `all`.
-- Copilot tool mode defaults to `COPILOT_TOOL_MODE=text-only`; set `COPILOT_TOOL_MODE=tools-enabled` only if you explicitly want Copilot tool calls.
+- human-authored issue definition
+- objective and acceptance criteria
+- human-readable execution journal rendered from structured state
 
-## E2E Definition and Trigger
-- Local E2E command is defined in `Makefile` target: `e2e`.
-- `scripts/task_flow.sh build` runs `make e2e` only when Playwright config exists (`web/playwright.config.ts` or `.js`).
-- If Playwright is not configured, E2E is skipped by design (not treated as failure).
-- Optional manual GitHub run is defined in `.github/workflows/pr-validate.yml` with `workflow_dispatch` only.
+#### 3. Human approvals are explicit graph interrupts
+The workflow pauses at human gates and resumes with structured JSON payloads.
 
-## How to Trigger a New Feature
-Input entrypoint for high-level task: task file objective section.
+Primary gates:
 
-Git behavior for this step:
-- Create the new task file first and run `make task-prepare ...`.
-- `task-prepare` checks out `main`, pulls latest, creates/switches `feature/issue-<id>-<slug>`, and commits the task file on that feature branch.
-- `task-plan` then reuses that existing branch (no branch recreation).
-- Do not commit the task file on `main` first.
-- Keep tracked local changes clean before running, or branch switching can fail.
+- plan approval
+- human review
 
-Example (UI/UX refresh):
-1. Create task:
-- `cp tasks/_template.md tasks/issue-103-ui-ux-refresh.md`
-2. Write your high-level prompt in `## Objective`, for example:
-- "Refresh dashboard UI/UX for clarity and hierarchy; improve risk card readability and mobile spacing."
-3. Start workflow:
-- `make task-prepare TASK=tasks/issue-103-ui-ux-refresh.md`
-- `make task-plan TASK=tasks/issue-103-ui-ux-refresh.md`
-4. Review generated plan and check:
-- `- [x] Approved for implementation`
-5. Continue:
-- `make task-build TASK=tasks/issue-103-ui-ux-refresh.md`
-- `make task-review TASK=tasks/issue-103-ui-ux-refresh.md`
-- `make task-ship TASK=tasks/issue-103-ui-ux-refresh.md`
+#### 4. Workflow intent is preserved, but shell-specific hacks are removed
+The old shell pipeline used markdown parsing, placeholder blocks, and implicit state transitions.
+
+The new workflow preserves the intent:
+
+- prepare
+- plan
+- human approval
+- build
+- agent review
+- optional escalation review
+- human review
+- rework loop
+- ship
+
+but implements it with explicit typed state and graph routing.
+
+---
+
+## High-Level Pipeline
+
+```text
+prepare
+  -> plan
+  -> human approval gate
+  -> build
+  -> agent review
+  -> optional escalation review
+  -> human review
+  -> if approved: ship
+  -> if needs fixes:
+        rework analysis
+        -> rework implementation
+        -> agent review
+        -> optional escalation review
+        -> human review
+        -> repeat until approved
+
+
+Stage meanings
+prepare
+
+ensures task file exists
+
+prepares or switches to the correct issue branch
+
+bootstraps workflow context for the issue
+
+plan
+
+generates a structured implementation plan
+
+records acceptance criteria, checklist, and planned file paths
+
+captures immutable plan hash
+
+human_approval_gate
+
+mandatory human gate after planning
+
+blocks build until approved
+
+build
+
+implements the feature
+
+runs verification suite
+
+stages scoped changes
+
+preserves immutable plan region
+
+agent_review
+
+performs structured model review on build or rework output
+
+may approve, request fixes, or escalate
+
+escalation_review
+
+second-pass review for uncertain or high-risk cases
+
+human_review
+
+human review after agent review
+
+can approve or request fixes
+
+rework_analysis
+
+analyzes latest findings and human comments
+
+produces structured rework plan and answer matrix
+
+rework_implementation
+
+applies the rework
+
+reruns verification
+
+returns to review loop
+
+ship
+
+final guarded ship step
+
+commits and pushes branch
+
+optionally opens PR
+
+Canonical Task File
+
+Task files live under:
+
+tasks/issue-<id>-<slug>.md
+
+Example:
+
+tasks/issue-103-ui-ux-refresh.md
+Canonical Make Commands
+Core workflow commands
+make task-prepare TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-build TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-agent-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-rework TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+Human gate resume commands
+make task-approve-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
+make task-human-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
+make task-resume TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
+State and debugging commands
+make task-export-state TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-import-state TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 STATE_FILE=.task-flow/exports/issue-123.json
+make task-restore-state TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123-restored STATE_FILE=.task-flow/exports/issue-123.json RESTART_AT=human_review
+make task-state-show TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-orch-smoke
+End-to-End Feature Workflow
+
+This is the canonical operator path for implementing a new feature.
+
+Step 0 — Preflight
+
+Run a quick workflow smoke test and standard verification:
+
+make task-orch-smoke
+make verify
+
+If you also need the app running locally:
+
+make up
+make db-migrate
+make api-up
+make web-up
+Step 1 — Create the task file
+
+Create a new issue task file:
+
+cp tasks/_template.md tasks/issue-123-my-feature.md
+
+Example:
+
+cp tasks/_template.md tasks/issue-103-ui-ux-refresh.md
+Step 2 — Write the initial objective
+
+Edit the task file and write the initial human problem statement.
+
+At minimum, fill:
+
+## Objective
+
+If known, also fill or refine:
+
+## Acceptance Criteria
+
+any architecture notes or constraints
+
+Example objective:
+
+Refresh dashboard UI/UX for clearer hierarchy, better risk-card readability, and better mobile spacing.
+
+Keep this high level and human-authored. The planner will refine it.
+
+Step 3 — Choose a stable thread id
+
+Pick a thread id for the issue and keep using it throughout the workflow.
+
+Example:
+
+issue-103
+Step 4 — Prepare the workflow context
+
+Run:
+
+make task-prepare TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+
+What this does:
+
+ensures the task file exists
+
+prepares the issue branch
+
+initializes workflow context for that task
+
+Step 5 — Generate the plan
+
+Run:
+
+make task-plan TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+
+What happens:
+
+planner reads the task markdown as human context
+
+produces structured PlanOutput
+
+records:
+
+plan summary
+
+architecture decisions
+
+risks
+
+acceptance criteria
+
+checklist
+
+planned paths
+
+captures immutable plan hash
+
+renders the plan summary into the task markdown
+
+At this point the workflow has not started implementation.
+
+Step 6 — Review the generated plan as a human
+
+Open the task file and review:
+
+objective clarity
+
+architecture choices
+
+scope boundaries
+
+acceptance criteria
+
+checklist sanity
+
+planned paths
+
+Questions to ask:
+
+Is the scope too broad?
+
+Are the acceptance criteria testable?
+
+Are the planned files reasonable?
+
+Is anything missing?
+
+Would I approve this if a human engineer proposed it?
+
+Step 7 — Approve or reject the plan
+Approve the plan
+make task-approve-plan \
+  TASK=tasks/issue-103-ui-ux-refresh.md \
+  THREAD_ID=issue-103 \
+  RESUME_JSON='{"gate_type":"plan_approval","decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
+Reject or request fixes to the plan
+make task-approve-plan \
+  TASK=tasks/issue-103-ui-ux-refresh.md \
+  THREAD_ID=issue-103 \
+  RESUME_JSON='{"gate_type":"plan_approval","decision":"needs_fixes","reviewer":"Hitesh","notes":"Scope is too broad; narrow to dashboard cards only","questions":["Can this be split into two tasks?"],"response_requirements":["Reduce scope and tighten acceptance criteria"],"unresolved_comments":["Do not touch unrelated layout areas"]}'
+
+If you reject, the workflow should not proceed into build until the plan is corrected.
+
+Step 8 — Build the feature
+
+If running stepwise:
+
+make task-build TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+
+If running full workflow, task-all will continue after plan approval.
+
+What happens during build:
+
+immutable plan region is checked
+
+builder implements the feature
+
+verification suite runs
+
+retry policy is applied
+
+one scoped builder auto-fix pass may be attempted on repeated code failures
+
+changed files are staged if within allowed scope
+
+markdown execution journal is updated
+
+Typical verification includes:
+
+make lint
+make typecheck
+make test-backend
+make test-frontend
+make api-smoke
+make e2e   # if Playwright is configured
+Step 9 — Run agent review
+
+Run:
+
+make task-agent-review TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+
+Possible outcomes:
+
+approved
+
+needs_fixes
+
+escalate
+
+If the review is high-risk or uncertain, the graph may route into escalation review during full workflow execution.
+
+Step 10 — Complete human review
+
+When the workflow pauses for human review, inspect:
+
+rendered review cycle in task markdown
+
+summary of findings
+
+test gaps
+
+changed files
+
+verification outcome
+
+Then resume the human review gate.
+
+Approve
+make task-human-review \
+  TASK=tasks/issue-103-ui-ux-refresh.md \
+  THREAD_ID=issue-103 \
+  RESUME_JSON='{"decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
+Request fixes
+make task-human-review \
+  TASK=tasks/issue-103-ui-ux-refresh.md \
+  THREAD_ID=issue-103 \
+  RESUME_JSON='{"decision":"needs_fixes","reviewer":"Hitesh","notes":"Please fix the routing edge case and make the acceptance criteria coverage clearer","questions":["Was the edge case tested?"],"response_requirements":["Show the exact fix and verification evidence"],"unresolved_comments":["Do not ship until this is corrected"]}'
+
+If both:
+
+effective agent review = approved
+
+human review = approved
+
+then the workflow can ship.
+
+If either requests fixes, the workflow enters rework.
+
+Step 11 — Rework loop
+
+If human or agent review requests fixes, the workflow goes through:
+
+rework_analysis
+
+rework_implementation
+
+review again
+
+You can trigger rework directly if operating manually:
+
+make task-rework TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+Rework analysis
+
+Produces:
+
+root cause
+
+findings addressed
+
+planned changes
+
+validation plan
+
+answer matrix
+
+Rework implementation
+
+Applies the changes and reruns verification.
+
+Then the workflow returns to:
+
+agent review
+
+optional escalation review
+
+human review
+
+This loop continues until both sides approve.
+
+Step 12 — Ship
+
+Once the final review cycle is approved and blockers are clear:
+
+make task-ship TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+
+What happens:
+
+final ship checks run
+
+branch is pushed
+
+PR may be created if enabled in orchestration config
+
+Fast Path (Recommended for normal usage)
+
+The simplest operator path is:
+
+1. Create the task file
+cp tasks/_template.md tasks/issue-123-my-feature.md
+2. Write the objective
+
+Edit the file.
+
+3. Start the full workflow
+make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+4. Approve the plan when interrupted
+make task-approve-plan \
+  TASK=tasks/issue-123-my-feature.md \
+  THREAD_ID=issue-123 \
+  RESUME_JSON='{"gate_type":"plan_approval","decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
+5. Approve or reject human review when interrupted
+
+Approve:
+
+make task-human-review \
+  TASK=tasks/issue-123-my-feature.md \
+  THREAD_ID=issue-123 \
+  RESUME_JSON='{"decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'
+
+Or request fixes:
+
+make task-human-review \
+  TASK=tasks/issue-123-my-feature.md \
+  THREAD_ID=issue-123 \
+  RESUME_JSON='{"decision":"needs_fixes","reviewer":"Hitesh","notes":"Please address the routing issue","questions":["Was the edge case covered?"],"response_requirements":["Show the exact routing fix"],"unresolved_comments":["Do not ship until corrected"]}'
+
+If you reject with needs_fixes, the workflow continues through rework and returns to human review again.
+
+JSON Resume Payload Examples
+Plan approval — approved
+{
+  "gate_type": "plan_approval",
+  "decision": "approved",
+  "reviewer": "Hitesh",
+  "notes": "Looks good",
+  "questions": [],
+  "response_requirements": [],
+  "unresolved_comments": []
+}
+Plan approval — needs fixes
+{
+  "gate_type": "plan_approval",
+  "decision": "needs_fixes",
+  "reviewer": "Hitesh",
+  "notes": "Scope too broad",
+  "questions": ["Split task?"],
+  "response_requirements": ["Reduce scope"],
+  "unresolved_comments": ["Do not touch unrelated modules"]
+}
+Human review — approved
+{
+  "decision": "approved",
+  "reviewer": "Hitesh",
+  "notes": "Looks good",
+  "questions": [],
+  "response_requirements": [],
+  "unresolved_comments": []
+}
+Human review — needs fixes
+{
+  "decision": "needs_fixes",
+  "reviewer": "Hitesh",
+  "notes": "Fix edge case",
+  "questions": ["Was it tested?"],
+  "response_requirements": ["Show fix"],
+  "unresolved_comments": ["Do not ship"]
+}
+State Export, Import, and Restore
+Export current workflow state
+make task-export-state TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103
+Inspect exported state
+make task-import-state TASK=tasks/issue-103-ui-ux-refresh.md THREAD_ID=issue-103 STATE_FILE=.task-flow/exports/issue-103.json
+Restore into a new thread
+make task-restore-state \
+  TASK=tasks/issue-103-ui-ux-refresh.md \
+  THREAD_ID=issue-103-restored \
+  STATE_FILE=.task-flow/exports/issue-103.json \
+  RESTART_AT=human_review
+When to use restore
+
+Use restore when:
+
+checkpoint DB is lost or corrupted
+
+moving machines or environments
+
+graph or state schema changed and you want a clean restart point
+
+you want to branch from an earlier workflow snapshot
+
+you need to recover from bad human input
+
+Testing the Pipeline
+
+There are two useful layers of testing.
+
+1. Quick orchestration smoke test
+make task-orch-smoke
+2. Full orchestration test suite
+
+Run:
+
+pytest orchestration/tests -q
+Useful individual tests
+pytest orchestration/tests/test_routing.py -q
+pytest orchestration/tests/test_state_machine.py -q
+pytest orchestration/tests/test_integrity.py -q
+pytest orchestration/tests/test_e2e_mocked.py -q
+pytest orchestration/tests/test_escalation_rework_ship.py -q
+
+These tests validate workflow logic without requiring live model calls.
+
+Guardrails
+
+The workflow is designed to enforce these rules:
+
+structured state is authoritative
+
+human approval is mandatory before build
+
+immutable plan region must not change during mutable stages
+
+verification is required before approval and ship
+
+out-of-scope changes are blocked
+
+ship is blocked if blockers remain
+
+workflow should never intentionally ship from base branch
+
+markdown is rendered from state rather than reparsed as the primary workflow database
+
+Practical Advice
+
+If you are implementing a real feature, do this:
+
+create the task file
+
+write a clear objective and constraints
+
+run task-all
+
+inspect the generated plan carefully
+
+only approve the plan if you would approve it from a human engineer
+
+during human review, push hard on:
+
+scope creep
+
+weak verification
+
+unclear evidence
+
+unnecessary refactors
+
+only ship once findings are actually closed, not just summarized nicely
+
+The quality of the workflow depends more on discipline than on model choice.
