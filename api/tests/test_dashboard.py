@@ -145,15 +145,25 @@ def test_dashboard_eth_derivative_grouping(client: TestClient, db_engine, monkey
             ),
             {"as_of": as_of},
         )
+        # Create crypto_assets entries with base_asset = 'ETH'
+        conn.execute(
+            text(
+                "INSERT INTO crypto_assets (id, chain_type, chain, asset_kind, symbol, base_asset) VALUES "
+                "(80, 'evm', 'ethereum', 'native', 'ETH', 'ETH'), "
+                "(81, 'evm', 'ethereum', 'token', 'wETH', 'ETH'), "
+                "(82, 'evm', 'ethereum', 'token', 'stETH', 'ETH'), "
+                "(83, 'evm', 'ethereum', 'token', 'wstETH', 'ETH')"
+            )
+        )
         # Create 4 separate ETH derivative items
         conn.execute(
             text(
                 "INSERT INTO crypto_wallet_snapshot_items "
-                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd, base_asset) VALUES "
-                "(80, 80, 'evm', 'ethereum', 'native', 'ETH', 1.0, 3000, 'ETH'), "
-                "(81, 80, 'evm', 'ethereum', 'token', 'wETH', 0.5, 1500, 'ETH'), "
-                "(82, 80, 'evm', 'ethereum', 'token', 'stETH', 1.2, 3600, 'ETH'), "
-                "(83, 80, 'evm', 'ethereum', 'token', 'wstETH', 0.6, 1900, 'ETH')"
+                "(id, snapshot_id, asset_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(80, 80, 80, 'evm', 'ethereum', 'native', 'ETH', 1.0, 3000), "
+                "(81, 80, 81, 'evm', 'ethereum', 'token', 'wETH', 0.5, 1500), "
+                "(82, 80, 82, 'evm', 'ethereum', 'token', 'stETH', 1.2, 3600), "
+                "(83, 80, 83, 'evm', 'ethereum', 'token', 'wstETH', 0.6, 1900)"
             )
         )
 

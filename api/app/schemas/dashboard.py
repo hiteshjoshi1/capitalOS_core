@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 
 
@@ -16,40 +16,34 @@ class GeographyItem(BaseModel):
     percent: float
 
 
-class CashFlowItem(BaseModel):
-    source: str
-    income: float
-    expense: float
-    net: float
-
-
 class CashFlow(BaseModel):
-    income_total: float
-    expense_total: float
-    net_total: float
-    by_source: List[CashFlowItem]
+    income: float
+    expenses: float
+    net: float
+    savings_rate: Optional[float] = None
 
 
 class TopHolding(BaseModel):
+    asset_id: Optional[int] = None
     symbol: str
     asset_class: str
     value: float
-    percent: float
+    percent_of_networth: float
     quantity: Optional[float] = None
     avg_cost: Optional[float] = None
     latest_price: Optional[float] = None
     quote_currency: Optional[str] = None
-    home: Optional[str] = None
+    geo: Optional[str] = None
+    platform: Optional[str] = None
 
 
 class CashBalance(BaseModel):
-    source: str
+    currency: str
     value: float
-    percent: float
 
 
 class NetWorthChange(BaseModel):
-    abs: float
+    abs_: float = Field(alias="abs")
     pct: Optional[float] = None
     current_as_of: Optional[str] = None
     compare_as_of: Optional[str] = None
@@ -68,6 +62,9 @@ class DashboardSummaryResponse(BaseModel):
     cash_balances: List[CashBalance]
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
     cash_percent: float
+
+    class Config:
+        populate_by_name = True
 
 
 class PlatformAllocationItem(BaseModel):
