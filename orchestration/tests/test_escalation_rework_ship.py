@@ -387,3 +387,116 @@ def test_ship_reconciles_stale_branch_metadata_with_current_branch(tmp_path: Pat
     assert pushed == ["issue-123-test"]
     assert pipeline["issue"]["branch"] == "issue-123-test"
     assert pipeline["workflow_status"] == "shipped"
+
+
+def test_ship_renders_task_file_before_commit(tmp_path: Path, monkeypatch):
+    task_file = make_task_file(tmp_path)
+
+    commit_observations: dict[str, str] = {}
+
+    monkeypatch.setattr(
+        "orchestration.services.git.GitService.add",
+        lambda self, *paths: None,
+    )
+
+    def fake_commit(self, message):
+        commit_observations["message"] = message
+        commit_observations["task_file"] = (tmp_path / task_file).read_text()
+        return True
+
+    monkeypatch.setattr(
+        "orchestration.services.git.GitService.commit_if_needed",
+        fake_commit,
+    )
+    monkeypatch.setattr(
+        "orchestration.services.git.GitService.push",
+        lambda self, branch: None,
+    )
+    monkeypatch.setattr(
+        "orchestration.services.git.GitService.current_branch",
+        lambda self: "issue-123-test",
+    )
+    monkeypatch.setattr(
+        "orchestration.services.integrity.IntegrityService.assert_matches_planned_hash",
+        lambda self, pipeline: None,
+    )
+
+    graph = build_graph(get_checkpointer(str(tmp_path / ".task-flow" / "langgraph.sqlite")))
+    config = {"configurable": {"thread_id": "issue-123-ship-render-order"}}
+    state = {
+        "pipeline": {
+            "issue": {
+                "issue_id": "123",
+                "slug": "test",
+                "title": "Test",
+                "task_file": task_file,
+                "repo_root": str(tmp_path),
+                "branch": "issue-123-test",
+                "created_at": "2026-03-18T00:00:00Z",
+            },
+            "current_stage": "human_review",
+            "workflow_status": "approved",
+            "requested_entrypoint": "ship",
+            "execution_mode": "step",
+            "build_output": {
+                "summary": "Implemented feature",
+                "changed_files": ["orchestration/graph.py"],
+                "completed_checklist_item_ids": [],
+                "implementation_notes": [],
+                "verification": {
+                    "results": [
+                        {
+                            "name": "lint",
+                            "command": "make lint",
+                            "status": "pass",
+                            "exit_code": 0,
+                            "output_excerpt": "ok",
+                        }
+                    ],
+                    "summary": "ok",
+                    "any_failures": False,
+                    "created_at": "2026-03-18T00:00:00Z",
+                },
+                "extra_changed_files": [],
+                "retry_entries": [],
+            },
+            "review_cycles": [
+                {
+                    "review_id": "R1",
+                    "source": "build",
+                    "agent_review": {
+                        "review_id": "R1",
+                        "model_name": "reviewer",
+                        "decision": "approved",
+                        "risk": "low",
+                        "summary": "Looks good",
+                        "findings": [],
+                        "test_gaps": [],
+                        "verification_considered": True,
+                        "created_at": "2026-03-18T00:00:00Z",
+                    },
+                    "human_review": {
+                        "review_id": "R1",
+                        "decision": "approved",
+                        "reviewer": "Hitesh",
+                        "notes": "Ship it",
+                        "questions": [],
+                        "response_requirements": [],
+                        "unresolved_comments": [],
+                        "created_at": "2026-03-18T00:00:00Z",
+                    },
+                    "status": "approved",
+                    "created_at": "2026-03-18T00:00:00Z",
+                }
+            ],
+            "active_review_cycle_id": "R1",
+        }
+    }
+
+    graph.invoke(state, config=config)
+
+    rendered = commit_observations["task_file"]
+    assert "**Current Stage**: `done`" in rendered
+    assert "**Workflow Status**: `shipped`" in rendered
+    assert "## Ship Result" in rendered
+    assert "Pushed branch `issue-123-test`." in rendered

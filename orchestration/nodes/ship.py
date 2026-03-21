@@ -53,16 +53,27 @@ def run(state: GraphState) -> GraphState:
         )
         pipeline.issue.branch = current_branch
 
+    pr_created = False
+    pr_url = None
+    summary = f"Pushed branch `{pipeline.issue.branch}`."
+
+    pipeline.ship_result = ShipResult(
+        committed=False,
+        pushed=True,
+        pr_created=pr_created,
+        pr_url=pr_url,
+        summary=summary,
+    )
+    pipeline.workflow_status = "shipped"
+    pipeline.current_stage = "done"
+
+    render_task_file(pipeline)
     git.add(pipeline.issue.task_file)
     emit_progress("ship", current_action="Creating final workflow commit and pushing branch")
     committed = git.commit_if_needed(
         f"feat: complete issue #{pipeline.issue.issue_id} workflow execution"
     )
     git.push(pipeline.issue.branch)
-
-    pr_created = False
-    pr_url = None
-    summary = f"Pushed branch `{pipeline.issue.branch}`."
 
     if cfg.create_pr_on_ship:
         gh = GitHubService(pipeline.issue.repo_root)
@@ -75,18 +86,12 @@ def run(state: GraphState) -> GraphState:
         pr_created = pr.created
         pr_url = pr.url
         summary += f" {pr.message}"
+        pipeline.ship_result.pr_created = pr_created
+        pipeline.ship_result.pr_url = pr_url
+        pipeline.ship_result.summary = summary
+        render_task_file(pipeline)
 
-    pipeline.ship_result = ShipResult(
-        committed=committed,
-        pushed=True,
-        pr_created=pr_created,
-        pr_url=pr_url,
-        summary=summary,
-    )
-    pipeline.workflow_status = "shipped"
-    pipeline.current_stage = "done"
-
-    render_task_file(pipeline)
+    pipeline.ship_result.committed = committed
     emit_stage_end(
         "ship",
         status="shipped",
