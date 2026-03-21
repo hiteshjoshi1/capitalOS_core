@@ -139,6 +139,7 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
     if not rows:
         rows = []
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    currencies.add("USD")  # Include USD for crypto wallet conversions
     rates = get_rates(anchor_ts, base_currency, currencies)
     cash = 0.0
     stocks_funds = 0.0
@@ -174,7 +175,7 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
     ).mappings().one()
     wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
     if wallet_usd:
-        usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
+        usd_rate = rates.get("USD", 1.0)
         crypto += wallet_usd * usd_rate
 
     liabilities = 0.0  # later when loans modeled
