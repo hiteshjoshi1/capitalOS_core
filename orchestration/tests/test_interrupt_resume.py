@@ -229,6 +229,9 @@ def test_step_mode_plan_reaches_human_approval_gate(tmp_path: Path, monkeypatch)
 
     assert snapshot.interrupts, "Expected interrupt at plan approval in step mode"
     assert snapshot.interrupts[0].value["gate"] == "plan_approval"
+    rendered = (tmp_path / task_file).read_text()
+    assert "**Current Stage**: `human_approval_gate`" in rendered
+    assert "**Workflow Status**: `waiting_for_human`" in rendered
 
 
 def test_step_mode_plan_approval_continues_to_human_review(tmp_path: Path, monkeypatch):
@@ -346,6 +349,9 @@ def test_step_mode_plan_approval_continues_to_human_review(tmp_path: Path, monke
     snapshot = graph.get_state(config)
     assert snapshot.interrupts
     assert snapshot.interrupts[0].value["gate"] == "human_review"
+    rendered = (tmp_path / task_file).read_text()
+    assert "**Current Stage**: `human_review`" in rendered
+    assert "**Workflow Status**: `waiting_for_human`" in rendered
 
 
 def test_workflow_extra_files_gate_then_returns_to_review(tmp_path: Path, monkeypatch):

@@ -4,6 +4,7 @@ from langgraph.types import interrupt
 
 from orchestration.models.review import HumanDecision, HumanReview
 from orchestration.render import render_task_file
+from orchestration.services.console import emit_stage_end, emit_stage_start, emit_waiting_for_human
 from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_state
 
 
@@ -15,6 +16,11 @@ def run(state: GraphState) -> GraphState:
     cycle = pipeline.get_active_review_cycle()
     if not cycle:
         raise RuntimeError("No active review cycle available for human review.")
+    emit_stage_start(
+        "human_review",
+        current_action="Preparing human review payload",
+        evidence=[f"review_id={cycle.review_id}", f"status={cycle.status}"],
+    )
 
     if cycle.extra_changed_files and cycle.extra_files_review is None:
         payload = {
@@ -34,6 +40,13 @@ def run(state: GraphState) -> GraphState:
             },
         }
 
+        render_task_file(pipeline)
+        emit_waiting_for_human(
+            "human_review",
+            gate="extra_files_approval",
+            evidence=[f"review_id={cycle.review_id}", f"extra_files={len(cycle.extra_changed_files)}"],
+            conclusion="Human approval is required for files outside the planned scope.",
+        )
         decision_raw = interrupt(payload)
         decision_raw.setdefault("gate_type", "extra_files_approval")
 
@@ -50,6 +63,12 @@ def run(state: GraphState) -> GraphState:
             pipeline.workflow_status = "needs_fixes"
 
         render_task_file(pipeline)
+        emit_stage_end(
+            "human_review",
+            status=cycle.status,
+            evidence=[f"gate=extra_files_approval", f"decision={decision.decision}", f"reviewer={decision.reviewer}"],
+            conclusion="Extra-file approval decision recorded.",
+        )
         return dump_pipeline_state(pipeline)
 
     effective_review = cycle.escalation_review or cycle.agent_review
@@ -70,6 +89,13 @@ def run(state: GraphState) -> GraphState:
         },
     }
 
+    render_task_file(pipeline)
+    emit_waiting_for_human(
+        "human_review",
+        gate="human_review",
+        evidence=[f"review_id={cycle.review_id}", f"agent_decision={effective_review.decision}"],
+        conclusion="Final human review is required before ship or further rework.",
+    )
     decision_raw = interrupt(payload)
     if "gate_type" in decision_raw:
         decision_raw.pop("gate_type", None)
@@ -92,4 +118,10 @@ def run(state: GraphState) -> GraphState:
         pipeline.workflow_status = "needs_fixes"
 
     render_task_file(pipeline)
+    emit_stage_end(
+        "human_review",
+        status=cycle.status,
+        evidence=[f"decision={human_decision.decision}", f"reviewer={human_decision.reviewer}"],
+        conclusion="Human review decision recorded.",
+    )
     return dump_pipeline_state(pipeline)

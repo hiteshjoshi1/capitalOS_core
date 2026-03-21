@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
@@ -65,12 +66,21 @@ def test_build_uses_autopilot_when_tools_enabled(monkeypatch) -> None:
         def model_for_stage(self, stage):
             return "claude-sonnet-4.5"
 
-    def fake_run(args, capture_output, text, cwd):
-        calls.append((args, cwd))
-        return SimpleNamespace(returncode=0, stdout='{"summary":"ok"}', stderr="")
+    class FakePopen:
+        def __init__(self, args, stdout, stderr, text, cwd, **kwargs):
+            calls.append((args, cwd))
+            self.returncode = 0
+            self.stdout = StringIO('{"summary":"ok"}')
+            self.stderr = StringIO("")
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            return self.returncode
 
     monkeypatch.setattr("orchestration.services.llm.get_config", lambda: FakeConfig())
-    monkeypatch.setattr("orchestration.services.llm.subprocess.run", fake_run)
+    monkeypatch.setattr("orchestration.services.llm.subprocess.Popen", FakePopen)
 
     service = LLMService(PipelineStage.BUILD, repo_root="/tmp/repo")
     service.complete_text("Implement the task")
@@ -91,12 +101,21 @@ def test_plan_stays_text_only_even_when_tools_enabled(monkeypatch) -> None:
         def model_for_stage(self, stage):
             return "claude-opus-4.6"
 
-    def fake_run(args, capture_output, text, cwd):
-        calls.append((args, cwd))
-        return SimpleNamespace(returncode=0, stdout=PLAN_JSON, stderr="")
+    class FakePopen:
+        def __init__(self, args, stdout, stderr, text, cwd, **kwargs):
+            calls.append((args, cwd))
+            self.returncode = 0
+            self.stdout = StringIO(PLAN_JSON)
+            self.stderr = StringIO("")
+
+        def poll(self):
+            return None
+
+        def wait(self):
+            return self.returncode
 
     monkeypatch.setattr("orchestration.services.llm.get_config", lambda: FakeConfig())
-    monkeypatch.setattr("orchestration.services.llm.subprocess.run", fake_run)
+    monkeypatch.setattr("orchestration.services.llm.subprocess.Popen", FakePopen)
 
     service = LLMService(PipelineStage.PLAN, repo_root="/tmp/repo")
     service.complete_text("Plan the task")

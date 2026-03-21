@@ -50,8 +50,8 @@ _Automation appends structured logs here._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-**Current Stage**: `PipelineStage.REWORK_ANALYSIS`
-**Workflow Status**: `running`
+**Current Stage**: `human_review`
+**Workflow Status**: `approved`
 
 ## Plan Summary
 Fix the dashboard risk card: add cash % as a top-level KPI, exclude cash from top-N positions, include crypto holdings (from wallet snapshots) in top-N positions, and group crypto derivatives (ETH+wETH+stETH etc.) into combined positions using a new base_asset column on the crypto_assets table.
@@ -205,6 +205,18 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
 - questions:
   - NA
 
+### Extra Files Approval
+- decision: `approved`
+- reviewer: `HJ`
+- decided_at: `2026-03-21T10:43:26.853263+00:00`
+- notes: _none_
+
+### Extra Files Approval
+- decision: `approved`
+- reviewer: `Hitesh Joshi`
+- decided_at: `2026-03-21T14:02:29.186336+00:00`
+- notes: _none_
+
 ### Plan Approval
 - decision: `approved`
 - reviewer: `Hitesh`
@@ -328,6 +340,114 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
   - No test validates ETH derivative grouping: that ETH + wETH + stETH + wstETH snapshot items are collapsed into a single 'ETH' row in top_holdings.
   - test_dashboard_top_holdings_include_cash_symbol asserts only cash_percent > 0, not the computed value. Weak assertion given the change is security-sensitive (position exclusion).
   - Static openapi.json not updated to include cash_percent in the summary schema, creating a documentation drift for API consumers.
+
+### Review Cycle R5
+- source: `rework`
+- status: `scope_approved`
+#### Primary Agent Review
+- model: `claude-sonnet-4.6`
+- decision: `needs_fixes`
+- risk: `medium`
+- summary: Review paused because files outside the approved scope were changed. Human approval is required before substantive review can continue.
+- findings:
+  - Unapproved extra changed files were detected outside the planned paths.
+#### Extra Files Outside Planned Scope
+- `orchestration/nodes/human_approval.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
+- `orchestration/nodes/prepare.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
+- `orchestration/nodes/ship.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
+- `orchestration/services/console.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
+- `orchestration/tests/test_console.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
+#### Extra Files Approval
+- reviewer: `HJ`
+- decision: `approved`
+- notes: _none_
+
+### Review Cycle R6
+- source: `rework`
+- status: `needs_fixes`
+#### Primary Agent Review
+- model: `claude-sonnet-4.6`
+- decision: `needs_fixes`
+- risk: `medium`
+- summary: Core feature deliverables (cash_percent KPI, CASH exclusion from top-N, crypto wallet positions, ETH derivative grouping via base_asset) are implemented and schema-consistent. One latent data-correctness bug exists in the crypto holdings JOIN that can silently double-count asset values in realistic DB states. Additionally, the primary acceptance-criteria field (cash_percent) has no value assertion in the basic smoke test, and a frontend type mismatch exists for snapshot_day.
+- findings:
+  - BUG – Double-counting in crypto_holdings CTE (dashboard.py ~L330): The OR-based LEFT JOIN `(ca.id = i.asset_id) OR (i.asset_id IS NULL AND LOWER(ca.symbol) = LOWER(i.symbol) AND ca.chain = i.chain)` can match multiple crypto_assets rows for a single snapshot item when the fallback path fires (asset_id IS NULL) and multiple crypto_assets entries share the same symbol+chain (e.g. V1/V2 contracts). The subsequent SUM(i.value_usd) grouped by COALESCE(ca.base_asset, i.symbol) will multiply the item's value by the number of matched rows. Fix: use a DISTINCT ON or pre-select a single canonical crypto_asset per (symbol, chain) in a deduplicated CTE before joining.
+  - TYPE MISMATCH – snapshot_day declared as `number` (non-nullable) in web/src/lib/api.ts DashboardSummary type, but the backend router hardcodes `snapshot_day: None` and the Pydantic schema declares it `Optional[int] = None`. TypeScript strict mode will not catch null at runtime. Fix: change api.ts declaration to `snapshot_day: number | null`.
+  - MISPLACED DOCSTRING – In `_networth_components` (dashboard.py L104–107), the `if anchor_ts is None: return ...` guard appears before the function docstring. The docstring is syntactically unreachable as a proper module-level docstring and will not appear in help(). Fix: move the docstring to immediately after `def _networth_components`.
+- test_gaps:
+  - test_dashboard_summary_basic does not assert `cash_percent` value — the key acceptance-criteria field has no numeric regression anchor. Add: `assert data['cash_percent'] == pytest.approx(expected_cash / expected_total * 100, rel=1e-3)`.
+  - No test exercises the fallback JOIN path (asset_id IS NULL on snapshot item with multiple matching crypto_assets rows) to detect the potential double-counting regression.
+  - No frontend test (App.test.tsx) verifies that summary.cash_percent is forwarded to RiskCard's cashPercent prop and rendered as the first KPI row.
+#### Human Review
+- reviewer: `Hitesh`
+- decision: `approved`
+- notes: Address the remaining R6 issues before final approval.
+
+### Review Cycle R7
+- source: `rework`
+- status: `needs_fixes`
+#### Primary Agent Review
+- model: `claude-sonnet-4.6`
+- decision: `approved`
+- risk: `low`
+- summary: Implementation correctly delivers all four plan requirements: cash_percent as a top-level KPI, CASH excluded from top-N positions SQL (WHERE a.asset_class <> 'CRYPTO' AND a.asset_class <> 'CASH'), crypto wallet snapshots included via UNION ALL, and ETH derivatives grouped via base_asset column + fallback CTE. Backend schema, Pydantic model, TypeScript types, RiskCard component, and App.tsx wiring are all coherent. All verification checks pass. One minor type contract gap exists but does not affect runtime behavior.
+- findings:
+  - TypeScript type `top_holdings[].asset_id` is declared as `number` in api.ts (line 61) but the Pydantic schema has `Optional[int] = None` and crypto rows return NULL from SQL. The correct TS type is `number | null`. Not a runtime bug today (asset_id is unused in App.tsx risk paths) but violates the API contract and will cause issues if any consumer does arithmetic with asset_id on a crypto holding.
+  - crypto_asset_fallback CTE uses MIN(ca.base_asset) to resolve collisions when the same symbol exists on multiple chains in crypto_assets. MIN is semantically arbitrary — if ETH exists on both 'ethereum' and 'solana' with different base_assets, the one chosen is non-deterministic by content. The JOIN condition includes chain equality which reduces the risk, but using MIN instead of asserting uniqueness is fragile.
+  - Migration 028 has no IF NOT EXISTS guard on the ADD COLUMN statement. Re-running the migration on a DB that already has the column will error. Minor operational risk for environments using run-all-migrations scripts.
+- test_gaps:
+  - No test for cash_percent when net worth total is zero (the 0.0 fallback path). Low risk since the guard is simple.
+  - No test covering the MIN(base_asset) collision path in crypto_asset_fallback (same symbol, same chain, two crypto_assets rows with different base_asset values). The existing duplicate-asset test only covers NULL asset_id fallback, not conflicting base_asset values.
+  - No test verifying that asset_id is null (not absent) in top_holdings for crypto rows in the API JSON response.
+#### Human Review
+- reviewer: `Hitesh Joshi`
+- decision: `needs_fixes`
+- notes: stock and crypto detail pages must stay separatecombining is only for dashboard risk/top-holdings/holdings must remain stock-only/crypto/holdings must remain crypto-only
+- questions:
+  - Why was the stock detail page changed in the first place? It was not my requirement
+  - why was this change not flagged by the review model
+- response_requirements:
+  - Stock detail should not have Ethereum. Stock and crypto are combined only for Risk card in dashboar
+
+### Review Cycle R8
+- source: `rework`
+- status: `scope_approved`
+#### Primary Agent Review
+- model: `claude-sonnet-4.6`
+- decision: `needs_fixes`
+- risk: `medium`
+- summary: Review paused because files outside the approved scope were changed. Human approval is required before substantive review can continue.
+- findings:
+  - Unapproved extra changed files were detected outside the planned paths.
+#### Extra Files Outside Planned Scope
+- `orchestration/tests/test_prompts.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
+#### Extra Files Approval
+- reviewer: `Hitesh Joshi`
+- decision: `approved`
+- notes: _none_
+
+### Review Cycle R9
+- source: `rework`
+- status: `approved`
+#### Primary Agent Review
+- model: `claude-sonnet-4.6`
+- decision: `approved`
+- risk: `low`
+- summary: All plan goals implemented correctly. The R7 human review concern (stock detail must not show crypto) is resolved: StockHoldings.tsx filters out asset_class CRYPTO at line 99, and crypto items in top_holdings are tagged asset_class=CRYPTO in dashboard.py line 347. CryptoHoldings uses api.cryptoSummary() independently — crypto detail remains crypto-only. cash_percent is a new top-level KPI in RiskCard. ETH derivatives are grouped via base_asset. All verification checks pass.
+- findings:
+  - StockHoldings.tsx line 99 correctly filters `asset_class !== 'CASH' && asset_class !== 'CRYPTO'`, so ETH/crypto items from the combined top_holdings will never appear in the stock detail page. R7 requirement satisfied.
+  - CryptoHoldings.tsx uses api.cryptoSummary() — a completely separate endpoint — and never consumes dashboard top_holdings. Crypto detail page remains crypto-only.
+  - Dashboard top_holdings combines stocks+crypto only for risk concentration. Crypto wallet snapshot items are explicitly tagged `asset_class = 'CRYPTO'` in dashboard.py line 347, which is the key sentinel preventing them from appearing in StockHoldings.
+  - cash_percent is computed and returned by the backend (dashboard.py lines 781-801) and displayed as the first KPI row in RiskCard.tsx. DashboardSummary TypeScript type includes cash_percent field.
+  - base_asset column added to CryptoAsset model and migration 028 correctly seeds ETH and BTC derivative symbol mappings with collision validation.
+  - Minor non-determinism: crypto_asset_fallback CTE uses MIN(base_asset) for symbol+chain collisions. Documented in a code comment; low risk for current dataset but worth a follow-up cleanup.
+- test_gaps:
+  - StockHoldings.test.tsx fixture contains no CRYPTO-class holding, so there is no explicit assertion that crypto items are excluded from the rendered table. A fixture row with asset_class='CRYPTO' and a negative assertion would close this gap.
+  - No frontend test verifies that cashPercent prop is rendered by RiskCard when populated from summary.cash_percent.
+#### Human Review
+- reviewer: `Hitesh`
+- decision: `approved`
+- notes: _none_
 
 ## Rework Cycles
 
@@ -523,6 +643,178 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>' to commit 
     - human_comment: none
     - root_cause: Reviewer concern about NULL chain values causing unintended JOIN matches, but no concrete failure case provided
     - status: planned
+
+### Rework Cycle W4
+- source_review_id: `R6`
+- status: `analysis_complete`
+#### Analysis
+- root_cause: Three code-level defects (crypto double-counting JOIN bug, frontend/backend type mismatch on snapshot_day, misplaced docstring) and three missing test assertions remain unaddressed in the feature branch, blocking final approval despite core feature logic being implemented.
+- findings_addressed:
+  - BUG: Double-counting in crypto_holdings CTE due to OR-based LEFT JOIN matching multiple crypto_assets rows when asset_id IS NULL
+  - TYPE MISMATCH: snapshot_day declared as non-nullable number in web/src/lib/api.ts but backend returns null
+  - MISPLACED DOCSTRING: _networth_components docstring appears after early-return guard, making it syntactically unreachable
+  - TEST GAP: test_dashboard_summary_basic does not assert cash_percent value against expected calculation
+  - TEST GAP: No test exercises fallback JOIN path with multiple matching crypto_assets to detect double-counting regression
+  - TEST GAP: No frontend test verifies cash_percent is rendered in RiskCard
+- planned_changes:
+  - Refactor crypto_holdings CTE in api/app/routers/dashboard.py to use DISTINCT ON or pre-deduplicated crypto_assets subquery before JOIN to ensure each snapshot item matches at most one canonical crypto_asset row
+  - Update web/src/lib/api.ts DashboardSummary interface: change snapshot_day: number to snapshot_day: number | null
+  - Move _networth_components docstring in api/app/routers/dashboard.py to immediately after def statement (before early-return guard)
+  - Add cash_percent value assertion to api/tests/test_dashboard.py::test_dashboard_summary_basic using pytest.approx with rel=1e-3 tolerance
+  - Add new test to api/tests/test_dashboard.py exercising fallback JOIN path: create snapshot item with asset_id=NULL and multiple crypto_assets rows with matching symbol+chain, verify value_usd is not multiplied
+  - Add test to web/src/App.test.tsx verifying summary.cash_percent is passed to RiskCard and rendered as first KPI row
+- validation_plan:
+  - Run make api-rebuild to rebuild backend container with fixes
+  - Run pytest api/tests/test_dashboard.py -v to verify new and modified tests pass
+  - Run make web-rebuild to verify TypeScript compiles without errors after snapshot_day type fix
+  - Run make api-smoke to verify dashboard endpoint returns valid JSON with cash_percent field
+  - Manually verify http://localhost:5173 renders cash_percent in RiskCard after make up
+  - Verify git diff shows changes in api/app/routers/dashboard.py, web/src/lib/api.ts, api/tests/test_dashboard.py, and web/src/App.test.tsx
+  - Commit all changes to issue-118-risk-and-test-pipeline branch and verify branch diff against main is non-empty
+- answer_matrix:
+  - entry_1:
+    - reviewer_finding: BUG – Double-counting in crypto_holdings CTE (dashboard.py ~L330): The OR-based LEFT JOIN can match multiple crypto_assets rows for a single snapshot item when fallback path fires, causing SUM(i.value_usd) to multiply the value by number of matched rows
+    - human_comment: Address the remaining R6 issues before final approval
+    - root_cause: JOIN condition allows non-deterministic one-to-many relationship between snapshot items and crypto_assets when asset_id is NULL
+    - status: planned
+    - change_made: Refactor to use DISTINCT ON or pre-select single canonical crypto_asset per (symbol, chain) before joining
+    - verification_performed: Add test with NULL asset_id and duplicate symbol+chain rows; verify value_usd not doubled
+  - entry_2:
+    - reviewer_finding: TYPE MISMATCH – snapshot_day declared as number (non-nullable) in web/src/lib/api.ts but backend returns None
+    - human_comment: Address the remaining R6 issues before final approval
+    - root_cause: Frontend TypeScript type declaration does not match backend Pydantic Optional[int] = None schema
+    - status: planned
+    - change_made: Change api.ts DashboardSummary.snapshot_day to number | null
+    - verification_performed: TypeScript compilation succeeds; runtime does not throw on null value
+  - entry_3:
+    - reviewer_finding: MISPLACED DOCSTRING – _networth_components docstring appears after early-return guard, making it syntactically unreachable
+    - human_comment: Address the remaining R6 issues before final approval
+    - root_cause: Docstring placed after conditional return statement instead of immediately after function signature
+    - status: planned
+    - change_made: Move docstring to line immediately following def _networth_components
+    - verification_performed: help(_networth_components) displays docstring; linters do not warn
+  - entry_4:
+    - reviewer_finding: TEST GAP – test_dashboard_summary_basic does not assert cash_percent value, leaving key acceptance-criteria field without numeric regression anchor
+    - human_comment: Address the remaining R6 issues before final approval
+    - root_cause: Test validates field presence but not correctness of calculation
+    - status: planned
+    - change_made: Add assertion: assert data['cash_percent'] == pytest.approx(expected_cash / expected_total * 100, rel=1e-3)
+    - verification_performed: Test passes with correct calculation; fails if cash_percent logic is broken
+  - entry_5:
+    - reviewer_finding: TEST GAP – No test exercises fallback JOIN path with multiple matching crypto_assets to detect double-counting regression
+    - human_comment: Address the remaining R6 issues before final approval
+    - root_cause: Existing tests only exercise happy path with valid asset_id foreign keys
+    - status: planned
+    - change_made: Add test creating snapshot item with asset_id=NULL and multiple crypto_assets rows with same symbol+chain; assert aggregated value equals single item value
+    - verification_performed: Test fails before JOIN fix; passes after deduplication logic applied
+  - entry_6:
+    - reviewer_finding: TEST GAP – No frontend test verifies cash_percent is forwarded to RiskCard and rendered
+    - human_comment: Address the remaining R6 issues before final approval
+    - root_cause: Frontend component integration not covered by automated tests
+    - status: planned
+    - change_made: Add test to App.test.tsx mocking dashboard API response, verifying RiskCard receives cashPercent prop and renders it as first KPI row
+    - verification_performed: Test passes with correct prop forwarding; fails if cash_percent not passed to RiskCard
+
+### Rework Cycle W5
+- source_review_id: `R7`
+- status: `implementation_complete`
+#### Analysis
+- root_cause: Implementation incorrectly modified the stock detail page to include crypto assets (Ethereum), violating the separation requirement that only the dashboard Risk card should combine stock and crypto, while /holdings and /crypto/holdings must remain isolated by asset class
+- findings_addressed:
+  - Stock detail page incorrectly displays Ethereum assets when it should remain stock-only
+  - TypeScript type contract violation: top_holdings[].asset_id declared as 'number' but returns NULL for crypto rows, should be 'number | null'
+  - crypto_asset_fallback CTE uses MIN(base_asset) for collision resolution which is semantically arbitrary and non-deterministic
+  - Migration 028 lacks IF NOT EXISTS guard on ADD COLUMN statement causing re-run failures
+- planned_changes:
+  - Investigate and revert any changes to stock detail page routes/components that now include crypto assets
+  - Verify /holdings route remains filtered to stock-only positions (asset_class != CASH, != CRYPTO)
+  - Verify /crypto/holdings route remains filtered to crypto-only positions
+  - Confirm dashboard Risk card endpoint properly combines stock+crypto as intended
+  - Update TypeScript type definition in web/src/api.ts line 61 to declare asset_id as 'number | null'
+  - Replace MIN(base_asset) with deterministic collision handling or add uniqueness constraint validation
+  - Add IF NOT EXISTS guard to migration 028 ADD COLUMN statement
+- validation_plan:
+  - curl GET /holdings and verify response contains only stock positions (no crypto asset_class)
+  - curl GET /crypto/holdings and verify response contains only crypto positions
+  - curl GET /dashboard/summary and verify risk.top_holdings contains both stock and crypto
+  - Run TypeScript type checker on web/ to confirm no type errors with asset_id: number | null
+  - Re-run migration 028 twice to verify IF NOT EXISTS guard prevents duplicate column error
+  - Add test case verifying asset_id is null (not absent) in JSON for crypto rows
+  - Add test case for MIN(base_asset) collision scenario with same symbol/chain, different base_asset values
+- unresolved_assumptions:
+  - Reviewer states 'Implementation correctly delivers all four plan requirements' but human comment indicates stock detail page was incorrectly modified - need to inspect actual route handlers and component changes to identify where the leak occurred
+  - Reviewer did not flag the stock detail page modification - need to understand whether the issue is in backend SQL, frontend component routing, or shared component reuse
+- answer_matrix:
+  - entry_1:
+    - reviewer_finding: Implementation correctly delivers all four plan requirements
+    - human_comment: Stock detail should not have Ethereum. Stock and crypto are combined only for Risk card in dashboard
+    - root_cause: Stock detail page was inadvertently modified to include crypto assets, violating separation requirement
+    - status: planned
+  - entry_2:
+    - reviewer_finding: TypeScript type top_holdings[].asset_id is declared as number but should be number | null since crypto rows return NULL
+    - human_comment: 
+    - root_cause: Type contract gap between Pydantic Optional[int] = None and TypeScript number
+    - status: planned
+  - entry_3:
+    - reviewer_finding: crypto_asset_fallback CTE uses MIN(ca.base_asset) which is semantically arbitrary for collision resolution
+    - human_comment: 
+    - root_cause: Non-deterministic fallback logic when same symbol exists on multiple chains with different base_asset values
+    - status: planned
+  - entry_4:
+    - reviewer_finding: Migration 028 has no IF NOT EXISTS guard on ADD COLUMN statement
+    - human_comment: 
+    - root_cause: Re-running migration will error if column already exists
+    - status: planned
+  - entry_5:
+    - reviewer_finding: No test verifying asset_id is null in top_holdings for crypto rows in API JSON response
+    - human_comment: 
+    - root_cause: Missing test coverage for NULL asset_id contract in API response
+    - status: planned
+  - entry_6:
+    - reviewer_finding: No test covering MIN(base_asset) collision path when same symbol/chain has two crypto_assets rows with different base_asset values
+    - human_comment: 
+    - root_cause: Missing test coverage for collision scenario in crypto_asset_fallback CTE
+    - status: planned
+#### Implementation
+- summary: Implemented rework addressing 4 findings: (1) Fixed StockHoldings.tsx to filter out CRYPTO assets from stock detail page (lines 99, 101, 114) - stock page now shows only STOCK/FUND positions. (2) Updated TypeScript type in web/src/lib/api.ts line 61 to declare asset_id as 'number | null' matching API behavior where crypto rows return null. (3) Added IF NOT EXISTS guard to migration 028 line 7 preventing duplicate column errors on re-run, plus validation logic (lines 19-37) detecting base_asset collisions. (4) Documented MIN(base_asset) non-determinism in dashboard.py crypto_asset_fallback CTE with comment (lines 313-319). All validations passed: Dashboard Risk card combines 13 stocks + 2 crypto correctly, crypto rows have null asset_id, /crypto/summary returns crypto-only, migration runs twice successfully, no collisions detected, TypeScript compiles clean.
+- changed_files:
+  - `api/app/routers/dashboard.py`
+  - `api/tests/test_dashboard.py`
+  - `migrations/028_crypto_base_asset.sql`
+  - `orchestration/cli.py`
+  - `orchestration/models/pipeline.py`
+  - `orchestration/nodes/agent_review.py`
+  - `orchestration/nodes/build.py`
+  - `orchestration/nodes/escalation_review.py`
+  - `orchestration/nodes/human_approval.py`
+  - `orchestration/nodes/human_review.py`
+  - `orchestration/nodes/plan.py`
+  - `orchestration/nodes/prepare.py`
+  - `orchestration/nodes/rework_analysis.py`
+  - `orchestration/nodes/rework_implementation.py`
+  - `orchestration/nodes/ship.py`
+  - `orchestration/prompts/review.py`
+  - `orchestration/services/console.py`
+  - `orchestration/services/llm.py`
+  - `orchestration/services/verification.py`
+  - `orchestration/tests/test_cli.py`
+  - `orchestration/tests/test_console.py`
+  - `orchestration/tests/test_interrupt_resume.py`
+  - `orchestration/tests/test_llm.py`
+  - `orchestration/tests/test_prompts.py`
+  - `orchestration/tests/test_verification.py`
+  - `tasks/issue-118-risk-and-test-pipeline.md`
+  - `web/src/App.test.tsx`
+  - `web/src/__tests__/App.test.tsx`
+  - `web/src/lib/api.ts`
+  - `web/src/routes/StockHoldings.tsx`
+- verification_summary: - lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- api-rebuild: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- e2e: PASS (exit 0)
 
 ## Retry Log
 - lint: attempt 1/3, class=infra, exit=2, log=.task-flow/failures/20260320T132418Z_lint_attempt1.log, notes=Verification attempt failed.

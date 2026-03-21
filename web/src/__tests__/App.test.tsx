@@ -324,13 +324,18 @@ describe("App", () => {
     const user = userEvent.setup();
     renderApp();
 
-    expect(await screen.findByText("Risk")).toBeInTheDocument();
+    const riskHeading = await screen.findByText("Risk");
+    expect(riskHeading).toBeInTheDocument();
     expect(screen.getByText("TSLA — 24.3%")).toBeInTheDocument();
     expect(screen.getByText("80.8%")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Top 5" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByRole("button", { name: "Top 3" })).toHaveAttribute("aria-pressed", "false");
 
     const riskTable = screen.getByTestId("risk-distribution-table");
+    const riskCard = riskTable.closest(".card");
+    expect(riskCard).not.toBeNull();
+    expect(within(riskCard as HTMLElement).getByText("Cash")).toBeInTheDocument();
+    expect(within(riskCard as HTMLElement).getByText("16.0%")).toBeInTheDocument();
     expect(within(riskTable).getAllByRole("row")).toHaveLength(6);
 
     await user.click(screen.getByRole("button", { name: "Top 3" }));

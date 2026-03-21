@@ -202,6 +202,31 @@ def load_pending_interrupt(graph, config: dict[str, Any]) -> dict[str, Any]:
     return snapshot.interrupts[0].value
 
 
+def _effective_stage_from_interrupts(interrupts: list[Any]) -> tuple[str | None, str | None]:
+    if not interrupts:
+        return None, None
+    gate = interrupts[0].value.get("gate")
+    if gate == "plan_approval":
+        return "human_approval_gate", "waiting_for_human"
+    if gate in {"human_review", "extra_files_approval"}:
+        return "human_review", "waiting_for_human"
+    return None, "waiting_for_human"
+
+
+def _pipeline_with_interrupt_context(snapshot: Any) -> PipelineState | None:
+    values = getattr(snapshot, "values", None) or {}
+    raw_pipeline = values.get("pipeline")
+    if not raw_pipeline:
+        return None
+    pipeline = PipelineState.model_validate(raw_pipeline)
+    current_stage, workflow_status = _effective_stage_from_interrupts(list(snapshot.interrupts))
+    if current_stage:
+        pipeline.current_stage = current_stage  # type: ignore[assignment]
+    if workflow_status:
+        pipeline.workflow_status = workflow_status  # type: ignore[assignment]
+    return pipeline
+
+
 def _parse_list_input(raw: str) -> list[str]:
     return [item.strip() for item in raw.split("|") if item.strip()]
 
@@ -267,14 +292,15 @@ def build_interactive_resume_payload(
     response_requirements: list[str] = []
     unresolved_comments: list[str] = []
     if decision == "needs_fixes":
+        print_fn("What must be addressed before approval?")
         response_requirements = _parse_list_input(
             input_fn(
-                "Response requirements (optional, separate with ' | '): "
+                "Response requirements for the next rework/review (optional, separate with ' | '): "
             ).strip()
         )
         unresolved_comments = _parse_list_input(
             input_fn(
-                "Unresolved comments (optional, separate with ' | '): "
+                "Unresolved comments to carry forward (optional, separate with ' | '): "
             ).strip()
         )
 
@@ -294,11 +320,9 @@ def print_result(graph, config: dict[str, Any], result: Any) -> None:
     print(json.dumps(result, indent=2, default=str))
 
     snapshot = graph.get_state(config)
-    values = getattr(snapshot, "values", None) or {}
-    raw_pipeline = values.get("pipeline") if isinstance(values, dict) else None
     summary: dict[str, Any] = {}
-    if raw_pipeline:
-        pipeline = PipelineState.model_validate(raw_pipeline)
+    pipeline = _pipeline_with_interrupt_context(snapshot)
+    if pipeline:
         summary = {
             "current_stage": pipeline.current_stage,
             "workflow_status": pipeline.workflow_status,
@@ -354,10 +378,11 @@ def main() -> None:
 
     if args.command == "export-state":
         snapshot = graph.get_state(config)
+        pipeline = _pipeline_with_interrupt_context(snapshot)
         exported = state_io.export_state(
             args.thread_id,
             {
-                "pipeline": snapshot.values.get("pipeline"),
+                "pipeline": pipeline.model_dump(mode="json") if pipeline is not None else snapshot.values.get("pipeline"),
                 "next": snapshot.next,
                 "interrupts": [i.value for i in snapshot.interrupts],
             },

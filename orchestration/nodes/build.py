@@ -4,14 +4,15 @@ import os
 
 from orchestration.models.build import BuildOutput, ExtraChangedFile
 from orchestration.models.stage import PipelineStage
+from orchestration.prompts.build import build_build_prompt
 from orchestration.render import render_task_file
 from orchestration.services.builder_fix import BuilderFixService
 from orchestration.services.config import get_config
+from orchestration.services.console import emit_progress, emit_stage_end, emit_stage_start
 from orchestration.services.git import GitService
 from orchestration.services.llm import LLMService
 from orchestration.services.scope import ScopePolicyService
 from orchestration.services.verification import VerificationService
-from orchestration.prompts.build import build_build_prompt
 from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_state
 
 
@@ -113,6 +114,11 @@ def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
     pipeline.current_stage = PipelineStage.BUILD
     pipeline.workflow_status = "running"
+    emit_stage_start(
+        PipelineStage.BUILD,
+        current_action="Running builder implementation and verification",
+        evidence=[f"planned_paths={len(pipeline.plan_output.allowed_paths()) if pipeline.plan_output else 0}"],
+    )
 
     cfg = get_config()
     decision = pipeline.human_gate_decisions.get("plan_approval")
@@ -122,8 +128,19 @@ def run(state: GraphState) -> GraphState:
     pipeline.reset_build_state()
 
     builder = LLMService(PipelineStage.BUILD, repo_root=pipeline.issue.repo_root)
+    emit_progress(
+        PipelineStage.BUILD,
+        current_action="Requesting implementation from builder model",
+        evidence=[f"model={cfg.builder_model}"],
+        reasoning="Build generates repo changes before verification runs.",
+    )
     build_output = builder.complete_structured(build_build_prompt(pipeline), BuildOutput)
     build_output.builder_model = cfg.builder_model
+    emit_progress(
+        PipelineStage.BUILD,
+        current_action="Builder response received",
+        evidence=[f"summary={build_output.summary[:160]}", f"implementation_notes={len(build_output.implementation_notes)}"],
+    )
 
     fix_service = BuilderFixService(pipeline)
 
@@ -135,7 +152,16 @@ def run(state: GraphState) -> GraphState:
             output=output,
         )
 
-    verification_service = VerificationService(pipeline.issue.repo_root)
+    verification_service = VerificationService(
+        pipeline.issue.repo_root,
+        stage=PipelineStage.BUILD.value,
+    )
+    emit_progress(
+        PipelineStage.BUILD,
+        current_action="Starting verification suite",
+        evidence=["suite=lint,typecheck,api-rebuild,test-backend,test-frontend,api-smoke,e2e"],
+        reasoning="Verification determines whether the build output is usable and reviewable.",
+    )
     verification, retries = verification_service.run_default_suite(
         max_attempts=cfg.max_retries,
         on_code_retry_fix=fix_callback,
@@ -151,6 +177,12 @@ def run(state: GraphState) -> GraphState:
         build_output.extra_changed_files,
     )
     pipeline.build_output = build_output
+    emit_progress(
+        PipelineStage.BUILD,
+        current_action="Collected changed file inventory",
+        evidence=[f"changed_files={len(build_output.changed_files)}", f"extra_changed_files={len(build_output.extra_changed_files)}"],
+        reasoning="The build records which files changed so review can assess scope and feature coverage.",
+    )
 
     for entry in retries:
         pipeline.add_retry(entry)
@@ -180,4 +212,14 @@ def run(state: GraphState) -> GraphState:
         pipeline.workflow_status = "blocked"
 
     render_task_file(pipeline)
+    emit_stage_end(
+        PipelineStage.BUILD,
+        status=pipeline.workflow_status,
+        evidence=[
+            f"verification_failures={verification.any_failures}",
+            f"blockers={len(pipeline.blockers)}",
+            f"changed_files={len(build_output.changed_files)}",
+        ],
+        conclusion="Build stage finished and the task file was updated with build evidence.",
+    )
     return dump_pipeline_state(pipeline)

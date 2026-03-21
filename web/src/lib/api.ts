@@ -58,7 +58,7 @@ export type DashboardSummary = {
   };
 
   top_holdings: Array<{
-    asset_id: number;
+    asset_id: number | null;
     symbol: string;
     asset_class: string;
     value: number;
@@ -74,7 +74,7 @@ export type DashboardSummary = {
     currency: string;
     value: number;
   }>;
-  snapshot_day: number;
+  snapshot_day: number | null;
 net_worth_as_of: string | null;
 net_worth_change: null | {
   vs_prev_month?: {

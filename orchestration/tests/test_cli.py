@@ -3,7 +3,12 @@ from __future__ import annotations
 from argparse import Namespace
 from types import SimpleNamespace
 
-from orchestration.cli import build_interactive_resume_payload, load_pending_interrupt, make_step_state
+from orchestration.cli import (
+    _pipeline_with_interrupt_context,
+    build_interactive_resume_payload,
+    load_pending_interrupt,
+    make_step_state,
+)
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.pipeline import PipelineState
 from orchestration.models.plan import PlanOutput
@@ -160,6 +165,32 @@ def test_load_pending_interrupt_returns_first_interrupt() -> None:
     assert interrupt["gate"] == "extra_files_approval"
 
 
+def test_pipeline_with_interrupt_context_overrides_stage_for_human_review_gate() -> None:
+    pipeline = PipelineState(
+        issue=IssueMetadata(
+            issue_id="118",
+            slug="risk-and-test-pipeline",
+            title="Risk And Test Pipeline",
+            task_file="tasks/issue-118-risk-and-test-pipeline.md",
+            repo_root="/tmp/repo",
+            branch="feature/issue-118-risk-and-test-pipeline",
+        ),
+        current_stage="rework_analysis",
+        workflow_status="running",
+    )
+    snapshot = SimpleNamespace(
+        values={"pipeline": pipeline.model_dump(mode="json")},
+        interrupts=[SimpleNamespace(value={"gate": "human_review", "review_id": "R6"})],
+        next=("human_review",),
+    )
+
+    effective = _pipeline_with_interrupt_context(snapshot)
+
+    assert effective is not None
+    assert effective.current_stage == "human_review"
+    assert effective.workflow_status == "waiting_for_human"
+
+
 def test_build_interactive_resume_payload_for_approval() -> None:
     answers = iter(
         [
@@ -212,3 +243,31 @@ def test_build_interactive_resume_payload_for_needs_fixes() -> None:
         "response_requirements": ["Use SQLite-safe SQL", "update the failing risk-card assertion"],
         "unresolved_comments": ["Do not ship until tests pass", "explain extra file changes"],
     }
+
+
+def test_build_interactive_resume_payload_prompts_for_response_requirements() -> None:
+    answers = iter(
+        [
+            "n",
+            "Hitesh",
+            "Please address the regression.",
+            "",
+            "Keep /holdings stock-only | Verify /crypto/holdings stays crypto-only",
+            "Do not merge stock and crypto detail pages",
+        ]
+    )
+    prompts: list[str] = []
+    output: list[str] = []
+
+    payload = build_interactive_resume_payload(
+        {"gate": "human_review", "review_id": "R7", "agent_review": {"decision": "approved", "summary": "Looks good"}},
+        input_fn=lambda prompt: prompts.append(prompt) or next(answers),
+        print_fn=lambda message: output.append(message),
+    )
+
+    assert "What must be addressed before approval?" in output
+    assert any("Response requirements for the next rework/review" in prompt for prompt in prompts)
+    assert payload["response_requirements"] == [
+        "Keep /holdings stock-only",
+        "Verify /crypto/holdings stays crypto-only",
+    ]

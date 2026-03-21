@@ -3,6 +3,7 @@ from __future__ import annotations
 from orchestration.models.ship import ShipResult
 from orchestration.render import render_task_file
 from orchestration.services.config import get_config
+from orchestration.services.console import emit_progress, emit_stage_end, emit_stage_start
 from orchestration.services.git import GitService
 from orchestration.services.github import GitHubService
 from orchestration.services.integrity import IntegrityService
@@ -13,6 +14,11 @@ def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
     pipeline.current_stage = "ship"
     pipeline.workflow_status = "running"
+    emit_stage_start(
+        "ship",
+        current_action="Preparing branch push and optional PR creation",
+        evidence=[f"branch={pipeline.issue.branch}"],
+    )
 
     cfg = get_config()
     IntegrityService(pipeline.issue.repo_root).assert_matches_planned_hash(pipeline)
@@ -40,6 +46,7 @@ def run(state: GraphState) -> GraphState:
         raise RuntimeError(f"Refusing to ship from base branch `{cfg.base_branch}`.")
 
     git.add(pipeline.issue.task_file)
+    emit_progress("ship", current_action="Creating final workflow commit and pushing branch")
     committed = git.commit_if_needed(
         f"feat: complete issue #{pipeline.issue.issue_id} workflow execution"
     )
@@ -72,4 +79,10 @@ def run(state: GraphState) -> GraphState:
     pipeline.current_stage = "done"
 
     render_task_file(pipeline)
+    emit_stage_end(
+        "ship",
+        status="shipped",
+        evidence=[f"committed={committed}", f"pr_created={pr_created}", f"branch={pipeline.issue.branch}"],
+        conclusion=summary,
+    )
     return dump_pipeline_state(pipeline)

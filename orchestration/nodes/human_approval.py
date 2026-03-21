@@ -4,6 +4,7 @@ from langgraph.types import interrupt
 
 from orchestration.models.review import HumanDecision
 from orchestration.render import render_task_file
+from orchestration.services.console import emit_stage_end, emit_stage_start, emit_waiting_for_human
 from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_state
 
 
@@ -11,6 +12,11 @@ def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
     pipeline.current_stage = "human_approval_gate"
     pipeline.workflow_status = "waiting_for_human"
+    emit_stage_start(
+        "human_approval_gate",
+        current_action="Preparing plan approval payload",
+        evidence=[f"task_file={pipeline.issue.task_file}"],
+    )
 
     payload = {
         "gate": "plan_approval",
@@ -29,6 +35,13 @@ def run(state: GraphState) -> GraphState:
         },
     }
 
+    render_task_file(pipeline)
+    emit_waiting_for_human(
+        "human_approval_gate",
+        gate="plan_approval",
+        evidence=[f"acceptance_criteria={len(payload['acceptance_criteria'])}"],
+        conclusion="Plan approval is required before build can begin.",
+    )
     decision_raw = interrupt(payload)
     decision = HumanDecision.model_validate(decision_raw)
     if decision.gate_type != "plan_approval":
@@ -38,4 +51,10 @@ def run(state: GraphState) -> GraphState:
     pipeline.workflow_status = "running" if decision.decision == "approved" else "blocked"
 
     render_task_file(pipeline)
+    emit_stage_end(
+        "human_approval_gate",
+        status=pipeline.workflow_status,
+        evidence=[f"decision={decision.decision}", f"reviewer={decision.reviewer}"],
+        conclusion="Human plan approval decision recorded.",
+    )
     return dump_pipeline_state(pipeline)

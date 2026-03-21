@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import time
 from pathlib import Path
 from typing import Iterable, Callable, Optional
 
@@ -10,12 +11,14 @@ from orchestration.models.verification import (
     VerificationEvidence,
 )
 from orchestration.services.artifacts import ArtifactService
+from orchestration.services.console import emit_event
 
 
 class VerificationService:
-    def __init__(self, repo_root: str) -> None:
+    def __init__(self, repo_root: str, stage: str | None = None) -> None:
         self.repo_root = repo_root
         self.artifacts = ArtifactService(repo_root)
+        self.stage = stage
 
     def _classify_failure(self, output: str) -> str:
         infra_markers = [
@@ -62,15 +65,49 @@ class VerificationService:
 
         return lines[-1][:300]
 
-    def _run_raw(self, command: str) -> tuple[int, str]:
-        proc = subprocess.run(
+    def _run_raw(self, name: str, command: str) -> tuple[int, str]:
+        emit_event(
+            "verification_command_started",
+            stage=self.stage,
+            current_action=f"Running `{name}`",
+            evidence=[f"command={command}"],
+        )
+        proc = subprocess.Popen(
             command,
             cwd=self.repo_root,
             shell=True,
             text=True,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
         )
-        return proc.returncode, (proc.stdout + "\n" + proc.stderr).strip()
+        started_at = time.monotonic()
+        last_heartbeat = started_at
+
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                now = time.monotonic()
+                if now - last_heartbeat >= 30:
+                    emit_event(
+                        "verification_command_progress",
+                        stage=self.stage,
+                        current_action=f"`{name}` is still running",
+                        evidence=[f"command={command}", f"elapsed_seconds={int(now - started_at)}"],
+                        reasoning="The verification command is still active and has not exited yet.",
+                    )
+                    last_heartbeat = now
+
+        output = (stdout + "\n" + stderr).strip()
+        emit_event(
+            "verification_command_finished",
+            stage=self.stage,
+            status="completed" if proc.returncode == 0 else "failed",
+            evidence=[f"name={name}", f"exit_code={proc.returncode}", f"elapsed_seconds={int(time.monotonic() - started_at)}"],
+            conclusion=f"`{name}` finished with exit code {proc.returncode}.",
+        )
+        return proc.returncode, output
 
     def _collect_known_artifacts(self) -> list[str]:
         candidates = [
@@ -95,7 +132,7 @@ class VerificationService:
         retry_entries: list[RetryEntry] = []
 
         for attempt in range(1, max_attempts + 1):
-            code, output = self._run_raw(command)
+            code, output = self._run_raw(name, command)
             if code == 0:
                 return (
                     VerificationCommandResult(
@@ -119,6 +156,17 @@ class VerificationService:
                 exit_code=code,
                 output=output,
             )
+            emit_event(
+                "verification_attempt_failed",
+                stage=self.stage,
+                current_action=f"`{name}` failed on attempt {attempt}",
+                evidence=[
+                    f"classification={classification}",
+                    f"failure_log={failure_log}",
+                    f"reason={reason}",
+                ],
+                reasoning="The failure was classified to decide whether to retry directly or attempt an automated code fix.",
+            )
 
             entry = RetryEntry(
                 label=name,
@@ -135,6 +183,13 @@ class VerificationService:
                 entry.notes = f"Infra failure: {reason}"
                 retry_entries.append(entry)
                 if attempt < min(max_attempts, 2):
+                    emit_event(
+                        "verification_retry_scheduled",
+                        stage=self.stage,
+                        current_action=f"Retrying infra command `{name}`",
+                        evidence=[f"next_attempt={attempt + 1}", f"reason={reason}"],
+                        conclusion="Infra failures are retried once before the stage is blocked.",
+                    )
                     continue
                 return (
                     VerificationCommandResult(
@@ -171,6 +226,13 @@ class VerificationService:
                 break
 
             try:
+                emit_event(
+                    "verification_auto_fix_started",
+                    stage=self.stage,
+                    current_action=f"Applying automated fix for `{name}`",
+                    evidence=[f"attempt={attempt}", f"reason={reason}"],
+                    reasoning="Code failures trigger an automated fix before the next retry.",
+                )
                 on_code_retry_fix(name, command, code, output)
             except Exception as exc:
                 entry.notes = f"Auto-fix failed after code failure: {exc}"
@@ -190,6 +252,13 @@ class VerificationService:
 
             entry.notes = f"Code failure analyzed and auto-fix applied: {reason}"
             retry_entries.append(entry)
+            emit_event(
+                "verification_auto_fix_finished",
+                stage=self.stage,
+                status="completed",
+                evidence=[f"next_attempt={attempt + 1}", f"reason={reason}"],
+                conclusion=f"Automated fix completed for `{name}`; retrying the command.",
+            )
 
         final = retry_entries[-1]
         return (
@@ -211,6 +280,13 @@ class VerificationService:
         max_attempts: int = 3,
         on_code_retry_fix: Optional[Callable[[str, str, int, str], None]] = None,
     ) -> tuple[VerificationEvidence, list[RetryEntry]]:
+        emit_event(
+            "verification_suite_started",
+            stage=self.stage,
+            current_action="Running verification suite",
+            evidence=["commands=lint,typecheck,api-rebuild,test-backend,test-frontend,api-smoke,e2e"],
+        )
+
         commands: Iterable[tuple[str, str]] = [
             ("lint", "make lint"),
             ("typecheck", "make typecheck"),
@@ -256,4 +332,11 @@ class VerificationService:
             )
 
         any_failures = any(r.status == "fail" for r in results)
+        emit_event(
+            "verification_suite_finished",
+            stage=self.stage,
+            status="failed" if any_failures else "completed",
+            evidence=[f"failed_commands={','.join(r.name for r in results if r.status == 'fail') or 'none'}"],
+            conclusion="Verification suite completed.",
+        )
         return VerificationEvidence(results=results, any_failures=any_failures), retries

@@ -102,9 +102,9 @@ def _infer_country(
 
 
 def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, float]:
+    """Compute net worth components using latest snapshot per account up to anchor_ts."""
     if anchor_ts is None:
         return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
-    """Compute net worth components using latest snapshot per account up to anchor_ts."""
     q = text("""
         WITH latest AS (
           SELECT account_id, MAX(as_of) AS as_of
@@ -310,10 +310,40 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
           WHERE as_of_date <= :as_of_date
           GROUP BY wallet_id
         ),
+        -- Crypto asset fallback: provides base_asset for unlinked snapshot items
+        -- Note: Uses MIN(base_asset) for symbol+chain collisions. This is non-deterministic
+        -- if multiple crypto_assets with same symbol+chain have different base_asset values.
+        -- Migration 028 includes validation to detect such collisions.
+        crypto_asset_fallback AS (
+          SELECT
+            LOWER(ca.symbol) AS symbol_key,
+            ca.chain AS chain,
+            MIN(ca.base_asset) AS base_asset
+          FROM crypto_assets ca
+          GROUP BY LOWER(ca.symbol), ca.chain
+        ),
+        crypto_item_groups AS (
+          SELECT
+            UPPER(COALESCE(direct_ca.base_asset, fallback.base_asset, i.symbol)) AS symbol,
+            SUM(i.value_usd) AS value
+          FROM crypto_wallet_snapshots s
+          JOIN latest_wallets lw ON lw.wallet_id = s.wallet_id AND lw.as_of_date = s.as_of_date
+          JOIN crypto_wallets w ON w.id = s.wallet_id
+          JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+          LEFT JOIN crypto_assets direct_ca ON direct_ca.id = i.asset_id
+          LEFT JOIN crypto_asset_fallback fallback
+            ON fallback.symbol_key = LOWER(i.symbol)
+           AND (
+                fallback.chain = i.chain
+                OR (fallback.chain IS NULL AND i.chain IS NULL)
+           )
+          WHERE w.status = 'active'
+          GROUP BY UPPER(COALESCE(direct_ca.base_asset, fallback.base_asset, i.symbol))
+        ),
         crypto_holdings AS (
           SELECT
             CAST(NULL AS BIGINT) AS asset_id,
-            CAST(UPPER(COALESCE(ca.base_asset, i.symbol)) AS TEXT) AS symbol,
+            CAST(g.symbol AS TEXT) AS symbol,
             CAST('CRYPTO' AS TEXT) AS asset_class,
             CAST('USD' AS TEXT) AS quote_currency,
             CAST(NULL AS TEXT) AS home_country,
@@ -322,29 +352,19 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
             CAST(NULL AS NUMERIC) AS quantity,
             CAST(NULL AS NUMERIC) AS avg_cost,
             CAST(NULL AS NUMERIC) AS latest_price,
-            SUM(i.value_usd) AS value
-          FROM crypto_wallet_snapshots s
-          JOIN latest_wallets lw ON lw.wallet_id = s.wallet_id AND lw.as_of_date = s.as_of_date
-          JOIN crypto_wallets w ON w.id = s.wallet_id
-          JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
-          LEFT JOIN crypto_assets ca ON (ca.id = i.asset_id) 
-                                      OR (i.asset_id IS NULL AND LOWER(ca.symbol) = LOWER(i.symbol) AND ca.chain = i.chain)
-          WHERE w.status = 'active'
-          GROUP BY COALESCE(ca.base_asset, i.symbol)
+            g.value AS value
+          FROM crypto_item_groups g
         )
         SELECT * FROM positions_holdings
         UNION ALL
         SELECT * FROM crypto_holdings
     """)
     rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "as_of_date": anchor_ts.date()}).mappings().all()
-    
-    # USD rate for crypto conversion
-    usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
-    
+
     # Collect all unique currencies for FX conversion
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
-    rates["USD"] = usd_rate  # Ensure USD is in rates
     
     # Aggregate by symbol (for crypto grouped by base_asset) or asset_id (for positions)
     agg: Dict[tuple, Dict[str, Any]] = {}

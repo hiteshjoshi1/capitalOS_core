@@ -22,6 +22,7 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert data["cash_flow"]["expenses"] == 2100.0
     assert data["cash_flow"]["net"] == 3899.0
     assert data["cash_flow"]["savings_rate"] == pytest.approx(3899.0 / 5999.0, rel=1e-4)
+    assert data["cash_percent"] == pytest.approx(30.0, rel=1e-6)
 
     top = data["top_holdings"]
     assert len(top) == 2
@@ -186,6 +187,57 @@ def test_dashboard_eth_derivative_grouping(client: TestClient, db_engine, monkey
     assert eth_holdings[0]["asset_class"] == "CRYPTO"
 
 
+def test_dashboard_crypto_fallback_join_does_not_double_count_duplicate_assets(
+    client: TestClient, db_engine, monkeypatch
+):
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-fallback-test', 'evm', 'ethereum', '0xfallback', 'Fallback Wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(90, 'wallet-fallback-test', '2026-02-06', :as_of, 500)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_assets (id, chain_type, chain, asset_kind, symbol, base_asset) VALUES "
+                "(90, 'evm', 'ethereum', 'token', 'stETH', 'ETH'), "
+                "(91, 'evm', 'ethereum', 'token', 'stETH', 'ETH')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, asset_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(90, 90, NULL, 'evm', 'ethereum', 'token', 'stETH', 0.1, 500)"
+            )
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    eth_holdings = [row for row in data["top_holdings"] if row["symbol"] == "ETH"]
+    assert len(eth_holdings) == 1
+    assert eth_holdings[0]["value"] == 500
+
+
 def test_crypto_positions_cleanup_sql_removes_orphaned_assets(db_engine):
     from datetime import datetime, timezone
 
@@ -291,10 +343,7 @@ def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_das
     assert len(cash_rows) == 0
     # Verify cash_percent is exposed and correctly computed
     assert "cash_percent" in data
-    assert data["cash_percent"] > 0
-    # Validate computed cash_percent = (cash / total) * 100
-    expected_cash_percent = round((data["net_worth"]["cash"] / data["net_worth"]["total"]) * 100, 2)
-    assert data["cash_percent"] == expected_cash_percent
+    assert data["cash_percent"] == 30.0
 
 
 def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient, seed_dashboard_data):
@@ -715,3 +764,60 @@ def test_dashboard_top_holdings_limit_is_15(client: TestClient, db_engine, monke
     data = resp.json()
     non_cash = [row for row in data["top_holdings"] if row["asset_class"] != "CASH"]
     assert len(non_cash) == 15
+
+
+def test_dashboard_fallback_join_multiple_crypto_assets_no_doublecount(client: TestClient, db_engine, monkeypatch):
+    """Verify fallback JOIN path (asset_id=NULL) with multiple matching crypto_assets does not double-count value_usd."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        # Create test wallet
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-dupe-test', 'evm', 'ethereum', '0xDUPE', 'Dupe Test Wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        # Create snapshot
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(999, 'wallet-dupe-test', '2026-02-06', :as_of, 5000)"
+            ),
+            {"as_of": as_of},
+        )
+        # Create DUPLICATE crypto_assets entries with same symbol+chain
+        conn.execute(
+            text(
+                "INSERT INTO crypto_assets (id, chain_type, chain, asset_kind, symbol, base_asset) VALUES "
+                "(9991, 'evm', 'ethereum', 'token', 'USDT', 'USDT'), "
+                "(9992, 'evm', 'ethereum', 'token', 'USDT', 'USDT')"
+            )
+        )
+        # Create snapshot item with asset_id=NULL to trigger fallback JOIN
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, asset_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(999, 999, NULL, 'evm', 'ethereum', 'token', 'USDT', 5000, 5000)"
+            )
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Verify USDT appears once in top_holdings
+    usdt_holdings = [h for h in data["top_holdings"] if h["symbol"] == "USDT"]
+    assert len(usdt_holdings) == 1, "USDT should appear exactly once despite multiple crypto_assets rows"
+    
+    # Verify value is NOT multiplied (should be 5000, not 10000)
+    assert usdt_holdings[0]["value"] == 5000.0, "Value should not be doubled by multiple crypto_assets matches"

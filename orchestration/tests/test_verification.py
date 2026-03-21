@@ -11,7 +11,7 @@ def test_infra_failures_retry_once_without_autofix(tmp_path, monkeypatch):
     ]
     fix_calls = []
 
-    monkeypatch.setattr(service, "_run_raw", lambda command: outputs.pop(0))
+    monkeypatch.setattr(service, "_run_raw", lambda name, command: outputs.pop(0))
 
     result, retries = service.run_with_retry_policy(
         name="api-rebuild",
@@ -35,7 +35,7 @@ def test_code_failures_invoke_fix_before_each_new_attempt(tmp_path, monkeypatch)
     ]
     fix_calls = []
 
-    monkeypatch.setattr(service, "_run_raw", lambda command: outputs.pop(0))
+    monkeypatch.setattr(service, "_run_raw", lambda name, command: outputs.pop(0))
 
     def fake_fix(*args):
         fix_calls.append(args)
@@ -56,7 +56,7 @@ def test_code_failures_invoke_fix_before_each_new_attempt(tmp_path, monkeypatch)
 
 def test_code_failures_stop_immediately_when_no_fix_callback_exists(tmp_path, monkeypatch):
     service = VerificationService(str(tmp_path))
-    monkeypatch.setattr(service, "_run_raw", lambda command: (2, "AssertionError: expected value"))
+    monkeypatch.setattr(service, "_run_raw", lambda name, command: (2, "AssertionError: expected value"))
 
     result, retries = service.run_with_retry_policy(
         name="test-frontend",

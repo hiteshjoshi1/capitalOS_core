@@ -133,6 +133,14 @@ class PipelineState(BaseModel):
                 return cycle
         return None
 
+    def get_review_cycle(self, review_id: str | None) -> Optional[ReviewCycle]:
+        if not review_id:
+            return None
+        for cycle in self.review_cycles:
+            if cycle.review_id == review_id:
+                return cycle
+        return None
+
     def get_active_rework_cycle(self) -> Optional[ReworkCycle]:
         if not self.active_rework_cycle_id:
             return None
