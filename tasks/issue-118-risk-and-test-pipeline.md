@@ -50,8 +50,8 @@ _Automation appends structured logs here._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-**Current Stage**: `human_review`
-**Workflow Status**: `approved`
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
 
 ## Plan Summary
 Fix the dashboard risk card: add cash % as a top-level KPI, exclude cash from top-N positions, include crypto holdings (from wallet snapshots) in top-N positions, and group crypto derivatives (ETH+wETH+stETH etc.) into combined positions using a new base_asset column on the crypto_assets table.
@@ -824,4 +824,7 @@ Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>' to commit 
 - api-smoke: attempt 1/3, class=code, exit=2, log=.task-flow/failures/20260320T132450Z_api-smoke_attempt1.log, notes=Verification attempt failed.
 - api-smoke: attempt 2/3, class=code, exit=2, log=.task-flow/failures/20260320T132450Z_api-smoke_attempt2.log, notes=Verification attempt failed.
 - api-smoke: attempt 3/3, class=code, exit=2, log=.task-flow/failures/20260320T132450Z_api-smoke_attempt3.log, notes=Verification attempt failed.
+
+## Ship Result
+Pushed branch `issue-118-risk-and-test-pipeline`.
 <!-- MACHINE_RENDERED_END -->
