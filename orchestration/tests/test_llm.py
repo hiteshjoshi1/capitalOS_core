@@ -51,6 +51,24 @@ def test_extract_structured_plan_output_accepts_embedded_json_object() -> None:
     assert plan.acceptance_criteria == ["Plan output parses successfully"]
 
 
+def test_extract_structured_plan_output_uses_last_valid_fenced_json_block() -> None:
+    bad_json = """
+{
+  "summary": "Broken plan",
+  "architecture_decisions": ["unterminated
+}
+""".strip()
+    raw = (
+        "Interim attempt follows.\n\n"
+        f"```json\n{bad_json}\n```\n\n"
+        "Retry succeeded.\n\n"
+        f"```json\n{PLAN_JSON}\n```"
+    )
+    plan = extract_structured_plan_output(raw)
+    assert plan.summary == "Fix risk card plan"
+    assert plan.planned_paths == ["orchestration/services/llm.py"]
+
+
 def test_extract_structured_plan_output_raises_when_no_json_present() -> None:
     with pytest.raises(RuntimeError, match="Model did not return valid JSON"):
         extract_structured_plan_output("Here is the plan, but no structured payload followed.")

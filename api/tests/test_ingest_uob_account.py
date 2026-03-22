@@ -215,3 +215,48 @@ def test_uob_ingest_upload_with_legacy_platform_label(client: TestClient, db_eng
     assert data["counts"]["transactions_parsed"] == 3
     assert data["counts"]["transactions_inserted"] == 3
     assert data["counts"]["positions_inserted"] == 1
+
+
+def test_uob_ingested_data_appears_in_dashboard_and_cash_flow(client: TestClient, db_engine):
+    fixture = _fixture_path()
+
+    Session = sessionmaker(bind=db_engine)
+    db = Session()
+    try:
+        account_id = _next_account_id(db)
+        db.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG')"
+            ),
+            {"id": account_id},
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    with open(fixture, "rb") as f:
+        resp = client.post(
+            f"/ingest/upload?account_id={account_id}",
+            files={"file": ("uob_account.xls", f, "application/vnd.ms-excel")},
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "IMPORTED"
+
+    summary_resp = client.get("/dashboard/summary?month=2026-03&base_currency=SGD")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+
+    cash_flow_resp = client.get("/spending/cash-flow-detail?month=2026-03&base_currency=SGD")
+    assert cash_flow_resp.status_code == 200
+    cash_flow = cash_flow_resp.json()
+
+    assert summary["net_worth"]["cash"] == 97923.51
+    assert summary["net_worth"]["total"] == 97923.51
+    assert summary["cash_flow"]["income"] == 4600.0
+    assert summary["cash_flow"]["expenses"] == 1294.92
+    assert cash_flow["income_total"] == 4600.0
+    assert cash_flow["expense_total"] == 1294.92
+    assert cash_flow["income"]["transaction_count"] == 1
+    assert cash_flow["expenses"]["transaction_count"] == 1
