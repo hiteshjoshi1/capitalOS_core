@@ -78,11 +78,6 @@ _DIRECT_TRANSFER_KEYWORDS = (
     "TOPUP",
     "TOP UP",
 )
-_CONTEXTUAL_TRANSFER_KEYWORDS = (
-    "GIRO",
-    "IBG",
-)
-
 
 def _combined_text(description: str, supplementary: str) -> str:
     return f"{description} {supplementary}".upper().strip()
@@ -109,7 +104,7 @@ def _is_transfer(stmt_code: str, description: str, supplementary: str, amount: f
         return True
     if any(keyword in text for keyword in _DIRECT_TRANSFER_KEYWORDS):
         return True
-    return any(keyword in text for keyword in _CONTEXTUAL_TRANSFER_KEYWORDS) and _is_self_transfer(description, supplementary)
+    return False
 
 
 def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> ParseResult:

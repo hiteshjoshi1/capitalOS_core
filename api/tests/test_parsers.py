@@ -123,6 +123,19 @@ def test_dbs_parser_marks_paynow_transfer(tmp_path: Path):
     assert result.transactions[0]["type"] == "TRANSFER"
 
 
+def test_dbs_parser_giro_rent_debit_is_expense(tmp_path: Path):
+    """Non-salary, non-self-transfer GIRO debit (e.g. rent to landlord) must be EXPENSE, not TRANSFER."""
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_giro_rent.csv",
+        "19 Feb 2026,19 Feb 2026,GR,GIRO RENT PAYMENT LANDLORD ABC,GIRO,Monthly rent,REF,OTHR,Settled,SGD,2500,",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "EXPENSE"
+
+
 def test_ibkr_parser_sections(tmp_path: Path):
     content = """Cash Transactions,Header,Date,Amount,Currency,Type,Description\nCash Transactions,Data,2026-02-02,10,USD,Dividend,Test\nTrades,Header,Date,Buy/Sell,Symbol,Net Cash,Currency\nTrades,Data,2026-02-03,BUY,AAPL,-1000,USD\nOpen Positions,Header,Symbol,Description,Asset Class,Quantity,Cost Price,Cost Basis,Currency\nOpen Positions,Data,AAPL,Apple Inc.,Stock,10,150,1500,USD\nForex Balances,Header,Asset Category,Description,Quantity\nForex Balances,Data,Forex,USD,500\n"""
     fixture = tmp_path / "ibkr.csv"

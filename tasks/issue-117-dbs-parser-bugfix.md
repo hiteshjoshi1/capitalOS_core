@@ -101,22 +101,37 @@ The spending router already correctly excludes TRANSFER-typed transactions from 
 
 ## Acceptance Criteria
 
-- [ ] AC1: DBS salary/payroll credits (credit amount + salary keyword in description/supplementary) are classified as `INCOME`, not `TRANSFER`
-- [ ] AC2: DBS own-account transfers (statement code `TRF`, or description containing transfer to known counterparties like IBKR/UOB/OCBC) remain classified as `TRANSFER`
-- [ ] AC3: Existing unit tests pass (`test_dbs_parser_extracts_cash_and_transactions`, `test_dbs_parser_marks_transfers`, `test_dbs_parser_prefers_transaction_date`)
-- [ ] AC4: New regression tests cover: (a) salary via GIRO/IBG → INCOME, (b) non-salary GIRO transfer → TRANSFER, (c) self-transfer to IBKR → TRANSFER
-- [ ] AC5: Backfill migration is idempotent — running it twice produces identical DB state
-- [ ] AC6: After backfill, `/spending/cash-flow-detail?month=YYYY-MM` shows salary rows under income, not excluded
-- [ ] AC7: After backfill, `/dashboard/summary?month=YYYY-MM` cash_flow.income includes reclassified salary amounts
-- [ ] AC8: UOB regression root cause identified, fixed, and regression test added
-- [ ] AC9: UOB data appears correctly in dashboard net_worth and cash_flow after fix
-- [ ] AC10: `make api-rebuild` succeeds, `make api-smoke` passes
-- [ ] AC11: No unrelated files modified
+- AC1: DBS salary/payroll credits (credit amount + salary keyword in description/supplementary) are classified as `INCOME`, not `TRANSFER`
+- AC2: DBS own-account transfers (statement code `TRF`, or description containing transfer to known counterparties like IBKR/UOB/OCBC) remain classified as `TRANSFER`
+- AC3: Existing unit tests pass (`test_dbs_parser_extracts_cash_and_transactions`, `test_dbs_parser_marks_transfers`, `test_dbs_parser_prefers_transaction_date`)
+- AC4: New regression tests cover: (a) salary via GIRO/IBG → INCOME, (b) non-salary GIRO transfer → TRANSFER, (c) self-transfer to IBKR → TRANSFER
+- AC5: Backfill migration is idempotent — running it twice produces identical DB state
+- AC6: After backfill, `/spending/cash-flow-detail?month=YYYY-MM` shows salary rows under income, not excluded
+- AC7: After backfill, `/dashboard/summary?month=YYYY-MM` cash_flow.income includes reclassified salary amounts
+- AC8: UOB regression root cause identified, fixed, and regression test added
+- AC9: UOB data appears correctly in dashboard net_worth and cash_flow after fix
+- AC10: `make api-rebuild` succeeds, `make api-smoke` passes
+- AC11: No unrelated files modified
 
 ## Human Approval Gate
 - [x] Approved for implementation
 
 <!-- IMMUTABLE_PLAN_END -->
+
+## Acceptance Criteria Status (Mutable)
+- [x] AC1: DBS salary/payroll credits (credit amount + salary keyword in description/supplementary) are classified as `INCOME`, not `TRANSFER`
+- [x] AC2: DBS own-account transfers (statement code `TRF`, or description containing transfer to known counterparties like IBKR/UOB/OCBC) remain classified as `TRANSFER`
+- [x] AC3: Existing unit tests pass (`test_dbs_parser_extracts_cash_and_transactions`, `test_dbs_parser_marks_transfers`, `test_dbs_parser_prefers_transaction_date`)
+- [x] AC4: New regression tests cover: (a) salary via GIRO/IBG → INCOME, (b) non-salary GIRO transfer → TRANSFER, (c) self-transfer to IBKR → TRANSFER
+- [x] AC5: Backfill migration is idempotent — running it twice produces identical DB state
+- [x] AC6: After backfill, `/spending/cash-flow-detail?month=YYYY-MM` shows salary rows under income, not excluded
+- [x] AC7: After backfill, `/dashboard/summary?month=YYYY-MM` cash_flow.income includes reclassified salary amounts
+- [x] AC8: UOB regression root cause identified, fixed, and regression test added
+- [x] AC9: UOB data appears correctly in dashboard net_worth and cash_flow after fix
+- [x] AC10: `make api-rebuild` succeeds, `make api-smoke` passes
+- [x] AC11: No unrelated files modified
+
+_Mutable progress, checklist, and evidence updates must stay below this marker._
 
 ## Task Checklist
 
@@ -132,7 +147,7 @@ The spending router already correctly excludes TRANSFER-typed transactions from 
 ### Phase 2: New Regression Tests
 - [x] 2.1 Add test: DBS salary via GIRO → type=INCOME (e.g. description=`PAY PARTIOR PTE. LTD.`, supplementary contains `SALARY`, stmt_code=`GR`, credit amount)
 - [x] 2.2 Add test: DBS salary via IBG → type=INCOME
-- [x] 2.3 Add test: DBS non-salary GIRO debit → type=TRANSFER (e.g. GIRO bill payment)
+- [x] 2.3 Add test: non-salary GIRO to known self-transfer counterparty → TRANSFER
 - [x] 2.4 Add test: DBS self-transfer to IBKR → type=TRANSFER
 - [x] 2.5 Add test: DBS PayNow transfer → type=TRANSFER (ensure PayNow is still correctly classified)
 - [x] 2.6 Add test: DBS statement code TRF → type=TRANSFER (existing test, verify it still passes)
@@ -153,12 +168,12 @@ The spending router already correctly excludes TRANSFER-typed transactions from 
 
 ### Phase 5: Verification
 - [x] 5.1 `make api-rebuild` — containers start without errors
-- [ ] 5.2 `make api-smoke` — all smoke tests pass
-- [ ] 5.3 `curl http://localhost:8000/health` — returns OK
-- [ ] 5.4 `curl http://localhost:8000/spending/cash-flow-detail?month=2026-02&base_currency=SGD` — salary rows in income section
-- [ ] 5.5 `curl http://localhost:8000/dashboard/summary?month=2026-02` — cash_flow.income reflects salary
-- [ ] 5.6 Verify UOB data present in dashboard net_worth and cash_flow
-- [ ] 5.7 Run full test suite: `pytest api/tests/`
+- [x] 5.2 `make api-smoke` — all smoke tests pass
+- [x] 5.3 `curl http://localhost:8000/health` — returns OK
+- [x] 5.4 `curl http://localhost:8000/spending/cash-flow-detail?month=2026-02&base_currency=SGD` — salary rows in income section
+- [x] 5.5 `curl http://localhost:8000/dashboard/summary?month=2026-02` — cash_flow.income reflects salary
+- [x] 5.6 Verify UOB data present in dashboard net_worth and cash_flow
+- [x] 5.7 Run full test suite: `pytest api/tests/`
 
 ## Implementation Reasoning Addendum (Codex Mutable)
 - DBS fix:
@@ -954,21 +969,141 @@ OUTCOME:
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-**Current Stage**: `prepare`
+**Current Stage**: `PipelineStage.REWORK_ANALYSIS`
 **Workflow Status**: `running`
 
 ## Prepare
 Checked out `feature/issue-117-dbs-parser-bugfix` from `main` and ensured task file exists.
 
+## Plan Summary
+Complete remaining R4 rework items for Issue 117: fix dead code in _is_transfer() (line 112 is unreachable), add missing test coverage for non-salary GIRO debits, run end-to-end verification suite, and mark all checklist items done. Migration 028 is already applied and verified on live DB. DBS salary rows (4 rows) confirmed INCOME/Salary in production. February cash_flow.income confirmed at 21098.16 SGD. March salary not yet received (~2026-03-25).
+
+### Architecture Decisions
+- Remove dead code on dbs_transaction_history_csv_v1.py line 112: the `_is_self_transfer()` AND condition is unreachable because line 108-109 already returns True when `_is_self_transfer()` is True. Replace with `return False` to explicitly document intent that GIRO/IBG-only debits to unknown counterparties are NOT transfers.
+- Add one new test case for a non-salary, non-self-transfer GIRO debit (e.g., GIRO rent payment to a landlord) to guard the intentional EXPENSE classification behavior change identified in R2 review.
+- Do NOT change `_SELF_TRANSFER_COUNTERPARTIES` bare 'UOB' entry or `\bPAY\b.*\bCO\b` salary pattern — these are low-probability false-positive risks flagged in R2 but out of scope per Issue 117 narrow requirements. Document as known limitations.
+- No dashboard/spending query changes needed — the fix is purely parser-layer classification and one-time migration backfill. Queries correctly filter on type=INCOME already.
+- UOB regression is addressed by the end-to-end test added in test_ingest_uob_account.py (lines 220-263) which locks the import-to-dashboard data path. The actual UOB parser bugs (header resolution, continuation rows) were fixed in Issue 110.
+
+### Acceptance Criteria
+- AC1: DBS salary/payroll credits classified as INCOME, not TRANSFER — VERIFIED in R4 (4 rows confirmed)
+- AC2: DBS own-account transfers remain classified as TRANSFER — VERIFIED via test_dbs_parser_marks_transfers, test_dbs_parser_marks_ibkr_self_transfer, test_dbs_parser_marks_paynow_transfer
+- AC3: Existing unit tests pass — VERIFIED in R2 (104/104 backend tests)
+- AC4: New regression tests cover salary-via-GIRO, salary-via-IBG, non-salary GIRO self-transfer, IBKR self-transfer, PayNow transfer — VERIFIED, plus add non-salary non-self-transfer GIRO debit test
+- AC5: Backfill migration idempotent — VERIFIED via test_dbs_salary_backfill.py and R4 live DB evidence
+- AC6: /spending/cash-flow-detail shows salary under income — VERIFIED in R4 (id=748, amount=20560, Salary)
+- AC7: /dashboard/summary cash_flow.income includes salary — VERIFIED in R4 (income=21098.16)
+- AC8: UOB regression root cause documented (Issue 110 header-resolution + continuation-row bugs), regression test added
+- AC9: UOB data visible in dashboard/cash-flow — VERIFIED via test_uob_ingested_data_appears_in_dashboard_and_cash_flow
+- AC10: make api-rebuild succeeds, make api-smoke passes — rerun required
+- AC11: No unrelated files modified
+
+### Planned Paths
+- `api/app/ingestion/parsers/dbs_transaction_history_csv_v1.py`
+- `api/tests/test_parsers.py`
+- `tasks/issue-117-dbs-parser-bugfix.md`
+
+## Build Summary
+Fixed dead code in _is_transfer() (line 112 unreachable _is_self_transfer call replaced with explicit return False) and added test_dbs_parser_giro_rent_debit_is_expense to cover non-salary non-self-transfer GIRO debit → EXPENSE. All 108 backend tests pass, api-rebuild succeeded, api-smoke passes with income=21098.16.
+
+### Changed Files
+- `api/app/ingestion/parsers/dbs_transaction_history_csv_v1.py`
+- `api/tests/test_parsers.py`
+- `tasks/issue-117-dbs-parser-bugfix.md`
+
+## Latest Verification
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- api-rebuild: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- e2e: PASS (exit 0)
+
 ## Human Gate Decisions
 
-_No human gate decisions yet._
+### Plan Approval
+- decision: `approved`
+- reviewer: `HJ`
+- decided_at: `2026-03-22T02:34:49.960285+00:00`
+- notes: Please do read the context of older reviews, older rework and see the overall intent of the feature before implementing and reviewing. The salary should be categorised as money in, the transfers between accounts should be categorise[D[D[d as transfers. Need to track own accounts for categorizing properly. Money movement between bank accounts and platforms like coinbase, IBKR etc should also be categorised as transfer
 
 ## Review Cycles
 
-_No review cycles yet._
+### Review Cycle R1
+- source: `build`
+- status: `needs_fixes`
+#### Primary Agent Review
+- model: `claude-sonnet-4.6`
+- decision: `needs_fixes`
+- risk: `low`
+- summary: Code logic is correct, all 108 tests pass, and api-smoke returns income=21098.16 as expected. Two cleanup gaps remain: (1) _CONTEXTUAL_TRANSFER_KEYWORDS is defined at lines 81-84 but never referenced anywhere — unresolved dead code in the same file that was explicitly edited to remove dead code; (2) the task-file checklist (AC1–AC11 and Phase 5 steps 5.2–5.7) is entirely unchecked despite the plan explicitly stating 'mark all checklist items done' as a rework goal. A label inconsistency in checklist item 2.3 also creates a misleading description.
+- findings:
+  - _CONTEXTUAL_TRANSFER_KEYWORDS (lines 81-84 of dbs_transaction_history_csv_v1.py) is defined with values ('GIRO', 'IBG') but is never referenced in _is_transfer() or anywhere else in the codebase (grep confirms single occurrence: the definition itself). The rework was explicitly scoped to fix dead code in this file, yet this unused constant remains. The new test test_dbs_parser_giro_rent_debit_is_expense confirms that GIRO alone should NOT trigger TRANSFER classification, so the constant's intent is either obsolete or was never wired up. It must be removed to avoid future confusion about intended behaviour.
+  - Acceptance-criteria checkboxes AC1–AC11 in tasks/issue-117-dbs-parser-bugfix.md are all still '- [ ]'. Phase 5 verification steps 5.2–5.7 are also unchecked. The plan summary for this cycle explicitly states 'mark all checklist items done' as a deliverable, but the task file was not updated to reflect the completed and verified work.
+  - Checklist item 2.3 is labelled 'DBS non-salary GIRO debit → type=TRANSFER (e.g. GIRO bill payment)' and is marked [x], but the new test test_dbs_parser_giro_rent_debit_is_expense correctly asserts EXPENSE for a non-self-transfer GIRO debit. Item 2.3 was actually satisfied by test_dbs_parser_marks_non_salary_giro_self_transfer (GIRO to UOB counterparty → TRANSFER). The label misrepresents the intended behaviour and should be updated to 'non-salary GIRO to known self-transfer counterparty → TRANSFER'.
+- test_gaps:
+  - No test gaps in the parser logic itself — salary-via-GIRO, salary-via-IBG, GIRO/IBKR/PayNow/TRF transfer cases, and the new non-self-transfer GIRO EXPENSE case are all covered.
+- semantic_verification:
+  - AC1 (salary credits stay INCOME): VERIFIED — _is_transfer line 103 guards 'if amount > 0 and _is_salary(...): return False'; test_dbs_parser_keeps_salary_giro_credit_as_income and test_dbs_parser_keeps_salary_ibg_credit_as_income confirm type=INCOME and category=Salary.
+  - AC2 (own-account transfers stay TRANSFER): VERIFIED — _is_self_transfer checks against _SELF_TRANSFER_COUNTERPARTIES; confirmed by test_dbs_parser_marks_transfers (TRF code), test_dbs_parser_marks_ibkr_self_transfer, test_dbs_parser_marks_paynow_transfer, and test_dbs_parser_marks_non_salary_giro_self_transfer.
+  - AC3 (existing tests pass): VERIFIED — build reports 108 backend tests passing (exit 0).
+  - AC4 (regression tests): VERIFIED — salary-via-GIRO, salary-via-IBG, non-salary GIRO self-transfer, IBKR self-transfer, PayNow transfer, and new non-self-transfer GIRO EXPENSE tests all present in test_parsers.py.
+  - AC5 (backfill migration idempotent): VERIFIED via build summary (test_dbs_salary_backfill.py passes, migration 028 confirmed applied on live DB); not directly inspectable from parser files alone.
+  - AC6 (/spending/cash-flow-detail shows salary under income): VERIFIED via api-smoke PASS and task evidence (id=748, amount=20560, Salary).
+  - AC7 (/dashboard/summary income includes salary): VERIFIED via api-smoke result income=21098.16 SGD.
+  - AC8 (UOB regression root cause documented): PARTIALLY VERIFIED — task narrative lines 174-177 and lines 275-305 document issue-110 header-resolution and continuation-row bugs as root cause and explain that this issue adds regression coverage rather than a fresh parser fix; test_uob_ingested_data_appears_in_dashboard_and_cash_flow added (item 4.6 checked). However, AC8 checkbox in the acceptance criteria section remains '- [ ]', and the task file was not updated to close this item.
+  - AC9 (UOB data visible in dashboard/cash-flow): VERIFIED via test_uob_ingested_data_appears_in_dashboard_and_cash_flow (item 4.6 checked).
+  - AC10 (make api-rebuild and api-smoke): VERIFIED — build summary shows both PASS (exit 0).
+  - AC11 (no unrelated files modified): VERIFIED — only 3 files changed: api/app/ingestion/parsers/dbs_transaction_history_csv_v1.py, api/tests/test_parsers.py, tasks/issue-117-dbs-parser-bugfix.md.
 
 ## Rework Cycles
 
-_No rework cycles yet._
+### Rework Cycle W1
+- source_review_id: `R1`
+- status: `analysis_complete`
+#### Analysis
+- root_cause: The rework goal to clean up dead code was incomplete: _CONTEXTUAL_TRANSFER_KEYWORDS was left in dbs_transaction_history_csv_v1.py despite no reference site existing after the transfer-classification rewrite. The task file was not updated to reflect verified completions: AC1–AC11 checkboxes and Phase 5 steps 5.2–5.7 remain unchecked, and checklist item 2.3 carries a label that contradicts the actual behaviour enforced by the new test (non-self-transfer GIRO → EXPENSE, not TRANSFER).
+- findings_addressed:
+  - Dead constant _CONTEXTUAL_TRANSFER_KEYWORDS defined at lines 81-84 of dbs_transaction_history_csv_v1.py is never referenced in _is_transfer() or anywhere else in the codebase; it must be removed to complete the dead-code cleanup that was the explicit scope of this rework.
+  - Acceptance-criteria checkboxes AC1–AC11 in tasks/issue-117-dbs-parser-bugfix.md are all '- [ ]' and Phase 5 verification steps 5.2–5.7 are unchecked despite the plan summary listing 'mark all checklist items done' as a rework deliverable.
+  - Checklist item 2.3 label reads 'DBS non-salary GIRO debit → type=TRANSFER (e.g. GIRO bill payment)' which contradicts both the new test (test_dbs_parser_giro_rent_debit_is_expense asserts EXPENSE) and the actual test that satisfied item 2.3 (test_dbs_parser_marks_non_salary_giro_self_transfer — GIRO to UOB counterparty → TRANSFER); the label must be corrected to 'non-salary GIRO to known self-transfer counterparty → TRANSFER'.
+- planned_changes:
+  - Delete the _CONTEXTUAL_TRANSFER_KEYWORDS constant block (lines 81-84) from api/app/ingestion/parsers/dbs_transaction_history_csv_v1.py.
+  - Verify no import or reference to _CONTEXTUAL_TRANSFER_KEYWORDS exists anywhere in api/ or api/tests/ after deletion.
+  - In tasks/issue-117-dbs-parser-bugfix.md, mark checkboxes AC1 through AC11 as '- [x]'.
+  - In tasks/issue-117-dbs-parser-bugfix.md, mark Phase 5 verification steps 5.2 through 5.7 as '- [x]'.
+  - In tasks/issue-117-dbs-parser-bugfix.md, update checklist item 2.3 label from 'DBS non-salary GIRO debit → type=TRANSFER (e.g. GIRO bill payment)' to 'non-salary GIRO to known self-transfer counterparty → TRANSFER'.
+- validation_plan:
+  - After deleting _CONTEXTUAL_TRANSFER_KEYWORDS: run grep -rn '_CONTEXTUAL_TRANSFER_KEYWORDS' api/ and confirm zero matches.
+  - Run make api-rebuild and confirm exit 0 (no import errors, no syntax errors).
+  - Run make api-smoke and confirm income=21098.16 SGD (AC7 end-to-end regression still passes).
+  - Confirm all 108 backend tests still pass (pytest exit 0) — no tests may reference _CONTEXTUAL_TRANSFER_KEYWORDS.
+  - Open tasks/issue-117-dbs-parser-bugfix.md and confirm all AC1–AC11 lines contain '[x]', all Phase 5 steps 5.2–5.7 contain '[x]', and item 2.3 label reads 'non-salary GIRO to known self-transfer counterparty → TRANSFER'.
+  - Run curl http://localhost:8000/health to confirm container is live after rebuild.
+- unresolved_assumptions:
+  - The review states _CONTEXTUAL_TRANSFER_KEYWORDS contains ('GIRO', 'IBG') and was 'never wired up'; it is assumed the intent was superseded by _is_salary() and _SELF_TRANSFER_COUNTERPARTIES logic — if any future caller intended to use this constant, removing it is a semantic loss. No such caller was found by grep, so removal is treated as safe, but this should be confirmed by the original author if the constant's design intent is unclear.
+  - Phase 5 step numbers 5.2–5.7 are referenced in the reviewer finding but their exact labels in the task file are not reproduced in the review context; it is assumed these map to the api-rebuild, api-smoke, curl /health, curl /dashboard/summary, curl /spending/cash-flow-detail, and test-run verification steps that correspond to AC10 and the live-DB checks. If the actual step numbering differs, the checkbox update should be applied to whichever steps cover post-build smoke verification.
+- answer_matrix:
+  - entry_1:
+    - reviewer_finding: _CONTEXTUAL_TRANSFER_KEYWORDS (lines 81-84) is defined with values ('GIRO', 'IBG') but is never referenced in _is_transfer() or anywhere else in the codebase. The rework was explicitly scoped to fix dead code, yet this unused constant remains.
+    - human_comment: None
+    - root_cause: The dead-code removal pass that eliminated other unused symbols did not extend to _CONTEXTUAL_TRANSFER_KEYWORDS, likely because it was added in the same edit session as _is_transfer() and was overlooked when the transfer-classification logic was restructured to use _is_salary() and _SELF_TRANSFER_COUNTERPARTIES instead.
+    - status: planned
+    - change_made: Delete lines 81-84 (_CONTEXTUAL_TRANSFER_KEYWORDS = (...)) from api/app/ingestion/parsers/dbs_transaction_history_csv_v1.py.
+    - verification_performed: grep -rn '_CONTEXTUAL_TRANSFER_KEYWORDS' api/ returns zero results; make api-rebuild exits 0; 108 tests pass.
+  - entry_2:
+    - reviewer_finding: Acceptance-criteria checkboxes AC1–AC11 in tasks/issue-117-dbs-parser-bugfix.md are all still '- [ ]'. Phase 5 verification steps 5.2–5.7 are also unchecked. The plan summary explicitly states 'mark all checklist items done' as a deliverable.
+    - human_comment: None
+    - root_cause: The task file was edited to add narrative evidence and new test documentation but the checkbox lines were not updated to '[x]' before the rework was submitted for review.
+    - status: planned
+    - change_made: Change all '- [ ] AC1' through '- [ ] AC11' lines and '- [ ] 5.2' through '- [ ] 5.7' lines in tasks/issue-117-dbs-parser-bugfix.md to '- [x]'.
+    - verification_performed: grep '- \[ \]' tasks/issue-117-dbs-parser-bugfix.md returns zero AC or Phase-5 lines after the edit.
+  - entry_3:
+    - reviewer_finding: Checklist item 2.3 is labelled 'DBS non-salary GIRO debit → type=TRANSFER (e.g. GIRO bill payment)' and is marked [x], but the new test test_dbs_parser_giro_rent_debit_is_expense asserts EXPENSE for a non-self-transfer GIRO debit. The label misrepresents the intended behaviour.
+    - human_comment: None
+    - root_cause: Item 2.3 was originally written to capture a generic 'non-salary GIRO → TRANSFER' assumption that was later narrowed to only self-transfer counterparties. When the new EXPENSE test was added, the item label was not updated to reflect the narrowed semantics.
+    - status: planned
+    - change_made: Update item 2.3 label in tasks/issue-117-dbs-parser-bugfix.md from 'DBS non-salary GIRO debit → type=TRANSFER (e.g. GIRO bill payment)' to 'non-salary GIRO to known self-transfer counterparty → TRANSFER'.
+    - verification_performed: grep '2\.3' tasks/issue-117-dbs-parser-bugfix.md confirms the corrected label is present and no 'GIRO bill payment' phrasing remains on that line.
 <!-- MACHINE_RENDERED_END -->
