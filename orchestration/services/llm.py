@@ -25,9 +25,12 @@ def _extract_first_json_value(raw: str) -> object:
     except json.JSONDecodeError:
         pass
 
-    fenced_match = re.search(r"```json\s*(\{.*?\}|\[.*?\])\s*```", raw, re.DOTALL | re.IGNORECASE)
-    if fenced_match:
-        return json.loads(fenced_match.group(1))
+    fenced_matches = re.findall(r"```json\s*(\{.*?\}|\[.*?\])\s*```", raw, re.DOTALL | re.IGNORECASE)
+    for snippet in reversed(fenced_matches):
+        try:
+            return json.loads(snippet)
+        except json.JSONDecodeError:
+            continue
 
     start = next((idx for idx, ch in enumerate(raw) if ch in "{["), -1)
     if start == -1:
