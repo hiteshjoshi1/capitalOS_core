@@ -435,6 +435,21 @@ export type MarketDataRun = {
   error_summary?: string | null;
 };
 
+export type UploadReminder = {
+  account_id: number;
+  account_name: string;
+  platform: string;
+  account_type: string;
+  last_upload_date: string | null;
+  last_transaction_date: string | null;
+  days_since_upload: number;
+  message: string;
+};
+
+export type UploadReminderCount = {
+  count: number;
+};
+
 export const api = {
   health: () => req<Health>("/health"),
   categories: () => req<CategoryTaxonomy[]>("/categories"),
@@ -560,5 +575,7 @@ export const api = {
       method: "POST",
       headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
     }),
+  uploadReminders: () => req<UploadReminder[]>("/alerts/upload-reminders"),
+  uploadReminderCount: () => req<UploadReminderCount>("/alerts/upload-reminders/count"),
 
 };
