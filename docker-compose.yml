@@ -17,6 +17,8 @@ services:
     container_name: capitalos-api
     env_file:
       - .env
+    environment:
+      UPLOAD_STALE_DAYS: ${UPLOAD_STALE_DAYS:-30}
     ports:
       - "8000:8000"
     depends_on:

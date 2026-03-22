@@ -1,6 +1,7 @@
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
+import { api } from "../lib/api";
 
 type NavItem = {
   label: string;
@@ -28,6 +29,7 @@ const MENU_NAV_ITEMS: NavItem[] = [
   { label: "Crypto Holdings", to: "/crypto/holdings" },
   { label: "Ingest", to: "/ingest" },
   { label: "Market Data", to: "/market-data" },
+  { label: "Alerts", to: "/alerts" },
 ];
 
 function isActiveRoute(activeRoute: string, navPath: string) {
@@ -69,6 +71,13 @@ export default function PageShell({
   const menuRef = useRef<HTMLDetailsElement | null>(null);
   const { theme, toggleTheme } = useTheme();
   const primaryNavItems = getPrimaryNavItems(activeRoute, secondaryNavItem);
+  const [alertCount, setAlertCount] = useState<number>(0);
+
+  useEffect(() => {
+    api.uploadReminderCount?.()
+      ?.then((r) => setAlertCount(r.count))
+      .catch(() => setAlertCount(0));
+  }, []);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {
@@ -161,7 +170,7 @@ export default function PageShell({
                   {MENU_NAV_ITEMS.map((item) => (
                     <Link
                       key={`menu-${item.to}`}
-                      className={`menuLink${item.to === "/cash-flow/mapping" ? " menuLinkWithBadge" : ""}`}
+                      className={`menuLink${item.to === "/cash-flow/mapping" || item.to === "/alerts" ? " menuLinkWithBadge" : ""}`}
                       to={item.to}
                       onClick={closeUserMenu}
                     >
@@ -169,6 +178,11 @@ export default function PageShell({
                       {item.to === "/cash-flow/mapping" && unmappedCount != null && unmappedCount > 0 ? (
                         <span className="menuBadge" aria-label={`${unmappedCount} unmapped transactions`}>
                           {unmappedCount}
+                        </span>
+                      ) : null}
+                      {item.to === "/alerts" && alertCount > 0 ? (
+                        <span className="menuBadge alertBadge" aria-label={`${alertCount} upload alerts`}>
+                          {alertCount}
                         </span>
                       ) : null}
                     </Link>

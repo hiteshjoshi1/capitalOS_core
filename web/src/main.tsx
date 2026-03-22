@@ -23,6 +23,7 @@ import MarketData from "./routes/MarketData.tsx";
 import CreditCards from "./routes/CreditCards.tsx";
 import CashFlowDetail from "./routes/CashFlowDetail.tsx";
 import CashFlowMapping from "./routes/CashFlowMapping.tsx";
+import Alerts from "./routes/Alerts.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
@@ -76,6 +77,7 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
                       <Route path="/credit-cards" element={<CreditCards />} />
                       <Route path="/market-data" element={<MarketData />} />
+                      <Route path="/alerts" element={<Alerts />} />
                     </Routes>
                   </BrowserRouter>
                 </ThemeProvider>

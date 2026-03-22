@@ -941,3 +941,89 @@ a.btn {
 .footerAction {
   margin-left: auto;
 }
+
+/* ── Alert Cards ────────────────────────────────────────────── */
+.alertList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.alertCard {
+  border-left: 4px solid var(--warn);
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.alertCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.alertIcon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.alertAccountName {
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.alertPlatformBadge {
+  background: color-mix(in srgb, var(--warn) 18%, transparent 82%);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 40%, transparent 60%);
+  font-size: 11px;
+  padding: 2px 8px;
+}
+
+.alertAccountType {
+  font-size: 12px;
+}
+
+.alertMessage {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.alertDates {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.alertActions {
+  display: flex;
+  gap: 10px;
+}
+
+.alertEmptyState {
+  text-align: center;
+  padding: 40px 24px;
+}
+
+.alertEmptyIcon {
+  font-size: 40px;
+  margin: 0 0 8px;
+}
+
+.alertEmptyText {
+  color: var(--muted);
+  font-size: 15px;
+  margin: 0;
+}
+
+.alertBadge {
+  background: color-mix(in srgb, var(--warn) 22%, transparent 78%);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 45%, transparent 55%);
+}
