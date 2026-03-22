@@ -68,7 +68,13 @@ export function computeLargestPositionRisk(holdings: Holding[], netWorthTotal: n
     return noLargestPositionData();
   }
 
-  const largest = holdings.reduce((max, item) => (item.value > max.value ? item : max), holdings[0]);
+  // Exclude CASH from risk calculations
+  const filtered = holdings.filter((h) => h.asset_class !== "CASH");
+  if (filtered.length === 0) {
+    return noLargestPositionData();
+  }
+
+  const largest = filtered.reduce((max, item) => (item.value > max.value ? item : max), filtered[0]);
   const percent = toPercent(largest.value, netWorthTotal);
   return {
     symbol: largest.symbol,
@@ -103,7 +109,9 @@ export function computeTopNConcentrationRisk(
     };
   }
 
-  const sorted = sortHoldingsForRisk(holdings);
+  // Exclude CASH from risk calculations
+  const filtered = holdings.filter((h) => h.asset_class !== "CASH");
+  const sorted = sortHoldingsForRisk(filtered);
   const selected = sorted.slice(0, n);
   const sum = selected.reduce((acc, item) => acc + item.value, 0);
   const percent = toPercent(sum, netWorthTotal);
@@ -111,7 +119,7 @@ export function computeTopNConcentrationRisk(
   return {
     percent,
     hasData: selected.length > 0,
-    hasFullSelection: holdings.length >= n,
+    hasFullSelection: filtered.length >= n,
     state: inBand ? "in_band" : "out_of_band",
     selectedN: n,
     availableCount: selected.length,
@@ -127,7 +135,9 @@ export function buildTopNDistribution(
     return [];
   }
 
-  return sortHoldingsForRisk(holdings)
+  // Exclude CASH from risk calculations
+  const filtered = holdings.filter((h) => h.asset_class !== "CASH");
+  return sortHoldingsForRisk(filtered)
     .slice(0, n)
     .map((item) => ({
       symbol: item.symbol,

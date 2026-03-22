@@ -96,9 +96,9 @@ export default function StockHoldings() {
               </thead>
               <tbody>
                 {summary?.top_holdings
-                  ?.filter((h) => h.asset_class !== "CASH")
+                  ?.filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO")
                   .map((h, idx) => (
-                  <tr key={h.asset_id}>
+                  <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
                     <td>{idx + 1}</td>
                     <td>{h.symbol}</td>
                     <td className="muted">{h.asset_class}</td>
@@ -111,7 +111,7 @@ export default function StockHoldings() {
                     <td className="muted">{h.platform ?? "—"}</td>
                   </tr>
                 ))}
-                {summary && summary.top_holdings.filter((h) => h.asset_class !== "CASH").length === 0 && (
+                {summary && summary.top_holdings.filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO").length === 0 && (
                   <tr>
                     <td className="muted" colSpan={10}>No holdings available.</td>
                   </tr>

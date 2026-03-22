@@ -2,7 +2,7 @@
 
 CapitalOS is a local-first, open-source personal capital operating system.
 
-It provides a unified view of net worth, asset allocation, concentration risk, and spending behavior across multiple asset classes and financial accounts — designed as a foundation for building disciplined investment processes and, eventually, AI-assisted decision systems.
+It provides a unified view of net worth, asset allocation, concentration risk, and spending behavior across multiple asset classes and financial accounts. The long-term goal is to build infrastructure for disciplined capital allocation and AI-assisted analysis, while keeping judgment, traceability, and process at the center.
 
 CapitalOS is not a budgeting app and not a trading bot.
 
@@ -20,96 +20,24 @@ The project emphasizes correctness, traceability, and process over prediction.
 
 ## Core Principles
 
-- **Local-first**: Runs entirely on your machine.
-- **Source-of-truth driven**: Every number traces back to a file or on-chain address.
-- **Judgment over automation**: Systems support decisions; they don’t replace them.
-- **Process-oriented**: Investment outcomes are tracked against original intent.
-- **Composable**: Each module can evolve independently.
+- **Local-first**: Runs on your machine.
+- **Source-of-truth driven**: Every number should trace back to a file, account, or on-chain address.
+- **Judgment over automation**: Systems support decisions; they do not replace them.
+- **Process-oriented**: Outcomes should be comparable against original intent.
+- **Composable**: Modules can evolve independently.
 - **Open by design**: Built for learning, experimentation, and transparency.
 
 ---
 
-## Architecture Overview
+## What CapitalOS Is
 
-CapitalOS is organized into five conceptual modules:
+CapitalOS is a foundation for building:
 
-### Module A — Personal Financial Brain
-Structured visibility into:
-- portfolio across asset classes and geographies
-- bank balances
-- credit cards
-- spending
-
-Outputs:
-- net worth
-- asset allocation
-- savings rate
-- burn rate
-- risk
-Answers the question: What is my networth? How am I spending? What am I saving? 
-
----
-
-### Module B — Market Intelligence Engine (future)
-Ingests:
-- earnings transcripts
-- filings
-- news
-- product updates
-- competitor announcements
-
-Produces:
-- company summaries
-- competitive shifts
-- risk signals
-- sector trends
-
----
-
-### Module C — Investment Decision System (future)
-
-Provides structure for:
-- investment memos
-- checklists
-- decision logs
-- thesis tracking
-
-AI assists with preparation; humans retain judgment.
-
----
-
-### Module D — Feedback Loop (future)
-
-Tracks:
-- expected vs actual outcomes
-- root causes
-- recurring errors
-- winning patterns
-
-Designed to compound learning over time.
-
----
-
-### Module E — Public Thinking Layer (optional)
-
-Exports sanitized artifacts:
-- memos
-- post-mortems
-- mental models
-- process changes
-
-Focus is on reasoning, not returns.
-
----
-
-## Technology Stack (v1)
-
-- Backend: FastAPI (Python)
-- Frontend: React + TypeScript
-- Database: PostgreSQL
-- Deployment: Docker Compose
-
-The system runs locally and is designed for straightforward migration to managed cloud services later.
+- a personal financial system of record
+- portfolio visibility across multiple asset classes
+- ingestion and normalization pipelines
+- decision support tooling
+- future AI-assisted workflows for analysis, review, and process improvement
 
 ---
 
@@ -117,342 +45,357 @@ The system runs locally and is designed for straightforward migration to managed
 
 - Not a robo-advisor
 - Not a trading platform
-- Not a financial forecasting engine
+- Not a forecasting engine
 - Not a consumer budgeting app
+- Not a system that automates financial judgment away from the user
 
-This is for people who want to know where they are heading, how are their decisions shaping their lives
+---
+
+## Product Direction
+
+CapitalOS is organized into several conceptual layers.
+
+### Module A — Personal Financial Brain
+Structured visibility into:
+
+- portfolio across asset classes and geographies
+- bank balances
+- credit cards
+- spending
+
+Outputs include:
+
+- net worth
+- asset allocation
+- savings rate
+- burn rate
+- concentration and risk visibility
+
+This answers questions such as:
+
+- What is my net worth?
+- Where is my capital allocated?
+- How am I spending?
+- Where is risk concentrated?
+
+### Module B — Market Intelligence Engine (future)
+Ingests:
+
+- earnings transcripts
+- filings
+- news
+- product updates
+- competitor announcements
+
+Produces:
+
+- company summaries
+- competitive shifts
+- risk signals
+- sector trends
+
+### Module C — Investment Decision System (future)
+Provides structure for:
+
+- investment memos
+- checklists
+- decision logs
+- thesis tracking
+
+AI can assist with preparation, but humans retain judgment.
+
+### Module D — Feedback Loop (future)
+Tracks:
+
+- expected vs actual outcomes
+- root causes
+- recurring errors
+- winning patterns
+
+Designed to compound learning over time.
+
+### Module E — Public Thinking Layer (optional)
+Exports sanitized artifacts such as:
+
+- memos
+- post-mortems
+- mental models
+- process changes
+
+The emphasis is on reasoning, not performance signaling.
+
+---
+
+## Technology Stack
+
+Current stack:
+
+- **Backend**: FastAPI (Python)
+- **Frontend**: React + TypeScript
+- **Database**: PostgreSQL
+- **Local runtime**: Docker Compose
+- **Workflow orchestration**: LangGraph + Pydantic
+
+The application is local-first today, but structured so it can later be migrated to managed infrastructure if needed.
+
+---
+
+## Repository Structure
+
+High level:
+
+- `app/` — backend application
+- `web/` — frontend application
+- `migrations/` — database migrations
+- `data/` — local raw files, fixtures, and reports
+- `tasks/` — human-facing issue/task markdown files
+- `orchestration/` — LangGraph workflow, typed models, nodes, services, prompts, tests
 
 ---
 
 ## Getting Started
 
-See `PRD-Module-1.md` for detailed product and technical specifications for the first module.
-
----
-
-## License
-
-MIT (or TBD)
-
----
-
-## Philosophy
-
-Good capital allocation comes from:
-
-- clear thinking
-- disciplined process
-- honest feedback
-- long-term perspective
-
-CapitalOS exists to support those habits.
-
-
-# Running the application
-
-## AI Task Workflow
-
-CapitalOS supports a local-first AI workflow with a mandatory human gate.
-Detailed reference: `docs/workflows/ai-task-flow.md`.
-All validation commands run locally on your machine by default.
-Optional GitHub validation exists as a manual workflow (`workflow_dispatch`) and does not auto-run on PRs.
-On macOS, workflow stages (`task-plan`, `task-build`, `task-review`, `task-rework`, `task-all`) auto-use `caffeinate` so long runs do not sleep.
-Copilot planner/reviewer runs in text-only tool mode by default (no shell/write/url tools), which avoids planner permission failures and keeps task file writes deterministic via `task_flow.sh`.
-
-Model routing:
-- Planning/architecture: `claude-opus-4.6`
-- Implementation/checklist updates: Codex
-- Primary review/testing: `claude-sonnet-4.6`
-- Escalation review only (if Sonnet is uncertain/high-risk): `claude-opus-4.6`
-
-#### How config works
-- Workflow model/runtime settings are loaded from repo-root `.ai-models.env`.
-- Supported keys: `PLAN_MODEL`, `REVIEW_MODEL`, `REVIEW_ESCALATION_MODEL`, `CODEX_TIMEOUT_MINUTES`, `ENABLE_CAFFEINATE`, `COPILOT_TOOL_MODE`, `CONTEXT7_ENABLED`, `COPILOT_MCP_CONFIG`, `MAX_RETRIES`, `NO_CACHE`.
-- Environment variables still override `.ai-models.env` values.
-- Use verbose mode to print active routing/config: `./scripts/task_flow.sh --verbose plan tasks/issue-123-my-feature.md`.
-
-#### How cache works
-- Plan/review prompts use a read-through cache at `.task-cache/` (local, gitignored).
-- Cache key is SHA-256 over: phase + model + full task content + git tree hash.
-- `build` and `rework` are never cached.
-- Clear cache with `make task-cache-clean`.
-
-#### How to disable/tune
-- Disable cache for a run: `NO_CACHE=1 make task-plan TASK=...`
-- Change retry budget: `MAX_RETRIES=2 make task-build TASK=...`
-- Change planner/reviewer model per run with env overrides (same variable names as `.ai-models.env`).
-- Optional Context7 MCP for plan/review: set `CONTEXT7_ENABLED=1`. If Context7 invocation fails, workflow logs a warning and automatically retries without Context7.
-- Context7 config path defaults to `~/.copilot/mcp-config.json` (override with `COPILOT_MCP_CONFIG=...`).
-
-#### Context7 setup (standard)
-1. Create/update `~/.copilot/mcp-config.json`:
-```json
-{
-  "mcpServers": {
-    "context7": {
-      "type": "http",
-      "url": "https://mcp.context7.com/mcp",
-      "headers": {
-        "CONTEXT7_API_KEY": "YOUR_CONTEXT7_API_KEY"
-      },
-      "tools": ["resolve-library-id", "get-library-docs"]
-    }
-  }
-}
-```
-2. Enable for a run: `CONTEXT7_ENABLED=1 make task-plan TASK=...`
-
-Canonical task file:
-- `tasks/issue-<id>-<slug>.md`
-
-### Preflight
-
-```bash
-gh auth status -h github.com
-copilot --version
-codex --version
-```
-
-Optional:
-- Disable Codex sleep-prevention wrapper for a run: `ENABLE_CAFFEINATE=0 make task-build TASK=...`
-- Enable Copilot tool calls explicitly (normally keep off): `COPILOT_TOOL_MODE=tools-enabled make task-plan TASK=...`
-
-### 1) Create a task from template
-
-```bash
-cp tasks/_template.md tasks/issue-123-my-feature.md
-```
-
-Add your high-level input in the task file under `## Objective`.
-Example:
-- "Update dashboard UI/UX for cleaner hierarchy, better risk-card readability, and improved mobile layout."
-
-### 2) Prepare branch from latest main
-
-```bash
-make task-prepare TASK=tasks/issue-123-my-feature.md
-```
-
-This creates/switches `feature/issue-<id>-<slug>` from latest `main`, carries your task file into that branch, and commits it.
-
-### 3) Generate plan (Opus)
-
-```bash
-make task-plan TASK=tasks/issue-123-my-feature.md
-```
-
-`task-plan` reuses the existing issue branch if it already exists (it does not recreate it).
-If you are already on that issue branch, `task-plan` allows staged/unstaged edits only in the same task file.
-The `Workflow Commands` section is normalized to canonical `make task-* TASK=<file>` commands.
-The planning output also includes a ready-to-copy command pack for this exact task file.
-
-### 4) Human gate (required)
-
-Review the task file and mark:
-
-```md
-- [x] Approved for implementation
-```
-
-### 5) Build and verify (Codex)
-
-```bash
-make task-build TASK=tasks/issue-123-my-feature.md
-```
-
-`task-build` auto-stages changes (`git add -A`) for review handoff.
-
-### 6) Review (Sonnet, Opus escalation if needed)
-
-```bash
-make task-review TASK=tasks/issue-123-my-feature.md
-```
-
-Note:
-- `task-review` expects a fully staged snapshot (`git add -A`) so reviewer sees all changes, including new files.
-- `task-review` now reruns verification independently before model review:
-  - `make lint`
-  - `make typecheck`
-  - `make test-backend`
-  - `make test-frontend`
-  - `make api-smoke`
-  - `make e2e` when Playwright is configured (UI smoke)
-- Reviewer receives code diff + task file + verification outputs + UI artifact index and cannot run arbitrary tools.
-
-### 7) Rework only latest review findings (if needed)
-
-```bash
-make task-rework TASK=tasks/issue-123-my-feature.md
-```
-
-`task-rework` auto-stages changes (`git add -A`) for the next review pass.
-`task-rework` now runs in two passes:
-- Analysis pass (`diagnose -> justify`) writes:
-  - `Review Cycle R<n> - Rework Analysis`
-  - `Review Cycle R<n> - Rework Answer Matrix`
-- Implementation pass (`patch -> verify`) updates the same matrix with change and verification status.
-  
-Required answer-matrix fields per entry:
-- `REVIEWER_FINDING`
-- `HUMAN_COMMENT`
-- `ROOT_CAUSE`
-- `CHANGE_MADE`
-- `VERIFICATION_PERFORMED`
-- `STATUS`
-
-Before `task-rework`, add structured human input for the current cycle:
-- `### Review Cycle R<n> - Human Input`
-- `HUMAN_QUESTIONS: ...`
-- `UNRESOLVED_COMMENTS: ...`
-- `RESPONSE_REQUIREMENTS: ...`
-
-Review tracking:
-- After `task-review`: latest review cycle status is `Reviewed`.
-- After `task-rework`: same cycle status is `Implemented`.
-- A new `task-review` creates a new review cycle section (for example `R2`) so findings remain separated.
-- `task-review` fails fast if latest implemented cycle is missing rework analysis or answer matrix.
-
-### 8) Ship branch and open PR
-
-```bash
-make task-ship TASK=tasks/issue-123-my-feature.md
-```
-
-### Optional: One command orchestration
-
-```bash
-make task-all TASK=tasks/issue-123-my-feature.md
-```
-
-`task-all` always stops for the human gate when approval is unchecked.
-It also auto-stages changes before each review cycle.
-
-### E2E in this workflow
-
-- Local definition: `Makefile` target `e2e`.
-- `task-build` executes E2E only when Playwright config exists in `web/`.
-- If Playwright is not configured, E2E is skipped.
-- Optional manual GitHub run is available in `.github/workflows/pr-validate.yml`.
-
-
 ### Prerequisites
+
 - Docker + Docker Compose
+- Python 3.11+ recommended
+- Node.js / npm
 - Make
 
-### 1) Start Postgres
-From repo root:
+Optional, for AI workflow features:
+
+- GitHub CLI (`gh`)
+- Copilot CLI / builder tooling used by your orchestration services
+
+---
+
+## Running the Application
+
+### 1. Start local services
 
 ```bash
 make up
 ```
 
-### 2) Create DB schema (run migrations)
+Wait for services to be ready (Postgres, API, Web).
+
+### 2. Stop services
+
+```bash
+make down
+```
+
+Stops all running containers.
+
+### 3. Verify API health
+
+```bash
+curl http://localhost:8000/health
+```
+
+### 4. Access the application
+
+- **Frontend**: http://localhost:5173
+- **API docs**: http://localhost:8000/docs
+- **OpenAPI spec**: http://localhost:8000/openapi.json
+
+### 5. Run initial migrations
+
 ```bash
 make db-migrate
 ```
 
+### 6. (Optional) Seed dummy data
 
-### 3) Start the API
-```
-make apiup 
-```
-
-### The apiup internally uses docker-compose as below
 ```bash
-docker compose up -d --build api
-```
-### 4) Verify the API is running
-```bsh
-curl http://localhost:8000/health
+make db-seed-dummy
 ```
 
 ---
 
-## Crypto Wallet Tracking (EVM + Solana)
+## AI Task Pipeline
 
-### Environment Variables
-Set these in your `.env` (never commit secrets):
+CapitalOS uses a LangGraph-based AI task orchestration pipeline for feature development.
 
-- `ALCHEMY_API_KEY` (required for EVM balances)
-- `HELIUS_API_KEY` (required for Solana balances)
-- `COINGECKO_API_KEY` (optional; improves rate limits)
-- `CRYPTO_SIGNING_NONCE_TTL_SECONDS` (default `600`)
-- `CRYPTO_REFRESH_HOUR_LOCAL` (default `0`, Asia/Singapore time)
-- `CRYPTO_SCHEDULER_ENABLED` (default `1`, set `0` to disable scheduler)
-- `CRYPTO_SNAPSHOT_MAX_ITEMS` (default `500`)
-- `CRYPTO_ADMIN_KEY` (optional; protects `/crypto/refresh-now`)
-- `CRYPTO_ADMIN_MIN_INTERVAL_SECONDS` (default `60`)
-- `TZ` (default `Asia/Singapore`)
+### Pipeline Overview
 
-### Wallet Verification Flow (curl)
+The pipeline consists of seven core stages:
+
+1. **prepare** — Ensure task file exists, switch to issue branch, bootstrap workflow context
+2. **plan** — Generate structured implementation plan with acceptance criteria
+3. **human_approval_gate** — Mandatory human review of plan before build
+4. **build** — Implement feature, run verification suite, stage scoped changes
+5. **agent_review** — Model reviews build output, approves or requests fixes
+6. **human_review** — Human review after agent review
+7. **ship** — Commit, push, and optionally open PR
+
+If fixes are needed, the **rework** stage analyzes findings and re-implements, then returns to review loop.
+
+### Running a Task
+
 ```bash
-curl -X POST http://localhost:8000/crypto/wallets/init \
-  -H "Content-Type: application/json" \
-  -d '{"chain_type":"evm","chain":"ethereum","address":"0x...","label":"Main"}'
+# Prepare the task and branch
+make task-prepare TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 
-# Sign message with wallet, then:
-curl -X POST http://localhost:8000/crypto/wallets/verify \
-  -H "Content-Type: application/json" \
-  -d '{"wallet_id":"<id>","address":"0x...","signature":"0x..."}'
+# Generate implementation plan
+make task-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Approve the plan (after human review)
+make task-approve-plan TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved",...}'
+
+# Build the feature
+make task-build TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Agent review
+make task-agent-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+
+# Human review (after agent review)
+make task-human-review TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved",...}'
+
+# Ship the feature
+make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 ```
 
-### Crypto Summary (curl)
+Or run all stages end-to-end (with gates):
+
 ```bash
-curl "http://localhost:8000/crypto/summary?base_currency=SGD"
+make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 ```
 
-### Manual Refresh (admin)
+For complete workflow documentation, see [`docs/workflows/ai-task-flow.md`](docs/workflows/ai-task-flow.md).
+
+---
+
+## Verification Commands
+
+### Run all quality gates
+
 ```bash
-curl -X POST http://localhost:8000/crypto/refresh-now -H "X-Admin-Key: <key>"
+make verify
 ```
 
-### Logs
-```bash
-make logs
-# or API only:
-docker logs -f capitalos-api
+This runs:
+- Linting (ruff for Python, eslint for TypeScript)
+- Type checking (mypy for Python, tsc for TypeScript)
+- Backend tests (pytest)
+- Frontend tests (vitest)
 
-###Open a DB shell
+### Individual verification commands
+
 ```bash
+# Lint code
+make lint
+
+# Type check
+make typecheck
+
+# Run backend tests
+make test-backend
+
+# Run frontend tests
+make test-frontend
+
+# Run E2E tests (if configured)
+make e2e
+```
+
+### Database verification
+
+```bash
+# Check database connectivity
+make db-wait
+
+# Query database
+make db-query QUERY='SELECT * FROM accounts LIMIT 5;'
+
+# Open database shell
 make db-shell
 ```
 
-### Reset everything (DANGER: deletes DB volume)
+### API smoke tests
+
 ```bash
+# Quick API health check
+make api-smoke
+
+# Test ingestion pipeline (requires account)
+make ingest-smoke
+
+# Test crypto endpoints
+make crypto-smoke
+```
+
+---
+
+## Development Workflow
+
+### Making changes
+
+1. Create a task file: `tasks/issue-<id>-<slug>.md`
+2. Run `make task-all TASK=<task-file> THREAD_ID=<thread-id>`
+3. Review output and respond to gates as needed
+4. Verify changes: `make verify`
+5. Ship when approved: `make task-ship TASK=<task-file> THREAD_ID=<thread-id>`
+
+### Rebuilding services
+
+```bash
+# Rebuild API container
+make api-rebuild
+
+# Rebuild web container
+make web-rebuild
+```
+
+### Resetting database
+
+```bash
+# WARNING: This destroys all data
 make db-reset
 ```
 
 ---
 
-## Ingestion (IBKR v1)
+## Project Structure
 
-### Where files and reports are stored
-
-- Raw uploads: `data/raw/<job_id>/...`
-- Import reports: `data/reports/<job_id>.json`
-
-The `api` container mounts `./data` to `/app/data` for local-first storage.
-
-### Ingest via UI
-
-1. Create an account (if none exist): `http://localhost:5173/accounts/new`
-2. Go to `http://localhost:5173/ingest`
-3. Select an account and upload an IBKR Activity Statement CSV.
-
-### Ingest via curl
-
-```bash
-curl -s -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://localhost:8000/ingest/ibkr?account_id=<ACCOUNT_ID>"
+```
+capitalos/
+├── api/                    # FastAPI backend
+│   ├── app/                # Application code
+│   │   ├── models/         # SQLAlchemy models
+│   │   ├── routers/        # API endpoints
+│   │   ├── services/       # Business logic
+│   │   └── main.py         # FastAPI app
+│   ├── tests/              # Backend tests
+│   └── Dockerfile
+├── web/                    # React frontend (Vite)
+│   ├── src/
+│   │   ├── components/     # React components
+│   │   ├── types/          # TypeScript types
+│   │   └── main.tsx        # Entry point
+│   ├── package.json
+│   └── Dockerfile
+├── migrations/             # SQL migrations
+├── orchestration/          # LangGraph task pipeline
+├── tasks/                  # Task definition files
+├── docs/                   # Documentation
+├── docker-compose.yml      # Service orchestration
+├── Makefile                # Build and task commands
+└── ReadMe.md               # This file
 ```
 
-### Ingest smoke test
+---
 
-```bash
-make ingest-smoke
-```
+## Contributing
 
-### Signature and parser registry
+1. Follow the project principles in AGENTS.md
+2. Use the AI task pipeline for all features
+3. Ensure all changes pass `make verify`
+4. Keep changes scoped and deterministic
+5. Never break the API contract
 
-The ingestion pipeline computes a deterministic signature from the IBKR CSV (sections + headers + delimiter).
-Signatures are mapped to parser keys in `parser_registry`. Unknown signatures are marked `NEEDS_MAPPING`
-so you can register a new signature for a new file format.
+---
+
+## License
+
+MIT

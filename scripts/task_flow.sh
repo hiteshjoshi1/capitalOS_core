@@ -380,7 +380,7 @@ validate_task_file() {
 
   ISSUE_ID="${BASH_REMATCH[1]}"
   SLUG="${BASH_REMATCH[2]}"
-  BRANCH="feature/issue-${ISSUE_ID}-${SLUG}"
+  BRANCH="issue-${ISSUE_ID}-${SLUG}"
 }
 
 task_title_from_slug() {
