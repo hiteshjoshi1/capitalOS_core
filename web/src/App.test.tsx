@@ -4,12 +4,13 @@ import { MemoryRouter } from "react-router-dom";
 import App from "./App";
 import { ThemeProvider } from "./context/ThemeContext";
 import { api } from "./lib/api";
-import type { DashboardSummary } from "./lib/api";
+import type { DashboardBootstrap, DashboardSummary } from "./lib/api";
 
 // Mock the API module
 vi.mock("./lib/api", () => ({
   api: {
     health: vi.fn(),
+    dashboardBootstrap: vi.fn(),
     dashboardSummary: vi.fn(),
     cashDeposits: vi.fn(),
     platformAllocation: vi.fn(),
@@ -26,6 +27,23 @@ vi.mock("./lib/api", () => ({
 
 describe("App", () => {
   it("should pass cash_percent to RiskCard and render it in first KPI row", async () => {
+    const mockBootstrap: DashboardBootstrap = {
+      as_of_month: "2026-02",
+      base_currency: "SGD",
+      snapshot_day: null,
+      net_worth_as_of: "2026-02-06",
+      net_worth: {
+        total: 100000,
+        cash: 25000,
+        stocks_funds: 50000,
+        crypto: 25000,
+        liabilities: 0,
+      },
+      stock_exposure_total: 50000,
+      crypto_exposure_total: 25000,
+      cash_percent: 25.0,
+    };
+
     const mockSummary: DashboardSummary = {
       as_of_month: "2026-02",
       base_currency: "SGD",
@@ -53,6 +71,7 @@ describe("App", () => {
 
     // Mock API responses
     vi.mocked(api.health).mockResolvedValue({ status: "ok" });
+    vi.mocked(api.dashboardBootstrap).mockResolvedValue(mockBootstrap);
     vi.mocked(api.dashboardSummary).mockResolvedValue(mockSummary);
     vi.mocked(api.cashDeposits).mockResolvedValue({ total: 25000, items: [] });
     vi.mocked(api.platformAllocation).mockResolvedValue({ as_of: "2026-02-06", total: 100000, items: [] });
@@ -113,8 +132,7 @@ describe("App", () => {
       </ThemeProvider>
     );
 
-    // Wait for the component to load data and render
-    // RiskCard should display cash_percent as first KPI
+    // Wait for secondary data (RiskCard renders after phase 2 completes)
     const riskHeading = await screen.findByRole("heading", { name: "Risk" });
     const riskCard = riskHeading.parentElement;
     expect(riskCard).not.toBeNull();
@@ -126,3 +144,4 @@ describe("App", () => {
     expect(riskCardScope.getByText("% of net worth")).toBeInTheDocument();
   });
 });
+

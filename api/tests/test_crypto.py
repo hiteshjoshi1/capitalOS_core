@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from nacl.signing import SigningKey
@@ -110,3 +111,43 @@ def test_verify_solana_signature_unit():
     sig_lower_b58 = base58.b58encode(sig_lower).decode("utf-8")
     res_lower = verify_solana_signature(message, sig_lower_b58, address)
     assert res_lower.ok
+
+
+def test_crypto_summary_does_not_trigger_refresh(client: TestClient, db_engine):
+    """GET /crypto/summary must return refresh_triggered=False and must not mutate DB state."""
+    from sqlalchemy import text
+
+    wallet_id = "wallet-no-refresh"
+    as_of = datetime.now(tz=timezone.utc)
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, refresh_in_progress) "
+                "VALUES (:id, 'evm', 'ethereum', '0xNOREFRESH', 'Test', 'active', :now, FALSE)"
+            ),
+            {"id": wallet_id, "now": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (wallet_id, as_of_date, fetched_at, total_usd) "
+                "VALUES (:wid, :as_of, :fetched, 500.0)"
+            ),
+            {"wid": wallet_id, "as_of": as_of.date(), "fetched": as_of},
+        )
+
+    resp = client.get("/crypto/summary")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["refresh_triggered"] is False
+
+    with db_engine.connect() as conn:
+        row = conn.execute(
+            text(
+                "SELECT refresh_in_progress, refresh_started_at FROM crypto_wallets WHERE id = :id"
+            ),
+            {"id": wallet_id},
+        ).fetchone()
+    assert row is not None
+    assert not row[0], "refresh_in_progress must remain FALSE after /crypto/summary"
+    assert row[1] is None, "refresh_started_at must remain NULL after /crypto/summary"

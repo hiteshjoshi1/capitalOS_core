@@ -4,6 +4,26 @@ async function mockDashboardApis(page: Page) {
   await page.route("**/health", async (route) => {
     await route.fulfill({ json: { status: "ok" } });
   });
+  await page.route("**/dashboard/bootstrap**", async (route) => {
+    await route.fulfill({
+      json: {
+        as_of_month: "2026-02",
+        base_currency: "SGD",
+        snapshot_day: 6,
+        net_worth_as_of: "2026-02-06T00:00:00+00:00",
+        net_worth: {
+          total: 742180,
+          cash: 118400,
+          stocks_funds: 512300,
+          crypto: 136900,
+          liabilities: 0,
+        },
+        stock_exposure_total: 512300,
+        crypto_exposure_total: 136900,
+        cash_percent: 15.95,
+      },
+    });
+  });
   await page.route("**/dashboard/summary**", async (route) => {
     await route.fulfill({
       json: {

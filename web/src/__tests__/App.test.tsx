@@ -9,23 +9,23 @@ import { ThemeProvider } from "../context/ThemeContext";
 import type {
   CreditCardSummary,
   CryptoSummary,
+  DashboardBootstrap,
   DashboardSummary,
   PlatformAllocation,
   SpendingSummary,
-  StockExposure,
 } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     health: vi.fn(),
+    dashboardBootstrap: vi.fn(),
     unmappedTransactions: vi.fn(),
     dashboardSummary: vi.fn(),
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
     creditCardSummary: vi.fn(),
     cryptoSummary: vi.fn(),
-    stockExposure: vi.fn(),
-    accountOptions: vi.fn(),
+    stockExposure: vi.fn(),    accountOptions: vi.fn(),
     createAccount: vi.fn(),
     platformOptions: vi.fn(),
     createPlatform: vi.fn(),
@@ -35,6 +35,23 @@ vi.mock("../lib/api", () => ({
 }));
 
 const mockApi = vi.mocked(api, true);
+
+const bootstrapFixture: DashboardBootstrap = {
+  as_of_month: "2026-02",
+  base_currency: "SGD",
+  snapshot_day: null,
+  net_worth_as_of: "2026-02-06T00:00:00+00:00",
+  net_worth: {
+    total: 742180,
+    cash: 118400,
+    stocks_funds: 512300,
+    crypto: 136900,
+    liabilities: 0,
+  },
+  stock_exposure_total: 90000,
+  crypto_exposure_total: 136900,
+  cash_percent: 15.96,
+};
 
 const summaryFixture: DashboardSummary = {
   as_of_month: "2026-02",
@@ -152,25 +169,12 @@ const cryptoSummaryFixture: CryptoSummary = {
   refresh_triggered: false,
 };
 
-const stockExposureFixture: StockExposure = {
-  as_of: "2026-02-06T00:00:00+00:00",
-  base_currency: "SGD",
-  total: 90000,
-  by_country: [
-    { key: "US", value: 60000, percent: 66.7 },
-    { key: "IN", value: 30000, percent: 33.3 },
-  ],
-  by_platform: [
-    { key: "IBKR", value: 70000, percent: 77.8 },
-    { key: "DBS", value: 20000, percent: 22.2 },
-  ],
-};
-
 beforeEach(() => {
   vi.useRealTimers();
   vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
   window.localStorage.clear();
   mockApi.health.mockResolvedValue({ status: "ok" });
+  mockApi.dashboardBootstrap.mockResolvedValue(bootstrapFixture);
   mockApi.unmappedTransactions.mockResolvedValue([
     {
       transaction_id: 101,
@@ -202,7 +206,6 @@ beforeEach(() => {
   mockApi.spendingSummary.mockResolvedValue(spendingSummaryFixture);
   mockApi.creditCardSummary.mockResolvedValue(creditCardSummaryFixture);
   mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
-  mockApi.stockExposure.mockResolvedValue(stockExposureFixture);
 });
 
 afterEach(() => {
@@ -232,7 +235,7 @@ describe("App", () => {
     expect(within(nav).queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(within(nav).getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
     expect(within(nav).queryByRole("link", { name: "Market Data" })).not.toBeInTheDocument();
-    expect(screen.getByText("vs 2026-01")).toBeInTheDocument();
+    expect(await screen.findByText("vs 2026-01")).toBeInTheDocument();
     expect(screen.getByText("+S$ 10,000 (+10.0%)")).toBeInTheDocument();
     expect(screen.getByText("vs 2025-02")).toBeInTheDocument();
     expect(screen.getByText("+S$ 50,000 (+50.0%)")).toBeInTheDocument();
@@ -372,7 +375,7 @@ describe("App", () => {
   });
 
   it("renders API error state when requests fail", async () => {
-    mockApi.health.mockRejectedValueOnce(new Error("Network down"));
+    mockApi.dashboardBootstrap.mockRejectedValueOnce(new Error("Network down"));
 
     renderApp();
 
@@ -388,8 +391,170 @@ describe("App", () => {
     fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
 
     await waitFor(() => {
-      expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-01", "prev_month,prev_year", "SGD");
+      expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-01", "SGD");
+    });
+    await waitFor(() => {
+      expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-01", undefined, "SGD", true);
     });
     expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-01");
+  });
+
+  it("renders stock/crypto/cash exposure cards from bootstrap data on first paint", async () => {
+    renderApp();
+
+    // Hero and exposure cards render from bootstrap without needing secondary data
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Stock Exposure details" })).toHaveAttribute("href", "/holdings");
+    expect(screen.getByRole("link", { name: "Crypto Exposure details" })).toHaveAttribute("href", "/crypto/holdings");
+    expect(screen.getByRole("link", { name: "Cash Exposure details" })).toHaveAttribute("href", "/cash");
+    // Bootstrap drives the net worth total
+    expect(screen.getByText("S$ 742,180")).toBeInTheDocument();
+  });
+
+  it("does not trigger crypto background refresh: fixture is false and no refresh endpoint called", async () => {
+    renderApp();
+
+    // Wait for full render including secondary panels
+    await waitFor(() => {
+      expect(mockApi.cryptoSummary).toHaveBeenCalledTimes(1);
+    });
+
+    const cryptoResult = await mockApi.cryptoSummary.mock.results[0].value;
+    expect(cryptoResult.refresh_triggered).toBe(false);
+
+    // Confirm no call was made to any market-data or crypto-refresh endpoint
+    const allMockCalls = Object.entries(mockApi)
+      .filter(([key]) => key !== "health")
+      .map(([key, fn]) => ({ key, calls: (fn as ReturnType<typeof vi.fn>).mock.calls }));
+
+    const refreshCalls = allMockCalls.filter(({ key }) =>
+      key.toLowerCase().includes("refresh") || key.toLowerCase().includes("trigger")
+    );
+    expect(refreshCalls.every(({ calls }) => calls.length === 0)).toBe(true);
+  });
+
+  it("calls dashboardBootstrap on first phase and dashboardSummary without compare on second phase", async () => {
+    renderApp();
+
+    await waitFor(() => {
+      expect(mockApi.dashboardBootstrap).toHaveBeenCalledTimes(1);
+      expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-02", "SGD");
+    });
+
+    await waitFor(() => {
+      expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-02", undefined, "SGD", true);
+    });
+
+    // health is lazy — only fetched when user menu is opened, not on mount
+    expect(mockApi.health).not.toHaveBeenCalled();
+  });
+
+  it("/dashboard/bootstrap called exactly once on mount; /dashboard/summary not called before bootstrap resolves", async () => {
+    let resolveBootstrap!: (v: typeof bootstrapFixture) => void;
+    const pendingBootstrap = new Promise<typeof bootstrapFixture>((res) => { resolveBootstrap = res; });
+    mockApi.dashboardBootstrap.mockReturnValueOnce(pendingBootstrap);
+
+    renderApp();
+
+    // Before bootstrap resolves, summary must not be called
+    expect(mockApi.dashboardSummary).not.toHaveBeenCalled();
+    expect(mockApi.dashboardBootstrap).toHaveBeenCalledTimes(1);
+
+    // Resolve bootstrap
+    resolveBootstrap(bootstrapFixture);
+
+    // After bootstrap, summary is called exactly once in phase 2
+    await waitFor(() => {
+      expect(mockApi.dashboardSummary).toHaveBeenCalledTimes(1);
+    });
+
+    // Bootstrap still called exactly once total
+    expect(mockApi.dashboardBootstrap).toHaveBeenCalledTimes(1);
+  });
+
+  it("stock_exposure_total and crypto_exposure_total from bootstrap fixture are defined numbers", () => {
+    expect(typeof bootstrapFixture.stock_exposure_total).toBe("number");
+    expect(typeof bootstrapFixture.crypto_exposure_total).toBe("number");
+    expect(bootstrapFixture.stock_exposure_total).not.toBeUndefined();
+    expect(bootstrapFixture.crypto_exposure_total).not.toBeUndefined();
+  });
+
+  it("shows skeletons for secondary panels then renders them after load", async () => {
+    // Delay secondary API calls to observe skeleton state
+    let resolveSpending!: (v: SpendingSummary) => void;
+    const pendingSpending = new Promise<SpendingSummary>((res) => { resolveSpending = res; });
+    mockApi.spendingSummary.mockReturnValueOnce(pendingSpending);
+
+    renderApp();
+
+    // Wait for bootstrap to render hero
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+
+    // Secondary panels show loading skeletons
+    expect(screen.getByLabelText("Loading cash flow")).toBeInTheDocument();
+
+    // Resolve secondary data
+    resolveSpending(spendingSummaryFixture);
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Loading cash flow")).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole("link", { name: "Cash Flow details" })).toBeInTheDocument();
+  });
+
+  it("api.health is never called on mount (lazy — only fetched on user menu open)", async () => {
+    renderApp();
+
+    // Wait for full secondary load — health must still not be called
+    await waitFor(() => {
+      expect(mockApi.cryptoSummary).toHaveBeenCalledTimes(1);
+    });
+
+    expect(mockApi.health).not.toHaveBeenCalled();
+  });
+
+  it("unmappedTransactions is not called before bootstrapState is ready", async () => {
+    let resolveBootstrap!: (v: typeof bootstrapFixture) => void;
+    const pendingBootstrap = new Promise<typeof bootstrapFixture>((res) => { resolveBootstrap = res; });
+    mockApi.dashboardBootstrap.mockReturnValueOnce(pendingBootstrap);
+
+    renderApp();
+
+    // Before bootstrap resolves, unmappedTransactions must not be called
+    expect(mockApi.unmappedTransactions).not.toHaveBeenCalled();
+
+    // Resolve bootstrap
+    resolveBootstrap(bootstrapFixture);
+
+    // After bootstrap, unmappedTransactions should eventually be called
+    await waitFor(() => {
+      expect(mockApi.unmappedTransactions).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("Tier B secondary calls (spendingSummary, creditCardSummary, cryptoSummary) are not awaited before Tier A resolves", async () => {
+    let resolveSummary!: (v: typeof summaryFixture) => void;
+    const pendingSummary = new Promise<typeof summaryFixture>((res) => { resolveSummary = res; });
+    mockApi.dashboardSummary.mockReturnValueOnce(pendingSummary);
+
+    renderApp();
+
+    // Wait for bootstrap
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+
+    // Tier A (summary) is pending — Tier B must not have been called yet
+    expect(mockApi.spendingSummary).not.toHaveBeenCalled();
+    expect(mockApi.creditCardSummary).not.toHaveBeenCalled();
+    expect(mockApi.cryptoSummary).not.toHaveBeenCalled();
+
+    // Resolve Tier A
+    resolveSummary(summaryFixture);
+
+    // After Tier A resolves, Tier B calls should eventually be made
+    await waitFor(() => {
+      expect(mockApi.spendingSummary).toHaveBeenCalledTimes(1);
+      expect(mockApi.creditCardSummary).toHaveBeenCalledTimes(1);
+      expect(mockApi.cryptoSummary).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -821,3 +821,137 @@ def test_dashboard_fallback_join_multiple_crypto_assets_no_doublecount(client: T
     
     # Verify value is NOT multiplied (should be 5000, not 10000)
     assert usdt_holdings[0]["value"] == 5000.0, "Value should not be doubled by multiple crypto_assets matches"
+
+
+def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engine, monkeypatch):
+    """GET /dashboard/bootstrap must return net_worth, stock_exposure_total, crypto_exposure_total,
+    cash_percent as numeric fields and must NOT include geography, top_holdings, cashflow, or compare."""
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(80, 'OCBC', 'OCBC Bank', 'BANK', 'SG'), "
+                "(81, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(80, 'OCBC Savings', 'OCBC', 'BANK', 'SGD', 'SG', 80), "
+                "(81, 'IBKR Brokerage', 'IBKR', 'BROKER', 'USD', 'US', 81)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(80, 'SGDCASH', 'SGD Cash', 'CASH', 'SGD', 'SG'), "
+                "(81, 'AAPL', 'Apple Inc', 'STOCK', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(80, 80, 80, :as_of, 1, 50000, 50000), "
+                "(81, 81, 81, :as_of, 100, 150, 20000)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-bootstrap-test', 'evm', 'ethereum', '0xBOOT', 'Bootstrap Wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(800, 'wallet-bootstrap-test', '2026-02-06', :as_of, 5000.0)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(800, 800, 'evm', 'ethereum', 'native', 'ETH', 2.0, 5000.0)"
+            )
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/bootstrap?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # All four required BootstrapResponse numeric fields must be present
+    assert "net_worth" in body, "net_worth missing from bootstrap response"
+    assert isinstance(body["net_worth"]["total"], (int, float))
+    assert "stock_exposure_total" in body, "stock_exposure_total missing"
+    # AAPL: no latest price, so falls back to cost_basis_base=20000 (rate=1.0 for USD)
+    assert body["stock_exposure_total"] == pytest.approx(20000.0, rel=1e-4), (
+        f"stock_exposure_total expected ~20000, got {body['stock_exposure_total']}"
+    )
+    assert "crypto_exposure_total" in body, "crypto_exposure_total missing"
+    assert isinstance(body["crypto_exposure_total"], (int, float))
+    assert "cash_percent" in body, "cash_percent missing"
+    assert isinstance(body["cash_percent"], (int, float))
+    # snapshot_day must equal the env default (6), not null
+    assert body["snapshot_day"] == 6, f"snapshot_day expected 6, got {body['snapshot_day']}"
+
+    # Secondary fields must NOT be present
+    for forbidden in ("geography", "top_holdings", "cashflow", "compare", "net_worth_change"):
+        assert forbidden not in body, f"bootstrap response must not include '{forbidden}'"
+
+
+def test_dashboard_summary_skip_networth(client: TestClient, seed_dashboard_data, monkeypatch):
+    """skip_networth=true must omit net_worth/net_worth_as_of/net_worth_change and still return geography etc."""
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02&skip_networth=true")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    # These fields must be absent when skip_networth=true
+    assert "net_worth" not in body, "net_worth must be omitted when skip_networth=true"
+    assert "net_worth_as_of" not in body, "net_worth_as_of must be omitted when skip_networth=true"
+    assert "net_worth_change" not in body, "net_worth_change must be omitted when skip_networth=true"
+
+    # These fields must still be present
+    assert "geography" in body
+    assert "top_holdings" in body
+    assert "cash_flow" in body
+    assert "cash_balances" in body
+    assert "snapshot_day" in body
+    assert body["snapshot_day"] == 6
+
+    # Denominator fix: geography and top_holdings must be non-empty when seed data provides positions
+    assert len(body["geography"]) > 0, "geography must be non-empty when position data exists"
+    assert len(body["top_holdings"]) > 0, "top_holdings must be non-empty when position data exists"
+
+    # All geography entries must have a non-zero percent (denominator was real, not 0.0)
+    for entry in body["geography"]:
+        assert entry["percent"] != 0.0, f"geography entry {entry} has zero percent — denominator was 0.0"
+
+
+def test_dashboard_summary_snapshot_day_returned(client: TestClient, seed_dashboard_data, monkeypatch):
+    """snapshot_day must reflect the SNAPSHOT_DAY env var value, not null."""
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/summary?month=2026-02")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["snapshot_day"] == 6, f"snapshot_day expected 6, got {body['snapshot_day']}"

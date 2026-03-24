@@ -55,7 +55,7 @@ class DashboardSummaryResponse(BaseModel):
     base_currency: str
     snapshot_day: Optional[int] = None
     net_worth_as_of: Optional[str] = None
-    net_worth: NetWorth
+    net_worth: Optional[NetWorth] = None
     geography: List[GeographyItem]
     cash_flow: CashFlow
     top_holdings: List[TopHolding]
@@ -104,3 +104,14 @@ class StockExposureOut(BaseModel):
     total: float
     by_country: list[StockExposureItem]
     by_platform: list[StockExposureItem]
+
+
+class BootstrapResponse(BaseModel):
+    as_of_month: str
+    base_currency: str
+    snapshot_day: Optional[int] = None
+    net_worth_as_of: Optional[str] = None
+    net_worth: NetWorth
+    stock_exposure_total: float
+    crypto_exposure_total: float
+    cash_percent: float
