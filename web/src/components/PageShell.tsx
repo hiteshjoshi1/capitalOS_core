@@ -16,6 +16,7 @@ type PageShellProps = {
   secondaryNavItem?: NavItem;
   unmappedCount?: number;
   userMenuSettings?: ReactNode;
+  onUserMenuOpen?: () => void;
   children: ReactNode;
 };
 
@@ -66,6 +67,7 @@ export default function PageShell({
   secondaryNavItem,
   unmappedCount,
   userMenuSettings,
+  onUserMenuOpen,
   children,
 }: PageShellProps) {
   const menuRef = useRef<HTMLDetailsElement | null>(null);
@@ -78,6 +80,16 @@ export default function PageShell({
       ?.then((r) => setAlertCount(r.count))
       .catch(() => setAlertCount(0));
   }, []);
+
+  useEffect(() => {
+    const menu = menuRef.current;
+    if (!menu || !onUserMenuOpen) return;
+    const handleToggle = () => {
+      if (menu.open) onUserMenuOpen();
+    };
+    menu.addEventListener("toggle", handleToggle);
+    return () => menu.removeEventListener("toggle", handleToggle);
+  }, [onUserMenuOpen]);
 
   useEffect(() => {
     const handlePointerDown = (event: MouseEvent) => {

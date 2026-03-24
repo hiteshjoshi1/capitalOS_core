@@ -363,6 +363,23 @@ export type CategoryResolution = {
 
 export type Health = { status: string };
 
+export type DashboardBootstrap = {
+  as_of_month: string;
+  base_currency: string;
+  snapshot_day: number | null;
+  net_worth_as_of: string | null;
+  net_worth: {
+    total: number;
+    cash: number;
+    stocks_funds: number;
+    crypto: number;
+    liabilities: number;
+  };
+  stock_exposure_total: number;
+  crypto_exposure_total: number;
+  cash_percent: number;
+};
+
 export type Currency = {
   id: number;
   code: string;
@@ -452,6 +469,8 @@ export type UploadReminderCount = {
 
 export const api = {
   health: () => req<Health>("/health"),
+  dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
+    req<DashboardBootstrap>(`/dashboard/bootstrap?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   categories: () => req<CategoryTaxonomy[]>("/categories"),
   unmappedTransactions: (month: string, accountId?: number) =>
     req<UnmappedTransaction[]>(
@@ -478,8 +497,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  dashboardSummary: (month: string, compare?: string, baseCurrency = "SGD") =>
-  req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}`),
+  dashboardSummary: (month: string, compare?: string, baseCurrency = "SGD", skipNetworth = false) =>
+  req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   cashDeposits: (month: string, baseCurrency = "SGD") =>
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>

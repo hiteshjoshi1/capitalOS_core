@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.dashboard import (
+    BootstrapResponse,
     CashDepositsItem,
     CashDepositsOut,
     DashboardSummaryResponse,
@@ -730,11 +733,51 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dic
     }
 
 
+@router.get("/bootstrap", response_model=BootstrapResponse)
+def dashboard_bootstrap(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    """Lean first-paint payload: net worth + exposure totals only.
+
+    Skips geography, top_holdings, cashflow, and comparisons so the hero card
+    and stock/crypto/cash exposure cards render on first paint.
+    """
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start)
+    as_of = _effective_as_of(db, anchor)
+
+    nw = _networth_components(db, anchor, base_currency)
+    stock_data = _stock_exposure(db, anchor, base_currency)
+
+    cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
+    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+
+    return {
+        "as_of_month": month,
+        "base_currency": base_currency,
+        "snapshot_day": snapshot_day,
+        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "net_worth": {
+            "total": nw["total"],
+            "cash": nw["cash"],
+            "stocks_funds": nw["stocks_funds"],
+            "crypto": nw["crypto"],
+            "liabilities": nw["liabilities"],
+        },
+        "stock_exposure_total": stock_data["total"],
+        "crypto_exposure_total": nw["crypto"],
+        "cash_percent": cash_percent,
+    }
+
+
 @router.get("/summary", response_model=DashboardSummaryResponse)
 def dashboard_summary(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     compare: str = Query("", description="Comma-separated: prev_month,prev_year"),
+    skip_networth: bool = Query(False, description="When True, skip net-worth computation and omit net_worth/net_worth_as_of/net_worth_change from response"),
     db: Session = Depends(get_db),
 ):
     # Calendar month window for cashflow
@@ -743,6 +786,26 @@ def dashboard_summary(
 
     # Snapshot anchor + effective snapshot timestamp
     anchor = _anchor_ts(month_start)
+    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+
+    if skip_networth:
+        nw = _networth_components(db, anchor, base_currency)
+        geo = _geography(db, anchor, nw["total"], base_currency)
+        top = _top_holdings(db, anchor, nw["total"], base_currency, limit=15)
+        cash_balances = _cash_balances(db, anchor, base_currency)
+        cf = _cashflow(db, month_start, month_end, base_currency)
+        cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
+        return JSONResponse(content={
+            "as_of_month": month,
+            "base_currency": base_currency,
+            "snapshot_day": snapshot_day,
+            "geography": geo,
+            "cash_flow": cf,
+            "top_holdings": top,
+            "cash_balances": cash_balances,
+            "cash_percent": cash_percent,
+        })
+
     as_of = _effective_as_of(db, anchor)
 
     nw = _networth_components(db, anchor, base_currency)
@@ -784,7 +847,7 @@ def dashboard_summary(
     return {
         "as_of_month": month,
         "base_currency": base_currency,
-        "snapshot_day": None,
+        "snapshot_day": snapshot_day,
         "net_worth_as_of": as_of.isoformat() if as_of else None,
         "net_worth": {
             "total": nw["total"],

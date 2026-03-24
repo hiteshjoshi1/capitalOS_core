@@ -22,9 +22,11 @@ from app.crypto.verify import (
     verify_solana_signature_debug,
     verify_solana_signature_bytes_debug,
 )
-from app.crypto.ingest import ingest_wallet, upsert_snapshot, should_refresh, acquire_refresh_lock, release_refresh_lock
+from app.crypto.ingest import ingest_wallet, upsert_snapshot, acquire_refresh_lock, release_refresh_lock
 from app.crypto.pricing import price_by_contract, lookup_contract_metadata
 from app.fx import get_rates
+
+_STALE_THRESHOLD_SECONDS = 24 * 3600
 
 router = APIRouter(prefix="/crypto", tags=["crypto"])
 logger = logging.getLogger("uvicorn.error")
@@ -498,11 +500,8 @@ def list_wallets(db: Session = Depends(get_db)):
 @router.get("/summary")
 def crypto_summary(
     base_currency: str = "USD",
-    background: BackgroundTasks = None,
     db: Session = Depends(get_db),
 ):
-    if background is None:
-        background = BackgroundTasks()
     rows = db.execute(
         text(
             """
@@ -549,11 +548,10 @@ def crypto_summary(
             fetched_at = fetched_at.replace(tzinfo=timezone.utc)
         if fetched_at and (last_refreshed is None or fetched_at > last_refreshed):
             last_refreshed = fetched_at
-        if should_refresh(fetched_at):
-            is_stale = True
-            if acquire_refresh_lock(db, r["id"]):
-                refresh_triggered = True
-                background.add_task(_refresh_wallet, str(r["id"]))
+        is_stale = is_stale or (
+            fetched_at is None
+            or (datetime.now(tz=timezone.utc) - fetched_at).total_seconds() > _STALE_THRESHOLD_SECONDS
+        )
 
     items = db.execute(
         text(
