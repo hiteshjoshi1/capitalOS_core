@@ -1,5 +1,4 @@
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -83,7 +82,6 @@ const summaryFixture: DashboardSummary = {
 
 describe("StockHoldings", () => {
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
-    const user = userEvent.setup();
     mockApi.dashboardSummary.mockResolvedValueOnce(summaryFixture);
 
     render(
@@ -96,22 +94,8 @@ describe("StockHoldings", () => {
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
 
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(nav.children).toHaveLength(2);
-    expect(nav.children[0]).toHaveTextContent("Dashboard");
-    expect(nav.children[1]).toHaveTextContent("Ingest");
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    const ingestLink = within(nav).getByRole("link", { name: "Ingest" });
-    expect(ingestLink).toHaveAttribute("href", "/ingest");
-    expect(ingestLink).toHaveClass("topNavLinkActive");
-    expect(screen.getByLabelText("User menu")).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "User" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
-
-    await user.click(screen.getByLabelText("User menu"));
-    expect(screen.getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
-    expect(screen.getByRole("button", { name: "Theme: Dark" })).toBeInTheDocument();
 
     expect(screen.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();

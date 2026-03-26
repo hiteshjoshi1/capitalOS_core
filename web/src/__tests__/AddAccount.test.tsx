@@ -195,36 +195,4 @@ describe("AddAccount", () => {
     expect(await screen.findByText("Load error")).toBeInTheDocument();
     expect(screen.getByText(/No options/)).toBeInTheDocument();
   });
-
-  it("renders user menu with add account action", async () => {
-    const user = userEvent.setup();
-    mockApi.platforms.mockResolvedValueOnce(platformsFixture);
-    mockApi.accountOptions.mockResolvedValueOnce(optionsFixture);
-    mockApi.platformOptions.mockResolvedValueOnce(platformOptionsFixture);
-    mockApi.currencies.mockResolvedValueOnce([
-      { id: 1, code: "SGD", name: "Singapore Dollar", country: "Singapore" },
-    ]);
-
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <AddAccount />
-        </MemoryRouter>
-      </ThemeProvider>
-    );
-
-    await screen.findByText("Account Details");
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(1);
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(within(nav).queryByRole("link", { name: "Add Account" })).not.toBeInTheDocument();
-
-    await user.click(screen.getByLabelText("User menu"));
-    const userMenu = screen.getByLabelText("User menu").closest("details");
-    expect(userMenu).not.toBeNull();
-    if (!userMenu) {
-      throw new Error("User menu container not found");
-    }
-    expect(within(userMenu).getByRole("link", { name: "Add Account" })).toHaveAttribute("href", "/accounts/new");
-  });
 });

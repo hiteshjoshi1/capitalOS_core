@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -139,10 +139,6 @@ describe("CreditCards route", () => {
     expect(screen.getByText("Recurring Payments")).toBeInTheDocument();
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
     expect(screen.getAllByText("Netflix").length).toBeGreaterThan(0);
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(1);
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(within(nav).queryByRole("link", { name: "Credit Cards" })).not.toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
   });
 

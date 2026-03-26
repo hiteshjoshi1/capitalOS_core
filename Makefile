@@ -19,6 +19,7 @@ DB_PATH?=.task-flow/langgraph.sqlite
 RESTART_AT?=
 STATE_FILE?=
 RESUME_JSON?=
+CAFFEINATE?=$(shell command -v caffeinate 2>/dev/null)
 
 # ---- Helpers ----
 define require_task
@@ -47,6 +48,10 @@ ORCH_INIT_ARGS=$(ORCH_BASE_ARGS) \
 	$(if $(ISSUE_ID),--issue-id "$(ISSUE_ID)",) \
 	$(if $(SLUG),--slug "$(SLUG)",) \
 	$(if $(TITLE),--title "$(TITLE)",)
+
+define run_llm_orch
+	$(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(PYTHON) -m $(ORCH_MODULE) $(1)
+endef
 
 # ---- Primary lifecycle ----
 .PHONY: up down ps logs api-up web-up api-logs openapi
@@ -140,7 +145,7 @@ e2e:
 verify: lint typecheck test-backend test-frontend
 
 # ---- LangGraph task workflow ----
-.PHONY: task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-state-show task-orch-smoke
+.PHONY: task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-salvage-plan task-state-show task-orch-smoke
 
 task-prepare:
 	$(call require_task,task-prepare)
@@ -150,34 +155,34 @@ task-prepare:
 task-plan:
 	$(call require_task,task-plan)
 	$(call require_thread,task-plan)
-	$(PYTHON) -m $(ORCH_MODULE) plan $(ORCH_INIT_ARGS)
+	$(call run_llm_orch,plan $(ORCH_INIT_ARGS))
 
 task-build:
 	$(call require_task,task-build)
 	$(call require_thread,task-build)
-	$(PYTHON) -m $(ORCH_MODULE) build $(ORCH_INIT_ARGS)
+	$(call run_llm_orch,build $(ORCH_INIT_ARGS))
 
 task-agent-review:
 	$(call require_task,task-agent-review)
 	$(call require_thread,task-agent-review)
-	$(PYTHON) -m $(ORCH_MODULE) agent-review $(ORCH_INIT_ARGS)
+	$(call run_llm_orch,agent-review $(ORCH_INIT_ARGS))
 
 task-approve-plan:
 	$(call require_task,task-approve-plan)
 	$(call require_thread,task-approve-plan)
 	$(call require_resume_json,task-approve-plan)
-	$(PYTHON) -m $(ORCH_MODULE) approve-plan $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)'
+	$(call run_llm_orch,approve-plan $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)')
 
 task-human-review:
 	$(call require_task,task-human-review)
 	$(call require_thread,task-human-review)
 	$(call require_resume_json,task-human-review)
-	$(PYTHON) -m $(ORCH_MODULE) human-review $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)'
+	$(call run_llm_orch,human-review $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)')
 
 task-rework:
 	$(call require_task,task-rework)
 	$(call require_thread,task-rework)
-	$(PYTHON) -m $(ORCH_MODULE) rework $(ORCH_INIT_ARGS)
+	$(call run_llm_orch,rework $(ORCH_INIT_ARGS))
 
 task-ship:
 	$(call require_task,task-ship)
@@ -187,18 +192,18 @@ task-ship:
 task-all:
 	$(call require_task,task-all)
 	$(call require_thread,task-all)
-	$(PYTHON) -m $(ORCH_MODULE) all $(ORCH_INIT_ARGS)
+	$(call run_llm_orch,all $(ORCH_INIT_ARGS))
 
 task-resume:
 	$(call require_task,task-resume)
 	$(call require_thread,task-resume)
 	$(call require_resume_json,task-resume)
-	$(PYTHON) -m $(ORCH_MODULE) resume $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)'
+	$(call run_llm_orch,resume $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)')
 
 task-respond:
 	$(call require_task,task-respond)
 	$(call require_thread,task-respond)
-	$(PYTHON) -m $(ORCH_MODULE) respond $(ORCH_BASE_ARGS)
+	$(call run_llm_orch,respond $(ORCH_BASE_ARGS))
 
 task-export-state:
 	$(call require_task,task-export-state)
@@ -217,6 +222,11 @@ task-restore-state:
 	$(call require_state_file,task-restore-state)
 	$(call require_restart_at,task-restore-state)
 	$(PYTHON) -m $(ORCH_MODULE) restore-state $(ORCH_BASE_ARGS) --state-file "$(STATE_FILE)" --restart-at "$(RESTART_AT)"
+
+task-salvage-plan:
+	$(call require_task,task-salvage-plan)
+	$(call require_thread,task-salvage-plan)
+	$(PYTHON) -m $(ORCH_MODULE) salvage-plan $(ORCH_INIT_ARGS)
 
 task-state-show:
 	$(call require_task,task-state-show)

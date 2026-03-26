@@ -11,9 +11,16 @@ from langgraph.types import Command
 from orchestration.graph import build_graph
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.pipeline import PipelineState
+from orchestration.services.config import get_config
+from orchestration.services.llm import (
+    extract_latest_assistant_message,
+    extract_structured_plan_output,
+    find_latest_copilot_session,
+)
 from orchestration.services.persistence import get_checkpointer
 from orchestration.services.restore import RestoreBootstrapService
 from orchestration.services.state_io import StateIOService
+from orchestration.services.task_markdown import TaskMarkdownService
 
 
 STEP_ENTRYPOINT_MAP = {
@@ -49,6 +56,7 @@ def parse_args() -> argparse.Namespace:
             "export-state",
             "import-state",
             "restore-state",
+            "salvage-plan",
         ],
     )
     parser.add_argument("--thread-id", required=True)
@@ -410,6 +418,41 @@ def main() -> None:
             execution_mode=args.restore_mode,
         )
         result = graph.invoke(restored_state, config=config)
+        print_result(graph, config, result)
+        return
+
+    if args.command == "salvage-plan":
+        pipeline = load_existing_pipeline_state(graph, config)
+        if pipeline is None:
+            pipeline = PipelineState.model_validate(make_initial_state(args, "prepare", "workflow")["pipeline"])
+
+        cfg = get_config()
+        events_path = find_latest_copilot_session(
+            model=cfg.planner_model,
+            repo_root=repo_root,
+            branch=pipeline.issue.branch,
+        )
+        if events_path is None:
+            raise SystemExit("Could not find a matching Copilot planner session to salvage.")
+
+        assistant_content = extract_latest_assistant_message(events_path)
+        if not assistant_content:
+            raise SystemExit(f"Could not find a final assistant message in {events_path}.")
+
+        md = TaskMarkdownService(repo_root)
+        md.ensure_required_markers(args.task_file)
+        task_markdown = md.read(args.task_file)
+        plan = extract_structured_plan_output(assistant_content)
+        plan.planner_model = cfg.planner_model
+        plan.immutable_plan_hash = md.immutable_hash(task_markdown)
+
+        pipeline.plan_output = plan
+        pipeline.requested_entrypoint = "human_approval_gate"  # type: ignore[assignment]
+        pipeline.execution_mode = "workflow"  # type: ignore[assignment]
+        pipeline.current_stage = "dispatch"
+        pipeline.workflow_status = "running"
+
+        result = graph.invoke({"pipeline": pipeline.model_dump(mode="json")}, config=config)
         print_result(graph, config, result)
         return
 
