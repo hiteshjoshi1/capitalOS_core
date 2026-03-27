@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -82,9 +82,6 @@ describe("CryptoHoldings route", () => {
     );
 
     expect(await screen.findByText("Overview")).toBeInTheDocument();
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(within(nav).getByRole("link", { name: "Ingest" })).toHaveAttribute("href", "/ingest");
     expect(screen.getByLabelText("Month")).toHaveValue("2026-02");
     expect(screen.getByLabelText("Base currency")).toHaveValue("SGD");
     expect(mockApi.cryptoSummary).toHaveBeenCalledWith("SGD");

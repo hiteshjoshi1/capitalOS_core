@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 from orchestration.models.rework import ReworkAnalysis, ReworkCycle
 from orchestration.models.stage import PipelineStage
 from orchestration.prompts.rework import build_rework_analysis_prompt
@@ -9,6 +12,17 @@ from orchestration.services.console import emit_progress, emit_stage_end, emit_s
 from orchestration.services.integrity import IntegrityService
 from orchestration.services.llm import LLMService
 from orchestration.state import GraphState, load_pipeline_state, dump_pipeline_state
+
+
+def _rework_analysis_input_fingerprint(pipeline, review_cycle, source_review_cycle) -> str:
+    payload = {
+        "active_review_id": review_cycle.review_id,
+        "source_review_id": source_review_cycle.review_id,
+        "source_review": source_review_cycle.model_dump(mode="json"),
+        "semantic_requirements": pipeline.get_semantic_requirements(),
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 def run(state: GraphState) -> GraphState:
@@ -24,6 +38,25 @@ def run(state: GraphState) -> GraphState:
     source_review_cycle = pipeline.get_rework_context_review_cycle()
     if not source_review_cycle:
         raise RuntimeError("Cannot determine substantive review context for rework analysis.")
+    input_fingerprint = _rework_analysis_input_fingerprint(
+        pipeline,
+        review_cycle,
+        source_review_cycle,
+    )
+    existing_rework = pipeline.get_active_rework_cycle()
+    if (
+        existing_rework
+        and existing_rework.input_fingerprint == input_fingerprint
+        and existing_rework.analysis is not None
+        and existing_rework.implementation is None
+    ):
+        emit_progress(
+            PipelineStage.REWORK_ANALYSIS,
+            current_action="Reusing existing rework analysis for identical inputs",
+            evidence=[f"rework_id={existing_rework.rework_cycle_id}"],
+            reasoning="The stage re-entered without any substantive review change, so the prior analysis is reused.",
+        )
+        return dump_pipeline_state(pipeline)
 
     cfg = get_config()
     rework_id = pipeline.next_rework_id()
@@ -58,6 +91,7 @@ def run(state: GraphState) -> GraphState:
     cycle = ReworkCycle(
         rework_cycle_id=rework_id,
         source_review_id=source_review_cycle.review_id,
+        input_fingerprint=input_fingerprint,
         analysis=analysis,
         status="analysis_complete",
     )

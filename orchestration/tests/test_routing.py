@@ -1,3 +1,6 @@
+from langgraph.checkpoint.memory import InMemorySaver
+
+from orchestration.graph import build_graph
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.build import ExtraChangedFile
 from orchestration.models.pipeline import PipelineState
@@ -177,7 +180,7 @@ def test_route_after_agent_review_step_advances_to_escalation_when_high_risk():
     assert route_after_agent_review(dump_pipeline_state(state)) == "escalation_review"
 
 
-def test_route_after_agent_review_scope_gate_goes_to_human_review():
+def test_route_after_agent_review_extra_files_do_not_override_needs_fixes():
     state = _base_state(execution_mode="workflow")
     cycle = ReviewCycle(
         review_id="R1",
@@ -201,7 +204,7 @@ def test_route_after_agent_review_scope_gate_goes_to_human_review():
     state.review_cycles.append(cycle)
     state.active_review_cycle_id = "R1"
 
-    assert route_after_agent_review(dump_pipeline_state(state)) == "human_review"
+    assert route_after_agent_review(dump_pipeline_state(state)) == "rework_analysis"
 
 
 def test_route_after_escalation_review_step_advances_to_human_review():
@@ -325,6 +328,73 @@ def test_route_after_rework_implementation_blocked_ends():
     state.active_rework_cycle_id = "W1"
 
     assert route_after_rework_implementation(dump_pipeline_state(state)) == "__end__"
+
+
+def test_route_after_rework_implementation_scope_gate_pending_goes_to_human_review():
+    state = _base_state(execution_mode="step")
+    state.rework_cycles.append(
+        ReworkCycle(
+            rework_cycle_id="W1",
+            source_review_id="R1",
+            status="blocked",
+        )
+    )
+    state.active_rework_cycle_id = "W1"
+    state.review_cycles.append(
+        ReviewCycle(
+            review_id="R2",
+            source="rework",
+            source_rework_cycle_id="W1",
+            extra_changed_files=[
+                ExtraChangedFile(
+                    path="orchestration/cli.py",
+                    reason="Pipeline support change.",
+                    reason_source="builder",
+                )
+            ],
+            status="scope_gate_pending",
+        )
+    )
+    state.active_review_cycle_id = "R2"
+
+    assert route_after_rework_implementation(dump_pipeline_state(state)) == "human_review"
+
+
+def test_graph_declares_branch_for_rework_scope_gate_human_review_route():
+    state = _base_state(execution_mode="step")
+    state.rework_cycles.append(
+        ReworkCycle(
+            rework_cycle_id="W1",
+            source_review_id="R1",
+            status="blocked",
+        )
+    )
+    state.active_rework_cycle_id = "W1"
+    state.review_cycles.append(
+        ReviewCycle(
+            review_id="R2",
+            source="rework",
+            source_rework_cycle_id="W1",
+            extra_changed_files=[
+                ExtraChangedFile(
+                    path="orchestration/cli.py",
+                    reason="Pipeline support change.",
+                    reason_source="builder",
+                )
+            ],
+            status="scope_gate_pending",
+        )
+    )
+    state.active_review_cycle_id = "R2"
+
+    branch = route_after_rework_implementation(dump_pipeline_state(state))
+    assert branch == "human_review"
+
+    graph = build_graph(InMemorySaver())
+    rework_branches = graph.builder.branches["rework_implementation"]
+    route_spec = next(iter(rework_branches.values()))
+    assert route_spec.ends is not None
+    assert branch in route_spec.ends
 
 
 def test_route_after_human_review_to_ship():

@@ -23,6 +23,7 @@ Required JSON shape:
   "review_id": "{cycle.review_id if cycle else ''}",
   "root_cause": "string",
   "findings_addressed": ["string"],
+  "required_checks_planned": ["string"],
   "planned_changes": ["string"],
   "validation_plan": ["string"],
   "unresolved_assumptions": ["string"],
@@ -72,6 +73,9 @@ Human questions:
 
 Human unresolved comments:
 {_bullets(human_review.unresolved_comments if human_review else [])}
+
+Human required checks:
+{_bullets(human_review.required_checks if human_review else [])}
 
 Human response requirements:
 {_bullets(human_review.response_requirements if human_review else [])}
@@ -126,6 +130,8 @@ Required JSON shape:
   "summary": "string",
   "changed_files": ["path"],
   "verification_summary": "string",
+  "resolved_required_checks": ["string"],
+  "required_check_evidence": ["string"],
   "completed": true
 }}
 
@@ -137,6 +143,9 @@ Validation plan:
 
 Findings addressed:
 {_bullets(analysis.findings_addressed if analysis else [])}
+
+Required checks planned:
+{_bullets(analysis.required_checks_planned if analysis else [])}
 
 Source review semantic verification:
 {_bullets((source_cycle.escalation_review or source_cycle.agent_review).semantic_verification if source_cycle and (source_cycle.escalation_review or source_cycle.agent_review) else [])}
@@ -150,6 +159,9 @@ Human response requirements:
 Human unresolved comments:
 {_bullets(human_review.unresolved_comments if human_review else [])}
 
+Human required checks:
+{_bullets(human_review.required_checks if human_review else [])}
+
 Latest extra-files gate response requirements:
 {_bullets(extra_files_feedback.response_requirements if extra_files_feedback else [])}
 
@@ -159,8 +171,10 @@ Latest extra-files gate unresolved comments:
 Hard constraints:
 1) Actually modify the repo to address the rework findings before returning.
 2) Keep changes scoped to the current rework cycle.
-3) Do not claim filesystem write restrictions unless a real tool invocation fails and you include the concrete failed command in your summary.
-4) Do not invent git-history, branch-diff, or commit-state claims unless you directly verified them with a tool during this implementation.
-5) If this rework was triggered from a scope gate, still satisfy the original substantive user intent captured in the source review and human feedback.
-6) Verify the implementation semantically against the requirements above before returning; do not stop at formatting fixes, string presence, or stage-summary alignment.
+3) Prioritize the human response requirements, unresolved comments, and reviewer findings above verification-only cleanup.
+4) Do not spend the cycle on test-only updates unless the substantive requested implementation is already present and verified.
+5) Do not claim filesystem write restrictions unless a real tool invocation fails and you include the concrete failed command in your summary.
+6) Do not invent git-history, branch-diff, or commit-state claims unless you directly verified them with a tool during this implementation.
+7) If this rework was triggered from a scope gate, still satisfy the original substantive user intent captured in the source review and human feedback.
+8) Verify the implementation semantically against the requirements above before returning; do not stop at formatting fixes, string presence, or stage-summary alignment.
 """.strip()

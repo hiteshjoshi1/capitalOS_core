@@ -101,7 +101,7 @@ def build_graph(checkpointer):
     graph.add_conditional_edges(
         "rework_implementation",
         route_after_rework_implementation,
-        {"agent_review": "agent_review", "__end__": END},
+        {"agent_review": "agent_review", "human_review": "human_review", "__end__": END},
     )
     graph.add_edge("ship", END)
 

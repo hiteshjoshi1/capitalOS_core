@@ -5,6 +5,8 @@ from typing import List, Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestration.models.build import ExtraChangedFile
+from orchestration.models.verification import VerificationEvidence
+from orchestration.services.required_checks import normalize_required_checks
 
 
 def utc_now() -> datetime:
@@ -13,15 +15,17 @@ def utc_now() -> datetime:
 
 ReviewDecision = Literal["approved", "needs_fixes", "escalate"]
 ReviewRisk = Literal["low", "medium", "high"]
-GateType = Literal["plan_approval", "human_review", "extra_files_approval"]
+GateType = Literal["plan_approval", "human_review", "extra_files_approval", "build_retry_approval"]
 
 
 class StrictHumanPayload(BaseModel):
     reviewer: str
     notes: str = ""
     questions: List[str] = Field(default_factory=list)
+    required_checks: List[str] = Field(default_factory=list)
     response_requirements: List[str] = Field(default_factory=list)
     unresolved_comments: List[str] = Field(default_factory=list)
+    approved_retry_count: int = 0
 
     @field_validator("reviewer")
     @classmethod
@@ -35,6 +39,11 @@ class StrictHumanPayload(BaseModel):
     @classmethod
     def normalize_lists(cls, values: List[str]) -> List[str]:
         return [v.strip() for v in values if v and v.strip()]
+
+    @field_validator("required_checks")
+    @classmethod
+    def normalize_required_checks_list(cls, values: List[str]) -> List[str]:
+        return normalize_required_checks(values)
 
 
 class HumanDecision(StrictHumanPayload):
@@ -84,8 +93,11 @@ class ReviewCycle(BaseModel):
     review_id: str
     source: Literal["build", "rework"]
     source_rework_cycle_id: Optional[str] = None
+    input_fingerprint: Optional[str] = None
+    escalation_input_fingerprint: Optional[str] = None
     agent_review: Optional[AgentReview] = None
     escalation_review: Optional[AgentReview] = None
+    review_verification: Optional[VerificationEvidence] = None
     human_review: Optional[HumanReview] = None
     extra_changed_files: List[ExtraChangedFile] = Field(default_factory=list)
     extra_files_review: Optional[HumanDecision] = None

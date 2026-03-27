@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 
-from orchestration.models.build import BuildOutput, ExtraChangedFile
+from orchestration.models.build import BuildOutput, BuildRetryRequest, ExtraChangedFile, RetryEntry
 from orchestration.models.stage import PipelineStage
-from orchestration.prompts.build import build_build_prompt
+from orchestration.prompts.build import build_build_prompt, build_retry_request_prompt
 from orchestration.render import render_task_file
 from orchestration.services.builder_fix import BuilderFixService
 from orchestration.services.config import get_config
@@ -50,10 +50,23 @@ def _validate_build_output(pipeline, build_output: BuildOutput) -> list[str]:
     blockers: list[str] = []
     planned_paths = pipeline.plan_output.allowed_paths() if pipeline.plan_output else []
     matched_paths = _changed_files_in_planned_paths(build_output.changed_files, planned_paths)
+    required_checklist_ids = {
+        item.id
+        for item in (pipeline.plan_output.checklist if pipeline.plan_output else [])
+        if item.required and not item.human_only and not item.post_ship
+    }
+    completed_checklist_ids = set(build_output.completed_checklist_item_ids)
+    missing_checklist_ids = sorted(required_checklist_ids - completed_checklist_ids)
 
     if planned_paths and not matched_paths:
         blockers.append(
             "Build validation failed: no files under the planned paths were changed."
+        )
+
+    if missing_checklist_ids:
+        blockers.append(
+            "Build validation failed: required checklist items were not completed: "
+            + ", ".join(missing_checklist_ids)
         )
 
     if _claims_write_permission_restrictions(build_output) and os.access(
@@ -79,11 +92,45 @@ def _append_verification_failure_blockers(pipeline, retries) -> None:
             )
 
 
+def _request_build_retry_approval(
+    *,
+    pipeline,
+    builder,
+    build_output: BuildOutput,
+    retries: list[RetryEntry],
+) -> BuildRetryRequest:
+    blockers = list(pipeline.blockers)
+    try:
+        request = builder.complete_structured(
+            build_retry_request_prompt(
+                pipeline,
+                build_output=build_output,
+                blockers=blockers,
+                retries=retries,
+            ),
+            BuildRetryRequest,
+        )
+    except Exception as exc:
+        return BuildRetryRequest(
+            summary="Builder could not justify more retries and human guidance is required.",
+            why_more_retries_help="",
+            proposed_new_strategy="",
+            latest_failures=blockers[-3:] if blockers else [str(exc)],
+            requested_retry_count=0,
+            valid_reason=False,
+        )
+
+    request.latest_failures = list(dict.fromkeys(request.latest_failures or blockers[-3:]))
+    if request.valid_reason:
+        if request.requested_retry_count <= 0 or not request.proposed_new_strategy.strip():
+            request.valid_reason = False
+    if not request.valid_reason:
+        request.requested_retry_count = 0
+    return request
+
+
 def _base_scope_paths(pipeline, cfg) -> list[str]:
-    allowed = {pipeline.issue.task_file, *cfg.allowed_aux_files}
-    if pipeline.plan_output:
-        allowed.update(pipeline.plan_output.allowed_paths())
-    return sorted(path for path in allowed if path)
+    return ScopePolicyService(pipeline).review_allowed_paths()
 
 
 def _normalize_extra_changed_files(
@@ -110,6 +157,39 @@ def _normalize_extra_changed_files(
     return normalized
 
 
+def _persist_blocked_build_exception(
+    pipeline,
+    *,
+    exc: Exception,
+    build_output: BuildOutput | None,
+) -> GraphState:
+    if build_output is not None and pipeline.build_output is None:
+        try:
+            git = GitService(pipeline.issue.repo_root)
+            if not build_output.changed_files:
+                build_output.changed_files = git.changed_files()
+        except Exception:
+            pass
+        pipeline.build_output = build_output
+
+    pipeline.workflow_status = "blocked"
+    pipeline.blockers.append("Build stage crashed after repository changes may have been applied.")
+    pipeline.errors.append(str(exc))
+    render_task_file(pipeline)
+    emit_stage_end(
+        PipelineStage.BUILD,
+        status="blocked",
+        evidence=[
+            f"builder_output_present={build_output is not None}",
+            f"build_output_persisted={pipeline.build_output is not None}",
+            f"blockers={len(pipeline.blockers)}",
+            f"errors={len(pipeline.errors)}",
+        ],
+        conclusion="Build stage blocked because an exception escaped after build-side effects had already occurred.",
+    )
+    return dump_pipeline_state(pipeline)
+
+
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
     pipeline.current_stage = PipelineStage.BUILD
@@ -125,101 +205,153 @@ def run(state: GraphState) -> GraphState:
     if not decision or decision.decision != "approved":
         raise RuntimeError("Build blocked: plan approval gate has not approved the plan.")
 
+    prior_build_output = pipeline.build_output.model_copy(deep=True) if pipeline.build_output else None
+    prior_retry_entries = list(pipeline.retry_log)
+    prior_build_blockers = [
+        blocker for blocker in pipeline.blockers if pipeline.is_build_blocker(blocker)
+    ]
+    build_retry_decision = pipeline.human_gate_decisions.get("build_retry_approval")
+    extra_retry_budget = 0
+    if (
+        prior_build_output is not None
+        and prior_build_output.retry_request is not None
+        and build_retry_decision is not None
+        and build_retry_decision.decision == "approved"
+    ):
+        extra_retry_budget = build_retry_decision.approved_retry_count
     pipeline.reset_build_state()
+    build_output: BuildOutput | None = None
 
-    builder = LLMService(PipelineStage.BUILD, repo_root=pipeline.issue.repo_root)
-    emit_progress(
-        PipelineStage.BUILD,
-        current_action="Requesting implementation from builder model",
-        evidence=[f"model={cfg.builder_model}"],
-        reasoning="Build generates repo changes before verification runs.",
-    )
-    build_output = builder.complete_structured(build_build_prompt(pipeline), BuildOutput)
-    build_output.builder_model = cfg.builder_model
-    emit_progress(
-        PipelineStage.BUILD,
-        current_action="Builder response received",
-        evidence=[f"summary={build_output.summary[:160]}", f"implementation_notes={len(build_output.implementation_notes)}"],
-    )
-
-    fix_service = BuilderFixService(pipeline)
-
-    def fix_callback(name: str, command: str, exit_code: int, output: str) -> None:
-        fix_service.invoke_fix(
-            label=name,
-            command=command,
-            exit_code=exit_code,
-            output=output,
+    try:
+        builder = LLMService(PipelineStage.BUILD, repo_root=pipeline.issue.repo_root)
+        emit_progress(
+            PipelineStage.BUILD,
+            current_action="Requesting implementation from builder model",
+            evidence=[f"model={cfg.builder_model}"],
+            reasoning="Build generates repo changes before verification runs.",
+        )
+        try:
+            build_output = builder.complete_structured(
+                build_build_prompt(
+                    pipeline,
+                    prior_build_output=prior_build_output,
+                    prior_retry_entries=prior_retry_entries,
+                    prior_blockers=prior_build_blockers,
+                ),
+                BuildOutput,
+            )
+        except Exception as exc:
+            pipeline.workflow_status = "blocked"
+            pipeline.blockers.append("Builder failed before structured output was recorded.")
+            pipeline.errors.append(str(exc))
+            render_task_file(pipeline)
+            emit_stage_end(
+                PipelineStage.BUILD,
+                status="blocked",
+                evidence=["builder_output=missing", "verification_failures=unknown", "blockers=1"],
+                conclusion="Build stage blocked because the builder failed before returning structured output.",
+            )
+            return dump_pipeline_state(pipeline)
+        build_output.builder_model = cfg.builder_model
+        emit_progress(
+            PipelineStage.BUILD,
+            current_action="Builder response received",
+            evidence=[f"summary={build_output.summary[:160]}", f"implementation_notes={len(build_output.implementation_notes)}"],
         )
 
-    verification_service = VerificationService(
-        pipeline.issue.repo_root,
-        stage=PipelineStage.BUILD.value,
-    )
-    emit_progress(
-        PipelineStage.BUILD,
-        current_action="Starting verification suite",
-        evidence=["suite=lint,typecheck,api-rebuild,test-backend,test-frontend,api-smoke,e2e"],
-        reasoning="Verification determines whether the build output is usable and reviewable.",
-    )
-    verification, retries = verification_service.run_default_suite(
-        max_attempts=cfg.max_retries,
-        on_code_retry_fix=fix_callback,
-    )
-    build_output.verification = verification
+        fix_service = BuilderFixService(pipeline)
 
-    git = GitService(pipeline.issue.repo_root)
-    build_output.changed_files = git.changed_files()
-    build_output.extra_changed_files = _normalize_extra_changed_files(
-        pipeline,
-        cfg,
-        build_output.changed_files,
-        build_output.extra_changed_files,
-    )
-    pipeline.build_output = build_output
-    emit_progress(
-        PipelineStage.BUILD,
-        current_action="Collected changed file inventory",
-        evidence=[f"changed_files={len(build_output.changed_files)}", f"extra_changed_files={len(build_output.extra_changed_files)}"],
-        reasoning="The build records which files changed so review can assess scope and feature coverage.",
-    )
+        def fix_callback(
+            name: str,
+            command: str,
+            exit_code: int,
+            output: str,
+            prior_attempts: list[RetryEntry],
+        ) -> None:
+            fix_service.invoke_fix(
+                label=name,
+                command=command,
+                exit_code=exit_code,
+                output=output,
+                prior_attempts=prior_attempts,
+            )
 
-    for entry in retries:
-        pipeline.add_retry(entry)
+        verification_service = VerificationService(
+            pipeline.issue.repo_root,
+            stage=PipelineStage.BUILD.value,
+        )
+        emit_progress(
+            PipelineStage.BUILD,
+            current_action="Starting verification suite",
+            evidence=["suite=lint,typecheck,api-rebuild,test-backend,test-frontend,api-smoke,e2e"],
+            reasoning="Verification determines whether the build output is usable and reviewable.",
+        )
+        verification, retries = verification_service.run_default_suite(
+            max_attempts=cfg.max_retries + extra_retry_budget,
+            on_code_retry_fix=fix_callback,
+        )
+        build_output.verification = verification
 
-    allowed = {pipeline.issue.task_file, *cfg.allowed_aux_files}
-    allowed.update(build_output.changed_files)
-    staged, blocked = git.stage_scoped_changes(allowed)
+        git = GitService(pipeline.issue.repo_root)
+        build_output.changed_files = git.changed_files()
+        build_output.extra_changed_files = _normalize_extra_changed_files(
+            pipeline,
+            cfg,
+            build_output.changed_files,
+            build_output.extra_changed_files,
+        )
+        pipeline.build_output = build_output
+        emit_progress(
+            PipelineStage.BUILD,
+            current_action="Collected changed file inventory",
+            evidence=[f"changed_files={len(build_output.changed_files)}", f"extra_changed_files={len(build_output.extra_changed_files)}"],
+            reasoning="The build records which files changed so review can assess scope and feature coverage.",
+        )
 
-    build_failed = False
+        for entry in retries:
+            pipeline.add_retry(entry)
 
-    if blocked:
-        # Review owns approval of extra files. Build records context but does not fail solely on scope.
-        pass
+        allowed = {pipeline.issue.task_file, *cfg.allowed_aux_files}
+        allowed.update(build_output.changed_files)
+        staged, blocked = git.stage_scoped_changes(allowed)
 
-    validation_blockers = _validate_build_output(pipeline, build_output)
-    for blocker in validation_blockers:
-        pipeline.blockers.append(blocker)
-    if validation_blockers:
-        build_failed = True
+        build_failed = False
 
-    if verification.any_failures:
-        _append_verification_failure_blockers(pipeline, retries)
-        pipeline.blockers.append("Verification suite failed during build.")
-        build_failed = True
+        if blocked:
+            # Review owns approval of extra files. Build records context but does not fail solely on scope.
+            pass
 
-    if build_failed:
-        pipeline.workflow_status = "blocked"
+        validation_blockers = _validate_build_output(pipeline, build_output)
+        for blocker in validation_blockers:
+            pipeline.blockers.append(blocker)
+        if validation_blockers:
+            build_failed = True
 
-    render_task_file(pipeline)
-    emit_stage_end(
-        PipelineStage.BUILD,
-        status=pipeline.workflow_status,
-        evidence=[
-            f"verification_failures={verification.any_failures}",
-            f"blockers={len(pipeline.blockers)}",
-            f"changed_files={len(build_output.changed_files)}",
-        ],
-        conclusion="Build stage finished and the task file was updated with build evidence.",
-    )
-    return dump_pipeline_state(pipeline)
+        if verification.any_failures:
+            _append_verification_failure_blockers(pipeline, retries)
+            pipeline.blockers.append("Verification suite failed during build.")
+            build_failed = True
+
+        if build_failed:
+            pipeline.workflow_status = "blocked"
+            build_output.retry_request = _request_build_retry_approval(
+                pipeline=pipeline,
+                builder=builder,
+                build_output=build_output,
+                retries=retries,
+            )
+
+        render_task_file(pipeline)
+        emit_stage_end(
+            PipelineStage.BUILD,
+            status=pipeline.workflow_status,
+            evidence=[
+                f"verification_failures={verification.any_failures}",
+                f"blockers={len(pipeline.blockers)}",
+                f"changed_files={len(build_output.changed_files)}",
+            ],
+            conclusion="Build stage finished and the task file was updated with build evidence.",
+        )
+        return dump_pipeline_state(pipeline)
+    except Exception as exc:
+        return _persist_blocked_build_exception(pipeline, exc=exc, build_output=build_output)

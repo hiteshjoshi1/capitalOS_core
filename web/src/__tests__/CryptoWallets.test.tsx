@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import type { ReactNode } from "react";
@@ -80,9 +80,5 @@ describe("CryptoWallets route", () => {
     );
 
     expect(await screen.findByText("Add wallet")).toBeInTheDocument();
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(1);
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(within(nav).queryByRole("link", { name: "Crypto Wallets" })).not.toBeInTheDocument();
   });
 });

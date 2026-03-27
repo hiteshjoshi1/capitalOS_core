@@ -21,6 +21,12 @@ def route_after_plan(state: GraphState) -> str:
 
 def route_after_human_approval(state: GraphState) -> str:
     pipeline = load_pipeline_state(state)
+    if pipeline.build_output and pipeline.build_output.retry_request is not None:
+        decision = pipeline.human_gate_decisions.get("build_retry_approval")
+        if not decision:
+            return "human_approval_gate"
+        return "build" if decision.decision == "approved" else "__end__"
+
     decision = pipeline.human_gate_decisions.get("plan_approval")
     if not decision:
         return "human_approval_gate"
@@ -30,6 +36,8 @@ def route_after_human_approval(state: GraphState) -> str:
 def route_after_build(state: GraphState) -> str:
     pipeline = load_pipeline_state(state)
     if pipeline.workflow_status == "blocked":
+        if pipeline.build_output and pipeline.build_output.retry_request is not None:
+            return "human_approval_gate"
         return "__end__"
     return "agent_review"
 
@@ -39,9 +47,6 @@ def route_after_agent_review(state: GraphState) -> str:
     cycle = pipeline.get_active_review_cycle()
     if not cycle or not cycle.agent_review:
         return "__end__"
-
-    if cycle.extra_changed_files and cycle.status == "scope_gate_pending":
-        return "human_review"
 
     if cycle.agent_review.decision == "escalate" or cycle.agent_review.risk == "high":
         return "escalation_review"
@@ -86,6 +91,14 @@ def route_after_rework_analysis(state: GraphState) -> str:
 
 def route_after_rework_implementation(state: GraphState) -> str:
     pipeline = load_pipeline_state(state)
+    cycle = pipeline.get_active_review_cycle()
+    if (
+        cycle
+        and cycle.status == "scope_gate_pending"
+        and cycle.source == "rework"
+        and cycle.source_rework_cycle_id == pipeline.active_rework_cycle_id
+    ):
+        return "human_review"
     rework = pipeline.get_active_rework_cycle()
     if rework and rework.status == "blocked":
         return "__end__"

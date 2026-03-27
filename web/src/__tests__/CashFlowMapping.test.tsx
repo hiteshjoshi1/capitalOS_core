@@ -74,7 +74,6 @@ describe("CashFlowMapping route", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Cash Flow Mapping" })).toBeInTheDocument();
     expect(screen.getByText("DBS Savings")).toBeInTheDocument();
     expect(screen.getByText("NTUC FairPrice")).toBeInTheDocument();
-    expect(screen.getByLabelText("1 unmapped transactions")).toBeInTheDocument();
   });
 
   it("shows loading state while category and queue data are still in flight", async () => {

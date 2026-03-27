@@ -13,6 +13,7 @@ import "./index.css";
 import "@rainbow-me/rainbowkit/styles.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import App from "./App.tsx";
+import AppShell from "./components/AppShell.tsx";
 import AddAccount from "./routes/AddAccount.tsx";
 import Ingest from "./routes/Ingest.tsx";
 import CryptoWallets from "./routes/CryptoWallets.tsx";
@@ -24,6 +25,11 @@ import CreditCards from "./routes/CreditCards.tsx";
 import CashFlowDetail from "./routes/CashFlowDetail.tsx";
 import CashFlowMapping from "./routes/CashFlowMapping.tsx";
 import Alerts from "./routes/Alerts.tsx";
+import WealthOverview from "./routes/WealthOverview.tsx";
+import Loans from "./routes/Loans.tsx";
+import Companies from "./routes/Companies.tsx";
+import AIGuru from "./routes/AIGuru.tsx";
+import Settings from "./routes/Settings.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
@@ -66,18 +72,25 @@ createRoot(document.getElementById("root")!).render(
                 <ThemeProvider>
                   <BrowserRouter>
                     <Routes>
-                      <Route path="/" element={<App />} />
-                      <Route path="/accounts/new" element={<AddAccount />} />
-                      <Route path="/ingest" element={<Ingest />} />
-                      <Route path="/crypto" element={<CryptoWallets />} />
-                      <Route path="/crypto/holdings" element={<CryptoHoldings />} />
-                      <Route path="/holdings" element={<StockHoldings />} />
-                      <Route path="/cash" element={<CashOverview />} />
-                      <Route path="/cash-flow" element={<CashFlowDetail />} />
-                      <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
-                      <Route path="/credit-cards" element={<CreditCards />} />
-                      <Route path="/market-data" element={<MarketData />} />
-                      <Route path="/alerts" element={<Alerts />} />
+                      <Route element={<AppShell />}>
+                        <Route path="/" element={<App />} />
+                        <Route path="/wealth" element={<WealthOverview />} />
+                        <Route path="/holdings" element={<StockHoldings />} />
+                        <Route path="/crypto" element={<CryptoWallets />} />
+                        <Route path="/crypto/holdings" element={<CryptoHoldings />} />
+                        <Route path="/cash" element={<CashOverview />} />
+                        <Route path="/cash-flow" element={<CashFlowDetail />} />
+                        <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
+                        <Route path="/credit-cards" element={<CreditCards />} />
+                        <Route path="/loans" element={<Loans />} />
+                        <Route path="/companies" element={<Companies />} />
+                        <Route path="/alerts" element={<Alerts />} />
+                        <Route path="/ai-guru" element={<AIGuru />} />
+                        <Route path="/ingest" element={<Ingest />} />
+                        <Route path="/market-data" element={<MarketData />} />
+                        <Route path="/settings" element={<Settings />} />
+                        <Route path="/accounts/new" element={<AddAccount />} />
+                      </Route>
                     </Routes>
                   </BrowserRouter>
                 </ThemeProvider>

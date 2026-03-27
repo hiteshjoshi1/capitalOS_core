@@ -39,7 +39,13 @@ def get_checkpointer(db_path: str | None = None):
     returns a context manager. We must keep that context manager alive
     for as long as the saver is in use, otherwise the DB connection closes.
     """
-    if db_path and SqliteSaver is not None:
+    if db_path:
+        if SqliteSaver is None:
+            raise RuntimeError(
+                "SQLite checkpointer unavailable. Install the LangGraph SQLite "
+                "checkpoint package so workflow state can persist to disk."
+            )
+
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 
         ctx = SqliteSaver.from_conn_string(str(db_path))

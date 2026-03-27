@@ -1,6 +1,8 @@
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.pipeline import PipelineState
+from orchestration.models.plan import PlanOutput
 from orchestration.models.review import AgentReview, HumanDecision, HumanReview, ReviewCycle
+from orchestration.prompts.build import build_build_prompt
 from orchestration.models.rework import ReworkAnalysis, ReworkCycle
 from orchestration.prompts.review import build_review_prompt
 from orchestration.prompts.rework import build_rework_analysis_prompt
@@ -216,6 +218,25 @@ def test_review_prompt_carries_forward_human_requirements_from_source_review():
     assert "Verify /holdings stays stock-only after rework." in prompt
     assert "Combining is only intended for dashboard risk." in prompt
     assert "explicitly verify whether the source review's human response requirements" in prompt
+
+
+def test_build_prompt_includes_verification_support_paths_for_frontend_tasks():
+    state = _base_state()
+    state.plan_output = PlanOutput(
+        summary="Thin dashboard",
+        architecture_decisions=[],
+        risks=[],
+        open_questions=[],
+        acceptance_criteria=[],
+        planned_paths=["web/src/App.tsx"],
+        checklist=[],
+    )
+
+    prompt = build_build_prompt(state)
+
+    assert "Verification support paths:" in prompt
+    assert "web/tests/e2e/" in prompt
+    assert "web/src/__tests__/" in prompt
 
 
 def test_review_prompt_includes_semantic_requirements_and_grounded_verification_rules():

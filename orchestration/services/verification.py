@@ -3,7 +3,7 @@ from __future__ import annotations
 import subprocess
 import time
 from pathlib import Path
-from typing import Iterable, Callable, Optional
+from typing import Callable, Optional
 
 from orchestration.models.build import RetryEntry
 from orchestration.models.verification import (
@@ -65,6 +65,9 @@ class VerificationService:
 
         return lines[-1][:300]
 
+    def _failure_signature(self, name: str, output: str) -> str:
+        return f"{name}:{self._extract_failure_reason(output).lower()}"
+
     def _run_raw(self, name: str, command: str) -> tuple[int, str]:
         emit_event(
             "verification_command_started",
@@ -121,13 +124,53 @@ class VerificationService:
                 found.append(c)
         return found
 
+    @staticmethod
+    def _retry_applied_code_fix(entry: RetryEntry) -> bool:
+        return entry.classification == "code" and entry.notes.startswith(
+            "Code failure analyzed and auto-fix applied:"
+        )
+
+    @staticmethod
+    def _verification_commands(repo_root: str) -> list[dict[str, str]]:
+        commands: list[dict[str, str]] = [
+            {"name": "lint", "command": "make lint", "family": "foundation"},
+            {"name": "typecheck", "command": "make typecheck", "family": "foundation"},
+            {"name": "api-rebuild", "command": "make api-rebuild", "family": "backend"},
+            {"name": "contract-backend", "command": "make contract-backend", "family": "backend"},
+            {"name": "test-backend", "command": "make test-backend", "family": "backend"},
+            {"name": "contract-frontend", "command": "make contract-frontend", "family": "frontend"},
+            {"name": "test-frontend", "command": "make test-frontend", "family": "frontend"},
+            {"name": "api-smoke", "command": "make api-smoke", "family": "backend"},
+        ]
+
+        playwright_ts = Path(repo_root, "web/playwright.config.ts")
+        playwright_js = Path(repo_root, "web/playwright.config.js")
+        if playwright_ts.exists() or playwright_js.exists():
+            commands.append({"name": "e2e", "command": "make e2e", "family": "e2e"})
+        else:
+            commands.append({"name": "e2e", "command": "__skip__", "family": "e2e"})
+
+        return commands
+
+    @staticmethod
+    def _restart_family_for_command(name: str) -> str:
+        if name in {"lint", "typecheck"}:
+            return "foundation"
+        if name in {"api-rebuild", "contract-backend", "test-backend", "api-smoke"}:
+            return "backend"
+        if name in {"contract-frontend", "test-frontend"}:
+            return "frontend"
+        if name == "e2e":
+            return "frontend"
+        return "foundation"
+
     def run_with_retry_policy(
         self,
         *,
         name: str,
         command: str,
         max_attempts: int,
-        on_code_retry_fix: Optional[Callable[[str, str, int, str], None]] = None,
+        on_code_retry_fix: Optional[Callable[[str, str, int, str, list[RetryEntry]], None]] = None,
     ) -> tuple[VerificationCommandResult, list[RetryEntry]]:
         retry_entries: list[RetryEntry] = []
 
@@ -148,6 +191,7 @@ class VerificationService:
 
             classification = self._classify_failure(output)
             reason = self._extract_failure_reason(output)
+            failure_signature = self._failure_signature(name, output)
             entry_max_attempts = min(max_attempts, 2) if classification == "infra" else max_attempts
             failure_log = self.artifacts.persist_failure_output(
                 label=name,
@@ -175,6 +219,7 @@ class VerificationService:
                 command=command,
                 exit_code=code,
                 classification=classification,
+                failure_signature=failure_signature,
                 failure_log_path=failure_log,
                 notes=f"Failure reason: {reason}",
             )
@@ -225,15 +270,40 @@ class VerificationService:
                 retry_entries.append(entry)
                 break
 
+            repeated_signature = any(
+                prior.classification == "code"
+                and prior.failure_signature == failure_signature
+                and self._retry_applied_code_fix(prior)
+                for prior in retry_entries
+            )
+            if repeated_signature:
+                entry.notes = (
+                    "Code failure repeated with the same signature after an auto-fix attempt; "
+                    f"stopping to avoid thrash without new context: {reason}"
+                )
+                retry_entries.append(entry)
+                return (
+                    VerificationCommandResult(
+                        name=name,
+                        command=command,
+                        status="fail",
+                        exit_code=code,
+                        output_excerpt=output[:4000],
+                        artifact_paths=self._collect_known_artifacts(),
+                        failure_log_path=failure_log,
+                    ),
+                    retry_entries,
+                )
+
             try:
                 emit_event(
                     "verification_auto_fix_started",
                     stage=self.stage,
                     current_action=f"Applying automated fix for `{name}`",
                     evidence=[f"attempt={attempt}", f"reason={reason}"],
-                    reasoning="Code failures trigger an automated fix before the next retry.",
+                        reasoning="Code failures trigger an automated fix before the next retry.",
                 )
-                on_code_retry_fix(name, command, code, output)
+                on_code_retry_fix(name, command, code, output, [*retry_entries, entry])
             except Exception as exc:
                 entry.notes = f"Auto-fix failed after code failure: {exc}"
                 retry_entries.append(entry)
@@ -278,57 +348,85 @@ class VerificationService:
         self,
         *,
         max_attempts: int = 3,
-        on_code_retry_fix: Optional[Callable[[str, str, int, str], None]] = None,
+        on_code_retry_fix: Optional[Callable[[str, str, int, str, list[RetryEntry]], None]] = None,
     ) -> tuple[VerificationEvidence, list[RetryEntry]]:
         emit_event(
             "verification_suite_started",
             stage=self.stage,
             current_action="Running verification suite",
-            evidence=["commands=lint,typecheck,api-rebuild,test-backend,test-frontend,api-smoke,e2e"],
+            evidence=["commands=lint,typecheck,api-rebuild,contract-backend,test-backend,contract-frontend,test-frontend,api-smoke,e2e"],
         )
 
-        commands: Iterable[tuple[str, str]] = [
-            ("lint", "make lint"),
-            ("typecheck", "make typecheck"),
-            ("api-rebuild", "make api-rebuild"),
-            ("test-backend", "make test-backend"),
-            ("test-frontend", "make test-frontend"),
-            ("api-smoke", "make api-smoke"),
-        ]
+        commands = self._verification_commands(self.repo_root)
+        family_starts: dict[str, int] = {}
+        for index, item in enumerate(commands):
+            family_starts.setdefault(item["family"], index)
 
         results: list[VerificationCommandResult] = []
         retries: list[RetryEntry] = []
+        max_suite_rounds = max(2, max_attempts + 1)
+        start_index = 0
 
-        for name, cmd in commands:
-            result, retry_entries = self.run_with_retry_policy(
-                name=name,
-                command=cmd,
-                max_attempts=max_attempts,
-                on_code_retry_fix=on_code_retry_fix,
-            )
-            results.append(result)
-            retries.extend(retry_entries)
+        for suite_round in range(1, max_suite_rounds + 1):
+            round_results: list[VerificationCommandResult] = list(results[:start_index])
+            round_retries: list[RetryEntry] = []
 
-        playwright_ts = Path(self.repo_root, "web/playwright.config.ts")
-        playwright_js = Path(self.repo_root, "web/playwright.config.js")
-        if playwright_ts.exists() or playwright_js.exists():
-            result, retry_entries = self.run_with_retry_policy(
-                name="e2e",
-                command="make e2e",
-                max_attempts=max_attempts,
-                on_code_retry_fix=on_code_retry_fix,
-            )
-            results.append(result)
-            retries.extend(retry_entries)
-        else:
-            results.append(
-                VerificationCommandResult(
-                    name="e2e",
-                    command="make e2e",
-                    status="skip",
-                    exit_code=0,
-                    output_excerpt="Playwright not configured.",
+            for item in commands[start_index:]:
+                name = item["name"]
+                cmd = item["command"]
+                if cmd == "__skip__":
+                    round_results.append(
+                        VerificationCommandResult(
+                            name="e2e",
+                            command="make e2e",
+                            status="skip",
+                            exit_code=0,
+                            output_excerpt="Playwright not configured.",
+                        )
+                    )
+                    continue
+
+                result, retry_entries = self.run_with_retry_policy(
+                    name=name,
+                    command=cmd,
+                    max_attempts=max_attempts,
+                    on_code_retry_fix=on_code_retry_fix,
                 )
+                round_results.append(result)
+                round_retries.extend(retry_entries)
+
+            results = round_results
+            retries.extend(round_retries)
+            any_failures = any(r.status == "fail" for r in round_results)
+            code_fix_applied = any(
+                self._retry_applied_code_fix(entry) for entry in round_retries
+            )
+
+            if any_failures or not code_fix_applied or suite_round >= max_suite_rounds:
+                break
+
+            impacted_families = {
+                self._restart_family_for_command(entry.label)
+                for entry in round_retries
+                if self._retry_applied_code_fix(entry)
+            }
+            restart_at = min(
+                (family_starts.get(family, 0) for family in impacted_families),
+                default=0,
+            )
+            start_index = restart_at
+
+            emit_event(
+                "verification_suite_restarted",
+                stage=self.stage,
+                current_action="Restarting verification suite after auto-fix",
+                evidence=[
+                    f"round={suite_round}",
+                    "reason=repo mutated after auto-fix",
+                    f"restart_index={start_index}",
+                    f"families={','.join(sorted(impacted_families)) or 'foundation'}",
+                ],
+                reasoning="A code-mutating fix invalidates the impacted verification family and everything after it, so the suite reruns from the appropriate family boundary.",
             )
 
         any_failures = any(r.status == "fail" for r in results)

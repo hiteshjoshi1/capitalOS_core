@@ -16,13 +16,13 @@ def run(state: GraphState) -> GraphState:
     cycle = pipeline.get_active_review_cycle()
     if not cycle:
         raise RuntimeError("No active review cycle available for human review.")
-    emit_stage_start(
-        "human_review",
-        current_action="Preparing human review payload",
-        evidence=[f"review_id={cycle.review_id}", f"status={cycle.status}"],
-    )
 
-    if cycle.extra_changed_files and cycle.extra_files_review is None:
+    if cycle.status == "scope_gate_pending":
+        emit_stage_start(
+            "human_review",
+            current_action="Preparing extra-files approval payload",
+            evidence=[f"review_id={cycle.review_id}", f"extra_files={len(cycle.extra_changed_files)}"],
+        )
         payload = {
             "gate": "extra_files_approval",
             "review_id": cycle.review_id,
@@ -35,6 +35,7 @@ def run(state: GraphState) -> GraphState:
                 "reviewer": "non-empty string",
                 "notes": "string; required if needs_fixes",
                 "questions": ["string"],
+                "required_checks": ["string"],
                 "response_requirements": ["string"],
                 "unresolved_comments": ["string"],
             },
@@ -45,12 +46,13 @@ def run(state: GraphState) -> GraphState:
             "human_review",
             gate="extra_files_approval",
             evidence=[f"review_id={cycle.review_id}", f"extra_files={len(cycle.extra_changed_files)}"],
-            conclusion="Human approval is required for files outside the planned scope.",
+            conclusion="Human approval is required for out-of-scope files introduced during rework before review can continue.",
         )
         decision_raw = interrupt(payload)
-        decision_raw.setdefault("gate_type", "extra_files_approval")
-
         decision = HumanDecision.model_validate(decision_raw)
+        if decision.gate_type != "extra_files_approval":
+            raise RuntimeError("Invalid gate_type for extra-files approval resume payload.")
+
         cycle.extra_files_review = decision
         pipeline.human_gate_decisions[f"extra_files_approval:{cycle.review_id}"] = decision
 
@@ -66,10 +68,16 @@ def run(state: GraphState) -> GraphState:
         emit_stage_end(
             "human_review",
             status=cycle.status,
-            evidence=[f"gate=extra_files_approval", f"decision={decision.decision}", f"reviewer={decision.reviewer}"],
-            conclusion="Extra-file approval decision recorded.",
+            evidence=[f"decision={decision.decision}", f"reviewer={decision.reviewer}"],
+            conclusion="Human extra-files approval decision recorded.",
         )
         return dump_pipeline_state(pipeline)
+
+    emit_stage_start(
+        "human_review",
+        current_action="Preparing human review payload",
+        evidence=[f"review_id={cycle.review_id}", f"status={cycle.status}"],
+    )
 
     effective_review = cycle.escalation_review or cycle.agent_review
     if not effective_review:
@@ -79,11 +87,15 @@ def run(state: GraphState) -> GraphState:
         "gate": "human_review",
         "review_id": cycle.review_id,
         "agent_review": effective_review.model_dump(mode="json"),
+        "extra_changed_files": [
+            item.model_dump(mode="json") for item in cycle.extra_changed_files
+        ],
         "expected_resume_schema": {
             "decision": "approved|needs_fixes",
             "reviewer": "non-empty string",
             "notes": "string; required if needs_fixes",
             "questions": ["string"],
+            "required_checks": ["string"],
             "response_requirements": ["string"],
             "unresolved_comments": ["string"],
         },
@@ -93,8 +105,12 @@ def run(state: GraphState) -> GraphState:
     emit_waiting_for_human(
         "human_review",
         gate="human_review",
-        evidence=[f"review_id={cycle.review_id}", f"agent_decision={effective_review.decision}"],
-        conclusion="Final human review is required before ship or further rework.",
+        evidence=[
+            f"review_id={cycle.review_id}",
+            f"agent_decision={effective_review.decision}",
+            f"extra_files={len(cycle.extra_changed_files)}",
+        ],
+        conclusion="Final human review is required before ship or further rework, including any extra-file approval.",
     )
     decision_raw = interrupt(payload)
     if "gate_type" in decision_raw:
@@ -109,6 +125,20 @@ def run(state: GraphState) -> GraphState:
 
     cycle.human_review = human_decision
     agent_decision = cycle.effective_agent_decision()
+    if cycle.extra_changed_files and human_decision.decision == "approved":
+        pipeline.approve_extra_files(cycle.extra_changed_files)
+        cycle.extra_files_review = HumanDecision(
+            gate_type="extra_files_approval",
+            decision="approved",
+            reviewer=human_decision.reviewer,
+            notes=human_decision.notes,
+            questions=human_decision.questions,
+            required_checks=human_decision.required_checks,
+            response_requirements=human_decision.response_requirements,
+            unresolved_comments=human_decision.unresolved_comments,
+            approved_retry_count=human_decision.approved_retry_count,
+        )
+        pipeline.human_gate_decisions[f"extra_files_approval:{cycle.review_id}"] = cycle.extra_files_review
 
     if agent_decision == "approved" and human_decision.decision == "approved":
         cycle.status = "approved"

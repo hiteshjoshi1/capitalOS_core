@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -93,12 +93,6 @@ describe("CashOverview route", () => {
     expect(screen.getByText("Cash Balances")).toBeInTheDocument();
     expect(screen.getByText("DBS")).toBeInTheDocument();
     expect(screen.getByText("62.5%")).toBeInTheDocument();
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(2);
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    const ingestLink = within(nav).getByRole("link", { name: "Ingest" });
-    expect(ingestLink).toHaveAttribute("href", "/ingest");
-    expect(ingestLink).toHaveClass("topNavLinkActive");
 
     expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "SGD");
     expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");

@@ -51,10 +51,6 @@ describe("Ingest", () => {
     );
 
     await screen.findByText("Upload Statement CSV");
-    const nav = screen.getByRole("navigation", { name: "Primary navigation" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(1);
-    expect(within(nav).getByRole("link", { name: "Dashboard" })).toHaveAttribute("href", "/");
-    expect(within(nav).queryByRole("link", { name: "Ingest" })).not.toBeInTheDocument();
 
     expect(screen.getByRole("option", { name: `${account.name} (${account.currency})` })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Account"), "1");

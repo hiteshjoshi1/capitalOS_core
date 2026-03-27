@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from orchestration.models.build import BuildOutput, ExtraChangedFile
+from orchestration.models.build import BuildOutput, ExtraChangedFile, RetryEntry
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.pipeline import PipelineState
 from orchestration.models.plan import PlanOutput
+from orchestration.models.rework import ReworkCycle, ReworkImplementationResult
 from orchestration.models.review import AgentReview, HumanDecision, ReviewCycle
+from orchestration.models.verification import VerificationCommandResult, VerificationEvidence
 from orchestration.render import render_execution_journal
 
 
@@ -133,3 +135,131 @@ def test_render_execution_journal_includes_semantic_verification() -> None:
 
     assert "- semantic_verification:" in rendered
     assert "Compared ai-task-flow.md against Makefile and found task-respond documented with the wrong semantics." in rendered
+
+
+def test_render_execution_journal_surfaces_blocked_rework_reason_and_next_step() -> None:
+    state = _base_state()
+    state.current_stage = "rework_implementation"
+    state.workflow_status = "running"
+    state.review_cycles.append(
+        ReviewCycle(
+            review_id="R8",
+            source="build",
+            agent_review=AgentReview(
+                review_id="R8",
+                model_name="reviewer",
+                decision="needs_fixes",
+                risk="medium",
+                summary="Needs rework.",
+            ),
+            status="needs_fixes",
+        )
+    )
+    state.active_review_cycle_id = "R8"
+    state.rework_cycles.append(
+        ReworkCycle(
+            rework_cycle_id="W5",
+            source_review_id="R8",
+            implementation=ReworkImplementationResult(
+                rework_cycle_id="W5",
+                review_id="R8",
+                summary="Rework applied but verification failed.",
+                verification=VerificationEvidence(
+                    results=[
+                        VerificationCommandResult(
+                            name="test-backend",
+                            command="make test-backend",
+                            status="fail",
+                            exit_code=2,
+                        ),
+                        VerificationCommandResult(
+                            name="e2e",
+                            command="make e2e",
+                            status="fail",
+                            exit_code=2,
+                        ),
+                    ],
+                    any_failures=True,
+                ),
+            ),
+            status="blocked",
+        )
+    )
+    state.active_rework_cycle_id = "W5"
+    state.blockers.append("Verification suite failed during rework: test-backend, e2e")
+    state.retry_log.extend(
+        [
+            RetryEntry(
+                label="test-backend",
+                attempt=1,
+                max_attempts=3,
+                command="make test-backend",
+                exit_code=2,
+                classification="code",
+                notes="Auto-fix failed after code failure: callback mismatch",
+            ),
+            RetryEntry(
+                label="e2e",
+                attempt=1,
+                max_attempts=3,
+                command="make e2e",
+                exit_code=2,
+                classification="code",
+                notes="Auto-fix failed after code failure: callback mismatch",
+            ),
+        ]
+    )
+
+    rendered = render_execution_journal(state)
+
+    assert "**Current Stage**: `rework_implementation`" in rendered
+    assert "**Workflow Status**: `blocked`" in rendered
+    assert "- active_review_cycle: `R8` (`needs_fixes`)" in rendered
+    assert "- active_rework_cycle: `W5` (`blocked`)" in rendered
+    assert "- latest_failed_checks: `test-backend`, `e2e`" in rendered
+    assert "- retry_gate_pending: `no`" in rendered
+    assert "retry_detail: `e2e` stopped after attempt 1/3: Auto-fix failed after code failure" in rendered
+    assert "retry_detail: `test-backend` stopped after attempt 1/3: Auto-fix failed after code failure" in rendered
+    assert "- blocked_reason: Verification suite failed during rework: test-backend, e2e" in rendered
+    assert "- stopped_due_to: The automated retry fixer crashed before the retry budget was exhausted." in rendered
+    assert "The graph intentionally ends after a blocked rework implementation." in rendered
+    assert "rerun rework on the same thread" in rendered
+
+
+def test_render_execution_journal_shows_waiting_human_for_rework_scope_gate() -> None:
+    state = _base_state()
+    state.current_stage = "human_review"
+    state.workflow_status = "waiting_for_human"
+    state.rework_cycles.append(
+        ReworkCycle(
+            rework_cycle_id="W7",
+            source_review_id="R8",
+            status="blocked",
+        )
+    )
+    state.active_rework_cycle_id = "W7"
+    state.review_cycles.append(
+        ReviewCycle(
+            review_id="R9",
+            source="rework",
+            source_rework_cycle_id="W7",
+            extra_changed_files=[
+                ExtraChangedFile(
+                    path="orchestration/cli.py",
+                    reason="Pipeline support change.",
+                    reason_source="builder",
+                )
+            ],
+            status="scope_gate_pending",
+        )
+    )
+    state.active_review_cycle_id = "R9"
+
+    rendered = render_execution_journal(state)
+
+    assert "**Current Stage**: `human_review`" in rendered
+    assert "**Workflow Status**: `waiting_for_human`" in rendered
+    assert "- active_review_cycle: `R9` (`scope_gate_pending`)" in rendered
+    assert "- active_rework_cycle: `W7` (`blocked`)" in rendered
+    assert "Human to approve or reject out-of-scope files introduced during rework before review continues." in rendered
+    assert "- blocked_reason:" not in rendered

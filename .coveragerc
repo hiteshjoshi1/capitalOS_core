@@ -1,0 +1,7 @@
+[run]
+omit =
+    orchestration/tests/*
+
+[report]
+omit =
+    orchestration/tests/*
