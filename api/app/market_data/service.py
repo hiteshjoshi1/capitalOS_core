@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.market_data.providers import EODDataProvider, EODHDProvider, FinnhubProvider, YahooProvider, EodQuote
+from app.market_data.providers import EODDataProvider, EODHDProvider, FinnhubProvider, YahooProvider, YFinanceProvider, EodQuote
 
 
 YAHOO_SUFFIX = {
@@ -53,11 +53,11 @@ def _daily_limit() -> int:
 def _provider_chain(exchange_code: str) -> list[str]:
     exchange_code = exchange_code.upper()
     if exchange_code == "US":
-        raw = os.getenv("STOCK_PROVIDER_CHAIN_US", "finnhub,eodhd,yahoo")
+        raw = os.getenv("STOCK_PROVIDER_CHAIN_US", "finnhub,yahoo")
     else:
-        raw = os.getenv("STOCK_PROVIDER_CHAIN_NON_US", "eodhd,eoddata,yahoo")
+        raw = os.getenv("STOCK_PROVIDER_CHAIN_NON_US", "yfinance,yahoo")
     chain = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return [p for p in chain if p in {"finnhub", "eodhd", "eoddata", "yahoo"}]
+    return [p for p in chain if p in {"finnhub", "eodhd", "eoddata", "yahoo", "yfinance"}]
 
 
 
@@ -72,8 +72,16 @@ def _default_finnhub_symbol(exchange_symbol: str) -> str:
 
 
 def _default_yahoo_symbol(exchange_symbol: str, exchange_code: str) -> str:
+    base = (exchange_symbol or "").strip().upper()
     suffix = YAHOO_SUFFIX.get(exchange_code, "")
-    return f"{exchange_symbol}{suffix}"
+    symbol = base
+    if suffix and not symbol.endswith(suffix):
+        symbol = f"{symbol}{suffix}"
+    if exchange_code.upper() == "HKEX" and symbol.endswith(".HK"):
+        base = symbol[:-3]
+        if base.isdigit() and len(base) < 4:
+            return f"{base.zfill(4)}.HK"
+    return symbol
 
 
 
@@ -122,7 +130,10 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
         if not sym:
             continue
         eod_symbol = (row.get("eodhd_symbol_override") or _default_eodhd_symbol(sym, ex)).strip().upper()
-        yahoo_symbol = (row.get("yahoo_symbol_override") or _default_yahoo_symbol(sym, ex)).strip().upper()
+        yahoo_symbol = _default_yahoo_symbol(
+            str(row.get("yahoo_symbol_override") or sym).strip().upper(),
+            ex,
+        )
         out.append(
             SymbolMapRow(
                 asset_id=int(row["asset_id"]),
@@ -346,6 +357,8 @@ def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> di
             symbol = row.finnhub_symbol
         elif provider_name == "eoddata":
             symbol = row.exchange_symbol
+        elif provider_name == "yfinance":
+            symbol = row.yahoo_symbol
         else:
             symbol = row.yahoo_symbol
         symbol = symbol.strip().upper()
@@ -364,15 +377,18 @@ def _fetch_quotes(
     eodhd: EODHDProvider,
     finnhub: FinnhubProvider,
     eoddata: EODDataProvider,
+    yfinance: YFinanceProvider,
     yahoo: YahooProvider,
 ) -> dict[str, EodQuote]:
     if provider_name == "eodhd":
-        return eodhd.fetch_eod_single(symbols, trade_date=trade_date)
+        return eodhd.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
     if provider_name == "finnhub":
-        return finnhub.fetch_quotes(symbols)
+        return finnhub.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
     if provider_name == "eoddata":
-        return eoddata.fetch_quotes(exchange_code, symbols)
-    return yahoo.fetch_quotes(symbols)
+        return eoddata.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
+    if provider_name == "yfinance":
+        return yfinance.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
+    return yahoo.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
 
 
 
@@ -384,6 +400,7 @@ def run_exchange_refresh(
     eodhd: EODHDProvider | None = None,
     finnhub: FinnhubProvider | None = None,
     eoddata: EODDataProvider | None = None,
+    yfinance: YFinanceProvider | None = None,
     yahoo: YahooProvider | None = None,
 ) -> dict[str, Any]:
     exchange_code = exchange_code.upper()
@@ -391,6 +408,7 @@ def run_exchange_refresh(
     eodhd = eodhd or EODHDProvider()
     finnhub = finnhub or FinnhubProvider()
     eoddata = eoddata or EODDataProvider()
+    yfinance = yfinance or YFinanceProvider()
     yahoo = yahoo or YahooProvider()
 
     daily_limit = _daily_limit()
@@ -438,6 +456,7 @@ def run_exchange_refresh(
                 eodhd=eodhd,
                 finnhub=finnhub,
                 eoddata=eoddata,
+                yfinance=yfinance,
                 yahoo=yahoo,
             )
         except Exception as exc:  # noqa: BLE001

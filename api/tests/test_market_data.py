@@ -91,10 +91,10 @@ def test_market_data_fallback_to_yahoo(client, db_engine, monkeypatch):
             )
         )
 
-    def fake_eod(self, symbols, trade_date=None):
+    def fake_yfinance(self, symbols, exchange_code=None, trade_date=None):
         return {}
 
-    def fake_yahoo(self, symbols):
+    def fake_yahoo(self, symbols, exchange_code=None, trade_date=None):
         return {
             "RELIANCE.NS": providers.EodQuote(
                 provider="yahoo",
@@ -105,8 +105,8 @@ def test_market_data_fallback_to_yahoo(client, db_engine, monkeypatch):
             )
         }
 
-    monkeypatch.setattr("app.market_data.providers.EODHDProvider.fetch_eod_single", fake_eod)
-    monkeypatch.setattr("app.market_data.providers.YahooProvider.fetch_quotes", fake_yahoo)
+    monkeypatch.setattr("app.market_data.providers.YFinanceProvider.fetch_prices", fake_yfinance)
+    monkeypatch.setattr("app.market_data.providers.YahooProvider.fetch_prices", fake_yahoo)
 
     resp = client.post("/market-data/refresh-now")
     assert resp.status_code == 200
@@ -193,18 +193,19 @@ def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, mon
             )
         )
 
-    def fake_eod(self, symbols, trade_date=None):
+    def fake_yfinance(self, symbols, exchange_code=None, trade_date=None):
+        assert symbols == ["0700.HK"]
         return {
-            "700.HK": providers.EodQuote(
-                provider="eodhd",
-                symbol="700.HK",
+            "0700.HK": providers.EodQuote(
+                provider="yfinance",
+                symbol="0700.HK",
                 trade_date=datetime(2026, 2, 6, tzinfo=timezone.utc).date(),
                 close=500.0,
                 currency="USD",  # provider can be wrong/inconsistent
             )
         }
 
-    monkeypatch.setattr("app.market_data.providers.EODHDProvider.fetch_eod_single", fake_eod)
+    monkeypatch.setattr("app.market_data.providers.YFinanceProvider.fetch_prices", fake_yfinance)
 
     resp = client.post("/market-data/refresh-now")
     assert resp.status_code == 200
