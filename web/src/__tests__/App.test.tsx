@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -83,17 +83,24 @@ describe("App (thin Dashboard)", () => {
     expect(screen.getByText("S$ 742,180")).toBeInTheDocument();
   });
 
-  it("renders exposure cards for stocks, crypto, cash, and liabilities", async () => {
+  it("renders net worth card sections including cash flow and liabilities", async () => {
     renderApp();
-    expect(await screen.findByRole("link", { name: "Stocks & Funds details" })).toHaveAttribute("href", "/holdings");
-    expect(screen.getByRole("link", { name: "Crypto details" })).toHaveAttribute("href", "/crypto/holdings");
-    expect(screen.getByRole("link", { name: "Cash details" })).toHaveAttribute("href", "/cash");
-    expect(screen.getByRole("link", { name: "Liabilities details" })).toHaveAttribute("href", "/credit-cards");
+    expect(await screen.findByText("Stocks / Funds")).toBeInTheDocument();
+    expect(screen.getByText("Cash")).toBeInTheDocument();
+    expect(screen.getByText("Crypto")).toBeInTheDocument();
+    expect(screen.getByText("Cash Flow")).toBeInTheDocument();
+    expect(screen.getByText("Liabilities")).toBeInTheDocument();
   });
 
-  it("renders cash flow summary card linking to /cash-flow", async () => {
+  it("does not render separate exposure link cards on dashboard", async () => {
+    window.localStorage.setItem("capitalos.theme", "light");
     renderApp();
-    expect(await screen.findByRole("link", { name: "Cash Flow details" })).toHaveAttribute("href", "/cash-flow");
+
+    expect(await screen.findByText("Net Worth")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Stocks & Funds details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Crypto details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Cash details" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Cash Flow details" })).not.toBeInTheDocument();
   });
 
   it("renders action queue placeholder", async () => {
@@ -108,36 +115,14 @@ describe("App (thin Dashboard)", () => {
     });
   });
 
-  it("shows unmapped transaction count in action queue", async () => {
-    mockApi.unmappedTransactions.mockResolvedValue([
-      {
-        transaction_id: 1,
-        ts: "2026-02-01",
-        account_id: 1,
-        account_name: "DBS",
-        amount: -10,
-        currency: "SGD",
-        type: "EXPENSE",
-        raw_category: null,
-        merchant_counterparty: null,
-        notes: null,
-      },
-      {
-        transaction_id: 2,
-        ts: "2026-02-02",
-        account_id: 1,
-        account_name: "DBS",
-        amount: -20,
-        currency: "SGD",
-        type: "EXPENSE",
-        raw_category: null,
-        merchant_counterparty: null,
-        notes: null,
-      },
-    ]);
+  it("renders action queue mapping link without loading unmapped transactions", async () => {
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText("Unmapped transactions need categorization")).toBeInTheDocument();
+      expect(screen.getByText("Review cash mapping queue")).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Review cash mapping queue" })).toHaveAttribute(
+        "href",
+        "/cash-flow/mapping",
+      );
     });
   });
 
@@ -156,7 +141,7 @@ describe("App (thin Dashboard)", () => {
     expect(screen.queryByText("Trends (Monthly)")).not.toBeInTheDocument();
   });
 
-  it("only calls dashboardBootstrap and spendingSummary; not dashboardSummary, platformAllocation, creditCardSummary, or cryptoSummary", async () => {
+  it("only calls dashboardBootstrap and spendingSummary; does not call unmappedTransactions or heavy APIs", async () => {
     renderApp();
 
     await waitFor(() => {
@@ -168,6 +153,7 @@ describe("App (thin Dashboard)", () => {
 
     expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-02", "SGD");
     expect(mockApi.spendingSummary).toHaveBeenCalledWith("2026-02", "SGD");
+    expect(mockApi.unmappedTransactions).not.toHaveBeenCalled();
   });
 
   it("renders API error state when bootstrap fails", async () => {
@@ -189,27 +175,23 @@ describe("App (thin Dashboard)", () => {
     expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-01");
   });
 
-  it("unmappedTransactions is not called before bootstrapState is ready", async () => {
+  it("does not call unmappedTransactions on dashboard load", async () => {
     let resolveBootstrap!: (v: typeof bootstrapFixture) => void;
     const pendingBootstrap = new Promise<typeof bootstrapFixture>((res) => {
       resolveBootstrap = res;
     });
-    // Use mockReturnValue (not Once) so all bootstrap calls return pending
     mockApi.dashboardBootstrap.mockReturnValue(pendingBootstrap);
 
     renderApp();
-
-    // Drain any microtasks / leaked effects from prior tests, then reset call counts
-    await act(async () => {});
-    mockApi.unmappedTransactions.mockClear();
 
     expect(mockApi.unmappedTransactions).not.toHaveBeenCalled();
 
     resolveBootstrap(bootstrapFixture);
 
     await waitFor(() => {
-      expect(mockApi.unmappedTransactions).toHaveBeenCalled();
+      expect(mockApi.spendingSummary).toHaveBeenCalledTimes(1);
     });
+    expect(mockApi.unmappedTransactions).not.toHaveBeenCalled();
   });
 
   it("spendingSummary is not called before bootstrapState is ready", async () => {
@@ -217,10 +199,12 @@ describe("App (thin Dashboard)", () => {
     const pendingBootstrap = new Promise<typeof bootstrapFixture>((res) => {
       resolveBootstrap = res;
     });
-    mockApi.dashboardBootstrap.mockReturnValueOnce(pendingBootstrap);
+    mockApi.dashboardBootstrap.mockReturnValue(pendingBootstrap);
 
     renderApp();
+    mockApi.spendingSummary.mockClear();
 
+    await Promise.resolve();
     expect(mockApi.spendingSummary).not.toHaveBeenCalled();
 
     resolveBootstrap(bootstrapFixture);
@@ -230,7 +214,7 @@ describe("App (thin Dashboard)", () => {
     });
   });
 
-  it("shows skeleton for cash flow while spending summary loads, then renders card", async () => {
+  it("renders cash flow section in net worth card once spending summary resolves", async () => {
     let resolveSpending!: (v: SpendingSummary) => void;
     const pendingSpending = new Promise<SpendingSummary>((res) => {
       resolveSpending = res;
@@ -240,14 +224,15 @@ describe("App (thin Dashboard)", () => {
     renderApp();
 
     expect(await screen.findByText("Net Worth")).toBeInTheDocument();
-    expect(screen.getByLabelText("Loading cash flow")).toBeInTheDocument();
+    expect(screen.getByText("Cash Flow")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
 
     resolveSpending(spendingSummaryFixture);
 
     await waitFor(() => {
-      expect(screen.queryByLabelText("Loading cash flow")).not.toBeInTheDocument();
+      expect(screen.getByText("S$ 3,770")).toBeInTheDocument();
     });
-    expect(screen.getByRole("link", { name: "Cash Flow details" })).toBeInTheDocument();
+    expect(screen.getByText("2026-02")).toBeInTheDocument();
   });
 
   it("bootstrap called exactly once on mount; spendingSummary not called before bootstrap resolves", async () => {

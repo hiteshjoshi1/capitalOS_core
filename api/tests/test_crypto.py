@@ -56,8 +56,8 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
         conn.execute(
             text(
                 """
-                INSERT INTO crypto_wallet_snapshots (wallet_id, as_of_date, fetched_at, total_usd)
-                VALUES ('w1', :as_of, :fetched_at, 123.45)
+                INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd)
+                VALUES (9001, 'w1', :as_of, :fetched_at, 123.45)
                 """
             ),
             {"as_of": datetime(2026, 2, 21).date(), "fetched_at": datetime.now(tz=timezone.utc)},
@@ -67,7 +67,7 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
                 """
                 INSERT INTO crypto_wallet_snapshot_items
                 (snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd)
-                VALUES (1, 'evm', 'ethereum', 'native', 'ETH', 0.5, 123.45)
+                VALUES (9001, 'evm', 'ethereum', 'native', 'ETH', 0.5, 123.45)
                 """
             )
         )

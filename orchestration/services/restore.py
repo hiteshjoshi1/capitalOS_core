@@ -31,7 +31,17 @@ class RestoreBootstrapService:
             )
 
         pipeline = PipelineState.model_validate(raw_pipeline)
-        pipeline.requested_entrypoint = restart_at  # type: ignore[assignment]
+        metadata = exported_payload.get("export_metadata") or {}
+        effective_restart_at = restart_at
+        interrupts = metadata.get("source_interrupts") or exported_payload.get("interrupts") or []
+        if effective_restart_at in {"human_review", "human_approval_gate"} and interrupts:
+            gate = interrupts[0].get("gate")
+            if gate == "plan_approval":
+                effective_restart_at = "human_approval_gate"
+            elif gate in {"human_review", "extra_files_approval"}:
+                effective_restart_at = "human_review"
+
+        pipeline.requested_entrypoint = effective_restart_at  # type: ignore[assignment]
         pipeline.execution_mode = execution_mode    # type: ignore[assignment]
 
         # Reset transient workflow flags so the new thread can continue cleanly.

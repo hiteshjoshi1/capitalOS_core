@@ -508,27 +508,8 @@ def test_workflow_extra_files_gate_then_returns_to_review(tmp_path: Path, monkey
 
     snapshot = graph.get_state(config)
     assert snapshot.interrupts
-    assert snapshot.interrupts[0].value["gate"] == "extra_files_approval"
-    assert snapshot.interrupts[0].value["extra_changed_files"][0]["path"] == "orchestration/cli.py"
-
-    graph.invoke(
-        Command(
-            resume={
-                "gate_type": "extra_files_approval",
-                "decision": "approved",
-                "reviewer": "Hitesh",
-                "notes": "Allow the workflow support file change.",
-                "questions": [],
-                "response_requirements": [],
-                "unresolved_comments": [],
-            }
-        ),
-        config=config,
-    )
-
-    snapshot = graph.get_state(config)
-    assert snapshot.interrupts
     assert snapshot.interrupts[0].value["gate"] == "human_review"
+    assert snapshot.interrupts[0].value["extra_changed_files"][0]["path"] == "orchestration/cli.py"
     assert agent_review_calls["count"] == 1
 
 
@@ -557,6 +538,24 @@ def test_step_mode_extra_files_gate_then_next_review_accepts_approved_files(tmp_
     monkeypatch.setattr(
         "orchestration.services.git.GitService.changed_files",
         lambda self: ["web/src/App.tsx", "orchestration/cli.py"],
+    )
+    monkeypatch.setattr(
+        "orchestration.services.verification.VerificationService.run_default_suite",
+        lambda self, max_attempts=1, on_code_retry_fix=None: (
+            __import__("orchestration.models.verification", fromlist=["VerificationEvidence"]).VerificationEvidence(
+                results=[
+                    __import__("orchestration.models.verification", fromlist=["VerificationCommandResult"]).VerificationCommandResult(
+                        name="lint",
+                        command="make lint",
+                        status="pass",
+                        exit_code=0,
+                        output_excerpt="ok",
+                    )
+                ],
+                any_failures=False,
+            ),
+            [],
+        ),
     )
 
     task_file = make_task_file(tmp_path)
@@ -603,25 +602,6 @@ def test_step_mode_extra_files_gate_then_next_review_accepts_approved_files(tmp_
     graph.invoke(state, config=config)
     snapshot = graph.get_state(config)
     assert snapshot.interrupts
-    assert snapshot.interrupts[0].value["gate"] == "extra_files_approval"
-    assert agent_review_calls["count"] == 0
-
-    graph.invoke(
-        Command(
-            resume={
-                "gate_type": "extra_files_approval",
-                "decision": "approved",
-                "reviewer": "Hitesh",
-                "notes": "Allow the workflow support file change.",
-                "questions": [],
-                "response_requirements": [],
-                "unresolved_comments": [],
-            }
-        ),
-        config=config,
-    )
-
-    snapshot = graph.get_state(config)
-    assert snapshot.interrupts
     assert snapshot.interrupts[0].value["gate"] == "human_review"
+    assert snapshot.interrupts[0].value["extra_changed_files"][0]["path"] == "orchestration/cli.py"
     assert agent_review_calls["count"] == 1

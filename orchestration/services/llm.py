@@ -105,6 +105,76 @@ def extract_latest_assistant_message(events_path: Path) -> str | None:
     return latest_content
 
 
+def extract_session_repair_context(events_path: Path) -> str | None:
+    assistant_messages: list[str] = []
+    tool_results: list[str] = []
+    task_complete_summary: str | None = None
+    modified_files: list[str] = []
+    lines_added: int | None = None
+    lines_removed: int | None = None
+
+    try:
+        with events_path.open() as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                event_type = payload.get("type")
+                data = payload.get("data") or {}
+
+                if event_type == "assistant.message":
+                    content = str(data.get("content") or "").strip()
+                    if content:
+                        assistant_messages.append(content)
+                    continue
+
+                if event_type == "tool.execution_complete":
+                    result = data.get("result") or {}
+                    content = str(result.get("content") or "").strip()
+                    if content:
+                        tool_results.append(content)
+                    continue
+
+                if event_type == "session.task_complete":
+                    task_complete_summary = str(data.get("summary") or "").strip() or None
+                    continue
+
+                if event_type == "session.shutdown":
+                    code_changes = data.get("codeChanges") or {}
+                    modified_files = [str(path) for path in code_changes.get("filesModified") or []]
+                    lines_added = code_changes.get("linesAdded")
+                    lines_removed = code_changes.get("linesRemoved")
+                    continue
+    except OSError:
+        return None
+
+    context_lines: list[str] = []
+    if task_complete_summary:
+        context_lines.append(f"Task-complete summary: {task_complete_summary}")
+    if modified_files:
+        context_lines.append("Modified files:")
+        context_lines.extend(f"- {path}" for path in modified_files[:20])
+    if lines_added is not None or lines_removed is not None:
+        context_lines.append(
+            f"Line changes: +{lines_added or 0} / -{lines_removed or 0}"
+        )
+    if assistant_messages:
+        context_lines.append("Recent assistant messages:")
+        context_lines.extend(f"- {message}" for message in assistant_messages[-5:])
+    if tool_results:
+        context_lines.append("Recent successful tool outputs:")
+        context_lines.extend(f"- {result[:500]}" for result in tool_results[-8:])
+
+    if not context_lines:
+        return None
+    return "\n".join(context_lines)
+
+
 def _extract_first_json_value(raw: str) -> object:
     try:
         return json.loads(raw)
@@ -169,10 +239,10 @@ class LLMService:
             and self.stage in {PipelineStage.BUILD, PipelineStage.REWORK_IMPLEMENTATION}
         )
 
-    def complete_text(self, prompt: str) -> str:
+    def _complete_text_with_mode(self, prompt: str, *, tools_enabled: bool) -> str:
         args = ["copilot", "--model", self.model, "--stream", "on"]
-        tool_mode = "tools-enabled" if self._should_use_tools_enabled_mode() else "text-only"
-        if self._should_use_tools_enabled_mode():
+        tool_mode = "tools-enabled" if tools_enabled else "text-only"
+        if tools_enabled:
             args.extend(
                 [
                     "--autopilot",
@@ -236,12 +306,14 @@ class LLMService:
 
             if stream_name == "stdout":
                 stdout_chunks.append(chunk)
-                sys.stdout.write(chunk)
-                sys.stdout.flush()
+                if not tools_enabled:
+                    sys.stdout.write(chunk)
+                    sys.stdout.flush()
             else:
                 stderr_chunks.append(chunk)
-                sys.stderr.write(chunk)
-                sys.stderr.flush()
+                if not tools_enabled:
+                    sys.stderr.write(chunk)
+                    sys.stderr.flush()
 
         proc.wait()
         output = "".join(stdout_chunks).strip()
@@ -256,7 +328,10 @@ class LLMService:
                 evidence=[f"model={self.model}", f"elapsed_seconds={duration}", message[:300]],
                 conclusion="The model subprocess exited non-zero.",
             )
-            raise RuntimeError(message)
+            raise RuntimeError(
+                f"Copilot subprocess failed during `{self.stage.value}`. "
+                "Check Copilot session logs or the llm_request_failed event for details."
+            )
         self.last_session_events_path = find_latest_copilot_session(
             model=self.model,
             repo_root=self.repo_root or os.getcwd(),
@@ -271,6 +346,39 @@ class LLMService:
         )
         return output
 
+    def complete_text(self, prompt: str) -> str:
+        return self._complete_text_with_mode(
+            prompt,
+            tools_enabled=self._should_use_tools_enabled_mode(),
+        )
+
+    def _repair_structured_output(
+        self,
+        *,
+        original_prompt: str,
+        raw: str,
+        fallback_raw: str | None,
+        session_context: str,
+    ) -> str:
+        repair_prompt = f"""
+The previous tools-enabled Copilot run completed work in the repository but did not emit the required final JSON payload.
+
+Return strict JSON only. Do not call tools. Do not propose additional edits. Summarize the work already completed.
+
+Original prompt:
+{original_prompt}
+
+Observed stdout from the previous run:
+{raw or "<empty>"}
+
+Observed assistant-message fallback:
+{fallback_raw or "<empty>"}
+
+Observed Copilot session trace:
+{session_context}
+""".strip()
+        return self._complete_text_with_mode(repair_prompt, tools_enabled=False)
+
     def complete_structured(self, prompt: str, model_cls: Type[T]) -> T:
         raw = self.complete_text(prompt)
         fallback_raw = None
@@ -278,5 +386,21 @@ class LLMService:
             fallback_raw = extract_latest_assistant_message(self.last_session_events_path)
         if model_cls is PlanOutput:
             return extract_structured_plan_output(raw, fallback_raw)  # type: ignore[return-value]
-        data = _extract_json_with_fallback(raw, fallback_raw)
+        try:
+            data = _extract_json_with_fallback(raw, fallback_raw)
+        except RuntimeError:
+            if self._should_use_tools_enabled_mode() and self.last_session_events_path is not None:
+                session_context = extract_session_repair_context(self.last_session_events_path)
+                if session_context:
+                    repaired_raw = self._repair_structured_output(
+                        original_prompt=prompt,
+                        raw=raw,
+                        fallback_raw=fallback_raw,
+                        session_context=session_context,
+                    )
+                    data = _extract_json_with_fallback(repaired_raw)
+                else:
+                    raise
+            else:
+                raise
         return model_cls.model_validate(data)

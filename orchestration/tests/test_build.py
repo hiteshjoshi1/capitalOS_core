@@ -185,3 +185,72 @@ def test_build_blocks_bogus_write_permission_claim(tmp_path, monkeypatch):
         "Build validation failed: model reported filesystem write permission restrictions, "
         "but the repo root is writable."
     ) in pipeline.blockers
+
+
+def test_build_blocks_gracefully_when_builder_fails_before_structured_output(tmp_path, monkeypatch):
+    state = make_pipeline_state(tmp_path)
+
+    monkeypatch.setattr(
+        "orchestration.nodes.build.get_config",
+        lambda: SimpleNamespace(builder_model="builder-model", max_retries=3, allowed_aux_files=[]),
+    )
+
+    class FakeLLMService:
+        def __init__(self, stage, repo_root=None):
+            self.stage = stage
+            self.repo_root = repo_root
+
+        def complete_structured(self, prompt, model_cls):
+            raise RuntimeError("Copilot subprocess failed during `build`.")
+
+    monkeypatch.setattr("orchestration.nodes.build.LLMService", FakeLLMService)
+    monkeypatch.setattr("orchestration.nodes.build.render_task_file", lambda pipeline: None)
+
+    result = run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "blocked"
+    assert "Builder failed before structured output was recorded." in pipeline.blockers
+    assert any("Copilot subprocess failed during `build`." in error for error in pipeline.errors)
+
+
+def test_build_persists_blocked_state_when_exception_escapes_after_builder_changes(tmp_path, monkeypatch):
+    state = make_pipeline_state(tmp_path)
+
+    monkeypatch.setattr(
+        "orchestration.nodes.build.get_config",
+        lambda: SimpleNamespace(builder_model="builder-model", max_retries=3, allowed_aux_files=[]),
+    )
+
+    class FakeLLMService:
+        def __init__(self, stage, repo_root=None):
+            self.stage = stage
+            self.repo_root = repo_root
+
+        def complete_structured(self, prompt, model_cls):
+            return model_cls(
+                summary="Implemented feature",
+                changed_files=[],
+                completed_checklist_item_ids=["CHK-1"],
+                implementation_notes=["done"],
+            )
+
+    monkeypatch.setattr("orchestration.nodes.build.LLMService", FakeLLMService)
+    monkeypatch.setattr(
+        "orchestration.services.verification.VerificationService.run_default_suite",
+        lambda self, max_attempts=3, on_code_retry_fix=None: (_ for _ in ()).throw(RuntimeError("make e2e failed")),
+    )
+    monkeypatch.setattr(
+        "orchestration.services.git.GitService.changed_files",
+        lambda self: ["web/src/App.tsx", "web/tests/e2e/home.spec.ts"],
+    )
+    monkeypatch.setattr("orchestration.nodes.build.render_task_file", lambda pipeline: None)
+
+    result = run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "blocked"
+    assert "Build stage crashed after repository changes may have been applied." in pipeline.blockers
+    assert any("make e2e failed" in error for error in pipeline.errors)
+    assert pipeline.build_output is not None
+    assert "web/src/App.tsx" in pipeline.build_output.changed_files

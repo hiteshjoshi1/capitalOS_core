@@ -87,7 +87,10 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     renderSidebar("/");
 
-    await user.click(screen.getByRole("button", { name: /Liabilities/i }));
+    const toggle = screen.getByRole("button", { name: /Liabilities/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "Credit Cards" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Loans" })).toBeInTheDocument();
   });
@@ -96,7 +99,10 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     renderSidebar("/");
 
-    await user.click(screen.getByRole("button", { name: /Intelligence/i }));
+    const toggle = screen.getByRole("button", { name: /Intelligence/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "Companies" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Alerts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "AI Guru" })).toBeInTheDocument();
@@ -106,10 +112,21 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     renderSidebar("/");
 
-    await user.click(screen.getByRole("button", { name: /Operations/i }));
+    const toggle = screen.getByRole("button", { name: /Operations/i });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "Ingest" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Market Data" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cash Mapping" })).toBeInTheDocument();
+  });
+
+  it("non-active sections start collapsed on /holdings route", () => {
+    renderSidebar("/holdings");
+    expect(screen.getByRole("button", { name: /Wealth/i })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: /Liabilities/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /Intelligence/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: /Operations/i })).toHaveAttribute("aria-expanded", "false");
   });
 
   it("renders user area with theme toggle button", () => {

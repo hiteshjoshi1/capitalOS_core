@@ -7,8 +7,13 @@ DB_NAME?=capitalos
 
 API_CONTAINER=capitalos-api
 WEB_DIR=web
+WEB_PACKAGE_MANIFESTS=$(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
+WEB_NODE_MODULES_STAMP=$(WEB_DIR)/node_modules/.install-stamp
 
 PYTHON?=python3
+ORCH_VENV?=.venv-orch
+ORCH_PYTHON?=$(ORCH_VENV)/bin/python
+ORCH_PIP?=$(ORCH_VENV)/bin/pip
 ORCH_MODULE=orchestration.cli
 THREAD_ID?=
 TASK?=
@@ -42,6 +47,10 @@ define require_restart_at
 	@test -n "$(RESTART_AT)" || (echo "Usage: make $(1) TASK=tasks/issue-<id>-<slug>.md THREAD_ID=<thread-id> STATE_FILE=<file> RESTART_AT=<stage>" && exit 2)
 endef
 
+define require_orch_runtime
+	@test -x "$(ORCH_PYTHON)" || (echo "Managed orchestration runtime missing at $(ORCH_PYTHON). Run: make orch-bootstrap" && exit 2)
+endef
+
 ORCH_BASE_ARGS=--thread-id "$(THREAD_ID)" --task-file "$(TASK)" --repo-root . --db-path "$(DB_PATH)"
 
 ORCH_INIT_ARGS=$(ORCH_BASE_ARGS) \
@@ -50,11 +59,12 @@ ORCH_INIT_ARGS=$(ORCH_BASE_ARGS) \
 	$(if $(TITLE),--title "$(TITLE)",)
 
 define run_llm_orch
-	$(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(PYTHON) -m $(ORCH_MODULE) $(1)
+	$(call require_orch_runtime,$(1))
+	$(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(ORCH_PYTHON) -m $(ORCH_MODULE) $(1)
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: up down ps logs api-up web-up api-logs openapi
+.PHONY: up down ps logs api-up web-up api-logs openapi web-deps
 
 up:
 	docker compose up -d
@@ -71,8 +81,8 @@ logs:
 api-up:
 	docker compose up -d --build api
 
-web-up:
-	cd $(WEB_DIR) && npm install && npm run dev
+web-up: web-deps
+	cd $(WEB_DIR) && npm run dev
 
 api-logs:
 	docker logs -f $(API_CONTAINER)
@@ -80,6 +90,12 @@ api-logs:
 openapi:
 	curl -s http://localhost:8000/openapi.json > openapi.json
 	@echo "Wrote openapi.json"
+
+$(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
+	cd $(WEB_DIR) && npm ci
+	@touch "$(WEB_NODE_MODULES_STAMP)"
+
+web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
 .PHONY: db-shell db-wait db-migrate db-reset db-seed-dummy db-clear-dummy db-query
@@ -122,35 +138,61 @@ db-query:
 	docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) -c "$(QUERY)"
 
 # ---- Quality gates ----
-.PHONY: lint typecheck test-backend test-frontend e2e verify
+.PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e verify
 
-lint:
-	cd $(WEB_DIR) && npm install && npm run lint
+lint: web-deps
+	cd $(WEB_DIR) && npm run lint
 	docker compose run --rm api sh -lc "if command -v ruff >/dev/null 2>&1; then ruff check app tests; else echo 'ruff not installed in api image; skipping backend lint'; fi"
 
-typecheck:
-	cd $(WEB_DIR) && npm install && npx tsc -b --pretty false
+typecheck: web-deps
+	cd $(WEB_DIR) && npx tsc -b --pretty false
 	docker compose run --rm api sh -lc "if command -v mypy >/dev/null 2>&1; then mypy app; else echo 'mypy not installed in api image; skipping backend typecheck'; fi"
 
 test-backend:
 	docker compose run --rm api pytest
 
-test-frontend:
-	cd $(WEB_DIR) && npm install && npm test -- --run
+contract-backend:
+	docker compose run --rm api pytest tests/test_contracts.py -q
 
-e2e:
+test-frontend: web-deps
+	cd $(WEB_DIR) && npm test -- --run
+
+contract-frontend: web-deps
+	cd $(WEB_DIR) && npm test -- --run src/__tests__/contracts.test.tsx
+
+e2e: web-deps
 	@test -f "$(WEB_DIR)/playwright.config.ts" -o -f "$(WEB_DIR)/playwright.config.js" || (echo "Playwright is not configured in ./web yet." && exit 2)
-	cd $(WEB_DIR) && npm install && npx playwright test
+	cd $(WEB_DIR) && npx playwright test
 
 verify: lint typecheck test-backend test-frontend
 
 # ---- LangGraph task workflow ----
-.PHONY: task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-salvage-plan task-state-show task-orch-smoke
+.PHONY: orch-bootstrap orch-test orch-coverage task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-salvage-plan task-state-show task-orch-smoke
+
+orch-bootstrap:
+	$(PYTHON) -m venv "$(ORCH_VENV)"
+	"$(ORCH_PIP)" install -r orchestration/requirements.txt
+
+orch-test:
+	$(call require_orch_runtime,orch-test)
+	"$(ORCH_PYTHON)" -m pytest orchestration/tests -q
+
+orch-coverage:
+	$(call require_orch_runtime,orch-coverage)
+	@mkdir -p .task-flow/coverage
+	"$(ORCH_PYTHON)" -m pytest orchestration/tests \
+		--cov=orchestration \
+		--cov-config=.coveragerc \
+		--cov-report=term-missing \
+		--cov-report=xml:.task-flow/coverage/orchestration-coverage.xml \
+		--cov-report=json:.task-flow/coverage/orchestration-coverage.json \
+		-q
 
 task-prepare:
 	$(call require_task,task-prepare)
 	$(call require_thread,task-prepare)
-	$(PYTHON) -m $(ORCH_MODULE) prepare $(ORCH_INIT_ARGS)
+	$(call require_orch_runtime,task-prepare)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) prepare $(ORCH_INIT_ARGS)
 
 task-plan:
 	$(call require_task,task-plan)
@@ -187,7 +229,8 @@ task-rework:
 task-ship:
 	$(call require_task,task-ship)
 	$(call require_thread,task-ship)
-	$(PYTHON) -m $(ORCH_MODULE) ship $(ORCH_INIT_ARGS)
+	$(call require_orch_runtime,task-ship)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) ship $(ORCH_INIT_ARGS)
 
 task-all:
 	$(call require_task,task-all)
@@ -208,25 +251,29 @@ task-respond:
 task-export-state:
 	$(call require_task,task-export-state)
 	$(call require_thread,task-export-state)
-	$(PYTHON) -m $(ORCH_MODULE) export-state $(ORCH_BASE_ARGS)
+	$(call require_orch_runtime,task-export-state)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) export-state $(ORCH_BASE_ARGS)
 
 task-import-state:
 	$(call require_task,task-import-state)
 	$(call require_thread,task-import-state)
 	$(call require_state_file,task-import-state)
-	$(PYTHON) -m $(ORCH_MODULE) import-state $(ORCH_BASE_ARGS) --state-file "$(STATE_FILE)"
+	$(call require_orch_runtime,task-import-state)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) import-state $(ORCH_BASE_ARGS) --state-file "$(STATE_FILE)"
 
 task-restore-state:
 	$(call require_task,task-restore-state)
 	$(call require_thread,task-restore-state)
 	$(call require_state_file,task-restore-state)
 	$(call require_restart_at,task-restore-state)
-	$(PYTHON) -m $(ORCH_MODULE) restore-state $(ORCH_BASE_ARGS) --state-file "$(STATE_FILE)" --restart-at "$(RESTART_AT)"
+	$(call require_orch_runtime,task-restore-state)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) restore-state $(ORCH_BASE_ARGS) --state-file "$(STATE_FILE)" --restart-at "$(RESTART_AT)"
 
 task-salvage-plan:
 	$(call require_task,task-salvage-plan)
 	$(call require_thread,task-salvage-plan)
-	$(PYTHON) -m $(ORCH_MODULE) salvage-plan $(ORCH_INIT_ARGS)
+	$(call require_orch_runtime,task-salvage-plan)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) salvage-plan $(ORCH_INIT_ARGS)
 
 task-state-show:
 	$(call require_task,task-state-show)
@@ -238,7 +285,8 @@ task-state-show:
 	@echo "  make task-export-state TASK=$(TASK) THREAD_ID=$(THREAD_ID)"
 
 task-orch-smoke:
-	@$(PYTHON) -c "import orchestration.cli, orchestration.graph, orchestration.state; print('orchestration import smoke: ok')"
+	@$(call require_orch_runtime,task-orch-smoke)
+	@"$(ORCH_PYTHON)" -c "import orchestration.cli, orchestration.graph, orchestration.state; from orchestration.services.persistence import get_checkpointer; get_checkpointer('.task-flow/langgraph.sqlite'); print('orchestration import smoke: ok')"
 
 # ---- Suggested structured resume examples ----
 .PHONY: task-approve-plan-example task-human-review-approve-example task-human-review-fix-example

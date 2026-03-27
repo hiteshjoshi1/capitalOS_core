@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
+from orchestration.models.verification import VerificationEvidence
+
 
 def utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -23,6 +25,7 @@ class ReworkAnalysis(BaseModel):
     review_id: str
     root_cause: str
     findings_addressed: List[str] = Field(default_factory=list)
+    required_checks_planned: List[str] = Field(default_factory=list)
     planned_changes: List[str] = Field(default_factory=list)
     validation_plan: List[str] = Field(default_factory=list)
     unresolved_assumptions: List[str] = Field(default_factory=list)
@@ -36,6 +39,9 @@ class ReworkImplementationResult(BaseModel):
     summary: str
     changed_files: List[str] = Field(default_factory=list)
     verification_summary: str = ""
+    verification: Optional[VerificationEvidence] = None
+    resolved_required_checks: List[str] = Field(default_factory=list)
+    required_check_evidence: List[str] = Field(default_factory=list)
     completed: bool = True
     created_at: datetime = Field(default_factory=utc_now)
 
@@ -43,6 +49,7 @@ class ReworkImplementationResult(BaseModel):
 class ReworkCycle(BaseModel):
     rework_cycle_id: str
     source_review_id: str
+    input_fingerprint: Optional[str] = None
     analysis: Optional[ReworkAnalysis] = None
     implementation: Optional[ReworkImplementationResult] = None
     status: Literal["analysis_complete", "implementation_complete", "blocked"] = "analysis_complete"

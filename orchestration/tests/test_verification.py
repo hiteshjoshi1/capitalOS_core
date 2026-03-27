@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from orchestration.models.build import RetryEntry
+from orchestration.models.verification import VerificationCommandResult
 from orchestration.services.verification import VerificationService
 
 
@@ -68,3 +70,118 @@ def test_code_failures_stop_immediately_when_no_fix_callback_exists(tmp_path, mo
     assert result.status == "fail"
     assert len(retries) == 1
     assert retries[0].notes.startswith("Code failure with no auto-fix available:")
+
+
+def test_default_suite_restarts_after_green_run_with_late_code_fix(tmp_path, monkeypatch):
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "playwright.config.ts").write_text("export default {};\n")
+
+    service = VerificationService(str(tmp_path))
+    calls: list[str] = []
+    e2e_runs = {"count": 0}
+
+    def fake_run_with_retry_policy(*, name, command, max_attempts, on_code_retry_fix=None):
+        calls.append(name)
+        if name == "e2e":
+            e2e_runs["count"] += 1
+            if e2e_runs["count"] == 1:
+                return (
+                    VerificationCommandResult(
+                        name=name,
+                        command=command,
+                        status="pass",
+                        exit_code=0,
+                        output_excerpt="fixed and green",
+                    ),
+                    [
+                        RetryEntry(
+                            label=name,
+                            attempt=1,
+                            max_attempts=3,
+                            command=command,
+                            exit_code=2,
+                            classification="code",
+                            notes="Code failure analyzed and auto-fix applied: fixed e2e",
+                        )
+                    ],
+                )
+
+        return (
+            VerificationCommandResult(
+                name=name,
+                command=command,
+                status="pass",
+                exit_code=0,
+                output_excerpt="ok",
+            ),
+            [],
+        )
+
+    monkeypatch.setattr(service, "run_with_retry_policy", fake_run_with_retry_policy)
+
+    evidence, retries = service.run_default_suite(max_attempts=3)
+
+    assert evidence.any_failures is False
+    assert retries
+    assert calls.count("lint") == 1
+    assert calls.count("contract-backend") == 1
+    assert calls.count("test-backend") == 1
+    assert calls.count("contract-frontend") == 2
+    assert calls.count("test-frontend") == 2
+    assert calls.count("e2e") == 2
+
+
+def test_default_suite_restarts_from_backend_family_after_backend_fix(tmp_path, monkeypatch):
+    service = VerificationService(str(tmp_path))
+    calls: list[str] = []
+    backend_runs = {"count": 0}
+
+    def fake_run_with_retry_policy(*, name, command, max_attempts, on_code_retry_fix=None):
+        calls.append(name)
+        if name == "contract-backend":
+            backend_runs["count"] += 1
+            if backend_runs["count"] == 1:
+                return (
+                    VerificationCommandResult(
+                        name=name,
+                        command=command,
+                        status="pass",
+                        exit_code=0,
+                        output_excerpt="fixed and green",
+                    ),
+                    [
+                        RetryEntry(
+                            label=name,
+                            attempt=1,
+                            max_attempts=3,
+                            command=command,
+                            exit_code=2,
+                            classification="code",
+                            notes="Code failure analyzed and auto-fix applied: fixed backend contract",
+                        )
+                    ],
+                )
+
+        return (
+            VerificationCommandResult(
+                name=name,
+                command=command,
+                status="pass",
+                exit_code=0,
+                output_excerpt="ok",
+            ),
+            [],
+        )
+
+    monkeypatch.setattr(service, "run_with_retry_policy", fake_run_with_retry_policy)
+
+    evidence, retries = service.run_default_suite(max_attempts=3)
+
+    assert evidence.any_failures is False
+    assert retries
+    assert calls.count("lint") == 1
+    assert calls.count("typecheck") == 1
+    assert calls.count("api-rebuild") == 2
+    assert calls.count("contract-backend") == 2
+    assert calls.count("test-backend") == 2
+    assert calls.count("contract-frontend") == 2

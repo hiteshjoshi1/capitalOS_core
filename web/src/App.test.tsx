@@ -16,7 +16,7 @@ vi.mock("./lib/api", () => ({
 }));
 
 describe("App (thin Dashboard smoke)", () => {
-  it("renders net worth hero and action queue; RiskCard is NOT rendered", async () => {
+  it("renders net worth hero and action queue without dashboard unmapped fetches; RiskCard is NOT rendered", async () => {
     const mockBootstrap: DashboardBootstrap = {
       as_of_month: "2026-02",
       base_currency: "SGD",
@@ -60,6 +60,9 @@ describe("App (thin Dashboard smoke)", () => {
 
     // Action queue renders (thin dashboard)
     expect(await screen.findByLabelText("Action queue")).toBeInTheDocument();
+
+    // Action queue is kept as a lightweight placeholder without dashboard unmapped fetch
+    expect(vi.mocked(api.unmappedTransactions)).not.toHaveBeenCalled();
 
     // RiskCard is NOT on the thin dashboard
     expect(screen.queryByRole("heading", { name: "Risk" })).not.toBeInTheDocument();

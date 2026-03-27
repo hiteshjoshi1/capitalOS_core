@@ -3,8 +3,10 @@ from __future__ import annotations
 import subprocess
 from textwrap import dedent
 
+from orchestration.models.build import RetryEntry
 from orchestration.models.pipeline import PipelineState
 from orchestration.services.config import get_config
+from orchestration.services.scope import ScopePolicyService
 
 
 class BuilderFixService:
@@ -19,15 +21,19 @@ class BuilderFixService:
         command: str,
         exit_code: int,
         output: str,
+        prior_attempts: list[RetryEntry],
+        allowed_paths: list[str] | None = None,
+        primary_objective: str | None = None,
     ) -> None:
-        allowed_paths = {self.state.issue.task_file, *self.cfg.allowed_aux_files}
-        if self.state.plan_output is not None:
-            allowed_paths.update(self.state.plan_output.allowed_paths())
-        if self.state.build_output is not None:
-            allowed_paths.update(self.state.build_output.changed_files)
-        rework = self.state.get_active_rework_cycle()
-        if rework and rework.implementation is not None:
-            allowed_paths.update(rework.implementation.changed_files)
+        if allowed_paths is None:
+            computed_allowed_paths = set(ScopePolicyService(self.state).allowed_paths())
+            if self.state.build_output is not None:
+                computed_allowed_paths.update(self.state.build_output.changed_files)
+            rework = self.state.get_active_rework_cycle()
+            if rework and rework.implementation is not None:
+                computed_allowed_paths.update(rework.implementation.changed_files)
+        else:
+            computed_allowed_paths = {path for path in allowed_paths if path}
 
         prompt = dedent(
             f"""
@@ -37,12 +43,19 @@ class BuilderFixService:
             Failed command: {command}
             Exit code: {exit_code}
             Failure label: {label}
+            Primary objective: {primary_objective or "Restore the failing verification command without drifting from the active task intent."}
 
             Failure output:
             {output[:6000]}
 
+            Previous attempts for this command:
+            {chr(10).join(
+                f"- attempt {entry.attempt}/{entry.max_attempts}, signature={entry.failure_signature or 'n/a'}, notes={entry.notes}"
+                for entry in prior_attempts
+            ) or "- None"}
+
             Allowed write paths:
-            {chr(10).join(f"- {p}" for p in sorted(allowed_paths))}
+            {chr(10).join(f"- {p}" for p in sorted(computed_allowed_paths))}
 
             Hard constraints:
             1) Do not modify the immutable region of the task file.
@@ -51,6 +64,8 @@ class BuilderFixService:
             4) After changes, validation target is only:
                {command}
             5) Return successfully only after applying the fix attempt.
+            6) Change your approach if the same failure signature has already repeated; do not reapply the same ineffective fix.
+            7) Do not spend this retry on test-only churn when the primary objective requires substantive implementation work.
             """
         ).strip()
 

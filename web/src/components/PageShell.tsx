@@ -24,7 +24,7 @@ export default function PageShell({
   children,
 }: PageShellProps) {
   return (
-    <div className="wrap">
+    <div className="pageShellWrap">
       <header className="header dashboardHeader">
         <div className="titleBlock dashboardTitleBlock">
           <h1 className="title">{title}</h1>

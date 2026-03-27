@@ -152,20 +152,23 @@ test("navigates to cash overview", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Cash Overview" })).toBeVisible();
 });
 
-test("navigates via dashboard exposure cards", async ({ page }) => {
+test("navigates via wealth overview exposure cards", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await expect(page.getByRole("link", { name: "Stock Exposure details" })).toBeVisible();
+  await page.getByRole("button", { name: /Wealth/i }).click();
+  await page.getByRole("link", { name: "Overview" }).click();
+  await expect(page).toHaveURL(/\/wealth$/);
+  await expect(page.getByRole("link", { name: "Stocks & Funds details" })).toBeVisible();
 
-  await page.getByRole("link", { name: "Stock Exposure details" }).click();
+  await page.getByRole("link", { name: "Stocks & Funds details" }).click();
   await expect(page).toHaveURL(/\/holdings$/);
 
-  await page.goto("/");
-  await page.getByRole("link", { name: "Crypto Exposure details" }).click();
+  await page.goto("/wealth");
+  await page.getByRole("link", { name: "Crypto details" }).click();
   await expect(page).toHaveURL(/\/crypto\/holdings$/);
 
-  await page.goto("/");
-  await page.getByRole("link", { name: "Cash Exposure details" }).click();
+  await page.goto("/wealth");
+  await page.getByRole("link", { name: "Cash details" }).click();
   await expect(page).toHaveURL(/\/cash$/);
 });
 

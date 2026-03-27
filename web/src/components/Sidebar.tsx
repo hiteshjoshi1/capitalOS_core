@@ -51,13 +51,13 @@ export default function Sidebar() {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
-    () => {
-      const initial: Record<string, boolean> = {};
-      NAV_SECTIONS.forEach((section) => {
-        initial[section.label] = isSectionOpen(section, location.pathname);
-      });
-      return initial;
-    },
+    () =>
+      Object.fromEntries(
+        NAV_SECTIONS.map((s) => [
+          s.label,
+          isSectionOpen(s, location.pathname),
+        ]),
+      ),
   );
   const [alertCount, setAlertCount] = useState<number>(0);
 
@@ -71,7 +71,8 @@ export default function Sidebar() {
     setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
   };
 
-  const isActive = (to: string) => location.pathname === to;
+  const isActive = (to: string) =>
+    location.pathname === to || location.pathname.startsWith(to + "/");
 
   return (
     <aside className="sidebar" aria-label="Main navigation">
@@ -138,10 +139,10 @@ export default function Sidebar() {
         <button
           className="btn sidebarThemeToggle"
           type="button"
-          onClick={toggleTheme}
           aria-label="Toggle theme"
+          onClick={toggleTheme}
         >
-          {theme === "dark" ? "🌙 Dark" : "☀️ Light"}
+          {theme === "dark" ? "Theme: Dark" : "Theme: Light"}
         </button>
       </div>
     </aside>

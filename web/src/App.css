@@ -7,6 +7,7 @@
   --muted: #9aacbf;
   --line: #25344d;
   --accent: #66a3ff;
+  --accent-soft: rgba(102, 163, 255, 0.18);
   --good: #4ecf9f;
   --bad: #ff6d6d;
   --warn: #f4c178;
@@ -16,19 +17,21 @@
 }
 
 [data-theme="light"] {
-  --bg: #f2f6fc;
-  --bg-soft: #dce8f8;
-  --panel: #ffffff;
-  --panel2: #f7faff;
-  --text: #15253c;
-  --muted: #58708f;
-  --line: #d2ddeb;
-  --accent: #1f5fe0;
-  --good: #1e8f63;
-  --bad: #d14343;
-  --warn: #b7771f;
-  --shadow: rgba(34, 55, 84, 0.16);
-  --surface-glow: rgba(31, 95, 224, 0.06);
+  --bg: #f4efe6;
+  --bg-soft: #e8e0d5;
+  --panel: #fbf7ef;
+  --panel2: #fffdf8;
+  --text: #1f2421;
+  --muted: #6f756d;
+  --line: #d8d1c4;
+  --accent: #194a3a;
+  --accent-soft: #d8e6df;
+  --good: #1e6b47;
+  --bad: #b55d2d;
+  --warn: #b55d2d;
+  --shadow: rgba(31, 36, 33, 0.08);
+  --surface-glow: rgba(25, 74, 58, 0.06);
+  --radius: 22px;
 }
 
 body {
@@ -41,6 +44,14 @@ body {
   transition: background 0.2s ease, color 0.2s ease;
 }
 
+[data-theme="light"] body {
+  background:
+    radial-gradient(circle at top left, rgba(25, 74, 58, 0.12), transparent 28%),
+    radial-gradient(circle at right center, rgba(181, 93, 45, 0.08), transparent 24%),
+    var(--bg);
+  font-family: Georgia, "Times New Roman", serif;
+}
+
 a {
   color: inherit;
 }
@@ -50,6 +61,12 @@ a {
   margin: 0 auto;
   padding: 24px 18px 60px;
   min-width: 320px;
+}
+
+/* Used by PageShell inside AppShell — no max-width or min-width to avoid
+   double-capping when the sidebar already constrains the available space */
+.pageShellWrap {
+  padding: 24px 18px 60px;
 }
 
 .header {
@@ -97,7 +114,7 @@ a {
 
 .dashboardWrap {
   display: grid;
-  gap: 14px;
+  gap: 18px;
 }
 
 .dashboardHeader {
@@ -331,7 +348,9 @@ a {
 }
 
 [data-theme="light"] .card {
-  background: linear-gradient(180deg, #ffffff 0%, #f6f9ff 100%);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  box-shadow: 0 14px 30px var(--shadow);
 }
 
 .card h2 {
@@ -422,8 +441,8 @@ a.btn {
 
 .kpirow {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
 }
 
 .kpi {
@@ -455,6 +474,19 @@ a.btn {
   color: var(--muted);
 }
 
+.kpiDetailLink {
+  display: inline-flex;
+  margin-top: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.kpiDetailLink:hover {
+  text-decoration: underline;
+}
+
 .bar {
   height: 10px;
   border-radius: 999px;
@@ -467,6 +499,60 @@ a.btn {
 .bar > span {
   display: block;
   height: 100%;
+}
+
+.netWorthCard {
+  padding: 22px;
+  border-radius: 24px;
+}
+
+.netWorthCard h2 {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  margin-bottom: 12px;
+}
+
+.netWorthCard .big {
+  font-size: clamp(44px, 7vw, 58px);
+  line-height: 0.95;
+  margin: 0 0 14px;
+}
+
+.netWorthCard .kpi {
+  min-height: 132px;
+  border-radius: 16px;
+  padding: 14px 12px;
+}
+
+.netWorthCard .kpi .label {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 11px;
+  margin-bottom: 10px;
+}
+
+.netWorthCard .kpi .val {
+  font-size: clamp(24px, 2.8vw, 34px);
+  line-height: 1.05;
+}
+
+.netWorthCard .kpi .delta {
+  font-size: 13px;
+}
+
+[data-theme="light"] .netWorthCard {
+  background: var(--panel-strong, #fffdf8);
+  border-color: #d8d1c4;
+  box-shadow: 0 14px 30px rgba(31, 36, 33, 0.08);
+}
+
+[data-theme="light"] .netWorthCard .kpi {
+  background: #fffdf8;
+  border-color: #d8d1c4;
+}
+
+[data-theme="light"] .actionQueue {
+  background: #fffdf8;
 }
 
 .legend {
@@ -1036,10 +1122,10 @@ a.btn {
 }
 
 .sidebar {
-  width: 220px;
-  min-width: 220px;
+  width: 272px;
+  min-width: 272px;
   border-right: 1px solid var(--line);
-  background: linear-gradient(180deg, var(--panel) 0%, var(--panel2) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, black 6%) 0%, var(--panel2) 100%);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -1047,6 +1133,12 @@ a.btn {
   height: 100vh;
   overflow-y: auto;
   flex-shrink: 0;
+}
+
+[data-theme="light"] .sidebar {
+  background: linear-gradient(180deg, #f3ebde 0%, #e8dece 100%);
+  border-right-color: #cfc2ac;
+  box-shadow: 6px 0 22px rgba(31, 36, 33, 0.14);
 }
 
 .appShellMain {
@@ -1060,9 +1152,9 @@ a.btn {
 .sidebarNav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
   flex: 1;
-  padding: 16px 10px;
+  padding: 20px 12px;
 }
 
 .sidebarLink {
@@ -1075,10 +1167,10 @@ a.btn {
 }
 
 .sidebarTopLink {
-  padding: 8px 12px;
-  border-radius: 10px;
-  font-size: 13px;
-  font-weight: 600;
+  padding: 11px 14px;
+  border-radius: 14px;
+  font-size: 16px;
+  font-weight: 700;
 }
 
 .sidebarTopLink:hover {
@@ -1090,6 +1182,15 @@ a.btn {
   color: var(--accent) !important;
 }
 
+[data-theme="light"] .sidebarLink {
+  color: #2f463b;
+}
+
+[data-theme="light"] .sidebarLinkActive {
+  background: #194a3a !important;
+  color: #f8f3ea !important;
+}
+
 .sidebarSection {
   margin-top: 2px;
 }
@@ -1099,16 +1200,16 @@ a.btn {
   justify-content: space-between;
   align-items: center;
   width: 100%;
-  padding: 7px 12px;
+  padding: 9px 12px;
   background: none;
   border: none;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 12px;
   font-family: inherit;
 }
 
@@ -1118,21 +1219,21 @@ a.btn {
 }
 
 .sidebarChevron {
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .sidebarChildren {
   display: flex;
   flex-direction: column;
-  gap: 1px;
-  padding: 2px 0 2px 8px;
+  gap: 3px;
+  padding: 4px 0 2px 10px;
 }
 
 .sidebarChildLink {
-  padding: 6px 12px;
-  border-radius: 8px;
+  padding: 9px 12px;
+  border-radius: 12px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .sidebarChildLink:hover {
@@ -1144,10 +1245,10 @@ a.btn {
 
 .sidebarUserArea {
   border-top: 1px solid var(--line);
-  padding: 12px;
+  padding: 16px 14px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   flex-shrink: 0;
 }
 
@@ -1158,28 +1259,28 @@ a.btn {
 }
 
 .sidebarAvatar {
-  width: 28px;
-  height: 28px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   border: 1px solid var(--line);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
   background: var(--surface-glow);
   flex-shrink: 0;
 }
 
 .sidebarUserName {
-  font-size: 13px;
-  color: var(--muted);
+  font-size: 15px;
+  color: var(--text);
 }
 
 .sidebarThemeToggle {
   width: 100%;
   justify-content: center;
-  font-size: 11px;
+  font-size: 13px;
 }
 
 /* ─── Sidebar Badge ──────────────────────────────────────────────── */
@@ -1202,11 +1303,15 @@ a.btn {
 /* ─── Dashboard exposure row (4-col) ─────────────────────────────── */
 
 .rowExposure {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .rowCashAction {
   grid-template-columns: 1fr 1fr;
+}
+
+.rowActionOnly {
+  grid-template-columns: 1fr;
 }
 
 /* ─── Action Queue ───────────────────────────────────────────────── */
@@ -1265,13 +1370,23 @@ a.btn {
 
 /* ─── Responsive ─────────────────────────────────────────────────── */
 
+/* hidden on desktop, shown on mobile as fallback User menu trigger */
+.mobileUserMenu {
+  display: none !important;
+}
+
 @media (max-width: 768px) {
   .sidebar {
     display: none;
   }
 
+  .mobileUserMenu {
+    display: inline-flex !important;
+  }
+
   .rowExposure,
-  .rowCashAction {
+  .rowCashAction,
+  .rowActionOnly {
     grid-template-columns: 1fr;
   }
 }

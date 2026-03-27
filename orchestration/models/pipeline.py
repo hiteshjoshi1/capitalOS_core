@@ -10,6 +10,8 @@ from orchestration.models.build import BuildOutput, RetryEntry, ExtraChangedFile
 from orchestration.models.review import ReviewCycle, HumanDecision
 from orchestration.models.rework import ReworkCycle
 from orchestration.models.ship import ShipResult
+from orchestration.models.verification import VerificationEvidence
+from orchestration.services.required_checks import describe_required_checks
 
 
 def utc_now() -> datetime:
@@ -182,6 +184,10 @@ class PipelineState(BaseModel):
 
         if source_cycle and source_cycle.human_review:
             requirements.extend(
+                f"Required check: {item}"
+                for item in describe_required_checks(source_cycle.human_review.required_checks)
+            )
+            requirements.extend(
                 f"Human response requirement: {item}"
                 for item in source_cycle.human_review.response_requirements
                 if item and item.strip()
@@ -208,3 +214,36 @@ class PipelineState(BaseModel):
             if cycle.rework_cycle_id == self.active_rework_cycle_id:
                 return cycle
         return None
+
+    def get_review_source_verification(self) -> Optional[VerificationEvidence]:
+        active_rework = self.get_active_rework_cycle()
+        if active_rework and active_rework.implementation and active_rework.implementation.verification:
+            return active_rework.implementation.verification
+        if self.build_output and self.build_output.verification:
+            return self.build_output.verification
+        return None
+
+    def get_active_required_checks(self) -> list[str]:
+        source_cycle: Optional[ReviewCycle] = None
+        active_rework = self.get_active_rework_cycle()
+        if active_rework is not None:
+            source_cycle = self.get_review_cycle(active_rework.source_review_id)
+
+        if source_cycle is None:
+            source_cycle = self.get_rework_context_review_cycle() or self.get_active_review_cycle()
+
+        if source_cycle and source_cycle.human_review:
+            return list(source_cycle.human_review.required_checks)
+        return []
+
+    def get_unresolved_required_checks(self) -> list[str]:
+        active = self.get_active_required_checks()
+        if not active:
+            return []
+
+        active_rework = self.get_active_rework_cycle()
+        resolved: set[str] = set()
+        if active_rework and active_rework.implementation:
+            resolved.update(active_rework.implementation.resolved_required_checks)
+
+        return [check_id for check_id in active if check_id not in resolved]

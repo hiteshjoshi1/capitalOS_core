@@ -1,3 +1,4 @@
+from orchestration.models.build import ExtraChangedFile
 from orchestration.models.pipeline import PipelineState
 from orchestration.models.review import AgentReview
 
@@ -6,20 +7,31 @@ def _bullets(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- None"
 
 
-def build_review_prompt(state: PipelineState) -> str:
-    verification_summary = ""
-    if state.build_output and state.build_output.verification:
-        verification_summary = state.build_output.verification.summary
+def build_review_prompt(
+    state: PipelineState,
+    *,
+    verification_summary: str | None = None,
+    pending_extra_files: list[ExtraChangedFile] | None = None,
+) -> str:
+    if verification_summary is None:
+        verification_summary = ""
+        if state.build_output and state.build_output.verification:
+            verification_summary = state.build_output.verification.summary
     changed_files = state.build_output.changed_files if state.build_output else []
     active_rework = state.get_active_rework_cycle()
     source_review = state.get_review_cycle(active_rework.source_review_id) if active_rework else None
     source_human_review = source_review.human_review if source_review else None
+    pending_extra_files = pending_extra_files or []
     approved_extra_files = ""
     if state.approved_extra_files:
         approved_extra_files = "\n".join(
             f"- {item.path}: {item.reason or 'approved without recorded rationale'}"
             for item in state.approved_extra_files
         )
+    extra_changed_files = "\n".join(
+        f"- {item.path}: {item.reason or 'No reason recorded.'}"
+        for item in pending_extra_files
+    )
     semantic_requirements = state.get_semantic_requirements()
 
     return f"""
@@ -57,6 +69,9 @@ Changed files observed by the pipeline:
 Approved extra files:
 {approved_extra_files or "None"}
 
+Unapproved extra files pending human decision:
+{extra_changed_files or "None"}
+
 Semantic requirements to verify against implementation:
 {_bullets(semantic_requirements)}
 
@@ -66,6 +81,8 @@ Source review human guidance:
 - notes: {source_human_review.notes if source_human_review and source_human_review.notes else "None"}
 - response_requirements:
 {chr(10).join(f"- {item}" for item in (source_human_review.response_requirements if source_human_review else [])) or "- None"}
+- required_checks:
+{chr(10).join(f"- {item}" for item in (source_human_review.required_checks if source_human_review else [])) or "- None"}
 - unresolved_comments:
 {chr(10).join(f"- {item}" for item in (source_human_review.unresolved_comments if source_human_review else [])) or "- None"}
 
@@ -77,7 +94,8 @@ Review rules:
 5) Perform a grounded semantic verification pass against the implementation, not just string presence or stage summaries.
 6) For each semantic requirement above, either record concrete evidence in `semantic_verification` or raise a concrete finding/test gap that explains what is still missing.
 7) If the task changes documentation or workflow behavior, compare the docs against the real implementation sources (for example Makefile, CLI, routing, or task commands) rather than treating command mentions as sufficient.
-""".strip()
+8) Do not fail solely because extra files are pending human approval. Review the substantive implementation and let the human decide whether those extra files are acceptable.
+    """.strip()
 
 
 def build_escalation_review_prompt(state: PipelineState, primary_review: AgentReview) -> str:

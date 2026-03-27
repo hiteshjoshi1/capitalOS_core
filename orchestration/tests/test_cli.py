@@ -220,8 +220,10 @@ def test_build_interactive_resume_payload_for_approval() -> None:
         "reviewer": "Hitesh",
         "notes": "Looks good.",
         "questions": [],
+        "required_checks": [],
         "response_requirements": [],
         "unresolved_comments": [],
+        "approved_retry_count": 0,
     }
 
 
@@ -232,6 +234,7 @@ def test_build_interactive_resume_payload_for_needs_fixes() -> None:
             "Hitesh",
             "Please fix the scope issue.",
             "Was SQLite considered? | Why was cash included?",
+            "api.dashboard.summary_contract | state.human_review_restore_roundtrip",
             "Use SQLite-safe SQL | update the failing risk-card assertion",
             "Do not ship until tests pass | explain extra file changes",
         ]
@@ -248,8 +251,48 @@ def test_build_interactive_resume_payload_for_needs_fixes() -> None:
         "reviewer": "Hitesh",
         "notes": "Please fix the scope issue.",
         "questions": ["Was SQLite considered?", "Why was cash included?"],
+        "required_checks": ["api.dashboard.summary_contract", "state.human_review_restore_roundtrip"],
         "response_requirements": ["Use SQLite-safe SQL", "update the failing risk-card assertion"],
         "unresolved_comments": ["Do not ship until tests pass", "explain extra file changes"],
+        "approved_retry_count": 0,
+    }
+
+
+def test_build_interactive_resume_payload_for_build_retry_approval() -> None:
+    answers = iter(
+        [
+            "y",
+            "Hitesh",
+            "",
+            "",
+            "2",
+        ]
+    )
+    payload = build_interactive_resume_payload(
+        {
+            "gate": "build_retry_approval",
+            "retry_request": {
+                "summary": "A different selector strategy should unblock the failing e2e test.",
+                "why_more_retries_help": "The failure signature changed after the last fix and a narrower retry should work.",
+                "proposed_new_strategy": "Update the sidebar selector assertions before rerunning Playwright.",
+                "requested_retry_count": 2,
+                "valid_reason": True,
+            },
+        },
+        input_fn=lambda prompt: next(answers),
+        print_fn=lambda message: None,
+    )
+
+    assert payload == {
+        "gate_type": "build_retry_approval",
+        "decision": "approved",
+        "reviewer": "Hitesh",
+        "notes": "",
+        "questions": [],
+        "required_checks": [],
+        "response_requirements": [],
+        "unresolved_comments": [],
+        "approved_retry_count": 2,
     }
 
 
@@ -260,6 +303,7 @@ def test_build_interactive_resume_payload_prompts_for_response_requirements() ->
             "Hitesh",
             "Please address the regression.",
             "",
+            "ui.dashboard.exposure_labels | ui.theme_toggle.accessible_name",
             "Keep /holdings stock-only | Verify /crypto/holdings stays crypto-only",
             "Do not merge stock and crypto detail pages",
         ]
@@ -275,6 +319,10 @@ def test_build_interactive_resume_payload_prompts_for_response_requirements() ->
 
     assert "What must be addressed before approval?" in output
     assert any("Response requirements for the next rework/review" in prompt for prompt in prompts)
+    assert payload["required_checks"] == [
+        "ui.dashboard.exposure_labels",
+        "ui.theme_toggle.accessible_name",
+    ]
     assert payload["response_requirements"] == [
         "Keep /holdings stock-only",
         "Verify /crypto/holdings stays crypto-only",

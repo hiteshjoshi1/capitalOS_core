@@ -287,6 +287,17 @@ def build_interactive_resume_payload(
         if agent_review:
             print_fn(f"Agent decision: {agent_review.get('decision')}")
             print_fn(f"Agent summary: {agent_review.get('summary')}")
+    elif gate == "build_retry_approval":
+        retry_request = interrupt.get("retry_request") or {}
+        print_fn(f"Retry summary: {retry_request.get('summary') or 'None'}")
+        print_fn(
+            f"Why more retries may help: {retry_request.get('why_more_retries_help') or 'None'}"
+        )
+        print_fn(
+            f"Proposed new strategy: {retry_request.get('proposed_new_strategy') or 'None'}"
+        )
+        requested = retry_request.get("requested_retry_count") or 0
+        print_fn(f"Requested additional retries: {requested}")
 
     decision = _prompt_decision(input_fn)
     reviewer = _prompt_non_empty("Reviewer name: ", input_fn)
@@ -297,10 +308,21 @@ def build_interactive_resume_payload(
     questions = _parse_list_input(
         input_fn("Questions (optional, separate with ' | '): ").strip()
     )
+    required_checks: list[str] = []
     response_requirements: list[str] = []
     unresolved_comments: list[str] = []
+    approved_retry_count = 0
+    if gate == "build_retry_approval" and decision == "approved":
+        approved_retry_count = int(
+            _prompt_non_empty("Approved additional retries: ", input_fn)
+        )
     if decision == "needs_fixes":
         print_fn("What must be addressed before approval?")
+        required_checks = _parse_list_input(
+            input_fn(
+                "Required check IDs for the next rework/review (optional, separate with ' | '): "
+            ).strip()
+        )
         response_requirements = _parse_list_input(
             input_fn(
                 "Response requirements for the next rework/review (optional, separate with ' | '): "
@@ -318,8 +340,10 @@ def build_interactive_resume_payload(
         "reviewer": reviewer,
         "notes": notes,
         "questions": questions,
+        "required_checks": required_checks,
         "response_requirements": response_requirements,
         "unresolved_comments": unresolved_comments,
+        "approved_retry_count": approved_retry_count,
     }
     return payload
 
