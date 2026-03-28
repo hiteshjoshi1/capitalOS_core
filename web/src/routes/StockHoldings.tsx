@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
@@ -21,8 +22,8 @@ export default function StockHoldings() {
     (async () => {
       try {
         setState("loading");
-        const data = await api.stockHoldingsSummary(month, baseCurrency);
-        setSummary(data);
+        const stockData = await api.stockHoldingsSummary(month, baseCurrency);
+        setSummary(stockData);
         setState("ready");
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -89,7 +90,7 @@ export default function StockHoldings() {
       )}
 
       {state === "ready" && (
-        <section className="grid g-mid">
+        <section className="grid g-mid stockHoldingsLayout">
           <div className="card">
             <div className="stockHoldingsHeader">
               <h2>Top Holdings</h2>
@@ -103,14 +104,11 @@ export default function StockHoldings() {
                   <tr>
                     <th>#</th>
                     <th>Asset</th>
-                    <th>Class</th>
                     <th className="right">% NW</th>
                     <th className="right">Value</th>
                     <th className="right">Shares</th>
                     <th className="right">Purchase Price</th>
                     <th className="right">Current Price</th>
-                    <th>Geo</th>
-                    <th>Platform</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -118,19 +116,16 @@ export default function StockHoldings() {
                     <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
                       <td>{idx + 1}</td>
                       <td className="stockHoldingsSymbol">{h.symbol}</td>
-                      <td className="muted">{h.asset_class}</td>
                       <td className="right">{h.percent_of_networth.toFixed(1)}%</td>
                       <td className="right">{formatMoney(h.value)}</td>
                       <td className="right">{formatQuantity(h.quantity)}</td>
                       <td className="right">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
                       <td className="right">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
-                      <td className="muted">{h.geo ?? "—"}</td>
-                      <td className="muted">{h.platform ?? "—"}</td>
                     </tr>
                   ))}
                   {summary && holdings.length === 0 && (
                     <tr>
-                      <td className="muted" colSpan={10}>No holdings available.</td>
+                      <td className="muted" colSpan={7}>No holdings available.</td>
                     </tr>
                   )}
                 </tbody>
@@ -156,6 +151,16 @@ export default function StockHoldings() {
                 </button>
               </div>
             ) : null}
+          </div>
+
+          <div className="card stockHoldingsDividendsCard">
+            <div className="stockHoldingsDividendsIntro">
+              <h2>Dividends</h2>
+              <p className="stockHoldingsDividendsText">
+                Track realized payouts and annualized expected dividend income.
+              </p>
+            </div>
+            <Link className="btn stockHoldingsDividendsBtn" to="/dividends">Open full Dividends view</Link>
           </div>
         </section>
       )}

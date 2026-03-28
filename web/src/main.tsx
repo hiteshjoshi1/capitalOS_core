@@ -26,6 +26,7 @@ import CashFlowDetail from "./routes/CashFlowDetail.tsx";
 import CashFlowMapping from "./routes/CashFlowMapping.tsx";
 import Alerts from "./routes/Alerts.tsx";
 import WealthOverview from "./routes/WealthOverview.tsx";
+import Dividends from "./routes/Dividends.tsx";
 import Loans from "./routes/Loans.tsx";
 import Companies from "./routes/Companies.tsx";
 import AIGuru from "./routes/AIGuru.tsx";
@@ -76,6 +77,7 @@ createRoot(document.getElementById("root")!).render(
                       <Route element={<AppShell />}>
                         <Route path="/" element={<App />} />
                         <Route path="/wealth" element={<WealthOverview />} />
+                        <Route path="/dividends" element={<Dividends />} />
                         <Route path="/holdings" element={<StockHoldings />} />
                         <Route path="/crypto" element={<CryptoWallets />} />
                         <Route path="/crypto/holdings" element={<CryptoHoldings />} />

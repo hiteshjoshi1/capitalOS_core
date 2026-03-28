@@ -80,6 +80,10 @@ def _normalize_trade(row: Dict[str, str]) -> Dict[str, Any]:
     side = (row.get("Buy/Sell", "") or row.get("buy/sell", "")).strip().upper()
     symbol = (row.get("Symbol", "") or row.get("symbol", "")).strip()
     currency = row.get("Currency", "") or row.get("currency", "")
+    quantity_raw = row.get("Quantity", "") or row.get("quantity", "") or row.get("Shares", "") or row.get("shares", "")
+    quantity = _to_float(quantity_raw) if str(quantity_raw).strip() else 0.0
+    asset_class_raw = (row.get("Asset Class") or row.get("Asset Category") or row.get("asset class") or "Stock")
+    asset_class = _map_asset_class(asset_class_raw)
     ts = _parse_datetime(row.get("Date", "") or row.get("date", ""))
     net_cash = row.get("Net Cash", "") or row.get("net cash", "")
     amount = _to_float(net_cash)
@@ -99,6 +103,9 @@ def _normalize_trade(row: Dict[str, str]) -> Dict[str, Any]:
         "currency": currency,
         "category": "Brokerage::Trade",
         "merchant_counterparty": symbol or "IBKR",
+        "symbol": symbol or None,
+        "quantity": abs(quantity) if quantity else None,
+        "asset_class": asset_class,
     }
 
 

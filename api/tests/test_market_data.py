@@ -1,8 +1,38 @@
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy import text
 
 from app.market_data import providers
+
+
+@pytest.fixture(autouse=True)
+def _stub_dividend_yield_fetch(monkeypatch):
+    monkeypatch.setattr(
+        "app.market_data.providers.YFinanceProvider.fetch_dividend_yields",
+        lambda self, symbols, **kwargs: {},
+    )
+
+
+def test_yfinance_nse_symbol_normalization():
+    provider = providers.YFinanceProvider()
+    assert provider._normalize_symbol("NSE:RELIANCE", "NSE") == "RELIANCE.NS"
+    assert provider._normalize_symbol("RELIANCE.NSE", "NSE") == "RELIANCE.NS"
+    assert provider._normalize_symbol("M&M", "NSE") == "M&M.NS"
+
+
+def test_yfinance_dividend_yield_subunit_percent_hint_for_non_us():
+    provider = providers.YFinanceProvider()
+    value = provider._choose_reported_yield_rate(0.23, prefer_percent_for_subunit=True)
+    assert value is not None
+    assert value == pytest.approx(0.0023, rel=1e-9)
+
+
+def test_yfinance_dividend_yield_subunit_uses_implied_anchor():
+    provider = providers.YFinanceProvider()
+    value = provider._choose_reported_yield_rate(0.23, implied_yield=0.0021)
+    assert value is not None
+    assert value == pytest.approx(0.0023, rel=1e-9)
 
 
 def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
@@ -224,6 +254,68 @@ def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, mon
         ).fetchone()
     assert row is not None
     assert row[0] == "HKD"
+
+
+def test_market_data_auto_backfills_missing_nse_symbol_map(client, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(140, 'INFOSYS LIMITED', 'INFY', 'STOCK', 'INR', 'IN')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
+                (540, 'Sharekhan', 'SHAREKHAN', 'BROKER', 'INR', 'IN')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES
+                (740, 540, 140, '2026-03-06T00:00:00+00:00', 10, 1500, 15000)
+                """
+            )
+        )
+
+    def fake_yfinance(self, symbols, exchange_code=None, trade_date=None):
+        assert exchange_code == "NSE"
+        assert "INFY.NS" in symbols
+        return {
+            "INFY.NS": providers.EodQuote(
+                provider="yfinance",
+                symbol="INFY.NS",
+                trade_date=datetime(2026, 2, 6, tzinfo=timezone.utc).date(),
+                close=1500.0,
+                currency="INR",
+            )
+        }
+
+    monkeypatch.setattr("app.market_data.providers.YFinanceProvider.fetch_prices", fake_yfinance)
+
+    resp = client.post("/market-data/refresh-now")
+    assert resp.status_code == 200
+    nse = [x for x in resp.json()["exchanges"] if x["exchange_code"] == "NSE"][0]
+    assert nse["backfilled_symbols"] >= 1
+    assert nse["upserted_rows"] >= 1
+
+    with db_engine.begin() as conn:
+        map_row = conn.execute(
+            text(
+                """
+                SELECT exchange_code, exchange_symbol
+                FROM market_symbol_map
+                WHERE asset_id = 140
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+        assert map_row is not None
+        assert map_row[0] == "NSE"
+        assert map_row[1] == "INFY"
 
 
 def test_market_data_does_not_update_on_invalid_price(client, db_engine, monkeypatch):
