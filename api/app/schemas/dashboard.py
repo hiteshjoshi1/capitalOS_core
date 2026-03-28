@@ -67,6 +67,14 @@ class DashboardSummaryResponse(BaseModel):
         populate_by_name = True
 
 
+class StockHoldingsResponse(BaseModel):
+    as_of_month: str
+    base_currency: str
+    snapshot_day: Optional[int] = None
+    net_worth_as_of: Optional[str] = None
+    top_holdings: List[TopHolding]
+
+
 class PlatformAllocationItem(BaseModel):
     platform: str
     platform_type: str | None = None

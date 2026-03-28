@@ -95,6 +95,14 @@ net_worth_change: null | {
 cash_percent: number;
 };
 
+export type StockHoldingsSummary = {
+  as_of_month: string;
+  base_currency: string;
+  snapshot_day: number | null;
+  net_worth_as_of: string | null;
+  top_holdings: DashboardSummary["top_holdings"];
+};
+
 export type SpendingSummary = {
   month: string;
   base_currency: string;
@@ -499,6 +507,8 @@ export const api = {
     }),
   dashboardSummary: (month: string, compare?: string, baseCurrency = "SGD", skipNetworth = false) =>
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
+  stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
+    req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   cashDeposits: (month: string, baseCurrency = "SGD") =>
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>

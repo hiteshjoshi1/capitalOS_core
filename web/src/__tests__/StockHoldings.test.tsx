@@ -1,40 +1,25 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import StockHoldings from "../routes/StockHoldings";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { DashboardSummary } from "../lib/api";
+import type { StockHoldingsSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
-    dashboardSummary: vi.fn(),
+    stockHoldingsSummary: vi.fn(),
   },
 }));
 
 const mockApi = vi.mocked(api, true);
 
-const summaryFixture: DashboardSummary = {
+const summaryFixture: StockHoldingsSummary = {
   as_of_month: "2026-02",
   base_currency: "SGD",
   snapshot_day: 6,
   net_worth_as_of: "2026-02-06T00:00:00+00:00",
-  net_worth_change: null,
-  net_worth: {
-    total: 500000,
-    cash: 50000,
-    stocks_funds: 450000,
-    crypto: 0,
-    liabilities: 0,
-  },
-  geography: [],
-  cash_flow: {
-    income: 0,
-    expenses: 0,
-    net: 0,
-    savings_rate: null,
-  },
   top_holdings: [
     {
       asset_id: 1,
@@ -76,13 +61,11 @@ const summaryFixture: DashboardSummary = {
       platform: "DBS",
     },
   ],
-  cash_balances: [{ currency: "USD", value: 50000 }],
-  cash_percent: 10.0,
 };
 
 describe("StockHoldings", () => {
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
-    mockApi.dashboardSummary.mockResolvedValueOnce(summaryFixture);
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
 
     render(
       <ThemeProvider>
@@ -117,5 +100,43 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("20")).toBeInTheDocument();
       expect(scoped.getAllByText("—").length).toBeGreaterThanOrEqual(2);
     }
+  });
+
+  it("shows top 20 positions first and reveals more on Next", async () => {
+    const manyHoldings: StockHoldingsSummary = {
+      ...summaryFixture,
+      top_holdings: Array.from({ length: 25 }, (_, idx) => ({
+        asset_id: idx + 100,
+        symbol: `POS${idx + 1}`,
+        asset_class: "STOCK" as const,
+        value: 100000 - idx * 1000,
+        percent_of_networth: 10 - idx * 0.1,
+        quantity: idx + 1,
+        avg_cost: 100 + idx,
+        latest_price: 110 + idx,
+        quote_currency: "USD",
+        geo: "US",
+        platform: "IBKR",
+      })),
+    };
+
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(manyHoldings);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Showing 20 of 25 positions")).toBeInTheDocument();
+    expect(screen.getByText("POS20")).toBeInTheDocument();
+    expect(screen.queryByText("POS21")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByText("Showing 25 of 25 positions")).toBeInTheDocument();
+    expect(screen.getByText("POS25")).toBeInTheDocument();
   });
 });

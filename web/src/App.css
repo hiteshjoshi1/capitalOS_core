@@ -700,6 +700,57 @@ a.btn {
   border-bottom: none;
 }
 
+.stockHoldingsHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.stockHoldingsMeta {
+  font-size: 12px;
+}
+
+.stockHoldingsTableWrap {
+  overflow-x: auto;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent 28%);
+  border-radius: 12px;
+}
+
+.stockHoldingsTable {
+  min-width: 1080px;
+  border: none;
+  border-radius: 0;
+}
+
+.stockHoldingsTable th {
+  position: sticky;
+  top: 0;
+  background: color-mix(in srgb, var(--panel2) 90%, white 10%);
+  z-index: 1;
+}
+
+.stockHoldingsTable tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--panel2) 84%, transparent 16%);
+}
+
+.stockHoldingsTable tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel2) 86%);
+}
+
+.stockHoldingsSymbol {
+  font-weight: 700;
+  letter-spacing: 0.15px;
+}
+
+.stockHoldingsControls {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .mappingTableWrap {
   margin-top: 12px;
   overflow-x: auto;

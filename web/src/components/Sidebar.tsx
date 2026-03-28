@@ -34,6 +34,8 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: "Operations",
     children: [
+      { label: "Add Account", to: "/accounts/new" },
+      { label: "Platforms", to: "/platforms" },
       { label: "Ingest", to: "/ingest" },
       { label: "Market Data", to: "/market-data" },
       { label: "Cash Mapping", to: "/cash-flow/mapping" },

@@ -70,4 +70,15 @@ describe("api.dashboardBootstrap – URL correctness", () => {
     expect(calledUrl).toContain("month=2026-03");
     expect(calledUrl).toContain("base_currency=USD");
   });
+
+  it("calls /dashboard/stock-holdings for stockHoldingsSummary", async () => {
+    const { api } = await import("../lib/api");
+
+    await api.stockHoldingsSummary("2026-03", "USD");
+
+    const calledUrl: string = fetchSpy.mock.calls[0][0] as string;
+    expect(calledUrl).toContain("/dashboard/stock-holdings");
+    expect(calledUrl).toContain("month=2026-03");
+    expect(calledUrl).toContain("base_currency=USD");
+  });
 });

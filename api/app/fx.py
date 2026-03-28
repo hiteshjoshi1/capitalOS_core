@@ -9,7 +9,10 @@ from typing import Dict, Iterable
 import httpx
 
 _CACHE: dict[tuple[str, str, tuple[str, ...]], tuple[float, dict[str, float]]] = {}
-_TTL_SECONDS = 900
+try:
+    _TTL_SECONDS = max(1, int(os.getenv("FX_CACHE_TTL_SECONDS", "86400")))
+except ValueError:
+    _TTL_SECONDS = 86400
 def _fallback_rates_from_env() -> dict[str, dict[str, float]]:
     raw = os.getenv("FX_FALLBACK_RATES", "").strip()
     if not raw:
