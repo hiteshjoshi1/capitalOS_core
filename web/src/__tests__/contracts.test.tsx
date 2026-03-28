@@ -164,6 +164,8 @@ describe("frontend contracts", () => {
     expect(operationsToggle).toHaveAttribute("aria-expanded", "false");
 
     await user.click(operationsToggle);
+    expect(screen.getByRole("link", { name: "Add Account" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Platforms" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ingest" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Market Data" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cash Mapping" })).toBeInTheDocument();

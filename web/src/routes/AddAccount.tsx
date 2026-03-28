@@ -4,6 +4,7 @@ import { api } from "../lib/api";
 import type { AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -34,7 +35,7 @@ export default function AddAccount() {
   const [currencies, setCurrencies] = useState<Currency[]>([]);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
   const [showPlatformForm, setShowPlatformForm] = useState<boolean>(false);
-  const [platformForm, setPlatformForm] = useState({
+  const [platformForm, setPlatformForm] = useState<PlatformDraft>({
     code: "",
     name: "",
     platform_type: "",
@@ -358,105 +359,15 @@ export default function AddAccount() {
             <div className="modalBackdrop" role="dialog" aria-modal="true">
               <div className="modal">
                 <div className="cardTitle">New Platform</div>
-                <form className="formGrid" onSubmit={onCreatePlatform}>
-                <label className="field">
-                  <span className="label">Code</span>
-                  <input
-                    className="input"
-                    type="text"
-                    value={platformForm.code}
-                    aria-label="Platform Code"
-                    onChange={(e) => setPlatformForm((prev) => ({ ...prev, code: e.target.value }))}
-                    placeholder="e.g. DBS"
-                    required
-                  />
-                </label>
-                <label className="field">
-                  <span className="label">Name</span>
-                  <input
-                    className="input"
-                    type="text"
-                    value={platformForm.name}
-                    aria-label="Platform Name"
-                    onChange={(e) => setPlatformForm((prev) => ({ ...prev, name: e.target.value }))}
-                    placeholder="e.g. DBS Bank"
-                    required
-                  />
-                </label>
-                <label className="field">
-                  <span className="label">Platform Type</span>
-                  <select
-                    className="input"
-                    value={platformForm.platform_type}
-                    aria-label="Platform Type"
-                    onChange={(e) =>
-                      setPlatformForm((prev) => ({ ...prev, platform_type: e.target.value }))
-                    }
-                    required
-                  >
-                    <option value="" disabled>
-                      Select type
-                    </option>
-                    {platformTypes.map((t) => (
-                      <option key={t} value={t}>
-                        {t}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="field">
-                  <span className="label">Country</span>
-                  {platformCountries.length > 0 ? (
-                    <select
-                      className="input"
-                      value={platformForm.country}
-                      aria-label="Platform Country"
-                      onChange={(e) =>
-                        setPlatformForm((prev) => ({ ...prev, country: e.target.value }))
-                      }
-                      required
-                    >
-                      <option value="" disabled>
-                        Select country
-                      </option>
-                      {platformCountries.map((c) => (
-                        <option key={c} value={c}>
-                          {c}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      className="input"
-                      type="text"
-                      value={platformForm.country}
-                      aria-label="Platform Country"
-                      onChange={(e) => setPlatformForm((prev) => ({ ...prev, country: e.target.value }))}
-                      placeholder="e.g. SG"
-                      required
-                    />
-                  )}
-                </label>
-                <label className="field">
-                  <span className="label">Website</span>
-                  <input
-                    className="input"
-                    type="url"
-                    value={platformForm.website}
-                    aria-label="Platform Website"
-                    onChange={(e) => setPlatformForm((prev) => ({ ...prev, website: e.target.value }))}
-                    placeholder="https://www.example.com"
-                  />
-                </label>
-                <div className="actions">
-                  <button className="btn" type="submit">
-                    Save platform
-                  </button>
-                  <button className="btn" type="button" onClick={() => setShowPlatformForm(false)}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
+                <PlatformDetailsForm
+                  value={platformForm}
+                  platformTypes={platformTypes}
+                  platformCountries={platformCountries}
+                  onChange={setPlatformForm}
+                  onSubmit={onCreatePlatform}
+                  onCancel={() => setShowPlatformForm(false)}
+                  submitLabel="Save platform"
+                />
               </div>
             </div>
           )}

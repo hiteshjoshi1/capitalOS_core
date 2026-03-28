@@ -11,6 +11,7 @@ import Loans from "../routes/Loans";
 import Companies from "../routes/Companies";
 import AIGuru from "../routes/AIGuru";
 import Settings from "../routes/Settings";
+import Platforms from "../routes/Platforms";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -34,6 +35,13 @@ vi.mock("../lib/api", () => ({
       cash_balances: [],
     }),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
+    platforms: vi.fn().mockResolvedValue([]),
+    platformOptions: vi.fn().mockResolvedValue({
+      platform_types: ["BANK", "BROKER"],
+      countries: ["SG", "US"],
+      country_pattern: "^[A-Z]{2,3}$",
+    }),
+    createPlatform: vi.fn(),
   },
 }));
 
@@ -108,6 +116,7 @@ describe("Placeholder route smoke tests", () => {
     { path: "/companies", component: <Companies />, heading: "Companies" },
     { path: "/ai-guru", component: <AIGuru />, heading: "AI Guru" },
     { path: "/settings", component: <Settings />, heading: "Settings" },
+    { path: "/platforms", component: <Platforms />, heading: "Platforms" },
   ];
 
   routes.forEach(({ path, component, heading }) => {

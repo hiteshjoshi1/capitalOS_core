@@ -30,6 +30,7 @@ import Loans from "./routes/Loans.tsx";
 import Companies from "./routes/Companies.tsx";
 import AIGuru from "./routes/AIGuru.tsx";
 import Settings from "./routes/Settings.tsx";
+import Platforms from "./routes/Platforms.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
@@ -90,6 +91,7 @@ createRoot(document.getElementById("root")!).render(
                         <Route path="/market-data" element={<MarketData />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="/accounts/new" element={<AddAccount />} />
+                        <Route path="/platforms" element={<Platforms />} />
                       </Route>
                     </Routes>
                   </BrowserRouter>
