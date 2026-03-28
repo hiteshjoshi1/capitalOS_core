@@ -243,6 +243,20 @@ export type PlatformAllocation = {
   }>;
 };
 
+export type GeographyExposure = {
+  as_of: string | null;
+  base_currency: string;
+  total: number;
+  items: Array<{
+    country: string;
+    stocks_funds: number;
+    cash: number;
+    crypto: number;
+    total: number;
+    percent: number;
+  }>;
+};
+
 export type CashDeposits = {
   total: number;
   items: Array<{
@@ -619,6 +633,8 @@ export const api = {
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>
     req<PlatformAllocation>(`/dashboard/platform-allocation?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  dashboardGeographyExposure: (month: string, baseCurrency = "SGD") =>
+    req<GeographyExposure>(`/dashboard/geography-exposure?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockExposure: (month: string, baseCurrency = "SGD") =>
     req<StockExposure>(`/dashboard/stock-exposure?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   spendingSummary: (month: string, baseCurrency = "SGD") =>

@@ -114,6 +114,22 @@ class StockExposureOut(BaseModel):
     by_platform: list[StockExposureItem]
 
 
+class GeographyExposureItem(BaseModel):
+    country: str
+    stocks_funds: float
+    cash: float
+    crypto: float
+    total: float
+    percent: float
+
+
+class GeographyExposureOut(BaseModel):
+    as_of: str | None = None
+    base_currency: str
+    total: float
+    items: list[GeographyExposureItem]
+
+
 class BootstrapResponse(BaseModel):
     as_of_month: str
     base_currency: str

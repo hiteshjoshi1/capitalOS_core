@@ -19,6 +19,9 @@ Mode: Deterministic, verifiable, reproducible
 10. Do not refactor outside scope
 11. If acceptance criteria unclear, update plan doc and stop
 12. Max 3 retries per failing command
+13. Test every change
+14. Run unit tests and integration tests as per changes made
+
 
 ---
 

@@ -34,6 +34,12 @@ vi.mock("../lib/api", () => ({
       top_holdings: [],
       cash_balances: [],
     }),
+    dashboardGeographyExposure: vi.fn().mockResolvedValue({
+      as_of: "2026-02-06",
+      base_currency: "SGD",
+      total: 100000,
+      items: [],
+    }),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     platforms: vi.fn().mockResolvedValue([]),
     platformOptions: vi.fn().mockResolvedValue({
