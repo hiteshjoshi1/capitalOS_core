@@ -163,9 +163,6 @@ export default function App() {
               <div className="card actionQueue" aria-label="Action queue">
                 <h2>Action Queue</h2>
                 <div className="actionQueueItems">
-                  <Link to="/cash-flow/mapping" className="actionQueueItem">
-                    <span>Review cash mapping queue</span>
-                  </Link>
                   <div className="muted actionQueueEmpty">No pending actions</div>
                 </div>
               </div>

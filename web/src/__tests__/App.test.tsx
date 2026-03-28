@@ -115,14 +115,11 @@ describe("App (thin Dashboard)", () => {
     });
   });
 
-  it("renders action queue mapping link without loading unmapped transactions", async () => {
+  it("does not render cash mapping link on dashboard action queue", async () => {
     renderApp();
     await waitFor(() => {
-      expect(screen.getByText("Review cash mapping queue")).toBeInTheDocument();
-      expect(screen.getByRole("link", { name: "Review cash mapping queue" })).toHaveAttribute(
-        "href",
-        "/cash-flow/mapping",
-      );
+      expect(screen.queryByText("Review cash mapping queue")).not.toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "Review cash mapping queue" })).not.toBeInTheDocument();
     });
   });
 

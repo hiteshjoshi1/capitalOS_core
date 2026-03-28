@@ -17,6 +17,7 @@ from app.schemas.dashboard import (
     DashboardSummaryResponse,
     PlatformAllocationItem,
     PlatformAllocationOut,
+    StockHoldingsResponse,
     StockExposureItem,
     StockExposureOut,
 )
@@ -25,6 +26,16 @@ from app.fx import get_rates
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 _UPPERCASE_SOURCE_CODES = {"DBS", "OCBC", "UOB", "IBKR", "POSB", "CITI", "HSBC", "SCB"}
+
+
+def _summary_top_holdings_limit() -> int:
+    raw = os.getenv("DASHBOARD_TOP_HOLDINGS_LIMIT", "200")
+    try:
+        limit = int(raw)
+    except ValueError:
+        limit = 200
+    # Keep payload bounded while allowing rich detail pages to paginate client-side.
+    return max(20, min(limit, 500))
 
 
 def _parse_month(month: str) -> datetime:
@@ -787,11 +798,12 @@ def dashboard_summary(
     # Snapshot anchor + effective snapshot timestamp
     anchor = _anchor_ts(month_start)
     snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    top_holdings_limit = _summary_top_holdings_limit()
 
     if skip_networth:
         nw = _networth_components(db, anchor, base_currency)
         geo = _geography(db, anchor, nw["total"], base_currency)
-        top = _top_holdings(db, anchor, nw["total"], base_currency, limit=15)
+        top = _top_holdings(db, anchor, nw["total"], base_currency, limit=top_holdings_limit)
         cash_balances = _cash_balances(db, anchor, base_currency)
         cf = _cashflow(db, month_start, month_end, base_currency)
         cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
@@ -810,7 +822,7 @@ def dashboard_summary(
 
     nw = _networth_components(db, anchor, base_currency)
     geo = _geography(db, anchor, nw["total"], base_currency)
-    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=15)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=top_holdings_limit)
     cash_balances = _cash_balances(db, anchor, base_currency)
     cf = _cashflow(db, month_start, month_end, base_currency)
 
@@ -862,6 +874,29 @@ def dashboard_summary(
         "cash_balances": cash_balances,
         "net_worth_change": changes if changes else None,
         "cash_percent": cash_percent,
+    }
+
+
+@router.get("/stock-holdings", response_model=StockHoldingsResponse)
+def stock_holdings_summary(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start)
+    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    top_holdings_limit = _summary_top_holdings_limit()
+    as_of = _effective_as_of(db, anchor)
+    nw = _networth_components(db, anchor, base_currency)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=top_holdings_limit)
+
+    return {
+        "as_of_month": month,
+        "base_currency": base_currency,
+        "snapshot_day": snapshot_day,
+        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "top_holdings": top,
     }
 
 

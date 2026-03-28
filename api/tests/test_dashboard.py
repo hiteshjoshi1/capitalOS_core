@@ -33,6 +33,24 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert changes["pct"] == 10000.0 / 90000.0
 
 
+def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_dashboard_data):
+    resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["as_of_month"] == "2026-02"
+    assert data["base_currency"] == "SGD"
+    assert "top_holdings" in data
+    assert len(data["top_holdings"]) > 0
+
+    # stocks-only endpoint should not include heavy dashboard sections
+    assert "geography" not in data
+    assert "cash_flow" not in data
+    assert "cash_balances" not in data
+    assert "net_worth" not in data
+    assert "net_worth_change" not in data
+
+
 def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, db_engine, monkeypatch):
     from datetime import datetime, timezone
 
@@ -697,7 +715,7 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
     assert row["quote_currency"] == "HKD"
 
 
-def test_dashboard_top_holdings_limit_is_15(client: TestClient, db_engine, monkeypatch):
+def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client: TestClient, db_engine, monkeypatch):
     from sqlalchemy import text
     from datetime import datetime, timezone
 
@@ -763,7 +781,7 @@ def test_dashboard_top_holdings_limit_is_15(client: TestClient, db_engine, monke
     assert resp.status_code == 200
     data = resp.json()
     non_cash = [row for row in data["top_holdings"] if row["asset_class"] != "CASH"]
-    assert len(non_cash) == 15
+    assert len(non_cash) == 18
 
 
 def test_dashboard_fallback_join_multiple_crypto_assets_no_doublecount(client: TestClient, db_engine, monkeypatch):

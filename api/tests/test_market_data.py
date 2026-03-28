@@ -24,7 +24,7 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
             )
         )
 
-    def fake_finnhub(self, symbols):
+    def fake_finnhub(self, symbols, exchange_code=None, trade_date=None):
         return {
             "AAPL": providers.EodQuote(
                 provider="finnhub",
@@ -38,7 +38,7 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
     def fake_eod(self, symbols, trade_date=None):
         return {}
 
-    def fake_yahoo(self, symbols):
+    def fake_yahoo(self, symbols, exchange_code=None, trade_date=None):
         return {
             "AAPL": providers.EodQuote(
                 provider="yahoo",
@@ -49,9 +49,9 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
             ),
         }
 
-    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_quotes", fake_finnhub)
+    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
     monkeypatch.setattr("app.market_data.providers.EODHDProvider.fetch_eod_single", fake_eod)
-    monkeypatch.setattr("app.market_data.providers.YahooProvider.fetch_quotes", fake_yahoo)
+    monkeypatch.setattr("app.market_data.providers.YahooProvider.fetch_prices", fake_yahoo)
 
     resp = client.post("/market-data/refresh-now")
     assert resp.status_code == 200
@@ -139,7 +139,7 @@ def test_market_data_daily_limit_rotates_symbols(client, db_engine, monkeypatch)
 
     monkeypatch.setenv("STOCK_DAILY_SYMBOL_LIMIT", "1")
 
-    def fake_finnhub(self, symbols):
+    def fake_finnhub(self, symbols, exchange_code=None, trade_date=None):
         out = {}
         for symbol in symbols:
             out[symbol] = providers.EodQuote(
@@ -151,7 +151,7 @@ def test_market_data_daily_limit_rotates_symbols(client, db_engine, monkeypatch)
             )
         return out
 
-    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_quotes", fake_finnhub)
+    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
 
     first = client.post("/market-data/refresh-now")
     assert first.status_code == 200
@@ -254,7 +254,7 @@ def test_market_data_does_not_update_on_invalid_price(client, db_engine, monkeyp
             {"ts": datetime(2026, 2, 5, tzinfo=timezone.utc)},
         )
 
-    def fake_finnhub(self, symbols):
+    def fake_finnhub(self, symbols, exchange_code=None, trade_date=None):
         return {
             "AAPL": providers.EodQuote(
                 provider="finnhub",
@@ -265,7 +265,7 @@ def test_market_data_does_not_update_on_invalid_price(client, db_engine, monkeyp
             )
         }
 
-    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_quotes", fake_finnhub)
+    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
 
     resp = client.post("/market-data/refresh-now")
     assert resp.status_code == 200
