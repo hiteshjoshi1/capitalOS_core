@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.routers.dashboard import _display_source
+from app.routers.dashboard import _display_source, _infer_country
 
 
 def test_dashboard_invalid_month(client: TestClient):
@@ -395,6 +395,100 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     assert items[1]["value"] == 30000.0
 
 
+def test_dashboard_geography_exposure_breakdown_maps_crypto_to_us(client: TestClient, seed_dashboard_data, monkeypatch):
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["base_currency"] == "SGD"
+    assert data["total"] == 100000.0
+
+    by_country = {row["country"]: row for row in data["items"]}
+    assert set(by_country.keys()) == {"US", "SG"}
+    assert by_country["US"]["stocks_funds"] == 50000.0
+    assert by_country["US"]["cash"] == 0.0
+    assert by_country["US"]["crypto"] == 20000.0
+    assert by_country["US"]["total"] == 70000.0
+    assert by_country["SG"]["stocks_funds"] == 0.0
+    assert by_country["SG"]["cash"] == 30000.0
+    assert by_country["SG"]["crypto"] == 0.0
+    assert by_country["SG"]["total"] == 30000.0
+
+
+def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: TestClient, db_engine, monkeypatch):
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(801, 'DBS', 'DBS Bank', 'BANK', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(801, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 801)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(801, 'SGD', 'SGD Cash', 'CASH', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(801, 801, 801, :as_of, 1, 1000, 1000)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-geo', 'evm', 'ethereum', '0xgeo', 'Geo wallet', 'active', :as_of)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(801, 'wallet-geo', '2026-02-06', :as_of, 100)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(801, 801, 'evm', 'ethereum', 'token', 'USDC', 40, 40), "
+                "(802, 801, 'evm', 'ethereum', 'native', 'BTC', 0.001, 60)"
+            )
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    by_country = {row["country"]: row for row in data["items"]}
+    assert by_country["US"]["cash"] == 40.0
+    assert by_country["US"]["crypto"] == 60.0
+    assert by_country["US"]["stocks_funds"] == 0.0
+
+
 def test_dashboard_cash_deposits_matches_cash_total(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -547,6 +641,76 @@ def test_dashboard_cash_deposits_converts_non_sgd_cash_positions(client: TestCli
 )
 def test_display_source_normalizes_values(raw_value: str | None, expected: str):
     assert _display_source(raw_value) == expected
+
+
+@pytest.mark.parametrize(
+    ("symbol", "home", "platform", "quote_currency", "exchange_code", "expected"),
+    [
+        ("AAPL", "US", "IBKR", "USD", "US", "US"),
+        ("700", None, "IBKR", "HKD", "HKEX", "HK"),
+        ("SGD", None, "DBS", "SGD", None, "SG"),
+        ("SGD", None, "IBKR", "SGD", None, "SG"),
+        ("FOO", None, "IBKR", "USD", None, "US"),
+        ("FOO", None, "IBKR", "HKD", None, "HK"),
+        ("FOO", None, "IBKR", "INR", None, "IN"),
+        ("FOO", None, "IBKR", "EUR", None, "UNKNOWN"),
+    ],
+)
+def test_infer_country_uses_currency_fallbacks(
+    symbol: str | None,
+    home: str | None,
+    platform: str | None,
+    quote_currency: str | None,
+    exchange_code: str | None,
+    expected: str,
+):
+    assert _infer_country(symbol, home, platform, quote_currency, exchange_code) == expected
+
+
+def test_dashboard_geography_exposure_maps_sgd_cash_to_sg_when_home_country_missing(client: TestClient, db_engine, monkeypatch):
+    from datetime import datetime, timezone
+    from sqlalchemy import text
+
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(990, 'DBS', 'DBS Bank', 'BANK', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(990, 'DBS Cash', 'DBS', 'BANK', 'SGD', 'SG', 990)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(990, 'SGD', 'SGD Cash', 'CASH', 'SGD', NULL)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(990, 990, 990, :as_of, 1, 1000, 1000)"
+            ),
+            {"as_of": as_of},
+        )
+
+    def fake_rates(_date, _base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    resp = client.get("/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    by_country = {row["country"]: row for row in data["items"]}
+    assert "UNKNOWN" not in by_country
+    assert by_country["SG"]["cash"] == 1000.0
 
 
 def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monkeypatch):

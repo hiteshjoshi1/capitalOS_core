@@ -15,6 +15,7 @@ vi.mock("../lib/api", () => ({
   api: {
     dashboardBootstrap: vi.fn(),
     dashboardSummary: vi.fn(),
+    dashboardGeographyExposure: vi.fn(),
     spendingSummary: vi.fn(),
     unmappedTransactions: vi.fn(),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
@@ -101,6 +102,15 @@ function renderWealthOverview() {
     cash_balances: [{ currency: "SGD", value: 25000 }],
   };
   vi.mocked(api.dashboardSummary).mockResolvedValue(mockSummary);
+  vi.mocked(api.dashboardGeographyExposure).mockResolvedValue({
+    as_of: "2026-02-06",
+    base_currency: "SGD",
+    total: 100000,
+    items: [
+      { country: "US", stocks_funds: 50000, cash: 0, crypto: 25000, total: 75000, percent: 75 },
+      { country: "SG", stocks_funds: 0, cash: 25000, crypto: 0, total: 25000, percent: 25 },
+    ],
+  });
 
   return render(
     <ThemeProvider>
@@ -135,6 +145,12 @@ describe("frontend contracts", () => {
       cash_flow: { income: 0, expenses: 0, net: 0, savings_rate: null },
       top_holdings: [],
       cash_balances: [],
+    });
+    vi.mocked(api.dashboardGeographyExposure).mockResolvedValue({
+      as_of: "2026-02-06",
+      base_currency: "SGD",
+      total: 100000,
+      items: [],
     });
   });
 

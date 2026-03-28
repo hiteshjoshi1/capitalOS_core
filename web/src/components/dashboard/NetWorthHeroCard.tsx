@@ -83,20 +83,20 @@ export default function NetWorthHeroCard({
       </div>
 
       <div className="bar" title="Allocation (cash/stocks/crypto)">
-        <span style={{ width: `${cashPct.toFixed(1)}%`, background: "var(--warn)" }}></span>
-        <span style={{ width: `${stocksPct.toFixed(1)}%`, background: "var(--accent)" }}></span>
-        <span style={{ width: `${cryptoPct.toFixed(1)}%`, background: "var(--good)" }}></span>
+        <span style={{ width: `${cashPct.toFixed(1)}%`, background: "var(--alloc-cash)" }}></span>
+        <span style={{ width: `${stocksPct.toFixed(1)}%`, background: "var(--alloc-stocks)" }}></span>
+        <span style={{ width: `${cryptoPct.toFixed(1)}%`, background: "var(--alloc-crypto)" }}></span>
       </div>
 
       <div className="legend">
         <span className="dot">
-          <i style={{ background: "var(--warn)" }}></i>Cash {cashPct.toFixed(1)}%
+          <i style={{ background: "var(--alloc-cash)" }}></i>Cash {cashPct.toFixed(1)}%
         </span>
         <span className="dot">
-          <i style={{ background: "var(--accent)" }}></i>Stocks {stocksPct.toFixed(1)}%
+          <i style={{ background: "var(--alloc-stocks)" }}></i>Stocks {stocksPct.toFixed(1)}%
         </span>
         <span className="dot">
-          <i style={{ background: "var(--good)" }}></i>Crypto {cryptoPct.toFixed(1)}%
+          <i style={{ background: "var(--alloc-crypto)" }}></i>Crypto {cryptoPct.toFixed(1)}%
         </span>
       </div>
     </div>

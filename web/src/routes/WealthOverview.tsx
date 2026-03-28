@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { DashboardSummary } from "../lib/api";
+import type { DashboardSummary, GeographyExposure } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import {
   buildTopNDistribution,
@@ -10,6 +10,7 @@ import {
 } from "../lib/risk";
 import "../App.css";
 import ExposureLinkCard from "../components/dashboard/ExposureLinkCard";
+import GeographyPieCard from "../components/dashboard/GeographyPieCard";
 import RiskCard from "../components/dashboard/RiskCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -20,6 +21,7 @@ export default function WealthOverview() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [geographyExposure, setGeographyExposure] = useState<GeographyExposure | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
@@ -29,9 +31,13 @@ export default function WealthOverview() {
     (async () => {
       try {
         setState("loading");
-        const data = await api.dashboardSummary(month, "prev_month,prev_year", baseCurrency);
+        const [summaryData, geographyData] = await Promise.all([
+          api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+          api.dashboardGeographyExposure(month, baseCurrency),
+        ]);
         if (cancelled) return;
-        setSummary(data);
+        setSummary(summaryData);
+        setGeographyExposure(geographyData);
         setState("ready");
       } catch (e: unknown) {
         if (cancelled) return;
@@ -115,7 +121,7 @@ export default function WealthOverview() {
             />
           </section>
 
-          <section className="grid dashboardRow rowActionOnly">
+          <section className="grid dashboardRow rowCashAction">
             <RiskCard
               riskLargest={riskLargest}
               riskTopN={riskTopN}
@@ -125,6 +131,10 @@ export default function WealthOverview() {
               topNDistribution={topNDistribution}
               formatMoney={formatMoney}
               cashPercent={cashPct}
+            />
+            <GeographyPieCard
+              exposure={geographyExposure}
+              formatMoney={formatMoney}
             />
           </section>
         </>

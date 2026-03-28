@@ -15,6 +15,8 @@ from app.schemas.dashboard import (
     CashDepositsItem,
     CashDepositsOut,
     DashboardSummaryResponse,
+    GeographyExposureItem,
+    GeographyExposureOut,
     PlatformAllocationItem,
     PlatformAllocationOut,
     StockHoldingsResponse,
@@ -108,6 +110,8 @@ def _infer_country(
 
     if quote_currency and quote_currency.upper() == "USD":
         return "US"
+    if quote_currency and quote_currency.upper() == "SGD":
+        return "SG"
     if quote_currency and quote_currency.upper() == "HKD":
         return "HK"
     if quote_currency and quote_currency.upper() == "INR":
@@ -258,6 +262,150 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
             "percent": round((value / total) * 100, 2)
         })
     return out
+
+
+def _blank_geo_country_bucket() -> Dict[str, float]:
+    return {"stocks_funds": 0.0, "cash": 0.0, "crypto": 0.0}
+
+
+def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, Any]:
+    q = text(
+        """
+        WITH latest AS (
+          SELECT account_id, MAX(as_of) AS as_of
+          FROM positions
+          WHERE as_of <= :anchor_ts
+          GROUP BY account_id
+        ),
+        map_exchange AS (
+          SELECT
+            m.asset_id,
+            MIN(UPPER(m.exchange_code)) AS exchange_code
+          FROM market_symbol_map m
+          WHERE m.is_active = TRUE
+          GROUP BY m.asset_id
+        ),
+        latest_prices AS (
+          SELECT p1.asset_id, p1.price, p1.currency
+          FROM prices p1
+          JOIN (
+            SELECT asset_id, MAX(trade_date) AS trade_date
+            FROM prices
+            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
+            GROUP BY asset_id
+          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
+        )
+        SELECT
+          a.asset_class AS asset_class,
+          a.symbol AS symbol,
+          a.home_country AS home_country,
+          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
+          COALESCE(pl.code, acc.platform) AS platform,
+          mx.exchange_code AS exchange_code,
+          CASE
+            WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
+              THEN p.quantity * lp.price
+            ELSE p.cost_basis_base
+          END AS value
+        FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+        JOIN accounts acc ON acc.id = p.account_id
+        LEFT JOIN platforms pl ON pl.id = acc.platform_id
+        JOIN assets a ON a.id = p.asset_id
+        LEFT JOIN map_exchange mx ON mx.asset_id = a.id
+        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
+        WHERE a.asset_class IN ('CASH', 'STOCK', 'FUND')
+        """
+    )
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    currencies = {(row.get("quote_currency") or "").upper() for row in rows if row.get("quote_currency")}
+    currencies.add("USD")
+    rates = get_rates(anchor_ts, base_currency, currencies)
+    usd_rate = rates.get("USD", 1.0)
+
+    buckets: Dict[str, Dict[str, float]] = {}
+
+    def _bucket(country: str) -> Dict[str, float]:
+        if country not in buckets:
+            buckets[country] = _blank_geo_country_bucket()
+        return buckets[country]
+
+    for row in rows:
+        asset_class = str(row.get("asset_class") or "").upper()
+        quote_currency = (row.get("quote_currency") or base_currency).upper()
+        value_base = float(row.get("value") or 0.0) * rates.get(quote_currency, 1.0)
+        if value_base <= 0:
+            continue
+        country = _infer_country(
+            row.get("symbol"),
+            row.get("home_country"),
+            row.get("platform"),
+            row.get("quote_currency"),
+            row.get("exchange_code"),
+        )
+        bucket = _bucket(country)
+        if asset_class == "CASH":
+            bucket["cash"] += value_base
+        else:
+            bucket["stocks_funds"] += value_base
+
+    wallet_rows = db.execute(
+        text(
+            """
+            WITH latest AS (
+              SELECT wallet_id, MAX(as_of_date) AS as_of_date
+              FROM crypto_wallet_snapshots
+              WHERE as_of_date <= :as_of_date
+              GROUP BY wallet_id
+            )
+            SELECT
+              UPPER(COALESCE(i.symbol, '')) AS symbol,
+              SUM(i.value_usd) AS value_usd
+            FROM crypto_wallet_snapshots s
+            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+            WHERE w.status = 'active'
+            GROUP BY UPPER(COALESCE(i.symbol, ''))
+            """
+        ),
+        {"as_of_date": anchor_ts.date()},
+    ).mappings().all()
+
+    us_bucket = _bucket("US")
+    for row in wallet_rows:
+        value_usd = float(row.get("value_usd") or 0.0)
+        if value_usd <= 0:
+            continue
+        value_base = value_usd * usd_rate
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol in {"USDC", "USDT"}:
+            us_bucket["cash"] += value_base
+        else:
+            us_bucket["crypto"] += value_base
+
+    items: List[Dict[str, Any]] = []
+    grand_total = 0.0
+    for country, vals in buckets.items():
+        country_total = vals["stocks_funds"] + vals["cash"] + vals["crypto"]
+        if country_total <= 0:
+            continue
+        grand_total += country_total
+        items.append(
+            {
+                "country": country,
+                "stocks_funds": vals["stocks_funds"],
+                "cash": vals["cash"],
+                "crypto": vals["crypto"],
+                "total": country_total,
+            }
+        )
+
+    items.sort(key=lambda row: row["total"], reverse=True)
+    for row in items:
+        row["percent"] = round((row["total"] / grand_total) * 100, 2) if grand_total > 0 else 0.0
+
+    return {"base_currency": base_currency, "total": grand_total, "items": items}
 
 
 def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency: str, limit: int = 10) -> List[Dict[str, Any]]:
@@ -948,4 +1096,22 @@ def stock_exposure(
         total=payload["total"],
         by_country=[StockExposureItem(**item) for item in payload["by_country"]],
         by_platform=[StockExposureItem(**item) for item in payload["by_platform"]],
+    )
+
+
+@router.get("/geography-exposure", response_model=GeographyExposureOut)
+def geography_exposure(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+):
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start)
+    as_of = _effective_as_of(db, anchor)
+    payload = _geography_exposure(db, anchor, base_currency)
+    return GeographyExposureOut(
+        as_of=as_of.isoformat() if as_of else None,
+        base_currency=base_currency,
+        total=payload["total"],
+        items=[GeographyExposureItem(**item) for item in payload["items"]],
     )
