@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import math
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
@@ -17,6 +18,13 @@ YAHOO_SUFFIX = {
     "SGX": ".SI",
     "HKEX": ".HK",
     "NSE": ".NS",
+}
+
+_EXCHANGE_DEFAULT_CCY = {
+    "US": "USD",
+    "SGX": "SGD",
+    "HKEX": "HKD",
+    "NSE": "INR",
 }
 
 EODHD_SUFFIX = {
@@ -73,14 +81,21 @@ def _default_finnhub_symbol(exchange_symbol: str) -> str:
 
 def _default_yahoo_symbol(exchange_symbol: str, exchange_code: str) -> str:
     base = (exchange_symbol or "").strip().upper()
-    suffix = YAHOO_SUFFIX.get(exchange_code, "")
+    ex = exchange_code.upper()
+    if base.startswith(f"{ex}:"):
+        base = base.split(":", 1)[1].strip().upper()
+    if base.endswith(".NSE"):
+        base = f"{base[:-4]}.NS"
+    if base.endswith(".SGX"):
+        base = f"{base[:-4]}.SI"
+    suffix = YAHOO_SUFFIX.get(ex, "")
     symbol = base
     if suffix and not symbol.endswith(suffix):
         symbol = f"{symbol}{suffix}"
-    if exchange_code.upper() == "HKEX" and symbol.endswith(".HK"):
-        base = symbol[:-3]
-        if base.isdigit() and len(base) < 4:
-            return f"{base.zfill(4)}.HK"
+    if ex == "HKEX" and symbol.endswith(".HK"):
+        hk_base = symbol[:-3]
+        if hk_base.isdigit() and len(hk_base) < 4:
+            return f"{hk_base.zfill(4)}.HK"
     return symbol
 
 
@@ -146,6 +161,78 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
             )
         )
     return out
+
+
+def _ticker_candidate(value: str | None) -> str | None:
+    raw = (value or "").strip().upper()
+    if not raw or " " in raw or len(raw) > 24:
+        return None
+    if not re.fullmatch(r"[A-Z0-9&.\-]+", raw):
+        return None
+    return raw
+
+
+def _asset_matches_exchange(row: dict[str, Any], exchange_code: str) -> bool:
+    country = (row.get("home_country") or "").strip().upper()
+    quote_ccy = (row.get("quote_currency") or "").strip().upper()
+    if exchange_code == "NSE":
+        return country == "IN" or quote_ccy == "INR"
+    if exchange_code == "SGX":
+        return country == "SG" or quote_ccy == "SGD"
+    if exchange_code == "HKEX":
+        return country == "HK" or quote_ccy == "HKD"
+    if exchange_code == "US":
+        return country == "US" or quote_ccy == "USD"
+    return False
+
+
+def _backfill_symbol_map_for_exchange(db: Session, exchange_code: str) -> int:
+    rows = db.execute(
+        text(
+            """
+            SELECT a.id AS asset_id, a.symbol, a.name, a.quote_currency, a.home_country
+            FROM assets a
+            LEFT JOIN market_symbol_map m
+              ON m.asset_id = a.id
+             AND m.exchange_code = :exchange_code
+             AND COALESCE(m.is_active, TRUE) = TRUE
+            WHERE a.asset_class IN ('STOCK', 'FUND')
+              AND m.id IS NULL
+            ORDER BY a.id ASC
+            """
+        ),
+        {"exchange_code": exchange_code},
+    ).mappings().all()
+
+    created = 0
+    for row in rows:
+        if not _asset_matches_exchange(row, exchange_code):
+            continue
+        exchange_symbol = _ticker_candidate(row.get("name")) or _ticker_candidate(row.get("symbol"))
+        if not exchange_symbol:
+            continue
+        quote_currency = (row.get("quote_currency") or _EXCHANGE_DEFAULT_CCY.get(exchange_code) or "USD").upper()
+        result = db.execute(
+            text(
+                """
+                INSERT INTO market_symbol_map
+                  (asset_id, exchange_code, exchange_symbol, quote_currency, is_active, created_at, updated_at)
+                VALUES
+                  (:asset_id, :exchange_code, :exchange_symbol, :quote_currency, TRUE, :now, :now)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "asset_id": int(row["asset_id"]),
+                "exchange_code": exchange_code,
+                "exchange_symbol": exchange_symbol,
+                "quote_currency": quote_currency,
+                "now": datetime.now(tz=timezone.utc),
+            },
+        )
+        if result.rowcount and result.rowcount > 0:
+            created += 1
+    return created
 
 
 
@@ -348,6 +435,156 @@ def _upsert_price(
 
 
 
+def _upsert_dividend_snapshot(
+    db: Session,
+    *,
+    asset_id: int,
+    as_of_date: date,
+    yield_rate: float | None,
+    annual_dividend_per_share: float | None,
+    price: float | None,
+    currency: str,
+    source: str,
+    exchange_code: str,
+    provider_symbol: str,
+) -> bool:
+    if yield_rate is None or not math.isfinite(float(yield_rate)) or float(yield_rate) < 0:
+        return False
+    now = datetime.now(tz=timezone.utc)
+    dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    is_sqlite = getattr(dialect, "name", "") == "sqlite"
+
+    params = {
+        "asset_id": asset_id,
+        "as_of_date": as_of_date,
+        "yield_rate": float(yield_rate),
+        "annual_dividend_per_share": annual_dividend_per_share,
+        "price": price,
+        "currency": currency,
+        "source": source,
+        "exchange_code": exchange_code,
+        "provider_symbol": provider_symbol,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+    if is_sqlite:
+        existing = db.execute(
+            text(
+                """
+                SELECT id
+                FROM market_dividend_yields
+                WHERE asset_id = :asset_id
+                  AND as_of_date = :as_of_date
+                  AND source = :source
+                LIMIT 1
+                """
+            ),
+            params,
+        ).fetchone()
+        if existing:
+            db.execute(
+                text(
+                    """
+                    UPDATE market_dividend_yields
+                    SET yield_rate = :yield_rate,
+                        annual_dividend_per_share = :annual_dividend_per_share,
+                        price = :price,
+                        currency = :currency,
+                        exchange_code = :exchange_code,
+                        provider_symbol = :provider_symbol,
+                        updated_at = :updated_at
+                    WHERE id = :id
+                    """
+                ),
+                {**params, "id": int(existing[0])},
+            )
+        else:
+            db.execute(
+                text(
+                    """
+                    INSERT INTO market_dividend_yields
+                      (asset_id, as_of_date, yield_rate, annual_dividend_per_share, price, currency, source, exchange_code, provider_symbol, created_at, updated_at)
+                    VALUES
+                      (:asset_id, :as_of_date, :yield_rate, :annual_dividend_per_share, :price, :currency, :source, :exchange_code, :provider_symbol, :created_at, :updated_at)
+                    """
+                ),
+                params,
+            )
+        return True
+
+    db.execute(
+        text(
+            """
+            INSERT INTO market_dividend_yields
+              (asset_id, as_of_date, yield_rate, annual_dividend_per_share, price, currency, source, exchange_code, provider_symbol, created_at, updated_at)
+            VALUES
+              (:asset_id, :as_of_date, :yield_rate, :annual_dividend_per_share, :price, :currency, :source, :exchange_code, :provider_symbol, :created_at, :updated_at)
+            ON CONFLICT (asset_id, as_of_date, source)
+            DO UPDATE SET
+              yield_rate = EXCLUDED.yield_rate,
+              annual_dividend_per_share = EXCLUDED.annual_dividend_per_share,
+              price = EXCLUDED.price,
+              currency = EXCLUDED.currency,
+              exchange_code = EXCLUDED.exchange_code,
+              provider_symbol = EXCLUDED.provider_symbol,
+              updated_at = EXCLUDED.updated_at
+            """
+        ),
+        params,
+    )
+    return True
+
+
+def _refresh_dividend_yields_for_exchange(
+    db: Session,
+    *,
+    exchange_code: str,
+    trade_date: date,
+    symbols: list[SymbolMapRow],
+    yfinance: YFinanceProvider,
+) -> int:
+    by_symbol = _symbols_for_provider("yfinance", symbols)
+    if not by_symbol:
+        return 0
+    try:
+        snapshots = yfinance.fetch_dividend_yields(
+            list(by_symbol.keys()),
+            exchange_code=exchange_code,
+            as_of_date=trade_date,
+        )
+    except Exception:  # noqa: BLE001
+        return 0
+
+    upserted = 0
+    for provider_symbol, row in by_symbol.items():
+        payload = snapshots.get(provider_symbol.upper())
+        if not payload:
+            continue
+        try:
+            yield_rate = float(payload.get("yield_rate") or 0.0)
+        except Exception:  # noqa: BLE001
+            continue
+        annual_dividend = payload.get("annual_dividend")
+        price = payload.get("price")
+        currency = str(payload.get("currency") or row.quote_currency or "USD").upper()
+        written = _upsert_dividend_snapshot(
+            db,
+            asset_id=row.asset_id,
+            as_of_date=trade_date,
+            yield_rate=yield_rate,
+            annual_dividend_per_share=float(annual_dividend) if annual_dividend is not None else None,
+            price=float(price) if price is not None else None,
+            currency=currency,
+            source="yfinance_dividend",
+            exchange_code=exchange_code,
+            provider_symbol=provider_symbol,
+        )
+        if written:
+            upserted += 1
+    return upserted
+
+
 def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> dict[str, SymbolMapRow]:
     out: dict[str, SymbolMapRow] = {}
     for row in symbols:
@@ -411,6 +648,7 @@ def run_exchange_refresh(
     yfinance = yfinance or YFinanceProvider()
     yahoo = yahoo or YahooProvider()
 
+    backfilled_symbols = _backfill_symbol_map_for_exchange(db, exchange_code)
     daily_limit = _daily_limit()
     symbols = _load_symbols(db, exchange_code, daily_limit=daily_limit)
     if not symbols:
@@ -419,7 +657,9 @@ def run_exchange_refresh(
             "trade_date": trade_date.isoformat(),
             "requested_symbols": 0,
             "upserted_rows": 0,
+            "dividend_rows_upserted": 0,
             "missing_symbols": 0,
+            "backfilled_symbols": backfilled_symbols,
             "status": "success",
             "providers": [],
             "daily_limit": daily_limit,
@@ -564,13 +804,23 @@ def run_exchange_refresh(
         )
         unresolved = next_unresolved
 
+    dividend_rows_upserted = _refresh_dividend_yields_for_exchange(
+        db,
+        exchange_code=exchange_code,
+        trade_date=trade_date,
+        symbols=_load_symbols(db, exchange_code, daily_limit=0),
+        yfinance=yfinance,
+    )
+
     db.commit()
     return {
         "exchange_code": exchange_code,
         "trade_date": trade_date.isoformat(),
         "requested_symbols": requested_symbols,
         "upserted_rows": total_upserted,
+        "dividend_rows_upserted": dividend_rows_upserted,
         "missing_symbols": len(unresolved) + total_invalid,
+        "backfilled_symbols": backfilled_symbols,
         "status": "success" if (not unresolved and total_invalid == 0) else "partial",
         "providers": providers_used,
         "run_ids": run_ids,

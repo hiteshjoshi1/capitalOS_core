@@ -475,6 +475,112 @@ export type UploadReminderCount = {
   count: number;
 };
 
+export type DividendTotals = {
+  gross: number;
+  withholding: number;
+  net_received: number;
+  estimated_tax: number;
+  payout_minus_tax: number;
+};
+
+export type DividendSummaryBucket = DividendTotals & {
+  bucket: string;
+};
+
+export type DividendsSummary = {
+  from_month: string;
+  to_month: string;
+  period: "month" | "quarter" | "year";
+  base_currency: string;
+  assumed_tax_rate: number;
+  country_tax_rates: Record<string, number>;
+  buckets: DividendSummaryBucket[];
+  totals: DividendTotals;
+};
+
+export type DividendCompanyItem = DividendTotals & {
+  asset_id: number | null;
+  symbol: string;
+  company: string;
+  country: string | null;
+  yield_pct: number | null;
+};
+
+export type DividendsByCompany = {
+  from_month: string;
+  to_month: string;
+  base_currency: string;
+  assumed_tax_rate: number;
+  country_tax_rates: Record<string, number>;
+  items: DividendCompanyItem[];
+  totals: DividendTotals;
+};
+
+export type DividendHistoryEvent = DividendTotals & {
+  month: string;
+};
+
+export type DividendHistory = {
+  from_month: string;
+  to_month: string;
+  base_currency: string;
+  assumed_tax_rate: number;
+  country_tax_rates: Record<string, number>;
+  asset_id: number | null;
+  symbol: string | null;
+  company: string | null;
+  yield_pct: number | null;
+  events: DividendHistoryEvent[];
+  totals: DividendTotals;
+};
+
+export type ExpectedDividendBucket = {
+  bucket: string;
+  gross: number;
+  estimated_tax: number;
+  payout_minus_tax: number;
+};
+
+export type ExpectedDividendSummary = {
+  period: "month" | "quarter" | "year";
+  buckets: ExpectedDividendBucket[];
+  gross: number;
+  estimated_tax: number;
+  payout_minus_tax: number;
+};
+
+export type ExpectedDividendCompany = {
+  asset_id: number;
+  symbol: string;
+  company: string;
+  country: string | null;
+  shares: number;
+  yield_pct: number | null;
+  price: number | null;
+  quote_currency: string | null;
+  yearly_dividend: number;
+  quarterly_dividend: number;
+  monthly_dividend: number;
+  gross: number;
+  estimated_tax: number;
+  payout_minus_tax: number;
+};
+
+export type ExpectedDividendsOverview = {
+  from_month: string;
+  to_month: string;
+  base_currency: string;
+  assumed_tax_rate: number;
+  country_tax_rates: Record<string, number>;
+  holdings_considered: number;
+  assets_with_actions: number;
+  actions_evaluated: number;
+  monthly: ExpectedDividendSummary;
+  quarterly: ExpectedDividendSummary;
+  yearly: ExpectedDividendSummary;
+  companies: ExpectedDividendCompany[];
+};
+
 export const api = {
   health: () => req<Health>("/health"),
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
@@ -606,5 +712,47 @@ export const api = {
     }),
   uploadReminders: () => req<UploadReminder[]>("/alerts/upload-reminders"),
   uploadReminderCount: () => req<UploadReminderCount>("/alerts/upload-reminders/count"),
+  dividendsSummary: (
+    fromMonth: string,
+    toMonth: string,
+    period: "month" | "quarter" | "year",
+    baseCurrency = "SGD",
+    assumedTaxRate = 0,
+    countryTaxRates?: string,
+  ) =>
+    req<DividendsSummary>(
+      `/dividends/summary?from_month=${encodeURIComponent(fromMonth)}&to_month=${encodeURIComponent(toMonth)}&period=${encodeURIComponent(period)}&base_currency=${encodeURIComponent(baseCurrency)}&assumed_tax_rate=${encodeURIComponent(String(assumedTaxRate))}${countryTaxRates ? `&country_tax_rates=${encodeURIComponent(countryTaxRates)}` : ""}`
+    ),
+  dividendsByCompany: (
+    fromMonth: string,
+    toMonth: string,
+    baseCurrency = "SGD",
+    assumedTaxRate = 0,
+    countryTaxRates?: string,
+  ) =>
+    req<DividendsByCompany>(
+      `/dividends/by-company?from_month=${encodeURIComponent(fromMonth)}&to_month=${encodeURIComponent(toMonth)}&base_currency=${encodeURIComponent(baseCurrency)}&assumed_tax_rate=${encodeURIComponent(String(assumedTaxRate))}${countryTaxRates ? `&country_tax_rates=${encodeURIComponent(countryTaxRates)}` : ""}`
+    ),
+  dividendsHistory: (
+    assetId: number,
+    fromMonth: string,
+    toMonth: string,
+    baseCurrency = "SGD",
+    assumedTaxRate = 0,
+    countryTaxRates?: string,
+  ) =>
+    req<DividendHistory>(
+      `/dividends/history?asset_id=${encodeURIComponent(String(assetId))}&from_month=${encodeURIComponent(fromMonth)}&to_month=${encodeURIComponent(toMonth)}&base_currency=${encodeURIComponent(baseCurrency)}&assumed_tax_rate=${encodeURIComponent(String(assumedTaxRate))}${countryTaxRates ? `&country_tax_rates=${encodeURIComponent(countryTaxRates)}` : ""}`
+    ),
+  expectedDividendsOverview: (
+    fromMonth: string,
+    toMonth: string,
+    baseCurrency = "SGD",
+    assumedTaxRate = 0,
+    countryTaxRates?: string,
+  ) =>
+    req<ExpectedDividendsOverview>(
+      `/dividends/expected/overview?from_month=${encodeURIComponent(fromMonth)}&to_month=${encodeURIComponent(toMonth)}&base_currency=${encodeURIComponent(baseCurrency)}&assumed_tax_rate=${encodeURIComponent(String(assumedTaxRate))}${countryTaxRates ? `&country_tax_rates=${encodeURIComponent(countryTaxRates)}` : ""}`
+    ),
 
 };

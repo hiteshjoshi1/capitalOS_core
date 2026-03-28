@@ -128,6 +128,8 @@ def setup_db():
               amount REAL NOT NULL,
               type TEXT NOT NULL,
               currency TEXT NOT NULL,
+              asset_id INTEGER,
+              quantity REAL,
               category TEXT,
               merchant_counterparty TEXT,
               platform_reference TEXT,
@@ -305,6 +307,8 @@ def setup_db():
               amount REAL NOT NULL,
               type TEXT NOT NULL,
               currency TEXT NOT NULL,
+              asset_id INTEGER,
+              quantity REAL,
               category TEXT,
               merchant_counterparty TEXT,
               platform_reference TEXT,
@@ -380,6 +384,24 @@ def setup_db():
             )
             """
         )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS market_dividend_yields (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              asset_id INTEGER NOT NULL,
+              as_of_date DATE NOT NULL,
+              yield_rate REAL NOT NULL,
+              annual_dividend_per_share REAL,
+              price REAL,
+              currency TEXT NOT NULL,
+              source TEXT NOT NULL DEFAULT 'yfinance_dividend',
+              exchange_code TEXT,
+              provider_symbol TEXT,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            )
+            """
+        )
     yield
     with engine.begin() as conn:
         conn.exec_driver_sql("DROP TABLE IF EXISTS currencies")
@@ -393,6 +415,7 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_run_items")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_runs")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS market_dividend_yields")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_symbol_map")
         conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS assets")
@@ -421,6 +444,7 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM prices")
         conn.exec_driver_sql("DELETE FROM market_data_run_items")
         conn.exec_driver_sql("DELETE FROM market_data_runs")
+        conn.exec_driver_sql("DELETE FROM market_dividend_yields")
         conn.exec_driver_sql("DELETE FROM market_symbol_map")
         conn.exec_driver_sql("DELETE FROM currencies")
         conn.exec_driver_sql("DELETE FROM parser_registry")

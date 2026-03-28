@@ -257,6 +257,26 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
 
         for tx in parsed:
             fp = _fingerprint(job.account_id, tx)
+            tx_asset_id: int | None = None
+            tx_quantity: float | None = None
+            if tx.get("type") in {"BUY", "SELL"} and tx.get("symbol") and tx.get("currency"):
+                tx_asset_id = _get_or_create_asset(
+                    db,
+                    {
+                        "symbol": tx.get("symbol"),
+                        "name": tx.get("symbol"),
+                        "asset_class": tx.get("asset_class") or "STOCK",
+                        "currency": tx.get("currency"),
+                        "home_country": tx.get("home_country"),
+                    },
+                )
+                raw_quantity = tx.get("quantity")
+                if raw_quantity is not None and str(raw_quantity).strip() != "":
+                    try:
+                        tx_quantity = abs(float(raw_quantity))
+                    except (TypeError, ValueError):
+                        tx_quantity = None
+
             exists = db.execute(
                 text(
                     """
@@ -288,8 +308,32 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
             db.execute(
                 text(
                     """
-                    INSERT INTO transactions (ts, account_id, type, amount, currency, category, merchant_counterparty, source, notes)
-                    VALUES (:ts, :account_id, :type, :amount, :currency, :category, :merchant, :source, :notes)
+                    INSERT INTO transactions (
+                      ts,
+                      account_id,
+                      type,
+                      amount,
+                      currency,
+                      asset_id,
+                      quantity,
+                      category,
+                      merchant_counterparty,
+                      source,
+                      notes
+                    )
+                    VALUES (
+                      :ts,
+                      :account_id,
+                      :type,
+                      :amount,
+                      :currency,
+                      :asset_id,
+                      :quantity,
+                      :category,
+                      :merchant,
+                      :source,
+                      :notes
+                    )
                     """
                 ),
                 {
@@ -298,6 +342,8 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                     "type": tx["type"],
                     "amount": tx["amount"],
                     "currency": tx["currency"],
+                    "asset_id": tx_asset_id,
+                    "quantity": tx_quantity,
                     "category": tx.get("category"),
                     "merchant": tx.get("merchant_counterparty"),
                     "source": job.platform,

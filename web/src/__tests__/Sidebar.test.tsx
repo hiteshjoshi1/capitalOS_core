@@ -75,6 +75,7 @@ describe("Sidebar", () => {
     expect(wealthToggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "Stocks" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Dividends" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Crypto" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Cash" })).toBeInTheDocument();
 

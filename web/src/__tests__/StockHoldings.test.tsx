@@ -10,6 +10,7 @@ import type { StockHoldingsSummary } from "../lib/api";
 vi.mock("../lib/api", () => ({
   api: {
     stockHoldingsSummary: vi.fn(),
+    dividendsByCompany: vi.fn(),
   },
 }));
 
@@ -66,6 +67,15 @@ const summaryFixture: StockHoldingsSummary = {
 describe("StockHoldings", () => {
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    mockApi.dividendsByCompany.mockResolvedValueOnce({
+      from_month: "2025-03",
+      to_month: "2026-02",
+      base_currency: "SGD",
+      assumed_tax_rate: 0,
+      country_tax_rates: {},
+      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      items: [],
+    });
 
     render(
       <ThemeProvider>
@@ -76,6 +86,8 @@ describe("StockHoldings", () => {
     );
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+    expect(screen.getByText("Dividends")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open full Dividends view" })).toBeInTheDocument();
 
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
@@ -121,6 +133,15 @@ describe("StockHoldings", () => {
     };
 
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(manyHoldings);
+    mockApi.dividendsByCompany.mockResolvedValueOnce({
+      from_month: "2025-03",
+      to_month: "2026-02",
+      base_currency: "SGD",
+      assumed_tax_rate: 0,
+      country_tax_rates: {},
+      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      items: [],
+    });
 
     render(
       <ThemeProvider>
