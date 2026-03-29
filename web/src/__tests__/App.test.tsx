@@ -10,6 +10,7 @@ import type { DashboardBootstrap, SpendingSummary } from "../lib/api";
 vi.mock("../lib/api", () => ({
   api: {
     dashboardBootstrap: vi.fn(),
+    dashboardNetWorthChange: vi.fn(),
     spendingSummary: vi.fn(),
     unmappedTransactions: vi.fn(),
   },
@@ -51,11 +52,34 @@ const spendingSummaryFixture: SpendingSummary = {
   ],
 };
 
+const netWorthChangeFixture = {
+  vs_prev_month: {
+    abs: 1200,
+    pct: 0.01,
+    current_as_of: "2026-02-06T00:00:00+00:00",
+    compare_as_of: "2026-01-06T00:00:00+00:00",
+    compare_month: "2026-01",
+  },
+  vs_prev_year: {
+    abs: 11000,
+    pct: 0.12,
+    current_as_of: "2026-02-06T00:00:00+00:00",
+    compare_as_of: "2025-02-06T00:00:00+00:00",
+    compare_month: "2025-02",
+  },
+};
+
 beforeEach(() => {
   vi.useRealTimers();
   vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
   window.localStorage.clear();
   mockApi.dashboardBootstrap.mockResolvedValue(bootstrapFixture);
+  mockApi.dashboardNetWorthChange.mockResolvedValue({
+    as_of_month: "2026-02",
+    base_currency: "SGD",
+    net_worth_as_of: "2026-02-06T00:00:00+00:00",
+    net_worth_change: netWorthChangeFixture,
+  });
   mockApi.spendingSummary.mockResolvedValue(spendingSummaryFixture);
   mockApi.unmappedTransactions.mockResolvedValue([]);
 });
@@ -138,7 +162,7 @@ describe("App (thin Dashboard)", () => {
     expect(screen.queryByText("Trends (Monthly)")).not.toBeInTheDocument();
   });
 
-  it("only calls dashboardBootstrap and spendingSummary; does not call unmappedTransactions or heavy APIs", async () => {
+  it("calls dashboardBootstrap, dashboardNetWorthChange, and spendingSummary; does not call unmappedTransactions", async () => {
     renderApp();
 
     await waitFor(() => {
@@ -147,8 +171,12 @@ describe("App (thin Dashboard)", () => {
     await waitFor(() => {
       expect(mockApi.spendingSummary).toHaveBeenCalledTimes(1);
     });
+    await waitFor(() => {
+      expect(mockApi.dashboardNetWorthChange).toHaveBeenCalledTimes(1);
+    });
 
     expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-02", "SGD");
+    expect(mockApi.dashboardNetWorthChange).toHaveBeenCalledWith("2026-02", "SGD");
     expect(mockApi.spendingSummary).toHaveBeenCalledWith("2026-02", "SGD");
     expect(mockApi.unmappedTransactions).not.toHaveBeenCalled();
   });
@@ -188,10 +216,13 @@ describe("App (thin Dashboard)", () => {
     await waitFor(() => {
       expect(mockApi.spendingSummary).toHaveBeenCalledTimes(1);
     });
+    await waitFor(() => {
+      expect(mockApi.dashboardNetWorthChange).toHaveBeenCalledTimes(1);
+    });
     expect(mockApi.unmappedTransactions).not.toHaveBeenCalled();
   });
 
-  it("spendingSummary is not called before bootstrapState is ready", async () => {
+  it("spendingSummary and dashboardNetWorthChange are not called before bootstrapState is ready", async () => {
     let resolveBootstrap!: (v: typeof bootstrapFixture) => void;
     const pendingBootstrap = new Promise<typeof bootstrapFixture>((res) => {
       resolveBootstrap = res;
@@ -200,14 +231,19 @@ describe("App (thin Dashboard)", () => {
 
     renderApp();
     mockApi.spendingSummary.mockClear();
+    mockApi.dashboardNetWorthChange.mockClear();
 
     await Promise.resolve();
     expect(mockApi.spendingSummary).not.toHaveBeenCalled();
+    expect(mockApi.dashboardNetWorthChange).not.toHaveBeenCalled();
 
     resolveBootstrap(bootstrapFixture);
 
     await waitFor(() => {
       expect(mockApi.spendingSummary).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(mockApi.dashboardNetWorthChange).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -232,7 +268,7 @@ describe("App (thin Dashboard)", () => {
     expect(screen.getByText("2026-02")).toBeInTheDocument();
   });
 
-  it("bootstrap called exactly once on mount; spendingSummary not called before bootstrap resolves", async () => {
+  it("bootstrap called exactly once on mount; follow-up calls wait for bootstrap", async () => {
     let resolveBootstrap!: (v: typeof bootstrapFixture) => void;
     const pendingBootstrap = new Promise<typeof bootstrapFixture>((res) => {
       resolveBootstrap = res;
@@ -242,12 +278,16 @@ describe("App (thin Dashboard)", () => {
     renderApp();
 
     expect(mockApi.spendingSummary).not.toHaveBeenCalled();
+    expect(mockApi.dashboardNetWorthChange).not.toHaveBeenCalled();
     expect(mockApi.dashboardBootstrap).toHaveBeenCalledTimes(1);
 
     resolveBootstrap(bootstrapFixture);
 
     await waitFor(() => {
       expect(mockApi.spendingSummary).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(mockApi.dashboardNetWorthChange).toHaveBeenCalledTimes(1);
     });
     expect(mockApi.dashboardBootstrap).toHaveBeenCalledTimes(1);
   });

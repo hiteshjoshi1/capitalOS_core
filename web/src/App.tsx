@@ -1,8 +1,6 @@
-import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
-import { useTheme } from "./context/ThemeContext";
+import { useEffect, useState } from "react";
 import { api } from "./lib/api";
-import type { DashboardBootstrap, SpendingSummary } from "./lib/api";
+import type { DashboardBootstrap, DashboardSummary, SpendingSummary } from "./lib/api";
 import { useSelectedMonth } from "./lib/selectedMonth";
 import "./App.css";
 import DashboardLoading from "./components/dashboard/DashboardLoading";
@@ -18,11 +16,10 @@ export default function App() {
   const [err, setErr] = useState<string>("");
 
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
+  const [netWorthChange, setNetWorthChange] = useState<DashboardSummary["net_worth_change"]>(null);
 
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
-  const { theme, toggleTheme } = useTheme();
-  const menuRef = useRef<HTMLDetailsElement | null>(null);
 
   // Phase 1: bootstrap
   useEffect(() => {
@@ -32,6 +29,7 @@ export default function App() {
         setBootstrapState("loading");
         setBootstrapData(null);
         setSpendingSummary(null);
+        setNetWorthChange(null);
         const bootstrap = await api.dashboardBootstrap(month, baseCurrency);
         if (cancelled) return;
         setBootstrapData(bootstrap);
@@ -61,6 +59,22 @@ export default function App() {
     return () => { cancelled = true; };
   }, [bootstrapState, month, baseCurrency]);
 
+  // Phase 3: net-worth deltas (lightweight follow-up after bootstrap)
+  useEffect(() => {
+    if (bootstrapState !== "ready") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const delta = await api.dashboardNetWorthChange(month, baseCurrency);
+        if (cancelled) return;
+        setNetWorthChange(delta.net_worth_change ?? null);
+      } catch {
+        if (cancelled) return;
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [bootstrapState, month, baseCurrency]);
+
   const selectedBaseCurrency =
     baseCurrency || bootstrapData?.base_currency || "SGD";
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
@@ -76,7 +90,7 @@ export default function App() {
     ? {
         net_worth: bootstrapData.net_worth,
         net_worth_as_of: bootstrapData.net_worth_as_of,
-        net_worth_change: null,
+        net_worth_change: netWorthChange,
         cash_balances: undefined,
         cash_percent: bootstrapData.cash_percent ?? cashPct,
         as_of_month: bootstrapData.as_of_month,
@@ -99,34 +113,21 @@ export default function App() {
       title="CapitalOS Dashboard"
       headerActions={(
         <>
-          <Link to="/ingest" className="pill topNavLink">Ingest</Link>
-          <details className="userMenu" ref={menuRef}>
-            <summary className="pill userMenuSummary" aria-label="User menu">
-              <span className="avatar" aria-hidden="true">U</span>
-              <span>User</span>
-            </summary>
-            <div className="userMenuPanel">
-              <Link className="menuLink" to="/market-data">Market Data</Link>
-              <button className="btn" type="button" onClick={toggleTheme}>
-                Theme: {theme === "dark" ? "Dark" : "Light"}
-              </button>
-              <label className="field">
-                <span className="label">Base Currency</span>
-                <select
-                  className="input"
-                  aria-label="Base currency"
-                  value={selectedBaseCurrency}
-                  onChange={(event) => setBaseCurrency(event.target.value)}
-                >
-                  <option value="SGD">SGD</option>
-                  <option value="USD">USD</option>
-                  <option value="HKD">HKD</option>
-                  <option value="INR">INR</option>
-                </select>
-              </label>
-              <MonthControl month={month} onMonthChange={setMonth} />
-            </div>
-          </details>
+          <MonthControl month={month} onMonthChange={setMonth} />
+          <label className="pill">
+            <span>Base</span>
+            <select
+              className="monthInput"
+              aria-label="Base currency"
+              value={selectedBaseCurrency}
+              onChange={(event) => setBaseCurrency(event.target.value)}
+            >
+              <option value="SGD">SGD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="INR">INR</option>
+            </select>
+          </label>
         </>
       )}
     >

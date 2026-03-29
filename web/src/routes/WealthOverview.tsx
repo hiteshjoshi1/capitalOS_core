@@ -25,6 +25,7 @@ export default function WealthOverview() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
+  const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
 
   useEffect(() => {
     let cancelled = false;
@@ -50,7 +51,6 @@ export default function WealthOverview() {
     };
   }, [month, baseCurrency]);
 
-  const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;

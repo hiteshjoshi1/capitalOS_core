@@ -14,6 +14,7 @@ import WealthOverview from "../routes/WealthOverview";
 vi.mock("../lib/api", () => ({
   api: {
     dashboardBootstrap: vi.fn(),
+    dashboardNetWorthChange: vi.fn(),
     dashboardSummary: vi.fn(),
     dashboardGeographyExposure: vi.fn(),
     spendingSummary: vi.fn(),
@@ -51,6 +52,12 @@ function renderDashboard() {
   };
 
   vi.mocked(api.dashboardBootstrap).mockResolvedValue(mockBootstrap);
+  vi.mocked(api.dashboardNetWorthChange).mockResolvedValue({
+    as_of_month: "2026-02",
+    base_currency: "SGD",
+    net_worth_as_of: "2026-02-06",
+    net_worth_change: null,
+  });
   vi.mocked(api.spendingSummary).mockResolvedValue({
     month: "2026-02",
     base_currency: "SGD",
