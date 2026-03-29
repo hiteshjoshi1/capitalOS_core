@@ -129,3 +129,30 @@ def test_credit_card_endpoints_include_credit_card_accounts_without_metadata(cli
     assert len(detail["transactions"]) == 2
     assert detail["transactions"][0]["card_name"] == "Citi CC"
     assert detail["transactions"][0]["issuer"] == "CITI"
+
+
+def test_cash_flow_infers_signed_non_internal_transfer_rows(client: TestClient, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(700, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(7001, '2026-03-05 00:00:00+00:00', 700, 5000, 'INCOME', 'SGD', 'Salary', 'Employer', NULL), "
+                "(7002, '2026-03-06 00:00:00+00:00', 700, -12, 'TRANSFER', 'SGD', 'Bank::ADV', 'WEI DAO PTE. LTD.', NULL), "
+                "(7003, '2026-03-07 00:00:00+00:00', 700, -2000, 'TRANSFER', 'SGD', 'Bank::Transfer', 'OWN ACCOUNT TRANSFER', NULL), "
+                "(7004, '2026-03-08 00:00:00+00:00', 700, -1500, 'TRANSFER', 'SGD', 'Bank::ADV', 'Transfer to IBKR', NULL)"
+            )
+        )
+
+    resp = client.get("/spending/summary?month=2026-03&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["income_total"] == 5000.0
+    assert data["expense_total"] == 12.0
+    assert data["net"] == 4988.0

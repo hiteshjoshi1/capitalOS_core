@@ -24,6 +24,25 @@ from app.schemas.spending import (
 router = APIRouter(prefix="/spending", tags=["spending"])
 INCOME_TYPES = ("INCOME",)
 EXPENSE_TYPES = ("EXPENSE", "FEE", "TAX", "INTEREST")
+TRANSFER_TYPES = ("TRANSFER",)
+EXPLICIT_TRANSFER_RAW_CATEGORIES = {
+    "bank::transfer",
+    "creditcard::payment",
+    "brokerage::transfer",
+}
+LIKELY_INTERNAL_TRANSFER_MARKERS = (
+    "IBKR",
+    "INTERACTIVE BROKERS",
+    "UOB",
+    "OCBC",
+    "POSB",
+    "COINBASE",
+    "OWN ACCOUNT",
+    "CARD PAYMENT",
+    "CREDIT CARD PAYMENT",
+    "SI TO :",
+    "REF:SALARY",
+)
 
 
 def _parse_month(month: str) -> datetime:
@@ -106,7 +125,7 @@ def _cash_flow_rows(db: Session, start: datetime, end: datetime):
         LEFT JOIN category_taxonomy resolved_parent_ct
           ON resolved_parent_ct.id = resolved_ct.parent_id
         WHERE t.ts >= :start AND t.ts < :end
-          AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST')
+          AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST', 'TRANSFER')
         ORDER BY t.ts DESC, t.id DESC
     """)
     return db.execute(cash_flow_q, {"start": start, "end": end}).mappings().all()
@@ -118,13 +137,35 @@ def _is_transfer_resolved_category(row) -> bool:
     return resolved_code == "transfer" or parent_code == "transfer"
 
 
+def _is_explicit_source_transfer(row) -> bool:
+    raw_category = str(row.get("raw_category") or "").strip().lower()
+    if raw_category in EXPLICIT_TRANSFER_RAW_CATEGORIES:
+        return True
+    text = " ".join(
+        [
+            str(row.get("merchant_counterparty") or ""),
+            str(row.get("notes") or ""),
+        ]
+    ).upper()
+    if str(row.get("type") or "").upper() != "TRANSFER":
+        return False
+    return any(marker in text for marker in LIKELY_INTERNAL_TRANSFER_MARKERS)
+
+
 def _cash_flow_bucket(row) -> str | None:
-    if _is_transfer_resolved_category(row):
+    if _is_transfer_resolved_category(row) or _is_explicit_source_transfer(row):
         return None
     if row["type"] in INCOME_TYPES:
         return "income"
     if row["type"] in EXPENSE_TYPES:
         return "expense"
+    if row["type"] in TRANSFER_TYPES:
+        amount = float(row.get("amount") or 0.0)
+        if amount > 0:
+            return "income"
+        if amount < 0:
+            return "expense"
+        return None
     return None
 
 
@@ -319,7 +360,8 @@ def cash_flow_detail(
         savings_rate=savings_rate,
         calculation=(
             "Net = income_total - expense_total using month-scoped transactions with types "
-            "INCOME, EXPENSE, FEE, TAX, INTEREST, excluding rows resolved under Transfer."
+            "INCOME, EXPENSE, FEE, TAX, INTEREST, TRANSFER. Rows resolved under Transfer "
+            "categories or explicit source transfer categories are excluded."
         ),
         income=CashFlowDetailSection(
             total=income_total,
