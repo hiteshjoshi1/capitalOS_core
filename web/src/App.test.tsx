@@ -10,6 +10,7 @@ import type { DashboardBootstrap } from "./lib/api";
 vi.mock("./lib/api", () => ({
   api: {
     dashboardBootstrap: vi.fn(),
+    dashboardNetWorthChange: vi.fn(),
     spendingSummary: vi.fn(),
     unmappedTransactions: vi.fn(),
   },
@@ -44,6 +45,12 @@ describe("App (thin Dashboard smoke)", () => {
       savings_rate: 0.4,
       income_categories: [],
       expense_categories: [],
+    });
+    vi.mocked(api.dashboardNetWorthChange).mockResolvedValue({
+      as_of_month: "2026-02",
+      base_currency: "SGD",
+      net_worth_as_of: "2026-02-06",
+      net_worth_change: null,
     });
     vi.mocked(api.unmappedTransactions).mockResolvedValue([]);
 

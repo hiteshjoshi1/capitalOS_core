@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Callable
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import JSONResponse
@@ -15,6 +15,7 @@ from app.schemas.dashboard import (
     CashDepositsItem,
     CashDepositsOut,
     DashboardSummaryResponse,
+    NetWorthChangeResponse,
     GeographyExposureItem,
     GeographyExposureOut,
     PlatformAllocationItem,
@@ -758,6 +759,42 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str) -
     return {"income": income, "expenses": expenses, "net": net, "savings_rate": savings_rate}
 
 
+def _compute_net_worth_changes(
+    db: Session,
+    month_start: datetime,
+    as_of: datetime | None,
+    current_value: float,
+    base_currency: str,
+    compare_set: set[str],
+    value_selector: Callable[[Dict[str, float]], float] = lambda nw: nw["total"],
+) -> Dict[str, Dict[str, Any]]:
+    changes: Dict[str, Dict[str, Any]] = {}
+
+    def _delta(label: str, other_month_start: datetime):
+        other_anchor = _anchor_ts(other_month_start)
+        other_as_of = _effective_as_of(db, other_anchor)
+        other_nw = _networth_components(db, other_as_of, base_currency)
+        prev_value = value_selector(other_nw)
+
+        abs_change = current_value - prev_value
+        pct_change = (abs_change / prev_value) if prev_value > 0 else None
+
+        changes[label] = {
+            "abs": abs_change,
+            "pct": pct_change,
+            "current_as_of": as_of.isoformat() if as_of else None,
+            "compare_as_of": other_as_of.isoformat() if other_as_of else None,
+            "compare_month": other_month_start.strftime("%Y-%m"),
+        }
+
+    if "prev_month" in compare_set:
+        _delta("vs_prev_month", _add_months(month_start, -1))
+    if "prev_year" in compare_set:
+        _delta("vs_prev_year", _add_months(month_start, -12))
+
+    return changes
+
+
 def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -> dict:
     q = text("""
         WITH latest AS (
@@ -931,6 +968,34 @@ def dashboard_bootstrap(
     }
 
 
+@router.get("/net-worth-change", response_model=NetWorthChangeResponse)
+def dashboard_net_worth_change(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    compare: str = Query("prev_month,prev_year", description="Comma-separated: prev_month,prev_year"),
+    db: Session = Depends(get_db),
+):
+    month_start = _parse_month(month)
+    anchor = _anchor_ts(month_start)
+    as_of = _effective_as_of(db, anchor)
+    nw = _networth_components(db, anchor, base_currency)
+    compare_set = {c.strip() for c in compare.split(",") if c.strip()}
+    changes = _compute_net_worth_changes(
+        db=db,
+        month_start=month_start,
+        as_of=as_of,
+        current_value=nw["total"],
+        base_currency=base_currency,
+        compare_set=compare_set,
+    )
+    return {
+        "as_of_month": month,
+        "base_currency": base_currency,
+        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_change": changes if changes else None,
+    }
+
+
 @router.get("/summary", response_model=DashboardSummaryResponse)
 def dashboard_summary(
     month: str = Query(..., description="YYYY-MM"),
@@ -974,32 +1039,15 @@ def dashboard_summary(
     cash_balances = _cash_balances(db, anchor, base_currency)
     cf = _cashflow(db, month_start, month_end, base_currency)
 
-    # Comparisons (Option A)
     compare_set = {c.strip() for c in compare.split(",") if c.strip()}
-    changes = {}
-
-    def _delta(label: str, other_month_start: datetime):
-        other_anchor = _anchor_ts(other_month_start)
-        other_as_of = _effective_as_of(db, other_anchor)
-        other_nw = _networth_components(db, other_as_of, base_currency)
-
-        cur = nw["total"]
-        prev = other_nw["total"]
-        abs_change = cur - prev
-        pct_change = (abs_change / prev) if prev > 0 else None
-
-        changes[label] = {
-            "abs": abs_change,
-            "pct": pct_change,
-            "current_as_of": as_of.isoformat() if as_of else None,
-            "compare_as_of": other_as_of.isoformat() if other_as_of else None,
-            "compare_month": other_month_start.strftime("%Y-%m"),
-        }
-
-    if "prev_month" in compare_set:
-        _delta("vs_prev_month", _add_months(month_start, -1))
-    if "prev_year" in compare_set:
-        _delta("vs_prev_year", _add_months(month_start, -12))
+    changes = _compute_net_worth_changes(
+        db=db,
+        month_start=month_start,
+        as_of=as_of,
+        current_value=nw["total"],
+        base_currency=base_currency,
+        compare_set=compare_set,
+    )
 
     # Compute cash_percent
     cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0

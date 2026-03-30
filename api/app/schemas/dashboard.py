@@ -67,6 +67,16 @@ class DashboardSummaryResponse(BaseModel):
         populate_by_name = True
 
 
+class NetWorthChangeResponse(BaseModel):
+    as_of_month: str
+    base_currency: str
+    net_worth_as_of: Optional[str] = None
+    net_worth_change: Optional[Dict[str, NetWorthChange]] = None
+
+    class Config:
+        populate_by_name = True
+
+
 class StockHoldingsResponse(BaseModel):
     as_of_month: str
     base_currency: str

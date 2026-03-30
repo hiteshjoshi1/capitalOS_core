@@ -33,6 +33,23 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert changes["pct"] == 10000.0 / 90000.0
 
 
+def test_dashboard_net_worth_change_lightweight(client: TestClient, seed_dashboard_data):
+    resp = client.get("/dashboard/net-worth-change?month=2026-02&compare=prev_month")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["as_of_month"] == "2026-02"
+    assert data["base_currency"] == "SGD"
+    assert "net_worth_as_of" in data
+    assert "net_worth_change" in data
+    assert "vs_prev_month" in data["net_worth_change"]
+    assert "vs_prev_year" not in data["net_worth_change"]
+
+    changes = data["net_worth_change"]["vs_prev_month"]
+    assert changes["abs"] == 10000.0
+    assert changes["pct"] == 10000.0 / 90000.0
+
+
 def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
