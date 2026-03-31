@@ -209,6 +209,13 @@ net_worth_change: null | {
 cash_percent: number;
 };
 
+export type DashboardNetWorthChange = {
+  as_of_month: string;
+  base_currency: string;
+  net_worth_as_of: string | null;
+  net_worth_change: DashboardSummary["net_worth_change"];
+};
+
 export type StockHoldingsSummary = {
   as_of_month: string;
   base_currency: string;
@@ -719,6 +726,8 @@ export const api = {
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
     req<DashboardBootstrap>(`/dashboard/bootstrap?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  dashboardNetWorthChange: (month: string, baseCurrency = "SGD", compare = "prev_month,prev_year") =>
+    req<DashboardNetWorthChange>(`/dashboard/net-worth-change?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}&compare=${encodeURIComponent(compare)}`),
   categories: () => req<CategoryTaxonomy[]>("/categories"),
   unmappedTransactions: (month: string, accountId?: number) =>
     req<UnmappedTransaction[]>(
