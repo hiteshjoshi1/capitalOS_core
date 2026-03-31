@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.schemas.dashboard import (
     BootstrapResponse,
@@ -25,7 +26,7 @@ from app.schemas.dashboard import (
 )
 from app.fx import get_rates
 
-router = APIRouter(prefix="/dashboard", tags=["dashboard"])
+router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(require_current_user)])
 
 _UPPERCASE_SOURCE_CODES = {"DBS", "OCBC", "UOB", "IBKR", "POSB", "CITI", "HSBC", "SCB"}
 
@@ -60,14 +61,22 @@ def _anchor_ts(month_start: datetime) -> datetime:
     return _add_months(month_start, 1).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def _effective_as_of(db: Session, anchor_ts: datetime) -> Optional[datetime]:
+def _effective_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> Optional[datetime]:
     """
     Pick the effective snapshot timestamp:
     max(positions.as_of) where as_of <= anchor_ts.
     Returns None if no snapshots exist at/before anchor.
     """
-    q = text("SELECT MAX(as_of) AS as_of FROM positions WHERE as_of <= :anchor_ts")
-    r = db.execute(q, {"anchor_ts": anchor_ts}).mappings().one()
+    q = text(
+        """
+        SELECT MAX(p.as_of) AS as_of
+        FROM positions p
+        JOIN accounts acc ON acc.id = p.account_id
+        WHERE p.as_of <= :anchor_ts
+          AND """
+        + account_scope_sql("acc")
+    )
+    r = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().one()
     as_of = r["as_of"]
     if isinstance(as_of, str):
         try:
@@ -119,16 +128,20 @@ def _infer_country(
     return "UNKNOWN"
 
 
-def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, float]:
+def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, float]:
     """Compute net worth components using latest snapshot per account up to anchor_ts."""
     if anchor_ts is None:
         return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
     q = text("""
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         latest_prices AS (
           SELECT p1.asset_id, p1.price, p1.currency
@@ -153,7 +166,10 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
         JOIN assets a ON a.id = p.asset_id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().all()
     if not rows:
         rows = []
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -187,9 +203,12 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
             JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
             JOIN crypto_wallets w ON w.id = s.wallet_id
             WHERE w.status = 'active'
+              AND """
+            + account_scope_sql("w")
+            + """
             """
         ),
-        {"as_of_date": as_of_date},
+        {"as_of_date": as_of_date, "current_user_id": current_user_id},
     ).mappings().one()
     wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
     if wallet_usd:
@@ -207,15 +226,19 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str) -
     }
 
 
-def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: str) -> List[Dict[str, Any]]:
+def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
     if total <= 0:
         return []
     q = text("""
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         latest_prices AS (
           SELECT p1.asset_id, p1.price, p1.currency
@@ -244,8 +267,14 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
         WHERE a.asset_class <> 'CRYPTO'
+          AND """
+        + account_scope_sql("acc")
+        + """
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().all()
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[str, float] = {}
@@ -268,14 +297,18 @@ def _blank_geo_country_bucket() -> Dict[str, float]:
     return {"stocks_funds": 0.0, "cash": 0.0, "crypto": 0.0}
 
 
-def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, Any]:
+def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     q = text(
         """
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+          + account_scope_sql("acc")
+          + """
+          GROUP BY p.account_id
         ),
         map_exchange AS (
           SELECT
@@ -315,9 +348,15 @@ def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str) ->
         LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
         WHERE a.asset_class IN ('CASH', 'STOCK', 'FUND')
+          AND """
+        + account_scope_sql("acc")
+        + """
         """
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().all()
     currencies = {(row.get("quote_currency") or "").upper() for row in rows if row.get("quote_currency")}
     currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
@@ -366,10 +405,13 @@ def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str) ->
             JOIN crypto_wallets w ON w.id = s.wallet_id
             JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
             WHERE w.status = 'active'
+              AND """
+            + account_scope_sql("w")
+            + """
             GROUP BY UPPER(COALESCE(i.symbol, ''))
             """
         ),
-        {"as_of_date": anchor_ts.date()},
+        {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
 
     us_bucket = _bucket("US")
@@ -408,17 +450,28 @@ def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str) ->
     return {"base_currency": base_currency, "total": grand_total, "items": items}
 
 
-def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency: str, limit: int = 10) -> List[Dict[str, Any]]:
+def _top_holdings(
+    db: Session,
+    anchor_ts: datetime,
+    total: float,
+    base_currency: str,
+    current_user_id: int,
+    limit: int = 10,
+) -> List[Dict[str, Any]]:
     if total <= 0:
         return []
     
     # Combined query: positions (stocks/funds, excluding CASH) UNION ALL crypto wallet snapshots (grouped by base_asset)
     q = text("""
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         map_exchange AS (
           SELECT
@@ -464,6 +517,9 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
           LEFT JOIN map_exchange mx ON mx.asset_id = a.id
           LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
           WHERE a.asset_class <> 'CRYPTO' AND a.asset_class <> 'CASH'
+            AND """
+          + account_scope_sql("acc")
+          + """
         ),
         -- Crypto: wallet snapshots grouped by base_asset (or symbol if base_asset is null)
         latest_wallets AS (
@@ -500,6 +556,9 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
                 OR (fallback.chain IS NULL AND i.chain IS NULL)
            )
           WHERE w.status = 'active'
+            AND """
+          + account_scope_sql("w")
+          + """
           GROUP BY UPPER(COALESCE(direct_ca.base_asset, fallback.base_asset, i.symbol))
         ),
         crypto_holdings AS (
@@ -521,7 +580,15 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
         UNION ALL
         SELECT * FROM crypto_holdings
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "as_of_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {
+            "anchor_ts": anchor_ts,
+            "anchor_date": anchor_ts.date(),
+            "as_of_date": anchor_ts.date(),
+            "current_user_id": current_user_id,
+        },
+    ).mappings().all()
 
     # Collect all unique currencies for FX conversion
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -604,13 +671,17 @@ def _top_holdings(db: Session, anchor_ts: datetime, total: float, base_currency:
     return out
 
 
-def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str) -> List[Dict[str, Any]]:
+def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
     q = text("""
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         )
         SELECT
           a.quote_currency AS currency,
@@ -620,7 +691,7 @@ def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str) -> List
         JOIN assets a ON a.id = p.asset_id
         WHERE a.asset_class = 'CASH'
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().all()
     if not rows:
         return []
     currencies = {r["currency"] for r in rows if r["currency"]}
@@ -651,17 +722,21 @@ def _display_source(value: str | None) -> str:
     return text.lower().title()
 
 
-def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str) -> Dict[str, Any]:
+def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     buckets: Dict[str, float] = {}
 
     cash_rows = db.execute(
         text(
             """
             WITH latest AS (
-              SELECT account_id, MAX(as_of) AS as_of
-              FROM positions
-              WHERE as_of <= :anchor_ts
-              GROUP BY account_id
+              SELECT p.account_id, MAX(p.as_of) AS as_of
+              FROM positions p
+              JOIN accounts scoped_acc ON scoped_acc.id = p.account_id
+              WHERE p.as_of <= :anchor_ts
+                AND """
+            + account_scope_sql("scoped_acc")
+            + """
+              GROUP BY p.account_id
             )
             SELECT
               COALESCE(pl.code, acc.platform) AS source,
@@ -673,9 +748,12 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str) -> Dict
             LEFT JOIN platforms pl ON pl.id = acc.platform_id
             JOIN assets a ON a.id = p.asset_id
             WHERE a.asset_class = 'CASH'
+              AND """
+            + account_scope_sql("acc")
+            + """
             """
         ),
-        {"anchor_ts": anchor_ts},
+        {"anchor_ts": anchor_ts, "current_user_id": current_user_id},
     ).mappings().all()
     cash_currencies = {row["quote_currency"] for row in cash_rows if row["quote_currency"]}
     cash_rates = get_rates(anchor_ts, base_currency, cash_currencies) if cash_currencies else {}
@@ -704,11 +782,14 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str) -> Dict
             JOIN crypto_wallets w ON w.id = s.wallet_id
             JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
             WHERE w.status = 'active'
+              AND """
+            + account_scope_sql("w")
+            + """
               AND UPPER(COALESCE(i.symbol, '')) IN ('USDC', 'USDT')
             GROUP BY i.chain
             """
         ),
-        {"as_of_date": anchor_ts.date()},
+        {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
     if wallet_rows:
         usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
@@ -732,16 +813,22 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str) -> Dict
     return {"items": items, "total": total}
 
 
-def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str) -> Dict[str, Any]:
-    q = text("""
+def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
+    q = text(
+        """
         SELECT
-          type,
-          amount,
-          currency
-        FROM transactions
-        WHERE ts >= :start AND ts < :end
-    """)
-    rows = db.execute(q, {"start": start, "end": end}).mappings().all()
+          t.type,
+          t.amount,
+          t.currency
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        WHERE t.ts >= :start AND t.ts < :end
+          AND """
+        + account_scope_sql("a")
+        + """
+        """
+    )
+    rows = db.execute(q, {"start": start, "end": end, "current_user_id": current_user_id}).mappings().all()
     currencies = {r["currency"] for r in rows if r["currency"]}
     rates = get_rates(start, base_currency, currencies)
     income = 0.0
@@ -758,13 +845,17 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str) -
     return {"income": income, "expenses": expenses, "net": net, "savings_rate": savings_rate}
 
 
-def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -> dict:
+def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> dict:
     q = text("""
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         latest_prices AS (
           SELECT p1.asset_id, p1.price, p1.currency
@@ -793,8 +884,14 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -
         JOIN assets a2 ON a2.id = p.asset_id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
         WHERE a2.asset_class <> 'CRYPTO'
+          AND """
+        + account_scope_sql("a")
+        + """
     """)
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().all()
     if not rows:
         return {"as_of": None, "total": 0.0, "items": []}
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -819,14 +916,18 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str) -
     return {"as_of": None, "total": total, "items": items}
 
 
-def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dict:
+def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> dict:
     q = text(
         """
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         latest_prices AS (
           SELECT p1.asset_id, p1.price, p1.currency
@@ -855,9 +956,15 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str) -> dic
         JOIN assets a2 ON a2.id = p.asset_id
         LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
         WHERE a2.asset_class IN ('STOCK', 'FUND')
+          AND """
+        + account_scope_sql("a")
+        + """
         """
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().all()
     if not rows:
         return {"as_of": None, "base_currency": base_currency, "total": 0.0, "by_country": [], "by_platform": []}
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
@@ -897,6 +1004,7 @@ def dashboard_bootstrap(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     """Lean first-paint payload: net worth + exposure totals only.
 
@@ -905,10 +1013,10 @@ def dashboard_bootstrap(
     """
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    as_of = _effective_as_of(db, anchor)
+    as_of = _effective_as_of(db, anchor, current_user.id)
 
-    nw = _networth_components(db, anchor, base_currency)
-    stock_data = _stock_exposure(db, anchor, base_currency)
+    nw = _networth_components(db, anchor, base_currency, current_user.id)
+    stock_data = _stock_exposure(db, anchor, base_currency, current_user.id)
 
     cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
     snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
@@ -938,6 +1046,7 @@ def dashboard_summary(
     compare: str = Query("", description="Comma-separated: prev_month,prev_year"),
     skip_networth: bool = Query(False, description="When True, skip net-worth computation and omit net_worth/net_worth_as_of/net_worth_change from response"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     # Calendar month window for cashflow
     month_start = _parse_month(month)
@@ -949,11 +1058,11 @@ def dashboard_summary(
     top_holdings_limit = _summary_top_holdings_limit()
 
     if skip_networth:
-        nw = _networth_components(db, anchor, base_currency)
-        geo = _geography(db, anchor, nw["total"], base_currency)
-        top = _top_holdings(db, anchor, nw["total"], base_currency, limit=top_holdings_limit)
-        cash_balances = _cash_balances(db, anchor, base_currency)
-        cf = _cashflow(db, month_start, month_end, base_currency)
+        nw = _networth_components(db, anchor, base_currency, current_user.id)
+        geo = _geography(db, anchor, nw["total"], base_currency, current_user.id)
+        top = _top_holdings(db, anchor, nw["total"], base_currency, current_user.id, limit=top_holdings_limit)
+        cash_balances = _cash_balances(db, anchor, base_currency, current_user.id)
+        cf = _cashflow(db, month_start, month_end, base_currency, current_user.id)
         cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
         return JSONResponse(content={
             "as_of_month": month,
@@ -966,13 +1075,13 @@ def dashboard_summary(
             "cash_percent": cash_percent,
         })
 
-    as_of = _effective_as_of(db, anchor)
+    as_of = _effective_as_of(db, anchor, current_user.id)
 
-    nw = _networth_components(db, anchor, base_currency)
-    geo = _geography(db, anchor, nw["total"], base_currency)
-    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=top_holdings_limit)
-    cash_balances = _cash_balances(db, anchor, base_currency)
-    cf = _cashflow(db, month_start, month_end, base_currency)
+    nw = _networth_components(db, anchor, base_currency, current_user.id)
+    geo = _geography(db, anchor, nw["total"], base_currency, current_user.id)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, current_user.id, limit=top_holdings_limit)
+    cash_balances = _cash_balances(db, anchor, base_currency, current_user.id)
+    cf = _cashflow(db, month_start, month_end, base_currency, current_user.id)
 
     # Comparisons (Option A)
     compare_set = {c.strip() for c in compare.split(",") if c.strip()}
@@ -980,8 +1089,8 @@ def dashboard_summary(
 
     def _delta(label: str, other_month_start: datetime):
         other_anchor = _anchor_ts(other_month_start)
-        other_as_of = _effective_as_of(db, other_anchor)
-        other_nw = _networth_components(db, other_as_of, base_currency)
+        other_as_of = _effective_as_of(db, other_anchor, current_user.id)
+        other_nw = _networth_components(db, other_as_of, base_currency, current_user.id)
 
         cur = nw["total"]
         prev = other_nw["total"]
@@ -1030,14 +1139,15 @@ def stock_holdings_summary(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
     snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
     top_holdings_limit = _summary_top_holdings_limit()
-    as_of = _effective_as_of(db, anchor)
-    nw = _networth_components(db, anchor, base_currency)
-    top = _top_holdings(db, anchor, nw["total"], base_currency, limit=top_holdings_limit)
+    as_of = _effective_as_of(db, anchor, current_user.id)
+    nw = _networth_components(db, anchor, base_currency, current_user.id)
+    top = _top_holdings(db, anchor, nw["total"], base_currency, current_user.id, limit=top_holdings_limit)
 
     return {
         "as_of_month": month,
@@ -1053,11 +1163,12 @@ def platform_allocation(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    as_of = _effective_as_of(db, anchor)
-    payload = _platform_allocation(db, anchor, base_currency)
+    as_of = _effective_as_of(db, anchor, current_user.id)
+    payload = _platform_allocation(db, anchor, base_currency, current_user.id)
     return PlatformAllocationOut(
         as_of=as_of.isoformat() if as_of else None,
         total=payload["total"],
@@ -1070,10 +1181,11 @@ def cash_deposits(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    payload = _cash_deposits(db, anchor, base_currency)
+    payload = _cash_deposits(db, anchor, base_currency, current_user.id)
     return CashDepositsOut(
         total=payload["total"],
         items=[CashDepositsItem(**item) for item in payload["items"]],
@@ -1085,11 +1197,12 @@ def stock_exposure(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    as_of = _effective_as_of(db, anchor)
-    payload = _stock_exposure(db, anchor, base_currency)
+    as_of = _effective_as_of(db, anchor, current_user.id)
+    payload = _stock_exposure(db, anchor, base_currency, current_user.id)
     return StockExposureOut(
         as_of=as_of.isoformat() if as_of else None,
         base_currency=base_currency,
@@ -1104,11 +1217,12 @@ def geography_exposure(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    as_of = _effective_as_of(db, anchor)
-    payload = _geography_exposure(db, anchor, base_currency)
+    as_of = _effective_as_of(db, anchor, current_user.id)
+    payload = _geography_exposure(db, anchor, base_currency, current_user.id)
     return GeographyExposureOut(
         as_of=as_of.isoformat() if as_of else None,
         base_currency=base_currency,

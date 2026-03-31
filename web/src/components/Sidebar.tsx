@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
+import { useAuth } from "../context/useAuth";
 import { api } from "../lib/api";
 
 type NavChild = { label: string; to: string };
@@ -53,6 +54,7 @@ function isSectionOpen(section: NavSection, pathname: string): boolean {
 export default function Sidebar() {
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+  const { user, logout } = useAuth();
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () =>
       Object.fromEntries(
@@ -135,9 +137,9 @@ export default function Sidebar() {
       <div className="sidebarUserArea">
         <div className="sidebarUserInfo">
           <span className="sidebarAvatar" aria-hidden="true">
-            U
+            {(user?.username || "U").slice(0, 1).toUpperCase()}
           </span>
-          <span className="sidebarUserName">User</span>
+          <span className="sidebarUserName">{user?.display_name || user?.username || "User"}</span>
         </div>
         <button
           className="btn sidebarThemeToggle"
@@ -146,6 +148,15 @@ export default function Sidebar() {
           onClick={toggleTheme}
         >
           {theme === "dark" ? "Theme: Dark" : "Theme: Light"}
+        </button>
+        <button
+          className="btn sidebarThemeToggle"
+          type="button"
+          onClick={() => {
+            void logout();
+          }}
+        >
+          Log Out
         </button>
       </div>
     </aside>

@@ -82,3 +82,49 @@ describe("api.dashboardBootstrap – URL correctness", () => {
     expect(calledUrl).toContain("base_currency=USD");
   });
 });
+
+describe("api.authLogin – error formatting", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("formats FastAPI validation payloads into readable field messages", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      text: () =>
+        Promise.resolve(
+          JSON.stringify({
+            detail: [
+              {
+                type: "string_too_short",
+                loc: ["body", "password"],
+                msg: "String should have at least 8 characters",
+              },
+            ],
+          }),
+        ),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const { api } = await import("../lib/api");
+
+    await expect(api.authLogin({ username: "demo", password: "short" })).rejects.toThrow(
+      "password: String should have at least 8 characters",
+    );
+  });
+
+  it("uses detail string when backend returns auth failure", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: () => Promise.resolve(JSON.stringify({ detail: "invalid credentials" })),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const { api } = await import("../lib/api");
+
+    await expect(api.authLogin({ username: "demo", password: "wrongpassword" })).rejects.toThrow(
+      "invalid credentials",
+    );
+  });
+});

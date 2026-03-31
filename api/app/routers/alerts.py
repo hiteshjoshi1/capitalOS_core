@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.schemas.alert import UploadReminderAlert, UploadReminderCountResponse
 
-router = APIRouter(prefix="/alerts", tags=["alerts"])
+router = APIRouter(prefix="/alerts", tags=["alerts"], dependencies=[Depends(require_current_user)])
 
 
 def _stale_days() -> int:
@@ -51,7 +52,7 @@ def _days_since(val: object) -> int:
     return 0
 
 
-def _fetch_stale_accounts(db: Session, stale_days: int) -> List[UploadReminderAlert]:
+def _fetch_stale_accounts(db: Session, stale_days: int, current_user_id: int) -> List[UploadReminderAlert]:
     sql = text(
         """
         SELECT
@@ -66,11 +67,14 @@ def _fetch_stale_accounts(db: Session, stale_days: int) -> List[UploadReminderAl
         INNER JOIN import_jobs AS ij
             ON ij.account_id = a.id AND ij.status = 'IMPORTED'
         LEFT JOIN transactions AS t ON t.account_id = a.id
+        WHERE """
+        + account_scope_sql("a")
+        + """
         GROUP BY a.id, a.name, a.platform, a.account_type, p.code
         ORDER BY a.name
         """
     )
-    rows = db.execute(sql).mappings().fetchall()
+    rows = db.execute(sql, {"current_user_id": current_user_id}).mappings().fetchall()
 
     alerts: List[UploadReminderAlert] = []
     for row in rows:
@@ -110,13 +114,19 @@ def _fetch_stale_accounts(db: Session, stale_days: int) -> List[UploadReminderAl
 
 
 @router.get("/upload-reminders", response_model=List[UploadReminderAlert])
-def get_upload_reminders(db: Session = Depends(get_db)) -> List[UploadReminderAlert]:
+def get_upload_reminders(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+) -> List[UploadReminderAlert]:
     """Return accounts whose last successful import is older than UPLOAD_STALE_DAYS."""
-    return _fetch_stale_accounts(db, _stale_days())
+    return _fetch_stale_accounts(db, _stale_days(), current_user.id)
 
 
 @router.get("/upload-reminders/count", response_model=UploadReminderCountResponse)
-def get_upload_reminders_count(db: Session = Depends(get_db)) -> UploadReminderCountResponse:
+def get_upload_reminders_count(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+) -> UploadReminderCountResponse:
     """Return the number of stale-upload alerts (for the nav badge)."""
-    alerts = _fetch_stale_accounts(db, _stale_days())
+    alerts = _fetch_stale_accounts(db, _stale_days(), current_user.id)
     return UploadReminderCountResponse(count=len(alerts))

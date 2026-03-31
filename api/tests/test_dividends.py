@@ -178,3 +178,53 @@ def test_expected_dividends_overview_is_annualized_from_yield(client, db_engine)
     assert round(payload["companies"][0]["yearly_dividend"], 2) == 60.0
     assert round(payload["companies"][0]["quarterly_dividend"], 2) == 15.0
     assert round(payload["companies"][0]["monthly_dividend"], 2) == 5.0
+
+
+def test_expected_dividends_overview_ignores_dummy_source_snapshots(client, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
+                (511, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES
+                (911, 'COP', 'ConocoPhillips', 'STOCK', 'USD', 'US')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES
+                (711, 511, 911, '2026-03-06T00:00:00+00:00', 10, 100, 1000)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_dividend_yields
+                  (asset_id, as_of_date, yield_rate, annual_dividend_per_share, price, currency, source, exchange_code, provider_symbol)
+                VALUES
+                  (911, '2026-03-31', 2.20, 2.53, 115, 'USD', 'DUMMY', 'US', 'COP'),
+                  (911, '2026-03-30', 0.025, 3.18, 132, 'USD', 'yfinance_dividend', 'US', 'COP')
+                """
+            )
+        )
+
+    resp = client.get(
+        "/dividends/expected/overview"
+        "?from_month=2026-03&to_month=2026-03&base_currency=USD"
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert len(payload["companies"]) == 1
+    # Uses yfinance snapshot (2.5%), not DUMMY (220%).
+    assert round(payload["companies"][0]["yield_pct"], 2) == 2.5
+    assert round(payload["companies"][0]["yearly_dividend"], 2) == 33.0

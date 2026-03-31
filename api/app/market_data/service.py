@@ -88,6 +88,11 @@ def _default_yahoo_symbol(exchange_symbol: str, exchange_code: str) -> str:
         base = f"{base[:-4]}.NS"
     if base.endswith(".SGX"):
         base = f"{base[:-4]}.SI"
+    if ex == "US" and "." in base and not base.endswith((".NS", ".SI", ".HK")):
+        # Yahoo uses dashed class-share tickers for US equities (e.g. BRK-B).
+        parts = base.split(".")
+        if len(parts) == 2 and parts[0] and parts[1]:
+            base = f"{parts[0]}-{parts[1]}"
     suffix = YAHOO_SUFFIX.get(ex, "")
     symbol = base
     if suffix and not symbol.endswith(suffix):
@@ -113,6 +118,7 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
             SELECT m.asset_id,
                    m.exchange_code,
                    m.exchange_symbol,
+                   a.symbol AS asset_symbol,
                    m.quote_currency,
                    m.eodhd_symbol_override,
                    m.yahoo_symbol_override,
@@ -140,7 +146,11 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
 
     out: list[SymbolMapRow] = []
     for row in rows:
-        sym = str(row["exchange_symbol"] or "").strip().upper()
+        ex = str(row["exchange_code"]).strip().upper()
+        mapped_symbol = str(row["exchange_symbol"] or "").strip().upper()
+        asset_symbol = str(row.get("asset_symbol") or "").strip().upper()
+        # US maps can drift to company-name-like symbols; prefer canonical asset symbol when present.
+        sym = asset_symbol if ex == "US" and asset_symbol else mapped_symbol
         ex = str(row["exchange_code"]).strip().upper()
         if not sym:
             continue
@@ -208,7 +218,7 @@ def _backfill_symbol_map_for_exchange(db: Session, exchange_code: str) -> int:
     for row in rows:
         if not _asset_matches_exchange(row, exchange_code):
             continue
-        exchange_symbol = _ticker_candidate(row.get("name")) or _ticker_candidate(row.get("symbol"))
+        exchange_symbol = _ticker_candidate(row.get("symbol")) or _ticker_candidate(row.get("name"))
         if not exchange_symbol:
             continue
         quote_currency = (row.get("quote_currency") or _EXCHANGE_DEFAULT_CCY.get(exchange_code) or "USD").upper()
@@ -544,7 +554,12 @@ def _refresh_dividend_yields_for_exchange(
     symbols: list[SymbolMapRow],
     yfinance: YFinanceProvider,
 ) -> int:
-    by_symbol = _symbols_for_provider("yfinance", symbols)
+    by_symbol: dict[str, list[SymbolMapRow]] = {}
+    for row in symbols:
+        provider_symbol = row.yahoo_symbol.strip().upper()
+        if not provider_symbol:
+            continue
+        by_symbol.setdefault(provider_symbol, []).append(row)
     if not by_symbol:
         return 0
     try:
@@ -557,7 +572,7 @@ def _refresh_dividend_yields_for_exchange(
         return 0
 
     upserted = 0
-    for provider_symbol, row in by_symbol.items():
+    for provider_symbol, mapped_rows in by_symbol.items():
         payload = snapshots.get(provider_symbol.upper())
         if not payload:
             continue
@@ -567,21 +582,22 @@ def _refresh_dividend_yields_for_exchange(
             continue
         annual_dividend = payload.get("annual_dividend")
         price = payload.get("price")
-        currency = str(payload.get("currency") or row.quote_currency or "USD").upper()
-        written = _upsert_dividend_snapshot(
-            db,
-            asset_id=row.asset_id,
-            as_of_date=trade_date,
-            yield_rate=yield_rate,
-            annual_dividend_per_share=float(annual_dividend) if annual_dividend is not None else None,
-            price=float(price) if price is not None else None,
-            currency=currency,
-            source="yfinance_dividend",
-            exchange_code=exchange_code,
-            provider_symbol=provider_symbol,
-        )
-        if written:
-            upserted += 1
+        for row in mapped_rows:
+            currency = str(payload.get("currency") or row.quote_currency or "USD").upper()
+            written = _upsert_dividend_snapshot(
+                db,
+                asset_id=row.asset_id,
+                as_of_date=trade_date,
+                yield_rate=yield_rate,
+                annual_dividend_per_share=float(annual_dividend) if annual_dividend is not None else None,
+                price=float(price) if price is not None else None,
+                currency=currency,
+                source="yfinance_dividend",
+                exchange_code=exchange_code,
+                provider_symbol=provider_symbol,
+            )
+            if written:
+                upserted += 1
     return upserted
 
 

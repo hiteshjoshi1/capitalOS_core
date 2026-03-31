@@ -68,8 +68,8 @@ export function computeLargestPositionRisk(holdings: Holding[], netWorthTotal: n
     return noLargestPositionData();
   }
 
-  // Exclude CASH from risk calculations
-  const filtered = holdings.filter((h) => h.asset_class !== "CASH");
+  // Exclude CASH/CRYPTO from position concentration risk calculations.
+  const filtered = holdings.filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO");
   if (filtered.length === 0) {
     return noLargestPositionData();
   }
@@ -109,8 +109,8 @@ export function computeTopNConcentrationRisk(
     };
   }
 
-  // Exclude CASH from risk calculations
-  const filtered = holdings.filter((h) => h.asset_class !== "CASH");
+  // Exclude CASH/CRYPTO from position concentration risk calculations.
+  const filtered = holdings.filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO");
   const sorted = sortHoldingsForRisk(filtered);
   const selected = sorted.slice(0, n);
   const sum = selected.reduce((acc, item) => acc + item.value, 0);
@@ -135,8 +135,8 @@ export function buildTopNDistribution(
     return [];
   }
 
-  // Exclude CASH from risk calculations
-  const filtered = holdings.filter((h) => h.asset_class !== "CASH");
+  // Exclude CASH/CRYPTO from position concentration risk calculations.
+  const filtered = holdings.filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO");
   return sortHoldingsForRisk(filtered)
     .slice(0, n)
     .map((item) => ({

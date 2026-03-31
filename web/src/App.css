@@ -1254,6 +1254,35 @@ a.btn {
   margin-left: auto;
 }
 
+.authPage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.authCard {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 12px;
+  padding: 20px;
+}
+
+.authTitle {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 760;
+}
+
+.authSubtitle {
+  margin: 0 0 2px;
+}
+
+.authFooter {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
 /* ── Alert Cards ────────────────────────────────────────────── */
 .alertList {
   display: flex;

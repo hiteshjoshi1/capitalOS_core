@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mockAuthenticatedSession } from "./helpers/auth";
 
 type Platform = {
   id: number;
@@ -113,16 +114,20 @@ async function mockOperationsApis(page: Page) {
   });
 }
 
+test.beforeEach(async ({ page }) => {
+  await mockAuthenticatedSession(page);
+});
+
 test("Operations nav includes Add Account and Platforms", async ({ page }) => {
   await mockDashboardApis(page);
   await mockOperationsApis(page);
 
   await page.goto("/");
   await page.getByRole("button", { name: /Operations/i }).click();
-  await expect(page.getByRole("link", { name: "Add Account" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Accounts" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Platforms" })).toBeVisible();
 
-  await page.getByRole("link", { name: "Add Account" }).click();
+  await page.getByRole("link", { name: "Accounts" }).click();
   await expect(page).toHaveURL(/\/accounts\/new$/);
   await expect(page.getByRole("heading", { level: 1, name: "Add Account" })).toBeVisible();
 

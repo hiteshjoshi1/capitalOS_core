@@ -19,6 +19,7 @@ def test_yfinance_nse_symbol_normalization():
     assert provider._normalize_symbol("NSE:RELIANCE", "NSE") == "RELIANCE.NS"
     assert provider._normalize_symbol("RELIANCE.NSE", "NSE") == "RELIANCE.NS"
     assert provider._normalize_symbol("M&M", "NSE") == "M&M.NS"
+    assert provider._normalize_symbol("BRK.B", "US") == "BRK-B"
 
 
 def test_yfinance_dividend_yield_subunit_percent_hint_for_non_us():
@@ -254,6 +255,59 @@ def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, mon
         ).fetchone()
     assert row is not None
     assert row[0] == "HKD"
+
+
+def test_market_data_prefers_asset_symbol_for_us_map_drift(client, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(121, 'COP', 'ConocoPhillips', 'STOCK', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_symbol_map
+                  (asset_id, exchange_code, exchange_symbol, quote_currency, is_active)
+                VALUES
+                  (121, 'US', 'CONOCOPHILLIPS', 'USD', 1)
+                """
+            )
+        )
+
+    def fake_finnhub(self, symbols, exchange_code=None, trade_date=None):
+        assert symbols == ["COP"]
+        return {
+            "COP": providers.EodQuote(
+                provider="finnhub",
+                symbol="COP",
+                trade_date=datetime(2026, 2, 6, tzinfo=timezone.utc).date(),
+                close=132.0,
+                currency="USD",
+            )
+        }
+
+    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
+
+    resp = client.post("/market-data/refresh-now")
+    assert resp.status_code == 200
+
+    with db_engine.begin() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT provider_symbol, currency
+                FROM prices
+                WHERE asset_id = 121
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            )
+        ).fetchone()
+    assert row is not None
+    assert row[0] == "COP"
+    assert row[1] == "USD"
 
 
 def test_market_data_auto_backfills_missing_nse_symbol_map(client, db_engine, monkeypatch):

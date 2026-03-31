@@ -13,6 +13,9 @@ os.environ.setdefault("SNAPSHOT_DAY", "6")
 os.environ.setdefault("CRYPTO_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
+os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
+os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+os.environ.setdefault("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "1")
 
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
@@ -47,10 +50,59 @@ def setup_db():
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               name TEXT NOT NULL,
               platform TEXT NOT NULL,
+              user_id INTEGER,
               account_type TEXT NOT NULL,
               currency TEXT NOT NULL,
               country TEXT,
               platform_id INTEGER
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              username TEXT NOT NULL UNIQUE,
+              display_name TEXT,
+              email TEXT,
+              is_active INTEGER NOT NULL DEFAULT 1,
+              is_admin INTEGER NOT NULL DEFAULT 0,
+              created_at TIMESTAMP,
+              updated_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS user_credentials (
+              user_id INTEGER PRIMARY KEY,
+              password_hash TEXT NOT NULL,
+              password_algo TEXT NOT NULL,
+              password_updated_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS auth_sessions (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              refresh_token_hash TEXT NOT NULL,
+              expires_at TIMESTAMP NOT NULL,
+              revoked_at TIMESTAMP,
+              created_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS oauth_identities (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              user_id INTEGER NOT NULL,
+              provider TEXT NOT NULL,
+              provider_subject TEXT NOT NULL,
+              email TEXT,
+              created_at TIMESTAMP
             )
             """
         )
@@ -426,6 +478,10 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallets")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_user_networth")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_allowlist")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS auth_sessions")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS oauth_identities")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS user_credentials")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS users")
     Base.metadata.drop_all(bind=engine)
 
 
@@ -449,6 +505,10 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM currencies")
         conn.exec_driver_sql("DELETE FROM parser_registry")
         conn.exec_driver_sql("DELETE FROM import_jobs")
+        conn.exec_driver_sql("DELETE FROM auth_sessions")
+        conn.exec_driver_sql("DELETE FROM oauth_identities")
+        conn.exec_driver_sql("DELETE FROM user_credentials")
+        conn.exec_driver_sql("DELETE FROM users")
         conn.exec_driver_sql("DELETE FROM crypto_allowlist")
         conn.exec_driver_sql("DELETE FROM crypto_wallet_snapshot_items")
         conn.exec_driver_sql("DELETE FROM crypto_wallet_snapshots")

@@ -1,4 +1,9 @@
 import { test, expect } from "@playwright/test";
+import { mockAuthenticatedSession } from "./helpers/auth";
+
+test.beforeEach(async ({ page }) => {
+  await mockAuthenticatedSession(page);
+});
 
 test("happy path: dashboard to cash and market data", async ({ page }) => {
   await page.goto("/");

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import get_rates
 from app.market_data.service import YAHOO_SUFFIX
@@ -24,7 +25,7 @@ from app.schemas.dividends import (
     ExpectedDividendSummaryOut,
 )
 
-router = APIRouter(prefix="/dividends", tags=["dividends"])
+router = APIRouter(prefix="/dividends", tags=["dividends"], dependencies=[Depends(require_current_user)])
 
 
 def _parse_month(value: str) -> datetime:
@@ -145,6 +146,7 @@ def _fetch_dividend_rows(
     db: Session,
     start: datetime,
     end: datetime,
+    current_user_id: int,
     *,
     asset_id: int | None = None,
     symbol: str | None = None,
@@ -192,6 +194,9 @@ def _fetch_dividend_rows(
           ON resolved_ct.id = COALESCE(override_ct.id, parser_ct.id)
         WHERE t.ts >= :start
           AND t.ts < :end
+          AND """
+        + account_scope_sql("acc")
+        + f"""
           AND (
             LOWER(COALESCE(resolved_ct.code, '')) IN ('income_dividends', 'taxes_withholding')
             OR LOWER(COALESCE(t.category, '')) LIKE '%dividend%'
@@ -202,17 +207,27 @@ def _fetch_dividend_rows(
         ORDER BY t.ts ASC, t.id ASC
         """
     )
+    params["current_user_id"] = current_user_id
     return [dict(r) for r in db.execute(q, params).mappings().all()]
 
 
-def _latest_asset_market_values(db: Session, anchor_ts: datetime, base_currency: str) -> dict[int, float]:
+def _latest_asset_market_values(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+) -> dict[int, float]:
     q = text(
         """
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         latest_prices AS (
           SELECT p1.asset_id, p1.price, p1.currency
@@ -242,7 +257,10 @@ def _latest_asset_market_values(db: Session, anchor_ts: datetime, base_currency:
         GROUP BY p.asset_id, COALESCE(lp.currency, a.quote_currency)
         """
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date()}).mappings().all()
+    rows = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().all()
     if not rows:
         return {}
     currencies = {(r.get("quote_currency") or base_currency).upper() for r in rows}
@@ -264,6 +282,7 @@ def _aggregate_dividend_data(
     assumed_tax_rate: float,
     country_rates: dict[str, float],
     anchor_ts: datetime,
+    current_user_id: int,
     db: Session,
 ) -> tuple[list[DividendSummaryBucketOut], list[dict[str, Any]], DividendTotalsOut]:
     if not rows:
@@ -336,7 +355,7 @@ def _aggregate_dividend_data(
         totals["estimated_tax"] += item.estimated_tax
         totals["payout_minus_tax"] += item.payout_minus_tax
 
-    asset_values = _latest_asset_market_values(db, anchor_ts, base_currency)
+    asset_values = _latest_asset_market_values(db, anchor_ts, base_currency, current_user_id)
     company_items: list[dict[str, Any]] = []
     for item in company_rollups.values():
         asset_id = item["asset_id"]
@@ -373,11 +392,12 @@ def dividends_summary(
     assumed_tax_rate: float = Query(0.0, ge=0.0),
     country_tax_rates: str | None = Query(None, description="Comma-separated rates, e.g. US:0.15,IN:0.10"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start, end, from_key, to_key = _resolve_range(from_month, to_month)
     normalized_default_rate = _normalize_tax_rate(assumed_tax_rate)
     country_rates = _parse_country_tax_rates(country_tax_rates)
-    rows = _fetch_dividend_rows(db, start, end)
+    rows = _fetch_dividend_rows(db, start, end, current_user.id)
     buckets, _company, totals = _aggregate_dividend_data(
         rows,
         period=period,
@@ -385,6 +405,7 @@ def dividends_summary(
         assumed_tax_rate=normalized_default_rate,
         country_rates=country_rates,
         anchor_ts=end,
+        current_user_id=current_user.id,
         db=db,
     )
     return DividendSummaryOut(
@@ -407,11 +428,12 @@ def dividends_by_company(
     assumed_tax_rate: float = Query(0.0, ge=0.0),
     country_tax_rates: str | None = Query(None, description="Comma-separated rates, e.g. US:0.15,IN:0.10"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start, end, from_key, to_key = _resolve_range(from_month, to_month)
     normalized_default_rate = _normalize_tax_rate(assumed_tax_rate)
     country_rates = _parse_country_tax_rates(country_tax_rates)
-    rows = _fetch_dividend_rows(db, start, end)
+    rows = _fetch_dividend_rows(db, start, end, current_user.id)
     _buckets, company_rows, totals = _aggregate_dividend_data(
         rows,
         period="month",
@@ -419,6 +441,7 @@ def dividends_by_company(
         assumed_tax_rate=normalized_default_rate,
         country_rates=country_rates,
         anchor_ts=end,
+        current_user_id=current_user.id,
         db=db,
     )
     items = [DividendCompanyItemOut(**row) for row in company_rows]
@@ -443,6 +466,7 @@ def dividends_history(
     assumed_tax_rate: float = Query(0.0, ge=0.0),
     country_tax_rates: str | None = Query(None, description="Comma-separated rates, e.g. US:0.15,IN:0.10"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     if asset_id is None and (symbol is None or not symbol.strip()):
         raise HTTPException(status_code=400, detail="Either asset_id or symbol is required")
@@ -450,7 +474,7 @@ def dividends_history(
     start, end, from_key, to_key = _resolve_range(from_month, to_month)
     normalized_default_rate = _normalize_tax_rate(assumed_tax_rate)
     country_rates = _parse_country_tax_rates(country_tax_rates)
-    rows = _fetch_dividend_rows(db, start, end, asset_id=asset_id, symbol=symbol)
+    rows = _fetch_dividend_rows(db, start, end, current_user.id, asset_id=asset_id, symbol=symbol)
     buckets, company_rows, totals = _aggregate_dividend_data(
         rows,
         period="month",
@@ -458,6 +482,7 @@ def dividends_history(
         assumed_tax_rate=normalized_default_rate,
         country_rates=country_rates,
         anchor_ts=end,
+        current_user_id=current_user.id,
         db=db,
     )
 
@@ -512,14 +537,18 @@ def _to_yahoo_symbol(symbol: str, exchange_code: str | None) -> str:
     return out
 
 
-def _load_expected_holdings(db: Session, anchor_ts: datetime) -> list[dict[str, Any]]:
+def _load_expected_holdings(db: Session, anchor_ts: datetime, current_user_id: int) -> list[dict[str, Any]]:
     q = text(
         """
         WITH latest AS (
-          SELECT account_id, MAX(as_of) AS as_of
-          FROM positions
-          WHERE as_of <= :anchor_ts
-          GROUP BY account_id
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+            + account_scope_sql("acc")
+            + """
+          GROUP BY p.account_id
         ),
         latest_holdings AS (
           SELECT p.asset_id, SUM(COALESCE(p.quantity, 0)) AS quantity
@@ -555,7 +584,7 @@ def _load_expected_holdings(db: Session, anchor_ts: datetime) -> list[dict[str, 
         ORDER BY h.quantity DESC, a.id ASC
         """
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().all()
     out: list[dict[str, Any]] = []
     for row in rows:
         exchange_code = (row.get("exchange_code") or "").strip().upper() or None
@@ -578,21 +607,31 @@ def _load_expected_holdings(db: Session, anchor_ts: datetime) -> list[dict[str, 
     return out
 
 
-def _quantity_on_date(db: Session, asset_id: int, event_date: date, snapshot_fallback: float) -> float:
+def _quantity_on_date(
+    db: Session,
+    asset_id: int,
+    event_date: date,
+    snapshot_fallback: float,
+    current_user_id: int,
+) -> float:
     cutoff = datetime.combine(event_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
     trades = db.execute(
         text(
             """
             SELECT type, quantity
-            FROM transactions
-            WHERE asset_id = :asset_id
-              AND ts < :cutoff
-              AND type IN ('BUY', 'SELL')
-              AND quantity IS NOT NULL
-            ORDER BY ts ASC, id ASC
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.asset_id = :asset_id
+              AND t.ts < :cutoff
+              AND t.type IN ('BUY', 'SELL')
+              AND t.quantity IS NOT NULL
+              AND """
+            + account_scope_sql("a")
+            + """
+            ORDER BY t.ts ASC, t.id ASC
             """
         ),
-        {"asset_id": asset_id, "cutoff": cutoff},
+        {"asset_id": asset_id, "cutoff": cutoff, "current_user_id": current_user_id},
     ).mappings().all()
     if trades:
         qty = 0.0
@@ -608,11 +647,15 @@ def _quantity_on_date(db: Session, asset_id: int, event_date: date, snapshot_fal
         text(
             """
             WITH latest AS (
-              SELECT account_id, MAX(as_of) AS as_of
-              FROM positions
-              WHERE asset_id = :asset_id
-                AND as_of < :cutoff
-              GROUP BY account_id
+              SELECT p.account_id, MAX(p.as_of) AS as_of
+              FROM positions p
+              JOIN accounts a ON a.id = p.account_id
+              WHERE p.asset_id = :asset_id
+                AND p.as_of < :cutoff
+                AND """
+            + account_scope_sql("a")
+            + """
+              GROUP BY p.account_id
             )
             SELECT SUM(COALESCE(p.quantity, 0)) AS quantity
             FROM positions p
@@ -620,7 +663,7 @@ def _quantity_on_date(db: Session, asset_id: int, event_date: date, snapshot_fal
             WHERE p.asset_id = :asset_id
             """
         ),
-        {"asset_id": asset_id, "cutoff": cutoff},
+        {"asset_id": asset_id, "cutoff": cutoff, "current_user_id": current_user_id},
     ).mappings().one_or_none()
     snap_qty = float(snap_row.get("quantity") or 0.0) if snap_row else 0.0
     if snap_qty > 0:
@@ -687,6 +730,7 @@ def _latest_dividend_snapshot_for_asset(db: Session, asset_id: int, anchor_date:
             FROM market_dividend_yields
             WHERE asset_id = :asset_id
               AND as_of_date <= :anchor_date
+              AND source <> 'DUMMY'
             ORDER BY as_of_date DESC, updated_at DESC
             LIMIT 1
             """
@@ -712,6 +756,7 @@ def expected_dividends_overview(
     assumed_tax_rate: float = Query(0.0, ge=0.0),
     country_tax_rates: str | None = Query(None, description="Comma-separated rates, e.g. US:0.15,IN:0.10"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start, end, from_key, to_key = _resolve_range(from_month, to_month)
     anchor_month_dt = _parse_month(to_key)
@@ -721,7 +766,7 @@ def expected_dividends_overview(
     end_date_inclusive = (end - timedelta(days=1)).date()
     normalized_default_rate = _normalize_tax_rate(assumed_tax_rate)
     country_rates = _parse_country_tax_rates(country_tax_rates)
-    holdings = _load_expected_holdings(db, end)
+    holdings = _load_expected_holdings(db, end, current_user.id)
     if not holdings:
         empty = _expected_summary_from_buckets("month", {})
         return ExpectedDividendsOverviewOut(
@@ -748,6 +793,7 @@ def expected_dividends_overview(
             int(holding["asset_id"]),
             end_date_inclusive,
             float(holding.get("snapshot_quantity") or 0.0),
+            current_user.id,
         )
         if shares <= 0:
             continue

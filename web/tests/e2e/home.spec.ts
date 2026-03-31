@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mockAuthenticatedSession } from "./helpers/auth";
 
 async function mockDashboardApis(page: Page) {
   await page.route("**/health", async (route) => {
@@ -96,6 +97,20 @@ async function mockDashboardApis(page: Page) {
       },
     });
   });
+  await page.route("**/dashboard/geography-exposure**", async (route) => {
+    await route.fulfill({
+      json: {
+        as_of: "2026-02-06T00:00:00+00:00",
+        base_currency: "SGD",
+        total: 742180,
+        slices: [
+          { geo: "US", value: 410000, percent: 55.24 },
+          { geo: "SG", value: 280000, percent: 37.73 },
+          { geo: "HK", value: 52180, percent: 7.03 },
+        ],
+      },
+    });
+  });
   await page.route("**/spending/summary**", async (route) => {
     await route.fulfill({
       json: {
@@ -138,6 +153,10 @@ async function mockDashboardApis(page: Page) {
   });
 }
 
+test.beforeEach(async ({ page }) => {
+  await mockAuthenticatedSession(page);
+});
+
 test("loads dashboard shell", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
@@ -167,7 +186,9 @@ test("navigates via wealth overview exposure cards", async ({ page }) => {
   await page.getByRole("link", { name: "Crypto details" }).click();
   await expect(page).toHaveURL(/\/crypto\/holdings$/);
 
-  await page.goto("/wealth");
+  await page.waitForLoadState("domcontentloaded");
+  await page.goto("/wealth", { waitUntil: "domcontentloaded" });
+  await expect(page).toHaveURL(/\/wealth$/);
   await page.getByRole("link", { name: "Cash details" }).click();
   await expect(page).toHaveURL(/\/cash$/);
 });

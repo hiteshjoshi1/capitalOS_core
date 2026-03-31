@@ -442,6 +442,10 @@ class YFinanceProvider(GenericMarketDataProvider):
             upper = f"{upper[:-4]}.NS"
         if upper.endswith(".SGX"):
             upper = f"{upper[:-4]}.SI"
+        if exchange_code and exchange_code.upper() == "US" and "." in upper and not upper.endswith((".NS", ".SI", ".HK")):
+            parts = upper.split(".")
+            if len(parts) == 2 and parts[0] and parts[1]:
+                upper = f"{parts[0]}-{parts[1]}"
         if exchange_code and exchange_code.upper() == "NSE" and not upper.endswith(".NS"):
             upper = f"{upper}.NS"
         if exchange_code and exchange_code.upper() == "SGX" and not upper.endswith(".SI"):

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.category_engine import apply_rules, resolve_category
 from app.db.session import get_db
 from app.models.category import CategoryRule, CategoryTaxonomy
@@ -20,7 +21,7 @@ from app.schemas.category import (
     UnmappedTransactionOut,
 )
 
-router = APIRouter(prefix="/categories", tags=["categories"])
+router = APIRouter(prefix="/categories", tags=["categories"], dependencies=[Depends(require_current_user)])
 
 VALID_TXN_TYPES = {
     "INCOME",
@@ -62,10 +63,21 @@ def _validate_target_category(db: Session, category_id: int) -> None:
         raise HTTPException(status_code=400, detail="target_category_id not found")
 
 
-def _validate_transaction(db: Session, transaction_id: int) -> None:
+def _validate_transaction(db: Session, transaction_id: int, current_user_id: int) -> None:
     row = db.execute(
-        text("SELECT id FROM transactions WHERE id = :transaction_id LIMIT 1"),
-        {"transaction_id": transaction_id},
+        text(
+            """
+            SELECT t.id
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.id = :transaction_id
+              AND """
+            + account_scope_sql("a")
+            + """
+            LIMIT 1
+            """
+        ),
+        {"transaction_id": transaction_id, "current_user_id": current_user_id},
     ).fetchone()
     if row is None:
         raise HTTPException(status_code=400, detail="transaction_id not found")
@@ -260,6 +272,7 @@ def list_unmapped_transactions(
     month: str = Query(..., description="YYYY-MM"),
     account_id: int | None = Query(None),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start, end = _parse_month(month)
     sql = """
@@ -279,6 +292,9 @@ def list_unmapped_transactions(
         LEFT JOIN category_overrides co ON co.transaction_id = t.id
         WHERE t.ts >= :start
           AND t.ts < :end
+          AND """
+    sql += account_scope_sql("a")
+    sql += """
           AND co.id IS NULL
           AND (
             t.category IS NULL
@@ -290,6 +306,7 @@ def list_unmapped_transactions(
     if account_id is not None:
         sql += " AND t.account_id = :account_id"
         params["account_id"] = account_id
+    params["current_user_id"] = current_user.id
     sql += " ORDER BY t.ts DESC, t.id DESC"
 
     rows = db.execute(text(sql), params).mappings().all()
@@ -311,8 +328,12 @@ def list_unmapped_transactions(
 
 
 @router.post("/override", response_model=CategoryResolutionOut)
-def apply_manual_override(payload: CategoryOverrideCreate, db: Session = Depends(get_db)):
-    _validate_transaction(db, payload.transaction_id)
+def apply_manual_override(
+    payload: CategoryOverrideCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    _validate_transaction(db, payload.transaction_id, current_user.id)
     _validate_target_category(db, payload.category_id)
 
     existing = db.execute(
@@ -364,11 +385,31 @@ def apply_manual_override(payload: CategoryOverrideCreate, db: Session = Depends
 
 
 @router.get("/resolve/{transaction_id}", response_model=CategoryResolutionOut)
-def resolve_transaction_category(transaction_id: int, db: Session = Depends(get_db)):
+def resolve_transaction_category(
+    transaction_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    _validate_transaction(db, transaction_id, current_user.id)
     return CategoryResolutionOut(**resolve_category(db, transaction_id))
 
 
 @router.post("/backfill", response_model=BackfillResultOut)
-def backfill_categories(db: Session = Depends(get_db)):
-    result = apply_rules(db)
+def backfill_categories(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    tx_rows = db.execute(
+        text(
+            """
+            SELECT t.id
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE """
+            + account_scope_sql("a")
+        ),
+        {"current_user_id": current_user.id},
+    ).mappings().all()
+    tx_ids = [int(row["id"]) for row in tx_rows]
+    result = apply_rules(db, tx_ids)
     return BackfillResultOut(created=result.created, updated=result.updated)

@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_current_user
 from app.db.session import get_db
 from app.crypto.verify import (
     verify_evm_signature,
@@ -23,12 +24,12 @@ from app.crypto.verify import (
     verify_solana_signature_bytes_debug,
 )
 from app.crypto.ingest import ingest_wallet, upsert_snapshot, acquire_refresh_lock, release_refresh_lock
-from app.crypto.pricing import price_by_contract, lookup_contract_metadata
+from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.fx import get_rates
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
 
-router = APIRouter(prefix="/crypto", tags=["crypto"])
+router = APIRouter(prefix="/crypto", tags=["crypto"], dependencies=[Depends(require_current_user)])
 logger = logging.getLogger("uvicorn.error")
 _SOLANA_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 
@@ -71,6 +72,12 @@ class SolanaPreflightIn(BaseModel):
 
 def _nonce_ttl() -> int:
     return int(os.getenv("CRYPTO_SIGNING_NONCE_TTL_SECONDS", "600"))
+
+
+def _wallet_scope_sql(alias: str = "w") -> str:
+    if allow_legacy_null_ownership():
+        return f"({alias}.user_id = :current_user_id OR {alias}.user_id IS NULL)"
+    return f"{alias}.user_id = :current_user_id"
 
 
 def _message(nonce: str, address: str, chain: str) -> str:
@@ -210,7 +217,11 @@ def _verify_solana_onchain(signature: str, address: str, nonce: str, expires_at:
 
 
 @router.post("/wallets/init")
-def wallet_init(payload: WalletInitIn, db: Session = Depends(get_db)):
+def wallet_init(
+    payload: WalletInitIn,
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_current_user),
+):
     _validate_address(payload.chain_type, payload.address)
     _validate_chain(payload.chain_type, payload.chain)
 
@@ -261,7 +272,12 @@ def wallet_init(payload: WalletInitIn, db: Session = Depends(get_db)):
 
 
 @router.post("/wallets/verify")
-def wallet_verify(payload: WalletVerifyIn, background: BackgroundTasks, db: Session = Depends(get_db)):
+def wallet_verify(
+    payload: WalletVerifyIn,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     _validate_address(payload.chain_type, payload.address)
     _validate_chain(payload.chain_type, payload.chain)
     normalized_address = payload.address.lower() if payload.chain_type == "evm" else payload.address
@@ -349,32 +365,36 @@ def wallet_verify(payload: WalletVerifyIn, background: BackgroundTasks, db: Sess
 
     wallet = db.execute(
         text(
-            "SELECT id FROM crypto_wallets WHERE chain_type = :chain_type AND chain = :chain AND address = :address"
+            "SELECT id, user_id FROM crypto_wallets WHERE chain_type = :chain_type AND chain = :chain AND address = :address"
         ),
         {
             "chain_type": payload.chain_type,
             "chain": payload.chain,
             "address": normalized_address,
         },
-    ).fetchone()
+    ).mappings().one_or_none()
     if wallet:
-        wallet_id = wallet[0]
+        wallet_owner = wallet["user_id"]
+        if wallet_owner is not None and int(wallet_owner) != int(current_user.id):
+            raise HTTPException(status_code=409, detail="Wallet is owned by another user")
+        wallet_id = wallet["id"]
         db.execute(
             text(
-                "UPDATE crypto_wallets SET status = 'active', verified_at = :now WHERE id = :id"
+                "UPDATE crypto_wallets SET status = 'active', verified_at = :now, user_id = COALESCE(user_id, :current_user_id) WHERE id = :id"
             ),
-            {"id": wallet_id, "now": datetime.now(tz=timezone.utc)},
+            {"id": wallet_id, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         )
     else:
         row = db.execute(
             text(
                 """
-                INSERT INTO crypto_wallets (chain_type, chain, address, status, created_at, verified_at)
-                VALUES (:chain_type, :chain, :address, 'active', :now, :now)
+                INSERT INTO crypto_wallets (user_id, chain_type, chain, address, status, created_at, verified_at)
+                VALUES (:current_user_id, :chain_type, :chain, :address, 'active', :now, :now)
                 RETURNING id
                 """
             ),
             {
+                "current_user_id": current_user.id,
                 "chain_type": payload.chain_type,
                 "chain": payload.chain,
                 "address": normalized_address,
@@ -395,7 +415,10 @@ def wallet_verify(payload: WalletVerifyIn, background: BackgroundTasks, db: Sess
 
 @router.post("/wallets/verify-onchain")
 def wallet_verify_onchain(
-    payload: SolanaVerifyOnchainIn, background: BackgroundTasks, db: Session = Depends(get_db)
+    payload: SolanaVerifyOnchainIn,
+    background: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     _validate_address("solana", payload.address)
     normalized_address = payload.address
@@ -428,26 +451,29 @@ def wallet_verify_onchain(
 
     wallet = db.execute(
         text(
-            "SELECT id FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
+            "SELECT id, user_id FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
         ),
         {"address": normalized_address},
-    ).fetchone()
+    ).mappings().one_or_none()
     if wallet:
-        wallet_id = wallet[0]
+        wallet_owner = wallet["user_id"]
+        if wallet_owner is not None and int(wallet_owner) != int(current_user.id):
+            raise HTTPException(status_code=409, detail="Wallet is owned by another user")
+        wallet_id = wallet["id"]
         db.execute(
-            text("UPDATE crypto_wallets SET status = 'active', verified_at = :now WHERE id = :id"),
-            {"id": wallet_id, "now": datetime.now(tz=timezone.utc)},
+            text("UPDATE crypto_wallets SET status = 'active', verified_at = :now, user_id = COALESCE(user_id, :current_user_id) WHERE id = :id"),
+            {"id": wallet_id, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         )
     else:
         row = db.execute(
             text(
                 """
-                INSERT INTO crypto_wallets (chain_type, chain, address, status, created_at, verified_at)
-                VALUES ('solana', 'solana', :address, 'active', :now, :now)
+                INSERT INTO crypto_wallets (user_id, chain_type, chain, address, status, created_at, verified_at)
+                VALUES (:current_user_id, 'solana', 'solana', :address, 'active', :now, :now)
                 RETURNING id
                 """
             ),
-            {"address": normalized_address, "now": datetime.now(tz=timezone.utc)},
+            {"address": normalized_address, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         ).fetchone()
         wallet_id = row[0]
 
@@ -488,11 +514,17 @@ def _refresh_wallet(wallet_id: str):
 
 
 @router.get("/wallets")
-def list_wallets(db: Session = Depends(get_db)):
+def list_wallets(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     rows = db.execute(
         text(
-            "SELECT id, chain_type, chain, address, label, status, created_at, verified_at FROM crypto_wallets ORDER BY created_at DESC"
-        )
+            "SELECT id, chain_type, chain, address, label, status, created_at, verified_at FROM crypto_wallets w WHERE "
+            + _wallet_scope_sql("w")
+            + " ORDER BY created_at DESC"
+        ),
+        {"current_user_id": current_user.id},
     ).mappings().all()
     return [dict(r) for r in rows]
 
@@ -501,6 +533,7 @@ def list_wallets(db: Session = Depends(get_db)):
 def crypto_summary(
     base_currency: str = "USD",
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     rows = db.execute(
         text(
@@ -516,8 +549,12 @@ def crypto_summary(
             LEFT JOIN crypto_wallet_snapshots s
               ON s.wallet_id = w.id AND s.as_of_date = l.as_of_date
             WHERE w.status = 'active'
+              AND """
+            + _wallet_scope_sql("w")
+            + """
             """
-        )
+        ),
+        {"current_user_id": current_user.id},
     ).mappings().all()
     last_refreshed = None
     total_usd = 0.0
@@ -565,10 +602,15 @@ def crypto_summary(
             FROM crypto_wallet_snapshot_items i
             JOIN crypto_wallet_snapshots s ON s.id = i.snapshot_id
             JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            WHERE """
+            + _wallet_scope_sql("w")
+            + """
             ORDER BY i.value_usd DESC NULLS LAST
             LIMIT 50
             """
-        )
+        ),
+        {"current_user_id": current_user.id},
     ).mappings().all()
 
     chain_breakdown = db.execute(
@@ -583,10 +625,15 @@ def crypto_summary(
             FROM crypto_wallet_snapshot_items i
             JOIN crypto_wallet_snapshots s ON s.id = i.snapshot_id
             JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            WHERE """
+            + _wallet_scope_sql("w")
+            + """
             GROUP BY s.wallet_id, i.chain
             ORDER BY total_usd DESC NULLS LAST
             """
-        )
+        ),
+        {"current_user_id": current_user.id},
     ).mappings().all()
 
     rate = get_rates(datetime.now(tz=timezone.utc), base_currency, {"USD"}).get("USD", 1.0)
@@ -678,7 +725,10 @@ def crypto_summary(
 
 
 @router.get("/tokens")
-def crypto_tokens(db: Session = Depends(get_db)):
+def crypto_tokens(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     rows = db.execute(
         text(
             """
@@ -693,9 +743,13 @@ def crypto_tokens(db: Session = Depends(get_db)):
             JOIN crypto_wallet_snapshots s ON s.id = i.snapshot_id
             JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
             JOIN crypto_wallets w ON w.id = s.wallet_id
+            WHERE """
+            + _wallet_scope_sql("w")
+            + """
             ORDER BY i.value_usd DESC NULLS LAST
             """
-        )
+        ),
+        {"current_user_id": current_user.id},
     ).mappings().all()
     return {
         "total": len(rows),
@@ -757,6 +811,7 @@ def refresh_now(
     background: BackgroundTasks,
     x_admin_key: Optional[str] = Header(None),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     admin_key = os.getenv("CRYPTO_ADMIN_KEY", "")
     if admin_key and x_admin_key != admin_key:
@@ -768,7 +823,8 @@ def refresh_now(
         raise HTTPException(status_code=429, detail="Too many refresh requests")
     _ADMIN_LAST_CALL = now
     rows = db.execute(
-        text("SELECT id FROM crypto_wallets WHERE status = 'active'")
+        text("SELECT id FROM crypto_wallets w WHERE w.status = 'active' AND " + _wallet_scope_sql("w")),
+        {"current_user_id": current_user.id},
     ).fetchall()
     for r in rows:
         background.add_task(_refresh_wallet, str(r[0]))

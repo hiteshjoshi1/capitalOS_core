@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import get_rates
 from app.schemas.spending import (
@@ -21,7 +22,7 @@ from app.schemas.spending import (
     CreditCardRecurringPaymentItem,
 )
 
-router = APIRouter(prefix="/spending", tags=["spending"])
+router = APIRouter(prefix="/spending", tags=["spending"], dependencies=[Depends(require_current_user)])
 INCOME_TYPES = ("INCOME",)
 EXPENSE_TYPES = ("EXPENSE", "FEE", "TAX", "INTEREST")
 TRANSFER_TYPES = ("TRANSFER",)
@@ -84,7 +85,7 @@ def _month_key(value: datetime | str) -> str:
     return as_text[:7]
 
 
-def _cash_flow_rows(db: Session, start: datetime, end: datetime):
+def _cash_flow_rows(db: Session, start: datetime, end: datetime, current_user_id: int):
     cash_flow_q = text("""
         SELECT
           t.id AS transaction_id,
@@ -125,10 +126,13 @@ def _cash_flow_rows(db: Session, start: datetime, end: datetime):
         LEFT JOIN category_taxonomy resolved_parent_ct
           ON resolved_parent_ct.id = resolved_ct.parent_id
         WHERE t.ts >= :start AND t.ts < :end
+          AND """
+            + account_scope_sql("a")
+            + """
           AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST', 'TRANSFER')
         ORDER BY t.ts DESC, t.id DESC
     """)
-    return db.execute(cash_flow_q, {"start": start, "end": end}).mappings().all()
+    return db.execute(cash_flow_q, {"start": start, "end": end, "current_user_id": current_user_id}).mappings().all()
 
 
 def _is_transfer_resolved_category(row) -> bool:
@@ -169,7 +173,7 @@ def _cash_flow_bucket(row) -> str | None:
     return None
 
 
-def _credit_cards(db: Session):
+def _credit_cards(db: Session, current_user_id: int):
     cards_q = text("""
         SELECT
           a.id AS account_id,
@@ -183,9 +187,12 @@ def _credit_cards(db: Session):
         FROM accounts a
         LEFT JOIN credit_card_accounts cc ON cc.account_id = a.id
         WHERE a.account_type = 'CREDIT_CARD'
+          AND """
+            + account_scope_sql("a")
+            + """
         ORDER BY a.name
     """)
-    return db.execute(cards_q).mappings().all()
+    return db.execute(cards_q, {"current_user_id": current_user_id}).mappings().all()
 
 
 def _spend_by_account(
@@ -193,6 +200,7 @@ def _spend_by_account(
     start: datetime,
     end: datetime,
     base_currency: str,
+    current_user_id: int,
 ) -> dict[int, float]:
     spend_q = text("""
         SELECT
@@ -203,9 +211,15 @@ def _spend_by_account(
         JOIN accounts a ON a.id = t.account_id
         WHERE t.ts >= :start AND t.ts < :end
           AND a.account_type = 'CREDIT_CARD'
+          AND """
+            + account_scope_sql("a")
+            + """
           AND t.type IN ('EXPENSE','FEE','TAX','INTEREST')
     """)
-    spend_rows = db.execute(spend_q, {"start": start, "end": end}).mappings().all()
+    spend_rows = db.execute(
+        spend_q,
+        {"start": start, "end": end, "current_user_id": current_user_id},
+    ).mappings().all()
     currencies = {r["currency"] for r in spend_rows if r["currency"]}
     rates = get_rates(start, base_currency, currencies)
     spend: dict[int, float] = {}
@@ -255,10 +269,11 @@ def spending_summary(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start = _parse_month(month)
     end = _month_end(start)
-    rows = _cash_flow_rows(db, start, end)
+    rows = _cash_flow_rows(db, start, end, current_user.id)
     currencies = {r["currency"] for r in rows if r["currency"]}
     rates = get_rates(start, base_currency, currencies)
 
@@ -304,10 +319,11 @@ def cash_flow_detail(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start = _parse_month(month)
     end = _month_end(start)
-    rows = _cash_flow_rows(db, start, end)
+    rows = _cash_flow_rows(db, start, end, current_user.id)
     currencies = {r["currency"] for r in rows if r["currency"]}
     rates = get_rates(start, base_currency, currencies)
 
@@ -383,12 +399,13 @@ def credit_card_summary(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start = _parse_month(month)
     end = _month_end(start)
 
-    cards = _credit_cards(db)
-    spend = _spend_by_account(db, start, end, base_currency)
+    cards = _credit_cards(db, current_user.id)
+    spend = _spend_by_account(db, start, end, base_currency, current_user.id)
     items = _credit_card_items(cards, spend, start, base_currency)
 
     total_spend = sum(i.current_due for i in items)
@@ -405,13 +422,14 @@ def credit_card_transactions(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     start = _parse_month(month)
     end = _month_end(start)
     lookback_start = _add_months(start, -2)
 
-    cards = _credit_cards(db)
-    spend = _spend_by_account(db, start, end, base_currency)
+    cards = _credit_cards(db, current_user.id)
+    spend = _spend_by_account(db, start, end, base_currency, current_user.id)
     card_items = _credit_card_items(cards, spend, start, base_currency)
 
     tx_q = text("""
@@ -442,9 +460,15 @@ def credit_card_transactions(
         LEFT JOIN category_taxonomy ct ON ct.id = co.category_id
         WHERE t.ts >= :start AND t.ts < :end
           AND a.account_type = 'CREDIT_CARD'
+          AND """
+            + account_scope_sql("a")
+            + """
         ORDER BY t.ts DESC, t.id DESC
     """)
-    tx_rows = db.execute(tx_q, {"start": start, "end": end}).mappings().all()
+    tx_rows = db.execute(
+        tx_q,
+        {"start": start, "end": end, "current_user_id": current_user.id},
+    ).mappings().all()
     tx_currencies = {r["currency"] for r in tx_rows if r["currency"]}
     tx_rates = get_rates(start, base_currency, tx_currencies)
 
@@ -492,12 +516,16 @@ def credit_card_transactions(
         LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
         WHERE t.ts >= :lookback_start AND t.ts < :end
           AND a.account_type = 'CREDIT_CARD'
+          AND """
+            + account_scope_sql("a")
+            + """
           AND t.type = 'EXPENSE'
           AND COALESCE(TRIM(t.merchant_counterparty), '') <> ''
         ORDER BY t.ts DESC, t.id DESC
     """)
     recurring_rows = db.execute(
-        recurring_q, {"lookback_start": lookback_start, "end": end}
+        recurring_q,
+        {"lookback_start": lookback_start, "end": end, "current_user_id": current_user.id},
     ).mappings().all()
     recurring_currencies = {r["currency"] for r in recurring_rows if r["currency"]}
     recurring_rates = get_rates(start, base_currency, recurring_currencies)

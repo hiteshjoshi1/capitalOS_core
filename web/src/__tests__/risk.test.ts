@@ -124,4 +124,24 @@ describe("risk helpers", () => {
     expect(distribution[1].symbol).toBe("MSFT");
     expect(distribution[1].assetClass).toBe("STOCK");
   });
+
+  it("excludes CRYPTO holdings from concentration and distribution", () => {
+    const cryptoHolding: Holding = {
+      asset_id: 101,
+      symbol: "ETH",
+      asset_class: "CRYPTO",
+      value: 300,
+      percent_of_networth: 0,
+    };
+    const holdings = [holding("AAPL", 120), cryptoHolding, holding("MSFT", 80)];
+
+    const top3 = computeTopNConcentrationRisk(holdings, 1000, 3);
+    expect(top3.hasData).toBe(true);
+    // CRYPTO should be excluded, so only AAPL + MSFT = 200
+    expect(top3.percent).toBeCloseTo(20.0, 4);
+
+    const distribution = buildTopNDistribution(holdings, 1000, 3);
+    expect(distribution.length).toBe(2);
+    expect(distribution.map((item) => item.symbol)).toEqual(["AAPL", "MSFT"]);
+  });
 });
