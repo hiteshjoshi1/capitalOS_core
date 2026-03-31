@@ -17,6 +17,7 @@ class Account(Base):
 
     # legacy column from your initial schema
     platform = Column(Text, nullable=False)
+    user_id = Column(BigInteger, ForeignKey("users.id"), nullable=True)
 
     account_type = Column(AccountType, nullable=False)
     currency = Column(Text, nullable=False)

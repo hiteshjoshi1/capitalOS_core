@@ -33,6 +33,10 @@ import AIGuru from "./routes/AIGuru.tsx";
 import Settings from "./routes/Settings.tsx";
 import Platforms from "./routes/Platforms.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
+import { AuthProvider } from "./context/AuthContext.tsx";
+import RequireAuth from "./components/RequireAuth.tsx";
+import Login from "./routes/Login.tsx";
+import Signup from "./routes/Signup.tsx";
 
 const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
 const chains = [mainnet, base, arbitrum, optimism, mantle, scroll] as const;
@@ -72,31 +76,38 @@ createRoot(document.getElementById("root")!).render(
             <QueryClientProvider client={queryClient}>
               <RainbowKitProvider>
                 <ThemeProvider>
-                  <BrowserRouter>
-                    <Routes>
-                      <Route element={<AppShell />}>
-                        <Route path="/" element={<App />} />
-                        <Route path="/wealth" element={<WealthOverview />} />
-                        <Route path="/dividends" element={<Dividends />} />
-                        <Route path="/holdings" element={<StockHoldings />} />
-                        <Route path="/crypto" element={<CryptoWallets />} />
-                        <Route path="/crypto/holdings" element={<CryptoHoldings />} />
-                        <Route path="/cash" element={<CashOverview />} />
-                        <Route path="/cash-flow" element={<CashFlowDetail />} />
-                        <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
-                        <Route path="/credit-cards" element={<CreditCards />} />
-                        <Route path="/loans" element={<Loans />} />
-                        <Route path="/companies" element={<Companies />} />
-                        <Route path="/alerts" element={<Alerts />} />
-                        <Route path="/ai-guru" element={<AIGuru />} />
-                        <Route path="/ingest" element={<Ingest />} />
-                        <Route path="/market-data" element={<MarketData />} />
-                        <Route path="/settings" element={<Settings />} />
-                        <Route path="/accounts/new" element={<AddAccount />} />
-                        <Route path="/platforms" element={<Platforms />} />
-                      </Route>
-                    </Routes>
-                  </BrowserRouter>
+                  <AuthProvider>
+                    <BrowserRouter>
+                      <Routes>
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/signup" element={<Signup />} />
+
+                        <Route element={<RequireAuth />}>
+                          <Route element={<AppShell />}>
+                            <Route path="/" element={<App />} />
+                            <Route path="/wealth" element={<WealthOverview />} />
+                            <Route path="/dividends" element={<Dividends />} />
+                            <Route path="/holdings" element={<StockHoldings />} />
+                            <Route path="/crypto" element={<CryptoWallets />} />
+                            <Route path="/crypto/holdings" element={<CryptoHoldings />} />
+                            <Route path="/cash" element={<CashOverview />} />
+                            <Route path="/cash-flow" element={<CashFlowDetail />} />
+                            <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
+                            <Route path="/credit-cards" element={<CreditCards />} />
+                            <Route path="/loans" element={<Loans />} />
+                            <Route path="/companies" element={<Companies />} />
+                            <Route path="/alerts" element={<Alerts />} />
+                            <Route path="/ai-guru" element={<AIGuru />} />
+                            <Route path="/ingest" element={<Ingest />} />
+                            <Route path="/market-data" element={<MarketData />} />
+                            <Route path="/settings" element={<Settings />} />
+                            <Route path="/accounts/new" element={<AddAccount />} />
+                            <Route path="/platforms" element={<Platforms />} />
+                          </Route>
+                        </Route>
+                      </Routes>
+                    </BrowserRouter>
+                  </AuthProvider>
                 </ThemeProvider>
               </RainbowKitProvider>
             </QueryClientProvider>

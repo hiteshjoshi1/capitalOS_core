@@ -14,6 +14,7 @@ from .crypto import (
     CryptoWalletSnapshotItem,
     CryptoUserNetworth,
 )
+from .user import User, UserCredential, AuthSession, OAuthIdentity
 
 __all__ = [
     "Account",
@@ -32,4 +33,8 @@ __all__ = [
     "CryptoWalletSnapshot",
     "CryptoWalletSnapshotItem",
     "CryptoUserNetworth",
+    "User",
+    "UserCredential",
+    "AuthSession",
+    "OAuthIdentity",
 ]

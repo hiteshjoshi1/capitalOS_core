@@ -3,18 +3,25 @@ import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.auth_context import CurrentUser, require_current_user
 from app.db.session import get_db
 from app.models.platform import Platform, PlatformType
 from app.schemas.platform import PlatformCreate, PlatformOut
 
-router = APIRouter(prefix="/platforms", tags=["platforms"])
+router = APIRouter(prefix="/platforms", tags=["platforms"], dependencies=[Depends(require_current_user)])
 
 @router.get("", response_model=list[PlatformOut])
-def list_platforms(db: Session = Depends(get_db)):
+def list_platforms(
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_current_user),
+):
     return db.query(Platform).order_by(Platform.country, Platform.platform_type, Platform.code).all()
 
 @router.get("/options")
-def platform_options(db: Session = Depends(get_db)):
+def platform_options(
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_current_user),
+):
     q = text("""
         SELECT DISTINCT country FROM platforms WHERE country IS NOT NULL
         UNION
@@ -29,7 +36,11 @@ def platform_options(db: Session = Depends(get_db)):
     }
 
 @router.post("", response_model=PlatformOut)
-def create_platform(payload: PlatformCreate, db: Session = Depends(get_db)):
+def create_platform(
+    payload: PlatformCreate,
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_current_user),
+):
     code = payload.code.strip().upper()
     name = payload.name.strip()
     platform_type = payload.platform_type.strip()

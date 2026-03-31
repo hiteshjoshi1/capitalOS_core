@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { mockAuthenticatedSession } from "./helpers/auth";
 
 async function mockAlertsApis(page: Page, alerts: object[] = []) {
   await page.route("**/alerts/upload-reminders/count", async (route) => {
@@ -31,6 +32,10 @@ const MOCK_ALERTS = [
     message: "Upload the latest statement for IBKR Brokerage (IBKR). Last upload was 2025-10-15.",
   },
 ];
+
+test.beforeEach(async ({ page }) => {
+  await mockAuthenticatedSession(page);
+});
 
 test("navigates to /alerts and shows alert cards", async ({ page }) => {
   await mockAlertsApis(page, MOCK_ALERTS);

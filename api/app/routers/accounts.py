@@ -1,22 +1,35 @@
 import re
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_current_user
 from app.db.session import get_db
 from app.models.account import Account, AccountType
 from app.models.currency import Currency
 from app.models.platform import Platform
 from app.schemas.account import AccountCreate, AccountOut
 
-router = APIRouter(prefix="/accounts", tags=["accounts"])
+router = APIRouter(prefix="/accounts", tags=["accounts"], dependencies=[Depends(require_current_user)])
 
 @router.get("", response_model=list[AccountOut])
-def list_accounts(db: Session = Depends(get_db)):
-    return db.query(Account).order_by(Account.id).all()
+def list_accounts(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    query = db.query(Account)
+    if allow_legacy_null_ownership():
+        query = query.filter(or_(Account.user_id == current_user.id, Account.user_id.is_(None)))
+    else:
+        query = query.filter(Account.user_id == current_user.id)
+    return query.order_by(Account.id).all()
 
 @router.get("/options")
-def account_options(db: Session = Depends(get_db)):
+def account_options(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     account_types = list(AccountType.enums)
 
     q = text("""
@@ -28,10 +41,12 @@ def account_options(db: Session = Depends(get_db)):
     q = text("""
         SELECT DISTINCT country FROM platforms WHERE country IS NOT NULL
         UNION
-        SELECT DISTINCT country FROM accounts WHERE country IS NOT NULL
+        SELECT DISTINCT country FROM accounts
+        WHERE country IS NOT NULL
+          AND (user_id = :current_user_id OR user_id IS NULL)
         ORDER BY country
     """)
-    countries = [r[0] for r in db.execute(q).fetchall()]
+    countries = [r[0] for r in db.execute(q, {"current_user_id": current_user.id}).fetchall()]
 
     return {
         "account_types": account_types,
@@ -41,7 +56,11 @@ def account_options(db: Session = Depends(get_db)):
     }
 
 @router.post("", response_model=AccountOut)
-def create_account(payload: AccountCreate, db: Session = Depends(get_db)):
+def create_account(
+    payload: AccountCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     # lightweight validation
     if not payload.name.strip():
         raise HTTPException(status_code=400, detail="name is required")
@@ -82,6 +101,7 @@ def create_account(payload: AccountCreate, db: Session = Depends(get_db)):
         name=payload.name.strip(),
         platform=platform_code,
         platform_id=payload.platform_id,
+        user_id=current_user.id,
         account_type=account_type,
         currency=currency,
         country=country,

@@ -98,7 +98,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: db-shell db-wait db-migrate db-reset db-seed-dummy db-clear-dummy db-query
+.PHONY: db-shell db-wait db-migrate db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign
 
 db-shell:
 	docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)
@@ -133,9 +133,17 @@ db-clear-dummy: db-wait
 	@docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy_cleanup.sql
 	@echo "Dummy data removed."
 
+db-seed-demo: db-seed-dummy
+
+db-clear-demo: db-clear-dummy
+
 db-query:
 	@test -n "$(QUERY)" || (echo "Usage: make db-query QUERY='SELECT ...';" && exit 2)
 	docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) -c "$(QUERY)"
+
+ownership-reassign:
+	@test -n "$(TARGET_USER_ID)" || (echo "Usage: make ownership-reassign TARGET_USER_ID=<id> [APPLY=1]" && exit 2)
+	docker compose run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
 
 # ---- Quality gates ----
 .PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e verify

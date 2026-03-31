@@ -20,3 +20,5 @@ pynacl==1.5.0
 base58==2.1.1
 APScheduler==3.10.4
 yfinance==1.2.0
+PyJWT==2.9.0
+argon2-cffi==23.1.0

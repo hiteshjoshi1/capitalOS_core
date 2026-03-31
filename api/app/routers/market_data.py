@@ -6,10 +6,11 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from app.auth_context import require_current_user
 from app.db.session import get_db
 from app.market_data.service import latest_status_by_exchange, list_runs, run_all_exchanges
 
-router = APIRouter(prefix="/market-data", tags=["market-data"])
+router = APIRouter(prefix="/market-data", tags=["market-data"], dependencies=[Depends(require_current_user)])
 
 
 def _validate_admin_key(x_admin_key: Optional[str]) -> None:

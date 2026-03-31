@@ -3,6 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.routers.health import router as health_router
+from app.routers.auth import router as auth_router
 from app.routers.platforms import router as platforms_router
 from app.routers.accounts import router as accounts_router
 from app.routers.dashboard import router as dashboard_router
@@ -22,18 +23,41 @@ from app.market_data.scheduler import start_scheduler as start_market_scheduler
 
 app = FastAPI(title="CapitalOS API", version="0.1.0")
 
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+]
+
+
+def _resolve_cors_origins(raw_origins: str) -> list[str]:
+    initial = [o.strip() for o in raw_origins.split(",") if o.strip()]
+    if not initial:
+        return list(_DEFAULT_CORS_ORIGINS)
+
+    resolved = set(initial)
+    for origin in initial:
+        if origin.startswith("http://localhost:"):
+            resolved.add(origin.replace("http://localhost:", "http://127.0.0.1:", 1))
+        if origin.startswith("http://127.0.0.1:"):
+            resolved.add(origin.replace("http://127.0.0.1:", "http://localhost:", 1))
+    return sorted(resolved)
+
+
 cors_origins = os.getenv("CORS_ORIGINS", "")
-origins = [o.strip() for o in cors_origins.split(",") if o.strip()]
+origins = _resolve_cors_origins(cors_origins)
 if origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=origins,
-        allow_credentials=False,
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
 
 app.include_router(health_router)
+app.include_router(auth_router)
 app.include_router(platforms_router)
 app.include_router(accounts_router)
 app.include_router(dashboard_router)

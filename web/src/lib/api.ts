@@ -1,14 +1,114 @@
-const API_BASE = import.meta.env.VITE_API_BASE as string;
+const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "http://localhost:8000";
+const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
+const ACCESS_TOKEN_STORAGE_KEY = "capitalos.accessToken";
+let accessTokenMemory: string | null = null;
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    ...init,
-  });
+export function getAccessToken(): string | null {
+  if (accessTokenMemory) return accessTokenMemory;
+  if (typeof window === "undefined") return null;
+  const stored = window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
+  accessTokenMemory = stored || null;
+  return accessTokenMemory;
+}
+
+export function setAccessToken(token: string | null): void {
+  accessTokenMemory = token;
+  if (typeof window === "undefined") return;
+  if (token) {
+    window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
+  } else {
+    window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
+  }
+}
+
+function buildHeaders(
+  initHeaders?: HeadersInit,
+  opts?: { includeJsonContentType?: boolean; skipAuth?: boolean },
+): Headers {
+  const headers = new Headers(initHeaders);
+  if (opts?.includeJsonContentType !== false && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  if (!opts?.skipAuth) {
+    const token = getAccessToken();
+    if (token && !headers.has("Authorization")) {
+      headers.set("Authorization", `Bearer ${token}`);
+    }
+  }
+  return headers;
+}
+
+type ApiValidationDetail = {
+  loc?: Array<string | number>;
+  msg?: string;
+};
+
+function formatApiValidationMessage(detail: unknown): string | null {
+  if (typeof detail === "string" && detail.trim()) {
+    return detail.trim();
+  }
+
+  if (!Array.isArray(detail)) {
+    return null;
+  }
+
+  const messages = detail
+    .map((item) => {
+      const entry = item as ApiValidationDetail;
+      const msg = typeof entry.msg === "string" ? entry.msg.trim() : "";
+      if (!msg) return null;
+
+      const field = Array.isArray(entry.loc)
+        ? entry.loc
+            .filter((part) => typeof part === "string")
+            .filter((part) => part !== "body")
+            .join(".")
+        : "";
+      return field ? `${field}: ${msg}` : msg;
+    })
+    .filter((message): message is string => Boolean(message));
+
+  if (!messages.length) {
+    return null;
+  }
+  return messages.join("; ");
+}
+
+function formatHttpError(status: number, rawText: string): string {
+  const text = rawText.trim();
+  if (!text) {
+    return `Request failed (${status}).`;
+  }
+
+  try {
+    const parsed = JSON.parse(text) as { detail?: unknown; message?: unknown };
+    const detailMessage = formatApiValidationMessage(parsed.detail);
+    if (detailMessage) return detailMessage;
+    if (typeof parsed.message === "string" && parsed.message.trim()) return parsed.message.trim();
+  } catch {
+    // Not JSON, fall through to plain text handling.
+  }
+
+  if (status >= 500) return "Server error. Please try again.";
+  return text;
+}
+
+async function req<T>(path: string, init?: RequestInit, opts?: { skipAuth?: boolean }): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      credentials: "include",
+      headers: buildHeaders(init?.headers, { includeJsonContentType: true, skipAuth: opts?.skipAuth }),
+      ...init,
+    });
+  } catch (err: unknown) {
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+  }
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API ${res.status}: ${text}`);
+    throw new Error(formatHttpError(res.status, text));
   }
   return res.json() as Promise<T>;
 }
@@ -20,6 +120,20 @@ export type Platform = {
   platform_type: string; // BANK | BROKER | EXCHANGE | CARD_ISSUER | WALLET_PROVIDER
   country: string;       // SG | US | IN | HK | GLOBAL
   website?: string | null;
+};
+
+export type AuthMe = {
+  id: number;
+  username: string;
+  display_name?: string | null;
+  email?: string | null;
+  is_admin: boolean;
+};
+
+export type AuthToken = {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
 };
 
 export type Account = {
@@ -604,6 +718,12 @@ export type ExpectedDividendsOverview = {
 
 export const api = {
   health: () => req<Health>("/health"),
+  authSignup: (payload: { username: string; password: string; display_name?: string }) =>
+    req<AuthMe>("/auth/signup", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
+  authLogin: (payload: { username: string; password: string }) =>
+    req<AuthToken>("/auth/login", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
+  authMe: () => req<AuthMe>("/auth/me"),
+  authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
     req<DashboardBootstrap>(`/dashboard/bootstrap?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   dashboardNetWorthChange: (month: string, baseCurrency = "SGD", compare = "prev_month,prev_year") =>
@@ -657,26 +777,44 @@ export const api = {
   ingestUpload: async (accountId: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${API_BASE}/ingest/upload?account_id=${accountId}`, {
-      method: "POST",
-      body: form,
-    });
+    const headers = buildHeaders(undefined, { includeJsonContentType: false });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/ingest/upload?account_id=${accountId}`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: form,
+      });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    }
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`API ${res.status}: ${text}`);
+      throw new Error(formatHttpError(res.status, text));
     }
     return res.json() as Promise<Record<string, unknown>>;
   },
   ingestIbkr: async (accountId: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
-    const res = await fetch(`${API_BASE}/ingest/ibkr?account_id=${accountId}`, {
-      method: "POST",
-      body: form,
-    });
+    const headers = buildHeaders(undefined, { includeJsonContentType: false });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/ingest/ibkr?account_id=${accountId}`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: form,
+      });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    }
     if (!res.ok) {
       const text = await res.text();
-      throw new Error(`API ${res.status}: ${text}`);
+      throw new Error(formatHttpError(res.status, text));
     }
     return res.json() as Promise<Record<string, unknown>>;
   },
