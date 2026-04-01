@@ -38,12 +38,15 @@ def account_options(
     """)
     currencies = [r[0] for r in db.execute(q).fetchall()]
 
-    q = text("""
+    country_owner_clause = "user_id = :current_user_id"
+    if allow_legacy_null_ownership():
+        country_owner_clause = "(user_id = :current_user_id OR user_id IS NULL)"
+    q = text(f"""
         SELECT DISTINCT country FROM platforms WHERE country IS NOT NULL
         UNION
         SELECT DISTINCT country FROM accounts
         WHERE country IS NOT NULL
-          AND (user_id = :current_user_id OR user_id IS NULL)
+          AND {country_owner_clause}
         ORDER BY country
     """)
     countries = [r[0] for r in db.execute(q, {"current_user_id": current_user.id}).fetchall()]

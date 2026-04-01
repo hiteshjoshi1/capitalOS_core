@@ -20,7 +20,7 @@ class CurrentUser:
 
 
 def allow_legacy_null_ownership() -> bool:
-    raw = os.getenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "1").strip().lower()
+    raw = os.getenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0").strip().lower()
     return raw in {"1", "true", "yes", "on"}
 
 
@@ -82,4 +82,3 @@ def require_current_user(
         username=str(row["username"]),
         is_admin=bool(row["is_admin"]),
     )
-
