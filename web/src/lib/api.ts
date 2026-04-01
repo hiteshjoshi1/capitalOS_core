@@ -1,24 +1,14 @@
 const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "http://localhost:8000";
 const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
-const ACCESS_TOKEN_STORAGE_KEY = "capitalos.accessToken";
 let accessTokenMemory: string | null = null;
+let refreshInFlight: Promise<string | null> | null = null;
 
 export function getAccessToken(): string | null {
-  if (accessTokenMemory) return accessTokenMemory;
-  if (typeof window === "undefined") return null;
-  const stored = window.localStorage.getItem(ACCESS_TOKEN_STORAGE_KEY);
-  accessTokenMemory = stored || null;
   return accessTokenMemory;
 }
 
 export function setAccessToken(token: string | null): void {
   accessTokenMemory = token;
-  if (typeof window === "undefined") return;
-  if (token) {
-    window.localStorage.setItem(ACCESS_TOKEN_STORAGE_KEY, token);
-  } else {
-    window.localStorage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
-  }
 }
 
 function buildHeaders(
@@ -37,6 +27,8 @@ function buildHeaders(
   }
   return headers;
 }
+
+type RequestOptions = { skipAuth?: boolean; skipRefreshRetry?: boolean };
 
 type ApiValidationDetail = {
   loc?: Array<string | number>;
@@ -93,19 +85,59 @@ function formatHttpError(status: number, rawText: string): string {
   return text;
 }
 
-async function req<T>(path: string, init?: RequestInit, opts?: { skipAuth?: boolean }): Promise<T> {
-  let res: Response;
+async function callRefreshEndpoint(): Promise<string | null> {
   try {
-    res = await fetch(`${API_BASE}${path}`, {
+    const res = await fetch(`${API_BASE}/auth/refresh`, {
+      method: "POST",
       credentials: "include",
-      headers: buildHeaders(init?.headers, { includeJsonContentType: true, skipAuth: opts?.skipAuth }),
-      ...init,
+      headers: buildHeaders(undefined, { includeJsonContentType: false, skipAuth: true }),
     });
+    if (!res.ok) {
+      setAccessToken(null);
+      return null;
+    }
+    const payload = (await res.json()) as AuthToken;
+    if (!payload?.access_token) {
+      setAccessToken(null);
+      return null;
+    }
+    setAccessToken(payload.access_token);
+    return payload.access_token;
   } catch (err: unknown) {
-    const reason = err instanceof Error ? err.message : String(err);
-    throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    setAccessToken(null);
+    return null;
   }
+}
 
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = callRefreshEndpoint().finally(() => {
+    refreshInFlight = null;
+  });
+  return refreshInFlight;
+}
+
+async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {}): Promise<T> {
+  const execute = async (): Promise<Response> => {
+    try {
+      return await fetch(`${API_BASE}${path}`, {
+        credentials: "include",
+        headers: buildHeaders(init?.headers, { includeJsonContentType: true, skipAuth: opts.skipAuth }),
+        ...init,
+      });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    }
+  };
+
+  let res = await execute();
+  if (res.status === 401 && !opts.skipAuth && !opts.skipRefreshRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      res = await execute();
+    }
+  }
   if (!res.ok) {
     const text = await res.text();
     throw new Error(formatHttpError(res.status, text));
@@ -722,6 +754,8 @@ export const api = {
     req<AuthMe>("/auth/signup", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
   authLogin: (payload: { username: string; password: string }) =>
     req<AuthToken>("/auth/login", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
+  authRefresh: () =>
+    req<AuthToken>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
   authMe: () => req<AuthMe>("/auth/me"),
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>

@@ -11,7 +11,6 @@ from app.auth_context import CurrentUser, require_current_user
 from app.db.session import get_db
 from app.schemas.auth import AuthMeResponse, AuthTokenResponse, LoginRequest, SignupRequest
 from app.services.auth import (
-    access_token_ttl_seconds,
     create_access_token,
     generate_refresh_token,
     hash_password,
@@ -36,6 +35,26 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
         max_age=ttl,
         path="/",
     )
+
+
+def _create_refresh_session(db: Session, *, user_id: int) -> str:
+    now = datetime.now(tz=timezone.utc)
+    refresh_token = generate_refresh_token()
+    db.execute(
+        text(
+            """
+            INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at, revoked_at, created_at)
+            VALUES (:user_id, :refresh_token_hash, :expires_at, NULL, :created_at)
+            """
+        ),
+        {
+            "user_id": user_id,
+            "refresh_token_hash": hash_refresh_token(refresh_token),
+            "expires_at": now + timedelta(seconds=refresh_token_ttl_seconds()),
+            "created_at": now,
+        },
+    )
+    return refresh_token
 
 
 @router.post("/signup", response_model=AuthMeResponse)
@@ -115,27 +134,84 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
 
     user_id = int(row["id"])
     username = str(row["username"])
-    access_token, exp = create_access_token(user_id=user_id, username=username)
-    refresh_token = generate_refresh_token()
-    refresh_hash = hash_refresh_token(refresh_token)
     now = datetime.now(tz=timezone.utc)
-    db.execute(
-        text(
-            """
-            INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at, revoked_at, created_at)
-            VALUES (:user_id, :refresh_token_hash, :expires_at, NULL, :created_at)
-            """
-        ),
-        {
-            "user_id": user_id,
-            "refresh_token_hash": refresh_hash,
-            "expires_at": now + timedelta(seconds=refresh_token_ttl_seconds()),
-            "created_at": now,
-        },
-    )
+    access_token, exp = create_access_token(user_id=user_id, username=username)
+    refresh_token = _create_refresh_session(db, user_id=user_id)
     db.commit()
 
     _set_refresh_cookie(response, refresh_token)
+    return AuthTokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=max(int((exp - now).total_seconds()), 1),
+    )
+
+
+@router.post("/refresh", response_model=AuthTokenResponse)
+def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
+    refresh_token = request.cookies.get(refresh_cookie_name())
+    if not refresh_token:
+        response.delete_cookie(refresh_cookie_name(), path="/")
+        raise HTTPException(status_code=401, detail="refresh token required")
+
+    now = datetime.now(tz=timezone.utc)
+    row = db.execute(
+        text(
+            """
+            SELECT
+              s.id AS session_id,
+              s.user_id,
+              u.username
+            FROM auth_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.refresh_token_hash = :refresh_token_hash
+              AND s.revoked_at IS NULL
+              AND s.expires_at > :now
+              AND COALESCE(u.is_active, TRUE) = TRUE
+            LIMIT 1
+            """
+        ),
+        {"refresh_token_hash": hash_refresh_token(refresh_token), "now": now},
+    ).mappings().one_or_none()
+
+    if row is None:
+        db.execute(
+            text(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = :now
+                WHERE refresh_token_hash = :refresh_token_hash
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"now": now, "refresh_token_hash": hash_refresh_token(refresh_token)},
+        )
+        db.commit()
+        response.delete_cookie(refresh_cookie_name(), path="/")
+        raise HTTPException(status_code=401, detail="invalid or expired refresh token")
+
+    revoked = db.execute(
+        text(
+            """
+            UPDATE auth_sessions
+            SET revoked_at = :now
+            WHERE id = :session_id
+              AND revoked_at IS NULL
+            """
+        ),
+        {"now": now, "session_id": int(row["session_id"])},
+    ).rowcount
+    if revoked == 0:
+        response.delete_cookie(refresh_cookie_name(), path="/")
+        raise HTTPException(status_code=401, detail="invalid refresh token")
+
+    user_id = int(row["user_id"])
+    username = str(row["username"])
+    next_refresh_token = _create_refresh_session(db, user_id=user_id)
+    access_token, exp = create_access_token(user_id=user_id, username=username)
+    db.commit()
+
+    _set_refresh_cookie(response, next_refresh_token)
     return AuthTokenResponse(
         access_token=access_token,
         token_type="bearer",

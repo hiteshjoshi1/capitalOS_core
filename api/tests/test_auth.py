@@ -28,6 +28,14 @@ def _insert_user_with_password(db_engine, *, user_id: int, username: str, passwo
         )
 
 
+def _cookie_value(set_cookie_header: str, name: str) -> str:
+    for raw in set_cookie_header.split(","):
+        first = raw.strip().split(";", 1)[0]
+        if first.startswith(f"{name}="):
+            return first.split("=", 1)[1]
+    raise AssertionError(f"Cookie {name} not found in header: {set_cookie_header}")
+
+
 def test_auth_signup_login_me_logout(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
@@ -81,6 +89,64 @@ def test_auth_signup_login_me_logout(client, db_engine, monkeypatch):
             text("SELECT COUNT(*) FROM auth_sessions WHERE revoked_at IS NOT NULL")
         ).scalar_one()
         assert int(revoked) == 1
+
+
+def test_auth_refresh_rotates_session(client, db_engine, monkeypatch):
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+
+    _insert_user_with_password(db_engine, user_id=900, username="refresh_user", password="RefreshPass1!")
+    login = client.post("/auth/login", json={"username": "refresh_user", "password": "RefreshPass1!"})
+    assert login.status_code == 200
+    old_cookie = _cookie_value(login.headers.get("set-cookie", ""), "capitalos_refresh")
+
+    refreshed = client.post("/auth/refresh")
+    assert refreshed.status_code == 200
+    second_token = refreshed.json()["access_token"]
+    assert second_token
+    new_cookie = _cookie_value(refreshed.headers.get("set-cookie", ""), "capitalos_refresh")
+    assert new_cookie
+    assert new_cookie != old_cookie
+
+    me = client.get("/auth/me", headers={"Authorization": f"Bearer {second_token}"})
+    assert me.status_code == 200
+    assert me.json()["username"] == "refresh_user"
+
+    with db_engine.begin() as conn:
+        active = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM auth_sessions
+                WHERE user_id = 900
+                  AND revoked_at IS NULL
+                """
+            )
+        ).scalar_one()
+        revoked = conn.execute(
+            text(
+                """
+                SELECT COUNT(*) FROM auth_sessions
+                WHERE user_id = 900
+                  AND revoked_at IS NOT NULL
+                """
+            )
+        ).scalar_one()
+        assert int(active) == 1
+        assert int(revoked) == 1
+
+    client.cookies.clear()
+    reused = client.post("/auth/refresh", cookies={"capitalos_refresh": old_cookie})
+    assert reused.status_code == 401
+
+
+def test_auth_refresh_requires_cookie(client, monkeypatch):
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+
+    res = client.post("/auth/refresh")
+    assert res.status_code == 401
 
 
 def test_accounts_are_user_scoped(client, db_engine, monkeypatch):

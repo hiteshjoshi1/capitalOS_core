@@ -1,5 +1,5 @@
 import { createContext, useEffect, useMemo, useState } from "react";
-import { api, getAccessToken, setAccessToken } from "../lib/api";
+import { api, setAccessToken } from "../lib/api";
 import type { AuthMe } from "../lib/api";
 
 type AuthContextValue = {
@@ -25,12 +25,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const token = getAccessToken();
-      if (!token) {
-        if (!cancelled) setLoading(false);
-        return;
-      }
       try {
+        await api.authRefresh();
         const me = await api.authMe();
         if (cancelled) return;
         setUser(me);
