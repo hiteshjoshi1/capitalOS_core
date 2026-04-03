@@ -248,13 +248,15 @@ task-all:
 task-v3-run:
 	$(call require_task,task-v3-run)
 	$(call require_thread,task-v3-run)
-	PIPELINE_VERSION=v3 $(call run_llm_orch,all $(ORCH_INIT_ARGS))
+	$(call require_orch_runtime,task-v3-run)
+	PIPELINE_VERSION=v3 $(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(ORCH_PYTHON) -m $(ORCH_MODULE) all $(ORCH_INIT_ARGS)
 
 task-v3-resume:
 	$(call require_task,task-v3-resume)
 	$(call require_thread,task-v3-resume)
 	$(call require_resume_json,task-v3-resume)
-	PIPELINE_VERSION=v3 $(call run_llm_orch,resume $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)')
+	$(call require_orch_runtime,task-v3-resume)
+	PIPELINE_VERSION=v3 $(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(ORCH_PYTHON) -m $(ORCH_MODULE) resume $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)'
 
 task-v3-status:
 	$(call require_task,task-v3-status)

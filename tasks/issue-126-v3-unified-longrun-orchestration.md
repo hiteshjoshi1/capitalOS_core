@@ -136,8 +136,7 @@ Switching:
   - `V3_PROVIDER=copilot|codex`
   - `V3_MODEL=<model-name>`
   - `V3_MODE=single_session`
-  - `V3_ON_PROVIDER_FAILURE=fallback|fail`
-  - `V3_FALLBACK_PROVIDER=codex|copilot` (optional)
+  - `V3_ON_PROVIDER_FAILURE=fail` (explicit mode switch by operator, no auto cross-provider fallback)
 
 ### 4) Structured Output Contract for `agent_run`
 `agent_run` must return strict JSON with at least:
@@ -188,15 +187,11 @@ Add v3-specific keys:
 - `V3_AUTO_FIX_MODE=deterministic_only|single_repair_session`
 - `V3_ENABLE_POST_PR_HUMAN_REVIEW=1`
 - `V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK=1`
-- `V3_ENABLE_PROVIDER_FALLBACK=0|1`
-- `V3_FALLBACK_PROVIDER=codex|copilot`
 - `V3_ENABLE_CAFFEINATE=1`
 
 ## Decision Log (Locked Defaults For V3)
 - `PIPELINE_VERSION=v3`
-- `V3_PROVIDER=copilot` (primary)
-- `V3_FALLBACK_PROVIDER=codex`
-- `V3_ENABLE_PROVIDER_FALLBACK=1`
+- `V3_PROVIDER=copilot` (explicit run mode; set `codex` when running directly on Codex)
 - `V3_AUTO_FIX_MODE=deterministic_only`
 - `V3_ENABLE_CAFFEINATE=1`
 - `V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK=1`
@@ -218,7 +213,7 @@ Rationale: v3 adoption should be opt-in and reversible until stability is proven
 
 ### 9) Test Strategy (Required)
 Unit tests:
-- provider selection and fallback logic
+- provider selection (single-provider explicit mode)
 - structured output parsing/validation
 - policy engine rule outcomes
 - routing transitions for happy/failure/high-risk flows
@@ -226,7 +221,7 @@ Unit tests:
 Mocked e2e orchestration tests:
 - successful single-session run -> deterministic gates pass -> ship
 - gate failure -> blocked with clear diagnostics
-- provider failure -> fallback provider path
+- provider failure -> blocked with clear diagnostics and no automatic provider switch
 - high-risk file change -> pre-ship human gate path
 
 Regression tests:
@@ -259,7 +254,7 @@ Phase 3:
 - Mitigation: keep deterministic gates strict; keep optional post-failure second session
 
 - Risk: provider behavior differences
-- Mitigation: adapter contract + backend-specific tests + fallback provider mode
+- Mitigation: adapter contract + backend-specific tests + explicit provider-mode selection (`V3_PROVIDER`) per run
 
 - Risk: hidden scope drift by long session
 - Mitigation: hard policy engine blocks restricted paths before ship

@@ -242,6 +242,19 @@ prepare
   -> ship
 ```
 
+### V3 provider mode (explicit, no fallback)
+
+V3 runs exactly one provider per invocation. It does not auto-fallback across subscriptions.
+
+- Copilot mode:
+  - `V3_PROVIDER=copilot`
+  - `V3_MODEL=<copilot-supported-model>`
+- Codex mode:
+  - `V3_PROVIDER=codex`
+  - `V3_MODEL=<codex-supported-model>`
+
+If the selected provider/model fails, the run is blocked and reported. Switching provider is an explicit operator choice in env, then rerun.
+
 Failure behavior in v3:
 
 - deterministic gate failures are classified and reported with command/log detail.

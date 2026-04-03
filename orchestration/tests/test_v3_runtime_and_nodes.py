@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -279,15 +278,13 @@ def test_deterministic_gates_high_risk_rejected_blocks(tmp_path, monkeypatch) ->
     assert "High-risk findings rejected" in pipeline.blockers[0]
 
 
-def test_provider_runtime_complete_structured_fallback(monkeypatch, tmp_path) -> None:
+def test_provider_runtime_complete_structured_raises_on_primary_failure(monkeypatch, tmp_path) -> None:
     cfg = SimpleNamespace(
         v3_enable_caffeinate=False,
         build_max_autopilot_continues=3,
         v3_longrun_timeout_minutes=5,
         v3_provider="copilot",
         v3_model="gpt-5.3-codex",
-        v3_enable_provider_fallback=True,
-        v3_fallback_provider="codex",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
 
@@ -296,38 +293,14 @@ def test_provider_runtime_complete_structured_fallback(monkeypatch, tmp_path) ->
     def fake_run_provider(self, provider, *, model, prompt):
         _ = (self, model, prompt)
         calls.append(provider)
-        if provider == "copilot":
-            raise RuntimeError("primary failed")
-        payload = {
-            "summary": "ok",
-            "plan_summary": "plan",
-            "architecture_decisions": [],
-            "risks": [],
-            "open_questions": [],
-            "acceptance_criteria": [],
-            "planned_paths": [],
-            "checklist": [],
-            "changed_files": [],
-            "extra_changed_files": [],
-            "implementation_notes": [],
-            "acceptance_criteria_checks": [],
-            "semantic_intent_achieved": True,
-            "risk_flags": [],
-        }
-        return ProviderRunResult(
-            provider="codex",
-            model="gpt-5.3-codex",
-            output=json.dumps(payload),
-            diagnostics=[],
-        )
+        raise RuntimeError("primary failed")
 
     monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
     service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
-    parsed, run_result = service.complete_structured("prompt", AgentRunOutput)
+    with pytest.raises(RuntimeError, match="Provider `copilot` failed for v3 run"):
+        service.complete_structured("prompt", AgentRunOutput)
 
-    assert parsed.summary == "ok"
-    assert run_result.provider == "codex"
-    assert calls == ["copilot", "codex"]
+    assert calls == ["copilot"]
 
 
 def test_provider_runtime_run_provider_dispatch_and_prefix(monkeypatch, tmp_path) -> None:
@@ -337,8 +310,6 @@ def test_provider_runtime_run_provider_dispatch_and_prefix(monkeypatch, tmp_path
         v3_longrun_timeout_minutes=5,
         v3_provider="copilot",
         v3_model="gpt-5.3-codex",
-        v3_enable_provider_fallback=False,
-        v3_fallback_provider="codex",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     monkeypatch.setattr("orchestration.services.provider_runtime.shutil.which", lambda _: "/usr/bin/caffeinate")
@@ -362,8 +333,6 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
         v3_longrun_timeout_minutes=5,
         v3_provider="codex",
         v3_model="gpt-5.3-codex",
-        v3_enable_provider_fallback=False,
-        v3_fallback_provider="copilot",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     created: dict[str, Path] = {}

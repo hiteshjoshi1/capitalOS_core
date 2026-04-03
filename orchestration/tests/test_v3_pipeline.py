@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from langgraph.checkpoint.memory import InMemorySaver
+
+from orchestration.graph import build_graph
 from orchestration.models.build import ExtraChangedFile
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.pipeline import PipelineState
 from orchestration.routing import (
     route_after_agent_run,
     route_after_deterministic_gates,
+    route_after_plan,
     route_after_prepare,
 )
 from orchestration.services.config import ModelRoutingConfig
@@ -30,6 +34,28 @@ def _state() -> PipelineState:
 def test_route_after_prepare_v3_goes_to_agent_run() -> None:
     state = _state()
     assert route_after_prepare(dump_pipeline_state(state)) == "agent_run"
+
+
+def test_graph_declares_prepare_branch_for_v3_agent_run() -> None:
+    branch = route_after_prepare(dump_pipeline_state(_state()))
+    assert branch == "agent_run"
+
+    graph = build_graph(InMemorySaver())
+    prepare_branches = graph.builder.branches["prepare"]
+    route_spec = next(iter(prepare_branches.values()))
+    assert route_spec.ends is not None
+    assert branch in route_spec.ends
+
+
+def test_graph_declares_plan_branch_for_v3_agent_run() -> None:
+    branch = route_after_plan(dump_pipeline_state(_state()))
+    assert branch == "agent_run"
+
+    graph = build_graph(InMemorySaver())
+    plan_branches = graph.builder.branches["plan"]
+    route_spec = next(iter(plan_branches.values()))
+    assert route_spec.ends is not None
+    assert branch in route_spec.ends
 
 
 def test_route_after_agent_run_blocked_ends() -> None:
@@ -92,8 +118,6 @@ def test_model_routing_config_supports_v3_fields() -> None:
         v3_provider="codex",
         v3_model="gpt-5.3-codex",
         v3_auto_fix_mode="single_repair_session",
-        v3_enable_provider_fallback=True,
-        v3_fallback_provider="copilot",
     )
     assert cfg.pipeline_version == "v3"
     assert cfg.v3_provider == "codex"

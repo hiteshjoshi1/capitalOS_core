@@ -134,7 +134,7 @@ export default function Sidebar() {
         </Link>
       </nav>
 
-      <div className="sidebarUserArea">
+      <div className="sidebarUserArea" aria-label="User menu">
         <div className="sidebarUserInfo">
           <span className="sidebarAvatar" aria-hidden="true">
             {(user?.username || "U").slice(0, 1).toUpperCase()}
