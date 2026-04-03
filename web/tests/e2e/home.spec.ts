@@ -161,8 +161,9 @@ test("loads dashboard shell", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeVisible();
+  // Expand the "Operations" nav section to verify Ingest and Market Data links exist.
+  await page.getByRole("button", { name: /Operations/i }).click();
   await expect(page.getByRole("link", { name: "Ingest" })).toBeVisible();
-  await page.getByLabel("User menu").click();
   await expect(page.getByRole("link", { name: "Market Data" })).toBeVisible();
 });
 
@@ -196,8 +197,7 @@ test("navigates via wealth overview exposure cards", async ({ page }) => {
 test("persists theme toggle across reload", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await page.getByLabel("User menu").click();
-  await page.getByRole("button", { name: "Theme: Dark" }).click();
+  await page.getByRole("button", { name: "Toggle theme" }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect
@@ -213,6 +213,5 @@ test("loads dashboard shell on mobile breakpoint", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeVisible();
-  await page.getByLabel("User menu").click();
   await expect(page.getByLabel("Month")).toBeVisible();
 });

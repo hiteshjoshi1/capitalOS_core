@@ -119,48 +119,37 @@ class ProviderRuntimeService:
         raise RuntimeError(f"Unsupported provider: {provider}")
 
     def complete_structured(self, prompt: str, model_cls: Type[T]) -> tuple[T, ProviderRunResult]:
-        primary = self.cfg.v3_provider
+        provider = self.cfg.v3_provider
         model_name = self.cfg.v3_model
 
         emit_event(
             "provider_run_started",
             stage=self.stage,
-            current_action=f"Starting v3 long-run session via `{primary}`",
-            evidence=[f"provider={primary}", f"model={model_name}"],
+            current_action=f"Starting v3 long-run session via `{provider}`",
+            evidence=[f"provider={provider}", f"model={model_name}"],
         )
 
-        tried: list[str] = []
-        last_exc: Exception | None = None
-        for provider in [primary, self.cfg.v3_fallback_provider]:
-            if provider in tried:
-                continue
-            if provider != primary and not self.cfg.v3_enable_provider_fallback:
-                continue
-            tried.append(provider)
-            try:
-                run_result = self._run_provider(provider, model=model_name, prompt=prompt)
-                payload = _extract_json_with_fallback(run_result.output)
-                parsed = model_cls.model_validate(payload)
-                emit_event(
-                    "provider_run_finished",
-                    stage=self.stage,
-                    status="completed",
-                    evidence=run_result.diagnostics,
-                    conclusion=f"Structured payload parsed successfully from `{provider}`.",
-                )
-                return parsed, run_result
-            except Exception as exc:  # noqa: BLE001
-                last_exc = exc
-                emit_event(
-                    "provider_run_failed",
-                    stage=self.stage,
-                    status="failed",
-                    evidence=[f"provider={provider}", f"error={str(exc)[:280]}"],
-                    conclusion=f"Provider `{provider}` failed for this v3 run attempt.",
-                )
-                continue
-
-        raise RuntimeError(f"All providers failed for v3 run: {last_exc}")
+        try:
+            run_result = self._run_provider(provider, model=model_name, prompt=prompt)
+            payload = _extract_json_with_fallback(run_result.output)
+            parsed = model_cls.model_validate(payload)
+            emit_event(
+                "provider_run_finished",
+                stage=self.stage,
+                status="completed",
+                evidence=run_result.diagnostics,
+                conclusion=f"Structured payload parsed successfully from `{provider}`.",
+            )
+            return parsed, run_result
+        except Exception as exc:  # noqa: BLE001
+            emit_event(
+                "provider_run_failed",
+                stage=self.stage,
+                status="failed",
+                evidence=[f"provider={provider}", f"error={str(exc)[:280]}"],
+                conclusion=f"Provider `{provider}` failed for this v3 run attempt.",
+            )
+            raise RuntimeError(f"Provider `{provider}` failed for v3 run: {exc}") from exc
 
 
 def structured_output_for_debug(output: BaseModel) -> str:

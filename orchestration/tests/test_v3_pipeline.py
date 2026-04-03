@@ -118,8 +118,6 @@ def test_model_routing_config_supports_v3_fields() -> None:
         v3_provider="codex",
         v3_model="gpt-5.3-codex",
         v3_auto_fix_mode="single_repair_session",
-        v3_enable_provider_fallback=True,
-        v3_fallback_provider="copilot",
     )
     assert cfg.pipeline_version == "v3"
     assert cfg.v3_provider == "codex"
