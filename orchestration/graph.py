@@ -73,8 +73,24 @@ def build_graph(checkpointer):
         },
     )
 
-    graph.add_conditional_edges("prepare", route_after_prepare, {"plan": "plan", "__end__": END})
-    graph.add_conditional_edges("plan", route_after_plan, {"human_approval_gate": "human_approval_gate", "__end__": END})
+    graph.add_conditional_edges(
+        "prepare",
+        route_after_prepare,
+        {
+            "plan": "plan",
+            "agent_run": "agent_run",
+            "__end__": END,
+        },
+    )
+    graph.add_conditional_edges(
+        "plan",
+        route_after_plan,
+        {
+            "human_approval_gate": "human_approval_gate",
+            "agent_run": "agent_run",
+            "__end__": END,
+        },
+    )
     graph.add_conditional_edges("human_approval_gate", route_after_human_approval, {"build": "build", "__end__": END})
     graph.add_conditional_edges("build", route_after_build, {"agent_review": "agent_review", "__end__": END})
     graph.add_conditional_edges(
