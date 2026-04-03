@@ -1,0 +1,100 @@
+from __future__ import annotations
+
+from orchestration.models.build import ExtraChangedFile
+from orchestration.models.issue import IssueMetadata
+from orchestration.models.pipeline import PipelineState
+from orchestration.routing import (
+    route_after_agent_run,
+    route_after_deterministic_gates,
+    route_after_prepare,
+)
+from orchestration.services.config import ModelRoutingConfig
+from orchestration.services.v3_policy import V3PolicyService
+from orchestration.state import dump_pipeline_state
+
+
+def _state() -> PipelineState:
+    return PipelineState(
+        issue=IssueMetadata(
+            issue_id="126",
+            slug="v3",
+            title="V3",
+            task_file="tasks/issue-126-v3.md",
+            repo_root=".",
+            branch="feature/issue-126-v3",
+        ),
+        pipeline_version="v3",
+    )
+
+
+def test_route_after_prepare_v3_goes_to_agent_run() -> None:
+    state = _state()
+    assert route_after_prepare(dump_pipeline_state(state)) == "agent_run"
+
+
+def test_route_after_agent_run_blocked_ends() -> None:
+    state = _state()
+    state.workflow_status = "blocked"
+    assert route_after_agent_run(dump_pipeline_state(state)) == "__end__"
+
+
+def test_route_after_agent_run_success_goes_to_deterministic_gates() -> None:
+    state = _state()
+    state.workflow_status = "running"
+    assert route_after_agent_run(dump_pipeline_state(state)) == "deterministic_gates"
+
+
+def test_route_after_deterministic_gates_schedules_one_repair_session() -> None:
+    state = _state()
+    state.workflow_status = "needs_fixes"
+    state.v3_repair_session_used = True
+    assert route_after_deterministic_gates(dump_pipeline_state(state)) == "agent_run"
+
+
+def test_route_after_deterministic_gates_success_goes_to_ship() -> None:
+    state = _state()
+    state.workflow_status = "running"
+    assert route_after_deterministic_gates(dump_pipeline_state(state)) == "ship"
+
+
+def test_v3_policy_blocks_restricted_and_missing_reason(tmp_path) -> None:
+    service = V3PolicyService(str(tmp_path))
+    result = service.evaluate(
+        changed_files=[".gitignore", "web/src/App.tsx"],
+        allowed_paths=["tasks/issue-126-v3.md"],
+        extra_changed_files=[],
+    )
+    assert result.blocked is True
+    assert any("Restricted file modified" in item for item in result.blockers)
+    assert any("missing explicit reason" in item for item in result.blockers)
+
+
+def test_v3_policy_accepts_reasoned_out_of_scope_file(tmp_path) -> None:
+    service = V3PolicyService(str(tmp_path))
+    result = service.evaluate(
+        changed_files=["web/src/App.tsx"],
+        allowed_paths=["tasks/issue-126-v3.md"],
+        extra_changed_files=[
+            ExtraChangedFile(
+                path="web/src/App.tsx",
+                reason="Needed for shared route wiring in this task.",
+                reason_source="builder",
+            )
+        ],
+    )
+    assert result.blocked is False
+    assert len(result.extra_files_with_reasons) == 1
+
+
+def test_model_routing_config_supports_v3_fields() -> None:
+    cfg = ModelRoutingConfig(
+        pipeline_version="v3",
+        v3_provider="codex",
+        v3_model="gpt-5.3-codex",
+        v3_auto_fix_mode="single_repair_session",
+        v3_enable_provider_fallback=True,
+        v3_fallback_provider="copilot",
+    )
+    assert cfg.pipeline_version == "v3"
+    assert cfg.v3_provider == "codex"
+    assert cfg.v3_auto_fix_mode == "single_repair_session"

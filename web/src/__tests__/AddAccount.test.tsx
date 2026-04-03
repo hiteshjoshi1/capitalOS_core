@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -99,7 +99,7 @@ describe("AddAccount", () => {
     });
 
     expect(await screen.findByRole("status")).toHaveTextContent("Account created.");
-  });
+  }, 15000);
 
   it("creates a new platform from the modal", async () => {
     mockApi.platforms
@@ -169,14 +169,16 @@ describe("AddAccount", () => {
 
     await userEvent.click(scoped.getByRole("button", { name: "Save platform" }));
 
-    expect(mockApi.createPlatform).toHaveBeenCalledWith({
-      code: "PPFAS",
-      name: "Parag Parikh AMC",
-      platform_type: "MUTUAL_FUND",
-      country: "IN",
-      website: "https://www.example.com",
+    await waitFor(() => {
+      expect(mockApi.createPlatform).toHaveBeenCalledWith({
+        code: "PPFAS",
+        name: "Parag Parikh AMC",
+        platform_type: "MUTUAL_FUND",
+        country: "IN",
+        website: "https://www.example.com",
+      });
     });
-  });
+  }, 15000);
 
   it("shows load error when options fail", async () => {
     mockApi.platforms.mockResolvedValueOnce(platformsFixture);

@@ -37,7 +37,7 @@ const UOB_CC_HEADERS = [
   "transaction amount(local)",
 ] as const;
 
-function hasOrderedHeaderSubset(header: unknown, expected: readonly string[]): boolean {
+export function hasOrderedHeaderSubset(header: unknown, expected: readonly string[]): boolean {
   if (!Array.isArray(header)) return false;
   const normalized = header
     .map((value) => String(value).trim().toLowerCase())
@@ -51,7 +51,7 @@ function hasOrderedHeaderSubset(header: unknown, expected: readonly string[]): b
   return false;
 }
 
-function resolvePlatformParser(
+export function resolvePlatformParser(
   platform: string | undefined,
   signatureDebug: SignatureDebug | undefined,
 ): PlatformParserConfig | undefined {

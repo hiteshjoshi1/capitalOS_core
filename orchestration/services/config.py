@@ -18,6 +18,17 @@ def _load_env_files() -> None:
 
 
 class ModelRoutingConfig(BaseModel):
+    pipeline_version: Literal["v2", "v3"] = "v2"
+    v3_provider: Literal["copilot", "codex"] = "copilot"
+    v3_model: str = Field(default="gpt-5.3-codex")
+    v3_longrun_timeout_minutes: int = Field(default=120, ge=1)
+    v3_auto_fix_mode: Literal["deterministic_only", "single_repair_session"] = "deterministic_only"
+    v3_enable_post_pr_human_review: bool = True
+    v3_require_pre_ship_human_on_high_risk: bool = True
+    v3_enable_provider_fallback: bool = False
+    v3_fallback_provider: Literal["copilot", "codex"] = "codex"
+    v3_enable_caffeinate: bool = True
+
     planner_model: str = Field(default="claude-opus-4.6")
     builder_model: str = Field(default="gpt-5.3-codex")
     reviewer_model: str = Field(default="claude-sonnet-4.6")
@@ -41,6 +52,20 @@ class ModelRoutingConfig(BaseModel):
         aux_files = [x.strip() for x in raw_aux.replace(";", ",").split(",") if x.strip()]
 
         return cls(
+            pipeline_version=os.getenv("PIPELINE_VERSION", "v2"),
+            v3_provider=os.getenv("V3_PROVIDER", "copilot"),
+            v3_model=os.getenv("V3_MODEL", os.getenv("BUILD_MODEL", "gpt-5.3-codex")),
+            v3_longrun_timeout_minutes=int(os.getenv("V3_LONGRUN_TIMEOUT_MINUTES", "120")),
+            v3_auto_fix_mode=os.getenv("V3_AUTO_FIX_MODE", "deterministic_only"),
+            v3_enable_post_pr_human_review=os.getenv("V3_ENABLE_POST_PR_HUMAN_REVIEW", "1") == "1",
+            v3_require_pre_ship_human_on_high_risk=os.getenv("V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", "1") == "1",
+            v3_enable_provider_fallback=os.getenv("V3_ENABLE_PROVIDER_FALLBACK", "0") == "1",
+            v3_fallback_provider=os.getenv("V3_FALLBACK_PROVIDER", "codex"),
+            v3_enable_caffeinate=os.getenv(
+                "V3_ENABLE_CAFFEINATE",
+                os.getenv("ENABLE_CAFFEINATE", "1"),
+            )
+            == "1",
             planner_model=os.getenv("PLAN_MODEL", "claude-opus-4.6"),
             builder_model=os.getenv("BUILD_MODEL", "claude-sonnet-4.6"),
             reviewer_model=os.getenv("REVIEW_MODEL", "claude-sonnet-4.6"),
@@ -61,6 +86,8 @@ class ModelRoutingConfig(BaseModel):
 
         if stage in {
             PipelineStage.BUILD,
+            PipelineStage.AGENT_RUN,
+            PipelineStage.DETERMINISTIC_GATES,
             PipelineStage.REWORK_ANALYSIS,
             PipelineStage.REWORK_IMPLEMENTATION,
         }:

@@ -27,6 +27,8 @@ STEP_ENTRYPOINT_MAP = {
     "prepare": "prepare",
     "plan": "plan",
     "build": "build",
+    "agent-run": "agent_run",
+    "deterministic-gates": "deterministic_gates",
     "agent-review": "agent_review",
     "rework": "rework_analysis",
     "ship": "ship",
@@ -46,6 +48,8 @@ def parse_args() -> argparse.Namespace:
             "plan",
             "approve-plan",
             "build",
+            "agent-run",
+            "deterministic-gates",
             "agent-review",
             "human-review",
             "rework",
@@ -79,6 +83,8 @@ def parse_args() -> argparse.Namespace:
             "human_review",
             "rework_analysis",
             "rework_implementation",
+            "agent_run",
+            "deterministic_gates",
             "ship",
         ],
     )
@@ -128,6 +134,7 @@ def make_initial_state(args: argparse.Namespace, entrypoint: str, mode: str) -> 
 
     pipeline = PipelineState(
         issue=issue,
+        pipeline_version=get_config().pipeline_version,
         requested_entrypoint=entrypoint,  # type: ignore[arg-type]
         execution_mode=mode,              # type: ignore[arg-type]
     )
@@ -218,6 +225,8 @@ def _effective_stage_from_interrupts(interrupts: list[Any]) -> tuple[str | None,
         return "human_approval_gate", "waiting_for_human"
     if gate in {"human_review", "extra_files_approval"}:
         return "human_review", "waiting_for_human"
+    if gate == "v3_high_risk_review":
+        return "deterministic_gates", "waiting_for_human"
     return None, "waiting_for_human"
 
 
@@ -298,6 +307,12 @@ def build_interactive_resume_payload(
         )
         requested = retry_request.get("requested_retry_count") or 0
         print_fn(f"Requested additional retries: {requested}")
+    elif gate == "v3_high_risk_review":
+        findings = interrupt.get("findings") or []
+        if findings:
+            print_fn("High-risk findings:")
+            for item in findings:
+                print_fn(f"- {item}")
 
     decision = _prompt_decision(input_fn)
     reviewer = _prompt_non_empty("Reviewer name: ", input_fn)
@@ -389,6 +404,13 @@ def print_result(graph, config: dict[str, Any], result: Any) -> None:
             summary.update({"status": "completed", "message": "Workflow shipped successfully."})
         elif pipeline.workflow_status == "blocked":
             summary.update({"status": "blocked", "message": "Workflow blocked. Check task markdown or blockers."})
+        elif pipeline.workflow_status == "needs_fixes":
+            summary.update(
+                {
+                    "status": "needs_fixes",
+                    "message": "Workflow needs fixes before shipping. Check task markdown for required action.",
+                }
+            )
         else:
             summary.update(
                 {

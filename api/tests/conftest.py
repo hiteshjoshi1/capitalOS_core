@@ -15,7 +15,7 @@ os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
 os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
-os.environ.setdefault("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "1"
 
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402

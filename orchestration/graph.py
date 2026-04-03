@@ -4,8 +4,10 @@ from langgraph.graph import START, END, StateGraph
 
 from orchestration.state import GraphState
 from orchestration.routing import (
+    route_after_agent_run,
     route_after_agent_review,
     route_after_build,
+    route_after_deterministic_gates,
     route_after_escalation_review,
     route_after_human_approval,
     route_after_human_review,
@@ -20,6 +22,8 @@ from orchestration.nodes import (
     plan,
     human_approval,
     build,
+    agent_run,
+    deterministic_gates,
     agent_review,
     human_review,
     rework_analysis,
@@ -41,6 +45,8 @@ def build_graph(checkpointer):
     graph.add_node("plan", plan.run)
     graph.add_node("human_approval_gate", human_approval.run)
     graph.add_node("build", build.run)
+    graph.add_node("agent_run", agent_run.run)
+    graph.add_node("deterministic_gates", deterministic_gates.run)
     graph.add_node("agent_review", agent_review.run)
     graph.add_node("escalation_review", escalation_review.run)
     graph.add_node("human_review", human_review.run)
@@ -57,6 +63,8 @@ def build_graph(checkpointer):
             "plan": "plan",
             "human_approval_gate": "human_approval_gate",
             "build": "build",
+            "agent_run": "agent_run",
+            "deterministic_gates": "deterministic_gates",
             "agent_review": "agent_review",
             "human_review": "human_review",
             "rework_analysis": "rework_analysis",
@@ -69,6 +77,16 @@ def build_graph(checkpointer):
     graph.add_conditional_edges("plan", route_after_plan, {"human_approval_gate": "human_approval_gate", "__end__": END})
     graph.add_conditional_edges("human_approval_gate", route_after_human_approval, {"build": "build", "__end__": END})
     graph.add_conditional_edges("build", route_after_build, {"agent_review": "agent_review", "__end__": END})
+    graph.add_conditional_edges(
+        "agent_run",
+        route_after_agent_run,
+        {"deterministic_gates": "deterministic_gates", "__end__": END},
+    )
+    graph.add_conditional_edges(
+        "deterministic_gates",
+        route_after_deterministic_gates,
+        {"agent_run": "agent_run", "ship": "ship", "__end__": END},
+    )
     graph.add_conditional_edges(
         "agent_review",
         route_after_agent_review,

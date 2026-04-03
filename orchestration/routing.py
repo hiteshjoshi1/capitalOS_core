@@ -10,12 +10,16 @@ def route_from_dispatch(state: GraphState) -> str:
 
 
 def route_after_prepare(state: GraphState) -> str:
-    load_pipeline_state(state)
+    pipeline = load_pipeline_state(state)
+    if pipeline.pipeline_version == "v3":
+        return "agent_run"
     return "plan"
 
 
 def route_after_plan(state: GraphState) -> str:
-    load_pipeline_state(state)
+    pipeline = load_pipeline_state(state)
+    if pipeline.pipeline_version == "v3":
+        return "agent_run"
     return "human_approval_gate"
 
 
@@ -103,3 +107,19 @@ def route_after_rework_implementation(state: GraphState) -> str:
     if rework and rework.status == "blocked":
         return "__end__"
     return "agent_review"
+
+
+def route_after_agent_run(state: GraphState) -> str:
+    pipeline = load_pipeline_state(state)
+    if pipeline.workflow_status == "blocked":
+        return "__end__"
+    return "deterministic_gates"
+
+
+def route_after_deterministic_gates(state: GraphState) -> str:
+    pipeline = load_pipeline_state(state)
+    if pipeline.workflow_status == "needs_fixes" and pipeline.v3_repair_session_used:
+        return "agent_run"
+    if pipeline.workflow_status in {"blocked", "failed"}:
+        return "__end__"
+    return "ship"

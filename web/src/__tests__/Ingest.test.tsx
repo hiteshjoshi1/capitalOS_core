@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
-import Ingest from "../routes/Ingest";
+import Ingest, { hasOrderedHeaderSubset, resolvePlatformParser } from "../routes/Ingest";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
 
@@ -18,6 +18,44 @@ vi.mock("../lib/api", () => ({
 }));
 
 const mockApi = vi.mocked(api, true);
+
+describe("Ingest helpers", () => {
+  it("detects ordered header subsets", () => {
+    expect(hasOrderedHeaderSubset("not-an-array", ["a"])).toBe(false);
+    expect(
+      hasOrderedHeaderSubset(
+        ["transaction date", "Unnamed: 1", "transaction description", "withdrawal", "deposit", "available balance"],
+        ["transaction date", "transaction description", "withdrawal", "deposit", "available balance"],
+      ),
+    ).toBe(true);
+    expect(
+      hasOrderedHeaderSubset(
+        ["transaction date", "withdrawal", "deposit"],
+        ["transaction date", "transaction description", "withdrawal", "deposit", "available balance"],
+      ),
+    ).toBe(false);
+  });
+
+  it("resolves parser from signature and platform labels", () => {
+    expect(
+      resolvePlatformParser(undefined, {
+        file_kind: "excel",
+        header: ["transaction date", "posting date", "description", "foreign currency type", "transaction amount(foreign)", "local currency type", "transaction amount(local)"],
+      }),
+    ).toEqual({ label: "Approve as UOB CC", parserKey: "uob_credit_card_xls_v1" });
+    expect(
+      resolvePlatformParser("UOB Credit Card", undefined),
+    ).toEqual({ label: "Approve as UOB CC", parserKey: "uob_credit_card_xls_v1" });
+    expect(
+      resolvePlatformParser("UOB One Account", undefined),
+    ).toEqual({ label: "Approve as UOB", parserKey: "uob_account_xls_v1" });
+    expect(
+      resolvePlatformParser("IBKR", undefined),
+    ).toEqual({ label: "Approve as IBKR", parserKey: "ibkr_activity_csv_v1" });
+    expect(resolvePlatformParser(undefined, undefined)).toBeUndefined();
+    expect(resolvePlatformParser("UNKNOWN", undefined)).toBeUndefined();
+  });
+});
 
 describe("Ingest", () => {
   beforeEach(() => {
@@ -66,6 +104,108 @@ describe("Ingest", () => {
     expect(screen.getByText("Rows total: 1")).toBeInTheDocument();
     expect(screen.getByText("Parsed: 1")).toBeInTheDocument();
     expect(screen.getByText("Inserted: 1")).toBeInTheDocument();
+  }, 15000);
+
+  it("shows load error when initial fetch fails", async () => {
+    mockApi.accounts.mockRejectedValueOnce(new Error("accounts failed"));
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("Load error")).toBeInTheDocument();
+    expect(screen.getByText("accounts failed")).toBeInTheDocument();
+  });
+
+  it("shows create-account call-to-action when accounts are empty", async () => {
+    mockApi.accounts.mockResolvedValueOnce([]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("No accounts found.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Create account" })).toHaveAttribute("href", "/accounts/new");
+  });
+
+  it("surfaces string-based errors from upload, registration, and load-job paths", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 8, name: "Test", platform: "TEST", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([
+      { id: 80, status: "NEEDS_MAPPING", platform: "TEST", account_id: 8, original_filename: "test.csv", created_at: null },
+    ]);
+    mockApi.ingestUpload.mockRejectedValueOnce("upload string failure");
+    mockApi.ingestJob.mockRejectedValueOnce("job string failure");
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "8");
+    const file = new File(["data"], "test.csv", { type: "text/csv" });
+    await userEvent.upload(screen.getByLabelText("Statement file"), file);
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    expect(await screen.findByText("upload string failure")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("row", { name: /80/i }));
+    expect(await screen.findByText("job string failure")).toBeInTheDocument();
+  });
+
+  it("renders report fallbacks and warning/preview branches", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 9, name: "Parser Test", platform: "UOB", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.ingestUpload.mockResolvedValueOnce({
+      job_id: null,
+      status: "NEEDS_MAPPING",
+      platform: null,
+      parser_key: null,
+      format_signature: null,
+      signature_debug: null,
+      error_message: "format ambiguous",
+      counts: {},
+      section_summary: [],
+      validation_warnings: ["row 3 ignored"],
+      preview_transactions: [{ ts: null, type: null, amount: null, currency: null, category: null, merchant_counterparty: null }],
+    });
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "9");
+    const file = new File(["data"], "uob.xls", { type: "application/vnd.ms-excel" });
+    await userEvent.upload(screen.getByLabelText("Statement file"), file);
+    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+
+    expect(await screen.findByText(/Job #—/)).toBeInTheDocument();
+    expect(screen.getByText("format ambiguous")).toBeInTheDocument();
+    expect(screen.getByText("No section summary.")).toBeInTheDocument();
+    expect(screen.getByText("row 3 ignored")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
   it("shows approve button for Sharekhan mapping", async () => {
@@ -115,6 +255,55 @@ describe("Ingest", () => {
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(11, "sharekhan_holdings_xls_v1");
     expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+  });
+
+  it("loads a job report from recent imports", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 7, name: "DBS", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([
+      { id: 77, status: "IMPORTED", platform: "DBS", account_id: 7, original_filename: "dbs.csv", created_at: "2026-02-01T00:00:00Z" },
+    ]);
+    mockApi.ingestJob.mockResolvedValueOnce({
+      job: {
+        id: 77,
+        status: "IMPORTED",
+        platform: "DBS",
+        account_id: 7,
+        original_filename: "dbs.csv",
+        stored_path: "data/dbs.csv",
+        file_sha256: "x",
+        format_signature: "sig",
+        parser_key: "dbs_transaction_history_csv_v1",
+        report_path: null,
+        error_message: null,
+        created_at: "2026-02-01T00:00:00Z",
+        updated_at: "2026-02-01T00:00:00Z",
+      },
+      report: {
+        job_id: 77,
+        status: "IMPORTED",
+        platform: "DBS",
+        parser_key: "dbs_transaction_history_csv_v1",
+        counts: { rows_total: 2, transactions_parsed: 2, transactions_inserted: 2, duplicates_skipped: 0 },
+        section_summary: [],
+        preview_transactions: [],
+      },
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    const row = await screen.findByRole("row", { name: /77/i });
+    await userEvent.click(row);
+
+    expect(await screen.findByText(/Job #77/)).toBeInTheDocument();
+    expect(mockApi.ingestJob).toHaveBeenCalledWith(77);
   });
 
   it("shows approve button for DBS Vickers mapping", async () => {

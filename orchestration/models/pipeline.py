@@ -10,6 +10,7 @@ from orchestration.models.build import BuildOutput, RetryEntry, ExtraChangedFile
 from orchestration.models.review import ReviewCycle, HumanDecision
 from orchestration.models.rework import ReworkCycle
 from orchestration.models.ship import ShipResult
+from orchestration.models.agent_run import AgentRunOutput
 from orchestration.models.verification import VerificationEvidence
 from orchestration.services.required_checks import describe_required_checks
 
@@ -24,6 +25,8 @@ StageName = Literal[
     "plan",
     "human_approval_gate",
     "build",
+    "agent_run",
+    "deterministic_gates",
     "agent_review",
     "escalation_review",
     "human_review",
@@ -56,6 +59,7 @@ class PrepareResult(BaseModel):
 
 class PipelineState(BaseModel):
     issue: IssueMetadata
+    pipeline_version: Literal["v2", "v3"] = "v2"
     current_stage: StageName = "dispatch"
     workflow_status: WorkflowStatus = "not_started"
 
@@ -65,6 +69,7 @@ class PipelineState(BaseModel):
     prepare_result: Optional[PrepareResult] = None
     plan_output: Optional[PlanOutput] = None
     build_output: Optional[BuildOutput] = None
+    agent_run_output: Optional[AgentRunOutput] = None
 
     review_cycles: List[ReviewCycle] = Field(default_factory=list)
     rework_cycles: List[ReworkCycle] = Field(default_factory=list)
@@ -79,6 +84,11 @@ class PipelineState(BaseModel):
     blockers: List[str] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     retry_log: List[RetryEntry] = Field(default_factory=list)
+    v3_agent_run_attempts: int = 0
+    v3_repair_session_used: bool = False
+    v3_provider: Optional[str] = None
+    v3_model: Optional[str] = None
+    v3_permanent_failure_reason: Optional[str] = None
 
     updated_at: datetime = Field(default_factory=utc_now)
 

@@ -217,6 +217,18 @@ make db-seed-dummy
 
 CapitalOS uses a LangGraph-based AI task orchestration pipeline for feature development.
 
+### Pipeline Modes
+
+- **v2 (existing)**: multi-stage plan/build/review/rework flow with explicit human gates.
+- **v3 (new, opt-in)**: unified long-run `agent_run` + deterministic safety gates, optimized for lower premium-request usage.
+
+Mode is selected by config:
+
+```bash
+PIPELINE_VERSION=v2   # default
+PIPELINE_VERSION=v3
+```
+
 ### Pipeline Overview
 
 The pipeline consists of seven core stages:
@@ -230,6 +242,22 @@ The pipeline consists of seven core stages:
 7. **ship** — Commit, push, and optionally open PR
 
 If fixes are needed, the **rework** stage analyzes findings and re-implements, then returns to review loop.
+
+### V3 Unified Long-Run Flow (Opt-In)
+
+When `PIPELINE_VERSION=v3`, orchestration uses:
+
+1. `prepare`
+2. `agent_run` (single long-running provider session: plan + implementation + semantic self-check)
+3. `deterministic_gates` (lint/typecheck/tests/e2e/api-smoke + scope/secrets/restricted-path policy)
+4. `ship`
+
+If deterministic gates fail:
+
+- `V3_AUTO_FIX_MODE=deterministic_only` blocks with actionable failure details.
+- `V3_AUTO_FIX_MODE=single_repair_session` schedules one additional `agent_run` repair attempt before permanent block.
+
+Out-of-scope files are allowed only with explicit per-file reasons. Restricted paths (e.g. `.gitignore`, fixtures paths, secret-like content) hard-fail.
 
 ### Running a Task
 
@@ -260,6 +288,18 @@ Or run all stages end-to-end (with gates):
 
 ```bash
 make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
+
+Run the v3 flow end-to-end:
+
+```bash
+make task-v3-run TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+```
+
+Resume a blocked v3 run:
+
+```bash
+make task-v3-resume TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='{"decision":"approved","reviewer":"...","notes":"..."}'
 ```
 
 For complete workflow documentation, see [`docs/workflows/ai-task-flow.md`](docs/workflows/ai-task-flow.md).

@@ -27,6 +27,17 @@ The workflow is:
 
 ---
 
+## Workflow Versions
+
+Both versions are supported. v2 documentation in this file remains valid.
+
+- `PIPELINE_VERSION=v2` (default): staged plan/build/review/rework workflow.
+- `PIPELINE_VERSION=v3`: unified long-run session + deterministic gates.
+
+v3 is optimized for premium-request budgets by collapsing model-heavy work into one `agent_run` session per attempt.
+
+---
+
 ## Core Architecture
 
 The workflow is implemented in Python under `orchestration/` using:
@@ -213,6 +224,30 @@ make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-all TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 make task-respond TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 ```
+
+### V3 commands (additive; v2 remains unchanged)
+
+```bash
+make task-v3-run TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-v3-status TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
+make task-v3-resume TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUME_JSON='...'
+```
+
+### V3 stage flow
+
+```text
+prepare
+  -> agent_run
+  -> deterministic_gates
+  -> ship
+```
+
+Failure behavior in v3:
+
+- deterministic gate failures are classified and reported with command/log detail.
+- out-of-scope files are allowed only with explicit per-file reason.
+- restricted files/paths and secret-like content are hard-fail.
+- optional one-time repair session is controlled by `V3_AUTO_FIX_MODE`.
 
 ### Human gate resume commands
 

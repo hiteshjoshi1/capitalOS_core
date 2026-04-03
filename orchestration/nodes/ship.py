@@ -23,9 +23,13 @@ def run(state: GraphState) -> GraphState:
     cfg = get_config()
     IntegrityService(pipeline.issue.repo_root).assert_matches_planned_hash(pipeline)
 
-    cycle = pipeline.get_active_review_cycle()
-    if not cycle or cycle.status != "approved":
-        raise RuntimeError("Ship blocked: latest review cycle is not fully approved.")
+    if pipeline.pipeline_version == "v2":
+        cycle = pipeline.get_active_review_cycle()
+        if not cycle or cycle.status != "approved":
+            raise RuntimeError("Ship blocked: latest review cycle is not fully approved.")
+    else:
+        if pipeline.agent_run_output is None:
+            raise RuntimeError("Ship blocked: no v3 agent_run output recorded.")
 
     if pipeline.blockers:
         raise RuntimeError(

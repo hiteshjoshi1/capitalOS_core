@@ -233,6 +233,8 @@ def _latest_outcome(state: PipelineState) -> str:
         return rework.implementation.summary
     if rework and rework.analysis:
         return rework.analysis.root_cause
+    if state.agent_run_output:
+        return state.agent_run_output.summary
     if state.build_output:
         return state.build_output.summary
     if state.plan_output:
@@ -354,6 +356,8 @@ def _next_action(state: PipelineState) -> str:
     current_stage = _display_value(state.current_stage)
 
     if workflow_status == "waiting_for_human":
+        if current_stage == "deterministic_gates":
+            return "Human to approve or reject high-risk findings before ship."
         if current_stage == "human_approval_gate" and state.build_output and state.build_output.retry_request:
             retry_request = state.build_output.retry_request
             if retry_request and retry_request.valid_reason:
@@ -371,6 +375,8 @@ def _next_action(state: PipelineState) -> str:
         return "Human input is required before the workflow can continue."
 
     if workflow_status == "blocked":
+        if current_stage == "deterministic_gates":
+            return "Inspect deterministic gate failures, apply mitigations, then rerun the workflow."
         if current_stage == "rework_implementation":
             return "Inspect the failed verification checks, update the repo, and rerun rework on the same thread."
         if state.build_output and state.build_output.retry_request:
@@ -382,6 +388,8 @@ def _next_action(state: PipelineState) -> str:
 
     if workflow_status == "approved":
         return "Run ship to commit and push the approved changes."
+    if workflow_status == "needs_fixes" and current_stage == "deterministic_gates":
+        return "A single v3 repair session is queued; rerun to continue agent_run."
     if workflow_status == "shipped":
         return "No action required."
     if current_stage == "build":
@@ -421,7 +429,12 @@ def render_execution_journal(state: PipelineState) -> str:
     snapshot_lines = [
         f"- latest_outcome: {_latest_outcome(state)}",
         f"- next_action: {_next_action(state)}",
+        f"- pipeline_version: `{state.pipeline_version}`",
     ]
+    if state.v3_provider or state.v3_model:
+        snapshot_lines.append(
+            f"- provider_model: `{state.v3_provider or 'unknown'}/{state.v3_model or 'unknown'}`"
+        )
     if active_review:
         snapshot_lines.append(
             f"- active_review_cycle: `{active_review.review_id}` (`{active_review.status}`)"
@@ -506,6 +519,39 @@ def render_execution_journal(state: PipelineState) -> str:
                 ]
             )
 
+        lines.append("## Extra Files Changed")
+        if state.build_output.extra_changed_files:
+            for item in state.build_output.extra_changed_files:
+                lines.append(
+                    f"- `{item.path}` — reason: {item.reason or 'No reason recorded.'} (source: `{item.reason_source or 'unknown'}`)"
+                )
+        else:
+            lines.append("- None")
+        lines.append("")
+
+    if state.agent_run_output:
+        lines.extend(
+            [
+                "## Agent Run Summary",
+                state.agent_run_output.summary,
+                "",
+                f"- semantic_intent_achieved: `{state.agent_run_output.semantic_intent_achieved}`",
+                f"- provider_model: `{state.agent_run_output.provider or 'unknown'}/{state.agent_run_output.model_name or 'unknown'}`",
+                "",
+            ]
+        )
+        if state.agent_run_output.acceptance_criteria_checks:
+            lines.append("### Semantic Checks")
+            for check in state.agent_run_output.acceptance_criteria_checks:
+                lines.append(
+                    f"- `{check.status}` {check.criterion}: {check.evidence or 'No evidence provided.'}"
+                )
+            lines.append("")
+        if state.agent_run_output.risk_flags:
+            lines.append("### Risk Flags")
+            lines.extend(f"- {item}" for item in state.agent_run_output.risk_flags)
+            lines.append("")
+
     lines.extend(_render_human_gate_decisions(state))
     lines.extend(_render_review_cycle(state))
     lines.extend(_render_rework_cycles(state))
@@ -525,6 +571,21 @@ def render_execution_journal(state: PipelineState) -> str:
 
     if state.blockers:
         lines.extend(["## Blockers", *[f"- {x}" for x in state.blockers], ""])
+
+    if state.v3_permanent_failure_reason:
+        mitigation_lines = [f"- mitigation: {item.notes}" for item in _latest_retry_entries(state) if item.notes]
+        if not mitigation_lines:
+            mitigation_lines = ["- mitigation: No automated mitigation was recorded."]
+        lines.extend(
+            [
+                "## Permanently Failed / Gave Up",
+                f"- Stop reason: {state.v3_permanent_failure_reason}",
+                "- Attempted mitigations:",
+                *mitigation_lines,
+                "- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.",
+                "",
+            ]
+        )
 
     if state.ship_result:
         lines.extend(["## Ship Result", state.ship_result.summary, ""])

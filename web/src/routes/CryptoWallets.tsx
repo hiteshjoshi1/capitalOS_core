@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import { useAccount, useChainId, useDisconnect, useSignMessage } from "wagmi";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useWallet } from "@solana/wallet-adapter-react";
 import { Transaction, TransactionInstruction, PublicKey } from "@solana/web3.js";
@@ -20,6 +18,21 @@ const EVM_CHAIN_MAP: Record<number, string> = {
   534352: "scroll",
 };
 
+const EVM_CHAINS = [
+  { id: 1, name: "Ethereum" },
+  { id: 8453, name: "Base" },
+  { id: 42161, name: "Arbitrum" },
+  { id: 10, name: "Optimism" },
+  { id: 5000, name: "Mantle" },
+  { id: 534352, name: "Scroll" },
+] as const;
+
+type Eip1193Provider = {
+  request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
+  on: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener: (event: string, listener: (...args: unknown[]) => void) => void;
+};
+
 export default function CryptoWallets() {
   const [wallets, setWallets] = useState<CryptoWallet[]>([]);
   const [allowlist, setAllowlist] = useState<CryptoAllowlistItem[]>([]);
@@ -30,16 +43,21 @@ export default function CryptoWallets() {
   const [label, setLabel] = useState<string>("");
   const [chainType, setChainType] = useState<"evm" | "solana">("evm");
   const [useHardwareSolana, setUseHardwareSolana] = useState<boolean>(false);
+  const [evmAddress, setEvmAddress] = useState<string>("");
+  const [evmChainId, setEvmChainId] = useState<number>(1);
+  const [connectingEvm, setConnectingEvm] = useState<boolean>(false);
 
-  const { address, isConnected } = useAccount();
-  const chainId = useChainId();
-  const { signMessageAsync } = useSignMessage();
-  const { disconnect } = useDisconnect();
   const { publicKey, connected, signMessage, signTransaction, disconnect: disconnectSolana, wallet } = useWallet();
 
-  const evmChain = useMemo(() => EVM_CHAIN_MAP[chainId] || "ethereum", [chainId]);
+  const evmChain = useMemo(() => EVM_CHAIN_MAP[evmChainId] || "ethereum", [evmChainId]);
+  const evmConnected = evmAddress.length > 0;
   const solAddress = publicKey?.toString() ?? "";
   const walletCount = wallets.length;
+
+  const getEthereum = (): Eip1193Provider | null => {
+    const provider = (window as Window & { ethereum?: Eip1193Provider }).ethereum;
+    return provider ?? null;
+  };
 
   const loadWallets = async () => {
     const data = await api.cryptoWallets();
@@ -63,13 +81,98 @@ export default function CryptoWallets() {
     }
   }, [wallet]);
 
-  const verifyEvm = async () => {
-    if (!isConnected || !address) {
-      setError("Connect your EVM wallet first.");
+  useEffect(() => {
+    const provider = getEthereum();
+    if (!provider) return;
+
+    let cancelled = false;
+
+    const loadEvmState = async () => {
+      try {
+        const [accountsResult, chainResult] = await Promise.all([
+          provider.request({ method: "eth_accounts" }),
+          provider.request({ method: "eth_chainId" }),
+        ]);
+        if (cancelled) return;
+        const accounts = Array.isArray(accountsResult) ? (accountsResult as string[]) : [];
+        const chainHex = typeof chainResult === "string" ? chainResult : "0x1";
+        setEvmAddress(accounts[0] ?? "");
+        setEvmChainId(parseInt(chainHex, 16));
+      } catch {
+        if (!cancelled) {
+          setEvmAddress("");
+          setEvmChainId(1);
+        }
+      }
+    };
+
+    const handleAccountsChanged = (accounts: unknown) => {
+      if (Array.isArray(accounts)) {
+        setEvmAddress(typeof accounts[0] === "string" ? accounts[0] : "");
+      } else {
+        setEvmAddress("");
+      }
+    };
+
+    const handleChainChanged = (chainHex: unknown) => {
+      if (typeof chainHex === "string") {
+        setEvmChainId(parseInt(chainHex, 16));
+      }
+    };
+
+    void loadEvmState();
+    provider.on("accountsChanged", handleAccountsChanged);
+    provider.on("chainChanged", handleChainChanged);
+
+    return () => {
+      cancelled = true;
+      provider.removeListener("accountsChanged", handleAccountsChanged);
+      provider.removeListener("chainChanged", handleChainChanged);
+    };
+  }, []);
+
+  const connectEvm = async () => {
+    const provider = getEthereum();
+    if (!provider) {
+      setError("No EVM wallet detected. Install MetaMask or a compatible extension.");
       return;
     }
-    if (!signMessageAsync) {
-      setError("Wallet does not support message signing.");
+    try {
+      setError("");
+      setConnectingEvm(true);
+      const accounts = await provider.request({ method: "eth_requestAccounts" });
+      if (Array.isArray(accounts) && typeof accounts[0] === "string") {
+        setEvmAddress(accounts[0]);
+      }
+      const chainHex = await provider.request({ method: "eth_chainId" });
+      if (typeof chainHex === "string") {
+        setEvmChainId(parseInt(chainHex, 16));
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setConnectingEvm(false);
+    }
+  };
+
+  const switchEvmChain = async (targetChainId: number) => {
+    const provider = getEthereum();
+    if (!provider) return;
+    try {
+      await provider.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: `0x${targetChainId.toString(16)}` }],
+      });
+      setEvmChainId(targetChainId);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const verifyEvm = async () => {
+    const provider = getEthereum();
+    if (!provider || !evmConnected) {
+      setError("Connect your EVM wallet first.");
       return;
     }
     try {
@@ -78,15 +181,21 @@ export default function CryptoWallets() {
       const init = await api.cryptoWalletInit({
         chain_type: "evm",
         chain: evmChain,
-        address,
+        address: evmAddress,
         label: label || undefined,
       });
-      const signature = await signMessageAsync({ message: init.message_to_sign });
+      const signatureResult = await provider.request({
+        method: "personal_sign",
+        params: [init.message_to_sign, evmAddress],
+      });
+      if (typeof signatureResult !== "string") {
+        throw new Error("Wallet did not return a valid signature.");
+      }
       const res = await api.cryptoWalletVerify({
         chain_type: "evm",
         chain: evmChain,
-        address,
-        signature,
+        address: evmAddress,
+        signature: signatureResult,
         verification_id: init.verification_id,
       });
       setStatus(`Wallet ${res.wallet_id} verified`);
@@ -236,35 +345,42 @@ export default function CryptoWallets() {
             <span className="label">Wallet</span>
             {chainType === "evm" ? (
               <div style={{ marginTop: 6 }}>
-                <ConnectButton.Custom>
-                  {({ account, chain, openAccountModal, openChainModal, openConnectModal, mounted }) => {
-                    const ready = mounted;
-                    const connected = ready && account && chain;
-                    if (!connected) {
-                      return (
-                        <button className="btn" onClick={openConnectModal}>
-                          Connect wallet
+                {!evmConnected ? (
+                  <button
+                    className="btn"
+                    onClick={connectEvm}
+                    disabled={connectingEvm}
+                  >
+                    {connectingEvm ? "Connecting..." : "Connect wallet"}
+                  </button>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div className="muted">Connected: {evmAddress}</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <select
+                        className="input"
+                        value={evmChainId}
+                        onChange={(e) => void switchEvmChain(Number(e.target.value))}
+                        style={{ maxWidth: 220 }}
+                      >
+                        {EVM_CHAINS.map((chain) => (
+                          <option key={chain.id} value={chain.id}>
+                            {chain.name}
+                          </option>
+                        ))}
+                      </select>
+                      {evmAddress && (
+                        <button
+                          className="btn"
+                          onClick={() => navigator.clipboard.writeText(evmAddress)}
+                        >
+                          Copy address
                         </button>
-                      );
-                    }
-                    return (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <div className="muted">Connected: {account.address}</div>
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button className="btn" onClick={openAccountModal}>Switch wallet</button>
-                          <button className="btn" onClick={openChainModal}>Switch network</button>
-                          <button
-                            className="btn"
-                            onClick={() => navigator.clipboard.writeText(account.address)}
-                          >
-                            Copy address
-                          </button>
-                          <button className="btn" onClick={() => disconnect()}>Disconnect</button>
-                        </div>
-                      </div>
-                    );
-                  }}
-                </ConnectButton.Custom>
+                      )}
+                      <button className="btn" onClick={() => setEvmAddress("")}>Disconnect</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ marginTop: 6 }}>
@@ -294,7 +410,7 @@ export default function CryptoWallets() {
         </div>
         <div className="actions">
           {chainType === "evm" ? (
-            <button className="btn" onClick={verifyEvm} disabled={!isConnected}>
+            <button className="btn" onClick={verifyEvm} disabled={!evmConnected}>
               Sign & verify
             </button>
           ) : (

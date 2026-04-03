@@ -1,5 +1,6 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import Dividends from "../routes/Dividends";
@@ -17,6 +18,10 @@ vi.mock("../lib/api", () => ({
 const mockApi = vi.mocked(api, true);
 
 describe("Dividends", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("renders period totals and company table", async () => {
     const monthSummary = {
       from_month: "2025-03",
@@ -115,5 +120,109 @@ describe("Dividends", () => {
     expect(screen.getByText("Expected Dividends (Holdings-Based)")).toBeInTheDocument();
     expect(screen.getByText("By Company (Expected)")).toBeInTheDocument();
     expect(screen.getAllByText("Apple Inc.").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("renders API error state when loading fails", async () => {
+    mockApi.dividendsSummary.mockRejectedValueOnce(new Error("dividends failed"));
+    mockApi.dividendsByCompany.mockResolvedValueOnce({
+      from_month: "2026-01",
+      to_month: "2026-02",
+      base_currency: "SGD",
+      assumed_tax_rate: 0,
+      country_tax_rates: {},
+      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      items: [],
+    });
+    mockApi.expectedDividendsOverview.mockResolvedValueOnce({
+      from_month: "2026-01",
+      to_month: "2026-02",
+      base_currency: "SGD",
+      assumed_tax_rate: 0,
+      country_tax_rates: {},
+      holdings_considered: 0,
+      assets_with_actions: 0,
+      actions_evaluated: 0,
+      monthly: { period: "month", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      quarterly: { period: "quarter", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      yearly: { period: "year", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      companies: [],
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Dividends />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(screen.getByText("dividends failed")).toBeInTheDocument();
+  });
+
+  it("renders empty-state tables and refetches when controls change", async () => {
+    mockApi.dividendsSummary.mockResolvedValue({
+      from_month: "2025-03",
+      to_month: "2026-02",
+      period: "month",
+      base_currency: "SGD",
+      assumed_tax_rate: 0.1,
+      country_tax_rates: {},
+      buckets: [],
+      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
+    });
+    mockApi.dividendsByCompany.mockResolvedValue({
+      from_month: "2026-02",
+      to_month: "2026-02",
+      base_currency: "SGD",
+      assumed_tax_rate: 0.1,
+      country_tax_rates: {},
+      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      items: [],
+    });
+    mockApi.expectedDividendsOverview.mockResolvedValue({
+      from_month: "2025-03",
+      to_month: "2026-02",
+      base_currency: "SGD",
+      assumed_tax_rate: 0.1,
+      country_tax_rates: {},
+      holdings_considered: 0,
+      assets_with_actions: 0,
+      actions_evaluated: 0,
+      monthly: { period: "month", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      quarterly: { period: "quarter", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      yearly: { period: "year", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      companies: [],
+    });
+
+    const user = userEvent.setup();
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Dividends />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("No dividends in selected range.")).toBeInTheDocument();
+    expect(screen.getByText("No company-level dividend records yet.")).toBeInTheDocument();
+    expect(screen.getByText("No expected dividend estimates found for selected range.")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
+    await user.clear(screen.getByLabelText("Assumed tax rate percent"));
+    await user.type(screen.getByLabelText("Assumed tax rate percent"), "12");
+    await user.clear(screen.getByLabelText("Country tax rates"));
+    await user.type(screen.getByLabelText("Country tax rates"), "US:20");
+
+    await waitFor(() => {
+      expect(mockApi.dividendsSummary).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.any(String),
+        "month",
+        "USD",
+        12,
+        "US:20",
+      );
+    });
   });
 });

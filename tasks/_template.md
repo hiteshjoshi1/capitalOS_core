@@ -17,29 +17,46 @@
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Implement backend changes (if required)
-- [ ] Implement frontend changes (if required)
+- [ ] Implement scoped code changes
 - [ ] Add/update tests
-- [ ] Run verification commands
+- [ ] Run deterministic safety gates
+- [ ] Verify semantic intent is achieved
 
-## Implementation Reasoning Addendum (Codex Mutable)
-_Codex appends execution reasoning entries here._
+## Execution Journal (Codex Mutable)
+- Current Stage: `<stage>`
+- Workflow Status: `<running|blocked|shipped|failed>`
+- Provider/Model: `<provider>/<model>`
+- Last Updated: `<timestamp>`
 
-## Verification Evidence (Codex Mutable)
-_Codex appends lint/typecheck/test evidence here._
+## Deterministic Gate Results (Codex Mutable)
+_Append command-level evidence here._
+- `lint`: `<pass|fail|skip>` — `<notes/log path>`
+- `typecheck`: `<pass|fail|skip>` — `<notes/log path>`
+- `tests`: `<pass|fail|skip>` — `<notes/log path>`
+- `e2e`: `<pass|fail|skip>` — `<notes/log path>`
+- `api-smoke`: `<pass|fail|skip>` — `<notes/log path>`
+- `policy-checks`: `<pass|fail>` — `<notes/log path>`
 
-## Review Findings (Sonnet Primary, Opus Escalation)
-_Review output is appended here._
+## Extra Files Changed (Codex Mutable)
+_List all out-of-scope files with explicit rationale._
+- `<path>` — reason: `<why this file was required>`
 
-## Human Rework Input (Mutable)
-_Before running `task-rework`, add/update:_
-- `### Review Cycle R<n> - Human Input` with a `text` block containing:
-  `HUMAN_QUESTIONS: ...`
-  `UNRESOLVED_COMMENTS: ...`
-  `RESPONSE_REQUIREMENTS: ...`
+## Permanently Failed / Gave Up (Codex Mutable)
+_Fill only if workflow stops without shipping._
+- Stop reason: `<concrete reason>`
+- Attempted mitigations:
+  - `<mitigation 1>`
+  - `<mitigation 2>`
+- Suggested human action: `<next action>`
 
-## Retry Log (Max 3)
-_Failed command/rework retries are appended here._
+## Human Action Summary (Codex Mutable)
+_Human-readable next steps._
+- Next expected action: `<command or decision>`
+- Open questions:
+  - `<question>`
+- If PR raised but intent partial:
+  - unmet criteria: `<criterion ids>`
+  - follow-up issue: `<issue link or TODO>`
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._

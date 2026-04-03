@@ -1,16 +1,10 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
-import { WagmiProvider, createConfig, http } from "wagmi";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RainbowKitProvider, getDefaultConfig } from "@rainbow-me/rainbowkit";
-import { mainnet, base, arbitrum, optimism, mantle, scroll } from "wagmi/chains";
-import { injected } from "wagmi/connectors";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-wallets";
+import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import "./index.css";
-import "@rainbow-me/rainbowkit/styles.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import App from "./App.tsx";
 import AppShell from "./components/AppShell.tsx";
@@ -38,32 +32,6 @@ import RequireAuth from "./components/RequireAuth.tsx";
 import Login from "./routes/Login.tsx";
 import Signup from "./routes/Signup.tsx";
 
-const projectId = import.meta.env.VITE_WALLETCONNECT_PROJECT_ID as string | undefined;
-const chains = [mainnet, base, arbitrum, optimism, mantle, scroll] as const;
-let wagmiConfig;
-if (projectId) {
-  wagmiConfig = getDefaultConfig({
-    appName: "CapitalOS",
-    projectId,
-    chains,
-    ssr: false,
-  });
-} else {
-  console.warn("VITE_WALLETCONNECT_PROJECT_ID is not set. Falling back to injected wallets only.");
-  wagmiConfig = createConfig({
-    chains,
-    connectors: [injected()],
-    transports: {
-      [mainnet.id]: http(),
-      [base.id]: http(),
-      [arbitrum.id]: http(),
-      [optimism.id]: http(),
-      [mantle.id]: http(),
-      [scroll.id]: http(),
-    },
-  });
-}
-const queryClient = new QueryClient();
 const solanaEndpoint = (import.meta.env.VITE_SOLANA_RPC as string) || "https://api.mainnet-beta.solana.com";
 const solanaWallets = [new PhantomWalletAdapter()];
 
@@ -72,46 +40,40 @@ createRoot(document.getElementById("root")!).render(
     <ConnectionProvider endpoint={solanaEndpoint}>
       <WalletProvider wallets={solanaWallets} autoConnect={true}>
         <WalletModalProvider>
-          <WagmiProvider config={wagmiConfig}>
-            <QueryClientProvider client={queryClient}>
-              <RainbowKitProvider>
-                <ThemeProvider>
-                  <AuthProvider>
-                    <BrowserRouter>
-                      <Routes>
-                        <Route path="/login" element={<Login />} />
-                        <Route path="/signup" element={<Signup />} />
+          <ThemeProvider>
+            <AuthProvider>
+              <BrowserRouter>
+                <Routes>
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/signup" element={<Signup />} />
 
-                        <Route element={<RequireAuth />}>
-                          <Route element={<AppShell />}>
-                            <Route path="/" element={<App />} />
-                            <Route path="/wealth" element={<WealthOverview />} />
-                            <Route path="/dividends" element={<Dividends />} />
-                            <Route path="/holdings" element={<StockHoldings />} />
-                            <Route path="/crypto" element={<CryptoWallets />} />
-                            <Route path="/crypto/holdings" element={<CryptoHoldings />} />
-                            <Route path="/cash" element={<CashOverview />} />
-                            <Route path="/cash-flow" element={<CashFlowDetail />} />
-                            <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
-                            <Route path="/credit-cards" element={<CreditCards />} />
-                            <Route path="/loans" element={<Loans />} />
-                            <Route path="/companies" element={<Companies />} />
-                            <Route path="/alerts" element={<Alerts />} />
-                            <Route path="/ai-guru" element={<AIGuru />} />
-                            <Route path="/ingest" element={<Ingest />} />
-                            <Route path="/market-data" element={<MarketData />} />
-                            <Route path="/settings" element={<Settings />} />
-                            <Route path="/accounts/new" element={<AddAccount />} />
-                            <Route path="/platforms" element={<Platforms />} />
-                          </Route>
-                        </Route>
-                      </Routes>
-                    </BrowserRouter>
-                  </AuthProvider>
-                </ThemeProvider>
-              </RainbowKitProvider>
-            </QueryClientProvider>
-          </WagmiProvider>
+                  <Route element={<RequireAuth />}>
+                    <Route element={<AppShell />}>
+                      <Route path="/" element={<App />} />
+                      <Route path="/wealth" element={<WealthOverview />} />
+                      <Route path="/dividends" element={<Dividends />} />
+                      <Route path="/holdings" element={<StockHoldings />} />
+                      <Route path="/crypto" element={<CryptoWallets />} />
+                      <Route path="/crypto/holdings" element={<CryptoHoldings />} />
+                      <Route path="/cash" element={<CashOverview />} />
+                      <Route path="/cash-flow" element={<CashFlowDetail />} />
+                      <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
+                      <Route path="/credit-cards" element={<CreditCards />} />
+                      <Route path="/loans" element={<Loans />} />
+                      <Route path="/companies" element={<Companies />} />
+                      <Route path="/alerts" element={<Alerts />} />
+                      <Route path="/ai-guru" element={<AIGuru />} />
+                      <Route path="/ingest" element={<Ingest />} />
+                      <Route path="/market-data" element={<MarketData />} />
+                      <Route path="/settings" element={<Settings />} />
+                      <Route path="/accounts/new" element={<AddAccount />} />
+                      <Route path="/platforms" element={<Platforms />} />
+                    </Route>
+                  </Route>
+                </Routes>
+              </BrowserRouter>
+            </AuthProvider>
+          </ThemeProvider>
         </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>
