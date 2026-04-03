@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -85,5 +86,81 @@ describe("CryptoHoldings route", () => {
     expect(screen.getByLabelText("Month")).toHaveValue("2026-02");
     expect(screen.getByLabelText("Base currency")).toHaveValue("SGD");
     expect(mockApi.cryptoSummary).toHaveBeenCalledWith("SGD");
+  });
+
+  it("shows API error state when fetch fails", async () => {
+    mockApi.cryptoSummary.mockRejectedValueOnce(new Error("crypto unavailable"));
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(screen.getByText("crypto unavailable")).toBeInTheDocument();
+  });
+
+  it("filters dust holdings by default and shows them when toggled", async () => {
+    const dusty: CryptoSummary = {
+      ...cryptoSummaryFixture,
+      top_holdings: [
+        { symbol: "ETH", chain: "ethereum", amount: 1.1, value_usd: 3500, value_base: 4700, asset_class: "CRYPTO" },
+        { symbol: "DUST", chain: "ethereum", amount: 10, value_usd: 5, value_base: 7, asset_class: "CRYPTO" },
+      ],
+      wallet_exposure: [],
+      wallet_chain_exposure: [],
+      refresh_triggered: true,
+      is_stale: true,
+    };
+    mockApi.cryptoSummary.mockResolvedValueOnce(dusty);
+
+    const user = userEvent.setup();
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+    expect(screen.queryByText("DUST")).not.toBeInTheDocument();
+    expect(screen.getByText(/Stale/)).toBeInTheDocument();
+    expect(screen.getByText(/\(refreshing\)/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: /Show <\$10 tokens/i }));
+    await waitFor(() => {
+      expect(screen.getByText("DUST")).toBeInTheDocument();
+    });
+  });
+
+  it("shows fallback rows when there are no holdings", async () => {
+    mockApi.cryptoSummary.mockResolvedValueOnce({
+      ...cryptoSummaryFixture,
+      top_holdings: [],
+      wallet_exposure: [],
+      wallet_chain_exposure: [],
+      last_refreshed_at: null,
+      eth_exposure_usd: undefined,
+      eth_exposure_base: undefined,
+      token_exposure_usd: undefined,
+      token_exposure_base: undefined,
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("No crypto holdings yet.")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Exposure by Wallet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Exposure by Wallet + Chain")).not.toBeInTheDocument();
   });
 });
