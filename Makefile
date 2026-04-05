@@ -148,7 +148,7 @@ ownership-reassign:
 	docker compose run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
 
 # ---- Quality gates ----
-.PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e verify
+.PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e test test-all verify
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
@@ -173,6 +173,10 @@ contract-frontend: web-deps
 e2e: web-deps
 	@test -f "$(WEB_DIR)/playwright.config.ts" -o -f "$(WEB_DIR)/playwright.config.js" || (echo "Playwright is not configured in ./web yet." && exit 2)
 	cd $(WEB_DIR) && npx playwright test
+
+test-all: test-backend contract-backend test-frontend contract-frontend orch-test e2e
+
+test: test-all
 
 verify: lint typecheck test-backend test-frontend
 
