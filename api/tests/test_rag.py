@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import importlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -420,6 +421,81 @@ class TestEmbedder:
 
         assert embedding_model_name() == "mock"
 
+    def test_voyage_embed_batch_uses_2048_document_embeddings(self, monkeypatch):
+        monkeypatch.setenv("RAG_EMBEDDING_MOCK", "0")
+        monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "voyage")
+        monkeypatch.setenv("RAG_EMBEDDING_MODEL", "voyage-4")
+        monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+
+        import app.rag.ingestion.embedder as embedder
+
+        importlib.reload(embedder)
+
+        captured: dict[str, object] = {}
+
+        class _FakeResponse:
+            embeddings = [[0.25] * embedder.EMBEDDING_DIM]
+
+        class _FakeClient:
+            def __init__(self, api_key: str):
+                captured["api_key"] = api_key
+
+            def embed(self, texts, model=None, input_type=None, truncation=True, output_dtype=None, output_dimension=None):
+                captured["texts"] = texts
+                captured["model"] = model
+                captured["input_type"] = input_type
+                captured["output_dimension"] = output_dimension
+                return _FakeResponse()
+
+        monkeypatch.setattr(embedder, "_voyageai", MagicMock(Client=_FakeClient))
+        monkeypatch.setattr(embedder, "_VOYAGE_AVAILABLE", True)
+
+        result = embedder.embed_batch(["capital allocation matters"])
+
+        assert len(result) == 1
+        assert len(result[0]) == embedder.EMBEDDING_DIM
+        assert captured["api_key"] == "test-key"
+        assert captured["model"] == "voyage-4"
+        assert captured["input_type"] == "document"
+        assert captured["output_dimension"] == 1024
+
+    def test_voyage_embed_query_uses_2048_query_embeddings(self, monkeypatch):
+        monkeypatch.setenv("RAG_EMBEDDING_MOCK", "0")
+        monkeypatch.setenv("RAG_EMBEDDING_PROVIDER", "voyage")
+        monkeypatch.setenv("RAG_EMBEDDING_MODEL", "voyage-4")
+        monkeypatch.setenv("VOYAGE_API_KEY", "test-key")
+
+        import app.rag.ingestion.embedder as embedder
+
+        importlib.reload(embedder)
+
+        captured: dict[str, object] = {}
+
+        class _FakeResponse:
+            embeddings = [[0.5] * embedder.EMBEDDING_DIM]
+
+        class _FakeClient:
+            def __init__(self, api_key: str):
+                captured["api_key"] = api_key
+
+            def embed(self, texts, model=None, input_type=None, truncation=True, output_dtype=None, output_dimension=None):
+                captured["texts"] = texts
+                captured["model"] = model
+                captured["input_type"] = input_type
+                captured["output_dimension"] = output_dimension
+                return _FakeResponse()
+
+        monkeypatch.setattr(embedder, "_voyageai", MagicMock(Client=_FakeClient))
+        monkeypatch.setattr(embedder, "_VOYAGE_AVAILABLE", True)
+
+        result = embedder.embed_query("durable moat")
+
+        assert len(result) == embedder.EMBEDDING_DIM
+        assert captured["api_key"] == "test-key"
+        assert captured["model"] == "voyage-4"
+        assert captured["input_type"] == "query"
+        assert captured["output_dimension"] == 1024
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. Pipeline — manual ingestion with ORM (SQLite-based)
@@ -490,16 +566,41 @@ class TestManualPipeline:
         job = run_manual_ingestion(source, SAMPLE_TEXT, db)
 
         assert source.status == "failed"
+        assert job.failure_category == "parse_failed"
 
-    def test_pipeline_empty_text_still_creates_job(self):
+    def test_pipeline_empty_text_is_classified(self):
         from app.rag.ingestion.pipeline import run_manual_ingestion
 
         source = self._make_mock_source()
         db = MagicMock()
 
         job = run_manual_ingestion(source, "", db)
-        # Empty text produces no chunks; pipeline should still complete without crashing
+        assert source.status == "failed"
         assert job is not None
+        assert job.failure_category == "empty_text_extraction"
+
+    def test_url_pdf_empty_text_maps_to_ocr_required(self):
+        from app.rag.ingestion.pipeline import run_url_ingestion
+
+        source = self._make_mock_source()
+        source.url = "https://example.com/test.pdf"
+        source.source_type = "pdf"
+        db = MagicMock()
+
+        with patch("app.rag.ingestion.pipeline.fetch_url") as mock_fetch, patch(
+            "app.rag.ingestion.pipeline.parse"
+        ) as mock_parse:
+            mock_fetch.return_value = MagicMock(
+                sha256="abc123",
+                content_type="application/pdf",
+                raw_bytes=b"%PDF",
+            )
+            mock_parse.return_value = MagicMock(raw_text="", clean_text="", source_type="pdf")
+
+            job = run_url_ingestion(source, db)
+
+        assert source.status == "failed"
+        assert job.failure_category == "ocr_required"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -642,6 +743,21 @@ class TestRagIngestionAPI:
         body = resp.json()
         assert body["status"] in ("done", "failed")  # failed is OK for SQLite PickleType
         assert "id" in body
+
+    def test_manual_ingest_empty_text_sets_failure_category(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post(
+            "/rag/ingest/manual",
+            json={
+                "author_id": "test_author",
+                "text": "",
+                "title": "Empty Upload",
+            },
+        )
+        assert resp.status_code == 202
+        body = resp.json()
+        assert body["status"] == "failed"
+        assert body["failure_category"] == "empty_text_extraction"
 
     def test_manual_ingest_unknown_author(self, client, rag_yaml_file):
         self._ensure_author(client, rag_yaml_file)

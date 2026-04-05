@@ -18,7 +18,7 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.rag.ingestion.embedder import embed_text
+from app.rag.ingestion.embedder import embed_query
 
 log = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def retrieve_similar_chunks(
 
     Returns an empty list if no embeddings exist yet.
     """
-    query_vector = embed_text(query)
+    query_vector = embed_query(query)
     vector_literal = "[" + ",".join(str(v) for v in query_vector) + "]"
 
     # Build optional WHERE clauses for metadata filters on the source.

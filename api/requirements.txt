@@ -28,3 +28,4 @@ pdfminer.six>=20221105
 pgvector>=0.3.0
 PyYAML>=6.0.1
 openai>=1.0.0
+voyageai>=0.3.2

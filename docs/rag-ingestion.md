@@ -47,6 +47,12 @@ The intended production embedding policy is:
 - use `voyage-4` for documents that are mostly text
 - use `voyage-multimodal-3.5` for documents where layout, visual structure, scans, figures, or mixed-modal content materially matter
 
+Default dimensionality for `voyage-4` in this project:
+
+- `1024`
+- query embeddings and document embeddings must use the same dimension
+- the `rag_embeddings` pgvector column is therefore provisioned as `VECTOR(1024)`
+
 Practical rule:
 
 - annual letters, memos, essays, transcripts, filings, and cleaned PDF-to-text content should normally use `voyage-4`

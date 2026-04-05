@@ -95,6 +95,7 @@ class JobOut(BaseModel):
     id: str
     source_id: str
     status: str
+    failure_category: Optional[str]
     error: Optional[str]
     stats_json: dict
     started_at: Optional[Any]
@@ -420,6 +421,7 @@ def _job_out(job: RagIngestionJob) -> JobOut:
         id=str(job.id),
         source_id=str(job.source_id),
         status=job.status,
+        failure_category=job.failure_category,
         error=job.error,
         stats_json=job.stats_json or {},
         started_at=job.started_at,

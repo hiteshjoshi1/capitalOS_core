@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
+import httpx
 from sqlalchemy.orm import Session
 
 from app.models.rag import RagChunk, RagDocument, RagEmbedding, RagIngestionJob, RagSource
@@ -25,6 +26,20 @@ from app.rag.ingestion.fetcher import FetchResult, detect_source_type, fetch_url
 from app.rag.ingestion.parser import ParseResult, parse
 
 log = logging.getLogger(__name__)
+
+FAILURE_NETWORK_ERROR = "network_error"
+FAILURE_PARSE_FAILED = "parse_failed"
+FAILURE_EMPTY_TEXT_EXTRACTION = "empty_text_extraction"
+FAILURE_OCR_REQUIRED = "ocr_required"
+FAILURE_MANUAL_REVIEW_REQUIRED = "manual_review_required"
+
+
+class EmptyTextExtractionError(RuntimeError):
+    pass
+
+
+class OcrRequiredError(RuntimeError):
+    pass
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -110,6 +125,28 @@ def _embed_and_persist(db: Session, chunks: list[RagChunk]) -> int:
     return len(chunks)
 
 
+def _classify_failure(exc: Exception, source_type: Optional[str]) -> str:
+    if isinstance(exc, (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError)):
+        return FAILURE_NETWORK_ERROR
+    if isinstance(exc, ValueError) and "HTTP " in str(exc):
+        return FAILURE_NETWORK_ERROR
+    if isinstance(exc, OcrRequiredError):
+        return FAILURE_OCR_REQUIRED
+    if isinstance(exc, EmptyTextExtractionError):
+        return FAILURE_EMPTY_TEXT_EXTRACTION
+    if isinstance(exc, (RuntimeError, UnicodeDecodeError)):
+        return FAILURE_PARSE_FAILED
+    return FAILURE_MANUAL_REVIEW_REQUIRED
+
+
+def _ensure_clean_text(parsed: ParseResult, source_type: str) -> None:
+    if parsed.clean_text.strip():
+        return
+    if source_type == "pdf":
+        raise OcrRequiredError("PDF text extraction produced no usable text; OCR is required")
+    raise EmptyTextExtractionError("Text extraction produced no usable text")
+
+
 def _open_job(db: Session, source: RagSource) -> RagIngestionJob:
     job = RagIngestionJob(
         source_id=source.id,
@@ -128,9 +165,11 @@ def _close_job(
     success: bool,
     stats: dict,
     error: Optional[str] = None,
+    failure_category: Optional[str] = None,
 ) -> None:
     job.status = "done" if success else "failed"
     job.error = error
+    job.failure_category = failure_category
     job.stats_json = stats
     job.finished_at = _now()
     db.flush()
@@ -159,6 +198,7 @@ def run_url_ingestion(source: RagSource, db: Session) -> RagIngestionJob:
 
         log.info("Parsing %s (%s)", source.url, source.source_type)
         parsed: ParseResult = parse(fetch.raw_bytes, source.source_type)
+        _ensure_clean_text(parsed, source.source_type)
 
         doc, chunks = _persist_document_and_chunks(db, source, parsed)
         n_emb = _embed_and_persist(db, chunks)
@@ -180,7 +220,14 @@ def run_url_ingestion(source: RagSource, db: Session) -> RagIngestionJob:
     except Exception as exc:
         log.exception("Ingestion failed for source %s", source.id)
         source.status = "failed"
-        _close_job(db, job, success=False, stats={}, error=str(exc))
+        _close_job(
+            db,
+            job,
+            success=False,
+            stats={},
+            error=str(exc),
+            failure_category=_classify_failure(exc, source.source_type),
+        )
 
     return job
 
@@ -209,6 +256,7 @@ def run_manual_ingestion(
         from app.rag.ingestion.parser import parse_text
 
         parsed = parse_text(text)
+        _ensure_clean_text(parsed, source.source_type)
 
         doc, chunks = _persist_document_and_chunks(
             db, source, parsed, title=title, published_at=published_at
@@ -232,6 +280,13 @@ def run_manual_ingestion(
     except Exception as exc:
         log.exception("Manual ingestion failed for source %s", source.id)
         source.status = "failed"
-        _close_job(db, job, success=False, stats={}, error=str(exc))
+        _close_job(
+            db,
+            job,
+            success=False,
+            stats={},
+            error=str(exc),
+            failure_category=_classify_failure(exc, source.source_type),
+        )
 
     return job

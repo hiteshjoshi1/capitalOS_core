@@ -279,10 +279,46 @@ Planned embedding standard for this module:
 Phase 1 operating rule:
 - normal letters, memos, transcripts, essays, and cleaned PDF-to-text content should default to `voyage-4`
 - multimodal or visually dependent content should use `voyage-multimodal-3.5`
+- `voyage-4` should use `1024` dimensions in this project
+- query embeddings and document embeddings must match the `rag_embeddings` vector dimension
 
 Development/testing rule:
 - deterministic mock embeddings are still acceptable for tests and local development
 - mock embeddings do not count as proof of real semantic retrieval quality
+
+### HTML/PDF to embedding execution plan
+
+This issue should treat most source material as text-first unless proven otherwise.
+
+1. Source registration
+   - user picks author from config-backed registry
+   - user provides a URL or uploads/pastes content manually
+2. Fetch / load
+   - for `html`: download raw page content, extract readable article text, strip obvious boilerplate
+   - for `pdf`: download PDF bytes, extract text with PDF parser, preserve page/section ordering where possible
+   - for `manual`: accept already-cleaned text or uploaded `.txt`
+3. Normalize
+   - convert all source types into a common cleaned-text representation
+   - keep source metadata: author, title, URL, source type, publish date, doc hash
+4. Decide embedding mode
+   - if the normalized document is primarily text, use `voyage-4`
+   - if the document is scan-heavy, layout-dependent, or visually meaningful, mark it for `voyage-multimodal-3.5`
+   - Phase 1 may keep multimodal support behind a simple selector/flag rather than automatic classification
+5. Chunk
+   - split cleaned text into retrieval-sized chunks with stable chunk indices
+   - attach chunk-level metadata needed for citation and lineage
+6. Embed
+   - call Voyage SDK with the chosen embedding model
+   - store returned vectors in `rag_embeddings`
+   - record which provider/model produced each vector
+7. Persist and retrieve
+   - store document, chunks, embeddings, and ingestion-job status
+   - retrieval smoke should embed the user query with the matching text embedding path and return top chunks plus metadata
+
+Operational expectation:
+- most annual letters, blogs, memos, interviews, filings, and PDF text extractions should go through `HTML/PDF -> cleaned text -> chunking -> voyage-4`
+- `voyage-multimodal-3.5` should be reserved for documents where text extraction alone would lose too much meaning
+- if automatic fetch or parsing fails, the user should manually supply the text; the downstream chunking/embedding flow remains the same
 
 ### Manual fallback is mandatory
 

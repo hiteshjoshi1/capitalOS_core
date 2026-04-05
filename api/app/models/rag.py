@@ -116,7 +116,7 @@ def _uuid_default():
 try:
     from pgvector.sqlalchemy import Vector as PgVector  # type: ignore
 
-    _VECTOR_TYPE = PgVector(1536)
+    _VECTOR_TYPE = PgVector(1024)
 except Exception:  # pragma: no cover
     # pgvector Python package not installed; use Text as a non-functional stand-in.
     # The real column is created via SQL migration with the correct type.
@@ -207,7 +207,7 @@ class RagEmbedding(Base):
 
     chunk_id = Column(_UUIDStr, ForeignKey("rag_chunks.id", ondelete="CASCADE"), primary_key=True)
     embedding = Column(_VECTOR_TYPE, nullable=False)
-    model = Column(String, nullable=False, default="text-embedding-3-small")
+    model = Column(String, nullable=False, default="voyage-4")
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     chunk = relationship("RagChunk", back_populates="embedding")
@@ -219,6 +219,7 @@ class RagIngestionJob(Base):
     id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
     source_id = Column(_UUIDStr, ForeignKey("rag_sources.id", ondelete="CASCADE"), nullable=False)
     status = Column(String, nullable=False, default="pending")  # pending | running | done | failed
+    failure_category = Column(String)
     error = Column(Text)
     stats_json = Column(_JsonBlob, nullable=False, default=dict)
     started_at = Column(DateTime(timezone=True))

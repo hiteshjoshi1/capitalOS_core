@@ -224,6 +224,8 @@ Operational rule:
 
 - if the source is a normal letter, memo, transcript, essay, filing, or research paper that has been cleanly reduced to text, use `voyage-4`
 - if the source meaningfully depends on layout, figures, charts, scans, or multimodal document structure, use `voyage-multimodal-3.5`
+- for `voyage-4`, the default indexed output dimension in this module should be `1024`
+- query and document embeddings must share the same dimension as the backing `pgvector` column
 
 Design requirement:
 

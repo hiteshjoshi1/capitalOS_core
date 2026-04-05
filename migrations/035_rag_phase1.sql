@@ -85,12 +85,12 @@ CREATE TABLE rag_chunks (
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Embeddings
--- 1536-dimensional vector (text-embedding-3-small or compatible model).
+-- 1024-dimensional vector (voyage-4 default indexed text embedding output size).
 -- ─────────────────────────────────────────────────────────────────────────────
 CREATE TABLE rag_embeddings (
     chunk_id        UUID PRIMARY KEY REFERENCES rag_chunks(id) ON DELETE CASCADE,
-    embedding       VECTOR(1536) NOT NULL,
-    model           TEXT NOT NULL DEFAULT 'text-embedding-3-small',
+    embedding       VECTOR(1024) NOT NULL,
+    model           TEXT NOT NULL DEFAULT 'voyage-4',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -102,6 +102,7 @@ CREATE TABLE rag_ingestion_jobs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     source_id       UUID NOT NULL REFERENCES rag_sources(id) ON DELETE CASCADE,
     status          TEXT NOT NULL DEFAULT 'pending',  -- pending | running | done | failed
+    failure_category TEXT,
     error           TEXT,
     stats_json      JSONB NOT NULL DEFAULT '{}',
     started_at      TIMESTAMPTZ,
