@@ -11,7 +11,7 @@ It is an auditable decision-intelligence system that combines:
 
 1. grounded knowledge retrieval (RAG)
 2. structured multi-perspective reasoning
-3. explicit synthesis
+3. explicit synthesis while preserving differences
 4. uncertainty handling
 
 ---
