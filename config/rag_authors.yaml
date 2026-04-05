@@ -1,0 +1,165 @@
+# CapitalOS RAG Author Registry
+# ─────────────────────────────────────────────────────────────────────────────
+# This file is the single source of truth for thinker/author configuration.
+# Edit this file to add, remove, or modify authors tracked by the system.
+# Run POST /rag/authors/sync-config to apply changes without restarting.
+#
+# Field reference:
+#   id              — unique snake_case identifier (immutable once sources exist)
+#   name            — display name
+#   enabled         — set false to exclude from retrieval without deleting
+#   domains         — broad topic areas  (investing, business, macro, strategy, …)
+#   expertise_tags  — fine-grained concept tags used for retrieval filtering
+#   overall_weight  — float 0–5; higher → more likely selected for a query
+#   role_type       — investor | operator | economist | academic | journalist | other
+#   reasoning_lens  — optional: shapes future lens-adapter prompts (not executed here)
+# ─────────────────────────────────────────────────────────────────────────────
+
+authors:
+  - id: warren_buffett
+    name: Warren Buffett
+    enabled: true
+    domains: [investing, business]
+    expertise_tags:
+      - business_quality
+      - moat
+      - capital_allocation
+      - valuation
+      - management_integrity
+      - long_term_investing
+    overall_weight: 4.5
+    role_type: investor
+    reasoning_lens:
+      focus:
+        - business quality and moat durability
+        - capital allocation discipline
+        - management integrity and incentives
+        - intrinsic value vs price
+      avoid:
+        - macro speculation
+        - short-term price movements
+      biases:
+        - prefers predictable, simple businesses
+        - strong preference for owner-operators
+        - sceptical of financial engineering
+
+  - id: charlie_munger
+    name: Charlie Munger
+    enabled: true
+    domains: [investing, psychology, decision_making]
+    expertise_tags:
+      - mental_models
+      - psychology
+      - incentives
+      - moat
+      - opportunity_cost
+      - latticework_thinking
+    overall_weight: 4.5
+    role_type: investor
+    reasoning_lens:
+      focus:
+        - mental models and latticework thinking
+        - incentive structures and psychology
+        - inversion and second-order effects
+        - business economics
+      avoid:
+        - macro forecasting
+        - frequent trading
+      biases:
+        - strong scepticism of incentive-distorted advice
+        - preference for extreme patience
+
+  - id: howard_marks
+    name: Howard Marks
+    enabled: true
+    domains: [investing, macro, credit, cycles]
+    expertise_tags:
+      - risk
+      - cycles
+      - credit
+      - market_psychology
+      - second_level_thinking
+      - base_rates
+    overall_weight: 4.0
+    role_type: investor
+    reasoning_lens:
+      focus:
+        - market cycles and positioning
+        - risk recognition and management
+        - second-level thinking
+        - credit and distressed investing
+      avoid:
+        - precise macro forecasts
+      biases:
+        - cycle-aware, tends cautious at market peaks
+
+  - id: nick_sleep
+    name: Nick Sleep
+    enabled: true
+    domains: [investing, business]
+    expertise_tags:
+      - scale_economics
+      - customer_obsession
+      - long_term_investing
+      - business_quality
+      - concentration
+    overall_weight: 3.5
+    role_type: investor
+    reasoning_lens:
+      focus:
+        - scale economies shared with customers
+        - destination businesses
+        - very long holding periods
+      avoid:
+        - short-term macro commentary
+      biases:
+        - high conviction, concentrated portfolio mindset
+
+  - id: michael_mauboussin
+    name: Michael Mauboussin
+    enabled: true
+    domains: [investing, decision_making, strategy]
+    expertise_tags:
+      - base_rates
+      - competitive_advantage_period
+      - moat
+      - decision_making
+      - ROIC
+      - valuation
+    overall_weight: 3.5
+    role_type: investor
+    reasoning_lens:
+      focus:
+        - base rates and outside view
+        - competitive advantage period (CAP)
+        - ROIC and reinvestment
+        - process vs outcome in investing
+      avoid:
+        - short-term price catalysts
+      biases:
+        - strong evidence-based, statistical approach
+
+  - id: jeff_bezos
+    name: Jeff Bezos
+    enabled: true
+    domains: [business, operator, strategy]
+    expertise_tags:
+      - customer_obsession
+      - long_term_thinking
+      - innovation
+      - operating_leverage
+      - flywheel
+      - culture
+    overall_weight: 3.0
+    role_type: operator
+    reasoning_lens:
+      focus:
+        - customer-backwards thinking
+        - long-term orientation vs short-term earnings
+        - scalable flywheel mechanics
+        - culture and hiring bar
+      avoid:
+        - quarterly earnings optimisation
+      biases:
+        - extremely long time horizon
+        - willing to be misunderstood for years

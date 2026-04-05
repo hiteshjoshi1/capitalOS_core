@@ -15,6 +15,15 @@ from .crypto import (
     CryptoUserNetworth,
 )
 from .user import User, UserCredential, AuthSession, OAuthIdentity
+from .rag import (
+    RagAuthor,
+    RagAuthorCard,
+    RagSource,
+    RagDocument,
+    RagChunk,
+    RagEmbedding,
+    RagIngestionJob,
+)
 
 __all__ = [
     "Account",
@@ -37,4 +46,11 @@ __all__ = [
     "UserCredential",
     "AuthSession",
     "OAuthIdentity",
+    "RagAuthor",
+    "RagAuthorCard",
+    "RagSource",
+    "RagDocument",
+    "RagChunk",
+    "RagEmbedding",
+    "RagIngestionJob",
 ]
