@@ -248,14 +248,14 @@ If fixes are needed, the **rework** stage analyzes findings and re-implements, t
 When `PIPELINE_VERSION=v3`, orchestration uses:
 
 1. `prepare`
-2. `agent_run` (single long-running provider session: plan + implementation + semantic self-check)
-3. `deterministic_gates` (lint/typecheck/tests/e2e/api-smoke + scope/secrets/restricted-path policy)
+2. `agent_run` (single long-running provider session: understand task, plan, implement, update tests, run relevant tests, fix failures, rerun until green or truly stuck)
+3. `deterministic_gates` (verification-only rerun of relevant backend/frontend/pipeline checks + scope/secrets/restricted-path policy)
 4. `ship`
 
 If deterministic gates fail:
 
-- `V3_AUTO_FIX_MODE=deterministic_only` blocks with actionable failure details.
-- `V3_AUTO_FIX_MODE=single_repair_session` schedules one additional `agent_run` repair attempt before permanent block.
+- the workflow blocks with actionable failure details.
+- deterministic gates do not launch another model run.
 
 Out-of-scope files are allowed only with explicit per-file reasons. Restricted paths (e.g. `.gitignore`, fixtures paths, secret-like content) hard-fail.
 

@@ -22,6 +22,12 @@ class AcceptanceCriteriaCheck(BaseModel):
     evidence: str = ""
 
 
+class CommandExecutionCheck(BaseModel):
+    command: str
+    status: Literal["pass", "fail", "skip"] = "pass"
+    evidence: str = ""
+
+
 class AgentRunOutput(BaseModel):
     summary: str
 
@@ -36,6 +42,8 @@ class AgentRunOutput(BaseModel):
     changed_files: List[str] = Field(default_factory=list)
     extra_changed_files: List[ExtraChangedFile] = Field(default_factory=list)
     implementation_notes: List[str] = Field(default_factory=list)
+    verification_commands_run: List[CommandExecutionCheck] = Field(default_factory=list)
+    unresolved_failures: List[str] = Field(default_factory=list)
 
     acceptance_criteria_checks: List[AcceptanceCriteriaCheck] = Field(default_factory=list)
     semantic_intent_achieved: bool = False

@@ -12,7 +12,6 @@ from orchestration.services.console import (
     emit_stage_start,
     emit_waiting_for_human,
 )
-from orchestration.services.deterministic_fix import DeterministicFixService
 from orchestration.services.git import GitService
 from orchestration.services.scope import ScopePolicyService
 from orchestration.services.v3_policy import V3PolicyService
@@ -43,19 +42,6 @@ def _human_review_gate(pipeline, *, findings: list[str]) -> dict:
         raise RuntimeError("Invalid resume payload for v3_high_risk_review.")
     return raw
 
-
-def _verification_fix_callback(repo_root: str):
-    fix_service = DeterministicFixService(repo_root)
-
-    def _callback(name: str, command: str, exit_code: int, output: str, prior_attempts: list) -> None:
-        _ = (name, command, exit_code, prior_attempts)
-        outcome = fix_service.apply_for_failure(output=output)
-        if not outcome.applied:
-            raise RuntimeError(outcome.summary)
-
-    return _callback
-
-
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
     pipeline.current_stage = PipelineStage.DETERMINISTIC_GATES.value
@@ -74,16 +60,16 @@ def run(state: GraphState) -> GraphState:
         pipeline.issue.repo_root,
         stage=PipelineStage.DETERMINISTIC_GATES.value,
     )
-    verification, retries = verification_service.run_default_suite(
+    git = GitService(pipeline.issue.repo_root)
+    changed_files = git.changed_files()
+    verification, retries = verification_service.run_suite_for_changed_files(
+        changed_files=changed_files,
         max_attempts=cfg.max_retries,
-        on_code_retry_fix=_verification_fix_callback(pipeline.issue.repo_root),
+        on_code_retry_fix=None,
     )
 
     for retry in retries:
         pipeline.add_retry(retry)
-
-    git = GitService(pipeline.issue.repo_root)
-    changed_files = git.changed_files()
 
     build_output = BuildOutput(
         summary=pipeline.agent_run_output.summary,
@@ -118,21 +104,6 @@ def run(state: GraphState) -> GraphState:
 
     if failures:
         pipeline.errors.extend(failures)
-        if cfg.v3_auto_fix_mode == "single_repair_session" and not pipeline.v3_repair_session_used:
-            pipeline.v3_repair_session_used = True
-            pipeline.workflow_status = "needs_fixes"
-            pipeline.blockers = [
-                "Deterministic gates failed; scheduling one additional agent_run repair session."
-            ]
-            render_task_file(pipeline)
-            emit_stage_end(
-                PipelineStage.DETERMINISTIC_GATES,
-                status="needs_fixes",
-                evidence=[f"failures={len(failures)}", "repair_session=scheduled"],
-                conclusion="Deterministic gates failed; one repair session will run.",
-            )
-            return dump_pipeline_state(pipeline)
-
         pipeline.workflow_status = "blocked"
         pipeline.blockers = failures
         pipeline.v3_permanent_failure_reason = failures[0]

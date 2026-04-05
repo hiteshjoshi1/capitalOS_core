@@ -213,6 +213,30 @@ Supported source types in v1:
   - ingestion lineage
   - source cleanliness/confidence metadata
 
+### 4.3.1 Embedding provider policy
+
+The intended embedding provider strategy is:
+
+- `voyage-4` for documents that are primarily text
+- `voyage-multimodal-3.5` for documents that contain meaningful non-text structure or mixed-modal content
+
+Operational rule:
+
+- if the source is a normal letter, memo, transcript, essay, filing, or research paper that has been cleanly reduced to text, use `voyage-4`
+- if the source meaningfully depends on layout, figures, charts, scans, or multimodal document structure, use `voyage-multimodal-3.5`
+- for `voyage-4`, the default indexed output dimension in this module should be `1024`
+- query and document embeddings must share the same dimension as the backing `pgvector` column
+
+Design requirement:
+
+- the embedding layer must be provider-configurable rather than hardcoded to a single vendor
+- chunk metadata should record which embedding model produced each stored vector
+- deterministic mock embeddings remain acceptable for tests and local development only
+
+Assumption for planning:
+
+- `voyage-4` and `voyage-multimodal-3.5` are intended to coexist within the same ingestion system as operator-selected embedding modes, with text-first content defaulting to `voyage-4`
+
 ## 4.4 Citations and traceability
 
 - Every non-trivial answer must cite supporting passages.

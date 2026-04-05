@@ -118,8 +118,6 @@ def route_after_agent_run(state: GraphState) -> str:
 
 def route_after_deterministic_gates(state: GraphState) -> str:
     pipeline = load_pipeline_state(state)
-    if pipeline.workflow_status == "needs_fixes" and pipeline.v3_repair_session_used:
-        return "agent_run"
     if pipeline.workflow_status in {"blocked", "failed"}:
         return "__end__"
     return "ship"

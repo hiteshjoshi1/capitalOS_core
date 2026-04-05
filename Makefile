@@ -4,6 +4,8 @@ PROJECT=capitalos
 DB_CONTAINER=capitalos-postgres
 DB_USER?=capitalos
 DB_NAME?=capitalos
+SMOKE_USER?=demo
+SMOKE_PASSWORD?=Test@1234
 
 API_CONTAINER=capitalos-api
 WEB_DIR=web
@@ -146,7 +148,7 @@ ownership-reassign:
 	docker compose run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
 
 # ---- Quality gates ----
-.PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e verify
+.PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e test test-all verify
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
@@ -171,6 +173,10 @@ contract-frontend: web-deps
 e2e: web-deps
 	@test -f "$(WEB_DIR)/playwright.config.ts" -o -f "$(WEB_DIR)/playwright.config.js" || (echo "Playwright is not configured in ./web yet." && exit 2)
 	cd $(WEB_DIR) && npx playwright test
+
+test-all: test-backend contract-backend test-frontend contract-frontend orch-test e2e
+
+test: test-all
 
 verify: lint typecheck test-backend test-frontend
 
@@ -353,8 +359,12 @@ api-shell:
 web-test: test-frontend
 
 api-smoke:
-	curl -s http://localhost:8000/health
-	curl -s "http://localhost:8000/dashboard/summary?month=2026-02"
+	curl -sf http://localhost:8000/health && echo
+	@TOKEN=$$(curl -sf -X POST http://localhost:8000/auth/login \
+		-H "Content-Type: application/json" \
+		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
+		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
+	curl -sf -H "Authorization: Bearer $$TOKEN" "http://localhost:8000/dashboard/summary?month=2026-02" && echo
 
 api-test: test-backend
 
@@ -363,13 +373,21 @@ api-coverage:
 
 ingest-smoke:
 	@echo "Running ingest smoke..."
-	@ACCOUNT_ID=$$(curl -s http://localhost:8000/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \
+	@TOKEN=$$(curl -sf -X POST http://localhost:8000/auth/login \
+		-H "Content-Type: application/json" \
+		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
+		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
+	ACCOUNT_ID=$$(curl -sf -H "Authorization: Bearer $$TOKEN" http://localhost:8000/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \
 	if [ -z "$$ACCOUNT_ID" ]; then \
 		echo "No accounts found. Create an account first."; \
 		exit 1; \
 	fi; \
-	curl -s -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://localhost:8000/ingest/ibkr?account_id=$$ACCOUNT_ID"; \
+	curl -sf -H "Authorization: Bearer $$TOKEN" -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://localhost:8000/ingest/ibkr?account_id=$$ACCOUNT_ID"; \
 	echo
 
 crypto-smoke:
-	curl -s "http://localhost:8000/crypto/summary?base_currency=USD"
+	@TOKEN=$$(curl -sf -X POST http://localhost:8000/auth/login \
+		-H "Content-Type: application/json" \
+		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
+		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
+	curl -sf -H "Authorization: Bearer $$TOKEN" "http://localhost:8000/crypto/summary?base_currency=USD" && echo

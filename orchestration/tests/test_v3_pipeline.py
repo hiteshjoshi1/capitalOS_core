@@ -70,17 +70,16 @@ def test_route_after_agent_run_success_goes_to_deterministic_gates() -> None:
     assert route_after_agent_run(dump_pipeline_state(state)) == "deterministic_gates"
 
 
-def test_route_after_deterministic_gates_schedules_one_repair_session() -> None:
-    state = _state()
-    state.workflow_status = "needs_fixes"
-    state.v3_repair_session_used = True
-    assert route_after_deterministic_gates(dump_pipeline_state(state)) == "agent_run"
-
-
 def test_route_after_deterministic_gates_success_goes_to_ship() -> None:
     state = _state()
     state.workflow_status = "running"
     assert route_after_deterministic_gates(dump_pipeline_state(state)) == "ship"
+
+
+def test_route_after_deterministic_gates_blocked_ends() -> None:
+    state = _state()
+    state.workflow_status = "blocked"
+    assert route_after_deterministic_gates(dump_pipeline_state(state)) == "__end__"
 
 
 def test_v3_policy_blocks_restricted_and_missing_reason(tmp_path) -> None:
@@ -117,8 +116,7 @@ def test_model_routing_config_supports_v3_fields() -> None:
         pipeline_version="v3",
         v3_provider="codex",
         v3_model="gpt-5.3-codex",
-        v3_auto_fix_mode="single_repair_session",
     )
     assert cfg.pipeline_version == "v3"
     assert cfg.v3_provider == "codex"
-    assert cfg.v3_auto_fix_mode == "single_repair_session"
+    assert cfg.v3_model == "gpt-5.3-codex"

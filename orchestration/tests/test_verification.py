@@ -123,7 +123,7 @@ def test_default_suite_restarts_after_green_run_with_late_code_fix(tmp_path, mon
 
     assert evidence.any_failures is False
     assert retries
-    assert calls.count("lint") == 1
+    assert calls.count("lint") == 2
     assert calls.count("contract-backend") == 1
     assert calls.count("test-backend") == 1
     assert calls.count("contract-frontend") == 2
@@ -179,9 +179,29 @@ def test_default_suite_restarts_from_backend_family_after_backend_fix(tmp_path, 
 
     assert evidence.any_failures is False
     assert retries
-    assert calls.count("lint") == 1
-    assert calls.count("typecheck") == 1
+    assert calls.count("lint") == 2
+    assert calls.count("typecheck") == 2
     assert calls.count("api-rebuild") == 2
     assert calls.count("contract-backend") == 2
     assert calls.count("test-backend") == 2
     assert calls.count("contract-frontend") == 2
+
+
+def test_expected_commands_for_backend_only_changes(tmp_path):
+    service = VerificationService(str(tmp_path))
+    commands = service.expected_commands_for_changed_files(str(tmp_path), ["api/app/main.py", "migrations/001_init.sql"])
+    assert commands == [
+        "make api-rebuild",
+        "make contract-backend",
+        "make test-backend",
+        "make api-smoke",
+    ]
+
+
+def test_expected_commands_for_pipeline_only_changes(tmp_path):
+    service = VerificationService(str(tmp_path))
+    commands = service.expected_commands_for_changed_files(
+        str(tmp_path),
+        ["orchestration/nodes/agent_run.py", "docs/workflows/ai-task-flow.md", "Makefile"],
+    )
+    assert commands == ["make orch-test"]

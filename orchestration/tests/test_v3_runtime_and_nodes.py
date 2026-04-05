@@ -52,6 +52,13 @@ def _agent_output() -> AgentRunOutput:
         changed_files=["web/src/App.tsx"],
         extra_changed_files=[],
         implementation_notes=["Implemented."],
+        verification_commands_run=[
+            {"command": "make lint", "status": "pass", "evidence": "ok"},
+            {"command": "make typecheck", "status": "pass", "evidence": "ok"},
+            {"command": "make contract-frontend", "status": "pass", "evidence": "ok"},
+            {"command": "make test-frontend", "status": "pass", "evidence": "ok"},
+        ],
+        unresolved_failures=[],
         acceptance_criteria_checks=[
             {"criterion": "AC1", "status": "pass", "evidence": "Updated UI and tests."}
         ],
@@ -80,6 +87,10 @@ def test_agent_run_success_populates_plan_and_provider(tmp_path, monkeypatch) ->
     state = _v3_state(tmp_path)
 
     monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["web/src/App.tsx"],
+    )
 
     def fake_complete_structured(self, prompt, model_cls):
         _ = (self, prompt, model_cls)
@@ -127,6 +138,34 @@ def test_agent_run_failure_blocks_with_reason(tmp_path, monkeypatch) -> None:
     assert "agent_run failed" in pipeline.v3_permanent_failure_reason
 
 
+def test_agent_run_blocks_on_changed_files_mismatch(tmp_path, monkeypatch) -> None:
+    state = _v3_state(tmp_path)
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["api/app/main.py"],
+    )
+
+    def fake_complete_structured(self, prompt, model_cls):
+        _ = (self, prompt, model_cls)
+        return _agent_output(), ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+    assert pipeline.workflow_status == "blocked"
+    assert any("changed_files" in item for item in pipeline.blockers)
+
+
 def _verification_pass() -> VerificationEvidence:
     return VerificationEvidence(
         results=[
@@ -160,8 +199,8 @@ def _verification_fail() -> VerificationEvidence:
 def _patch_deterministic_deps(monkeypatch, *, verification: VerificationEvidence, policy: V3PolicyResult):
     monkeypatch.setattr(deterministic_gates_node, "render_task_file", lambda pipeline: None)
     monkeypatch.setattr(
-        "orchestration.nodes.deterministic_gates.VerificationService.run_default_suite",
-        lambda self, max_attempts=3, on_code_retry_fix=None: (verification, []),
+        "orchestration.nodes.deterministic_gates.VerificationService.run_suite_for_changed_files",
+        lambda self, changed_files, max_attempts=3, on_code_retry_fix=None: (verification, []),
     )
     monkeypatch.setattr(
         "orchestration.nodes.deterministic_gates.GitService.changed_files",
@@ -186,7 +225,6 @@ def test_deterministic_gates_success(tmp_path, monkeypatch) -> None:
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_auto_fix_mode="deterministic_only",
             v3_require_pre_ship_human_on_high_risk=False,
         ),
     )
@@ -199,7 +237,7 @@ def test_deterministic_gates_success(tmp_path, monkeypatch) -> None:
     assert pipeline.blockers == []
 
 
-def test_deterministic_gates_schedules_single_repair_session(tmp_path, monkeypatch) -> None:
+def test_deterministic_gates_blocks_when_verification_fails(tmp_path, monkeypatch) -> None:
     state = _v3_state(tmp_path)
     state.agent_run_output = _agent_output()
 
@@ -208,7 +246,6 @@ def test_deterministic_gates_schedules_single_repair_session(tmp_path, monkeypat
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_auto_fix_mode="single_repair_session",
             v3_require_pre_ship_human_on_high_risk=False,
         ),
     )
@@ -216,8 +253,8 @@ def test_deterministic_gates_schedules_single_repair_session(tmp_path, monkeypat
 
     result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
     pipeline = PipelineState.model_validate(result["pipeline"])
-    assert pipeline.workflow_status == "needs_fixes"
-    assert pipeline.v3_repair_session_used is True
+    assert pipeline.workflow_status == "blocked"
+    assert any("Deterministic gates failed" in item for item in pipeline.blockers)
 
 
 def test_deterministic_gates_blocks_when_policy_fails(tmp_path, monkeypatch) -> None:
@@ -229,7 +266,6 @@ def test_deterministic_gates_blocks_when_policy_fails(tmp_path, monkeypatch) -> 
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_auto_fix_mode="deterministic_only",
             v3_require_pre_ship_human_on_high_risk=False,
         ),
     )
@@ -256,7 +292,6 @@ def test_deterministic_gates_high_risk_rejected_blocks(tmp_path, monkeypatch) ->
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_auto_fix_mode="deterministic_only",
             v3_require_pre_ship_human_on_high_risk=True,
         ),
     )
