@@ -232,6 +232,44 @@ def run_url_ingestion(source: RagSource, db: Session) -> RagIngestionJob:
     return job
 
 
+def bulk_ingest_author(
+    author_id: str,
+    db: Session,
+    *,
+    statuses: tuple[str, ...] = ("pending", "failed"),
+) -> list[RagIngestionJob]:
+    """
+    Ingest all sources with a matching status for the given author.
+
+    Only processes sources with a URL (url-based ingestion).
+    Sources without a URL are skipped.
+
+    Returns a list of RagIngestionJob (one per processed source).
+    The caller is responsible for committing the session.
+    """
+    from sqlalchemy import and_
+
+    sources = (
+        db.query(RagSource)
+        .filter(
+            and_(
+                RagSource.author_id == author_id,
+                RagSource.status.in_(statuses),
+                RagSource.url.isnot(None),
+            )
+        )
+        .all()
+    )
+
+    jobs: list[RagIngestionJob] = []
+    for source in sources:
+        log.info("Bulk ingesting source %s (%s) for author %s", source.id, source.url, author_id)
+        job = run_url_ingestion(source, db)
+        jobs.append(job)
+
+    return jobs
+
+
 def run_manual_ingestion(
     source: RagSource,
     text: str,

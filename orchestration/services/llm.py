@@ -105,6 +105,29 @@ def extract_latest_assistant_message(events_path: Path) -> str | None:
     return latest_content
 
 
+def wait_for_latest_assistant_message(
+    events_path: Path,
+    *,
+    timeout_seconds: float = 5.0,
+    poll_interval_seconds: float = 0.25,
+    require_json: bool = False,
+) -> str | None:
+    deadline = time.monotonic() + timeout_seconds
+    latest_message: str | None = None
+    while time.monotonic() <= deadline:
+        latest_message = extract_latest_assistant_message(events_path)
+        if latest_message:
+            if not require_json:
+                return latest_message
+            try:
+                _extract_first_json_value(latest_message)
+                return latest_message
+            except json.JSONDecodeError:
+                pass
+        time.sleep(poll_interval_seconds)
+    return latest_message
+
+
 def extract_session_repair_context(events_path: Path) -> str | None:
     assistant_messages: list[str] = []
     tool_results: list[str] = []
@@ -383,7 +406,10 @@ Observed Copilot session trace:
         raw = self.complete_text(prompt)
         fallback_raw = None
         if self.last_session_events_path is not None:
-            fallback_raw = extract_latest_assistant_message(self.last_session_events_path)
+            fallback_raw = wait_for_latest_assistant_message(
+                self.last_session_events_path,
+                require_json=True,
+            )
         if model_cls is PlanOutput:
             return extract_structured_plan_output(raw, fallback_raw)  # type: ignore[return-value]
         try:

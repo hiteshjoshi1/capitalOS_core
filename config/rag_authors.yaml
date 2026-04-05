@@ -42,6 +42,16 @@ authors:
         - prefers predictable, simple businesses
         - strong preference for owner-operators
         - sceptical of financial engineering
+    discovery_seeds:
+      - url: "https://www.berkshirehathaway.com/letters/letters.html"
+        seed_type: archive_page
+        link_patterns:
+          - ".*[0-9]{4}\\.html$"
+          - ".*ltr\\.pdf$"
+          - ".*[0-9]{4}ltr\\.html$"
+        base_url: "https://www.berkshirehathaway.com/letters/"
+        domain_filter: "berkshirehathaway.com"
+        prefer_type: pdf
 
   - id: charlie_munger
     name: Charlie Munger
@@ -68,6 +78,15 @@ authors:
       biases:
         - strong scepticism of incentive-distorted advice
         - preference for extreme patience
+    discovery_seeds:
+      - url: "https://www.berkshirehathaway.com/wesco/wescoa.html"
+        seed_type: archive_page
+        link_patterns:
+          - ".*ar[0-9]{2}\\.pdf$"
+          - ".*wesco.*\\.pdf$"
+        base_url: "https://www.berkshirehathaway.com/wesco/"
+        domain_filter: "berkshirehathaway.com"
+        prefer_type: pdf
 
   - id: howard_marks
     name: Howard Marks
@@ -92,6 +111,13 @@ authors:
         - precise macro forecasts
       biases:
         - cycle-aware, tends cautious at market peaks
+    discovery_seeds:
+      - url: "https://www.oaktreecapital.com/insights"
+        seed_type: archive_page
+        link_patterns:
+          - ".*/insights/.*"
+        domain_filter: "oaktreecapital.com"
+        prefer_type: html
 
   - id: nick_sleep
     name: Nick Sleep
@@ -114,6 +140,10 @@ authors:
         - short-term macro commentary
       biases:
         - high conviction, concentrated portfolio mindset
+    discovery_seeds:
+      - url: "https://igyfoundation.org.uk/wp-content/uploads/2021/03/Full_Collection_Nomad_Letters_.pdf"
+        seed_type: direct_source
+        source_type: pdf
 
   - id: michael_mauboussin
     name: Michael Mauboussin
@@ -138,6 +168,14 @@ authors:
         - short-term price catalysts
       biases:
         - strong evidence-based, statistical approach
+    discovery_seeds:
+      - url: "https://www.michaelmauboussin.com/writing"
+        seed_type: archive_page
+        link_patterns:
+          - ".*\\.pdf$"
+          - ".*/writing/.*"
+        domain_filter: "michaelmauboussin.com"
+        prefer_type: pdf
 
   - id: jeff_bezos
     name: Jeff Bezos
@@ -163,3 +201,160 @@ authors:
       biases:
         - extremely long time horizon
         - willing to be misunderstood for years
+
+  - id: ben_thompson
+    name: Ben Thompson
+    enabled: true
+    domains: [technology, strategy, business]
+    expertise_tags:
+      - aggregation_theory
+      - platform_strategy
+      - disruption
+      - tech_business_models
+      - media
+    overall_weight: 3.5
+    role_type: journalist
+    reasoning_lens:
+      focus:
+        - aggregation theory and platform economics
+        - disruption and S-curve adoption
+        - tech company strategy and moats
+        - media business models
+      avoid:
+        - short-term price catalysts
+      biases:
+        - strong tech-first lens
+        - believes distribution beats content
+    discovery_seeds:
+      - url: "https://stratechery.com/archive/"
+        seed_type: archive_page
+        link_patterns:
+          - ".*/20[0-9]{2}/.*"
+        domain_filter: "stratechery.com"
+        prefer_type: html
+
+  - id: byrne_hobart
+    name: Byrne Hobart
+    enabled: true
+    domains: [finance, strategy, technology]
+    expertise_tags:
+      - financial_history
+      - tech_finance
+      - leverage
+      - market_structure
+      - macro
+    overall_weight: 3.0
+    role_type: journalist
+    reasoning_lens:
+      focus:
+        - financial history and cycles
+        - leverage and volatility
+        - tech company finance
+        - market structure and incentives
+      avoid:
+        - simple narratives
+      biases:
+        - sees financial history repeating in new forms
+        - enjoys contrarian framings
+    discovery_seeds:
+      - url: "https://thediff.co/archive/"
+        seed_type: archive_page
+        link_patterns:
+          - ".*/archive/.*"
+        domain_filter: "thediff.co"
+        prefer_type: html
+
+  - id: eugene_wei
+    name: Eugene Wei
+    enabled: true
+    domains: [technology, strategy, product]
+    expertise_tags:
+      - product_strategy
+      - social_networks
+      - status_mechanics
+      - consumer_tech
+      - UX
+    overall_weight: 3.0
+    role_type: operator
+    reasoning_lens:
+      focus:
+        - status mechanics in social products
+        - consumer product strategy
+        - invisible asymptotes and growth ceilings
+        - media and social dynamics
+      avoid:
+        - financial engineering
+      biases:
+        - product-first thinker
+        - deep anthropological lens on user behaviour
+    discovery_seeds:
+      - url: "https://www.eugenewei.com/"
+        seed_type: archive_page
+        link_patterns:
+          - "https://www\\.eugenewei\\.com/blog/.*"
+        domain_filter: "eugenewei.com"
+        prefer_type: html
+
+  - id: matt_levine
+    name: Matt Levine
+    enabled: true
+    domains: [finance, markets, law]
+    expertise_tags:
+      - financial_law
+      - derivatives
+      - mergers_acquisitions
+      - financial_regulation
+      - market_structure
+    overall_weight: 3.5
+    role_type: journalist
+    reasoning_lens:
+      focus:
+        - financial law and regulation
+        - derivatives and structured products
+        - M&A mechanics and incentives
+        - corporate governance
+      avoid:
+        - long-term macro forecasting
+      biases:
+        - ex-banker lens on finance humour
+        - sceptical of simple morality tales in finance
+    discovery_seeds:
+      - url: "https://www.bloomberg.com/opinion/authors/ARbTQlRLRjE/matthew-s-levine"
+        seed_type: archive_page
+        link_patterns:
+          - ".*/opinion/articles/.*matt.*levine.*"
+          - ".*/opinion/articles/.*money-stuff.*"
+        domain_filter: "bloomberg.com"
+        prefer_type: html
+
+  - id: christopher_bloomstran
+    name: Christopher Bloomstran
+    enabled: true
+    domains: [investing, valuation, business]
+    expertise_tags:
+      - valuation
+      - intrinsic_value
+      - Berkshire_analysis
+      - capital_allocation
+      - long_term_investing
+    overall_weight: 3.0
+    role_type: investor
+    reasoning_lens:
+      focus:
+        - deep fundamental valuation
+        - Berkshire Hathaway analysis
+        - capital allocation and owner earnings
+        - long-form annual letters
+      avoid:
+        - macro speculation
+        - short-term trading
+      biases:
+        - extremely detailed bottom-up analyst
+        - admires Buffett/Munger framework
+    discovery_seeds:
+      - url: "https://www.semperaugustus.com/letters"
+        seed_type: archive_page
+        link_patterns:
+          - ".*\\.pdf$"
+        domain_filter: "semperaugustus.com"
+        prefer_type: pdf
