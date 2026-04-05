@@ -260,7 +260,7 @@ Failure behavior in v3:
 - deterministic gate failures are classified and reported with command/log detail.
 - out-of-scope files are allowed only with explicit per-file reason.
 - restricted files/paths and secret-like content are hard-fail.
-- optional one-time repair session is controlled by `V3_AUTO_FIX_MODE`.
+- deterministic gates are verify-only; they do not trigger another model session.
 
 ### Human gate resume commands
 

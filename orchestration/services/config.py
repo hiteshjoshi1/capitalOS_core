@@ -22,7 +22,6 @@ class ModelRoutingConfig(BaseModel):
     v3_provider: Literal["copilot", "codex"] = "copilot"
     v3_model: str = Field(default="gpt-5.3-codex")
     v3_longrun_timeout_minutes: int = Field(default=120, ge=1)
-    v3_auto_fix_mode: Literal["deterministic_only", "single_repair_session"] = "deterministic_only"
     v3_enable_post_pr_human_review: bool = True
     v3_require_pre_ship_human_on_high_risk: bool = True
     v3_enable_caffeinate: bool = True
@@ -54,7 +53,6 @@ class ModelRoutingConfig(BaseModel):
             v3_provider=os.getenv("V3_PROVIDER", "copilot"),
             v3_model=os.getenv("V3_MODEL", os.getenv("BUILD_MODEL", "gpt-5.3-codex")),
             v3_longrun_timeout_minutes=int(os.getenv("V3_LONGRUN_TIMEOUT_MINUTES", "120")),
-            v3_auto_fix_mode=os.getenv("V3_AUTO_FIX_MODE", "deterministic_only"),
             v3_enable_post_pr_human_review=os.getenv("V3_ENABLE_POST_PR_HUMAN_REVIEW", "1") == "1",
             v3_require_pre_ship_human_on_high_risk=os.getenv("V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", "1") == "1",
             v3_enable_caffeinate=os.getenv(

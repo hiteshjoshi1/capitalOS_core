@@ -40,6 +40,23 @@ curl -X POST http://localhost:8000/rag/retrieve-smoke \
   -d '{"query": "capital allocation", "top_k": 5}'
 ```
 
+## Embedding Policy
+
+The intended production embedding policy is:
+
+- use `voyage-4` for documents that are mostly text
+- use `voyage-multimodal-3.5` for documents where layout, visual structure, scans, figures, or mixed-modal content materially matter
+
+Practical rule:
+
+- annual letters, memos, essays, transcripts, filings, and cleaned PDF-to-text content should normally use `voyage-4`
+- scanned documents, visually rich reports, or multimodal source material should use `voyage-multimodal-3.5`
+
+Development note:
+
+- deterministic mock embeddings are still acceptable for tests and local development
+- mock embeddings are not meaningful for evaluating real retrieval quality
+
 ---
 
 ## Author Registry
@@ -233,9 +250,11 @@ A successful response confirms:
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `RAG_AUTHORS_CONFIG` | `config/rag_authors.yaml` | Path to author registry file |
-| `RAG_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI embedding model |
+| `RAG_EMBEDDING_MODEL` | `voyage-4` | Default embedding model for text-first documents |
+| `RAG_MULTIMODAL_EMBEDDING_MODEL` | `voyage-multimodal-3.5` | Embedding model for multimodal documents |
+| `RAG_EMBEDDING_PROVIDER` | `voyage` | Embedding provider selector |
 | `RAG_EMBEDDING_MOCK` | `0` | Set to `1` to use deterministic mock embeddings (for tests/dev) |
-| `OPENAI_API_KEY` | — | Required for real embeddings; if absent, mock is used automatically |
+| `VOYAGE_API_KEY` | — | Required for real Voyage embeddings; if absent, mock/dev fallback should be used |
 
 ---
 

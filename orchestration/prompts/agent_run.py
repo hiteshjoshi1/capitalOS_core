@@ -60,6 +60,14 @@ Return JSON matching exactly this shape:
     }}
   ],
   "implementation_notes": ["string"],
+  "verification_commands_run": [
+    {{
+      "command": "make test-backend",
+      "status": "pass|fail|skip",
+      "evidence": "string"
+    }}
+  ],
+  "unresolved_failures": ["string"],
   "acceptance_criteria_checks": [
     {{
       "criterion": "string",
@@ -76,6 +84,15 @@ Rules:
 2) Keep changes minimal and aligned to acceptance criteria.
 3) Every changed file must be real and currently changed in git status.
 4) Any changed file outside planned paths must be included in extra_changed_files with a concrete reason.
-5) Do not include markdown fences or prose outside JSON.
-6) If semantic intent is not achieved, set semantic_intent_achieved=false and explain exactly why in checks/evidence.
+5) In this single session you must do the full loop: understand task, derive plan, implement, add/update relevant tests, run relevant tests, fix failures, rerun until green or truly stuck.
+6) Relevant test policy:
+   - if you changed `api/` or `migrations/`, run backend verification commands (`make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`)
+   - if you changed `web/`, run frontend verification commands (`make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`, `make e2e` when Playwright exists)
+   - if you changed `orchestration/`, workflow docs, or the `Makefile`, run pipeline verification (`make orch-test`)
+   - if you changed multiple areas, run the union
+7) Do not commit, push, or open a PR in this session. Ship owns commits.
+8) Record every relevant test command you ran in verification_commands_run.
+9) If semantic intent is achieved, unresolved_failures must be empty.
+10) Do not include markdown fences or prose outside JSON.
+11) If semantic intent is not achieved, set semantic_intent_achieved=false and explain exactly why in checks/evidence.
 """.strip()

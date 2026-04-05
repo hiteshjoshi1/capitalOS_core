@@ -109,10 +109,8 @@
     - missing tool/dependency
     - infra/access issue
     - policy violation
-  - apply targeted remediation first (fix code, install/enable tool, workaround for access), then rerun only impacted commands
-  - optional `AUTO_FIX_MODE`:
-    - `deterministic_only` (default): no extra LLM calls
-    - `single_repair_session`: exactly one additional `agent_run` session
+  - rerun deterministic commands only for infra-style retry handling
+  - do not start another `agent_run`; this stage is verify-only
 - high-risk policy violation:
   - block ship
   - optionally require explicit human override decision
@@ -146,6 +144,8 @@ Switching:
 - `changed_files`
 - `notes`
 - `risk_flags` (optional)
+- `verification_commands_run`
+- `unresolved_failures`
 
 This output is machine-validated before deterministic gates.
 
@@ -184,7 +184,6 @@ Add v3-specific keys:
 - `V3_PROVIDER=copilot|codex`
 - `V3_MODEL=...`
 - `V3_LONGRUN_TIMEOUT_MINUTES=...`
-- `V3_AUTO_FIX_MODE=deterministic_only|single_repair_session`
 - `V3_ENABLE_POST_PR_HUMAN_REVIEW=1`
 - `V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK=1`
 - `V3_ENABLE_CAFFEINATE=1`
@@ -192,7 +191,6 @@ Add v3-specific keys:
 ## Decision Log (Locked Defaults For V3)
 - `PIPELINE_VERSION=v3`
 - `V3_PROVIDER=copilot` (explicit run mode; set `codex` when running directly on Codex)
-- `V3_AUTO_FIX_MODE=deterministic_only`
 - `V3_ENABLE_CAFFEINATE=1`
 - `V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK=1`
 - `V3_ENABLE_POST_PR_HUMAN_REVIEW=1`
@@ -200,8 +198,7 @@ Add v3-specific keys:
 Retry cost semantics (authoritative):
 - Deterministic retries are non-LLM operations (command reruns, local diagnostics, policy checks, environment/tool mitigation) and must not start a new model session.
 - Only `agent_run` starts a premium model session.
-- If `V3_AUTO_FIX_MODE=deterministic_only`, failed gates do not trigger another model run.
-- If `V3_AUTO_FIX_MODE=single_repair_session`, at most one additional `agent_run` session is allowed after deterministic mitigation is exhausted.
+- Failed deterministic gates do not trigger another model run.
 
 ### 8) Suggested Command UX
 - `make task-v3-run TASK=... THREAD_ID=...`

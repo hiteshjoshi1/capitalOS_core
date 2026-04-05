@@ -6,8 +6,10 @@ from orchestration.models.stage import PipelineStage
 from orchestration.prompts.agent_run import build_agent_run_prompt
 from orchestration.render import render_task_file
 from orchestration.services.console import emit_progress, emit_stage_end, emit_stage_start
+from orchestration.services.git import GitService
 from orchestration.services.provider_runtime import ProviderRuntimeService
 from orchestration.services.task_markdown import TaskMarkdownService
+from orchestration.services.verification import VerificationService
 from orchestration.state import GraphState, dump_pipeline_state, load_pipeline_state
 
 
@@ -68,6 +70,52 @@ def run(state: GraphState) -> GraphState:
 
     output.provider = run_result.provider
     output.model_name = run_result.model
+    git = GitService(pipeline.issue.repo_root)
+    actual_changed_files = git.changed_files()
+    reported_changed_files = sorted({path for path in output.changed_files if path})
+    expected_verification_commands = VerificationService.expected_commands_for_changed_files(
+        pipeline.issue.repo_root,
+        actual_changed_files,
+    )
+    reported_verification_commands = {
+        item.command for item in output.verification_commands_run if item.command
+    }
+    integrity_failures: list[str] = []
+    if sorted(actual_changed_files) != reported_changed_files:
+        integrity_failures.append(
+            "agent_run reported changed_files that do not match the actual git diff. "
+            f"reported={reported_changed_files or ['<none>']} actual={actual_changed_files or ['<none>']}"
+        )
+    if output.semantic_intent_achieved and output.unresolved_failures:
+        integrity_failures.append(
+            "agent_run marked semantic intent achieved but still reported unresolved failures."
+        )
+    missing_verification_commands = [
+        command for command in expected_verification_commands if command not in reported_verification_commands
+    ]
+    if output.semantic_intent_achieved and missing_verification_commands:
+        integrity_failures.append(
+            "agent_run did not report running all required relevant verification commands: "
+            + ", ".join(missing_verification_commands)
+        )
+    if integrity_failures:
+        pipeline.workflow_status = "blocked"
+        pipeline.v3_permanent_failure_reason = integrity_failures[0]
+        pipeline.blockers.extend(integrity_failures)
+        pipeline.errors.extend(integrity_failures)
+        render_task_file(pipeline)
+        emit_stage_end(
+            PipelineStage.AGENT_RUN,
+            status="blocked",
+            evidence=[
+                f"attempt={pipeline.v3_agent_run_attempts}",
+                f"actual_changed_files={len(actual_changed_files)}",
+                f"reported_changed_files={len(reported_changed_files)}",
+            ],
+            conclusion="V3 agent_run output failed repo-integrity checks and the workflow is blocked.",
+        )
+        return dump_pipeline_state(pipeline)
+    output.changed_files = actual_changed_files
     pipeline.v3_provider = run_result.provider
     pipeline.v3_model = run_result.model
     pipeline.agent_run_output = output

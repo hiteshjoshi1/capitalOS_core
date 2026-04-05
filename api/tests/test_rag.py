@@ -178,6 +178,22 @@ def sqlite_rag_db():
 
 
 class TestConfigLoader:
+    def test_default_config_path_walks_up_to_repo_config(self, tmp_path, monkeypatch):
+        repo_root = tmp_path / "repo"
+        config_dir = repo_root / "config"
+        config_dir.mkdir(parents=True)
+        expected = config_dir / "rag_authors.yaml"
+        expected.write_text("authors: []")
+
+        fake_module_path = repo_root / "api" / "app" / "rag" / "config.py"
+        fake_module_path.parent.mkdir(parents=True)
+        fake_module_path.write_text("# fake")
+
+        import app.rag.config as rag_config
+
+        monkeypatch.setattr(rag_config, "__file__", str(fake_module_path))
+        assert rag_config._default_config_path() == expected
+
     def test_load_yaml_returns_authors_list(self, rag_yaml_file):
         with patch.dict(os.environ, {"RAG_AUTHORS_CONFIG": rag_yaml_file}):
             from app.rag.config import load_author_config

@@ -9,15 +9,25 @@ from sqlalchemy.orm import Session
 
 from app.models.rag import RagAuthor, RagAuthorCard
 
-# Default path relative to the repo root; override with RAG_AUTHORS_CONFIG env var.
-_DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[5] / "config" / "rag_authors.yaml"
+_CONFIG_FILENAME = "rag_authors.yaml"
+
+
+def _default_config_path() -> Path:
+    """Find config/rag_authors.yaml by walking upward from this module."""
+    current = Path(__file__).resolve()
+    for parent in current.parents:
+        candidate = parent / "config" / _CONFIG_FILENAME
+        if candidate.exists():
+            return candidate
+    repo_like = current.parents[3] if len(current.parents) >= 4 else current.parent
+    return repo_like / "config" / _CONFIG_FILENAME
 
 
 def _config_path() -> Path:
     env = os.getenv("RAG_AUTHORS_CONFIG")
     if env:
         return Path(env)
-    return _DEFAULT_CONFIG_PATH
+    return _default_config_path()
 
 
 def load_author_config() -> dict[str, Any]:

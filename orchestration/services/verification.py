@@ -131,38 +131,74 @@ class VerificationService:
         )
 
     @staticmethod
-    def _verification_commands(repo_root: str) -> list[dict[str, str]]:
-        commands: list[dict[str, str]] = [
-            {"name": "lint", "command": "make lint", "family": "foundation"},
-            {"name": "typecheck", "command": "make typecheck", "family": "foundation"},
-            {"name": "api-rebuild", "command": "make api-rebuild", "family": "backend"},
-            {"name": "contract-backend", "command": "make contract-backend", "family": "backend"},
-            {"name": "test-backend", "command": "make test-backend", "family": "backend"},
-            {"name": "contract-frontend", "command": "make contract-frontend", "family": "frontend"},
-            {"name": "test-frontend", "command": "make test-frontend", "family": "frontend"},
-            {"name": "api-smoke", "command": "make api-smoke", "family": "backend"},
+    def _detect_changed_areas(changed_files: list[str]) -> set[str]:
+        areas: set[str] = set()
+        for path in changed_files:
+            if path.startswith("api/") or path.startswith("migrations/"):
+                areas.add("backend")
+            if path.startswith("web/"):
+                areas.add("frontend")
+            if (
+                path.startswith("orchestration/")
+                or path.startswith("docs/workflows/")
+                or path == "Makefile"
+            ):
+                areas.add("pipeline")
+        return areas
+
+    @classmethod
+    def expected_commands_for_changed_files(cls, repo_root: str, changed_files: list[str]) -> list[str]:
+        return [
+            item["command"]
+            for item in cls._verification_commands_for_changed_files(repo_root, changed_files)
+            if item["command"] != "__skip__"
         ]
 
-        playwright_ts = Path(repo_root, "web/playwright.config.ts")
-        playwright_js = Path(repo_root, "web/playwright.config.js")
-        if playwright_ts.exists() or playwright_js.exists():
-            commands.append({"name": "e2e", "command": "make e2e", "family": "e2e"})
-        else:
-            commands.append({"name": "e2e", "command": "__skip__", "family": "e2e"})
+    @classmethod
+    def _verification_commands_for_changed_files(cls, repo_root: str, changed_files: list[str]) -> list[dict[str, str]]:
+        areas = cls._detect_changed_areas(changed_files)
+        commands: list[dict[str, str]] = []
+
+        if "backend" in areas:
+            commands.extend(
+                [
+                    {"name": "api-rebuild", "command": "make api-rebuild", "family": "backend"},
+                    {"name": "contract-backend", "command": "make contract-backend", "family": "backend"},
+                    {"name": "test-backend", "command": "make test-backend", "family": "backend"},
+                    {"name": "api-smoke", "command": "make api-smoke", "family": "backend"},
+                ]
+            )
+
+        if "frontend" in areas:
+            commands.extend(
+                [
+                    {"name": "lint", "command": "make lint", "family": "frontend"},
+                    {"name": "typecheck", "command": "make typecheck", "family": "frontend"},
+                    {"name": "contract-frontend", "command": "make contract-frontend", "family": "frontend"},
+                    {"name": "test-frontend", "command": "make test-frontend", "family": "frontend"},
+                ]
+            )
+            playwright_ts = Path(repo_root, "web/playwright.config.ts")
+            playwright_js = Path(repo_root, "web/playwright.config.js")
+            if playwright_ts.exists() or playwright_js.exists():
+                commands.append({"name": "e2e", "command": "make e2e", "family": "frontend"})
+            else:
+                commands.append({"name": "e2e", "command": "__skip__", "family": "frontend"})
+
+        if "pipeline" in areas:
+            commands.append({"name": "orch-test", "command": "make orch-test", "family": "pipeline"})
 
         return commands
 
     @staticmethod
     def _restart_family_for_command(name: str) -> str:
-        if name in {"lint", "typecheck"}:
-            return "foundation"
+        if name in {"lint", "typecheck", "contract-frontend", "test-frontend", "e2e"}:
+            return "frontend"
         if name in {"api-rebuild", "contract-backend", "test-backend", "api-smoke"}:
             return "backend"
-        if name in {"contract-frontend", "test-frontend"}:
-            return "frontend"
-        if name == "e2e":
-            return "frontend"
-        return "foundation"
+        if name == "orch-test":
+            return "pipeline"
+        return "frontend"
 
     def run_with_retry_policy(
         self,
@@ -344,20 +380,34 @@ class VerificationService:
             retry_entries,
         )
 
-    def run_default_suite(
+    def run_suite_for_changed_files(
         self,
+        changed_files: list[str],
         *,
         max_attempts: int = 3,
         on_code_retry_fix: Optional[Callable[[str, str, int, str, list[RetryEntry]], None]] = None,
     ) -> tuple[VerificationEvidence, list[RetryEntry]]:
+        commands = self._verification_commands_for_changed_files(self.repo_root, changed_files)
+        suite_name = "+".join(sorted(self._detect_changed_areas(changed_files))) or "none"
         emit_event(
             "verification_suite_started",
             stage=self.stage,
             current_action="Running verification suite",
-            evidence=["commands=lint,typecheck,api-rebuild,contract-backend,test-backend,contract-frontend,test-frontend,api-smoke,e2e"],
+            evidence=[
+                f"suite={suite_name}",
+                f"commands={','.join(item['name'] for item in commands) or 'none'}",
+            ],
         )
-
-        commands = self._verification_commands(self.repo_root)
+        if not commands:
+            evidence = VerificationEvidence(suite_name=suite_name, results=[], any_failures=False)
+            emit_event(
+                "verification_suite_finished",
+                stage=self.stage,
+                status="completed",
+                evidence=["failed_commands=none"],
+                conclusion="No relevant verification commands were required for the changed files.",
+            )
+            return evidence, []
         family_starts: dict[str, int] = {}
         for index, item in enumerate(commands):
             family_starts.setdefault(item["family"], index)
@@ -437,4 +487,22 @@ class VerificationService:
             evidence=[f"failed_commands={','.join(r.name for r in results if r.status == 'fail') or 'none'}"],
             conclusion="Verification suite completed.",
         )
-        return VerificationEvidence(results=results, any_failures=any_failures), retries
+        return VerificationEvidence(suite_name=suite_name, results=results, any_failures=any_failures), retries
+
+    def run_default_suite(
+        self,
+        *,
+        max_attempts: int = 3,
+        on_code_retry_fix: Optional[Callable[[str, str, int, str, list[RetryEntry]], None]] = None,
+    ) -> tuple[VerificationEvidence, list[RetryEntry]]:
+        changed_files = [
+            "api/app/",
+            "migrations/",
+            "web/src/",
+            "orchestration/",
+        ]
+        return self.run_suite_for_changed_files(
+            changed_files=changed_files,
+            max_attempts=max_attempts,
+            on_code_retry_fix=on_code_retry_fix,
+        )
