@@ -19,6 +19,7 @@ from orchestration.services.llm import (
     extract_session_repair_context,
     extract_structured_plan_output,
     find_latest_copilot_session,
+    wait_for_latest_assistant_message,
 )
 
 
@@ -186,6 +187,24 @@ def test_extract_latest_assistant_message_returns_last_message(tmp_path):
 
 def test_extract_latest_assistant_message_returns_none_on_missing_file(tmp_path):
     assert extract_latest_assistant_message(tmp_path / "missing.jsonl") is None
+
+
+def test_wait_for_latest_assistant_message_can_wait_for_json(tmp_path):
+    path = tmp_path / "events.jsonl"
+    path.write_text("")
+    path.write_text(
+        "\n".join(
+            [
+                '{"type":"assistant.message","data":{"content":"tool chatter only"}}',
+                '{"type":"assistant.message","data":{"content":"```json\\n{\\"summary\\": \\"ok\\"}\\n```"}}',
+            ]
+        )
+    )
+
+    result = wait_for_latest_assistant_message(path, timeout_seconds=0.1, poll_interval_seconds=0.01, require_json=True)
+
+    assert result is not None
+    assert '{"summary": "ok"}' in result
 
 
 def test_extract_session_repair_context_summarizes_completed_tools_session(tmp_path):
@@ -421,3 +440,39 @@ def test_complete_structured_repairs_when_tools_session_ends_without_final_json(
     assert calls[1][1] is False
     assert "did not emit the required final JSON payload" in calls[1][0]
     assert "Modified files:" in calls[1][0]
+
+
+def test_complete_structured_waits_for_delayed_session_json_before_repair(monkeypatch, tmp_path) -> None:
+    class ExampleModel(BaseModel):
+        summary: str
+
+    class FakeConfig:
+        copilot_tool_mode = "tools-enabled"
+        build_max_autopilot_continues = 12
+
+        def model_for_stage(self, stage):
+            return "claude-sonnet-4.6"
+
+    monkeypatch.setattr("orchestration.services.llm.get_config", lambda: FakeConfig())
+
+    calls: list[tuple[str, bool]] = []
+
+    def fake_complete_text_with_mode(self, prompt: str, *, tools_enabled: bool) -> str:
+        calls.append((prompt, tools_enabled))
+        self.last_session_events_path = tmp_path / "events.jsonl"
+        return "tool chatter\nnot json\n"
+
+    monkeypatch.setattr(
+        "orchestration.services.llm.LLMService._complete_text_with_mode",
+        fake_complete_text_with_mode,
+    )
+    monkeypatch.setattr(
+        "orchestration.services.llm.wait_for_latest_assistant_message",
+        lambda *args, **kwargs: '{"summary":"from-session"}',
+    )
+
+    service = LLMService(PipelineStage.REWORK_IMPLEMENTATION, repo_root="/tmp/repo")
+    parsed = service.complete_structured("Return strict JSON only.", ExampleModel)
+
+    assert parsed.summary == "from-session"
+    assert calls == [("Return strict JSON only.", True)]

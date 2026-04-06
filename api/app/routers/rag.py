@@ -31,8 +31,9 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource
-from app.rag.config import sync_authors_from_config
-from app.rag.ingestion.pipeline import run_manual_ingestion, run_url_ingestion
+from app.rag.config import load_author_config, sync_authors_from_config
+from app.rag.discovery import discover_sources_for_author
+from app.rag.ingestion.pipeline import bulk_ingest_author, run_manual_ingestion, run_url_ingestion
 from app.rag.retrieval import retrieve_similar_chunks
 
 log = logging.getLogger(__name__)
@@ -115,6 +116,29 @@ class RetrieveSmokeIn(BaseModel):
 class RetrieveSmokeOut(BaseModel):
     query: str
     results: list[dict]
+
+
+class DiscoveryResultOut(BaseModel):
+    seed_url: str
+    discovered_count: int
+    registered: int
+    skipped_duplicate: int
+    errors: list[str]
+
+
+class DiscoverAuthorOut(BaseModel):
+    author_id: str
+    seeds_processed: int
+    total_discovered: int
+    total_registered: int
+    total_skipped_duplicate: int
+    results: list[DiscoveryResultOut]
+
+
+class BulkIngestOut(BaseModel):
+    author_id: str
+    sources_processed: int
+    jobs: list[JobOut]
 
 
 # ── Catalog / config ──────────────────────────────────────────────────────────
@@ -339,6 +363,104 @@ def retry_ingestion(source_id: str, db: Session = Depends(get_db)):
     job = run_url_ingestion(source, db)
     db.commit()
     return _job_out(job)
+
+
+# ── Discovery ─────────────────────────────────────────────────────────────────
+
+
+@router.post("/authors/{author_id}/discover", response_model=DiscoverAuthorOut, status_code=200)
+def discover_author_sources(author_id: str, db: Session = Depends(get_db)):
+    """
+    Discover child source URLs for an author from their config discovery_seeds.
+
+    Reads the archive/index pages defined in config/rag_authors.yaml for the
+    given author, extracts child links, deduplicates, applies prefer_type rules,
+    and registers new sources in rag_sources (status=pending).
+
+    Idempotent: already-registered URLs are skipped.
+    Does not trigger ingestion — call POST /rag/authors/{author_id}/bulk-ingest
+    after discovery to ingest all pending sources.
+    """
+    author = db.get(RagAuthor, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail=f"Author '{author_id}' not found. Run sync-config first.")
+
+    try:
+        config_data = load_author_config()
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    author_cfgs = {a["id"]: a for a in config_data.get("authors", [])}
+    author_cfg = author_cfgs.get(author_id, {})
+
+    if not author_cfg.get("discovery_seeds"):
+        return DiscoverAuthorOut(
+            author_id=author_id,
+            seeds_processed=0,
+            total_discovered=0,
+            total_registered=0,
+            total_skipped_duplicate=0,
+            results=[],
+        )
+
+    results = discover_sources_for_author(author_id, author_cfg, db)
+    db.commit()
+
+    result_outs = [
+        DiscoveryResultOut(
+            seed_url=r.seed_url,
+            discovered_count=len(r.discovered),
+            registered=r.registered,
+            skipped_duplicate=r.skipped_duplicate,
+            errors=r.errors,
+        )
+        for r in results
+    ]
+
+    return DiscoverAuthorOut(
+        author_id=author_id,
+        seeds_processed=len(results),
+        total_discovered=sum(len(r.discovered) for r in results),
+        total_registered=sum(r.registered for r in results),
+        total_skipped_duplicate=sum(r.skipped_duplicate for r in results),
+        results=result_outs,
+    )
+
+
+# ── Bulk ingestion ────────────────────────────────────────────────────────────
+
+
+@router.post("/authors/{author_id}/bulk-ingest", response_model=BulkIngestOut, status_code=202)
+def bulk_ingest_author_sources(
+    author_id: str,
+    statuses: str = Query("pending,failed", description="Comma-separated source statuses to ingest"),
+    db: Session = Depends(get_db),
+):
+    """
+    Ingest all sources in pending or failed status for the given author.
+
+    Runs URL-based ingestion for each matching source in sequence.
+    Results (including failures) are recorded in rag_ingestion_jobs.
+
+    Use ?statuses=pending,failed (default) to retry all unprocessed and failed sources.
+    Use ?statuses=pending to ingest only freshly discovered sources.
+    """
+    author = db.get(RagAuthor, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail=f"Author '{author_id}' not found. Run sync-config first.")
+
+    status_list = tuple(s.strip() for s in statuses.split(",") if s.strip())
+    if not status_list:
+        raise HTTPException(status_code=422, detail="statuses must be a non-empty comma-separated list")
+
+    jobs = bulk_ingest_author(author_id, db, statuses=status_list)
+    db.commit()
+
+    return BulkIngestOut(
+        author_id=author_id,
+        sources_processed=len(jobs),
+        jobs=[_job_out(j) for j in jobs],
+    )
 
 
 @router.get("/ingest/jobs", response_model=list[JobOut])
