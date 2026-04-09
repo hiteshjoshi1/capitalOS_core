@@ -2,6 +2,7 @@ const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "h
 const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
 let accessTokenMemory: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
+let authFailureHandler: (() => void) | null = null;
 
 export function getAccessToken(): string | null {
   return accessTokenMemory;
@@ -9,6 +10,14 @@ export function getAccessToken(): string | null {
 
 export function setAccessToken(token: string | null): void {
   accessTokenMemory = token;
+}
+
+export function setAuthFailureHandler(handler: (() => void) | null): void {
+  authFailureHandler = handler;
+}
+
+function notifyAuthFailure(): void {
+  authFailureHandler?.();
 }
 
 function buildHeaders(
@@ -94,17 +103,20 @@ async function callRefreshEndpoint(): Promise<string | null> {
     });
     if (!res.ok) {
       setAccessToken(null);
+      notifyAuthFailure();
       return null;
     }
     const payload = (await res.json()) as AuthToken;
     if (!payload?.access_token) {
       setAccessToken(null);
+      notifyAuthFailure();
       return null;
     }
     setAccessToken(payload.access_token);
     return payload.access_token;
   } catch (err: unknown) {
     setAccessToken(null);
+    notifyAuthFailure();
     return null;
   }
 }
@@ -120,10 +132,11 @@ async function refreshAccessToken(): Promise<string | null> {
 async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {}): Promise<T> {
   const execute = async (): Promise<Response> => {
     try {
+      const { headers: initHeaders, ...restInit } = init ?? {};
       return await fetch(`${API_BASE}${path}`, {
         credentials: "include",
-        headers: buildHeaders(init?.headers, { includeJsonContentType: true, skipAuth: opts.skipAuth }),
-        ...init,
+        ...restInit,
+        headers: buildHeaders(initHeaders, { includeJsonContentType: true, skipAuth: opts.skipAuth }),
       });
     } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : String(err);
@@ -132,14 +145,20 @@ async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {
   };
 
   let res = await execute();
+  let sessionExpired = false;
   if (res.status === 401 && !opts.skipAuth && !opts.skipRefreshRetry) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       res = await execute();
+    } else {
+      sessionExpired = true;
     }
   }
   if (!res.ok) {
     const text = await res.text();
+    if (res.status === 401 && !opts.skipAuth && sessionExpired) {
+      throw new Error("Your session expired. Please sign in again.");
+    }
     throw new Error(formatHttpError(res.status, text));
   }
   return res.json() as Promise<T>;

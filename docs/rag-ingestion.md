@@ -18,27 +18,40 @@ It does **not** perform lens reasoning, synthesis, or critic evaluation — thos
 # 1. Start the stack
 make up
 
-# 2. Sync authors from config
-curl -X POST http://localhost:8000/rag/authors/sync-config
+# 2. Authenticate once and keep a bearer token handy
+TOKEN=$(curl -s -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"demo","password":"Test@1234"}' | \
+  python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])')
 
-# 3. Register a source URL
+# 3. Sync authors from config
+curl -X POST http://localhost:8000/rag/authors/sync-config \
+  -H "Authorization: Bearer $TOKEN"
+
+# 4. Register a source URL
 curl -X POST http://localhost:8000/rag/sources \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"author_id": "warren_buffett", "url": "https://www.berkshirehathaway.com/letters/2024ltr.pdf", "source_type": "pdf"}'
 
-# 4. Trigger ingestion
+# 5. Trigger ingestion
 curl -X POST http://localhost:8000/rag/ingest/url \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"source_id": "<uuid-from-step-3>"}'
 
-# 5. Check job status
-curl http://localhost:8000/rag/ingest/jobs
+# 6. Check job status
+curl http://localhost:8000/rag/ingest/jobs \
+  -H "Authorization: Bearer $TOKEN"
 
-# 6. Run retrieval smoke
+# 7. Run retrieval smoke
 curl -X POST http://localhost:8000/rag/retrieve-smoke \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"query": "capital allocation", "top_k": 5}'
 ```
+
+All `/rag/*` endpoints require authentication.
 
 ## Embedding Policy
 

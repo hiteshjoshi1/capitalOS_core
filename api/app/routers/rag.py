@@ -29,6 +29,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.auth_context import require_current_user
 from app.db.session import get_db
 from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource
 from app.rag.config import load_author_config, sync_authors_from_config
@@ -37,7 +38,7 @@ from app.rag.ingestion.pipeline import bulk_ingest_author, run_manual_ingestion,
 from app.rag.retrieval import retrieve_similar_chunks
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/rag", tags=["rag"])
+router = APIRouter(prefix="/rag", tags=["rag"], dependencies=[Depends(require_current_user)])
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────

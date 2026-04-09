@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useContext } from "react";
 import { AuthContext, AuthProvider } from "../context/AuthContext";
 
-const { mockApi, mockSetAccessToken } = vi.hoisted(() => ({
+const { mockApi, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
   mockApi: {
     authRefresh: vi.fn(),
     authMe: vi.fn(),
@@ -13,11 +13,13 @@ const { mockApi, mockSetAccessToken } = vi.hoisted(() => ({
     authLogout: vi.fn(),
   },
   mockSetAccessToken: vi.fn(),
+  mockSetAuthFailureHandler: vi.fn(),
 }));
 
 vi.mock("../lib/api", () => ({
   api: mockApi,
   setAccessToken: mockSetAccessToken,
+  setAuthFailureHandler: mockSetAuthFailureHandler,
 }));
 
 function AuthConsumer() {
@@ -73,6 +75,7 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("user").textContent).toBe("none");
     });
     expect(mockSetAccessToken).toHaveBeenCalledWith(null);
+    expect(mockSetAuthFailureHandler).toHaveBeenCalled();
   });
 
   it("runs login/signup/logout flows and updates user", async () => {
@@ -116,5 +119,23 @@ describe("AuthProvider", () => {
     expect(mockSetAccessToken).toHaveBeenCalledWith("login-token");
     expect(mockSetAccessToken).toHaveBeenCalledWith("signup-token");
     expect(mockSetAccessToken).toHaveBeenCalledWith(null);
+  });
+
+  it("registers and unregisters auth failure handler", async () => {
+    mockApi.authRefresh.mockRejectedValueOnce(new Error("unauthorized"));
+
+    const { unmount } = render(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mockSetAuthFailureHandler).toHaveBeenCalledWith(expect.any(Function));
+    });
+
+    unmount();
+
+    expect(mockSetAuthFailureHandler).toHaveBeenLastCalledWith(null);
   });
 });

@@ -1,5 +1,5 @@
 import { createContext, useEffect, useMemo, useState } from "react";
-import { api, setAccessToken } from "../lib/api";
+import { api, setAccessToken, setAuthFailureHandler } from "../lib/api";
 import type { AuthMe } from "../lib/api";
 
 type AuthContextValue = {
@@ -21,6 +21,17 @@ const AuthContext = createContext<AuthContextValue>({
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthMe | null>(null);
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    setAuthFailureHandler(() => {
+      setAccessToken(null);
+      setUser(null);
+      setLoading(false);
+    });
+    return () => {
+      setAuthFailureHandler(null);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
