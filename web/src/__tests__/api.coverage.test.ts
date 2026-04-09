@@ -252,6 +252,28 @@ describe("api client coverage", () => {
     expect(called.some((url) => url.includes("/dividends/summary?"))).toBe(true);
   });
 
+  it("preserves bearer auth when custom headers are present", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue(okJson({}));
+    vi.stubGlobal("fetch", fetchSpy);
+    const { api, setAccessToken } = await import("../lib/api");
+
+    setAccessToken("token-keep");
+
+    await api.cryptoRefreshNow("crypto-admin");
+    await api.marketDataRefreshNow("market-admin");
+
+    const cryptoCall = fetchSpy.mock.calls.find((call) => String(call[0]).includes("/crypto/refresh-now"));
+    const marketCall = fetchSpy.mock.calls.find((call) => String(call[0]).includes("/market-data/refresh-now"));
+
+    const cryptoHeaders = cryptoCall?.[1]?.headers as Headers;
+    const marketHeaders = marketCall?.[1]?.headers as Headers;
+
+    expect(cryptoHeaders.get("Authorization")).toBe("Bearer token-keep");
+    expect(cryptoHeaders.get("X-Admin-Key")).toBe("crypto-admin");
+    expect(marketHeaders.get("Authorization")).toBe("Bearer token-keep");
+    expect(marketHeaders.get("X-Admin-Key")).toBe("market-admin");
+  });
+
   it("covers refresh edge cases", async () => {
     const fetchSpy = vi.fn()
       // Refresh edge case: missing access_token payload.
@@ -284,11 +306,14 @@ describe("api client coverage", () => {
       } satisfies MockResponse);
 
     vi.stubGlobal("fetch", fetchSpy);
-    const { api, setAccessToken } = await import("../lib/api");
+    const { api, setAccessToken, setAuthFailureHandler } = await import("../lib/api");
+    const onAuthFailure = vi.fn();
+    setAuthFailureHandler(onAuthFailure);
     setAccessToken("expired-token");
 
-    await expect(api.dashboardBootstrap("2026-03", "USD")).rejects.toThrow("expired");
-    await expect(api.dashboardBootstrap("2026-03", "USD")).rejects.toThrow("expired");
+    await expect(api.dashboardBootstrap("2026-03", "USD")).rejects.toThrow("Your session expired. Please sign in again.");
+    await expect(api.dashboardBootstrap("2026-03", "USD")).rejects.toThrow("Your session expired. Please sign in again.");
+    expect(onAuthFailure).toHaveBeenCalled();
   });
 
   it("covers ingest upload helper catch + non-ok branches", async () => {

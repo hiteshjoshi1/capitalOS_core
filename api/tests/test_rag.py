@@ -656,6 +656,11 @@ def client(rag_yaml_file):
 
 
 class TestRagAuthorsAPI:
+    def test_rag_requires_auth_when_bypass_disabled(self, client):
+        with patch.dict(os.environ, {"AUTH_BYPASS_USER_ID": ""}, clear=False):
+            resp = client.get("/rag/authors")
+        assert resp.status_code == 401
+
     def test_list_authors_empty(self, client):
         resp = client.get("/rag/authors")
         assert resp.status_code == 200
