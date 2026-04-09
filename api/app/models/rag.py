@@ -213,6 +213,39 @@ class RagEmbedding(Base):
     chunk = relationship("RagChunk", back_populates="embedding")
 
 
+class RagAuthorProfile(Base):
+    __tablename__ = "rag_author_profiles"
+
+    id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    author_id = Column(String, ForeignKey("rag_authors.id", ondelete="CASCADE"), nullable=False, unique=True)
+    worldview = Column(Text)
+    key_maxims = Column(_StringList, nullable=False, default=list)
+    strengths = Column(_StringList, nullable=False, default=list)
+    weaknesses = Column(_StringList, nullable=False, default=list)
+    favored_decision_variables = Column(_StringList, nullable=False, default=list)
+    anti_patterns = Column(_StringList, nullable=False, default=list)
+    generation_model = Column(String, nullable=False, default="template")
+    corpus_chunk_count = Column(Integer, nullable=False, default=0)
+    generated_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    author = relationship("RagAuthor", backref="profile", uselist=False)
+    citations = relationship("RagAuthorProfileCitation", back_populates="profile", cascade="all, delete-orphan")
+
+
+class RagAuthorProfileCitation(Base):
+    __tablename__ = "rag_author_profile_citations"
+
+    id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    profile_id = Column(_UUIDStr, ForeignKey("rag_author_profiles.id", ondelete="CASCADE"), nullable=False)
+    chunk_id = Column(_UUIDStr, ForeignKey("rag_chunks.id", ondelete="CASCADE"), nullable=False)
+    citation_context = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    profile = relationship("RagAuthorProfile", back_populates="citations")
+    chunk = relationship("RagChunk")
+
+
 class RagIngestionJob(Base):
     __tablename__ = "rag_ingestion_jobs"
 

@@ -3,9 +3,13 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from queue import Empty, Queue
 from typing import Type, TypeVar
 
 from pydantic import BaseModel
@@ -40,6 +44,73 @@ class ProviderRuntimeService:
             return args
         return [caffeinate, "-dimsu", *args]
 
+    def _run_streaming_command(
+        self,
+        args: list[str],
+        *,
+        stream_stdout: bool = True,
+        stream_stderr: bool = True,
+    ) -> tuple[int, str, str]:
+        proc = subprocess.Popen(
+            args,
+            cwd=self.repo_root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        queue: Queue[tuple[str, str]] = Queue()
+
+        def _reader(name: str, pipe) -> None:
+            if pipe is None:
+                return
+            try:
+                while True:
+                    chunk = pipe.read(1)
+                    if not chunk:
+                        break
+                    queue.put((name, chunk))
+            finally:
+                pipe.close()
+
+        stdout_thread = threading.Thread(target=_reader, args=("stdout", proc.stdout), daemon=True)
+        stderr_thread = threading.Thread(target=_reader, args=("stderr", proc.stderr), daemon=True)
+        stdout_thread.start()
+        stderr_thread.start()
+
+        deadline = time.monotonic() + (self.cfg.v3_longrun_timeout_minutes * 60)
+        try:
+            while stdout_thread.is_alive() or stderr_thread.is_alive() or not queue.empty():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    proc.kill()
+                    raise RuntimeError(
+                        f"Provider subprocess exceeded timeout of {self.cfg.v3_longrun_timeout_minutes} minutes."
+                    )
+                try:
+                    stream_name, chunk = queue.get(timeout=min(1.0, remaining))
+                except Empty:
+                    continue
+
+                if stream_name == "stdout":
+                    stdout_chunks.append(chunk)
+                    if stream_stdout:
+                        sys.stdout.write(chunk)
+                        sys.stdout.flush()
+                else:
+                    stderr_chunks.append(chunk)
+                    if stream_stderr:
+                        sys.stderr.write(chunk)
+                        sys.stderr.flush()
+        except KeyboardInterrupt:
+            proc.terminate()
+            raise
+
+        proc.wait()
+        return proc.returncode, "".join(stdout_chunks).strip(), "".join(stderr_chunks).strip()
+
     def _run_copilot(self, *, model: str, prompt: str) -> ProviderRunResult:
         args = [
             "copilot",
@@ -57,18 +128,15 @@ class ProviderRuntimeService:
             prompt,
         ]
         final_args = self._prefix_with_caffeinate(args)
-        proc = subprocess.run(
-            final_args,
-            cwd=self.repo_root,
-            capture_output=True,
-            text=True,
-            timeout=self.cfg.v3_longrun_timeout_minutes * 60,
-        )
-        output = (proc.stdout or "").strip()
-        error = (proc.stderr or "").strip()
-        if proc.returncode != 0:
+        returncode, output, error = self._run_streaming_command(final_args)
+        if returncode != 0:
             raise RuntimeError(error or output or "Copilot provider failed without output.")
-        diagnostics = [f"provider=copilot", f"model={model}", f"stdout_chars={len(output)}"]
+        diagnostics = [
+            f"provider=copilot",
+            f"model={model}",
+            f"stdout_chars={len(output)}",
+            f"stderr_chars={len(error)}",
+        ]
         return ProviderRunResult(provider="copilot", model=model, output=output, diagnostics=diagnostics)
 
     def _run_codex(self, *, model: str, prompt: str) -> ProviderRunResult:
@@ -93,20 +161,18 @@ class ProviderRuntimeService:
         ]
         final_args = self._prefix_with_caffeinate(args)
         try:
-            proc = subprocess.run(
-                final_args,
-                cwd=self.repo_root,
-                capture_output=True,
-                text=True,
-                timeout=self.cfg.v3_longrun_timeout_minutes * 60,
-            )
-            output = output_path.read_text().strip() if output_path.exists() else ""
+            returncode, output, error = self._run_streaming_command(final_args)
+            output = output_path.read_text().strip() if output_path.exists() else output
             if not output:
-                output = (proc.stdout or "").strip()
-            error = (proc.stderr or "").strip()
-            if proc.returncode != 0:
+                output = ""
+            if returncode != 0:
                 raise RuntimeError(error or output or "Codex provider failed without output.")
-            diagnostics = [f"provider=codex", f"model={model}", f"stdout_chars={len(output)}"]
+            diagnostics = [
+                f"provider=codex",
+                f"model={model}",
+                f"stdout_chars={len(output)}",
+                f"stderr_chars={len(error)}",
+            ]
             return ProviderRunResult(provider="codex", model=model, output=output, diagnostics=diagnostics)
         finally:
             output_path.unlink(missing_ok=True)

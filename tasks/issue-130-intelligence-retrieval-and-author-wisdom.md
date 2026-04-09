@@ -207,3 +207,33 @@ _Human-readable next steps._
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `prepare`
+**Workflow Status**: `running`
+
+## Workflow Snapshot
+- latest_outcome: No workflow outcome recorded yet.
+- next_action: Workflow execution is in progress.
+- pipeline_version: `v3`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- No active requirements recorded yet.
+
+## Prepare
+Checked out `feature/issue-130-intelligence-retrieval-and-author-wisdom` from `main` and ensured task file exists.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->

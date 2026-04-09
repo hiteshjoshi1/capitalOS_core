@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -372,21 +373,70 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     created: dict[str, Path] = {}
 
-    def fake_run(args, cwd, capture_output, text, timeout):
-        _ = (cwd, capture_output, text, timeout)
-        out_idx = args.index("--output-last-message") + 1
-        output_path = Path(args[out_idx])
-        output_path.write_text('{"ok": true}')
-        created["path"] = output_path
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    class FakePopen:
+        def __init__(self, args, cwd, stdout, stderr, text, bufsize):
+            _ = (cwd, stdout, stderr, text, bufsize)
+            out_idx = args.index("--output-last-message") + 1
+            output_path = Path(args[out_idx])
+            output_path.write_text('{"ok": true}')
+            created["path"] = output_path
+            self.returncode = 0
+            self.stdout = StringIO("")
+            self.stderr = StringIO("")
 
-    monkeypatch.setattr("orchestration.services.provider_runtime.subprocess.run", fake_run)
+        def wait(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr("orchestration.services.provider_runtime.subprocess.Popen", FakePopen)
 
     service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
     result = service._run_codex(model="gpt-5.3-codex", prompt="do it")
     assert result.provider == "codex"
     assert result.output == '{"ok": true}'
     assert created["path"].exists() is False
+
+
+def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, capsys) -> None:
+    cfg = SimpleNamespace(
+        v3_enable_caffeinate=False,
+        build_max_autopilot_continues=3,
+        v3_longrun_timeout_minutes=5,
+        v3_provider="copilot",
+        v3_model="claude-sonnet-4.6",
+    )
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    class FakePopen:
+        def __init__(self, args, cwd, stdout, stderr, text, bufsize):
+            _ = (args, cwd, stdout, stderr, text, bufsize)
+            self.returncode = 0
+            self.stdout = StringIO('{"ok": true}\n')
+            self.stderr = StringIO("thinking...\n")
+
+        def wait(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr("orchestration.services.provider_runtime.subprocess.Popen", FakePopen)
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    result = service._run_copilot(model="claude-sonnet-4.6", prompt="do it")
+
+    captured = capsys.readouterr()
+    assert '{"ok": true}' in captured.out
+    assert "thinking..." in captured.err
+    assert result.output == '{"ok": true}'
 
 
 def test_deterministic_fix_branches(monkeypatch, tmp_path) -> None:
