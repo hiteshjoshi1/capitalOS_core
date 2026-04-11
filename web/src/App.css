@@ -1623,6 +1623,298 @@ a.btn {
   padding: 4px 0;
 }
 
+/* ─── Forms ──────────────────────────────────────────────────────── */
+
+.formInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel2) 90%, white 10%);
+  color: var(--text);
+  padding: 11px 12px;
+  font: inherit;
+}
+
+.formInput::placeholder {
+  color: color-mix(in srgb, var(--muted) 86%, transparent 14%);
+}
+
+.formInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent 82%);
+}
+
+[data-theme="light"] .formInput {
+  background: #fffdfa;
+}
+
+/* ─── AI Sage ────────────────────────────────────────────────────── */
+
+.aiSagePage {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.aiSageChatPage {
+  min-height: calc(100vh - 210px);
+}
+
+.aiSageTimeline {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  padding-bottom: 8px;
+}
+
+.aiSageBubbleCard,
+.aiSageAnswerCard {
+  display: grid;
+  gap: 14px;
+}
+
+.aiSageWelcomeCard {
+  max-width: 820px;
+  display: grid;
+  gap: 12px;
+}
+
+.aiSageLead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.aiSagePromptEcho {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.aiSageComposerDock {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  background:
+    linear-gradient(180deg, rgba(9, 15, 25, 0) 0%, var(--bg) 24%);
+}
+
+[data-theme="light"] .aiSageComposerDock {
+  background:
+    linear-gradient(180deg, rgba(244, 239, 230, 0) 0%, var(--bg) 24%);
+}
+
+.aiSageComposerBar {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border-radius: 20px;
+}
+
+.aiSageComposerPlus {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 22px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aiSageComposerHint {
+  font-size: 12px;
+  padding: 0 6px 2px;
+}
+
+.aiSagePromptMenu {
+  width: min(760px, 100%);
+  display: grid;
+  gap: 10px;
+}
+
+.aiSagePromptMenuList {
+  display: grid;
+  gap: 8px;
+}
+
+.aiSagePromptInput {
+  min-height: 132px;
+  resize: vertical;
+}
+
+.aiSagePromptInputCompact {
+  min-height: 44px;
+  max-height: 160px;
+  padding-top: 11px;
+  padding-bottom: 11px;
+  resize: none;
+  border-radius: 16px;
+}
+
+.aiSageExampleRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiSageTokenBtn {
+  padding: 7px 10px;
+}
+
+.aiSageExampleBtn {
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  justify-content: flex-start;
+}
+
+.aiSageError {
+  border: 1px solid color-mix(in srgb, var(--bad) 60%, var(--line) 40%);
+  background: color-mix(in srgb, var(--bad) 12%, transparent 88%);
+  color: var(--bad);
+  border-radius: 14px;
+  padding: 11px 12px;
+  font-size: 13px;
+}
+
+.aiSageAnswerText {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.aiSageNote {
+  margin: 0;
+}
+
+.aiSageTokenRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiSageAuthorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.aiSageAuthorCard {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--surface-glow);
+  display: grid;
+  gap: 8px;
+}
+
+.aiSageAuthorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.aiSageAuthorMeta,
+.aiSageAuthorWorldview,
+.aiSageAuthorReasons {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.aiSagePill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line) 70%);
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent 30%);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.aiSageSourcesHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.aiSageSourcesHint {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.aiSageEvidenceList {
+  display: grid;
+  gap: 12px;
+}
+
+.aiSageEvidenceCard {
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.aiSageEvidenceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.aiSageEvidenceRank {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.aiSageEvidenceText,
+.aiSageEvidenceMeta {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.aiSageEvidenceText {
+  font-size: 14px;
+}
+
+.aiSageEvidenceMeta {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+  .aiSageChatPage {
+    min-height: calc(100vh - 190px);
+  }
+
+  .aiSageComposerBar {
+    grid-template-columns: 1fr;
+  }
+
+  .aiSageComposerPlus {
+    width: 36px;
+    height: 36px;
+  }
+
+  .aiSageSourcesHeader {
+    flex-direction: column;
+  }
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────── */
 
 /* hidden on desktop, shown on mobile as fallback User menu trigger */

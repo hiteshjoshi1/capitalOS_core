@@ -76,6 +76,43 @@ Development note:
 - deterministic mock embeddings are still acceptable for tests and local development
 - mock embeddings are not meaningful for evaluating real retrieval quality
 
+## Inference Runtime
+
+Retrieval and embeddings are not the same as answer-generation.
+
+For `AI Sage` and wisdom-profile synthesis, the backend can use a separate
+inference model. The runtime is externalized via env:
+
+| Variable | Purpose |
+|----------|---------|
+| `INFERENCE_LLM_PROVIDER` | Answer-generation provider selector. Current supported values: `openrouter`, `openai` |
+| `INFERENCE_LLM_MODEL` | Model used for `/rag/query` and author wisdom synthesis |
+| `INFERENCE_LLM_API_KEY` | Generic API key for the configured inference provider |
+| `INFERENCE_LLM_BASE_URL` | Optional override for the provider base URL |
+| `INFERENCE_LLM_HTTP_REFERER` | Optional OpenRouter referer header |
+| `INFERENCE_LLM_APP_NAME` | Optional app name header, useful for OpenRouter |
+
+If no inference provider/key is configured:
+
+- `/rag/query` degrades to deterministic
+  evidence summaries and wisdom profiles use template synthesis
+
+Recommended current default:
+
+```env
+INFERENCE_LLM_PROVIDER=openrouter
+INFERENCE_LLM_MODEL=openai/gpt-4o-mini
+INFERENCE_LLM_API_KEY=your_openrouter_api_key
+INFERENCE_LLM_BASE_URL=https://openrouter.ai/api/v1
+INFERENCE_LLM_APP_NAME=CapitalOS
+```
+
+OpenRouter model naming examples:
+
+- `anthropic/claude-sonnet-4.5`
+- `openai/gpt-4o-mini`
+- `google/gemini-2.5-pro`
+
 ---
 
 ## Author Registry

@@ -42,7 +42,7 @@ vi.mock("../routes/WealthOverview.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Dividends.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Loans.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Companies.tsx", () => ({ default: () => null }));
-vi.mock("../routes/AIGuru.tsx", () => ({ default: () => null }));
+vi.mock("../routes/AISage.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Settings.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Platforms.tsx", () => ({ default: () => null }));
 vi.mock("../context/ThemeContext.tsx", () => ({ ThemeProvider: ({ children }: { children: React.ReactNode }) => children }));
@@ -65,4 +65,3 @@ describe("main entry", () => {
     expect(renderSpy).toHaveBeenCalledTimes(1);
   });
 });
-

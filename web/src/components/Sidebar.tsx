@@ -30,7 +30,7 @@ const NAV_SECTIONS: NavSection[] = [
     children: [
       { label: "Companies", to: "/companies" },
       { label: "Alerts", to: "/alerts" },
-      { label: "AI Guru", to: "/ai-guru" },
+      { label: "AI Sage", to: "/ai-sage" },
     ],
   },
   {

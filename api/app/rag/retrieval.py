@@ -1,12 +1,11 @@
 """
-Retrieval smoke layer for RAG Phase 1.
+Semantic retrieval layer for RAG Phase 1 + Phase 2.
 
 Provides semantic similarity search over stored embeddings using pgvector's
-cosine distance operator (<=>).  Returns citation-ready results so callers
-can confirm the corpus was embedded and stored correctly.
+cosine distance operator (<=>).  Supports author, domain, and expertise-tag
+filters for Phase 2 author-aware retrieval.
 
-This is a smoke/validation path, not a full answer-generation system.
-Full lens/synthesis pipelines are out of scope for Phase 1.
+Returns citation-ready payloads with full metadata lineage.
 """
 
 from __future__ import annotations
@@ -23,6 +22,7 @@ from app.rag.ingestion.embedder import embed_query
 log = logging.getLogger(__name__)
 
 SMOKE_DEFAULT_TOP_K = 5
+DEFAULT_TOP_K = 5
 
 
 @dataclass
@@ -37,7 +37,7 @@ class RetrievedChunk:
 
     @property
     def similarity(self) -> float:
-        """Cosine similarity (1 − distance)."""
+        """Cosine similarity (1 - distance)."""
         return round(1.0 - self.cosine_distance, 6)
 
     def as_dict(self) -> dict[str, Any]:
@@ -56,32 +56,54 @@ def retrieve_similar_chunks(
     query: str,
     db: Session,
     *,
-    top_k: int = SMOKE_DEFAULT_TOP_K,
+    top_k: int = DEFAULT_TOP_K,
     author_id: Optional[str] = None,
+    author_ids: Optional[list[str]] = None,
     source_type: Optional[str] = None,
+    domains: Optional[list[str]] = None,
+    expertise_tags: Optional[list[str]] = None,
 ) -> list[RetrievedChunk]:
     """
     Embed query and return the top-k most similar chunks.
 
-    Optional filters:
-      author_id   — restrict to a single author's corpus
-      source_type — restrict to 'html', 'pdf', 'text', or 'manual'
+    Filters:
+      author_id      -- restrict to a single author's corpus
+      author_ids     -- restrict to a selected set of authors
+      source_type    -- restrict to 'html', 'pdf', 'text', or 'manual'
+      domains        -- restrict to authors in these domain categories (Postgres only)
+      expertise_tags -- restrict to authors with these expertise tags (Postgres only)
 
     Returns an empty list if no embeddings exist yet.
     """
     query_vector = embed_query(query)
     vector_literal = "[" + ",".join(str(v) for v in query_vector) + "]"
 
-    # Build optional WHERE clauses for metadata filters on the source.
-    where_clauses = []
+    where_clauses: list[str] = []
     params: dict[str, Any] = {"top_k": top_k, "query_vec": vector_literal}
 
     if author_id:
         where_clauses.append("rs.author_id = :author_id")
         params["author_id"] = author_id
+    elif author_ids:
+        author_id_conditions = " OR ".join(
+            f"rs.author_id = :author_id_{i}" for i in range(len(author_ids))
+        )
+        where_clauses.append(f"({author_id_conditions})")
+        for i, selected_author_id in enumerate(author_ids):
+            params[f"author_id_{i}"] = selected_author_id
     if source_type:
         where_clauses.append("rs.source_type = :source_type")
         params["source_type"] = source_type
+    if domains:
+        domain_conditions = " OR ".join(f":domain_{i} = ANY(ra.domains)" for i in range(len(domains)))
+        where_clauses.append(f"({domain_conditions})")
+        for i, d in enumerate(domains):
+            params[f"domain_{i}"] = d
+    if expertise_tags:
+        tag_conditions = " OR ".join(f":tag_{i} = ANY(ra.expertise_tags)" for i in range(len(expertise_tags)))
+        where_clauses.append(f"({tag_conditions})")
+        for i, t in enumerate(expertise_tags):
+            params[f"tag_{i}"] = t
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -99,6 +121,7 @@ def retrieve_similar_chunks(
         JOIN rag_chunks    rc ON rc.id = re.chunk_id
         JOIN rag_documents rd ON rd.id = rc.document_id
         JOIN rag_sources   rs ON rs.id = rd.source_id
+        JOIN rag_authors   ra ON ra.id = rs.author_id
         {where_sql}
         ORDER BY cosine_distance ASC
         LIMIT :top_k

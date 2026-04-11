@@ -118,6 +118,6 @@ def route_after_agent_run(state: GraphState) -> str:
 
 def route_after_deterministic_gates(state: GraphState) -> str:
     pipeline = load_pipeline_state(state)
-    if pipeline.workflow_status in {"blocked", "failed"}:
+    if pipeline.workflow_status in {"blocked", "failed", "waiting_for_human"}:
         return "__end__"
     return "ship"

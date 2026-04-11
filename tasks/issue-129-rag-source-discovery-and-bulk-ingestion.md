@@ -14,6 +14,7 @@
 - Decision 4: `rag_sources` remains the single source of truth for discovered and registered source URLs.
 - Decision 5: `rag_ingestion_jobs` remains the single source of truth for ingestion attempts, outcomes, and failure categories.
 - Decision 6: The initial registry should cover the full PRD seed author set, even if source discovery rules for some authors start simple and are expanded later.
+- Decision 7: This issue is infrastructure only. Discovery/ingestion controls should not leak into the main end-user `AI Sage` experience as primary UX levers.
 
 ## Initial Author Registry Target
 

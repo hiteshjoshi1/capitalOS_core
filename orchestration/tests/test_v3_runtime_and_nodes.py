@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -232,7 +233,7 @@ def test_deterministic_gates_success(tmp_path, monkeypatch) -> None:
 
     result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
     pipeline = PipelineState.model_validate(result["pipeline"])
-    assert pipeline.workflow_status == "running"
+    assert pipeline.workflow_status == "waiting_for_human"
     assert pipeline.build_output is not None
     assert pipeline.blockers == []
 
@@ -318,6 +319,8 @@ def test_provider_runtime_complete_structured_raises_on_primary_failure(monkeypa
         v3_enable_caffeinate=False,
         build_max_autopilot_continues=3,
         v3_longrun_timeout_minutes=5,
+        v3_inactivity_timeout_minutes=30,
+        v3_repair_enabled=False,
         v3_provider="copilot",
         v3_model="gpt-5.3-codex",
     )
@@ -332,7 +335,7 @@ def test_provider_runtime_complete_structured_raises_on_primary_failure(monkeypa
 
     monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
     service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
-    with pytest.raises(RuntimeError, match="Provider `copilot` failed for v3 run"):
+    with pytest.raises(RuntimeError, match="subprocess failed"):
         service.complete_structured("prompt", AgentRunOutput)
 
     assert calls == ["copilot"]
@@ -343,6 +346,8 @@ def test_provider_runtime_run_provider_dispatch_and_prefix(monkeypatch, tmp_path
         v3_enable_caffeinate=True,
         build_max_autopilot_continues=3,
         v3_longrun_timeout_minutes=5,
+        v3_inactivity_timeout_minutes=30,
+        v3_repair_enabled=False,
         v3_provider="copilot",
         v3_model="gpt-5.3-codex",
     )
@@ -366,27 +371,111 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
         v3_enable_caffeinate=False,
         build_max_autopilot_continues=3,
         v3_longrun_timeout_minutes=5,
+        v3_inactivity_timeout_minutes=30,
+        v3_repair_enabled=False,
         v3_provider="codex",
         v3_model="gpt-5.3-codex",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     created: dict[str, Path] = {}
 
-    def fake_run(args, cwd, capture_output, text, timeout):
-        _ = (cwd, capture_output, text, timeout)
-        out_idx = args.index("--output-last-message") + 1
-        output_path = Path(args[out_idx])
-        output_path.write_text('{"ok": true}')
-        created["path"] = output_path
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
+    class FakePopen:
+        def __init__(self, args, cwd, stdout, stderr, text, bufsize):
+            _ = (cwd, stdout, stderr, text, bufsize)
+            out_idx = args.index("--output-last-message") + 1
+            output_path = Path(args[out_idx])
+            output_path.write_text('{"ok": true}')
+            created["path"] = output_path
+            self.returncode = 0
+            self.stdout = StringIO("")
+            self.stderr = StringIO("")
 
-    monkeypatch.setattr("orchestration.services.provider_runtime.subprocess.run", fake_run)
+        def wait(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr("orchestration.services.provider_runtime.subprocess.Popen", FakePopen)
 
     service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
     result = service._run_codex(model="gpt-5.3-codex", prompt="do it")
     assert result.provider == "codex"
     assert result.output == '{"ok": true}'
     assert created["path"].exists() is False
+
+
+def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, capsys) -> None:
+    cfg = SimpleNamespace(
+        v3_enable_caffeinate=False,
+        build_max_autopilot_continues=3,
+        v3_longrun_timeout_minutes=5,
+        v3_inactivity_timeout_minutes=30,
+        v3_repair_enabled=False,
+        v3_provider="copilot",
+        v3_model="claude-sonnet-4.6",
+    )
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    class FakePopen:
+        def __init__(self, args, cwd, stdout, stderr, text, bufsize):
+            _ = (args, cwd, stdout, stderr, text, bufsize)
+            self.returncode = 0
+            self.stdout = StringIO('{"ok": true}\n')
+            self.stderr = StringIO("thinking...\n")
+
+        def wait(self):
+            return self.returncode
+
+        def terminate(self):
+            self.returncode = -15
+
+        def kill(self):
+            self.returncode = -9
+
+    monkeypatch.setattr("orchestration.services.provider_runtime.subprocess.Popen", FakePopen)
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    result = service._run_copilot(model="claude-sonnet-4.6", prompt="do it")
+
+    captured = capsys.readouterr()
+    assert '{"ok": true}' in captured.out
+    assert "thinking..." in captured.err
+    assert result.output == '{"ok": true}'
+
+
+def test_provider_runtime_complete_structured_uses_copilot_session_fallback(monkeypatch, tmp_path) -> None:
+    cfg = SimpleNamespace(
+        v3_enable_caffeinate=False,
+        build_max_autopilot_continues=3,
+        v3_longrun_timeout_minutes=5,
+        v3_inactivity_timeout_minutes=30,
+        v3_repair_enabled=False,
+        v3_provider="copilot",
+        v3_model="claude-sonnet-4.6",
+    )
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    def fake_run_provider(self, provider, *, model, prompt):
+        _ = (self, provider, model, prompt)
+        return ProviderRunResult(
+            provider="copilot",
+            model="claude-sonnet-4.6",
+            output="tool chatter\npartial json {\n",
+            diagnostics=["provider=copilot"],
+            fallback_output='```json\n{"summary":"ok","plan_summary":"done","architecture_decisions":[],"risks":[],"open_questions":[],"acceptance_criteria":[],"planned_paths":[],"checklist":[],"changed_files":[],"extra_changed_files":[],"implementation_notes":[],"verification_commands_run":[],"unresolved_failures":[],"acceptance_criteria_checks":[],"semantic_intent_achieved":true,"risk_flags":[]}\n```',
+        )
+
+    monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    parsed, result = service.complete_structured("prompt", AgentRunOutput)
+
+    assert parsed.summary == "ok"
+    assert result.provider == "copilot"
 
 
 def test_deterministic_fix_branches(monkeypatch, tmp_path) -> None:
@@ -411,3 +500,187 @@ def test_deterministic_fix_branches(monkeypatch, tmp_path) -> None:
     assert other.applied is False
     assert "make web-deps" in calls
     assert "cd web && npx playwright install" in calls
+
+
+# ---- New tests for v3 repair cycle, inactivity, and happy-path state ----
+
+def _make_cfg(*, repair_enabled: bool = True) -> SimpleNamespace:
+    return SimpleNamespace(
+        v3_enable_caffeinate=False,
+        build_max_autopilot_continues=3,
+        v3_longrun_timeout_minutes=5,
+        v3_inactivity_timeout_minutes=30,
+        v3_repair_enabled=repair_enabled,
+        v3_provider="copilot",
+        v3_model="claude-sonnet-4.6",
+    )
+
+
+def _minimal_agent_output_json() -> str:
+    return (
+        '{"summary":"ok","plan_summary":"done","architecture_decisions":[],'
+        '"risks":[],"open_questions":[],"acceptance_criteria":[],'
+        '"planned_paths":[],"checklist":[],"changed_files":[],'
+        '"extra_changed_files":[],"implementation_notes":[],'
+        '"verification_commands_run":[],"unresolved_failures":[],'
+        '"acceptance_criteria_checks":[],"semantic_intent_achieved":true,"risk_flags":[]}'
+    )
+
+
+def test_provider_runtime_repair_succeeds_after_malformed_output(monkeypatch, tmp_path) -> None:
+    """When primary parse fails but repair produces valid JSON, complete_structured succeeds."""
+    cfg = _make_cfg(repair_enabled=True)
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("")  # empty but exists
+
+    def fake_run_provider(self, provider, *, model, prompt):
+        return ProviderRunResult(
+            provider="copilot",
+            model=model,
+            output="the model forgot to emit JSON brr",
+            diagnostics=[],
+            session_events_path=str(events_path),
+        )
+
+    repaired: list[str] = []
+
+    def fake_run_copilot_repair(self, *, model, prompt):
+        repaired.append(prompt)
+        return _minimal_agent_output_json()
+
+    monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
+    monkeypatch.setattr(ProviderRuntimeService, "_run_copilot_repair", fake_run_copilot_repair)
+    monkeypatch.setattr(
+        "orchestration.services.provider_runtime.extract_session_repair_context",
+        lambda path: "Agent read files and wrote api/app/main.py",
+    )
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    parsed, _ = service.complete_structured("do work", AgentRunOutput)
+
+    assert parsed.summary == "ok"
+    assert len(repaired) == 1
+    assert "do work" in repaired[0]
+
+
+def test_provider_runtime_repair_disabled_raises_on_malformed_output(monkeypatch, tmp_path) -> None:
+    """When repair is disabled and output is malformed, complete_structured raises immediately."""
+    cfg = _make_cfg(repair_enabled=False)
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    def fake_run_provider(self, provider, *, model, prompt):
+        return ProviderRunResult(
+            provider="copilot",
+            model=model,
+            output="not json at all",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    with pytest.raises(RuntimeError, match="malformed structured output"):
+        service.complete_structured("do work", AgentRunOutput)
+
+
+def test_provider_runtime_repair_fails_raises_with_repair_message(monkeypatch, tmp_path) -> None:
+    """When repair also produces bad JSON, raise with a 'repair also failed' message."""
+    cfg = _make_cfg(repair_enabled=True)
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    events_path = tmp_path / "events.jsonl"
+    events_path.write_text("")
+
+    def fake_run_provider(self, provider, *, model, prompt):
+        return ProviderRunResult(
+            provider="copilot",
+            model=model,
+            output="still not json",
+            diagnostics=[],
+            session_events_path=str(events_path),
+        )
+
+    def fake_run_copilot_repair(self, *, model, prompt):
+        return "also not valid json after repair"
+
+    monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
+    monkeypatch.setattr(ProviderRuntimeService, "_run_copilot_repair", fake_run_copilot_repair)
+    monkeypatch.setattr(
+        "orchestration.services.provider_runtime.extract_session_repair_context",
+        lambda path: "some context",
+    )
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    with pytest.raises(RuntimeError, match="repair also failed"):
+        service.complete_structured("do work", AgentRunOutput)
+
+
+def test_provider_runtime_subprocess_failure_has_distinct_message(monkeypatch, tmp_path) -> None:
+    """Subprocess RuntimeError is distinct from malformed-output error."""
+    cfg = _make_cfg()
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    def fake_run_provider(self, provider, *, model, prompt):
+        raise RuntimeError("exit code 1")
+
+    monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    with pytest.raises(RuntimeError, match="subprocess failed"):
+        service.complete_structured("do work", AgentRunOutput)
+
+
+def test_deterministic_gates_success_sets_waiting_for_human(tmp_path, monkeypatch) -> None:
+    """After gates pass cleanly the workflow waits for the human to run task-ship."""
+    state = _v3_state(tmp_path)
+    state.agent_run_output = _agent_output()
+
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "get_config",
+        lambda: SimpleNamespace(
+            max_retries=3,
+            v3_require_pre_ship_human_on_high_risk=False,
+        ),
+    )
+    _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
+
+    result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "waiting_for_human"
+    assert pipeline.blockers == []
+    assert pipeline.v3_permanent_failure_reason is None
+
+
+def test_render_next_action_ready_to_ship(tmp_path) -> None:
+    """_next_action shows the task-ship hint when gates passed cleanly."""
+    from orchestration.render import render_execution_journal
+    from orchestration.models.agent_run import AgentRunOutput as ARO
+
+    state = _v3_state(tmp_path)
+    state.workflow_status = "waiting_for_human"
+    state.current_stage = "deterministic_gates"
+    state.agent_run_output = _agent_output()
+    state.blockers = []
+
+    rendered = render_execution_journal(state)
+    assert "task-ship" in rendered
+    assert "make task-ship" in rendered
+
+
+def test_render_next_action_high_risk_gate(tmp_path) -> None:
+    """_next_action shows high-risk approval hint when blockers are present."""
+    from orchestration.render import render_execution_journal
+
+    state = _v3_state(tmp_path)
+    state.workflow_status = "waiting_for_human"
+    state.current_stage = "deterministic_gates"
+    state.agent_run_output = _agent_output()
+    state.blockers = ["High-risk finding: potential secret exposure."]
+
+    rendered = render_execution_journal(state)
+    assert "high-risk" in rendered.lower() or "High-risk" in rendered
+

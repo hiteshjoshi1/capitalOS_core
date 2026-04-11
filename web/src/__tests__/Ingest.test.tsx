@@ -3,7 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
-import Ingest, { hasOrderedHeaderSubset, resolvePlatformParser } from "../routes/Ingest";
+import Ingest from "../routes/Ingest";
+import { hasOrderedHeaderSubset, resolvePlatformParser } from "../routes/ingestUtils";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
 

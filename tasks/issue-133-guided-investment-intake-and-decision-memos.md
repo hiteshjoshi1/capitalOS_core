@@ -13,6 +13,7 @@
 - The system should not assume it already has enough context.
 - If evidence or user-provided information is insufficient, it should ask follow-up questions rather than pretending certainty.
 - Question generation should come from author lenses and missing-data analysis, not generic “tell me more” prompts.
+- Follow-up questions surfaced by prior corpus reasoning should be shown to the user for selection/response; they should not automatically trigger external research behind the user's back.
 - The memo is the first-class product object.
 - Memo content should preserve:
   - question
@@ -29,6 +30,9 @@
 ## Acceptance Criteria
 - [ ] `AI Sage` can ask targeted follow-up questions when the query is under-specified.
 - [ ] The system can generate a missing-information checklist for a new investment or business question.
+- [ ] Follow-up prompts can clearly distinguish:
+  - questions the user should answer
+  - questions the user may choose to send into later external/company research flows
 - [ ] Add persisted decision memo object(s) and API surface to create, fetch, and list memos.
 - [ ] Memo draft includes:
   - decision question

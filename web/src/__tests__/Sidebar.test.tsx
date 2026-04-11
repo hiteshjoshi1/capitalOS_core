@@ -106,7 +106,8 @@ describe("Sidebar", () => {
     expect(toggle).toHaveAttribute("aria-expanded", "true");
     expect(screen.getByRole("link", { name: "Companies" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Alerts" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "AI Guru" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "AI Sage" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "AI Guru" })).not.toBeInTheDocument();
   });
 
   it("renders Operations children when section is expanded", async () => {

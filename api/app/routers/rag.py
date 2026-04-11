@@ -551,3 +551,216 @@ def _job_out(job: RagIngestionJob) -> JobOut:
         finished_at=job.finished_at,
         created_at=job.created_at,
     )
+
+
+# ── Phase 2: Author wisdom profiles ───────────────────────────────────────────
+
+
+class ProfileCitationOut(BaseModel):
+    chunk_id: str
+    citation_context: Optional[str]
+
+
+class AuthorProfileOut(BaseModel):
+    author_id: str
+    author_name: str
+    worldview: Optional[str]
+    key_maxims: list[str]
+    strengths: list[str]
+    weaknesses: list[str]
+    favored_decision_variables: list[str]
+    anti_patterns: list[str]
+    generation_model: str
+    corpus_chunk_count: int
+    generated_at: Optional[Any]
+    citations: list[ProfileCitationOut]
+
+
+class ProfileRefreshResultOut(BaseModel):
+    author_id: str
+    status: str
+    chunk_count: Optional[int] = None
+    error: Optional[str] = None
+
+
+class RefreshProfilesOut(BaseModel):
+    results: list[ProfileRefreshResultOut]
+    total: int
+    ok: int
+    errors: int
+
+
+@router.post("/authors/refresh-profiles", response_model=RefreshProfilesOut)
+def refresh_profiles(db: Session = Depends(get_db)):
+    """
+    Generate or refresh author wisdom profiles for all enabled authors.
+
+    Uses LLM synthesis when INFERENCE_LLM_PROVIDER / INFERENCE_LLM_API_KEY are configured; falls back to
+    deterministic template synthesis otherwise.  Idempotent — safe to call
+    repeatedly after new corpus ingestion.
+    """
+    from app.rag.wisdom import refresh_all_profiles
+
+    results = refresh_all_profiles(db)
+    ok_count = sum(1 for r in results if r["status"] == "ok")
+    err_count = len(results) - ok_count
+    return RefreshProfilesOut(
+        results=[ProfileRefreshResultOut(**r) for r in results],
+        total=len(results),
+        ok=ok_count,
+        errors=err_count,
+    )
+
+
+@router.get("/authors/{author_id}/profile", response_model=AuthorProfileOut)
+def get_author_profile(author_id: str, db: Session = Depends(get_db)):
+    """
+    Return the persisted wisdom profile for an author.
+
+    Returns 404 if no profile has been generated yet.
+    Run POST /rag/authors/refresh-profiles to generate profiles.
+    """
+    from app.models.rag import RagAuthorProfile
+
+    author = db.get(RagAuthor, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail=f"Author '{author_id}' not found")
+
+    profile = db.query(RagAuthorProfile).filter(RagAuthorProfile.author_id == author_id).first()
+    if not profile:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No profile for '{author_id}'. Run POST /rag/authors/refresh-profiles first.",
+        )
+
+    citations = [
+        ProfileCitationOut(chunk_id=str(c.chunk_id), citation_context=c.citation_context)
+        for c in (profile.citations or [])
+    ]
+
+    return AuthorProfileOut(
+        author_id=author_id,
+        author_name=author.name,
+        worldview=profile.worldview,
+        key_maxims=list(profile.key_maxims or []),
+        strengths=list(profile.strengths or []),
+        weaknesses=list(profile.weaknesses or []),
+        favored_decision_variables=list(profile.favored_decision_variables or []),
+        anti_patterns=list(profile.anti_patterns or []),
+        generation_model=profile.generation_model,
+        corpus_chunk_count=profile.corpus_chunk_count,
+        generated_at=profile.generated_at,
+        citations=citations,
+    )
+
+
+# ── Phase 2: Full retrieval ────────────────────────────────────────────────────
+
+
+class RetrieveIn(BaseModel):
+    query: str
+    top_k: int = 5
+    author_id: Optional[str] = None
+    domains: Optional[list[str]] = None
+    expertise_tags: Optional[list[str]] = None
+
+
+class RetrieveOut(BaseModel):
+    query: str
+    mode: str
+    selected_authors: list[dict]
+    evidence_chunks: list[dict]
+    answer: Optional[str]
+    missing_information: Optional[str]
+    evidence_sufficient: bool
+
+
+@router.post("/retrieve", response_model=RetrieveOut)
+def retrieve(body: RetrieveIn, db: Session = Depends(get_db)):
+    """
+    Semantic retrieval with author selection and citation-ready payloads.
+
+    Performs dynamic author selection based on query relevance, then returns
+    the top-k matching corpus chunks enriched with citation metadata.
+    """
+    from app.rag.query import execute_retrieve
+
+    result = execute_retrieve(
+        body.query,
+        db,
+        top_k=body.top_k,
+        author_id=body.author_id,
+        domains=body.domains,
+        expertise_tags=body.expertise_tags,
+    )
+    return result.as_dict()
+
+
+# ── Phase 2: Grounded query ────────────────────────────────────────────────────
+
+
+class QueryIn(BaseModel):
+    query: str
+    top_k: int = 8
+    author_id: Optional[str] = None
+    domains: Optional[list[str]] = None
+    expertise_tags: Optional[list[str]] = None
+
+
+@router.post("/query", response_model=RetrieveOut)
+def query_authors(body: QueryIn, db: Session = Depends(get_db)):
+    """
+    Author-aware grounded query.
+
+    Dynamically selects relevant authors, retrieves corpus evidence, and
+    synthesizes a grounded short answer. Uses LLM when INFERENCE_LLM_PROVIDER / INFERENCE_LLM_API_KEY are
+    configured; returns an evidence summary otherwise.
+    """
+    from app.rag.query import execute_ask
+
+    result = execute_ask(
+        body.query,
+        db,
+        top_k=body.top_k,
+        author_id=body.author_id,
+        domains=body.domains,
+        expertise_tags=body.expertise_tags,
+    )
+    return result.as_dict()
+
+
+# ── Phase 2: Company context preparation ──────────────────────────────────────
+
+
+class CompanyContextIn(BaseModel):
+    company: str
+    question: str
+    top_k: int = 8
+
+
+class CompanyContextOut(BaseModel):
+    company: str
+    question: str
+    relevant_author_lenses: list[dict]
+    evidence_pack: list[dict]
+    evidence_sufficient: bool
+
+
+@router.post("/analyze/company-context", response_model=CompanyContextOut)
+def company_context(body: CompanyContextIn, db: Session = Depends(get_db)):
+    """
+    Prepare a company analysis context.
+
+    Retrieves corpus evidence relevant to the company and question,
+    returns the most relevant author lenses (with wisdom profile data
+    if available), and structures an evidence pack for later reasoning.
+    """
+    from app.rag.query import execute_company_context
+
+    result = execute_company_context(
+        body.company,
+        body.question,
+        db,
+        top_k=body.top_k,
+    )
+    return result.as_dict()

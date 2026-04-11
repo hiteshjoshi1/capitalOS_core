@@ -18,6 +18,7 @@
 - Author selection remains dynamic. No fixed “Buffett/Munger/Marks every time” behavior.
 - Lens execution should be configuration-driven using author profile + reasoning lens metadata from the config/DB.
 - Each lens output should be explicitly structured, not free-form prose only.
+- The user should be able to see distinct per-author perspectives before they are collapsed into one blended answer.
 - Synthesis must preserve:
   - common ground
   - meaningful disagreements
@@ -28,11 +29,13 @@
   - citation mismatch
   - false consensus
   - weakly grounded conclusions
+- Critic should validate both the per-author outputs and the combined synthesis, not just critique the final answer in isolation.
 - This issue should not yet persist full decision memos. It should generate structured reasoning outputs that can later be saved by issue 133.
 
 ## Acceptance Criteria
 - [ ] `AI Sage` query flow can select relevant authors for a question and run lens-specific reasoning for the selected authors.
 - [ ] Lens outputs are visibly differentiated and grounded in retrieved evidence.
+- [ ] Query responses include explicit per-author perspective sections before the combined synthesis.
 - [ ] Add a synthesis stage that returns:
   - common ground
   - disagreements
@@ -51,6 +54,7 @@
   - lens outputs
   - synthesis
   - critic
+- [ ] If the reasoning flow surfaces follow-up questions or open threads, they are shown to the user as optional next questions rather than automatically triggering external search.
 - [ ] Add backend tests covering:
   - author selection
   - lens routing
