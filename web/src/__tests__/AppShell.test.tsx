@@ -9,7 +9,7 @@ import AppShell from "../components/AppShell";
 import WealthOverview from "../routes/WealthOverview";
 import Loans from "../routes/Loans";
 import Companies from "../routes/Companies";
-import AIGuru from "../routes/AIGuru";
+import AISage from "../routes/AISage";
 import Settings from "../routes/Settings";
 import Platforms from "../routes/Platforms";
 
@@ -120,7 +120,7 @@ describe("Placeholder route smoke tests", () => {
     { path: "/wealth", component: <WealthOverview />, heading: "Wealth Overview" },
     { path: "/loans", component: <Loans />, heading: "Loans" },
     { path: "/companies", component: <Companies />, heading: "Companies" },
-    { path: "/ai-guru", component: <AIGuru />, heading: "AI Guru" },
+    { path: "/ai-sage", component: <AISage />, heading: "AI Sage" },
     { path: "/settings", component: <Settings />, heading: "Settings" },
     { path: "/platforms", component: <Platforms />, heading: "Platforms" },
   ];

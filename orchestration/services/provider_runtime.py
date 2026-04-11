@@ -17,7 +17,11 @@ from pydantic import BaseModel
 from orchestration.models.stage import PipelineStage
 from orchestration.services.config import get_config
 from orchestration.services.console import emit_event
-from orchestration.services.llm import _extract_json_with_fallback
+from orchestration.services.llm import (
+    _extract_json_with_fallback,
+    find_latest_copilot_session,
+    wait_for_latest_assistant_message,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -28,6 +32,8 @@ class ProviderRunResult:
     model: str
     output: str
     diagnostics: list[str]
+    fallback_output: str | None = None
+    session_events_path: str | None = None
 
 
 class ProviderRuntimeService:
@@ -112,6 +118,7 @@ class ProviderRuntimeService:
         return proc.returncode, "".join(stdout_chunks).strip(), "".join(stderr_chunks).strip()
 
     def _run_copilot(self, *, model: str, prompt: str) -> ProviderRunResult:
+        started_at_epoch = time.time()
         args = [
             "copilot",
             "--model",
@@ -131,13 +138,36 @@ class ProviderRuntimeService:
         returncode, output, error = self._run_streaming_command(final_args)
         if returncode != 0:
             raise RuntimeError(error or output or "Copilot provider failed without output.")
+        session_events_path = find_latest_copilot_session(
+            model=model,
+            repo_root=self.repo_root,
+            started_after_epoch=started_at_epoch,
+        )
+        fallback_output = None
+        if session_events_path is not None:
+            fallback_output = wait_for_latest_assistant_message(
+                session_events_path,
+                timeout_seconds=5.0,
+                poll_interval_seconds=0.25,
+                require_json=True,
+            )
         diagnostics = [
             f"provider=copilot",
             f"model={model}",
             f"stdout_chars={len(output)}",
             f"stderr_chars={len(error)}",
         ]
-        return ProviderRunResult(provider="copilot", model=model, output=output, diagnostics=diagnostics)
+        if session_events_path is not None:
+            diagnostics.append(f"session_events={session_events_path}")
+            diagnostics.append(f"session_json_chars={len(fallback_output or '')}")
+        return ProviderRunResult(
+            provider="copilot",
+            model=model,
+            output=output,
+            diagnostics=diagnostics,
+            fallback_output=fallback_output,
+            session_events_path=str(session_events_path) if session_events_path else None,
+        )
 
     def _run_codex(self, *, model: str, prompt: str) -> ProviderRunResult:
         with tempfile.NamedTemporaryFile(prefix="codex-last-message-", suffix=".txt", delete=False) as handle:
@@ -197,7 +227,7 @@ class ProviderRuntimeService:
 
         try:
             run_result = self._run_provider(provider, model=model_name, prompt=prompt)
-            payload = _extract_json_with_fallback(run_result.output)
+            payload = _extract_json_with_fallback(run_result.output, run_result.fallback_output)
             parsed = model_cls.model_validate(payload)
             emit_event(
                 "provider_run_finished",

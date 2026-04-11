@@ -630,6 +630,8 @@ def setup_rag_tables_in_test_db():
     )
     with engine.begin() as conn:
         for table in [
+            "rag_author_profile_citations",
+            "rag_author_profiles",
             "rag_embeddings",
             "rag_chunks",
             "rag_documents",
@@ -873,3 +875,411 @@ class TestRetrievedChunk:
         assert first["source_url"] == "https://berkshirehathaway.com/letters/2024ltr.pdf"
         assert first["source_type"] == "pdf"
         assert "chunk_index" in first
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. Phase 2: Author wisdom profiles (API + unit)
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class TestAuthorSelectionUnit:
+    """Unit tests for dynamic author selection (no DB — uses mock objects)."""
+
+    def test_select_authors_returns_ranked_list(self):
+        from unittest.mock import MagicMock
+        from app.rag.author_selection import select_authors, SelectedAuthor
+
+        author = MagicMock()
+        author.id = "test_author"
+        author.name = "Test Author"
+        author.enabled = True
+        author.domains = ["investing"]
+        author.expertise_tags = ["valuation", "moat"]
+        author.overall_weight = 3.0
+        author.role_type = "investor"
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = [author]
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = [author]
+
+        results = select_authors("capital allocation and moat", db, top_k=4)
+        assert isinstance(results, list)
+        # All items must be SelectedAuthor
+        for r in results:
+            assert isinstance(r, SelectedAuthor)
+
+    def test_select_authors_filters_by_author_id(self):
+        from unittest.mock import MagicMock
+        from app.rag.author_selection import select_authors
+
+        author = MagicMock()
+        author.id = "test_author"
+        author.name = "Test Author"
+        author.enabled = True
+        author.domains = ["investing"]
+        author.expertise_tags = ["valuation"]
+        author.overall_weight = 3.0
+        author.role_type = "investor"
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = [author]
+        db.query.return_value.filter.return_value.all.return_value = [author]
+
+        results = select_authors("valuation", db, author_id="test_author", top_k=4)
+        assert isinstance(results, list)
+
+    def test_select_authors_empty_db(self):
+        from unittest.mock import MagicMock
+        from app.rag.author_selection import select_authors
+
+        db = MagicMock()
+        db.query.return_value.filter.return_value.all.return_value = []
+        db.query.return_value.filter.return_value.filter.return_value.all.return_value = []
+
+        results = select_authors("anything", db)
+        assert results == []
+
+
+class TestWisdomProfileUnit:
+    """Unit tests for wisdom profile template synthesis (no LLM, no DB)."""
+
+    def test_parse_profile_json_accepts_direct_json(self):
+        from app.rag.wisdom import _parse_profile_json
+
+        raw = """
+        {
+          "worldview": "Focus on durable economics.",
+          "key_maxims": ["Stay rational"],
+          "strengths": ["Business quality"],
+          "weaknesses": ["Can miss fast change"],
+          "favored_decision_variables": ["return on capital"],
+          "anti_patterns": ["Avoid leverage"]
+        }
+        """
+
+        result = _parse_profile_json(raw)
+        assert result["worldview"] == "Focus on durable economics."
+        assert result["key_maxims"] == ["Stay rational"]
+
+    def test_parse_profile_json_accepts_fenced_json(self):
+        from app.rag.wisdom import _parse_profile_json
+
+        raw = """```json
+        {
+          "worldview": "Focus on durable economics.",
+          "key_maxims": ["Stay rational"],
+          "strengths": ["Business quality"],
+          "weaknesses": ["Can miss fast change"],
+          "favored_decision_variables": ["return on capital"],
+          "anti_patterns": ["Avoid leverage"]
+        }
+        ```"""
+
+        result = _parse_profile_json(raw)
+        assert result["strengths"] == ["Business quality"]
+
+    def test_parse_profile_json_accepts_wrapped_json(self):
+        from app.rag.wisdom import _parse_profile_json
+
+        raw = """
+        Here's the profile:
+        {
+          "worldview": "Focus on durable economics.",
+          "key_maxims": ["Stay rational"],
+          "strengths": ["Business quality"],
+          "weaknesses": ["Can miss fast change"],
+          "favored_decision_variables": ["return on capital"],
+          "anti_patterns": ["Avoid leverage"]
+        }
+        """
+
+        result = _parse_profile_json(raw)
+        assert result["anti_patterns"] == ["Avoid leverage"]
+
+    def test_template_synthesis_returns_required_keys(self):
+        from unittest.mock import MagicMock
+        from app.rag.wisdom import _generate_profile_template
+
+        author = MagicMock()
+        author.name = "Test Author"
+        author.role_type = "investor"
+        author.domains = ["investing"]
+        author.expertise_tags = ["valuation", "moat", "capital_allocation"]
+
+        card = MagicMock()
+        card.focus_areas = ["business quality", "capital allocation"]
+        card.avoid_patterns = ["macro speculation"]
+        card.biases = ["prefers simplicity"]
+
+        result = _generate_profile_template(author, card, ["Sample corpus text."])
+        assert "worldview" in result
+        assert "key_maxims" in result
+        assert "strengths" in result
+        assert "weaknesses" in result
+        assert "favored_decision_variables" in result
+        assert "anti_patterns" in result
+        assert isinstance(result["key_maxims"], list)
+        assert len(result["key_maxims"]) > 0
+
+    def test_template_synthesis_no_card(self):
+        from unittest.mock import MagicMock
+        from app.rag.wisdom import _generate_profile_template
+
+        author = MagicMock()
+        author.name = "Test Author"
+        author.role_type = "investor"
+        author.domains = ["investing"]
+        author.expertise_tags = ["valuation"]
+
+        result = _generate_profile_template(author, None, [])
+        assert result["worldview"]
+        assert isinstance(result["anti_patterns"], list)
+
+
+class TestInferenceConfigUnit:
+    def test_generic_inference_env_overrides_openai_defaults(self):
+        from app.rag.inference import (
+            inference_api_key,
+            inference_base_url,
+            inference_model,
+            inference_provider,
+        )
+
+        with patch.dict(
+            os.environ,
+            {
+                "INFERENCE_LLM_PROVIDER": "openrouter",
+                "INFERENCE_LLM_MODEL": "anthropic/claude-sonnet-4.5",
+                "INFERENCE_LLM_API_KEY": "generic-key",
+            },
+            clear=False,
+        ):
+            assert inference_provider() == "openrouter"
+            assert inference_model() == "anthropic/claude-sonnet-4.5"
+            assert inference_api_key() == "generic-key"
+            assert inference_base_url() == "https://openrouter.ai/api/v1"
+
+    def test_defaults_to_openrouter_without_env(self):
+        from app.rag.inference import inference_api_key, inference_model, inference_provider
+
+        env = dict(os.environ)
+        env.pop("INFERENCE_LLM_API_KEY", None)
+        env.pop("INFERENCE_LLM_PROVIDER", None)
+        env.pop("INFERENCE_LLM_MODEL", None)
+        with patch.dict(os.environ, env, clear=True):
+            assert inference_provider() == "openrouter"
+            assert inference_model() == "openai/gpt-4o-mini"
+            assert inference_api_key() == ""
+
+
+class TestQueryResultUnit:
+    """Unit tests for query result and evidence dataclasses."""
+
+    def test_query_result_as_dict(self):
+        from app.rag.query import QueryResult
+
+        qr = QueryResult(
+            query="test query",
+            mode="retrieve",
+            selected_authors=[{"author_id": "test", "name": "Test"}],
+            evidence_chunks=[],
+            answer=None,
+            missing_information="No evidence found.",
+            evidence_sufficient=False,
+        )
+        d = qr.as_dict()
+        assert d["query"] == "test query"
+        assert d["mode"] == "retrieve"
+        assert d["evidence_sufficient"] is False
+        assert d["missing_information"] == "No evidence found."
+
+    def test_company_context_result_as_dict(self):
+        from app.rag.query import CompanyContextResult
+
+        ccr = CompanyContextResult(
+            company="TestCo",
+            question="What is the moat?",
+            relevant_author_lenses=[],
+            evidence_pack=[],
+            evidence_sufficient=False,
+        )
+        d = ccr.as_dict()
+        assert d["company"] == "TestCo"
+        assert d["question"] == "What is the moat?"
+        assert isinstance(d["relevant_author_lenses"], list)
+        assert isinstance(d["evidence_pack"], list)
+
+    def test_execute_retrieve_constrains_to_selected_authors(self):
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from app.rag import query as query_module
+
+        db = MagicMock()
+        selected = [
+            SimpleNamespace(
+                author_id="warren_buffett",
+                name="Warren Buffett",
+                score=5.0,
+                domains=["investing"],
+                expertise_tags=["capital_allocation"],
+                overall_weight=4.0,
+                role_type="investor",
+                match_reason=["domain_match:investing"],
+            ),
+            SimpleNamespace(
+                author_id="nick_sleep",
+                name="Nick Sleep",
+                score=4.0,
+                domains=["investing"],
+                expertise_tags=["customer_focus"],
+                overall_weight=3.0,
+                role_type="investor",
+                match_reason=["domain_match:investing"],
+            ),
+        ]
+
+        original_select_authors = query_module.select_authors
+        original_retrieve = query_module.retrieve_similar_chunks
+        try:
+            query_module.select_authors = lambda *args, **kwargs: selected
+
+            captured: dict[str, object] = {}
+
+            def fake_retrieve(*args, **kwargs):
+                captured.update(kwargs)
+                return []
+
+            query_module.retrieve_similar_chunks = fake_retrieve
+            query_module.execute_retrieve("capital allocation", db, top_k=5)
+        finally:
+            query_module.select_authors = original_select_authors
+            query_module.retrieve_similar_chunks = original_retrieve
+
+        assert captured["author_ids"] == ["warren_buffett", "nick_sleep"]
+
+
+class TestRagPhase2API:
+    """API-level tests for Phase 2 endpoints via TestClient (SQLite, no pgvector)."""
+
+    def _ensure_author(self, client, rag_yaml_file):
+        with patch.dict(os.environ, {"RAG_AUTHORS_CONFIG": rag_yaml_file}):
+            client.post("/rag/authors/sync-config")
+
+    def test_refresh_profiles_returns_results(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post("/rag/authors/refresh-profiles")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "results" in body
+        assert "total" in body
+        assert "ok" in body
+        assert "errors" in body
+        assert isinstance(body["results"], list)
+
+    def test_refresh_profiles_result_has_author_id(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post("/rag/authors/refresh-profiles")
+        assert resp.status_code == 200
+        body = resp.json()
+        ids = [r["author_id"] for r in body["results"]]
+        assert "test_author" in ids
+
+    def test_get_author_profile_after_refresh(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        client.post("/rag/authors/refresh-profiles")
+        resp = client.get("/rag/authors/test_author/profile")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["author_id"] == "test_author"
+        assert "worldview" in body
+        assert "key_maxims" in body
+        assert "strengths" in body
+        assert "weaknesses" in body
+        assert "favored_decision_variables" in body
+        assert "anti_patterns" in body
+        assert "citations" in body
+        assert isinstance(body["key_maxims"], list)
+
+    def test_get_author_profile_not_found(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.get("/rag/authors/nobody_known/profile")
+        assert resp.status_code == 404
+
+    def test_get_author_profile_no_profile_yet(self, client, rag_yaml_file):
+        """Without refresh, profile endpoint 404s for valid author."""
+        self._ensure_author(client, rag_yaml_file)
+        # disabled_author has no profile generated — and is not enabled so won't appear
+        resp = client.get("/rag/authors/disabled_author/profile")
+        assert resp.status_code == 404
+
+    def test_retrieve_endpoint_returns_expected_shape(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post(
+            "/rag/retrieve",
+            json={"query": "capital allocation and moat", "top_k": 5},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "query" in body
+        assert "mode" in body
+        assert "selected_authors" in body
+        assert "evidence_chunks" in body
+        assert "evidence_sufficient" in body
+        assert body["mode"] == "retrieve"
+        assert isinstance(body["selected_authors"], list)
+        assert isinstance(body["evidence_chunks"], list)
+
+    def test_retrieve_endpoint_with_author_filter(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post(
+            "/rag/retrieve",
+            json={"query": "moat", "top_k": 3, "author_id": "test_author"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "evidence_chunks" in body
+
+    def test_query_endpoint_returns_expected_shape(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post(
+            "/rag/query",
+            json={"query": "What would a value investor look for in a business?", "top_k": 5},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "query" in body
+        assert "mode" in body
+        assert "selected_authors" in body
+        assert "evidence_chunks" in body
+        assert "evidence_sufficient" in body
+        assert body["mode"] == "ask"
+
+    def test_query_endpoint_returns_missing_info_when_no_corpus(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post(
+            "/rag/query",
+            json={"query": "very specific obscure query with no corpus data xyz123"},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        # Either evidence_sufficient=False or missing_information is set
+        if not body["evidence_sufficient"]:
+            assert body["missing_information"] is not None or body["answer"] is None
+
+    def test_company_context_endpoint_returns_expected_shape(self, client, rag_yaml_file):
+        self._ensure_author(client, rag_yaml_file)
+        resp = client.post(
+            "/rag/analyze/company-context",
+            json={"company": "ExampleCo", "question": "What author lenses are relevant?", "top_k": 5},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "company" in body
+        assert "question" in body
+        assert "relevant_author_lenses" in body
+        assert "evidence_pack" in body
+        assert "evidence_sufficient" in body
+        assert body["company"] == "ExampleCo"
+        assert isinstance(body["relevant_author_lenses"], list)
+        assert isinstance(body["evidence_pack"], list)

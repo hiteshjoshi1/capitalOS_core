@@ -13,8 +13,9 @@ Citations are persisted in rag_author_profile_citations.
 
 from __future__ import annotations
 
+import json
 import logging
-import os
+import re
 import textwrap
 from datetime import datetime, timezone
 from typing import Optional
@@ -22,6 +23,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.rag import RagAuthor, RagAuthorCard, RagAuthorProfile, RagAuthorProfileCitation
+from app.rag.inference import create_inference_client, inference_available, inference_model
 from app.rag.retrieval import retrieve_similar_chunks
 
 log = logging.getLogger(__name__)
@@ -30,15 +32,32 @@ _MAX_PROFILE_CHUNKS = 20
 _PROFILE_TOP_K = 30
 
 
-def _llm_available() -> bool:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        return False
+def _parse_profile_json(raw: str) -> dict:
+    """
+    Parse an LLM wisdom-profile response into JSON.
+
+    Some providers return a JSON object directly, while others may wrap it in
+    markdown fences or explanatory text despite the prompt/response format.
+    """
+    text = (raw or "").strip()
+    if not text:
+        raise ValueError("Empty wisdom profile response")
+
     try:
-        import openai  # noqa: F401
-        return True
-    except ImportError:
-        return False
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    fenced = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, flags=re.DOTALL)
+    if fenced:
+        return json.loads(fenced.group(1))
+
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return json.loads(text[start : end + 1])
+
+    raise ValueError("Wisdom profile response did not contain valid JSON")
 
 
 def _generate_profile_llm(
@@ -46,9 +65,7 @@ def _generate_profile_llm(
     card: Optional[RagAuthorCard],
     chunk_texts: list[str],
 ) -> dict:
-    """Use OpenAI GPT to synthesize the author wisdom profile from corpus chunks."""
-    import json
-    import openai
+    """Use the configured inference provider to synthesize the author wisdom profile."""
 
     sample_text = "\n\n---\n\n".join(chunk_texts[:_MAX_PROFILE_CHUNKS])
     focus_str = ", ".join(card.focus_areas) if card and card.focus_areas else "not specified"
@@ -79,15 +96,15 @@ def _generate_profile_llm(
         favored_decision_variables, anti_patterns.
     """).strip()
 
-    client = openai.OpenAI()
+    client = create_inference_client()
     response = client.chat.completions.create(
-        model=os.getenv("RAG_LLM_MODEL", "gpt-4o-mini"),
+        model=inference_model(),
         messages=[{"role": "user", "content": prompt}],
         response_format={"type": "json_object"},
         temperature=0.2,
     )
     raw = response.choices[0].message.content or "{}"
-    return json.loads(raw)
+    return _parse_profile_json(raw)
 
 
 def _generate_profile_template(
@@ -177,12 +194,12 @@ def refresh_author_profile(
     chunk_ids = [c.chunk_id for c in chunks]
 
     # Choose synthesis path
-    use_llm = _llm_available() and not force_template
+    use_llm = inference_available() and not force_template
     generation_model = "mock"
     if use_llm:
         try:
             profile_data = _generate_profile_llm(author, card, chunk_texts)
-            generation_model = os.getenv("RAG_LLM_MODEL", "gpt-4o-mini")
+            generation_model = inference_model()
         except Exception as exc:
             log.warning("LLM synthesis failed for %s, falling back to template: %s", author_id, exc)
             profile_data = _generate_profile_template(author, card, chunk_texts)

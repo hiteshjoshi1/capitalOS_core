@@ -595,7 +595,7 @@ def refresh_profiles(db: Session = Depends(get_db)):
     """
     Generate or refresh author wisdom profiles for all enabled authors.
 
-    Uses LLM synthesis when OPENAI_API_KEY is configured; falls back to
+    Uses LLM synthesis when INFERENCE_LLM_PROVIDER / INFERENCE_LLM_API_KEY are configured; falls back to
     deterministic template synthesis otherwise.  Idempotent — safe to call
     repeatedly after new corpus ingestion.
     """
@@ -713,7 +713,7 @@ def query_authors(body: QueryIn, db: Session = Depends(get_db)):
     Author-aware grounded query.
 
     Dynamically selects relevant authors, retrieves corpus evidence, and
-    synthesizes a grounded short answer.  Uses LLM when OPENAI_API_KEY is
+    synthesizes a grounded short answer. Uses LLM when INFERENCE_LLM_PROVIDER / INFERENCE_LLM_API_KEY are
     configured; returns an evidence summary otherwise.
     """
     from app.rag.query import execute_ask

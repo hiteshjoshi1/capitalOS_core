@@ -131,7 +131,7 @@ describe("api client coverage", () => {
   });
 
   it("retries once after refresh on 401 and updates bearer token", async () => {
-    const fetchSpy = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+    const fetchSpy = vi.fn().mockImplementation((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes("/auth/refresh")) {
         return Promise.resolve(okJson({ access_token: "token-2", token_type: "bearer", expires_in: 3600 }));

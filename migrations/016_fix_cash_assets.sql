@@ -15,6 +15,16 @@ FROM cash_assets c
 JOIN target_assets t ON t.quote_currency = c.quote_currency
 WHERE p.asset_id = c.id;
 
+WITH cash_assets AS (
+  SELECT id, quote_currency
+  FROM assets
+  WHERE asset_class = 'CASH' AND UPPER(symbol) = 'CASH'
+),
+target_assets AS (
+  SELECT id, quote_currency
+  FROM assets
+  WHERE asset_class = 'CASH' AND symbol = quote_currency
+)
 DELETE FROM assets a
 USING cash_assets c
 JOIN target_assets t ON t.quote_currency = c.quote_currency

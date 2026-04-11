@@ -13,7 +13,6 @@ LLM synthesis degrades gracefully when no key is configured.
 from __future__ import annotations
 
 import logging
-import os
 import textwrap
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -22,6 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.models.rag import RagAuthorProfile
 from app.rag.author_selection import SelectedAuthor, select_authors
+from app.rag.inference import create_inference_client, inference_available, inference_model
 from app.rag.retrieval import RetrievedChunk, retrieve_similar_chunks
 
 log = logging.getLogger(__name__)
@@ -93,20 +93,8 @@ class CompanyContextResult:
 # ── LLM helpers ───────────────────────────────────────────────────────────────
 
 
-def _llm_available() -> bool:
-    key = os.getenv("OPENAI_API_KEY", "").strip()
-    if not key:
-        return False
-    try:
-        import openai  # noqa: F401
-        return True
-    except ImportError:
-        return False
-
-
 def _synthesize_answer(query: str, evidence_texts: list[str], author_names: list[str]) -> str:
-    """Use OpenAI to synthesize a short grounded answer from evidence."""
-    import openai
+    """Use the configured inference provider to synthesize a grounded answer."""
 
     joined = "\n\n---\n\n".join(evidence_texts[:10])
     authors_str = ", ".join(author_names) if author_names else "the corpus"
@@ -128,9 +116,9 @@ def _synthesize_answer(query: str, evidence_texts: list[str], author_names: list
         - Do not speculate beyond what the evidence supports.
     """).strip()
 
-    client = openai.OpenAI()
+    client = create_inference_client()
     response = client.chat.completions.create(
-        model=os.getenv("RAG_LLM_MODEL", "gpt-4o-mini"),
+        model=inference_model(),
         messages=[{"role": "user", "content": prompt}],
         temperature=0.1,
         max_tokens=400,
@@ -161,22 +149,26 @@ def execute_retrieve(
         expertise_tags=expertise_tags,
         top_k=4,
     )
+    selected_author_ids = [author.author_id for author in selected]
 
     chunks = retrieve_similar_chunks(
         query,
         db,
         top_k=top_k,
         author_id=author_id,
+        author_ids=None if author_id else selected_author_ids,
+        domains=domains,
+        expertise_tags=expertise_tags,
     )
 
-    # Enrich chunks with author info
-    author_map = {a.author_id: a.name for a in selected}
+    author_entries = _author_entries(selected, db)
+    author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
     evidence = _enrich_chunks(chunks, db, author_map)
 
     return QueryResult(
         query=query,
         mode="retrieve",
-        selected_authors=[_author_dict(a) for a in selected],
+        selected_authors=author_entries,
         evidence_chunks=[e.as_dict() for e in evidence],
         answer=None,
         missing_information=None if chunks else "No corpus evidence found for this query.",
@@ -206,15 +198,20 @@ def execute_ask(
         expertise_tags=expertise_tags,
         top_k=4,
     )
+    selected_author_ids = [author.author_id for author in selected]
 
     chunks = retrieve_similar_chunks(
         query,
         db,
         top_k=top_k,
         author_id=author_id,
+        author_ids=None if author_id else selected_author_ids,
+        domains=domains,
+        expertise_tags=expertise_tags,
     )
 
-    author_map = {a.author_id: a.name for a in selected}
+    author_entries = _author_entries(selected, db)
+    author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
     evidence = _enrich_chunks(chunks, db, author_map)
     author_names = [a.name for a in selected]
 
@@ -223,7 +220,7 @@ def execute_ask(
 
     if not chunks:
         missing = "No corpus evidence found. Cannot provide a grounded answer."
-    elif _llm_available():
+    elif inference_available():
         try:
             answer = _synthesize_answer(query, [c.text for c in chunks], author_names)
         except Exception as exc:
@@ -235,7 +232,7 @@ def execute_ask(
     return QueryResult(
         query=query,
         mode="ask",
-        selected_authors=[_author_dict(a) for a in selected],
+        selected_authors=author_entries,
         evidence_chunks=[e.as_dict() for e in evidence],
         answer=answer,
         missing_information=missing,
@@ -259,33 +256,23 @@ def execute_company_context(
     combined_query = f"{company} {question}"
 
     selected = select_authors(combined_query, db, top_k=5)
+    selected_author_ids = [author.author_id for author in selected]
 
     chunks = retrieve_similar_chunks(
         combined_query,
         db,
         top_k=top_k,
+        author_ids=selected_author_ids,
     )
 
-    author_map = {a.author_id: a.name for a in selected}
+    author_entries = _author_entries(selected, db)
+    author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
     evidence = _enrich_chunks(chunks, db, author_map)
-
-    # Build author lens cards with profile data if available
-    author_lenses = []
-    for author in selected:
-        profile = db.query(RagAuthorProfile).filter(
-            RagAuthorProfile.author_id == author.author_id
-        ).first()
-        lens_entry = _author_dict(author)
-        if profile:
-            lens_entry["worldview"] = profile.worldview
-            lens_entry["key_maxims"] = list(profile.key_maxims or [])
-            lens_entry["favored_decision_variables"] = list(profile.favored_decision_variables or [])
-        author_lenses.append(lens_entry)
 
     return CompanyContextResult(
         company=company,
         question=question,
-        relevant_author_lenses=author_lenses,
+        relevant_author_lenses=author_entries,
         evidence_pack=[e.as_dict() for e in evidence],
         evidence_sufficient=len(chunks) > 0,
     )
@@ -303,6 +290,23 @@ def _author_dict(a: SelectedAuthor) -> dict:
         "expertise_tags": a.expertise_tags,
         "match_reason": a.match_reason,
     }
+
+
+def _author_entries(selected: list[SelectedAuthor], db: Session) -> list[dict]:
+    entries: list[dict] = []
+    for author in selected:
+        entry = _author_dict(author)
+        profile = db.query(RagAuthorProfile).filter(
+            RagAuthorProfile.author_id == author.author_id
+        ).first()
+        if profile:
+            entry["worldview"] = profile.worldview
+            entry["key_maxims"] = list(profile.key_maxims or [])
+            entry["favored_decision_variables"] = list(
+                profile.favored_decision_variables or []
+            )
+        entries.append(entry)
+    return entries
 
 
 def _enrich_chunks(

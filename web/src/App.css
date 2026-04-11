@@ -1623,6 +1623,305 @@ a.btn {
   padding: 4px 0;
 }
 
+/* ─── Forms ──────────────────────────────────────────────────────── */
+
+.formInput {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel2) 90%, white 10%);
+  color: var(--text);
+  padding: 11px 12px;
+  font: inherit;
+}
+
+.formInput::placeholder {
+  color: color-mix(in srgb, var(--muted) 86%, transparent 14%);
+}
+
+.formInput:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent 82%);
+}
+
+[data-theme="light"] .formInput {
+  background: #fffdfa;
+}
+
+/* ─── AI Sage ────────────────────────────────────────────────────── */
+
+.aiSagePage {
+  display: grid;
+  gap: 18px;
+}
+
+.aiSageGuideGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.aiSageGuideCard,
+.aiSageModeCard,
+.aiSageControlCard,
+.aiSageResultSummaryCard,
+.aiSageAnswerCard {
+  min-width: 0;
+}
+
+.aiSageGuideText {
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.aiSageGuideText p {
+  margin: 0;
+}
+
+.aiSageModeCard {
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+}
+
+.aiSageModeCard:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.aiSageModeCardActive {
+  border-color: color-mix(in srgb, var(--accent) 60%, var(--line) 40%);
+  background: color-mix(in srgb, var(--accent-soft) 32%, var(--panel2) 68%);
+}
+
+.aiSageModeSummary {
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.aiSageModeBody {
+  margin: 8px 0 12px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.aiSageModeExample {
+  display: block;
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.aiSageWorkGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+  gap: 18px;
+}
+
+.aiSageControlCard {
+  display: grid;
+  gap: 14px;
+}
+
+.aiSageSegmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiSageSegmentActive {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent 82%);
+  color: var(--accent);
+}
+
+.aiSageModeIntro {
+  display: grid;
+  gap: 4px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface-glow);
+}
+
+.aiSageField {
+  display: grid;
+  gap: 8px;
+}
+
+.aiSageLabel {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.aiSageTextarea {
+  min-height: 118px;
+  resize: vertical;
+}
+
+.aiSageTokenRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiSageTokenBtn {
+  padding: 7px 10px;
+}
+
+.aiSageActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.aiSagePrimaryAction {
+  min-width: 180px;
+}
+
+.aiSageError {
+  border: 1px solid color-mix(in srgb, var(--bad) 60%, var(--line) 40%);
+  background: color-mix(in srgb, var(--bad) 12%, transparent 88%);
+  color: var(--bad);
+  border-radius: 14px;
+  padding: 11px 12px;
+  font-size: 13px;
+}
+
+.aiSageResultSummaryCard {
+  display: grid;
+  gap: 14px;
+}
+
+.aiSageButtonGuide {
+  display: grid;
+  gap: 12px;
+}
+
+.aiSageButtonGuideRow {
+  display: grid;
+  gap: 4px;
+}
+
+.aiSageSummaryStrip {
+  display: grid;
+  gap: 10px;
+}
+
+.aiSageSummaryMetric {
+  display: grid;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-glow);
+  font-size: 13px;
+}
+
+.aiSageAnswerCard {
+  display: grid;
+  gap: 10px;
+}
+
+.aiSageAnswerText {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.aiSageNote {
+  margin: 0;
+}
+
+.aiSageAuthorGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.aiSageAuthorCard {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: var(--surface-glow);
+  display: grid;
+  gap: 8px;
+}
+
+.aiSageAuthorHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.aiSageAuthorMeta,
+.aiSageAuthorWorldview,
+.aiSageAuthorReasons {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.aiSagePill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line) 70%);
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent 30%);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.aiSageEvidenceList {
+  display: grid;
+  gap: 12px;
+}
+
+.aiSageEvidenceCard {
+  border-left: 3px solid var(--accent);
+  padding: 4px 0 4px 14px;
+  display: grid;
+  gap: 8px;
+}
+
+.aiSageEvidenceHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.aiSageEvidenceRank {
+  margin-left: 8px;
+  font-size: 12px;
+}
+
+.aiSageEvidenceText,
+.aiSageEvidenceMeta {
+  margin: 0;
+  line-height: 1.6;
+}
+
+.aiSageEvidenceText {
+  font-size: 14px;
+}
+
+.aiSageEvidenceMeta {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────── */
 
 /* hidden on desktop, shown on mobile as fallback User menu trigger */
@@ -1637,6 +1936,11 @@ a.btn {
 
   .mobileUserMenu {
     display: inline-flex !important;
+  }
+
+  .aiSageGuideGrid,
+  .aiSageWorkGrid {
+    grid-template-columns: 1fr;
   }
 
   .rowExposure,

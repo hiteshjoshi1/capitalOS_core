@@ -18,6 +18,16 @@ export default function StockHoldings() {
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
 
+  const handleMonthChange = (nextMonth: string) => {
+    setVisibleCount(PAGE_SIZE);
+    setMonth(nextMonth);
+  };
+
+  const handleBaseCurrencyChange = (nextBaseCurrency: string) => {
+    setVisibleCount(PAGE_SIZE);
+    setBaseCurrency(nextBaseCurrency);
+  };
+
   useEffect(() => {
     (async () => {
       try {
@@ -30,10 +40,6 @@ export default function StockHoldings() {
         setState("error");
       }
     })();
-  }, [month, baseCurrency]);
-
-  useEffect(() => {
-    setVisibleCount(PAGE_SIZE);
   }, [month, baseCurrency]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
@@ -63,14 +69,14 @@ export default function StockHoldings() {
       secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
       headerActions={(
         <>
-          <MonthControl month={month} onMonthChange={setMonth} />
+          <MonthControl month={month} onMonthChange={handleMonthChange} />
           <label className="pill">
             <span>Base</span>
             <select
               className="monthInput"
               aria-label="Base currency"
               value={baseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
+              onChange={(event) => handleBaseCurrencyChange(event.target.value)}
             >
               <option value="SGD">SGD</option>
               <option value="USD">USD</option>

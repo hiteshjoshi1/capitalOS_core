@@ -114,7 +114,7 @@ async function callRefreshEndpoint(): Promise<string | null> {
     }
     setAccessToken(payload.access_token);
     return payload.access_token;
-  } catch (err: unknown) {
+  } catch {
     setAccessToken(null);
     notifyAuthFailure();
     return null;
@@ -767,6 +767,45 @@ export type ExpectedDividendsOverview = {
   companies: ExpectedDividendCompany[];
 };
 
+export type RagSelectedAuthor = {
+  author_id: string;
+  name: string;
+  score: number;
+  domains: string[];
+  expertise_tags: string[];
+  match_reason: string[];
+  worldview?: string;
+  key_maxims?: string[];
+  favored_decision_variables?: string[];
+};
+
+export type RagEvidenceChunk = {
+  chunk_id: string;
+  author_id: string;
+  author_name: string;
+  text: string;
+  similarity: number;
+  metadata: Record<string, unknown>;
+};
+
+export type RagQueryResult = {
+  query: string;
+  mode: string;
+  selected_authors: RagSelectedAuthor[];
+  evidence_chunks: RagEvidenceChunk[];
+  answer: string | null;
+  missing_information: string | null;
+  evidence_sufficient: boolean;
+};
+
+export type RagCompanyContextResult = {
+  company: string;
+  question: string;
+  relevant_author_lenses: RagSelectedAuthor[];
+  evidence_pack: RagEvidenceChunk[];
+  evidence_sufficient: boolean;
+};
+
 export const api = {
   health: () => req<Health>("/health"),
   authSignup: (payload: { username: string; password: string; display_name?: string }) =>
@@ -970,5 +1009,10 @@ export const api = {
     req<ExpectedDividendsOverview>(
       `/dividends/expected/overview?from_month=${encodeURIComponent(fromMonth)}&to_month=${encodeURIComponent(toMonth)}&base_currency=${encodeURIComponent(baseCurrency)}&assumed_tax_rate=${encodeURIComponent(String(assumedTaxRate))}${countryTaxRates ? `&country_tax_rates=${encodeURIComponent(countryTaxRates)}` : ""}`
     ),
-
+  ragRetrieve: (payload: { query: string; top_k?: number; author_id?: string; domains?: string[]; expertise_tags?: string[] }) =>
+    req<RagQueryResult>("/rag/retrieve", { method: "POST", body: JSON.stringify(payload) }),
+  ragQuery: (payload: { query: string; top_k?: number; author_id?: string; domains?: string[]; expertise_tags?: string[] }) =>
+    req<RagQueryResult>("/rag/query", { method: "POST", body: JSON.stringify(payload) }),
+  ragCompanyContext: (payload: { company: string; question: string; top_k?: number }) =>
+    req<RagCompanyContextResult>("/rag/analyze/company-context", { method: "POST", body: JSON.stringify(payload) }),
 };

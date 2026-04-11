@@ -1,80 +1,105 @@
 import { useState } from "react";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import { api } from "../lib/api";
+import type {
+  RagCompanyContextResult,
+  RagEvidenceChunk,
+  RagQueryResult,
+  RagSelectedAuthor,
+} from "../lib/api";
 
-interface Author {
-  author_id: string;
-  name: string;
-  score: number;
-  domains: string[];
-  expertise_tags: string[];
-  match_reason: string[];
-  worldview?: string;
-  key_maxims?: string[];
-  favored_decision_variables?: string[];
-}
+type Mode = "ask" | "retrieve" | "company_context";
 
-interface EvidenceChunk {
-  chunk_id: string;
-  author_id: string;
-  author_name: string;
-  text: string;
-  similarity: number;
-  metadata: Record<string, unknown>;
-}
+type ModeConfig = {
+  label: string;
+  summary: string;
+  purpose: string;
+  queryPlaceholder: string;
+  submitLabel: string;
+  exampleQuery: string;
+  exampleCompany?: string;
+  resultTitle: string;
+};
 
-interface QueryResult {
-  query: string;
-  mode: string;
-  selected_authors: Author[];
-  evidence_chunks: EvidenceChunk[];
-  answer: string | null;
-  missing_information: string | null;
-  evidence_sufficient: boolean;
-}
+const MODE_CONFIG: Record<Mode, ModeConfig> = {
+  ask: {
+    label: "Ask",
+    summary: "Best for a direct grounded answer with evidence attached.",
+    purpose: "Use this when you want AI Sage to read the corpus, synthesize an answer, and show the supporting passages.",
+    queryPlaceholder: "Ask a grounded question, for example: What does Warren Buffett emphasize about durable moats?",
+    submitLabel: "Ask AI Sage",
+    exampleQuery: "What does Warren Buffett emphasize when evaluating a durable moat and strong long-term economics?",
+    resultTitle: "Grounded Answer",
+  },
+  retrieve: {
+    label: "Retrieve",
+    summary: "Best for research mode when you want the raw evidence pack first.",
+    purpose: "Use this when you do not want synthesis yet and only want the highest-matching chunks and citations.",
+    queryPlaceholder: "Retrieve source material, for example: scale economies shared Nick Sleep Costco Amazon",
+    submitLabel: "Retrieve Evidence",
+    exampleQuery: "What does Nick Sleep emphasize about scale economies shared and long-term business quality?",
+    resultTitle: "Evidence Pack",
+  },
+  company_context: {
+    label: "Company Context",
+    summary: "Best for preparing a company analysis lens before deeper reasoning.",
+    purpose: "Use this when you want the most relevant authors and evidence pack for a company-specific question.",
+    queryPlaceholder: "Ask a company-specific question, for example: How should we think about moat, capital allocation, and holding quality?",
+    submitLabel: "Build Company Context",
+    exampleQuery: "How would Warren Buffett likely think about this company’s moat, capital allocation, and long-term holding quality?",
+    exampleCompany: "Apple",
+    resultTitle: "Company Context",
+  },
+};
 
-interface CompanyContextResult {
-  company: string;
-  question: string;
-  relevant_author_lenses: Author[];
-  evidence_pack: EvidenceChunk[];
-  evidence_sufficient: boolean;
-}
+const AUTHOR_EXAMPLES = [
+  { label: "Buffett", value: "warren_buffett" },
+  { label: "Nick Sleep", value: "nick_sleep" },
+  { label: "Howard Marks", value: "howard_marks" },
+  { label: "Clear", value: "" },
+];
 
-type Mode = "retrieve" | "ask" | "company_context";
-
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-
-function getAuthHeader(): Record<string, string> {
-  const token = localStorage.getItem("access_token");
-  return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function postJSON<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", ...getAuthHeader() },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`${res.status}: ${text}`);
+function resultSummary(
+  mode: Mode,
+  queryResult: RagQueryResult | null,
+  companyResult: RagCompanyContextResult | null,
+): string {
+  if (mode === "company_context") {
+    const authors = companyResult?.relevant_author_lenses.length ?? 0;
+    const evidence = companyResult?.evidence_pack.length ?? 0;
+    return `${authors} author lens${authors === 1 ? "" : "es"} · ${evidence} evidence chunk${evidence === 1 ? "" : "s"}`;
   }
-  return res.json() as Promise<T>;
+
+  const authors = queryResult?.selected_authors.length ?? 0;
+  const evidence = queryResult?.evidence_chunks.length ?? 0;
+  return `${authors} selected author${authors === 1 ? "" : "s"} · ${evidence} evidence chunk${evidence === 1 ? "" : "s"}`;
 }
 
 export default function AISage() {
   const [mode, setMode] = useState<Mode>("ask");
+  const [showGuide, setShowGuide] = useState(true);
   const [query, setQuery] = useState("");
   const [authorFilter, setAuthorFilter] = useState("");
   const [company, setCompany] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [queryResult, setQueryResult] = useState<RagQueryResult | null>(null);
+  const [companyResult, setCompanyResult] = useState<RagCompanyContextResult | null>(null);
 
-  const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
-  const [companyResult, setCompanyResult] = useState<CompanyContextResult | null>(null);
+  const config = MODE_CONFIG[mode];
+  const selectedAuthors =
+    queryResult?.selected_authors ?? companyResult?.relevant_author_lenses ?? [];
+  const evidenceChunks =
+    queryResult?.evidence_chunks ?? companyResult?.evidence_pack ?? [];
+  const canSubmit =
+    mode === "company_context"
+      ? Boolean(company.trim() && query.trim())
+      : Boolean(query.trim());
 
-  const handleSubmit = async () => {
+  async function handleSubmit() {
+    if (!canSubmit) return;
+
     setError(null);
     setQueryResult(null);
     setCompanyResult(null);
@@ -82,23 +107,23 @@ export default function AISage() {
 
     try {
       if (mode === "company_context") {
-        const result = await postJSON<CompanyContextResult>("/rag/analyze/company-context", {
-          company: company || query,
-          question: query,
+        const result = await api.ragCompanyContext({
+          company: company.trim(),
+          question: query.trim(),
           top_k: 8,
         });
         setCompanyResult(result);
       } else if (mode === "ask") {
-        const result = await postJSON<QueryResult>("/rag/query", {
-          query,
+        const result = await api.ragQuery({
+          query: query.trim(),
           top_k: 8,
           author_id: authorFilter || undefined,
         });
         setQueryResult(result);
       } else {
-        const result = await postJSON<QueryResult>("/rag/retrieve", {
-          query,
-          top_k: 5,
+        const result = await api.ragRetrieve({
+          query: query.trim(),
+          top_k: 8,
           author_id: authorFilter || undefined,
         });
         setQueryResult(result);
@@ -108,156 +133,309 @@ export default function AISage() {
     } finally {
       setLoading(false);
     }
-  };
+  }
 
-  const selectedAuthors =
-    queryResult?.selected_authors ?? companyResult?.relevant_author_lenses ?? [];
-  const evidenceChunks =
-    queryResult?.evidence_chunks ?? companyResult?.evidence_pack ?? [];
+  function handleModeChange(nextMode: Mode) {
+    setMode(nextMode);
+    setError(null);
+    setQueryResult(null);
+    setCompanyResult(null);
+  }
+
+  function fillExample(nextMode: Mode) {
+    const nextConfig = MODE_CONFIG[nextMode];
+    setMode(nextMode);
+    setQuery(nextConfig.exampleQuery);
+    setError(null);
+    setQueryResult(null);
+    setCompanyResult(null);
+    if (nextMode === "company_context") {
+      setCompany(nextConfig.exampleCompany ?? "");
+      setAuthorFilter("");
+    } else {
+      setCompany("");
+    }
+  }
 
   return (
-    <PageShell title="AI Sage" subtitle="Decision intelligence powered by thinker corpus">
-      <div className="wrap">
-        {/* Controls */}
-        <div className="card" style={{ marginBottom: "1rem" }}>
-          <div className="cardTitle">Query</div>
-          <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.75rem" }}>
-            {(["ask", "retrieve", "company_context"] as Mode[]).map((m) => (
-              <button
-                key={m}
-                className={mode === m ? "btn btn-primary" : "btn btn-secondary"}
-                onClick={() => setMode(m)}
-              >
-                {m === "ask" ? "Ask" : m === "retrieve" ? "Retrieve" : "Company Context"}
-              </button>
-            ))}
-          </div>
-
-          {mode === "company_context" && (
-            <input
-              className="formInput"
-              placeholder="Company name (e.g. Amazon)"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
-              style={{ marginBottom: "0.5rem", width: "100%" }}
-            />
-          )}
-
-          <textarea
-            className="formInput"
-            rows={3}
-            placeholder={
-              mode === "company_context"
-                ? "What question should we explore for this company?"
-                : "Enter your query..."
-            }
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            style={{ width: "100%", marginBottom: "0.5rem", resize: "vertical" }}
-          />
-
-          <input
-            className="formInput"
-            placeholder="Author filter (optional, e.g. warren_buffett)"
-            value={authorFilter}
-            onChange={(e) => setAuthorFilter(e.target.value)}
-            style={{ width: "100%", marginBottom: "0.75rem" }}
-          />
-
-          <button
-            className="btn btn-primary"
-            onClick={handleSubmit}
-            disabled={loading || !query.trim()}
-          >
-            {loading ? "Running..." : "Submit"}
+    <PageShell
+      title="AI Sage"
+      subtitle="Corpus-backed investment research with clearer workflows, not a debug form."
+      headerActions={
+        <>
+          <button className="btn" type="button" onClick={() => setShowGuide((value) => !value)}>
+            {showGuide ? "Hide Explain" : "Explain"}
           </button>
-
-          {error && <p className="muted" style={{ color: "var(--color-danger, red)", marginTop: "0.5rem" }}>{error}</p>}
-        </div>
-
-        {/* Selected Authors */}
-        {selectedAuthors.length > 0 && (
-          <div className="card" style={{ marginBottom: "1rem" }}>
-            <div className="cardTitle">Selected Authors</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-              {selectedAuthors.map((a) => (
-                <div key={a.author_id} style={{ border: "1px solid var(--color-border, #ccc)", borderRadius: "6px", padding: "0.75rem", minWidth: "200px", maxWidth: "300px" }}>
-                  <strong>{a.name}</strong>
-                  <div className="muted" style={{ fontSize: "0.8rem" }}>Score: {a.score}</div>
-                  {a.worldview && (
-                    <p style={{ fontSize: "0.8rem", marginTop: "0.4rem" }}>{a.worldview}</p>
-                  )}
-                  {a.key_maxims && a.key_maxims.length > 0 && (
-                    <div style={{ marginTop: "0.4rem" }}>
-                      <span className="muted" style={{ fontSize: "0.75rem" }}>Key maxims:</span>
-                      <ul style={{ margin: "0.2rem 0 0 1rem", padding: 0, fontSize: "0.75rem" }}>
-                        {a.key_maxims.slice(0, 3).map((m, i) => <li key={i}>{m}</li>)}
-                      </ul>
-                    </div>
-                  )}
-                  {a.match_reason && a.match_reason.length > 0 && (
-                    <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.3rem" }}>
-                      {a.match_reason.join(" | ")}
-                    </div>
-                  )}
-                </div>
-              ))}
+          <span className="pill">RAG Research</span>
+          <span className="pill">Evidence First</span>
+        </>
+      }
+    >
+      <div className="wrap aiSagePage">
+        {showGuide && (
+          <section className="aiSageGuideGrid" aria-label="How to use AI Sage">
+            <div className="card aiSageGuideCard">
+              <div className="cardTitle">How To Use AI Sage</div>
+              <div className="aiSageGuideText">
+                <p>
+                  AI Sage has three research modes. Pick the mode based on whether you want
+                  an answer, raw evidence, or a company analysis setup.
+                </p>
+                <p>
+                  The `Explain` button only shows or hides this guide. It does not call the
+                  model or change your results.
+                </p>
+              </div>
             </div>
-          </div>
+            {(["ask", "retrieve", "company_context"] as Mode[]).map((entryMode) => {
+              const entry = MODE_CONFIG[entryMode];
+              const selected = mode === entryMode;
+              return (
+                <button
+                  key={entryMode}
+                  type="button"
+                  className={`card aiSageModeCard${selected ? " aiSageModeCardActive" : ""}`}
+                  onClick={() => fillExample(entryMode)}
+                >
+                  <div className="cardTitle">{entry.label}</div>
+                  <div className="aiSageModeSummary">{entry.summary}</div>
+                  <p className="muted aiSageModeBody">{entry.purpose}</p>
+                  <span className="aiSageModeExample">
+                    Example: {entryMode === "company_context" ? `${entry.exampleCompany} · ` : ""}
+                    {entry.exampleQuery}
+                  </span>
+                </button>
+              );
+            })}
+          </section>
         )}
 
-        {/* Answer / Summary */}
-        {queryResult?.answer && (
-          <div className="card" style={{ marginBottom: "1rem" }}>
-            <div className="cardTitle">
-              {queryResult.mode === "ask" ? "Grounded Answer" : "Evidence Summary"}
+        <section className="aiSageWorkGrid">
+          <div className="card aiSageControlCard">
+            <div className="cardTitle">Research Flow</div>
+
+            <div className="aiSageSegmented" role="tablist" aria-label="AI Sage mode">
+              {(["ask", "retrieve", "company_context"] as Mode[]).map((entryMode) => (
+                <button
+                  key={entryMode}
+                  type="button"
+                  className={mode === entryMode ? "btn aiSageSegmentActive" : "btn"}
+                  onClick={() => handleModeChange(entryMode)}
+                >
+                  {MODE_CONFIG[entryMode].label}
+                </button>
+              ))}
             </div>
-            <p style={{ whiteSpace: "pre-wrap" }}>{queryResult.answer}</p>
-            {queryResult.missing_information && (
-              <p className="muted" style={{ marginTop: "0.5rem", fontStyle: "italic" }}>
-                Note: {queryResult.missing_information}
-              </p>
+
+            <div className="aiSageModeIntro">
+              <strong>{config.label}</strong>
+              <span className="muted">{config.summary}</span>
+            </div>
+
+            {mode === "company_context" ? (
+              <label className="aiSageField">
+                <span className="aiSageLabel">Company</span>
+                <input
+                  className="formInput"
+                  placeholder="Company name, for example Apple"
+                  value={company}
+                  onChange={(event) => setCompany(event.target.value)}
+                />
+              </label>
+            ) : null}
+
+            <label className="aiSageField">
+              <span className="aiSageLabel">
+                {mode === "company_context" ? "Question" : "Query"}
+              </span>
+              <textarea
+                className="formInput aiSageTextarea"
+                rows={4}
+                placeholder={config.queryPlaceholder}
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+              />
+            </label>
+
+            {mode !== "company_context" ? (
+              <label className="aiSageField">
+                <span className="aiSageLabel">Author Filter</span>
+                <input
+                  className="formInput"
+                  placeholder="Optional author id, for example warren_buffett"
+                  value={authorFilter}
+                  onChange={(event) => setAuthorFilter(event.target.value)}
+                />
+                <div className="aiSageTokenRow" aria-label="Author presets">
+                  {AUTHOR_EXAMPLES.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      className="btn aiSageTokenBtn"
+                      onClick={() => setAuthorFilter(preset.value)}
+                    >
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            ) : null}
+
+            <div className="aiSageActionRow">
+              <button
+                className="btn btnLarge aiSagePrimaryAction"
+                type="button"
+                onClick={() => void handleSubmit()}
+                disabled={loading || !canSubmit}
+              >
+                {loading ? "Running..." : config.submitLabel}
+              </button>
+              <button
+                className="btn"
+                type="button"
+                onClick={() => fillExample(mode)}
+                disabled={loading}
+              >
+                Use Example
+              </button>
+            </div>
+
+            {error ? <div className="aiSageError">{error}</div> : null}
+          </div>
+
+          <div className="card aiSageResultSummaryCard">
+            <div className="cardTitle">What These Buttons Do</div>
+            <div className="aiSageButtonGuide">
+              <div className="aiSageButtonGuideRow">
+                <strong>Explain</strong>
+                <span className="muted">Shows or hides the usage guide for AI Sage.</span>
+              </div>
+              <div className="aiSageButtonGuideRow">
+                <strong>Ask</strong>
+                <span className="muted">Retrieves evidence, then writes a grounded answer using that evidence.</span>
+              </div>
+              <div className="aiSageButtonGuideRow">
+                <strong>Retrieve</strong>
+                <span className="muted">Returns the strongest matching passages without synthesis.</span>
+              </div>
+              <div className="aiSageButtonGuideRow">
+                <strong>Company Context</strong>
+                <span className="muted">Builds an evidence pack and author lens set for a company-specific question.</span>
+              </div>
+            </div>
+
+            <div className="aiSageSummaryStrip">
+              <div className="aiSageSummaryMetric">
+                <span className="muted">Active Mode</span>
+                <strong>{config.label}</strong>
+              </div>
+              <div className="aiSageSummaryMetric">
+                <span className="muted">Result Scope</span>
+                <strong>{resultSummary(mode, queryResult, companyResult)}</strong>
+              </div>
+              <div className="aiSageSummaryMetric">
+                <span className="muted">Evidence Status</span>
+                <strong>
+                  {mode === "company_context"
+                    ? companyResult
+                      ? companyResult.evidence_sufficient
+                        ? "Grounded"
+                        : "No Evidence"
+                      : "Not Run"
+                    : queryResult
+                      ? queryResult.evidence_sufficient
+                        ? "Grounded"
+                        : "No Evidence"
+                      : "Not Run"}
+                </strong>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {(queryResult?.answer || queryResult?.missing_information) && (
+          <section className="card aiSageAnswerCard">
+            <div className="cardTitle">{config.resultTitle}</div>
+            {queryResult?.answer ? (
+              <p className="aiSageAnswerText">{queryResult.answer}</p>
+            ) : (
+              <p className="muted">{queryResult?.missing_information}</p>
             )}
-          </div>
+            {queryResult?.missing_information && queryResult.answer ? (
+              <p className="muted aiSageNote">Gap: {queryResult.missing_information}</p>
+            ) : null}
+          </section>
         )}
 
-        {queryResult?.missing_information && !queryResult.answer && (
-          <div className="card" style={{ marginBottom: "1rem" }}>
-            <p className="muted">{queryResult.missing_information}</p>
-          </div>
-        )}
-
-        {/* Evidence Chunks */}
-        {evidenceChunks.length > 0 && (
-          <div className="card">
-            <div className="cardTitle">Evidence Chunks ({evidenceChunks.length})</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
-              {evidenceChunks.map((chunk, i) => (
-                <div key={chunk.chunk_id} style={{ borderLeft: "3px solid var(--color-accent, #4a90e2)", paddingLeft: "0.75rem" }}>
-                  <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.25rem", flexWrap: "wrap" }}>
-                    <span style={{ fontWeight: 600, fontSize: "0.85rem" }}>{chunk.author_name}</span>
-                    <span className="muted" style={{ fontSize: "0.75rem" }}>sim: {(chunk.similarity * 100).toFixed(1)}%</span>
-                    <span className="muted" style={{ fontSize: "0.7rem" }}>#{i + 1}</span>
+        {selectedAuthors.length > 0 && (
+          <section className="card">
+            <div className="cardTitle">Selected Authors</div>
+            <div className="aiSageAuthorGrid">
+              {selectedAuthors.map((author: RagSelectedAuthor) => (
+                <article key={author.author_id} className="aiSageAuthorCard">
+                  <div className="aiSageAuthorHeader">
+                    <strong>{author.name}</strong>
+                    <span className="muted">Score {author.score.toFixed(2)}</span>
                   </div>
-                  <p style={{ fontSize: "0.85rem", margin: 0, lineHeight: 1.5 }}>
-                    {chunk.text.length > 400 ? chunk.text.slice(0, 400) + "..." : chunk.text}
+                  <p className="muted aiSageAuthorMeta">
+                    {(author.domains ?? []).join(" · ")}
                   </p>
-                  {chunk.metadata && Object.keys(chunk.metadata).length > 0 && (
-                    <div className="muted" style={{ fontSize: "0.7rem", marginTop: "0.25rem" }}>
-                      {chunk.metadata.title ? `"${String(chunk.metadata.title)}"` : ""}
-                      {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
+                  {author.worldview ? (
+                    <p className="aiSageAuthorWorldview">{author.worldview}</p>
+                  ) : null}
+                  {author.key_maxims?.length ? (
+                    <div className="aiSageTokenRow">
+                      {author.key_maxims.slice(0, 3).map((maxim) => (
+                        <span key={maxim} className="aiSagePill">
+                          {maxim}
+                        </span>
+                      ))}
                     </div>
-                  )}
-                </div>
+                  ) : null}
+                  {author.match_reason?.length ? (
+                    <p className="muted aiSageAuthorReasons">{author.match_reason.join(" · ")}</p>
+                  ) : null}
+                </article>
               ))}
             </div>
-          </div>
+          </section>
         )}
 
-        {/* No results state */}
+        {evidenceChunks.length > 0 && (
+          <section className="card">
+            <div className="cardTitle">Evidence Chunks</div>
+            <div className="aiSageEvidenceList">
+              {evidenceChunks.map((chunk: RagEvidenceChunk, index: number) => (
+                <article key={chunk.chunk_id} className="aiSageEvidenceCard">
+                  <div className="aiSageEvidenceHeader">
+                    <div>
+                      <strong>{chunk.author_name}</strong>
+                      <span className="muted aiSageEvidenceRank">Chunk {index + 1}</span>
+                    </div>
+                    <span className="aiSagePill">
+                      {(chunk.similarity * 100).toFixed(1)}% match
+                    </span>
+                  </div>
+                  <p className="aiSageEvidenceText">
+                    {chunk.text.length > 520 ? `${chunk.text.slice(0, 520)}...` : chunk.text}
+                  </p>
+                  <div className="muted aiSageEvidenceMeta">
+                    {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
+                    {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
         {!loading && !error && (queryResult || companyResult) && evidenceChunks.length === 0 && (
           <div className="card placeholderCard">
-            <p className="muted">No corpus evidence found for this query. Try ingesting more documents first.</p>
+            <div className="cardTitle">No Evidence Found</div>
+            <p className="muted">
+              This run did not find matching corpus material. Try a narrower author filter,
+              a different company, or ingest more source material first.
+            </p>
           </div>
         )}
       </div>

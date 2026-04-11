@@ -439,6 +439,35 @@ def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, caps
     assert result.output == '{"ok": true}'
 
 
+def test_provider_runtime_complete_structured_uses_copilot_session_fallback(monkeypatch, tmp_path) -> None:
+    cfg = SimpleNamespace(
+        v3_enable_caffeinate=False,
+        build_max_autopilot_continues=3,
+        v3_longrun_timeout_minutes=5,
+        v3_provider="copilot",
+        v3_model="claude-sonnet-4.6",
+    )
+    monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+
+    def fake_run_provider(self, provider, *, model, prompt):
+        _ = (self, provider, model, prompt)
+        return ProviderRunResult(
+            provider="copilot",
+            model="claude-sonnet-4.6",
+            output="tool chatter\npartial json {\n",
+            diagnostics=["provider=copilot"],
+            fallback_output='```json\n{"summary":"ok","plan_summary":"done","architecture_decisions":[],"risks":[],"open_questions":[],"acceptance_criteria":[],"planned_paths":[],"checklist":[],"changed_files":[],"extra_changed_files":[],"implementation_notes":[],"verification_commands_run":[],"unresolved_failures":[],"acceptance_criteria_checks":[],"semantic_intent_achieved":true,"risk_flags":[]}\n```',
+        )
+
+    monkeypatch.setattr(ProviderRuntimeService, "_run_provider", fake_run_provider)
+
+    service = ProviderRuntimeService(stage="agent_run", repo_root=str(tmp_path))
+    parsed, result = service.complete_structured("prompt", AgentRunOutput)
+
+    assert parsed.summary == "ok"
+    assert result.provider == "copilot"
+
+
 def test_deterministic_fix_branches(monkeypatch, tmp_path) -> None:
     service = DeterministicFixService(str(tmp_path))
 

@@ -100,7 +100,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: db-shell db-wait db-migrate db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign
+.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign
 
 db-shell:
 	docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)
@@ -113,12 +113,42 @@ db-wait:
 	@echo "Postgres is ready."
 
 db-migrate: db-wait
+	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" > /dev/null
+	@tracked_count=$$(docker exec -i $(DB_CONTAINER) psql -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT COUNT(*) FROM schema_migrations;"); \
+	public_table_count=$$(docker exec -i $(DB_CONTAINER) psql -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name <> 'schema_migrations';"); \
+	if [ "$$tracked_count" = "0" ] && [ "$$public_table_count" -gt 0 ]; then \
+		echo "Legacy database detected without migration tracking."; \
+		echo "Run 'make db-adopt-migrations' once to mark existing numbered migrations as applied without replaying them."; \
+		exit 2; \
+	fi
 	@echo "Running migrations..."
-	@for f in $$(ls -1 migrations/*.sql | sort); do \
+	@for f in $$(ls -1 migrations/[0-9][0-9][0-9]_*.sql | sort); do \
+		filename=$$(basename "$$f"); \
+		applied=$$(docker exec -i $(DB_CONTAINER) psql -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT 1 FROM schema_migrations WHERE filename = '$$filename' LIMIT 1;"); \
+		if [ "$$applied" = "1" ]; then \
+			echo "==> $$f (already applied)"; \
+			continue; \
+		fi; \
 		echo "==> $$f"; \
-		docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) < $$f; \
+		docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < $$f; \
+		docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "INSERT INTO schema_migrations (filename) VALUES ('$$filename');" > /dev/null; \
 	done
 	@echo "Migrations complete."
+
+db-adopt-migrations: db-wait
+	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" > /dev/null
+	@public_table_count=$$(docker exec -i $(DB_CONTAINER) psql -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name <> 'schema_migrations';"); \
+	if [ "$$public_table_count" = "0" ]; then \
+		echo "Database is empty; nothing to adopt. Run 'make db-migrate' instead."; \
+		exit 2; \
+	fi
+	@echo "Adopting existing numbered migrations without executing SQL..."
+	@for f in $$(ls -1 migrations/[0-9][0-9][0-9]_*.sql | sort); do \
+		filename=$$(basename "$$f"); \
+		echo "==> $$f"; \
+		docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "INSERT INTO schema_migrations (filename) VALUES ('$$filename') ON CONFLICT (filename) DO NOTHING;" > /dev/null; \
+	done
+	@echo "Migration adoption complete."
 
 db-reset:
 	docker compose down -v
@@ -354,17 +384,12 @@ web-rebuild:
 	docker compose up -d web
 
 api-shell:
-	curl -s http://localhost:8000/health && echo
+	docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"
 
 web-test: test-frontend
 
 api-smoke:
-	curl -sf http://localhost:8000/health && echo
-	@TOKEN=$$(curl -sf -X POST http://localhost:8000/auth/login \
-		-H "Content-Type: application/json" \
-		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
-		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
-	curl -sf -H "Authorization: Bearer $$TOKEN" "http://localhost:8000/dashboard/summary?month=2026-02" && echo
+	docker compose exec -T api python -c "import json, urllib.request; base='http://localhost:8000'; print(urllib.request.urlopen(base + '/health').read().decode()); login_req=urllib.request.Request(base + '/auth/login', data=json.dumps({'username':'$(SMOKE_USER)','password':'$(SMOKE_PASSWORD)'}).encode(), headers={'Content-Type':'application/json'}, method='POST'); token=json.loads(urllib.request.urlopen(login_req).read().decode())['access_token']; summary_req=urllib.request.Request(base + '/dashboard/summary?month=2026-02', headers={'Authorization': 'Bearer ' + token}); print(urllib.request.urlopen(summary_req).read().decode())"
 
 api-test: test-backend
 
@@ -373,21 +398,21 @@ api-coverage:
 
 ingest-smoke:
 	@echo "Running ingest smoke..."
-	@TOKEN=$$(curl -sf -X POST http://localhost:8000/auth/login \
+	@TOKEN=$$(curl -sf -X POST http://127.0.0.1:8000/auth/login \
 		-H "Content-Type: application/json" \
 		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
 		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
-	ACCOUNT_ID=$$(curl -sf -H "Authorization: Bearer $$TOKEN" http://localhost:8000/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \
+	ACCOUNT_ID=$$(curl -sf -H "Authorization: Bearer $$TOKEN" http://127.0.0.1:8000/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \
 	if [ -z "$$ACCOUNT_ID" ]; then \
 		echo "No accounts found. Create an account first."; \
 		exit 1; \
 	fi; \
-	curl -sf -H "Authorization: Bearer $$TOKEN" -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://localhost:8000/ingest/ibkr?account_id=$$ACCOUNT_ID"; \
+	curl -sf -H "Authorization: Bearer $$TOKEN" -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://127.0.0.1:8000/ingest/ibkr?account_id=$$ACCOUNT_ID"; \
 	echo
 
 crypto-smoke:
-	@TOKEN=$$(curl -sf -X POST http://localhost:8000/auth/login \
+	@TOKEN=$$(curl -sf -X POST http://127.0.0.1:8000/auth/login \
 		-H "Content-Type: application/json" \
 		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
 		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
-	curl -sf -H "Authorization: Bearer $$TOKEN" "http://localhost:8000/crypto/summary?base_currency=USD" && echo
+	curl -sf -H "Authorization: Bearer $$TOKEN" "http://127.0.0.1:8000/crypto/summary?base_currency=USD" && echo

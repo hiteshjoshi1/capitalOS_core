@@ -58,6 +58,7 @@ def retrieve_similar_chunks(
     *,
     top_k: int = DEFAULT_TOP_K,
     author_id: Optional[str] = None,
+    author_ids: Optional[list[str]] = None,
     source_type: Optional[str] = None,
     domains: Optional[list[str]] = None,
     expertise_tags: Optional[list[str]] = None,
@@ -67,6 +68,7 @@ def retrieve_similar_chunks(
 
     Filters:
       author_id      -- restrict to a single author's corpus
+      author_ids     -- restrict to a selected set of authors
       source_type    -- restrict to 'html', 'pdf', 'text', or 'manual'
       domains        -- restrict to authors in these domain categories (Postgres only)
       expertise_tags -- restrict to authors with these expertise tags (Postgres only)
@@ -82,6 +84,13 @@ def retrieve_similar_chunks(
     if author_id:
         where_clauses.append("rs.author_id = :author_id")
         params["author_id"] = author_id
+    elif author_ids:
+        author_id_conditions = " OR ".join(
+            f"rs.author_id = :author_id_{i}" for i in range(len(author_ids))
+        )
+        where_clauses.append(f"({author_id_conditions})")
+        for i, selected_author_id in enumerate(author_ids):
+            params[f"author_id_{i}"] = selected_author_id
     if source_type:
         where_clauses.append("rs.source_type = :source_type")
         params["source_type"] = source_type
