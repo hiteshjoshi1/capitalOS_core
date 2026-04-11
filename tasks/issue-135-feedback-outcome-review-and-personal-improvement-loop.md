@@ -1,71 +1,75 @@
-# Issue 135: Feedback, Outcome Review, And Personal Improvement Loop
+# Issue 135: Deferred Decision Records, Calibration, And Improvement
 
 ## Objective
-- Close the loop between prior thinking and later reality.
-- Help the user become a better investor and a better person by reviewing decisions, tracking mistakes, and surfacing recurring weaknesses in judgment.
-- Turn CapitalOS from a smart research/reasoning tool into a compounding judgment system.
+- Hold the major later-layer work that should not block v1 value delivery.
+- Defer everything that is useful only after the system already produces:
+  - strong concept answers
+  - strong company thesis pressure-testing
+  - reusable research memory
 
 ## Program Position
-- Depends on issues 130, 132, and 133.
-- Benefits materially from issue 134 but should still work with thinker + memo data alone.
-- This is the issue where the “better investor and better person” goal becomes explicit product behavior.
+- Depends on issues 131 through 134 being genuinely useful first.
+- This issue exists to stop early roadmap drift into scaffolding.
 
-## Architecture Decisions
-- Outcome review is a first-class object, not an afterthought.
-- Feedback and calibration should operate on stored memos and actual later reviews, not only instantaneous thumbs-up/down.
-- This issue should only evaluate and summarize workflows that are already producing valuable research and memo outputs. It must not drive product complexity ahead of answer quality.
-- Reflection should examine:
-  - overconfidence
-  - weak assumptions
-  - repeated blind spots
-  - poor domain fit
-  - missed disconfirming evidence
-  - recurring lens imbalance
-- Keep the first version simple and useful:
-  - review one memo
-  - review recent memos
-  - aggregate obvious patterns
-- Avoid pretending to know realized investment truth automatically when it is not available; allow manual review inputs.
+## Central Product Idea
+- If the system does not produce valuable outputs now, there is little point in storing, scoring, reviewing, or calibrating them.
+- Therefore this issue intentionally collects the later layers:
+  - explicit decision memo workflows
+  - feedback capture
+  - outcome review
+  - calibration records
+  - recurring mistake analysis
+  - personal improvement analytics
+  - monitoring / dashboard-style overlays
+
+## Scope
+- Explicit decision records / decision memo workflows
+- Feedback capture beyond simple usefulness
+- Outcome review after time passes
+- Calibration and reflection records
+- Pattern analysis over prior calls
+- Later monitoring/reporting views that depend on stored decision history
+
+## Out Of Scope For Earlier v1 Work
+- Anything here should not be pulled into issues 131-134 unless it directly improves:
+  - concept-mode answer quality now
+  - company-thesis-mode answer quality now
+  - research memory now
 
 ## Acceptance Criteria
-- [ ] Add memo feedback capture beyond simple success/failure.
-- [ ] Add persisted outcome review object linked to decision memos.
-- [ ] Add calibration or reflection records that compare original confidence/thesis to later review.
-- [ ] Add API and `AI Sage` views for:
-  - recent decisions
+- [ ] The issue documents the later-layer work that is intentionally deferred.
+- [ ] No part of this issue is required before the three core user jobs are useful:
+  - concept mode
+  - company thesis mode
+  - research memory
+- [ ] When implemented later, it can cover:
+  - decision memo persistence
+  - memo feedback capture
   - outcome reviews
-  - recurring mistakes / patterns
-  - strongest calls / weakest calls
-- [ ] System can answer prompts like:
-  - “What patterns do you see in my bad calls?”
-  - “Where do I tend to be overconfident?”
-  - “Which assumptions break most often?”
-- [ ] Add tests for:
-  - feedback capture
-  - outcome review linkage
-  - calibration aggregation
-  - reflection summary generation
+  - calibration summaries
+  - recurring mistake analysis
+  - personal improvement analytics
 
 ## Suggested Implementation Shape
 - New persisted objects, names subject to judgment:
+  - `decision_memos`
   - `decision_memo_feedback`
   - `outcome_reviews`
   - `calibration_records`
   - optional `reflection_runs`
-- Likely endpoints:
-  - `POST /decision/{id}/feedback`
-  - `POST /decision/{id}/outcome-review`
-  - `GET /decision/recent`
+- Later endpoints can include:
+  - `POST /decision/*`
+  - `GET /decision/*`
   - `GET /decision/reflection-summary`
 
 ## Verification Plan
-- `make api-rebuild`
-- `make test-backend`
-- Create memo via issue 133 flow
-- `curl -X POST http://localhost:8000/decision/<id>/feedback -H "Content-Type: application/json" -d '{"tags":["missed_key_risk","overconfident"],"notes":"..."}'`
-- `curl -X POST http://localhost:8000/decision/<id>/outcome-review -H "Content-Type: application/json" -d '{"what_happened":"...","assumptions_status":[...]}'`
-- `curl http://localhost:8000/decision/reflection-summary`
-- Verify `AI Sage` or related UI can show recent judgments and reflection outputs
+- Not applicable for current ruthless v1 build order.
+- This issue should only be implemented after issues 131-134 are already delivering user value.
+
+## Human Notes
+- Keep asking the same question:
+  `Does this improve answer quality now, or is it scaffolding for later?`
+- If it is scaffolding, it belongs here.
 
 ## Human Approval Gate
 - [ ] Approved for implementation

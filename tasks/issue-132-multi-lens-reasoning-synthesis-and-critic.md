@@ -1,88 +1,105 @@
-# Issue 132: Multi-Lens Reasoning, Synthesis, And Critic
+# Issue 132: AI Sage Company Thesis Mode
 
 ## Objective
-- Build the first real reasoning layer on top of issue 130 retrieval and author wisdom.
-- Let `AI Sage` reason on a problem using dynamically selected author lenses, then produce a synthesis and a critic pass that preserve disagreement instead of flattening it.
-- Deliver the first implementation of the 4-layer architecture promised by Module 2:
-  - shared knowledge layer
-  - query-selected author-specific reasoning lenses
-  - synthesis layer
-  - critic layer
+- Deliver the second high-value mode as fast as possible:
+  `Company Thesis Mode`
+- Support prompts like:
+  - "Here is my thesis on Tencent Music. Pressure test it."
+  - "What would Buffett and Nick Sleep worry about here?"
+  - "What are the missing questions and weak points in this thesis?"
+- Combine:
+  - author wisdom
+  - live company research
+  - structured synthesis
+  - critique
+  - an updated thesis view
 
 ## Program Position
-- Depends on issue 130.
-- Supplies the reasoning substrate for issue 133 decision memos and issue 135 personal reflection.
-- Should remain UI-testable through `Intelligence > AI Sage`.
+- Depends on issue 130 and issue 131.
+- This is the second step in the ruthless build order:
+  1. concept mode
+  2. company thesis mode
+  3. research memory
 
-## Architecture Decisions
-- Author selection remains dynamic. No fixed “Buffett/Munger/Marks every time” behavior.
-- Lens execution should be configuration-driven using author profile + reasoning lens metadata from the config/DB.
-- Each lens output should be explicitly structured, not free-form prose only.
-- The user should be able to see distinct per-author perspectives before they are collapsed into one blended answer.
-- Synthesis must preserve:
-  - common ground
-  - meaningful disagreements
-  - missing information
-  - highest-risk assumptions
-- Critic must challenge:
-  - unsupported claims
-  - citation mismatch
-  - false consensus
-  - weakly grounded conclusions
-- Critic should validate both the per-author outputs and the combined synthesis, not just critique the final answer in isolation.
-- This issue should not yet persist full decision memos. It should generate structured reasoning outputs that can later be saved by issue 133.
+## Central Product Idea
+- Company thesis mode should feel like intelligent pushback, not just company summarization.
+- The system should:
+  - identify the thesis claims being made
+  - pull relevant author lenses
+  - surface missing questions and blind spots
+  - fetch live company evidence
+  - answer what it can from fetched evidence
+  - synthesize what strengthens vs weakens the thesis
+  - critique the current view
+
+## Scope
+- Thesis-oriented query handling
+- Extraction of thesis claims / assumptions from user input
+- Key pushback questions
+- Missing information detection
+- Relevant author perspectives
+- Live evidence from filings, transcripts, reports, and web research
+- Synthesis and critique
+- Updated thesis view in the output
+
+## Out Of Scope
+- Save/retrieve research memory
+- Full memo workflow
+- Outcome review / calibration
+- Portfolio monitoring
+- Autonomous recommendations
 
 ## Acceptance Criteria
-- [ ] `AI Sage` query flow can select relevant authors for a question and run lens-specific reasoning for the selected authors.
-- [ ] Lens outputs are visibly differentiated and grounded in retrieved evidence.
-- [ ] Query responses include explicit per-author perspective sections before the combined synthesis.
-- [ ] Add a synthesis stage that returns:
-  - common ground
-  - disagreements
-  - decision-relevant variables
+- [ ] `AI Sage` can accept a thesis-style company prompt and classify it into company thesis mode.
+- [ ] For a company thesis query, the system returns:
+  - thesis / question
+  - relevant authors
+  - key pushback questions
   - missing information
-  - highest-risk assumptions
-  - tentative conclusion
-- [ ] Add a critic stage that returns:
-  - strongest counterargument
-  - least-grounded claim
-  - citation support warnings
-  - possible false consensus warning
-- [ ] Query responses remain citation-backed and expose which citations informed which lens.
-- [ ] `AI Sage` UI can display:
-  - selected authors
-  - lens outputs
+  - fetched sources used
+  - key facts extracted
+  - author views
   - synthesis
-  - critic
-- [ ] If the reasoning flow surfaces follow-up questions or open threads, they are shown to the user as optional next questions rather than automatically triggering external search.
-- [ ] Add backend tests covering:
-  - author selection
-  - lens routing
-  - synthesis shape
-  - critic shape
-  - citation propagation
+  - critique
+  - updated thesis view
+- [ ] Live company research materially improves the answer when internal corpus alone is insufficient.
+- [ ] Source attribution clearly distinguishes:
+  - thinker corpus evidence
+  - fetched company / web evidence
+- [ ] If the system surfaces additional follow-up questions, it does not recursively research them by default; it shows them to the user first.
+- [ ] Add backend tests for:
+  - thesis classification
+  - live research fetch/routing
+  - source attribution
+  - synthesis/critique response shape
+- [ ] Add frontend tests for thesis-mode rendering.
 
 ## Suggested Implementation Shape
-- Add services for:
-  - author selection for reasoning
-  - lens execution
-  - synthesis
-  - critic/red-team pass
-- Add API endpoints or extend existing ones, likely near:
-  - `POST /rag/reason`
-  - `POST /rag/query`
-  - `POST /rag/analyze/company-context`
-- Use structured JSON outputs between stages rather than free-form chaining.
+- Extend `POST /ai-sage/query` or add a closely related orchestration path.
+- Add provider/tool integration for:
+  - document fetching
+  - web research
+  - source extraction / normalization
+- Response shape should remain sectioned and user-readable.
 
 ## Verification Plan
 - `make api-rebuild`
+- `make web-rebuild`
 - `make test-backend`
-- `curl -X POST http://localhost:8000/rag/reason -H "Content-Type: application/json" -d '{"query":"Would a capital-light software business with strong customer lock-in but deteriorating pricing power still count as high quality?"}'`
-- Verify `AI Sage` renders:
-  - selected authors
-  - lens outputs
+- `make test-frontend`
+- `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"query":"Here is my thesis on Tencent Music. Pressure test it."}'`
+- Verify the answer includes:
+  - pushback questions
+  - live sources used
+  - extracted facts
+  - author perspectives
   - synthesis
-  - critic
+  - critique
+
+## Human Notes
+- This issue should be judged by whether it surfaces non-obvious pushback and genuinely improves the user’s thesis.
+- Generic “company overview” behavior is a failure even if the answer is polished.
+- The main question is: does the system think with you, or just summarize what it found?
 
 ## Human Approval Gate
 - [ ] Approved for implementation

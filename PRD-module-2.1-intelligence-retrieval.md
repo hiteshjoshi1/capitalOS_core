@@ -1,18 +1,69 @@
 Product Spec — CapitalOS Decision Intelligence System (v1)
 1. Product goal
+A system that helps me think better about investing by combining:
 
-Build a system that helps you make better decisions by combining:
+- author wisdom
+- live company research
+- structured synthesis and critique
+- saved research I can retrieve later
 
-grounded retrieval from high-quality sources
-structured multi-lens reasoning
-explicit decision records
-feedback capture
-later outcome review
-calibration over time
+That gives you 3 real user modes and a ruthless build order.
 
-The system should not just answer questions. It should create decision artifacts that can be revisited, judged, and improved.
+# Mode 1: concept learning
 
-2. Product promise
+Example: “What should I look for when evaluating a business?”
+The output should be:
+
+best passages from key authors
+distinct perspectives, not blended mush
+one synthesis
+one critique
+suggested writings to read next
+optionally a saved note/checklist under “business quality” or “moat”
+
+This is how it becomes better than generic ChatGPT.
+
+# Mode 2: thesis pressure-testing
+
+Example: “I think Tencent Music is attractive because …”
+The system should:
+
+pull relevant author perspectives
+surface missing questions and blind spots
+go fetch real-world evidence
+answer those questions
+tell you what strengthens vs weakens the thesis
+save the result as research for TME
+
+This is probably the highest-value mode.
+
+# Mode 3: knowledge compounding
+
+Example: “Show me everything I know so far about TME” or “Show me my notes on network effects.”
+The system should retrieve:
+
+prior research
+extracted data points
+prior model outputs
+stored checklists
+key author references
+updates over time
+
+v1 should optimize for answer quality and reusable research, not for downstream analytics scaffolding.
+
+If a feature does not materially improve the answer now, or does not make good research reusable later, defer it.
+
+2. Ruthless build order
+
+Build in this order:
+
+1. concept mode
+2. company thesis mode
+3. save / retrieve research
+
+Everything else is later.
+
+3. Product promise
 
 For any meaningful question like:
 
@@ -31,9 +82,9 @@ assumptions
 falsifiers
 monitoring checklist
 
-and store all of that so it can be reviewed later.
+and make the useful parts retrievable later.
 
-3. Core use cases
+4. Core use cases
 Use case 1 — Research a company
 
 User asks:
@@ -50,7 +101,7 @@ disagreement across lenses
 confidence
 checklist
 
-System stores this as a Decision Memo.
+System should also be able to save the result as reusable research, but a heavy decision-memo workflow is not required for v1.
 
 Use case 2 — Compare current thinking vs prior thinking
 
@@ -93,9 +144,9 @@ overconfidence patterns
 sectors where judgment is weaker
 lens bias patterns
 repeated missed risks
-4. Core product objects
+5. Core product objects
 
-These are the four primary artifacts.
+These are the main artifacts, but only the first two are truly required for v1.
 
 A. Research Note
 
@@ -164,7 +215,70 @@ notes on error type
 Purpose:
 
 improve future judgment
-5. System workflow
+6. v1 scope
+
+In scope for v1:
+
+- ingest selected author corpus
+- embed and retrieve author writings
+- dynamic author selection per query
+- author-specific perspectives
+- synthesis layer
+- critique layer
+- company research via tool use and web/doc fetching
+- save and retrieve research by topic/company/concept/checklist/thesis
+- simple UI with one main query input
+
+Out of scope for v1:
+
+- full calibration engine
+- outcome review loops
+- personal improvement analytics
+- portfolio-wide monitoring dashboards
+- autonomous investment recommendations
+- broad personal finance intelligence
+- heavy memo workflows that do not improve answer quality or reusable research
+
+7. v1 output format
+
+Every answer should try to produce:
+
+- Question / thesis
+- Relevant authors
+- Best passages / evidence
+- Author views
+- Synthesis
+- Critique
+- Open questions
+- Save to topic/company?
+
+For company mode, also include:
+
+- fetched sources used
+- key facts extracted
+- what changed / what matters
+
+8. Minimum data buckets
+
+- Author corpus
+- Company research corpus
+- Saved research notes
+- Topics / companies / concepts index
+
+9. Success criteria
+
+v1 is successful if:
+
+- concept answers feel materially better than generic ChatGPT
+- company thesis mode surfaces non-obvious pushbacks
+- live research improves the answer
+- useful outputs can be saved and found later
+- repeated use compounds knowledge instead of starting from zero each time
+
+10. Later workflows
+
+The following are valid later layers, but should be explicitly deferred until the three core modes above work well.
+
 Workflow 1 — Create decision memo
 Input
 user question

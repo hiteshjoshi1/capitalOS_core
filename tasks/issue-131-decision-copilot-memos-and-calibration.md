@@ -1,113 +1,186 @@
-# Issue 131: AI Sage Interaction Shell And Runtime Query Orchestration
+# Issue 131: AI Sage Concept Mode
 
 ## Objective
-- Build the first real interactive `AI Sage` experience on top of issue 130 retrieval and author wisdom.
-- Add the runtime orchestration layer that turns backend retrieval/profile endpoints into a usable product surface.
-- Create the session flow that later issues can extend with reasoning, questioning, memos, and reflection.
+- Deliver the first real user value for Module 2 as fast as possible.
+- Build `Concept Mode` in `AI Sage`: a single-input experience for questions like:
+  - "What makes a good business?"
+  - "How should I think about moat, scale economies shared, or network effects?"
+- Return a materially better answer than generic chat by combining:
+  - relevant author passages
+  - distinct author perspectives
+  - one synthesis
+  - one critique
+  - suggested original readings
 
 ## Program Position
-- Depends on issue 130.
-- Serves as the UX/runtime bridge for:
-  - issue 132 multi-lens reasoning
-  - issue 133 guided investment intake and decision memos
-  - issue 135 reflection and personal improvement
-- This issue should make `AI Sage` feel like a coherent product surface before the heavier reasoning and memo workflows land.
+- Depends on issue 130 retrieval, author selection, and author wisdom.
+- This is the first issue in the ruthless build order:
+  1. concept mode
+  2. company thesis mode
+  3. research memory
+- Everything else should defer unless it clearly improves answer quality for concept mode now.
 
-## Architecture Decisions
-- This issue assumes issue 130 already provides:
-  - retrieval
-  - citations
-  - author wisdom profiles
-  - author selection
-- The main job here is product orchestration, not deeper reasoning logic.
-- `AI Sage` should present one primary interaction model:
-  - user enters a question
-  - system decides whether thinker corpus is relevant
-  - system decides whether corpus evidence is sufficient
-  - system decides whether the user would benefit from fresher/external data
-- Add a runtime query orchestration layer in the backend that routes user requests to the correct retrieval/profile path and normalizes responses for the UI without exposing backend modes directly.
-- The frontend should preserve context between interactions in a session, but this issue should stop short of full memo persistence and outcome review.
-- The main UI should stay minimal. If advanced options are needed, they should be tucked behind a lightweight affordance rather than shown as primary controls.
-- The UI should show what the system is doing in user terms:
-  - relevant authors
-  - answer quality / missing information
-  - citations when explicitly inspected
-  - optional follow-up paths
-- This issue should not yet implement full multi-lens synthesis/critic reasoning. That belongs to issue 132.
+## Central Product Idea
+- `AI Sage` is a thinking workbench, not a bag of backend modes.
+- The user asks one question in plain language.
+- The system decides which authors are relevant.
+- The system returns differentiated author views, not one blended finance answer.
+- The system then synthesizes and critiques those views.
+- The system should also recommend what to read next from the author corpus.
+
+## User Intent
+- The user is not asking for a generic explainer.
+- The user wants help thinking better by seeing how strong underlying thinkers would frame the concept differently.
+- The user should come away with:
+  - clearer mental models
+  - clearer distinctions between author views
+  - a synthesis that helps action or understanding
+  - a critique that prevents false confidence
+  - obvious next readings if they want to go deeper
+
+## Primary User Experience
+- The user opens `AI Sage` and sees one main query input.
+- The user asks a concept question in natural language.
+- The system does the work behind the scenes:
+  - decide whether the author corpus is relevant
+  - select the most relevant authors
+  - retrieve the best supporting passages
+  - generate distinct author views
+  - generate one synthesis
+  - generate one critique
+- The UI should feel simple, direct, and opinionated.
+- The user should never have to choose:
+  - author ids
+  - retrieval modes
+  - reasoning modes
+  - internal RAG controls
+
+## UX Behavior
+- The answer should appear as one coherent result, not as a debugging console.
+- Results should be easy to scan in this order:
+  1. question
+  2. relevant authors
+  3. best passages / evidence
+  4. author views
+  5. synthesis
+  6. critique
+  7. suggested original readings
+- Evidence should be inspectable, but not noisy by default.
+- The user should immediately understand:
+  - which authors were used
+  - why the answer is better than a generic chat response
+  - where to go next if they want to read source material directly
+
+## What Good Looks Like
+- A strong answer feels grounded, differentiated, and useful.
+- The author views should not collapse into one generic tone.
+- The synthesis should simplify without flattening meaningful differences.
+- The critique should add real pushback, not ritual pessimism.
+- Suggested readings should feel like the obvious best next step, not random citations.
+- A successful output should feel like:
+  - "I understand this concept better now"
+  - "I can see how different thinkers would frame it"
+  - "I know what to read next if I want depth"
+
+## Weak-Evidence Behavior
+- If the author corpus is not strongly relevant, the system should say so clearly.
+- If evidence is thin, the system should avoid pretending certainty.
+- If one or two authors are useful but others are weakly matched, the system should use the useful ones and avoid forced inclusion.
+- If the system cannot produce a differentiated answer that is better than generic chat, it should return a limited answer and make the weakness explicit.
+- The system should not fabricate author views when the corpus grounding is weak.
 
 ## Scope
-- `AI Sage` page / route / shell
-- Session-oriented query UX
-- Backend runtime query orchestration for `AI Sage`
-- Unified response model for:
-  - retrieval results
-  - author wisdom profiles
-  - company-context preparation
-- Basic product polish for loading states, empty states, errors, and citation display
-- Automatic routing logic for when the system should:
-  - use internal corpus only
-  - report that the corpus is insufficient
-  - recommend or trigger external/company evidence retrieval because the query is out-of-corpus or time-sensitive
+- Single-input `AI Sage` query flow for concept questions
+- Automatic author selection
+- Retrieval of best supporting passages
+- Distinct author perspective generation
+- Synthesis layer
+- Critique layer
+- Suggested original readings / passages to continue from
+- Simple output structure in the UI and API
 
 ## Out Of Scope
-- Full multi-lens reasoning, synthesis, and critic
-- Guided clarification question generation
-- Decision memo persistence
-- Feedback capture
-- Outcome review
-- Calibration analytics
-- Company-intelligence corpus expansion beyond what already exists
+- Live company/web research
+- Thesis pressure-testing
+- Save/retrieve research memory
+- Decision memo workflows
+- Calibration / outcome review
+- Portfolio monitoring
+- Product scaffolding that does not materially improve concept answers now
+- Internal controls or UX levers that expose implementation details to the user
 
 ## Acceptance Criteria
-- [ ] Add an `Intelligence > AI Sage` product surface that can:
-  - accept a query
-  - submit via Enter
-  - automatically choose relevant authors when applicable
-  - display selected authors
-  - display citations and evidence only when the user asks to inspect them
-  - keep advanced controls out of the primary UI
-- [ ] Add a backend orchestration endpoint or equivalent service that normalizes UI query execution for `AI Sage`.
-- [ ] `AI Sage` can handle at least these flows:
-  - corpus-backed answer
-  - corpus-insufficient response
-  - company/time-sensitive query that should escalate to issue-134 style evidence retrieval when implemented
-  - direct author relevance selection without the user manually choosing author ids
-- [ ] UI has usable:
-  - loading states
-  - empty states
-  - user-friendly error states
-  - citation rendering
-- [ ] Responses remain source-grounded and curl-testable.
-- [ ] Add frontend tests for the `AI Sage` surface and backend tests for orchestration endpoints/services.
+- [ ] `AI Sage` concept queries behave as one simple user flow rather than multiple exposed system modes.
+- [ ] For a concept question, the system returns:
+  - question
+  - relevant authors
+  - best passages / evidence
+  - author views
+  - synthesis
+  - critique
+  - suggested original readings
+- [ ] Author perspectives are visibly distinct rather than flattened into one voice.
+- [ ] Every non-trivial answer is grounded in retrieved passages from the ingested author corpus.
+- [ ] UI remains minimal:
+  - one main query input
+  - answer/results at the top
+  - evidence inspectable on demand
+  - no visible internal mode switches
+- [ ] If evidence is weak or only partially relevant, the system says that clearly instead of forcing a polished but weak answer.
+- [ ] Suggested readings feel like a continuation path for learning, not a dump of citations.
+- [ ] Add backend tests for:
+  - concept-query routing
+  - author selection
+  - author view generation shape
+  - synthesis shape
+  - critique shape
+- [ ] Add frontend tests for the concept-mode rendering flow.
 
-## Suggested Implementation Shape
-- Add a route/page in the frontend for `AI Sage`.
-- Add frontend state for:
-  - current query
-  - current selected authors
-  - latest result payload
-  - recent session history if lightweight enough
-- Add a backend orchestration endpoint, likely close to:
-  - `POST /ai-sage/query`
-  - or a normalized extension of existing `/rag/query`
-- Keep response shapes stable enough that later issues can add reasoning/memo fields without breaking the shell.
+## Output Contract
+- The answer should try to preserve this structure:
+  - question
+  - relevant authors
+  - best passages / evidence
+  - author views
+  - synthesis
+  - critique
+  - suggested original readings
+- This is a product contract, not a command to implement a specific internal schema.
+
+## Product Guardrails
+- Do not build concept mode as a generic “one answer paragraph plus citations” flow.
+- Do not surface hidden system jargon like:
+  - retrieve
+  - ask
+  - company context
+  - evidence first
+  - RAG research
+- Do not optimize for future memo/calibration workflows in this issue.
+- Keep asking:
+  - does this make concept-mode answers better now?
+  - does this help the user think more clearly now?
+  - if not, defer it.
 
 ## Verification Plan
 - `make api-rebuild`
 - `make web-rebuild`
 - `make test-backend`
 - `make test-frontend`
-- `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"query":"capital allocation and moat"}'`
-- Verify `AI Sage` UI can execute the primary query flow, auto-select relevant authors, and render citations cleanly when requested.
+- `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"query":"What makes a good business?"}'`
+- `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"query":"How should I think about network effects?"}'`
+- Verify `AI Sage` shows:
+  - retrieved passages
+  - distinct author views
+  - synthesis
+  - critique
+  - suggested readings
 
 ## Human Notes
-- This is the first issue where the product should begin to feel like a coherent `AI Sage`, rather than a set of backend endpoints.
-- The point is product integration and usability, not yet full reasoning depth.
-- If scope becomes too large, prioritize:
-  - stable shell
-  - automatic routing
-  - citation rendering
-  - author relevance display
+- This issue should be judged by answer quality, not by orchestration cleverness.
+- If something does not make concept-mode answers materially better, defer it.
+- A good test question is whether the answer feels clearly better than generic ChatGPT because it preserves author distinctions and cites useful original passages.
+- The correct failure mode is a modest, honest, grounded answer.
+- The wrong failure mode is a polished generic answer that sounds smart but teaches little.
 
 ## Human Approval Gate
 - [ ] Approved for implementation

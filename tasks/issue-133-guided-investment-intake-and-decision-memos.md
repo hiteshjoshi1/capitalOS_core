@@ -1,79 +1,97 @@
-# Issue 133: Guided Investment Intake And Decision Memos
+# Issue 133: Research Memory Mode
 
 ## Objective
-- Turn `AI Sage` from a reasoning surface into a guided investment intake assistant.
-- Let the system ask clarifying questions from author lenses, collect missing information about a new investment, and produce a persisted decision memo.
-- Start capturing the user’s own thinking in a reusable, reviewable format.
+- Deliver the third core mode:
+  `Research Memory Mode`
+- Let the user save useful outputs and retrieve them later by:
+  - company
+  - concept
+  - checklist
+  - thesis
+  - topic
+- Make repeated use compound knowledge instead of starting from zero every time.
 
 ## Program Position
-- Depends on issue 130 and issue 132.
-- Feeds issue 135 by creating the decision artifacts that reflection/calibration needs.
+- Depends on issues 130, 131, and 132.
+- This is the third step in the ruthless build order:
+  1. concept mode
+  2. company thesis mode
+  3. research memory
 
-## Architecture Decisions
-- The system should not assume it already has enough context.
-- If evidence or user-provided information is insufficient, it should ask follow-up questions rather than pretending certainty.
-- Question generation should come from author lenses and missing-data analysis, not generic “tell me more” prompts.
-- Follow-up questions surfaced by prior corpus reasoning should be shown to the user for selection/response; they should not automatically trigger external research behind the user's back.
-- The memo is the first-class product object.
-- Memo content should preserve:
-  - question
-  - evidence
-  - lens reasoning
-  - synthesis
-  - critic output
-  - user-supplied clarifications
-  - confidence
-  - assumptions
-  - falsifiers
-  - monitoring checklist
+## Central Product Idea
+- Good outputs should not disappear after one session.
+- The system should make it easy to save and later retrieve:
+  - prior research
+  - stored notes
+  - extracted evidence
+  - past conclusions
+  - key author references
+
+## Scope
+- Save research outputs from concept mode and company thesis mode
+- Tag/index saved entries by:
+  - company
+  - concept
+  - checklist
+  - thesis
+  - topic
+- Retrieve saved research later by those keys
+- Support simple note/research objects rather than heavy workflow machinery
+- Keep the UI lightweight and directly useful
+
+## Out Of Scope
+- Full decision memo workflows
+- Outcome review / calibration
+- Feedback analytics
+- Monitoring dashboards
 
 ## Acceptance Criteria
-- [ ] `AI Sage` can ask targeted follow-up questions when the query is under-specified.
-- [ ] The system can generate a missing-information checklist for a new investment or business question.
-- [ ] Follow-up prompts can clearly distinguish:
-  - questions the user should answer
-  - questions the user may choose to send into later external/company research flows
-- [ ] Add persisted decision memo object(s) and API surface to create, fetch, and list memos.
-- [ ] Memo draft includes:
-  - decision question
-  - evidence summary
-  - author lens views
-  - synthesis
-  - critic
-  - recommendation / tentative conclusion
-  - confidence
-  - assumptions
-  - falsifiers
-  - monitoring checklist
-- [ ] `AI Sage` UI supports:
-  - showing clarification questions
-  - submitting answers
-  - showing memo draft
-  - saving or updating memo
-- [ ] Add tests for:
-  - follow-up question generation
-  - memo creation
-  - memo retrieval
-  - missing-data checklist generation
+- [ ] The user can save a useful answer or research output from `AI Sage`.
+- [ ] Saved research can be indexed under:
+  - company
+  - concept
+  - checklist
+  - thesis
+  - topic
+- [ ] The user can retrieve:
+  - prior research
+  - stored notes
+  - extracted evidence
+  - past conclusions
+- [ ] `AI Sage` can answer prompts like:
+  - "Show me everything I know so far about Tencent Music"
+  - "Show me my notes on network effects"
+- [ ] Saved research preserves links back to the evidence and sources used.
+- [ ] Add backend tests for:
+  - save research
+  - retrieve research by company/topic/concept
+  - evidence/source preservation
+- [ ] Add frontend tests for save/retrieve interactions.
 
 ## Suggested Implementation Shape
-- New persisted objects, names subject to judgment:
-  - `decision_sessions`
-  - `decision_memos`
-  - optional `decision_memo_sections`
-- Likely endpoints:
-  - `POST /decision/start`
-  - `POST /decision/{id}/answer-questions`
-  - `GET /decision/{id}`
-  - `GET /decision/recent`
+- Add lightweight persisted objects close to:
+  - `research_notes`
+  - `research_note_evidence`
+  - `research_topics`
+- Keep storage simple and retrieval-first.
+- Avoid over-designing memo/calibration schema here.
 
 ## Verification Plan
 - `make api-rebuild`
+- `make web-rebuild`
 - `make test-backend`
-- `curl -X POST http://localhost:8000/decision/start -H "Content-Type: application/json" -d '{"question":"Should I study Company X further?"}'`
-- `curl -X POST http://localhost:8000/decision/<id>/answer-questions -H "Content-Type: application/json" -d '{"answers":[...]}'`
-- `curl http://localhost:8000/decision/<id>`
-- Verify `AI Sage` can create and render a memo draft end to end
+- `make test-frontend`
+- Save a concept-mode answer under a concept/topic
+- Save a company thesis answer under a company
+- `curl` retrieval examples:
+  - `GET /research?company=TME`
+  - `GET /research?topic=network-effects`
+- Verify prior research can be found and reused
+
+## Human Notes
+- This issue should be judged by whether repeated use compounds knowledge.
+- If the system stores outputs but they are hard to retrieve later, the issue is not successful.
+- Keep this lightweight. The goal is reusable research, not workflow theater.
 
 ## Human Approval Gate
 - [ ] Approved for implementation
