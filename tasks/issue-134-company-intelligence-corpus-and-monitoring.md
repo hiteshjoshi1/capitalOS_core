@@ -1,52 +1,52 @@
-# Issue 134: Company Intelligence Corpus And Monitoring
+# Issue 134: Reusable Company Research Corpus
 
 ## Objective
-- Build the first company-intelligence corpus that complements thinker writings.
-- Let CapitalOS ingest and retrieve company-specific evidence such as filings, transcripts, presentations, product updates, and competitor signals.
-- Make `AI Sage` and later decision memos capable of reasoning over both thinker wisdom and company evidence.
-- Own the external-search and fresh-evidence path for questions that cannot be answered well from the thinker corpus alone.
+- Make company thesis mode reusable instead of one-shot.
+- Turn fetched company/web evidence into a reusable company research corpus that improves future answers.
+- Support the minimum data buckets needed for v1:
+  - author corpus
+  - company research corpus
+  - saved research notes
+  - topics / companies / concepts index
 
 ## Program Position
-- Depends on issue 130 for retrieval infrastructure.
-- Strongly complements issue 132 and issue 133.
-- Supplies evidence required for better company analysis and better investment decisions.
+- Depends on issue 132 and issue 133.
+- This issue exists only because it directly improves answer quality and reuse for company thesis mode.
+- If implementation drifts into monitoring/analytics scaffolding, it should be deferred.
 
-## Architecture Decisions
-- Keep thinker corpus and company corpus conceptually distinct, even if both use shared retrieval infrastructure.
-- Company-intelligence ingestion should be deterministic and source-traceable.
-- Focus on foundation sources first:
-  - transcripts
-  - filings / annual letters
-  - investor presentations
-  - company blog / product updates
-  - competitor source links where feasible
-- Do not overpromise real-time streaming. Batch ingestion and refresh is enough for the initial issue.
-- Query-time external search should be used when the system decides the question is:
-  - not answerable from the current corpus
-  - time-sensitive or likely to need fresher information
-  - materially improved by live company or market evidence
-- If prior corpus reasoning surfaces follow-up questions, do not search those automatically. Present them to the user first and let the user explicitly continue.
+## Central Product Idea
+- Live company research should not vanish after one thesis-pressure-test run.
+- The best fetched sources, extracted facts, and normalized evidence should be reusable later for the same company or topic.
+- This is still part of answer quality, not yet part of monitoring dashboards or analytics.
+
+## Scope
+- Persist fetched company research sources
+- Normalize/store extracted company evidence
+- Link saved research notes to company evidence
+- Support retrieval over:
+  - thinker corpus
+  - company evidence corpus
+  - saved research notes
+- Improve later company thesis answers by reusing prior fetched evidence
+
+## Out Of Scope
+- Portfolio/company monitoring dashboards
+- Automated watchlists / alerts
+- Outcome review / calibration
+- Broad business intelligence platform features
 
 ## Acceptance Criteria
-- [ ] Add company source registry and ingestion path for core company documents.
-- [ ] Retrieval can query thinker corpus, company corpus, or both.
-- [ ] `AI Sage` can surface company evidence distinctly from thinker evidence.
-- [ ] Add an external-search-backed path for company or time-sensitive questions with clear source attribution separate from thinker-corpus citations.
-- [ ] Add company-context retrieval mode that supports:
-  - company profile question
-  - business quality question
-  - risk/competition question
-  - what-changed question
-- [ ] Add metadata and filtering for:
-  - company / ticker
-  - document type
-  - document date
-  - competitor / related company when available
+- [ ] Fetched company/web sources from thesis mode can be persisted and reused.
+- [ ] Extracted company facts/evidence can be retrieved later by company/topic.
+- [ ] Retrieval can combine:
+  - thinker corpus
+  - company research corpus
+  - saved research notes
+- [ ] `AI Sage` can clearly distinguish these evidence types in responses.
 - [ ] Add tests for:
-  - company source ingestion
-  - company evidence retrieval
-  - mixed corpus retrieval
-  - external-search routing / attribution behavior
+  - saving fetched company sources
+  - retrieving company evidence later
+  - mixed retrieval across thinker/company/saved-research layers
 
 ## Suggested Implementation Shape
 - New persisted objects, names subject to judgment:
@@ -54,18 +54,19 @@
   - `company_documents`
   - `company_chunks`
   - or reuse existing RAG tables with robust corpus typing and metadata
-- Likely endpoints:
-  - `POST /company-intel/sources`
-  - `POST /company-intel/ingest`
-  - `POST /company-intel/retrieve`
-  - `POST /company-intel/analyze-context`
+- Keep the design retrieval-first and reuse-first.
 
 ## Verification Plan
 - `make api-rebuild`
 - `make test-backend`
-- Ingest a sample company document set
-- `curl -X POST http://localhost:8000/company-intel/retrieve -H "Content-Type: application/json" -d '{"company":"GOOGL","query":"capital allocation and competitive moat","top_k":5}'`
-- Verify `AI Sage` can show company evidence alongside thinker evidence
+- Run a thesis-mode company query that fetches live sources
+- Save/reuse those sources
+- `curl` a later company query and confirm prior fetched evidence is available
+
+## Human Notes
+- This is still a v1 value issue because it compounds company research quality across repeated use.
+- Do not let this turn into a broad monitoring system.
+- If a feature here does not improve later company answers or retrieval reuse, defer it.
 
 ## Human Approval Gate
 - [ ] Approved for implementation
