@@ -25,6 +25,8 @@ class ModelRoutingConfig(BaseModel):
     v3_enable_post_pr_human_review: bool = True
     v3_require_pre_ship_human_on_high_risk: bool = True
     v3_enable_caffeinate: bool = True
+    v3_inactivity_timeout_minutes: int = Field(default=30, ge=1)
+    v3_repair_enabled: bool = True
 
     planner_model: str = Field(default="claude-opus-4.6")
     builder_model: str = Field(default="gpt-5.3-codex")
@@ -60,6 +62,8 @@ class ModelRoutingConfig(BaseModel):
                 os.getenv("ENABLE_CAFFEINATE", "1"),
             )
             == "1",
+            v3_inactivity_timeout_minutes=int(os.getenv("V3_INACTIVITY_TIMEOUT_MINUTES", "30")),
+            v3_repair_enabled=os.getenv("V3_REPAIR_ENABLED", "1") == "1",
             planner_model=os.getenv("PLAN_MODEL", "claude-opus-4.6"),
             builder_model=os.getenv("BUILD_MODEL", "claude-sonnet-4.6"),
             reviewer_model=os.getenv("REVIEW_MODEL", "claude-sonnet-4.6"),

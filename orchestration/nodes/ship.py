@@ -72,7 +72,16 @@ def run(state: GraphState) -> GraphState:
     pipeline.current_stage = "done"
 
     render_task_file(pipeline)
+    # Stage the task file (updated by render_task_file above)
     git.add(pipeline.issue.task_file)
+    # For v3: stage all code files changed by agent_run (they were never committed during the run)
+    if pipeline.pipeline_version == "v3" and pipeline.agent_run_output:
+        code_files = [
+            f for f in pipeline.agent_run_output.changed_files
+            if f != pipeline.issue.task_file
+        ]
+        if code_files:
+            git.add(*code_files)
     emit_progress("ship", current_action="Creating final workflow commit and pushing branch")
     committed = git.commit_if_needed(
         f"feat: complete issue #{pipeline.issue.issue_id} workflow execution"

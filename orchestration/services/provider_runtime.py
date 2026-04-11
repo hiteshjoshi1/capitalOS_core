@@ -19,6 +19,7 @@ from orchestration.services.config import get_config
 from orchestration.services.console import emit_event
 from orchestration.services.llm import (
     _extract_json_with_fallback,
+    extract_session_repair_context,
     find_latest_copilot_session,
     wait_for_latest_assistant_message,
 )
@@ -56,6 +57,7 @@ class ProviderRuntimeService:
         *,
         stream_stdout: bool = True,
         stream_stderr: bool = True,
+        timeout_minutes: int | None = None,
     ) -> tuple[int, str, str]:
         proc = subprocess.Popen(
             args,
@@ -86,18 +88,31 @@ class ProviderRuntimeService:
         stdout_thread.start()
         stderr_thread.start()
 
-        deadline = time.monotonic() + (self.cfg.v3_longrun_timeout_minutes * 60)
+        total_timeout_seconds = (timeout_minutes or self.cfg.v3_longrun_timeout_minutes) * 60
+        inactivity_limit_seconds = self.cfg.v3_inactivity_timeout_minutes * 60
+        deadline = time.monotonic() + total_timeout_seconds
+        last_output_time = time.monotonic()
         try:
             while stdout_thread.is_alive() or stderr_thread.is_alive() or not queue.empty():
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     proc.kill()
                     raise RuntimeError(
-                        f"Provider subprocess exceeded timeout of {self.cfg.v3_longrun_timeout_minutes} minutes."
+                        f"Provider subprocess exceeded total timeout of "
+                        f"{timeout_minutes or self.cfg.v3_longrun_timeout_minutes} minutes."
                     )
                 try:
                     stream_name, chunk = queue.get(timeout=min(1.0, remaining))
+                    last_output_time = time.monotonic()
                 except Empty:
+                    inactivity_elapsed = time.monotonic() - last_output_time
+                    if inactivity_elapsed >= inactivity_limit_seconds:
+                        proc.kill()
+                        raise RuntimeError(
+                            f"Provider subprocess stalled: no output for "
+                            f"{int(inactivity_elapsed / 60)} minutes "
+                            f"(inactivity limit is {self.cfg.v3_inactivity_timeout_minutes} minutes)."
+                        )
                     continue
 
                 if stream_name == "stdout":
@@ -147,8 +162,8 @@ class ProviderRuntimeService:
         if session_events_path is not None:
             fallback_output = wait_for_latest_assistant_message(
                 session_events_path,
-                timeout_seconds=5.0,
-                poll_interval_seconds=0.25,
+                timeout_seconds=30.0,
+                poll_interval_seconds=0.5,
                 require_json=True,
             )
         diagnostics = [
@@ -168,6 +183,58 @@ class ProviderRuntimeService:
             fallback_output=fallback_output,
             session_events_path=str(session_events_path) if session_events_path else None,
         )
+
+    def _build_repair_prompt(
+        self,
+        *,
+        original_prompt: str,
+        raw: str,
+        fallback_raw: str | None,
+        session_context: str,
+    ) -> str:
+        return (
+            "The previous implementation session completed work in the repository but did not emit"
+            " the required final JSON payload.\n\n"
+            "Your ONLY task: produce the strict JSON output that the previous session should have produced.\n"
+            "- Do NOT call any tools.\n"
+            "- Do NOT make any file changes.\n"
+            "- Return ONLY a valid JSON object — no prose, no markdown fences.\n\n"
+            "Original prompt (defines the expected JSON schema and what work was done):\n"
+            f"{original_prompt}\n\n"
+            "Previous session stdout (may be empty or contain partial output):\n"
+            f"{raw[:8000] if raw else '<empty>'}\n\n"
+            "Previous session assistant-message fallback:\n"
+            f"{fallback_raw[:4000] if fallback_raw else '<empty>'}\n\n"
+            "Session context summary (what the agent actually did):\n"
+            f"{session_context}\n\n"
+            "Return only valid JSON matching the schema in the original prompt."
+        )
+
+    def _run_copilot_repair(self, *, model: str, prompt: str) -> str:
+        """Lightweight text-only Copilot call to repair malformed structured output.
+
+        No autopilot, no tools — this is purely a JSON-formatting request and
+        should complete in well under 5 minutes.
+        """
+        args = [
+            "copilot",
+            "--model",
+            model,
+            "-p",
+            prompt,
+            "--no-color",
+            "--no-ask-user",
+        ]
+        final_args = self._prefix_with_caffeinate(args)
+        returncode, output, error = self._run_streaming_command(
+            final_args,
+            stream_stdout=True,
+            stream_stderr=False,
+            timeout_minutes=5,
+        )
+        if returncode != 0:
+            raise RuntimeError(error or output or "Copilot repair call failed without output.")
+        return output
 
     def _run_codex(self, *, model: str, prompt: str) -> ProviderRunResult:
         with tempfile.NamedTemporaryFile(prefix="codex-last-message-", suffix=".txt", delete=False) as handle:
@@ -225,8 +292,22 @@ class ProviderRuntimeService:
             evidence=[f"provider={provider}", f"model={model_name}"],
         )
 
+        # --- Phase 1: run the provider subprocess ---
         try:
             run_result = self._run_provider(provider, model=model_name, prompt=prompt)
+        except RuntimeError as exc:
+            emit_event(
+                "provider_run_failed",
+                stage=self.stage,
+                status="failed",
+                evidence=[f"provider={provider}", f"error={str(exc)[:280]}"],
+                conclusion=f"Provider `{provider}` subprocess failed or stalled.",
+            )
+            raise RuntimeError(f"Provider `{provider}` subprocess failed for v3 run: {exc}") from exc
+
+        # --- Phase 2: parse structured output from stdout / session fallback ---
+        first_parse_failure: Exception | None = None
+        try:
             payload = _extract_json_with_fallback(run_result.output, run_result.fallback_output)
             parsed = model_cls.model_validate(payload)
             emit_event(
@@ -238,14 +319,70 @@ class ProviderRuntimeService:
             )
             return parsed, run_result
         except Exception as exc:  # noqa: BLE001
-            emit_event(
-                "provider_run_failed",
-                stage=self.stage,
-                status="failed",
-                evidence=[f"provider={provider}", f"error={str(exc)[:280]}"],
-                conclusion=f"Provider `{provider}` failed for this v3 run attempt.",
-            )
-            raise RuntimeError(f"Provider `{provider}` failed for v3 run: {exc}") from exc
+            first_parse_failure = exc
+
+        # --- Phase 3: single repair attempt (copilot only, if enabled) ---
+        if (
+            provider == "copilot"
+            and run_result.session_events_path is not None
+            and self.cfg.v3_repair_enabled
+        ):
+            session_context = extract_session_repair_context(Path(run_result.session_events_path))
+            if session_context:
+                emit_event(
+                    "provider_repair_started",
+                    stage=self.stage,
+                    current_action="Structured output malformed; attempting single text-only repair call",
+                    evidence=[
+                        f"provider={provider}",
+                        f"session_context_chars={len(session_context)}",
+                    ],
+                )
+                try:
+                    repair_prompt = self._build_repair_prompt(
+                        original_prompt=prompt,
+                        raw=run_result.output,
+                        fallback_raw=run_result.fallback_output,
+                        session_context=session_context,
+                    )
+                    repaired_raw = self._run_copilot_repair(model=model_name, prompt=repair_prompt)
+                    payload = _extract_json_with_fallback(repaired_raw, None)
+                    parsed = model_cls.model_validate(payload)
+                    emit_event(
+                        "provider_repair_finished",
+                        stage=self.stage,
+                        status="completed",
+                        evidence=[f"provider={provider}", f"repaired_chars={len(repaired_raw)}"],
+                        conclusion="Repair call produced valid structured output.",
+                    )
+                    return parsed, run_result
+                except Exception as repair_exc:  # noqa: BLE001
+                    emit_event(
+                        "provider_repair_failed",
+                        stage=self.stage,
+                        status="failed",
+                        evidence=[f"provider={provider}", f"error={str(repair_exc)[:280]}"],
+                        conclusion="Repair call also failed to produce valid structured output.",
+                    )
+                    raise RuntimeError(
+                        f"Provider `{provider}` returned malformed structured output and"
+                        f" repair also failed: {repair_exc}"
+                    ) from repair_exc
+
+        emit_event(
+            "provider_run_failed",
+            stage=self.stage,
+            status="failed",
+            evidence=[
+                f"provider={provider}",
+                f"error={str(first_parse_failure)[:280]}",
+                "repair_attempted=false",
+            ],
+            conclusion=f"Provider `{provider}` completed but returned malformed structured output.",
+        )
+        raise RuntimeError(
+            f"Provider `{provider}` completed but returned malformed structured output: {first_parse_failure}"
+        ) from first_parse_failure
 
 
 def structured_output_for_debug(output: BaseModel) -> str:

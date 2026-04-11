@@ -357,6 +357,12 @@ def _next_action(state: PipelineState) -> str:
 
     if workflow_status == "waiting_for_human":
         if current_stage == "deterministic_gates":
+            if state.agent_run_output is not None and not state.blockers:
+                return (
+                    "All deterministic gates passed. "
+                    "Review the changes in the working tree, then run "
+                    "`make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR."
+                )
             return "Human to approve or reject high-risk findings before ship."
         if current_stage == "human_approval_gate" and state.build_output and state.build_output.retry_request:
             retry_request = state.build_output.retry_request

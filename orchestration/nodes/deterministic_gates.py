@@ -148,7 +148,7 @@ def run(state: GraphState) -> GraphState:
             evidence=[f"reviewer={reviewer}"],
         )
 
-    pipeline.workflow_status = "running"
+    pipeline.workflow_status = "waiting_for_human"
     pipeline.blockers = []
     pipeline.v3_permanent_failure_reason = None
     render_task_file(pipeline)
@@ -156,6 +156,6 @@ def run(state: GraphState) -> GraphState:
         PipelineStage.DETERMINISTIC_GATES,
         status="completed",
         evidence=[f"changed_files={len(changed_files)}", f"retry_entries={len(retries)}"],
-        conclusion="Deterministic gates passed.",
+        conclusion="Deterministic gates passed. Run `make task-ship` to commit, push, and open a PR.",
     )
     return dump_pipeline_state(pipeline)

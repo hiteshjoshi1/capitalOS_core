@@ -53,11 +53,16 @@ def run(state: GraphState) -> GraphState:
             model_cls=AgentRunOutput,
         )
     except Exception as exc:  # noqa: BLE001
+        exc_str = str(exc)
+        if "subprocess failed" in exc_str or "stalled" in exc_str:
+            blocker = "V3 agent run: provider subprocess failed or stalled before completing."
+        elif "malformed structured output" in exc_str:
+            blocker = "V3 agent run completed work but failed to produce valid JSON output (repair also failed)."
+        else:
+            blocker = "V3 agent run failed before producing valid structured output."
         pipeline.workflow_status = "blocked"
         pipeline.v3_permanent_failure_reason = f"agent_run failed: {exc}"
-        pipeline.blockers.append(
-            "V3 agent run failed before producing valid structured output."
-        )
+        pipeline.blockers.append(blocker)
         pipeline.errors.append(str(exc))
         render_task_file(pipeline)
         emit_stage_end(
