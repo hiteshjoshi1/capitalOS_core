@@ -4,6 +4,7 @@
 - Build the first company-intelligence corpus that complements thinker writings.
 - Let CapitalOS ingest and retrieve company-specific evidence such as filings, transcripts, presentations, product updates, and competitor signals.
 - Make `AI Sage` and later decision memos capable of reasoning over both thinker wisdom and company evidence.
+- Own the external-search and fresh-evidence path for questions that cannot be answered well from the thinker corpus alone.
 
 ## Program Position
 - Depends on issue 130 for retrieval infrastructure.
@@ -20,11 +21,17 @@
   - company blog / product updates
   - competitor source links where feasible
 - Do not overpromise real-time streaming. Batch ingestion and refresh is enough for the initial issue.
+- Query-time external search should be used when the system decides the question is:
+  - not answerable from the current corpus
+  - time-sensitive or likely to need fresher information
+  - materially improved by live company or market evidence
+- If prior corpus reasoning surfaces follow-up questions, do not search those automatically. Present them to the user first and let the user explicitly continue.
 
 ## Acceptance Criteria
 - [ ] Add company source registry and ingestion path for core company documents.
 - [ ] Retrieval can query thinker corpus, company corpus, or both.
 - [ ] `AI Sage` can surface company evidence distinctly from thinker evidence.
+- [ ] Add an external-search-backed path for company or time-sensitive questions with clear source attribution separate from thinker-corpus citations.
 - [ ] Add company-context retrieval mode that supports:
   - company profile question
   - business quality question
@@ -39,6 +46,7 @@
   - company source ingestion
   - company evidence retrieval
   - mixed corpus retrieval
+  - external-search routing / attribution behavior
 
 ## Suggested Implementation Shape
 - New persisted objects, names subject to judgment:

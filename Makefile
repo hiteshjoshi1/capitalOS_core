@@ -380,8 +380,7 @@ api-rebuild:
 	docker compose up -d api
 
 web-rebuild:
-	docker compose build web
-	docker compose up -d web
+	cd $(WEB_DIR) && npm run build
 
 api-shell:
 	docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"

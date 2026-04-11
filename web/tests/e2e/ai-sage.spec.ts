@@ -44,14 +44,23 @@ test("navigates to AI Sage and renders grounded query results", async ({ page })
   await expect(page.getByRole("heading", { name: "AI Sage" })).toBeVisible();
   await page
     .getByPlaceholder(
-      "Ask a grounded question, for example: What does Warren Buffett emphasize about durable moats?",
+      "Ask AI Sage anything about a business, thesis, risk, or mental model...",
     )
     .fill("What matters?");
-  await page.getByRole("button", { name: "Ask AI Sage" }).click();
+  await page
+    .getByPlaceholder(
+      "Ask AI Sage anything about a business, thesis, risk, or mental model...",
+    )
+    .press("Enter");
 
-  await expect(page.getByText("Selected Authors")).toBeVisible();
+  await expect(page.getByText("Your Question")).toBeVisible();
+  await expect(page.getByText("Relevant Author Perspectives")).toBeVisible();
   await expect(page.getByText("Warren Buffett").first()).toBeVisible();
-  await expect(page.getByText("Grounded Answer")).toBeVisible();
+  await expect(page.getByText("Answer")).toBeVisible();
   await expect(page.getByText("Focus on business quality.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show Sources (1)" })).toBeVisible();
+  await expect(page.getByText(/A wonderful business can compound/i)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Show Sources (1)" }).click();
   await expect(page.getByText(/A wonderful business can compound/i)).toBeVisible();
 });

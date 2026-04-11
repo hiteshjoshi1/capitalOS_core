@@ -20,19 +20,19 @@
   - author wisdom profiles
   - author selection
 - The main job here is product orchestration, not deeper reasoning logic.
-- `AI Sage` should support multiple query modes in one consistent shell, for example:
-  - retrieve
-  - ask
-  - company context
-  - author profile view
-- Add a runtime query orchestration layer in the backend that routes user requests to the correct retrieval/profile path and normalizes responses for the UI.
+- `AI Sage` should present one primary interaction model:
+  - user enters a question
+  - system decides whether thinker corpus is relevant
+  - system decides whether corpus evidence is sufficient
+  - system decides whether the user would benefit from fresher/external data
+- Add a runtime query orchestration layer in the backend that routes user requests to the correct retrieval/profile path and normalizes responses for the UI without exposing backend modes directly.
 - The frontend should preserve context between interactions in a session, but this issue should stop short of full memo persistence and outcome review.
-- The UI should show what the system is doing:
-  - selected authors
-  - selected mode
-  - retrieved evidence
-  - citations
-  - author wisdom cards
+- The main UI should stay minimal. If advanced options are needed, they should be tucked behind a lightweight affordance rather than shown as primary controls.
+- The UI should show what the system is doing in user terms:
+  - relevant authors
+  - answer quality / missing information
+  - citations when explicitly inspected
+  - optional follow-up paths
 - This issue should not yet implement full multi-lens synthesis/critic reasoning. That belongs to issue 132.
 
 ## Scope
@@ -44,6 +44,10 @@
   - author wisdom profiles
   - company-context preparation
 - Basic product polish for loading states, empty states, errors, and citation display
+- Automatic routing logic for when the system should:
+  - use internal corpus only
+  - report that the corpus is insufficient
+  - recommend or trigger external/company evidence retrieval because the query is out-of-corpus or time-sensitive
 
 ## Out Of Scope
 - Full multi-lens reasoning, synthesis, and critic
@@ -57,17 +61,17 @@
 ## Acceptance Criteria
 - [ ] Add an `Intelligence > AI Sage` product surface that can:
   - accept a query
-  - choose a mode
-  - optionally choose/filter authors
+  - submit via Enter
+  - automatically choose relevant authors when applicable
   - display selected authors
-  - display citations and evidence cards
-  - display author wisdom profile cards
+  - display citations and evidence only when the user asks to inspect them
+  - keep advanced controls out of the primary UI
 - [ ] Add a backend orchestration endpoint or equivalent service that normalizes UI query execution for `AI Sage`.
 - [ ] `AI Sage` can handle at least these flows:
-  - retrieval query
-  - author-aware ask query
-  - company-context preparation query
-  - direct author profile inspection
+  - corpus-backed answer
+  - corpus-insufficient response
+  - company/time-sensitive query that should escalate to issue-134 style evidence retrieval when implemented
+  - direct author relevance selection without the user manually choosing author ids
 - [ ] UI has usable:
   - loading states
   - empty states
@@ -79,7 +83,6 @@
 ## Suggested Implementation Shape
 - Add a route/page in the frontend for `AI Sage`.
 - Add frontend state for:
-  - current mode
   - current query
   - current selected authors
   - latest result payload
@@ -94,17 +97,17 @@
 - `make web-rebuild`
 - `make test-backend`
 - `make test-frontend`
-- `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"mode":"retrieve","query":"capital allocation and moat"}'`
-- Verify `AI Sage` UI can execute all supported modes and render citations and author wisdom cleanly.
+- `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"query":"capital allocation and moat"}'`
+- Verify `AI Sage` UI can execute the primary query flow, auto-select relevant authors, and render citations cleanly when requested.
 
 ## Human Notes
 - This is the first issue where the product should begin to feel like a coherent `AI Sage`, rather than a set of backend endpoints.
 - The point is product integration and usability, not yet full reasoning depth.
 - If scope becomes too large, prioritize:
   - stable shell
-  - mode routing
+  - automatic routing
   - citation rendering
-  - author wisdom display
+  - author relevance display
 
 ## Human Approval Gate
 - [ ] Approved for implementation

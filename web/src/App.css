@@ -1653,121 +1653,114 @@ a.btn {
 /* ─── AI Sage ────────────────────────────────────────────────────── */
 
 .aiSagePage {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 18px;
 }
 
-.aiSageGuideGrid {
+.aiSageChatPage {
+  min-height: calc(100vh - 210px);
+}
+
+.aiSageTimeline {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-content: start;
+  padding-bottom: 8px;
+}
+
+.aiSageBubbleCard,
+.aiSageAnswerCard {
+  display: grid;
   gap: 14px;
 }
 
-.aiSageGuideCard,
-.aiSageModeCard,
-.aiSageControlCard,
-.aiSageResultSummaryCard,
-.aiSageAnswerCard {
-  min-width: 0;
-}
-
-.aiSageGuideText {
+.aiSageWelcomeCard {
+  max-width: 820px;
   display: grid;
-  gap: 10px;
-  font-size: 14px;
-  line-height: 1.55;
+  gap: 12px;
 }
 
-.aiSageGuideText p {
+.aiSageLead {
   margin: 0;
-}
-
-.aiSageModeCard {
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
-}
-
-.aiSageModeCard:hover {
-  border-color: var(--accent);
-  transform: translateY(-1px);
-}
-
-.aiSageModeCardActive {
-  border-color: color-mix(in srgb, var(--accent) 60%, var(--line) 40%);
-  background: color-mix(in srgb, var(--accent-soft) 32%, var(--panel2) 68%);
-}
-
-.aiSageModeSummary {
-  font-size: 16px;
-  font-weight: 700;
-  line-height: 1.35;
-}
-
-.aiSageModeBody {
-  margin: 8px 0 12px;
   font-size: 13px;
   line-height: 1.5;
 }
 
-.aiSageModeExample {
-  display: block;
-  color: var(--accent);
+.aiSagePromptEcho {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.aiSageComposerDock {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  gap: 10px;
+  padding-top: 10px;
+  background:
+    linear-gradient(180deg, rgba(9, 15, 25, 0) 0%, var(--bg) 24%);
+}
+
+[data-theme="light"] .aiSageComposerDock {
+  background:
+    linear-gradient(180deg, rgba(244, 239, 230, 0) 0%, var(--bg) 24%);
+}
+
+.aiSageComposerBar {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px;
+  align-items: end;
+  padding: 10px;
+  border-radius: 20px;
+}
+
+.aiSageComposerPlus {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 999px;
+  font-size: 22px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aiSageComposerHint {
   font-size: 12px;
-  line-height: 1.45;
+  padding: 0 6px 2px;
 }
 
-.aiSageWorkGrid {
+.aiSagePromptMenu {
+  width: min(760px, 100%);
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
-  gap: 18px;
+  gap: 10px;
 }
 
-.aiSageControlCard {
+.aiSagePromptMenuList {
   display: grid;
-  gap: 14px;
-}
-
-.aiSageSegmented {
-  display: flex;
-  flex-wrap: wrap;
   gap: 8px;
 }
 
-.aiSageSegmentActive {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 18%, transparent 82%);
-  color: var(--accent);
-}
-
-.aiSageModeIntro {
-  display: grid;
-  gap: 4px;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: var(--surface-glow);
-}
-
-.aiSageField {
-  display: grid;
-  gap: 8px;
-}
-
-.aiSageLabel {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-}
-
-.aiSageTextarea {
-  min-height: 118px;
+.aiSagePromptInput {
+  min-height: 132px;
   resize: vertical;
 }
 
-.aiSageTokenRow {
+.aiSagePromptInputCompact {
+  min-height: 44px;
+  max-height: 160px;
+  padding-top: 11px;
+  padding-bottom: 11px;
+  resize: none;
+  border-radius: 16px;
+}
+
+.aiSageExampleRow {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
@@ -1777,14 +1770,11 @@ a.btn {
   padding: 7px 10px;
 }
 
-.aiSageActionRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.aiSagePrimaryAction {
-  min-width: 180px;
+.aiSageExampleBtn {
+  text-align: left;
+  font-size: 12px;
+  line-height: 1.45;
+  justify-content: flex-start;
 }
 
 .aiSageError {
@@ -1796,41 +1786,6 @@ a.btn {
   font-size: 13px;
 }
 
-.aiSageResultSummaryCard {
-  display: grid;
-  gap: 14px;
-}
-
-.aiSageButtonGuide {
-  display: grid;
-  gap: 12px;
-}
-
-.aiSageButtonGuideRow {
-  display: grid;
-  gap: 4px;
-}
-
-.aiSageSummaryStrip {
-  display: grid;
-  gap: 10px;
-}
-
-.aiSageSummaryMetric {
-  display: grid;
-  gap: 3px;
-  padding: 10px 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: var(--surface-glow);
-  font-size: 13px;
-}
-
-.aiSageAnswerCard {
-  display: grid;
-  gap: 10px;
-}
-
 .aiSageAnswerText {
   margin: 0;
   white-space: pre-wrap;
@@ -1840,6 +1795,12 @@ a.btn {
 
 .aiSageNote {
   margin: 0;
+}
+
+.aiSageTokenRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .aiSageAuthorGrid {
@@ -1883,6 +1844,19 @@ a.btn {
   line-height: 1.4;
 }
 
+.aiSageSourcesHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 10px;
+}
+
+.aiSageSourcesHint {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
 .aiSageEvidenceList {
   display: grid;
   gap: 12px;
@@ -1922,6 +1896,25 @@ a.btn {
   overflow-wrap: anywhere;
 }
 
+@media (max-width: 768px) {
+  .aiSageChatPage {
+    min-height: calc(100vh - 190px);
+  }
+
+  .aiSageComposerBar {
+    grid-template-columns: 1fr;
+  }
+
+  .aiSageComposerPlus {
+    width: 36px;
+    height: 36px;
+  }
+
+  .aiSageSourcesHeader {
+    flex-direction: column;
+  }
+}
+
 /* ─── Responsive ─────────────────────────────────────────────────── */
 
 /* hidden on desktop, shown on mobile as fallback User menu trigger */
@@ -1936,11 +1929,6 @@ a.btn {
 
   .mobileUserMenu {
     display: inline-flex !important;
-  }
-
-  .aiSageGuideGrid,
-  .aiSageWorkGrid {
-    grid-template-columns: 1fr;
   }
 
   .rowExposure,

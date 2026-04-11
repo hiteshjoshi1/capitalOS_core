@@ -8,10 +8,10 @@
 ## Program Position
 - This is the foundation issue for the Decision Intelligence build plan.
 - Downstream dependencies:
-  - issue 131 uses this issue's retrieval and author wisdom layer in `AI Sage`
-  - issue 132 uses this issue's author selection and evidence packaging for guided questioning
-  - issue 133 uses this issue's evidence and author context inside decision memos
-  - issue 134 expands the corpus beyond thinker writings into company intelligence
+  - issue 131 turns this issue's retrieval and author wisdom layer into a coherent single-input `AI Sage` orchestration flow
+  - issue 132 uses this issue's author selection and evidence packaging for per-author reasoning, synthesis, and critic passes
+  - issue 133 uses this issue's evidence and author context inside guided follow-up and decision memos
+  - issue 134 expands the corpus beyond thinker writings into company intelligence and external-search-backed evidence
   - issue 135 uses all prior issues for reflection, calibration, and self-improvement
 
 ## Architecture Decisions
@@ -41,7 +41,23 @@
 - Output must remain auditable and source-grounded. If the system cannot support a statement from retrieved evidence or author wisdom citations, it should not present it as grounded truth.
 - This issue should stop before full memo/calibration workflows. Those are split into a follow-up issue.
 - Include a thin UI surface under `Intelligence > AI Sage` so retrieval can be validated as a product flow, not only by curl.
-- `AI Sage` in this issue is a verification surface, not a full chat product. It should expose backend retrieval/profile functionality clearly, with minimal UX scope.
+- `AI Sage` in this issue is a verification surface, not a full chat product.
+- The user-facing surface in this issue should already follow the future product direction:
+  - one primary text input
+  - Enter submits
+  - automatic author relevance selection
+  - no visible mode selector in the main UI
+  - no visible author id / author filter input in the main UI
+  - evidence hidden by default and shown only when the user explicitly asks to inspect it
+- This issue should document the long-term orchestration target clearly, even if later issues implement most of it:
+  - inspect the question and decide whether thinker corpus is relevant
+  - retrieve relevant chunks automatically
+  - synthesize per-author perspectives
+  - synthesize a combined perspective
+  - run a critic pass
+  - surface evidence behind each claim
+  - defer external search unless the query truly needs fresher or out-of-corpus data
+- If retrieval surfaces new lines of inquiry, do not automatically launch external search for those follow-on questions. Surface them to the user first and let the user decide the next step.
 
 ## Scope
 - Query classification for retrieval use cases:
@@ -52,7 +68,7 @@
 - Author wisdom profile generation and refresh
 - Retrieval APIs with citations and author-aware context
 - Light query-answering path that produces grounded synthesis input, not the full judgment OS
-- Minimal `AI Sage` UI for exercising retrieval, author wisdom, and company-context preparation
+- Minimal `AI Sage` UI for exercising retrieval and author wisdom through one primary query box
 - Curl-verifiable backend implementation remains mandatory
 
 ## Out Of Scope
@@ -86,11 +102,11 @@
   - asking an author-aware grounded question
 - [ ] Add a minimal `Intelligence > AI Sage` UI surface that supports:
   - entering a query
-  - optional author filter
-  - optional mode selection such as `Retrieve`, `Ask`, or `Company Context`
+  - Enter to submit
+  - automatic author relevance selection with no manual author-id entry in the main flow
   - displaying selected authors
   - displaying a short answer or evidence summary
-  - displaying cited chunks and author wisdom cards
+  - displaying cited chunks behind an explicit user action rather than by default
 - [ ] Query responses include:
   - selected authors
   - retrieved evidence chunks
@@ -101,6 +117,7 @@
   - retrieves relevant corpus evidence
   - returns which author lenses are likely relevant
   - returns a structured evidence pack for later reasoning
+- [ ] `AI Sage` remains a minimal validation surface in this issue. Rich multi-step orchestration, critic flows, and external search routing are documented here but implemented in later issues.
 - [ ] All new features are testable with curl and covered by backend tests.
 - [ ] Add or update a Make target or explicit documented command sequence to verify the retrieval flow end to end.
 
@@ -121,10 +138,9 @@
   - `POST /rag/query`
   - `POST /rag/analyze/company-context`
 - Add a thin frontend surface under `Intelligence > AI Sage`, likely including:
-  - a query input
-  - mode selector
-  - author filter selector
-  - results panel for answer, citations, and author wisdom cards
+  - a single query input
+  - Enter-to-submit behavior
+  - results panel for answer, selected authors, and hidden-by-default citations
 - Ensure author profile refresh can be rerun deterministically after new corpus ingestion.
 
 ## Verification Plan
@@ -146,11 +162,17 @@
 - Frontend verification:
   - `make web-rebuild`
   - open `Intelligence > AI Sage`
-  - verify query execution, author selection display, citations, and author wisdom rendering
+  - verify query execution, author auto-selection display, hidden-by-default citations, and answer rendering
 
 ## Human Notes
 - The purpose of this issue is to make the authors' core wisdom sit "next to you" in a grounded way, before building a more interactive coaching system.
-- The `AI Sage` UI in this issue is intentionally thin. Its purpose is to validate retrieval and author wisdom UX early, before the richer decision-copilot work in issue 131.
+- The `AI Sage` UI in this issue is intentionally thin. Its purpose is to validate retrieval and author wisdom UX early, before the richer orchestration and reasoning work in issues 131-134.
+- The minimal UI should not expose backend implementation jargon like `RAG Research`, `Evidence First`, `Ask`, `Retrieve`, or `Company Context` as primary user controls.
+- The long-term product shape is a single-query experience where the system decides:
+  - whether relevant author corpus exists
+  - whether corpus evidence is enough
+  - whether newer or external evidence is required
+  - which follow-up questions should be surfaced to the user instead of being searched automatically
 - If implementation becomes too broad, prioritize:
   - author wisdom profiles
   - retrieval quality

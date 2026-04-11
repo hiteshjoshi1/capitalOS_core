@@ -13,6 +13,7 @@
 ## Architecture Decisions
 - Outcome review is a first-class object, not an afterthought.
 - Feedback and calibration should operate on stored memos and actual later reviews, not only instantaneous thumbs-up/down.
+- This issue should only evaluate and summarize workflows that are already producing valuable research and memo outputs. It must not drive product complexity ahead of answer quality.
 - Reflection should examine:
   - overconfidence
   - weak assumptions
