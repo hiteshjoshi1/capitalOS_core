@@ -1669,10 +1669,26 @@ a.btn {
   padding-bottom: 8px;
 }
 
+.aiSageTurn {
+  display: grid;
+  gap: 12px;
+}
+
 .aiSageBubbleCard,
 .aiSageAnswerCard {
   display: grid;
   gap: 14px;
+}
+
+.aiSageUserBubble {
+  max-width: min(760px, 88%);
+  justify-self: end;
+  background: color-mix(in srgb, var(--accent) 16%, var(--card) 84%);
+}
+
+.aiSageAssistantBubble {
+  max-width: min(900px, 100%);
+  justify-self: start;
 }
 
 .aiSageWelcomeCard {
@@ -1694,6 +1710,26 @@ a.btn {
   line-height: 1.7;
 }
 
+.aiSageAnswerLead {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.aiSageResponseSection {
+  display: grid;
+  gap: 10px;
+}
+
+.aiSageSectionTitle {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .aiSageComposerDock {
   position: sticky;
   bottom: 0;
@@ -1711,7 +1747,7 @@ a.btn {
 
 .aiSageComposerBar {
   display: grid;
-  grid-template-columns: auto 1fr;
+  grid-template-columns: auto 1fr auto;
   gap: 10px;
   align-items: end;
   padding: 10px;
@@ -1728,6 +1764,13 @@ a.btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+}
+
+.aiSageComposerSend {
+  min-width: 72px;
+  height: 44px;
+  border-radius: 14px;
+  align-self: stretch;
 }
 
 .aiSageComposerHint {
@@ -1902,12 +1945,16 @@ a.btn {
   }
 
   .aiSageComposerBar {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
   }
 
   .aiSageComposerPlus {
     width: 36px;
     height: 36px;
+  }
+
+  .aiSageComposerSend {
+    grid-column: 1 / -1;
   }
 
   .aiSageSourcesHeader {

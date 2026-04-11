@@ -86,10 +86,12 @@ Rules:
 4) Any changed file outside planned paths must be included in extra_changed_files with a concrete reason.
 5) In this single session you must do the full loop: understand task, derive plan, implement, add/update relevant tests, run relevant tests, fix failures, rerun until green or truly stuck.
 6) Relevant test policy:
-   - if you changed `api/` or `migrations/`, run backend verification commands (`make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`)
-   - if you changed `web/`, run frontend verification commands (`make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`, `make e2e` when Playwright exists)
-   - if you changed `orchestration/`, workflow docs, or the `Makefile`, run pipeline verification (`make orch-test`)
-   - if you changed multiple areas, run the union
+   - if you changed `api/` or `migrations/`, run exactly these backend verification commands: `make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`
+   - if you changed `web/`, run exactly these frontend verification commands: `make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`, `make e2e` when Playwright exists
+   - if you changed `orchestration/`, workflow docs, or the `Makefile`, run exactly this pipeline verification command: `make orch-test`
+   - if you changed multiple areas, run the union of the exact `make ...` commands above
+   - do not substitute equivalent raw commands like `docker compose ...`, `pytest`, `npm test`, or `npm run build` when a required `make ...` target exists
+   - record the exact command strings you ran in `verification_commands_run`; they must match the executed `make ...` commands
 7) Do not commit, push, or open a PR in this session. Ship owns commits.
 8) Record every relevant test command you ran in verification_commands_run.
 9) If semantic intent is achieved, unresolved_failures must be empty.

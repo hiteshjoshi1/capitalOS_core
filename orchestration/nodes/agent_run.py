@@ -78,6 +78,15 @@ def run(state: GraphState) -> GraphState:
     git = GitService(pipeline.issue.repo_root)
     actual_changed_files = git.changed_files()
     reported_changed_files = sorted({path for path in output.changed_files if path})
+    task_file = pipeline.issue.task_file
+    normalized_actual_changed_files = sorted(
+        path for path in actual_changed_files
+        if path and path != task_file
+    )
+    normalized_reported_changed_files = sorted(
+        path for path in reported_changed_files
+        if path and path != task_file
+    )
     expected_verification_commands = VerificationService.expected_commands_for_changed_files(
         pipeline.issue.repo_root,
         actual_changed_files,
@@ -86,10 +95,11 @@ def run(state: GraphState) -> GraphState:
         item.command for item in output.verification_commands_run if item.command
     }
     integrity_failures: list[str] = []
-    if sorted(actual_changed_files) != reported_changed_files:
+    if normalized_actual_changed_files != normalized_reported_changed_files:
         integrity_failures.append(
             "agent_run reported changed_files that do not match the actual git diff. "
-            f"reported={reported_changed_files or ['<none>']} actual={actual_changed_files or ['<none>']}"
+            f"reported={normalized_reported_changed_files or ['<none>']} "
+            f"actual={normalized_actual_changed_files or ['<none>']}"
         )
     if output.semantic_intent_achieved and output.unresolved_failures:
         integrity_failures.append(
