@@ -13,6 +13,7 @@ from orchestration.models.pipeline import PipelineState
 from orchestration.models.verification import VerificationCommandResult, VerificationEvidence
 from orchestration.nodes import agent_run as agent_run_node
 from orchestration.nodes import deterministic_gates as deterministic_gates_node
+from orchestration.prompts.agent_run import build_agent_run_prompt
 from orchestration.services.deterministic_fix import DeterministicFixService
 from orchestration.services.provider_runtime import ProviderRunResult, ProviderRuntimeService
 from orchestration.services.v3_policy import V3PolicyResult
@@ -165,6 +166,47 @@ def test_agent_run_blocks_on_changed_files_mismatch(tmp_path, monkeypatch) -> No
     pipeline = PipelineState.model_validate(result["pipeline"])
     assert pipeline.workflow_status == "blocked"
     assert any("changed_files" in item for item in pipeline.blockers)
+
+
+def test_agent_run_allows_pipeline_managed_task_file_diff(tmp_path, monkeypatch) -> None:
+    state = _v3_state(tmp_path)
+
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["tasks/issue-126-v3.md", "web/src/App.tsx"],
+    )
+
+    def fake_complete_structured(self, prompt, model_cls):
+        _ = (self, prompt, model_cls)
+        return _agent_output(), ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "running"
+    assert pipeline.agent_run_output is not None
+    assert sorted(pipeline.agent_run_output.changed_files) == ["tasks/issue-126-v3.md", "web/src/App.tsx"]
+
+
+def test_agent_run_prompt_requires_exact_make_commands(tmp_path) -> None:
+    state = _v3_state(tmp_path)
+    prompt = build_agent_run_prompt(state)
+
+    assert "run exactly these backend verification commands" in prompt
+    assert "run exactly these frontend verification commands" in prompt
+    assert "do not substitute equivalent raw commands" in prompt
+    assert "record the exact command strings you ran" in prompt
 
 
 def _verification_pass() -> VerificationEvidence:
@@ -683,4 +725,3 @@ def test_render_next_action_high_risk_gate(tmp_path) -> None:
 
     rendered = render_execution_journal(state)
     assert "high-risk" in rendered.lower() or "High-risk" in rendered
-

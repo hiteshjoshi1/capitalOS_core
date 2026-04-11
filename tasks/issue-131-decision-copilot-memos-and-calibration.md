@@ -231,3 +231,44 @@ _Human-readable next steps._
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `agent_run`
+**Workflow Status**: `blocked`
+
+## Workflow Snapshot
+- latest_outcome: agent_run did not report running all required relevant verification commands: make api-rebuild, make contract-backend, make test-backend, make api-smoke, make lint, make typecheck, make contract-frontend, make test-frontend, make e2e
+- next_action: Inspect blockers and rerun the appropriate stage after adding new context.
+- pipeline_version: `v3`
+- retry_gate_pending: `no`
+- blocked_reason: agent_run did not report running all required relevant verification commands: make api-rebuild, make contract-backend, make test-backend, make api-smoke, make lint, make typecheck, make contract-frontend, make test-frontend, make e2e
+
+## Active Requirements
+- No active requirements recorded yet.
+
+## Prepare
+Checked out `feature/issue-131-decision-copilot-memos-and-calibration` from `main` and ensured task file exists.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Blockers
+- agent_run reported changed_files that do not match the actual git diff. reported=['api/app/main.py', 'api/app/rag/concept_mode.py', 'api/app/routers/ai_sage.py', 'api/tests/test_ai_sage_concept.py', 'web/src/__tests__/AISage.test.tsx', 'web/src/lib/api.ts', 'web/src/routes/AISage.tsx'] actual=['api/app/main.py', 'api/app/rag/concept_mode.py', 'api/app/routers/ai_sage.py', 'api/tests/test_ai_sage_concept.py', 'tasks/issue-131-decision-copilot-memos-and-calibration.md', 'web/src/__tests__/AISage.test.tsx', 'web/src/lib/api.ts', 'web/src/routes/AISage.tsx']
+- agent_run did not report running all required relevant verification commands: make api-rebuild, make contract-backend, make test-backend, make api-smoke, make lint, make typecheck, make contract-frontend, make test-frontend, make e2e
+
+## Permanently Failed / Gave Up
+- Stop reason: agent_run reported changed_files that do not match the actual git diff. reported=['api/app/main.py', 'api/app/rag/concept_mode.py', 'api/app/routers/ai_sage.py', 'api/tests/test_ai_sage_concept.py', 'web/src/__tests__/AISage.test.tsx', 'web/src/lib/api.ts', 'web/src/routes/AISage.tsx'] actual=['api/app/main.py', 'api/app/rag/concept_mode.py', 'api/app/routers/ai_sage.py', 'api/tests/test_ai_sage_concept.py', 'tasks/issue-131-decision-copilot-memos-and-calibration.md', 'web/src/__tests__/AISage.test.tsx', 'web/src/lib/api.ts', 'web/src/routes/AISage.tsx']
+- Attempted mitigations:
+- mitigation: No automated mitigation was recorded.
+- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.
+<!-- MACHINE_RENDERED_END -->
