@@ -4,22 +4,32 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useContext } from "react";
 import { AuthContext, AuthProvider } from "../context/AuthContext";
 
-const { mockApi, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
-  mockApi: {
-    authRefresh: vi.fn(),
-    authMe: vi.fn(),
-    authLogin: vi.fn(),
-    authSignup: vi.fn(),
-    authLogout: vi.fn(),
-  },
-  mockSetAccessToken: vi.fn(),
-  mockSetAuthFailureHandler: vi.fn(),
-}));
+const { mockApi, mockSetAccessToken, mockSetAuthFailureHandler, MockAuthExpiredError } = vi.hoisted(() => {
+  class _MockAuthExpiredError extends Error {
+    constructor(msg = "Session expired") {
+      super(msg);
+      this.name = "AuthSessionExpiredError";
+    }
+  }
+  return {
+    mockApi: {
+      authRefresh: vi.fn(),
+      authMe: vi.fn(),
+      authLogin: vi.fn(),
+      authSignup: vi.fn(),
+      authLogout: vi.fn(),
+    },
+    mockSetAccessToken: vi.fn(),
+    mockSetAuthFailureHandler: vi.fn(),
+    MockAuthExpiredError: _MockAuthExpiredError,
+  };
+});
 
 vi.mock("../lib/api", () => ({
   api: mockApi,
   setAccessToken: mockSetAccessToken,
   setAuthFailureHandler: mockSetAuthFailureHandler,
+  AuthSessionExpiredError: MockAuthExpiredError,
 }));
 
 function AuthConsumer() {
@@ -61,8 +71,8 @@ describe("AuthProvider", () => {
     });
   });
 
-  it("clears session on refresh failure", async () => {
-    mockApi.authRefresh.mockRejectedValueOnce(new Error("unauthorized"));
+  it("clears session on definitive auth failure (AuthSessionExpiredError) during bootstrap", async () => {
+    mockApi.authRefresh.mockRejectedValueOnce(new MockAuthExpiredError("Session expired"));
 
     render(
       <AuthProvider>
@@ -76,6 +86,23 @@ describe("AuthProvider", () => {
     });
     expect(mockSetAccessToken).toHaveBeenCalledWith(null);
     expect(mockSetAuthFailureHandler).toHaveBeenCalled();
+  });
+
+  it("does not force logout on transient network error during bootstrap", async () => {
+    mockApi.authRefresh.mockRejectedValueOnce(new Error("Unable to reach API at http://localhost:8000: Failed to fetch"));
+
+    render(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading").textContent).toBe("false");
+      expect(screen.getByTestId("user").textContent).toBe("none");
+    });
+    // setAccessToken should NOT be called with null on a transient error
+    expect(mockSetAccessToken).not.toHaveBeenCalledWith(null);
   });
 
   it("runs login/signup/logout flows and updates user", async () => {
@@ -122,7 +149,7 @@ describe("AuthProvider", () => {
   });
 
   it("registers and unregisters auth failure handler", async () => {
-    mockApi.authRefresh.mockRejectedValueOnce(new Error("unauthorized"));
+    mockApi.authRefresh.mockRejectedValueOnce(new MockAuthExpiredError("Session expired"));
 
     const { unmount } = render(
       <AuthProvider>

@@ -94,6 +94,17 @@ function formatHttpError(status: number, rawText: string): string {
   return text;
 }
 
+/**
+ * Thrown when a session is definitively invalid (401 from the server).
+ * Distinct from transient network or server errors.
+ */
+export class AuthSessionExpiredError extends Error {
+  constructor(message = "Session expired. Please sign in again.") {
+    super(message);
+    this.name = "AuthSessionExpiredError";
+  }
+}
+
 async function callRefreshEndpoint(): Promise<string | null> {
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
@@ -102,8 +113,12 @@ async function callRefreshEndpoint(): Promise<string | null> {
       headers: buildHeaders(undefined, { includeJsonContentType: false, skipAuth: true }),
     });
     if (!res.ok) {
-      setAccessToken(null);
-      notifyAuthFailure();
+      if (res.status === 401 || res.status === 403) {
+        // Definitive auth failure: the session is truly invalid.
+        setAccessToken(null);
+        notifyAuthFailure();
+      }
+      // For 5xx or other transient errors, don't clear auth state.
       return null;
     }
     const payload = (await res.json()) as AuthToken;
@@ -115,8 +130,7 @@ async function callRefreshEndpoint(): Promise<string | null> {
     setAccessToken(payload.access_token);
     return payload.access_token;
   } catch {
-    setAccessToken(null);
-    notifyAuthFailure();
+    // Network/transport error: treat as transient. Do not force logout.
     return null;
   }
 }
@@ -156,8 +170,14 @@ async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {
   }
   if (!res.ok) {
     const text = await res.text();
-    if (res.status === 401 && !opts.skipAuth && sessionExpired) {
-      throw new Error("Your session expired. Please sign in again.");
+    if (res.status === 401) {
+      if (!opts.skipAuth && sessionExpired) {
+        throw new AuthSessionExpiredError("Your session expired. Please sign in again.");
+      }
+      if (opts.skipAuth) {
+        // e.g. /auth/refresh returned 401 → truly invalid session
+        throw new AuthSessionExpiredError(formatHttpError(res.status, text));
+      }
     }
     throw new Error(formatHttpError(res.status, text));
   }
