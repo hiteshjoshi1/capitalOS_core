@@ -821,6 +821,19 @@ export type ConceptSuggestedReading = {
   reason: string;
 };
 
+export type ThesisLiveSource = {
+  url: string;
+  title: string;
+  snippet: string;
+  source_type: "web" | "filing" | "transcript";
+};
+
+export type UpdatedThesisView = {
+  stronger: string[];
+  weaker: string[];
+  unresolved: string[];
+};
+
 export type ConceptQueryResult = {
   query: string;
   best_passages: RagEvidenceChunk[];
@@ -830,6 +843,15 @@ export type ConceptQueryResult = {
   suggested_readings: ConceptSuggestedReading[];
   evidence_sufficient: boolean;
   weak_evidence_note: string | null;
+  // Thesis mode fields — present and populated only when mode === "thesis"
+  mode?: "concept" | "thesis";
+  thesis_question?: string | null;
+  pushback_questions?: string[];
+  missing_information?: string[];
+  key_facts?: string[];
+  updated_thesis_view?: UpdatedThesisView | null;
+  live_sources?: ThesisLiveSource[];
+  follow_up_questions?: string[];
 };
 
 export const api = {

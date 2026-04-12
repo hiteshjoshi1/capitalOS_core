@@ -87,13 +87,17 @@ def run(state: GraphState) -> GraphState:
         path for path in reported_changed_files
         if path and path != task_file
     )
-    expected_verification_commands = VerificationService.expected_commands_for_changed_files(
-        pipeline.issue.repo_root,
-        actual_changed_files,
-    )
-    reported_verification_commands = {
-        item.command for item in output.verification_commands_run if item.command
-    }
+
+    # ---- integrity checks ----
+    # Only two hard gates:
+    # 1) changed_files mismatch: model reported different files than git actually sees.
+    # 2) semantic_intent_achieved=True with non-empty unresolved_failures is self-contradictory.
+    #
+    # Verification coverage is NOT gated here. The model is instructed to run the full
+    # suite and report results, but whether it actually ran every required command is
+    # verified by deterministic_gates, which re-runs the real suite independently.
+    # Blocking here on missing verification_commands_run entries meant the pipeline
+    # could fail before deterministic verification even ran.
     integrity_failures: list[str] = []
     if normalized_actual_changed_files != normalized_reported_changed_files:
         integrity_failures.append(
@@ -105,13 +109,26 @@ def run(state: GraphState) -> GraphState:
         integrity_failures.append(
             "agent_run marked semantic intent achieved but still reported unresolved failures."
         )
+
+    # Emit a non-blocking warning if the model omitted expected verification commands —
+    # deterministic_gates will re-run and will be the authority on pass/fail.
+    expected_verification_commands = VerificationService.expected_commands_for_default_suite(
+        pipeline.issue.repo_root,
+    )
+    reported_verification_commands = {
+        item.command for item in output.verification_commands_run if item.command
+    }
     missing_verification_commands = [
         command for command in expected_verification_commands if command not in reported_verification_commands
     ]
-    if output.semantic_intent_achieved and missing_verification_commands:
-        integrity_failures.append(
-            "agent_run did not report running all required relevant verification commands: "
-            + ", ".join(missing_verification_commands)
+    if missing_verification_commands:
+        emit_progress(
+            PipelineStage.AGENT_RUN,
+            current_action="Warning: model did not report running all expected verification commands",
+            evidence=[
+                f"missing={missing_verification_commands}",
+                "deterministic_gates will rerun the full suite independently",
+            ],
         )
     if integrity_failures:
         pipeline.workflow_status = "blocked"

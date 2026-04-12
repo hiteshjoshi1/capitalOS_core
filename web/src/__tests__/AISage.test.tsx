@@ -345,3 +345,298 @@ describe("AISage Concept Mode", () => {
     expect(screen.queryByText(/company context/i)).not.toBeInTheDocument();
   });
 });
+
+const MOCK_THESIS_RESULT = {
+  query: "Here is my thesis on Tencent Music. Pressure test it.",
+  mode: "thesis" as const,
+  best_passages: [
+    {
+      chunk_id: "chunk-1",
+      author_id: "warren_buffett",
+      author_name: "Warren Buffett",
+      text: "A wonderful business can compound capital over time.",
+      similarity: 0.88,
+      metadata: { title: "Letter", source_url: "https://example.com/letters" },
+    },
+  ],
+  author_views: [
+    {
+      author_id: "warren_buffett",
+      author_name: "Warren Buffett",
+      view: "Tencent Music operates in a space where platform control matters, but the music rights cost structure creates a ceiling on return on capital.",
+      key_passages: ["A wonderful business can compound capital over time."],
+    },
+    {
+      author_id: "nick_sleep",
+      author_name: "Nick Sleep",
+      view: "The key question is whether Tencent Music shares scale benefits with users or extracts value from them.",
+      key_passages: [],
+    },
+  ],
+  synthesis: "Both Buffett and Sleep would focus on the sustainability of capital returns and whether the platform genuinely compounds value for users.",
+  critique: "The thesis may overestimate the durability of the moat given rising competition from short-video platforms for music consumption.",
+  suggested_readings: [],
+  evidence_sufficient: true,
+  weak_evidence_note: null,
+  thesis_question: "Is Tencent Music's moat durable enough to support a long-term investment thesis?",
+  pushback_questions: [
+    "How does Tencent Music's licensing cost structure compare to its international peers?",
+    "What is the risk that short-video platforms disintermediate music discovery?",
+    "How has ARPU trended versus subscriber growth — is monetisation improving or diluting?",
+  ],
+  missing_information: [
+    "Recent earnings transcript commentary on licensing renewal costs",
+    "Competitive share data vs Douyin/TikTok for music engagement",
+  ],
+  key_facts: [
+    "Tencent Music reported 88M paying subscribers in the most recent quarter.",
+    "Gross margins have expanded from 27% to 34% over three years.",
+  ],
+  updated_thesis_view: {
+    stronger: ["Platform scale and brand recognition remain durable."],
+    weaker: ["Licensing cost inflation could compress future margins."],
+    unresolved: ["Whether short-video platform competition materially erodes music engagement."],
+  },
+  live_sources: [
+    {
+      url: "https://sec.gov/tme-20f",
+      title: "Tencent Music 20-F Filing",
+      snippet: "Paid subscribers grew 14% year-over-year.",
+      source_type: "filing" as const,
+    },
+    {
+      url: "https://example.com/article",
+      title: "Streaming Competition Analysis",
+      snippet: "Short-video platforms are capturing more music discovery.",
+      source_type: "web" as const,
+    },
+  ],
+  follow_up_questions: [
+    "What does management say about social entertainment revenue declining?",
+    "How is Tencent Music adapting to the short-video threat?",
+  ],
+};
+
+describe("AISage Thesis Mode", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("renders thesis question section", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(
+      await screen.findByText("Thesis / Question"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Is Tencent Music's moat durable/i),
+    ).toBeInTheDocument();
+  });
+
+  it("renders key pushback questions", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Key Pushback Questions")).toBeInTheDocument();
+    expect(screen.getByText(/licensing cost structure/i)).toBeInTheDocument();
+    expect(screen.getByText(/short-video platforms disintermediate/i)).toBeInTheDocument();
+  });
+
+  it("renders missing information section", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Missing Information")).toBeInTheDocument();
+    expect(screen.getByText(/licensing renewal costs/i)).toBeInTheDocument();
+  });
+
+  it("renders key facts section", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Key Facts")).toBeInTheDocument();
+    expect(screen.getByText(/88M paying subscribers/i)).toBeInTheDocument();
+  });
+
+  it("renders author views in thesis mode", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Author Views")).toBeInTheDocument();
+    expect(screen.getByText(/platform control matters/i)).toBeInTheDocument();
+    expect(screen.getByText(/shares scale benefits with users/i)).toBeInTheDocument();
+  });
+
+  it("renders critique section in thesis mode", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Critique")).toBeInTheDocument();
+    expect(screen.getAllByText(/short-video platforms/i).length).toBeGreaterThan(0);
+  });
+
+  it("renders updated thesis view with stronger/weaker/unresolved", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Updated Thesis View")).toBeInTheDocument();
+    expect(screen.getByText("Looks Stronger")).toBeInTheDocument();
+    expect(screen.getByText("Looks Weaker")).toBeInTheDocument();
+    expect(screen.getByText("Still Unresolved")).toBeInTheDocument();
+    expect(screen.getByText(/Platform scale and brand recognition/i)).toBeInTheDocument();
+    expect(screen.getByText(/Licensing cost inflation/i)).toBeInTheDocument();
+  });
+
+  it("renders follow-up questions as a list (not auto-researched)", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(await screen.findByText("Follow-up Questions to Explore")).toBeInTheDocument();
+    expect(screen.getByText(/social entertainment revenue declining/i)).toBeInTheDocument();
+    // The follow-up questions are shown but not auto-submitted
+    expect(api.aiSageQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows live sources in the collapsible sources panel", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    const showSources = await screen.findByRole("button", { name: /Show Sources/i });
+    await user.click(showSources);
+
+    // Live sources are visible after expanding
+    expect(screen.getByText("Tencent Music 20-F Filing")).toBeInTheDocument();
+    expect(screen.getByText("SEC Filing")).toBeInTheDocument();
+    // Corpus sources also present
+    expect(screen.getByText("Thinker Corpus")).toBeInTheDocument();
+  });
+
+  it("distinguishes corpus sources from live research sources in the UI", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    const showSources = await screen.findByRole("button", { name: /Show Sources/i });
+    await user.click(showSources);
+
+    // Corpus pill
+    expect(screen.getByText("Thinker Corpus")).toBeInTheDocument();
+    // Live source type pill
+    expect(screen.getByText("SEC Filing")).toBeInTheDocument();
+  });
+
+  it("does not render thesis sections in concept mode", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue({
+      ...MOCK_CONCEPT_RESULT,
+      mode: "concept",
+      thesis_question: null,
+      pushback_questions: [],
+      missing_information: [],
+      key_facts: [],
+      updated_thesis_view: null,
+      live_sources: [],
+      follow_up_questions: [],
+    });
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "What makes a good business?{Enter}",
+    );
+
+    await screen.findByText(/Both authors agree/i);
+
+    expect(screen.queryByText("Key Pushback Questions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Missing Information")).not.toBeInTheDocument();
+    expect(screen.queryByText("Updated Thesis View")).not.toBeInTheDocument();
+    expect(screen.queryByText("Follow-up Questions to Explore")).not.toBeInTheDocument();
+  });
+
+  it("shows synthesis as the lead answer in thesis mode", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
+    );
+
+    expect(
+      await screen.findByText(/Both Buffett and Sleep would focus/i),
+    ).toBeInTheDocument();
+  });
+});

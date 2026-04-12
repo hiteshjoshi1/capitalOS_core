@@ -669,7 +669,7 @@ class TestAISageConceptAPI:
             assert body["weak_evidence_note"] is not None
 
     def test_no_exposed_internal_mode_fields(self, client, rag_yaml_file):
-        """Response must not expose internal mode jargon (retrieve, ask, etc.)."""
+        """Response must not expose internal routing jargon (retrieve, ask, etc.)."""
         self._ensure_authors(client, rag_yaml_file)
         resp = client.post(
             "/ai-sage/query",
@@ -677,6 +677,13 @@ class TestAISageConceptAPI:
         )
         assert resp.status_code == 200
         body = resp.json()
-        # These fields should not appear in the concept mode response
-        for forbidden in ["mode", "missing_information", "answer"]:
-            assert forbidden not in body, f"Internal field '{forbidden}' leaked into response"
+        # "mode" is a valid routing field (concept vs thesis) — allowed in response
+        # Internal LLM jargon and raw retrieval fields must not appear
+        for forbidden in ["missing_information", "answer"]:
+            assert forbidden not in body or body[forbidden] in (None, [], ""), (
+                f"Internal field '{forbidden}' leaked into response"
+            )
+        # Concept mode should use "concept" not implementation-level routing terms
+        assert body.get("mode") in ("concept", None), (
+            f"Unexpected mode value '{body.get('mode')}' in concept response"
+        )
