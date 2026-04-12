@@ -20,6 +20,18 @@ def test_run_returns_stdout_when_command_succeeds(monkeypatch):
     assert service.run("status") == "clean"
 
 
+def test_run_preserves_leading_status_space_for_porcelain_output(monkeypatch):
+    def fake_run(args, cwd, capture_output, text):
+        assert args == ["git", "status", "--porcelain"]
+        assert cwd == "/tmp/repo"
+        return SimpleNamespace(returncode=0, stdout=" M tasks/issue.md\n", stderr="")
+
+    monkeypatch.setattr("orchestration.services.git.subprocess.run", fake_run)
+
+    service = GitService("/tmp/repo")
+    assert service.run("status", "--porcelain") == " M tasks/issue.md"
+
+
 def test_run_raises_when_checking_failed_command(monkeypatch):
     monkeypatch.setattr(
         "orchestration.services.git.subprocess.run",
@@ -120,6 +132,16 @@ def test_ensure_clean_worktree_except_allows_only_permitted_paths(monkeypatch):
 def test_ensure_clean_worktree_except_returns_when_clean(monkeypatch):
     monkeypatch.setattr(GitService, "run", lambda self, *args, **kwargs: "")
     GitService("/tmp/repo").ensure_clean_worktree_except(["tasks/issue.md"])
+
+
+def test_ensure_clean_worktree_except_allows_dirty_task_file(monkeypatch):
+    monkeypatch.setattr(
+        GitService,
+        "run",
+        lambda self, *args, **kwargs: " M tasks/issue-132.md",
+    )
+
+    GitService("/tmp/repo").ensure_clean_worktree_except(["tasks/issue-132.md"])
 
 
 def test_changed_files_merges_unique_paths(monkeypatch):

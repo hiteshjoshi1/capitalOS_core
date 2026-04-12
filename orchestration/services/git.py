@@ -18,7 +18,7 @@ class GitService:
         )
         if check and proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
-        return proc.stdout.strip()
+        return proc.stdout.rstrip("\n")
 
     def current_branch(self) -> str:
         return self.run("rev-parse", "--abbrev-ref", "HEAD")

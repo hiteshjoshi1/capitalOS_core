@@ -20,6 +20,13 @@
   1. concept mode
   2. company thesis mode
   3. research memory
+- Treat issue 131 as the baseline already delivered:
+  - single-input `AI Sage`
+  - chat-style question/answer flow
+  - corpus-backed concept answers
+  - distinct author perspectives
+  - synthesis, critique, and inspectable sources
+- This issue should extend that baseline into company-thesis pressure testing, not replace it with a different UI or expose internal controls again.
 
 ## Central Product Idea
 - Company thesis mode should feel like intelligent pushback, not just company summarization.
@@ -32,12 +39,69 @@
   - synthesize what strengthens vs weakens the thesis
   - critique the current view
 
+## User Intent
+- The user already has a view, partial thesis, or instinct about a company.
+- The user is not asking for a generic company explainer.
+- The user wants:
+  - sharper pushback
+  - missing questions surfaced
+  - relevant author lenses
+  - live facts that matter to the thesis
+  - a clearer view of what got stronger vs weaker
+
+## Primary User Experience
+- The user stays in the same `AI Sage` chat flow introduced in issue 131.
+- The user pastes a thesis, question, or concern in plain language.
+- The system should decide that this is a company-thesis prompt and do the work behind the scenes.
+- The user should not have to choose:
+  - company mode
+  - research mode
+  - author ids
+  - retrieval settings
+  - web-search toggles
+
+## UX Behavior
+- The answer should read like one coherent assistant response in the chat thread.
+- The assistant response should lead with the pressure-tested answer, not with metadata.
+- Supporting sections should appear under that answer in a clear order:
+  1. thesis / question
+  2. key pushback questions
+  3. missing information
+  4. key facts extracted
+  5. author views
+  6. synthesis
+  7. critique
+  8. updated thesis view
+  9. fetched sources used
+- Source detail should be inspectable and attributable, but not overwhelm first paint.
+
+## Research Behavior
+- Use live company / web research when it materially improves the answer.
+- That includes cases where:
+  - the internal corpus is not enough
+  - the answer depends on current company facts
+  - the answer would materially benefit from fresh filings, transcripts, reports, or web evidence
+- If the system surfaces new follow-up questions during reasoning, do not recursively research them by default.
+- Instead:
+  - show those follow-up questions to the user
+  - let the user decide whether to continue
+
+## What Good Looks Like
+- A strong answer feels like intelligent pressure testing, not a prettified summary.
+- The pushback questions should be genuinely useful and non-obvious.
+- The fetched facts should change or sharpen the answer, not just decorate it.
+- The author views should frame the thesis differently, not repeat one blended opinion.
+- The updated thesis view should clearly separate:
+  - what looks stronger now
+  - what looks weaker now
+  - what remains unresolved
+
 ## Scope
 - Thesis-oriented query handling
 - Extraction of thesis claims / assumptions from user input
 - Key pushback questions
 - Missing information detection
-- Relevant author perspectives
+- Author perspectives
 - Live evidence from filings, transcripts, reports, and web research
 - Synthesis and critique
 - Updated thesis view in the output
@@ -48,20 +112,21 @@
 - Outcome review / calibration
 - Portfolio monitoring
 - Autonomous recommendations
+- New UI mode-switchers or exposed internal controls
+- Recursive autonomous research on follow-up questions surfaced by the system
 
 ## Acceptance Criteria
 - [ ] `AI Sage` can accept a thesis-style company prompt and classify it into company thesis mode.
 - [ ] For a company thesis query, the system returns:
   - thesis / question
-  - relevant authors
   - key pushback questions
   - missing information
-  - fetched sources used
   - key facts extracted
   - author views
   - synthesis
   - critique
   - updated thesis view
+  - fetched sources used
 - [ ] Live company research materially improves the answer when internal corpus alone is insufficient.
 - [ ] Source attribution clearly distinguishes:
   - thinker corpus evidence
@@ -74,13 +139,15 @@
   - synthesis/critique response shape
 - [ ] Add frontend tests for thesis-mode rendering.
 
-## Suggested Implementation Shape
-- Extend `POST /ai-sage/query` or add a closely related orchestration path.
-- Add provider/tool integration for:
-  - document fetching
-  - web research
-  - source extraction / normalization
-- Response shape should remain sectioned and user-readable.
+## Product Guardrails
+- Do not regress the simple chat-style `AI Sage` experience from issue 131.
+- Do not turn company thesis mode into a generic “company overview” answer.
+- Do not lead with author metadata, scorecards, or internal routing details.
+- Do not fetch extra sources just because they exist; fetch only what sharpens the thesis answer.
+- Keep asking:
+  - does this improve thesis pressure testing now?
+  - does this help the user think more clearly now?
+  - if not, defer it.
 
 ## Verification Plan
 - `make api-rebuild`
@@ -90,11 +157,12 @@
 - `curl -X POST http://localhost:8000/ai-sage/query -H "Content-Type: application/json" -d '{"query":"Here is my thesis on Tencent Music. Pressure test it."}'`
 - Verify the answer includes:
   - pushback questions
-  - live sources used
   - extracted facts
   - author perspectives
   - synthesis
   - critique
+  - updated thesis view
+  - live sources used
 
 ## Human Notes
 - This issue should be judged by whether it surfaces non-obvious pushback and genuinely improves the user’s thesis.
