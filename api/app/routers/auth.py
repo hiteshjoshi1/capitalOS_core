@@ -23,6 +23,10 @@ from app.services.auth import (
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+def _refresh_grace_seconds() -> int:
+    return max(int(os.getenv("AUTH_REFRESH_GRACE_SECONDS", "30")), 0)
+
+
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     ttl = refresh_token_ttl_seconds()
     secure = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
@@ -43,8 +47,8 @@ def _create_refresh_session(db: Session, *, user_id: int) -> str:
     db.execute(
         text(
             """
-            INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at, revoked_at, created_at)
-            VALUES (:user_id, :refresh_token_hash, :expires_at, NULL, :created_at)
+            INSERT INTO auth_sessions (user_id, refresh_token_hash, expires_at, revoked_at, revoke_reason, created_at)
+            VALUES (:user_id, :refresh_token_hash, :expires_at, NULL, NULL, :created_at)
             """
         ),
         {
@@ -154,6 +158,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
         response.delete_cookie(refresh_cookie_name(), path="/")
         raise HTTPException(status_code=401, detail="refresh token required")
 
+    token_hash = hash_refresh_token(refresh_token)
     now = datetime.now(tz=timezone.utc)
     row = db.execute(
         text(
@@ -171,30 +176,95 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
             LIMIT 1
             """
         ),
-        {"refresh_token_hash": hash_refresh_token(refresh_token), "now": now},
+        {"refresh_token_hash": token_hash, "now": now},
     ).mappings().one_or_none()
 
     if row is None:
-        db.execute(
-            text(
-                """
-                UPDATE auth_sessions
-                SET revoked_at = :now
-                WHERE refresh_token_hash = :refresh_token_hash
-                  AND revoked_at IS NULL
-                """
-            ),
-            {"now": now, "refresh_token_hash": hash_refresh_token(refresh_token)},
-        )
-        db.commit()
-        response.delete_cookie(refresh_cookie_name(), path="/")
-        raise HTTPException(status_code=401, detail="invalid or expired refresh token")
+        # Token not found as active. Check if it was recently rotated (concurrent refresh grace window).
+        grace = _refresh_grace_seconds()
+        recovered = False
+        if grace > 0:
+            grace_cutoff = now - timedelta(seconds=grace)
+            revoked_row = db.execute(
+                text(
+                    """
+                    SELECT s.id AS session_id, s.user_id, s.revoke_reason, s.revoked_at, u.username
+                    FROM auth_sessions s
+                    JOIN users u ON u.id = s.user_id
+                    WHERE s.refresh_token_hash = :refresh_token_hash
+                      AND s.revoked_at IS NOT NULL
+                      AND s.revoke_reason = 'rotation'
+                      AND s.revoked_at >= :grace_cutoff
+                      AND COALESCE(u.is_active, TRUE) = TRUE
+                    LIMIT 1
+                    """
+                ),
+                {"refresh_token_hash": token_hash, "grace_cutoff": grace_cutoff},
+            ).mappings().one_or_none()
+
+            if revoked_row is not None:
+                # Concurrent refresh: find and rotate the user's current active session.
+                user_id = int(revoked_row["user_id"])
+                username = str(revoked_row["username"])
+                active_session = db.execute(
+                    text(
+                        """
+                        SELECT id AS session_id
+                        FROM auth_sessions
+                        WHERE user_id = :user_id
+                          AND revoked_at IS NULL
+                          AND expires_at > :now
+                        ORDER BY created_at DESC
+                        LIMIT 1
+                        """
+                    ),
+                    {"user_id": user_id, "now": now},
+                ).mappings().one_or_none()
+
+                if active_session is not None:
+                    rotated = db.execute(
+                        text(
+                            """
+                            UPDATE auth_sessions
+                            SET revoked_at = :now, revoke_reason = 'rotation'
+                            WHERE id = :session_id AND revoked_at IS NULL
+                            """
+                        ),
+                        {"now": now, "session_id": int(active_session["session_id"])},
+                    ).rowcount
+                    if rotated > 0:
+                        next_refresh_token = _create_refresh_session(db, user_id=user_id)
+                        access_token, exp = create_access_token(user_id=user_id, username=username)
+                        db.commit()
+                        _set_refresh_cookie(response, next_refresh_token)
+                        recovered = True
+                        return AuthTokenResponse(
+                            access_token=access_token,
+                            token_type="bearer",
+                            expires_in=max(int((exp - now).total_seconds()), 1),
+                        )
+
+        if not recovered:
+            db.execute(
+                text(
+                    """
+                    UPDATE auth_sessions
+                    SET revoked_at = :now, revoke_reason = 'security'
+                    WHERE refresh_token_hash = :refresh_token_hash
+                      AND revoked_at IS NULL
+                    """
+                ),
+                {"now": now, "refresh_token_hash": token_hash},
+            )
+            db.commit()
+            response.delete_cookie(refresh_cookie_name(), path="/")
+            raise HTTPException(status_code=401, detail="invalid or expired refresh token")
 
     revoked = db.execute(
         text(
             """
             UPDATE auth_sessions
-            SET revoked_at = :now
+            SET revoked_at = :now, revoke_reason = 'rotation'
             WHERE id = :session_id
               AND revoked_at IS NULL
             """
@@ -227,7 +297,7 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
             text(
                 """
                 UPDATE auth_sessions
-                SET revoked_at = :now
+                SET revoked_at = :now, revoke_reason = 'logout'
                 WHERE refresh_token_hash = :token_hash
                   AND revoked_at IS NULL
                 """

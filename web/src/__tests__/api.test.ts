@@ -128,3 +128,52 @@ describe("api.authLogin – error formatting", () => {
     );
   });
 });
+
+describe("callRefreshEndpoint – session reliability", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("does NOT call notifyAuthFailure on network error during background refresh", async () => {
+    const fetchSpy = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { setAuthFailureHandler, setAccessToken } = await import("../lib/api");
+    const handler = vi.fn();
+    setAuthFailureHandler(handler);
+    setAccessToken("old-token");
+
+    // For network error, authRefresh throws a regular Error, not AuthSessionExpiredError.
+    const { api, AuthSessionExpiredError } = await import("../lib/api");
+
+    fetchSpy.mockRejectedValue(new TypeError("Network failure"));
+    await expect(api.authRefresh()).rejects.toThrow("Unable to reach API");
+    await expect(api.authRefresh()).rejects.not.toThrow(AuthSessionExpiredError as never);
+  });
+
+  it("throws AuthSessionExpiredError when /auth/refresh returns 401", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: () => Promise.resolve(JSON.stringify({ detail: "invalid or expired refresh token" })),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const { api, AuthSessionExpiredError } = await import("../lib/api");
+
+    await expect(api.authRefresh()).rejects.toBeInstanceOf(AuthSessionExpiredError);
+  });
+
+  it("does NOT throw AuthSessionExpiredError when /auth/refresh returns 500", async () => {
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: () => Promise.resolve("Internal Server Error"),
+    });
+    vi.stubGlobal("fetch", fetchSpy);
+    const { api, AuthSessionExpiredError } = await import("../lib/api");
+
+    const err = await api.authRefresh().catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(AuthSessionExpiredError);
+  });
+});

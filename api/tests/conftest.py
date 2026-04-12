@@ -90,6 +90,7 @@ def setup_db():
               refresh_token_hash TEXT NOT NULL,
               expires_at TIMESTAMP NOT NULL,
               revoked_at TIMESTAMP,
+              revoke_reason TEXT,
               created_at TIMESTAMP
             )
             """

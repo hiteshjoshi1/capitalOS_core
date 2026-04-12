@@ -1,5 +1,5 @@
 import { createContext, useEffect, useMemo, useState } from "react";
-import { api, setAccessToken, setAuthFailureHandler } from "../lib/api";
+import { api, setAccessToken, setAuthFailureHandler, AuthSessionExpiredError } from "../lib/api";
 import type { AuthMe } from "../lib/api";
 
 type AuthContextValue = {
@@ -41,10 +41,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const me = await api.authMe();
         if (cancelled) return;
         setUser(me);
-      } catch {
-        setAccessToken(null);
-        if (cancelled) return;
-        setUser(null);
+      } catch (err) {
+        if (!cancelled) {
+          if (err instanceof AuthSessionExpiredError) {
+            // Definitively invalid session: clear token and treat as signed out.
+            setAccessToken(null);
+            setUser(null);
+          }
+          // Transient errors (network down, 5xx): access token is already null on reload,
+          // just finish loading. The user will see the sign-in screen but was not force-logged out.
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

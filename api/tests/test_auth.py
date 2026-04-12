@@ -95,6 +95,7 @@ def test_auth_refresh_rotates_session(client, db_engine, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
     monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "0")  # disable grace window for strict rotation test
 
     _insert_user_with_password(db_engine, user_id=900, username="refresh_user", password="RefreshPass1!")
     login = client.post("/auth/login", json={"username": "refresh_user", "password": "RefreshPass1!"})
@@ -138,6 +139,71 @@ def test_auth_refresh_rotates_session(client, db_engine, monkeypatch):
     client.cookies.clear()
     reused = client.post("/auth/refresh", cookies={"capitalos_refresh": old_cookie})
     assert reused.status_code == 401
+
+
+def test_auth_refresh_grace_window_concurrent(client, db_engine, monkeypatch):
+    """Two concurrent refresh requests with the same token: second should succeed via grace window."""
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
+
+    _insert_user_with_password(db_engine, user_id=901, username="concurrent_user", password="ConcPass1!")
+    login = client.post("/auth/login", json={"username": "concurrent_user", "password": "ConcPass1!"})
+    assert login.status_code == 200
+    original_cookie = _cookie_value(login.headers.get("set-cookie", ""), "capitalos_refresh")
+
+    # First refresh: succeeds and rotates the session
+    first = client.post("/auth/refresh")
+    assert first.status_code == 200
+    first_token = first.json()["access_token"]
+    assert first_token
+
+    # Simulate concurrent second request with the original cookie (race condition)
+    # This should succeed because the original token was rotated within the grace window
+    client.cookies.clear()
+    second = client.post("/auth/refresh", cookies={"capitalos_refresh": original_cookie})
+    assert second.status_code == 200, f"Concurrent refresh should succeed within grace window, got: {second.json()}"
+    second_token = second.json()["access_token"]
+    assert second_token
+
+    # After concurrent refresh, there should be exactly 1 active session
+    with db_engine.begin() as conn:
+        active = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM auth_sessions WHERE user_id = 901 AND revoked_at IS NULL"
+            )
+        ).scalar_one()
+        assert int(active) == 1
+
+
+def test_auth_refresh_grace_window_logout_not_recovered(client, db_engine, monkeypatch):
+    """After explicit logout, even within grace window, refresh with old token should fail."""
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
+
+    _insert_user_with_password(db_engine, user_id=902, username="logout_user", password="LogoutPass1!")
+    login = client.post("/auth/login", json={"username": "logout_user", "password": "LogoutPass1!"})
+    assert login.status_code == 200
+    original_cookie = _cookie_value(login.headers.get("set-cookie", ""), "capitalos_refresh")
+
+    # Explicit logout
+    client.post("/auth/logout")
+
+    # Attempt to refresh with old cookie immediately after logout: should fail
+    client.cookies.clear()
+    reuse = client.post("/auth/refresh", cookies={"capitalos_refresh": original_cookie})
+    assert reuse.status_code == 401, "Logout-revoked tokens must not be recovered"
+
+    with db_engine.begin() as conn:
+        reason = conn.execute(
+            text(
+                "SELECT revoke_reason FROM auth_sessions WHERE user_id = 902 ORDER BY id DESC LIMIT 1"
+            )
+        ).scalar_one()
+        assert reason == "logout"
 
 
 def test_auth_refresh_requires_cookie(client, monkeypatch):
