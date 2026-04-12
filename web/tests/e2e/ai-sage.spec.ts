@@ -47,7 +47,8 @@ test.beforeEach(async ({ page }) => {
 
 test("navigates to AI Sage and renders grounded query results", async ({ page }) => {
   await page.goto("/ai-sage");
-  await expect(page.getByRole("heading", { name: "AI Sage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hello E2E User" })).toBeVisible();
+  await expect(page.getByText("What insights are we discovering today?")).toBeVisible();
   await page
     .getByPlaceholder(
       "Ask AI Sage anything about a business, thesis, risk, or mental model...",

@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import AISage from "../routes/AISage";
 import { api } from "../lib/api";
+import { AuthContext } from "../context/AuthContext";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -14,11 +15,27 @@ vi.mock("../lib/api", () => ({
 
 function renderAISage() {
   return render(
-    <MemoryRouter initialEntries={["/ai-sage"]}>
-      <Routes>
-        <Route path="/ai-sage" element={<AISage />} />
-      </Routes>
-    </MemoryRouter>,
+    <AuthContext.Provider
+      value={{
+        user: {
+          id: 1,
+          username: "demo",
+          display_name: "Hitesh",
+          email: null,
+          is_admin: false,
+        },
+        loading: false,
+        login: async () => {},
+        signup: async () => {},
+        logout: async () => {},
+      }}
+    >
+      <MemoryRouter initialEntries={["/ai-sage"]}>
+        <Routes>
+          <Route path="/ai-sage" element={<AISage />} />
+        </Routes>
+      </MemoryRouter>
+    </AuthContext.Provider>,
   );
 }
 
@@ -76,9 +93,12 @@ describe("AISage Concept Mode", () => {
     vi.clearAllMocks();
   });
 
-  it("renders welcome state before any query", () => {
+  it("renders personalized greeting before any query", () => {
     renderAISage();
-    expect(screen.getByText("Start Here")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Hello Hitesh" })).toBeInTheDocument();
+    expect(screen.getByText("What insights are we discovering today?")).toBeInTheDocument();
+    expect(screen.queryByText("Start Here")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "AI Sage" })).not.toBeInTheDocument();
   });
 
   it("submits with Enter and calls aiSageQuery", async () => {
@@ -111,6 +131,34 @@ describe("AISage Concept Mode", () => {
       query: "How should I think about network effects?",
       top_k: 12,
     });
+  });
+
+  it("shows a waiting state while the answer is loading", async () => {
+    let resolveQuery: (value: typeof MOCK_CONCEPT_RESULT) => void = () => {
+      throw new Error("resolveQuery not assigned");
+    };
+    vi.mocked(api.aiSageQuery).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveQuery = resolve;
+        }),
+    );
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "What makes a good business?{Enter}",
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Working through your question...");
+
+    resolveQuery(MOCK_CONCEPT_RESULT);
+
+    expect(
+      await screen.findByText(/Both authors agree that a good business/i),
+    ).toBeInTheDocument();
   });
 
   it("renders question echo after submit", async () => {

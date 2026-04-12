@@ -3,6 +3,7 @@ import { type ReactNode } from "react";
 type PageShellProps = {
   title: string;
   subtitle?: string;
+  hideHeader?: boolean;
   headerActions?: ReactNode;
   /** @deprecated Navigation moved to Sidebar; kept for backward compatibility */
   activeRoute?: string;
@@ -20,25 +21,27 @@ type PageShellProps = {
 export default function PageShell({
   title,
   subtitle,
+  hideHeader = false,
   headerActions,
   children,
 }: PageShellProps) {
   return (
     <div className="pageShellWrap">
-      <header className="header dashboardHeader">
-        <div className="titleBlock dashboardTitleBlock">
-          <h1 className="title">{title}</h1>
-          {subtitle ? <div className="subtitle">{subtitle}</div> : null}
-        </div>
-        {headerActions ? (
-          <div className="dashboardNavArea">
-            <div className="pageHeaderActions">{headerActions}</div>
+      {!hideHeader ? (
+        <header className="header dashboardHeader">
+          <div className="titleBlock dashboardTitleBlock">
+            <h1 className="title">{title}</h1>
+            {subtitle ? <div className="subtitle">{subtitle}</div> : null}
           </div>
-        ) : null}
-      </header>
+          {headerActions ? (
+            <div className="dashboardNavArea">
+              <div className="pageHeaderActions">{headerActions}</div>
+            </div>
+          ) : null}
+        </header>
+      ) : null}
 
       {children}
     </div>
   );
 }
-

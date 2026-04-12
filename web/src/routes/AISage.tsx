@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import { AuthContext } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type {
   ConceptAuthorView,
@@ -34,10 +35,13 @@ function createTurnId(): string {
 }
 
 export default function AISage() {
+  const { user } = useContext(AuthContext);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [showPromptMenu, setShowPromptMenu] = useState(false);
+  const greetingName = user?.display_name?.trim() || user?.username?.trim() || "there";
+  const hasTurns = turns.length > 0;
 
   const canSubmit = Boolean(query.trim()) && !loading;
 
@@ -117,24 +121,18 @@ export default function AISage() {
 
   return (
     <PageShell
-      title="AI Sage"
-      subtitle="Ask a concept question. Get a grounded answer, differentiated perspectives, and a critique."
+      title=""
+      hideHeader
     >
-      <div className="wrap aiSagePage aiSageChatPage">
-        <section className="aiSageTimeline" aria-live="polite">
-          {!turns.length ? (
-            <section className="card aiSageWelcomeCard">
-              <div className="cardTitle">Start Here</div>
-              <p className="aiSageAnswerText">
-                Ask a concept question about business, investing, or mental models.
-                AI Sage will answer directly, then show the supporting perspectives and source material.
-              </p>
-              <p className="muted aiSageNote">
-                Use the <strong>+</strong> in the composer for starter prompts.
-              </p>
-            </section>
-          ) : null}
+      <div className={`wrap aiSagePage aiSageChatPage ${hasTurns ? "aiSagePageActive" : "aiSagePageEmpty"}`}>
+        {!hasTurns ? (
+          <section className="aiSageHero" aria-label="AI Sage welcome">
+            <h1 className="aiSageHeroTitle">Hello {greetingName}</h1>
+            <p className="aiSageHeroSubtitle">What insights are we discovering today?</p>
+          </section>
+        ) : null}
 
+        <section className="aiSageTimeline" aria-live="polite">
           {turns.map((turn) => (
             <section key={turn.id} className="aiSageTurn">
               <section className="card aiSageBubbleCard aiSageUserBubble">
@@ -143,9 +141,14 @@ export default function AISage() {
 
               {turn.loading ? (
                 <section className="card aiSageBubbleCard aiSageAssistantBubble">
-                  <p className="muted aiSageAnswerText">
-                    AI Sage is selecting relevant authors, retrieving corpus passages, and assembling an answer.
-                  </p>
+                  <div className="aiSageThinking" role="status" aria-live="polite">
+                    <div className="aiSageThinkingDots" aria-hidden="true">
+                      <span className="aiSageThinkingDot" />
+                      <span className="aiSageThinkingDot" />
+                      <span className="aiSageThinkingDot" />
+                    </div>
+                    <p className="muted aiSageAnswerText">Working through your question...</p>
+                  </div>
                 </section>
               ) : null}
 
@@ -166,7 +169,7 @@ export default function AISage() {
           ))}
         </section>
 
-        <section className="aiSageComposerDock">
+        <section className={`aiSageComposerDock ${hasTurns ? "aiSageComposerDockThread" : "aiSageComposerDockHero"}`}>
           {showPromptMenu ? (
             <div className="card aiSagePromptMenu" aria-label="Starter prompts">
               <div className="cardTitle">Starter Prompts</div>
