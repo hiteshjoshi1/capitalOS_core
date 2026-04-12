@@ -1,19 +1,24 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import { AuthContext } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type {
   ConceptAuthorView,
   ConceptQueryResult,
   ConceptSuggestedReading,
   RagEvidenceChunk,
+  ThesisLiveSource,
+  UpdatedThesisView,
 } from "../lib/api";
 
 const EXAMPLE_PROMPTS = [
   "What makes a good business?",
   "How should I think about moat, scale economies shared, or network effects?",
   "If Buffett and Nick Sleep were studying Tencent Music, what questions would they ask first?",
+  "Here is my thesis on Spotify: the platform moat is durable. Pressure test it.",
+  "What would Munger worry about in a streaming business with high content costs?",
 ];
 
 type ConversationTurn = {
@@ -30,10 +35,13 @@ function createTurnId(): string {
 }
 
 export default function AISage() {
+  const { user } = useContext(AuthContext);
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [turns, setTurns] = useState<ConversationTurn[]>([]);
   const [showPromptMenu, setShowPromptMenu] = useState(false);
+  const greetingName = user?.display_name?.trim() || user?.username?.trim() || "there";
+  const hasTurns = turns.length > 0;
 
   const canSubmit = Boolean(query.trim()) && !loading;
 
@@ -113,24 +121,18 @@ export default function AISage() {
 
   return (
     <PageShell
-      title="AI Sage"
-      subtitle="Ask a concept question. Get a grounded answer, differentiated perspectives, and a critique."
+      title=""
+      hideHeader
     >
-      <div className="wrap aiSagePage aiSageChatPage">
-        <section className="aiSageTimeline" aria-live="polite">
-          {!turns.length ? (
-            <section className="card aiSageWelcomeCard">
-              <div className="cardTitle">Start Here</div>
-              <p className="aiSageAnswerText">
-                Ask a concept question about business, investing, or mental models.
-                AI Sage will answer directly, then show the supporting perspectives and source material.
-              </p>
-              <p className="muted aiSageNote">
-                Use the <strong>+</strong> in the composer for starter prompts.
-              </p>
-            </section>
-          ) : null}
+      <div className={`wrap aiSagePage aiSageChatPage ${hasTurns ? "aiSagePageActive" : "aiSagePageEmpty"}`}>
+        {!hasTurns ? (
+          <section className="aiSageHero" aria-label="AI Sage welcome">
+            <h1 className="aiSageHeroTitle">Hello {greetingName}</h1>
+            <p className="aiSageHeroSubtitle">What insights are we discovering today?</p>
+          </section>
+        ) : null}
 
+        <section className="aiSageTimeline" aria-live="polite">
           {turns.map((turn) => (
             <section key={turn.id} className="aiSageTurn">
               <section className="card aiSageBubbleCard aiSageUserBubble">
@@ -139,9 +141,14 @@ export default function AISage() {
 
               {turn.loading ? (
                 <section className="card aiSageBubbleCard aiSageAssistantBubble">
-                  <p className="muted aiSageAnswerText">
-                    AI Sage is selecting relevant authors, retrieving corpus passages, and assembling an answer.
-                  </p>
+                  <div className="aiSageThinking" role="status" aria-live="polite">
+                    <div className="aiSageThinkingDots" aria-hidden="true">
+                      <span className="aiSageThinkingDot" />
+                      <span className="aiSageThinkingDot" />
+                      <span className="aiSageThinkingDot" />
+                    </div>
+                    <p className="muted aiSageAnswerText">Working through your question...</p>
+                  </div>
                 </section>
               ) : null}
 
@@ -162,7 +169,7 @@ export default function AISage() {
           ))}
         </section>
 
-        <section className="aiSageComposerDock">
+        <section className={`aiSageComposerDock ${hasTurns ? "aiSageComposerDockThread" : "aiSageComposerDockHero"}`}>
           {showPromptMenu ? (
             <div className="card aiSagePromptMenu" aria-label="Starter prompts">
               <div className="cardTitle">Starter Prompts</div>
@@ -230,9 +237,17 @@ function AssistantTurn({
   const result = turn.result;
   if (!result) return null;
 
+  const isThesisMode = result.mode === "thesis";
   const bestPassages = result.best_passages ?? [];
   const authorViews = result.author_views ?? [];
   const suggestedReadings = result.suggested_readings ?? [];
+  const liveSourcesRaw = result.live_sources ?? [];
+  const pushbackQuestions = result.pushback_questions ?? [];
+  const missingInformation = result.missing_information ?? [];
+  const keyFacts = result.key_facts ?? [];
+  const followUpQuestions = result.follow_up_questions ?? [];
+  const updatedThesisView = result.updated_thesis_view ?? null;
+
   const answerText =
     result.synthesis ??
     result.weak_evidence_note ??
@@ -240,15 +255,60 @@ function AssistantTurn({
 
   return (
     <section className="card aiSageBubbleCard aiSageAssistantBubble">
+      {/* Lead answer — synthesis or weak evidence note */}
       <p className="aiSageAnswerLead">{answerText}</p>
 
       {result.weak_evidence_note && result.synthesis ? (
         <p className="muted aiSageNote">{result.weak_evidence_note}</p>
       ) : null}
 
+      {/* ── Thesis mode sections ─────────────────────────────────────── */}
+
+      {isThesisMode && result.thesis_question ? (
+        <section className="aiSageResponseSection">
+          <div className="aiSageSectionTitle">Thesis / Question</div>
+          <p className="aiSageAnswerText">{result.thesis_question}</p>
+        </section>
+      ) : null}
+
+      {isThesisMode && pushbackQuestions.length > 0 ? (
+        <section className="aiSageResponseSection">
+          <div className="aiSageSectionTitle">Key Pushback Questions</div>
+          <ol className="aiSageQuestionList">
+            {pushbackQuestions.map((q, i) => (
+              <li key={i} className="aiSageQuestionItem">{q}</li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
+      {isThesisMode && missingInformation.length > 0 ? (
+        <section className="aiSageResponseSection">
+          <div className="aiSageSectionTitle">Missing Information</div>
+          <ul className="aiSageQuestionList">
+            {missingInformation.map((m, i) => (
+              <li key={i} className="aiSageQuestionItem">{m}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {isThesisMode && keyFacts.length > 0 ? (
+        <section className="aiSageResponseSection">
+          <div className="aiSageSectionTitle">Key Facts</div>
+          <ul className="aiSageQuestionList">
+            {keyFacts.map((f, i) => (
+              <li key={i} className="aiSageQuestionItem">{f}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {/* ── Author views (shared between concept and thesis mode) ─────── */}
+
       {authorViews.length > 0 ? (
         <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Perspectives</div>
+          <div className="aiSageSectionTitle">{isThesisMode ? "Author Views" : "Perspectives"}</div>
           <div className="aiSageAuthorViewList">
             {authorViews.map((av: ConceptAuthorView) => (
               <article key={av.author_id} className="aiSageAuthorViewCard">
@@ -271,6 +331,9 @@ function AssistantTurn({
         </section>
       ) : null}
 
+      {/* ── Synthesis (shared) ────────────────────────────────────────── */}
+
+      {/* ── Critique (shared) ────────────────────────────────────────── */}
       {result.critique ? (
         <section className="aiSageResponseSection">
           <div className="aiSageSectionTitle">Critique</div>
@@ -278,7 +341,60 @@ function AssistantTurn({
         </section>
       ) : null}
 
-      {suggestedReadings.length > 0 ? (
+      {/* ── Updated thesis view (thesis mode only) ───────────────────── */}
+      {isThesisMode && updatedThesisView ? (
+        <section className="aiSageResponseSection" data-testid="updated-thesis-view">
+          <div className="aiSageSectionTitle">Updated Thesis View</div>
+          {updatedThesisView.stronger.length > 0 ? (
+            <div className="aiSageThesisGroup">
+              <div className="aiSageThesisGroupLabel aiSageThesisStronger">Looks Stronger</div>
+              <ul className="aiSageQuestionList">
+                {(updatedThesisView as UpdatedThesisView).stronger.map((s, i) => (
+                  <li key={i} className="aiSageQuestionItem">{s}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {updatedThesisView.weaker.length > 0 ? (
+            <div className="aiSageThesisGroup">
+              <div className="aiSageThesisGroupLabel aiSageThesisWeaker">Looks Weaker</div>
+              <ul className="aiSageQuestionList">
+                {(updatedThesisView as UpdatedThesisView).weaker.map((w, i) => (
+                  <li key={i} className="aiSageQuestionItem">{w}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {updatedThesisView.unresolved.length > 0 ? (
+            <div className="aiSageThesisGroup">
+              <div className="aiSageThesisGroupLabel aiSageThesisUnresolved">Still Unresolved</div>
+              <ul className="aiSageQuestionList">
+                {(updatedThesisView as UpdatedThesisView).unresolved.map((u, i) => (
+                  <li key={i} className="aiSageQuestionItem">{u}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {/* ── Follow-up questions (thesis mode — NOT auto-researched) ──── */}
+      {isThesisMode && followUpQuestions.length > 0 ? (
+        <section className="aiSageResponseSection">
+          <div className="aiSageSectionTitle">Follow-up Questions to Explore</div>
+          <p className="muted aiSageNote">
+            These questions were surfaced during analysis. Ask AI Sage any of them to continue.
+          </p>
+          <ol className="aiSageQuestionList">
+            {followUpQuestions.map((q, i) => (
+              <li key={i} className="aiSageQuestionItem">{q}</li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+
+      {/* ── Suggested readings (concept mode) ───────────────────────── */}
+      {!isThesisMode && suggestedReadings.length > 0 ? (
         <section className="aiSageResponseSection">
           <div className="aiSageSectionTitle">Suggested Readings</div>
           <div className="aiSageSuggestedReadingList">
@@ -300,13 +416,16 @@ function AssistantTurn({
         </section>
       ) : null}
 
-      {bestPassages.length > 0 ? (
+      {/* ── Sources (collapsible) ─────────────────────────────────────── */}
+      {bestPassages.length > 0 || liveSourcesRaw.length > 0 ? (
         <section className="aiSageResponseSection">
           <div className="aiSageSourcesHeader">
             <div>
               <div className="aiSageSectionTitle">Sources</div>
               <p className="muted aiSageSourcesHint">
-                Open to inspect the passages behind the answer.
+                {isThesisMode
+                  ? "Corpus passages and live research used in this analysis."
+                  : "Open to inspect the passages behind the answer."}
               </p>
             </div>
             <button
@@ -314,18 +433,22 @@ function AssistantTurn({
               className="btn"
               onClick={onToggleSources}
             >
-              {turn.showSources ? "Hide Sources" : `Show Sources (${bestPassages.length})`}
+              {turn.showSources
+                ? "Hide Sources"
+                : `Show Sources (${bestPassages.length + liveSourcesRaw.length})`}
             </button>
           </div>
 
           {turn.showSources ? (
             <div className="aiSageEvidenceList">
+              {/* Corpus evidence — thinker corpus */}
               {bestPassages.map((chunk: RagEvidenceChunk, index: number) => (
                 <article key={chunk.chunk_id} className="aiSageEvidenceCard">
                   <div className="aiSageEvidenceHeader">
                     <div>
                       <strong>{chunk.author_name}</strong>
                       <span className="muted aiSageEvidenceRank">Passage {index + 1}</span>
+                      <span className="aiSagePill aiSagePillCorpus">Thinker Corpus</span>
                     </div>
                     <span className="aiSagePill">
                       {(chunk.similarity * 100).toFixed(1)}% match
@@ -338,6 +461,22 @@ function AssistantTurn({
                     {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
                     {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
                   </div>
+                </article>
+              ))}
+
+              {/* Live sources — web / filings */}
+              {liveSourcesRaw.map((src: ThesisLiveSource, index: number) => (
+                <article key={index} className="aiSageEvidenceCard">
+                  <div className="aiSageEvidenceHeader">
+                    <div>
+                      <strong>{src.title}</strong>
+                      <span className="aiSagePill aiSagePillLive">
+                        {src.source_type === "filing" ? "SEC Filing" : src.source_type === "transcript" ? "Transcript" : "Web"}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="aiSageEvidenceText">{src.snippet}</p>
+                  <div className="muted aiSageEvidenceMeta">{src.url}</div>
                 </article>
               ))}
             </div>

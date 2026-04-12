@@ -4,24 +4,12 @@ import { mockAuthenticatedSession } from "./helpers/auth";
 test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 
-  await page.route("**/rag/query", async (route) => {
+  await page.route("**/ai-sage/query", async (route) => {
     await route.fulfill({
       json: {
         query: "What matters?",
-        mode: "ask",
-        selected_authors: [
-          {
-            author_id: "warren_buffett",
-            name: "Warren Buffett",
-            score: 4.5,
-            domains: ["investing"],
-            expertise_tags: ["capital_allocation"],
-            match_reason: ["domain_match:investing"],
-            worldview: "Focus on quality and capital allocation.",
-            key_maxims: ["Stay within competence"],
-          },
-        ],
-        evidence_chunks: [
+        mode: "concept",
+        best_passages: [
           {
             chunk_id: "chunk-1",
             author_id: "warren_buffett",
@@ -31,9 +19,27 @@ test.beforeEach(async ({ page }) => {
             metadata: { title: "Letter" },
           },
         ],
-        answer: "Focus on business quality.",
-        missing_information: null,
+        author_views: [
+          {
+            author_id: "warren_buffett",
+            author_name: "Warren Buffett",
+            view: "Focus on business quality.",
+            key_passages: ["A wonderful business can compound over time."],
+          },
+        ],
+        synthesis: "Focus on business quality.",
+        critique: "Durability still needs to be tested against industry change.",
+        suggested_readings: [
+          {
+            author_id: "warren_buffett",
+            author_name: "Warren Buffett",
+            passage: "A wonderful business can compound over time.",
+            source_url: "https://example.com/letter",
+            reason: "Best matched passage for this concept.",
+          },
+        ],
         evidence_sufficient: true,
+        weak_evidence_note: null,
       },
     });
   });
@@ -41,7 +47,8 @@ test.beforeEach(async ({ page }) => {
 
 test("navigates to AI Sage and renders grounded query results", async ({ page }) => {
   await page.goto("/ai-sage");
-  await expect(page.getByRole("heading", { name: "AI Sage" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Hello E2E User" })).toBeVisible();
+  await expect(page.getByText("What insights are we discovering today?")).toBeVisible();
   await page
     .getByPlaceholder(
       "Ask AI Sage anything about a business, thesis, risk, or mental model...",
@@ -53,14 +60,19 @@ test("navigates to AI Sage and renders grounded query results", async ({ page })
     )
     .press("Enter");
 
-  await expect(page.getByText("Your Question")).toBeVisible();
-  await expect(page.getByText("Relevant Author Perspectives")).toBeVisible();
+  await expect(page.getByText("What matters?")).toBeVisible();
+  await expect(page.getByText("Perspectives", { exact: true })).toBeVisible();
   await expect(page.getByText("Warren Buffett").first()).toBeVisible();
-  await expect(page.getByText("Answer")).toBeVisible();
-  await expect(page.getByText("Focus on business quality.")).toBeVisible();
+  await expect(page.getByText("Focus on business quality.").first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Show Sources (1)" })).toBeVisible();
-  await expect(page.getByText(/A wonderful business can compound/i)).toHaveCount(0);
+  await expect(page.getByText("Passage 1")).toHaveCount(0);
 
   await page.getByRole("button", { name: "Show Sources (1)" }).click();
-  await expect(page.getByText(/A wonderful business can compound/i)).toBeVisible();
+  await expect(page.getByText("Passage 1")).toBeVisible();
+  await expect(
+    page
+      .locator("article")
+      .filter({ hasText: "Passage 1" })
+      .getByText(/A wonderful business can compound/i),
+  ).toBeVisible();
 });

@@ -120,7 +120,7 @@ describe("Placeholder route smoke tests", () => {
     { path: "/wealth", component: <WealthOverview />, heading: "Wealth Overview" },
     { path: "/loans", component: <Loans />, heading: "Loans" },
     { path: "/companies", component: <Companies />, heading: "Companies" },
-    { path: "/ai-sage", component: <AISage />, heading: "AI Sage" },
+    { path: "/ai-sage", component: <AISage />, heading: "Hello there" },
     { path: "/settings", component: <Settings />, heading: "Settings" },
     { path: "/platforms", component: <Platforms />, heading: "Platforms" },
   ];

@@ -62,8 +62,7 @@ def run(state: GraphState) -> GraphState:
     )
     git = GitService(pipeline.issue.repo_root)
     changed_files = git.changed_files()
-    verification, retries = verification_service.run_suite_for_changed_files(
-        changed_files=changed_files,
+    verification, retries = verification_service.run_default_suite(
         max_attempts=cfg.max_retries,
         on_code_retry_fix=None,
     )

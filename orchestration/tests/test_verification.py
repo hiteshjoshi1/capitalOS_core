@@ -205,3 +205,23 @@ def test_expected_commands_for_pipeline_only_changes(tmp_path):
         ["orchestration/nodes/agent_run.py", "docs/workflows/ai-task-flow.md", "Makefile"],
     )
     assert commands == ["make orch-test"]
+
+
+def test_expected_commands_for_default_suite(tmp_path):
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "playwright.config.ts").write_text("export default {};\n")
+
+    service = VerificationService(str(tmp_path))
+    commands = service.expected_commands_for_default_suite(str(tmp_path))
+    assert commands == [
+        "make api-rebuild",
+        "make contract-backend",
+        "make test-backend",
+        "make api-smoke",
+        "make lint",
+        "make typecheck",
+        "make contract-frontend",
+        "make test-frontend",
+        "make e2e",
+        "make orch-test",
+    ]

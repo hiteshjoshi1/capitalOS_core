@@ -147,16 +147,7 @@ class VerificationService:
         return areas
 
     @classmethod
-    def expected_commands_for_changed_files(cls, repo_root: str, changed_files: list[str]) -> list[str]:
-        return [
-            item["command"]
-            for item in cls._verification_commands_for_changed_files(repo_root, changed_files)
-            if item["command"] != "__skip__"
-        ]
-
-    @classmethod
-    def _verification_commands_for_changed_files(cls, repo_root: str, changed_files: list[str]) -> list[dict[str, str]]:
-        areas = cls._detect_changed_areas(changed_files)
+    def _verification_commands_for_areas(cls, repo_root: str, areas: set[str]) -> list[dict[str, str]]:
         commands: list[dict[str, str]] = []
 
         if "backend" in areas:
@@ -189,6 +180,34 @@ class VerificationService:
             commands.append({"name": "orch-test", "command": "make orch-test", "family": "pipeline"})
 
         return commands
+
+    @classmethod
+    def expected_commands_for_changed_files(cls, repo_root: str, changed_files: list[str]) -> list[str]:
+        return [
+            item["command"]
+            for item in cls._verification_commands_for_changed_files(repo_root, changed_files)
+            if item["command"] != "__skip__"
+        ]
+
+    @classmethod
+    def expected_commands_for_default_suite(cls, repo_root: str) -> list[str]:
+        return [
+            item["command"]
+            for item in cls._default_suite_commands(repo_root)
+            if item["command"] != "__skip__"
+        ]
+
+    @classmethod
+    def _verification_commands_for_changed_files(cls, repo_root: str, changed_files: list[str]) -> list[dict[str, str]]:
+        areas = cls._detect_changed_areas(changed_files)
+        return cls._verification_commands_for_areas(repo_root, areas)
+
+    @classmethod
+    def _default_suite_commands(cls, repo_root: str) -> list[dict[str, str]]:
+        return cls._verification_commands_for_areas(
+            repo_root,
+            {"backend", "frontend", "pipeline"},
+        )
 
     @staticmethod
     def _restart_family_for_command(name: str) -> str:
@@ -495,14 +514,105 @@ class VerificationService:
         max_attempts: int = 3,
         on_code_retry_fix: Optional[Callable[[str, str, int, str, list[RetryEntry]], None]] = None,
     ) -> tuple[VerificationEvidence, list[RetryEntry]]:
-        changed_files = [
-            "api/app/",
-            "migrations/",
-            "web/src/",
-            "orchestration/",
-        ]
-        return self.run_suite_for_changed_files(
-            changed_files=changed_files,
-            max_attempts=max_attempts,
-            on_code_retry_fix=on_code_retry_fix,
+        commands = self._default_suite_commands(self.repo_root)
+        suite_name = "default"
+        emit_event(
+            "verification_suite_started",
+            stage=self.stage,
+            current_action="Running verification suite",
+            evidence=[
+                f"suite={suite_name}",
+                f"commands={','.join(item['name'] for item in commands) or 'none'}",
+            ],
         )
+        if not commands:
+            evidence = VerificationEvidence(suite_name=suite_name, results=[], any_failures=False)
+            emit_event(
+                "verification_suite_finished",
+                stage=self.stage,
+                status="completed",
+                evidence=["failed_commands=none"],
+                conclusion="No verification commands were configured for the default suite.",
+            )
+            return evidence, []
+
+        family_starts: dict[str, int] = {}
+        for index, item in enumerate(commands):
+            family_starts.setdefault(item["family"], index)
+
+        results: list[VerificationCommandResult] = []
+        retries: list[RetryEntry] = []
+        max_suite_rounds = max(2, max_attempts + 1)
+        start_index = 0
+
+        for suite_round in range(1, max_suite_rounds + 1):
+            round_results: list[VerificationCommandResult] = list(results[:start_index])
+            round_retries: list[RetryEntry] = []
+
+            for item in commands[start_index:]:
+                name = item["name"]
+                cmd = item["command"]
+                if cmd == "__skip__":
+                    round_results.append(
+                        VerificationCommandResult(
+                            name="e2e",
+                            command="make e2e",
+                            status="skip",
+                            exit_code=0,
+                            output_excerpt="Playwright not configured.",
+                        )
+                    )
+                    continue
+
+                result, retry_entries = self.run_with_retry_policy(
+                    name=name,
+                    command=cmd,
+                    max_attempts=max_attempts,
+                    on_code_retry_fix=on_code_retry_fix,
+                )
+                round_results.append(result)
+                round_retries.extend(retry_entries)
+
+            results = round_results
+            retries.extend(round_retries)
+            any_failures = any(r.status == "fail" for r in round_results)
+            code_fix_applied = any(
+                self._retry_applied_code_fix(entry) for entry in round_retries
+            )
+
+            if any_failures or not code_fix_applied or suite_round >= max_suite_rounds:
+                break
+
+            impacted_families = {
+                self._restart_family_for_command(entry.label)
+                for entry in round_retries
+                if self._retry_applied_code_fix(entry)
+            }
+            restart_at = min(
+                (family_starts.get(family, 0) for family in impacted_families),
+                default=0,
+            )
+            start_index = restart_at
+
+            emit_event(
+                "verification_suite_restarted",
+                stage=self.stage,
+                current_action="Restarting verification suite after auto-fix",
+                evidence=[
+                    f"round={suite_round}",
+                    "reason=repo mutated after auto-fix",
+                    f"restart_index={start_index}",
+                    f"families={','.join(sorted(impacted_families)) or 'foundation'}",
+                ],
+                reasoning="A code-mutating fix invalidates the impacted verification family and everything after it, so the suite reruns from the appropriate family boundary.",
+            )
+
+        any_failures = any(r.status == "fail" for r in results)
+        emit_event(
+            "verification_suite_finished",
+            stage=self.stage,
+            status="failed" if any_failures else "completed",
+            evidence=[f"failed_commands={','.join(r.name for r in results if r.status == 'fail') or 'none'}"],
+            conclusion="Verification suite completed.",
+        )
+        return VerificationEvidence(suite_name=suite_name, results=results, any_failures=any_failures), retries

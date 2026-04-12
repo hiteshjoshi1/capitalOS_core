@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from orchestration.models.agent_run import AgentRunOutput
+from orchestration.models.agent_run import AgentRunOutput, CommandExecutionCheck
 from orchestration.models.build import ExtraChangedFile
 from orchestration.models.issue import IssueMetadata
 from orchestration.models.pipeline import PipelineState
@@ -203,10 +203,15 @@ def test_agent_run_prompt_requires_exact_make_commands(tmp_path) -> None:
     state = _v3_state(tmp_path)
     prompt = build_agent_run_prompt(state)
 
-    assert "run exactly these backend verification commands" in prompt
-    assert "run exactly these frontend verification commands" in prompt
-    assert "do not substitute equivalent raw commands" in prompt
-    assert "record the exact command strings you ran" in prompt
+    # Prompt must instruct the model to run the full suite, not a changed-files subset
+    assert "make api-rebuild" in prompt
+    assert "make lint" in prompt
+    assert "make orch-test" in prompt
+    assert "run the FULL suite before returning JSON" in prompt
+    # Prompt must still tell the model it is not the final authority
+    assert "re-run" in prompt or "re-runs" in prompt or "independently" in prompt
+    # Prompt must still tell the model not to substitute raw commands
+    assert "do not substitute" in prompt or "do not substitute" in prompt.lower()
 
 
 def _verification_pass() -> VerificationEvidence:
@@ -242,8 +247,8 @@ def _verification_fail() -> VerificationEvidence:
 def _patch_deterministic_deps(monkeypatch, *, verification: VerificationEvidence, policy: V3PolicyResult):
     monkeypatch.setattr(deterministic_gates_node, "render_task_file", lambda pipeline: None)
     monkeypatch.setattr(
-        "orchestration.nodes.deterministic_gates.VerificationService.run_suite_for_changed_files",
-        lambda self, changed_files, max_attempts=3, on_code_retry_fix=None: (verification, []),
+        "orchestration.nodes.deterministic_gates.VerificationService.run_default_suite",
+        lambda self, max_attempts=3, on_code_retry_fix=None: (verification, []),
     )
     monkeypatch.setattr(
         "orchestration.nodes.deterministic_gates.GitService.changed_files",
@@ -725,3 +730,235 @@ def test_render_next_action_high_risk_gate(tmp_path) -> None:
 
     rendered = render_execution_journal(state)
     assert "high-risk" in rendered.lower() or "High-risk" in rendered
+
+
+# ---- Tests for verification_commands_run no-hard-gate contract ----
+
+def _agent_output_with_no_verification_commands() -> AgentRunOutput:
+    """Same as _agent_output() but verification_commands_run is intentionally empty."""
+    out = _agent_output()
+    out.verification_commands_run = []
+    return out
+
+
+def test_agent_run_does_not_block_when_verification_commands_missing(tmp_path, monkeypatch) -> None:
+    """agent_run must NOT block just because model omitted verification_commands_run entries.
+
+    The model reported web/src/App.tsx as changed and git agrees.
+    verification_commands_run is intentionally empty — that used to block; now it must not.
+    deterministic_gates is the authority for pass/fail; agent_run is only the authority for
+    changed_files integrity and semantic_intent/unresolved_failures consistency.
+    """
+    state = _v3_state(tmp_path)
+
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["web/src/App.tsx"],
+    )
+
+    def fake_complete_structured(self, prompt, model_cls):
+        return _agent_output_with_no_verification_commands(), ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "running", (
+        "agent_run must not block on missing verification_commands_run entries"
+    )
+    assert pipeline.agent_run_output is not None
+    assert pipeline.blockers == []
+
+
+def test_agent_run_does_not_block_when_only_some_commands_reported(tmp_path, monkeypatch) -> None:
+    """Partial verification_commands_run for the default full suite must not block."""
+    state = _v3_state(tmp_path)
+
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["web/src/App.tsx"],
+    )
+
+    partial_output = _agent_output()
+    # Only report one command out of the full default suite
+    partial_output.verification_commands_run = [
+        CommandExecutionCheck(command="make lint", status="pass", evidence="ok"),
+    ]
+
+    def fake_complete_structured(self, prompt, model_cls):
+        return partial_output, ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "running", (
+        "agent_run must not block on partial verification_commands_run"
+    )
+    assert pipeline.blockers == []
+
+
+def test_agent_run_still_blocks_on_changed_files_mismatch_regardless_of_verification(tmp_path, monkeypatch) -> None:
+    """changed_files integrity is a hard gate independent of verification_commands_run."""
+    state = _v3_state(tmp_path)
+
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    # Git says api/ changed; model says web/ changed — mismatch must still block
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["api/app/main.py"],
+    )
+
+    output = _agent_output()  # reports web/src/App.tsx, not api/app/main.py
+    output.verification_commands_run = [
+        CommandExecutionCheck(command="make api-rebuild", status="pass", evidence="ok"),
+        CommandExecutionCheck(command="make contract-backend", status="pass", evidence="ok"),
+        CommandExecutionCheck(command="make test-backend", status="pass", evidence="ok"),
+        CommandExecutionCheck(command="make api-smoke", status="pass", evidence="ok"),
+    ]
+
+    def fake_complete_structured(self, prompt, model_cls):
+        return output, ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "blocked"
+    assert any("changed_files" in b for b in pipeline.blockers)
+
+
+def test_agent_run_still_blocks_on_intent_vs_unresolved_failures_contradiction(tmp_path, monkeypatch) -> None:
+    """semantic_intent_achieved=True with non-empty unresolved_failures is still a hard block."""
+    state = _v3_state(tmp_path)
+
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: ["web/src/App.tsx"],
+    )
+
+    output = _agent_output()
+    output.semantic_intent_achieved = True
+    output.unresolved_failures = ["test-frontend failed: one assertion error"]
+    output.verification_commands_run = []  # empty — must not block
+
+    def fake_complete_structured(self, prompt, model_cls):
+        return output, ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "blocked"
+    assert any("unresolved failures" in b for b in pipeline.blockers)
+
+
+def test_deterministic_gates_is_authoritative_even_when_model_reported_all_pass(tmp_path, monkeypatch) -> None:
+    """deterministic_gates blocks on real failure regardless of what model reported."""
+    state = _v3_state(tmp_path)
+    # Model says everything passed, verification_commands_run is complete
+    state.agent_run_output = _agent_output()
+
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "get_config",
+        lambda: SimpleNamespace(
+            max_retries=3,
+            v3_require_pre_ship_human_on_high_risk=False,
+        ),
+    )
+    # Real deterministic run returns a failure
+    _patch_deterministic_deps(
+        monkeypatch,
+        verification=_verification_fail(),
+        policy=V3PolicyResult(blocked=False),
+    )
+
+    result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "blocked"
+    assert any("Deterministic gates failed" in b for b in pipeline.blockers)
+
+
+def test_deterministic_gates_runs_default_full_suite(tmp_path, monkeypatch) -> None:
+    state = _v3_state(tmp_path)
+    state.agent_run_output = _agent_output()
+
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "get_config",
+        lambda: SimpleNamespace(
+            max_retries=3,
+            v3_require_pre_ship_human_on_high_risk=False,
+        ),
+    )
+    monkeypatch.setattr(deterministic_gates_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.GitService.changed_files",
+        lambda self: ["web/src/App.tsx"],
+    )
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.ScopePolicyService.review_allowed_paths",
+        lambda self: ["web/src/"],
+    )
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.V3PolicyService.evaluate",
+        lambda self, changed_files, allowed_paths, extra_changed_files: V3PolicyResult(blocked=False),
+    )
+
+    calls: list[tuple[int, object]] = []
+
+    def fake_run_default_suite(self, max_attempts=3, on_code_retry_fix=None):
+        calls.append((max_attempts, on_code_retry_fix))
+        return _verification_pass(), []
+
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.VerificationService.run_default_suite",
+        fake_run_default_suite,
+    )
+
+    result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+
+    assert pipeline.workflow_status == "waiting_for_human"
+    assert calls == [(3, None)]

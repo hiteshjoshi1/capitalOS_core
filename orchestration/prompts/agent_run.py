@@ -84,14 +84,15 @@ Rules:
 2) Keep changes minimal and aligned to acceptance criteria.
 3) Every changed file must be real and currently changed in git status.
 4) Any changed file outside planned paths must be included in extra_changed_files with a concrete reason.
-5) In this single session you must do the full loop: understand task, derive plan, implement, add/update relevant tests, run relevant tests, fix failures, rerun until green or truly stuck.
-6) Relevant test policy:
-   - if you changed `api/` or `migrations/`, run exactly these backend verification commands: `make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`
-   - if you changed `web/`, run exactly these frontend verification commands: `make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`, `make e2e` when Playwright exists
-   - if you changed `orchestration/`, workflow docs, or the `Makefile`, run exactly this pipeline verification command: `make orch-test`
-   - if you changed multiple areas, run the union of the exact `make ...` commands above
-   - do not substitute equivalent raw commands like `docker compose ...`, `pytest`, `npm test`, or `npm run build` when a required `make ...` target exists
-   - record the exact command strings you ran in `verification_commands_run`; they must match the executed `make ...` commands
+5) In this single session you must do the full loop: understand task, derive plan, implement, add/update relevant tests, run the full verification suite, fix failures, rerun until green or truly stuck.
+6) Verification suite policy — run the FULL suite before returning JSON:
+   - run ALL of: `make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`
+   - run ALL of: `make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`
+   - run `make e2e` if Playwright is configured
+   - run `make orch-test`
+   - do not substitute raw commands (`pytest`, `npm test`, `docker compose …`) when a `make …` target exists
+   - record all commands you ran in `verification_commands_run` with their exact `make …` form
+   - Note: the pipeline will re-run the full verification suite independently after you return; those real results are the final authority on pass/fail. Your job is to run everything first and fix failures, not to predict the pipeline's verdict.
 7) Do not commit, push, or open a PR in this session. Ship owns commits.
 8) Record every relevant test command you ran in verification_commands_run.
 9) If semantic intent is achieved, unresolved_failures must be empty.

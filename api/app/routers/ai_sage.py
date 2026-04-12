@@ -1,8 +1,9 @@
 """
-AI Sage API router — Concept Mode.
+AI Sage API router — Concept Mode and Company Thesis Mode.
 
 Endpoints:
-  POST /ai-sage/query   — Concept Mode: single natural language query
+  POST /ai-sage/query   — Auto-routes to concept mode or thesis mode
+                          based on query classification.
 """
 
 from __future__ import annotations
@@ -16,6 +17,11 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import require_current_user
 from app.db.session import get_db
+from app.rag.company_thesis_mode import (
+    ThesisQueryResult,
+    classify_query_as_thesis,
+    execute_thesis_query,
+)
 from app.rag.concept_mode import ConceptQueryResult, execute_concept_query
 
 log = logging.getLogger(__name__)
@@ -59,6 +65,19 @@ class EvidenceChunkOut(BaseModel):
     metadata: dict[str, Any]
 
 
+class LiveSourceOut(BaseModel):
+    url: str
+    title: str
+    snippet: str
+    source_type: str
+
+
+class UpdatedThesisViewOut(BaseModel):
+    stronger: list[str]
+    weaker: list[str]
+    unresolved: list[str]
+
+
 class ConceptQueryOut(BaseModel):
     query: str
     best_passages: list[EvidenceChunkOut]
@@ -68,6 +87,15 @@ class ConceptQueryOut(BaseModel):
     suggested_readings: list[SuggestedReadingOut]
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
+    # Thesis mode fields — populated only when mode == "thesis"
+    mode: str = "concept"
+    thesis_question: Optional[str] = None
+    pushback_questions: list[str] = Field(default_factory=list)
+    missing_information: list[str] = Field(default_factory=list)
+    key_facts: list[str] = Field(default_factory=list)
+    updated_thesis_view: Optional[UpdatedThesisViewOut] = None
+    live_sources: list[LiveSourceOut] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────
@@ -76,17 +104,30 @@ class ConceptQueryOut(BaseModel):
 @router.post("/query", response_model=ConceptQueryOut)
 def concept_query(body: ConceptQueryIn, db: Session = Depends(get_db)) -> ConceptQueryOut:
     """
-    AI Sage Concept Mode.
+    AI Sage Query.
 
-    Ask a concept question in plain language. The system selects the relevant
-    author corpus automatically, retrieves the best supporting passages, generates
-    distinct author perspectives, a synthesis, a critique, and suggested readings.
+    Automatically classifies the query and routes to the appropriate mode:
+    - Company Thesis Mode: thesis pressure testing, pushback questions, live research,
+      updated thesis view, and structured critique.
+    - Concept Mode: concept question with author perspectives, synthesis, and critique.
 
-    The user never needs to specify authors, retrieval modes, or internal controls.
+    The user never needs to specify a mode, authors, or retrieval settings.
     """
-    result: ConceptQueryResult = execute_concept_query(
+    if classify_query_as_thesis(body.query):
+        result: ThesisQueryResult = execute_thesis_query(
+            body.query,
+            db,
+            top_k_chunks=body.top_k,
+        )
+        d = result.as_dict()
+        # Map updated_thesis_view dict to Pydantic model if present
+        if d.get("updated_thesis_view"):
+            d["updated_thesis_view"] = UpdatedThesisViewOut(**d["updated_thesis_view"])
+        return ConceptQueryOut(**d)
+
+    concept_result: ConceptQueryResult = execute_concept_query(
         body.query,
         db,
         top_k_chunks=body.top_k,
     )
-    return ConceptQueryOut(**result.as_dict())
+    return ConceptQueryOut(**concept_result.as_dict())
