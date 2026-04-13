@@ -96,6 +96,8 @@ class ConceptQueryOut(BaseModel):
     updated_thesis_view: Optional[UpdatedThesisViewOut] = None
     live_sources: list[LiveSourceOut] = Field(default_factory=list)
     follow_up_questions: list[str] = Field(default_factory=list)
+    # Intent routing metadata — included for all concept-mode responses
+    intent: Optional[dict[str, Any]] = None
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────

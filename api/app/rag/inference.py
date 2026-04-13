@@ -71,3 +71,36 @@ def create_inference_client() -> Any:
                 kwargs["default_headers"] = headers
         return openai.OpenAI(**kwargs)
     raise RuntimeError(f"Unsupported inference provider: {provider}")
+
+
+# ── Routing / planning model (cheap, fast, independent) ───────────────────────
+
+
+def routing_model() -> str:
+    """
+    Return the model to use for pre-retrieval intent routing and query planning.
+
+    Controlled by ROUTING_LLM_MODEL independently from INFERENCE_LLM_MODEL.
+    Defaults to a cheap/fast model (Qwen on OpenRouter, gpt-4o-mini elsewhere).
+    """
+    provider = inference_provider()
+    if provider == "openrouter":
+        default = "qwen/qwen-2.5-7b-instruct"
+    else:
+        default = inference_model()
+    return os.getenv("ROUTING_LLM_MODEL", default).strip()
+
+
+def routing_available() -> bool:
+    """Return True if the routing model can be called (same criteria as inference)."""
+    return inference_available()
+
+
+def create_routing_client() -> Any:
+    """
+    Return an OpenAI-compatible client configured for the routing model.
+
+    Uses the same provider / API key / base URL as the inference client so no
+    separate credentials are needed.  Only the model name differs.
+    """
+    return create_inference_client()

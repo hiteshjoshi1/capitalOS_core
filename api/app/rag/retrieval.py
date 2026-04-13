@@ -62,6 +62,8 @@ def retrieve_similar_chunks(
     source_type: Optional[str] = None,
     domains: Optional[list[str]] = None,
     expertise_tags: Optional[list[str]] = None,
+    year_from: Optional[str] = None,
+    year_to: Optional[str] = None,
 ) -> list[RetrievedChunk]:
     """
     Embed query and return the top-k most similar chunks.
@@ -72,6 +74,8 @@ def retrieve_similar_chunks(
       source_type    -- restrict to 'html', 'pdf', 'text', or 'manual'
       domains        -- restrict to authors in these domain categories (Postgres only)
       expertise_tags -- restrict to authors with these expertise tags (Postgres only)
+      year_from      -- restrict to chunks whose metadata_json->>'year' >= year_from
+      year_to        -- restrict to chunks whose metadata_json->>'year' <= year_to
 
     Returns an empty list if no embeddings exist yet.
     """
@@ -104,6 +108,12 @@ def retrieve_similar_chunks(
         where_clauses.append(f"({tag_conditions})")
         for i, t in enumerate(expertise_tags):
             params[f"tag_{i}"] = t
+    if year_from:
+        where_clauses.append("(rc.metadata_json->>'year') >= :year_from")
+        params["year_from"] = year_from
+    if year_to:
+        where_clauses.append("(rc.metadata_json->>'year') <= :year_to")
+        params["year_to"] = year_to
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
