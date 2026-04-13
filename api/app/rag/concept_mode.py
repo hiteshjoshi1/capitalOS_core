@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from app.rag.author_selection import SelectedAuthor, select_authors
 from app.rag.inference import create_inference_client, inference_available, inference_model
+from app.rag.intent_router import QueryIntent, parse_intent
 from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
 from app.rag.retrieval import RetrievedChunk, retrieve_similar_chunks
 
@@ -84,6 +85,7 @@ class ConceptQueryResult:
     suggested_readings: list[dict[str, Any]]
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
+    intent: Optional[dict[str, Any]] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +97,7 @@ class ConceptQueryResult:
             "suggested_readings": self.suggested_readings,
             "evidence_sufficient": self.evidence_sufficient,
             "weak_evidence_note": self.weak_evidence_note,
+            "intent": self.intent,
         }
 
 
@@ -296,6 +299,92 @@ def _template_synthesis(author_views: list[AuthorView]) -> str:
     )
 
 
+def _retrieve_with_intent_fallback(
+    query: str,
+    db: Session,
+    *,
+    top_k: int,
+    author_ids: list[str] | None,
+    source_type: Optional[str],
+    year_from: Optional[str],
+    year_to: Optional[str],
+) -> list[RetrievedChunk]:
+    """
+    Apply source/date intent as preferences first, not zero-result traps.
+
+    Retrieval tries the most constrained query first, then progressively relaxes
+    source/date filters if the corpus does not support them.
+    """
+
+    attempts: list[dict[str, Any]] = []
+    seen: set[tuple[Optional[str], Optional[str], Optional[str]]] = set()
+
+    def add_attempt(
+        *,
+        source_type_attempt: Optional[str],
+        year_from_attempt: Optional[str],
+        year_to_attempt: Optional[str],
+    ) -> None:
+        key = (source_type_attempt, year_from_attempt, year_to_attempt)
+        if key in seen:
+            return
+        seen.add(key)
+        attempts.append(
+            {
+                "source_type": source_type_attempt,
+                "year_from": year_from_attempt,
+                "year_to": year_to_attempt,
+            }
+        )
+
+    add_attempt(
+        source_type_attempt=source_type,
+        year_from_attempt=year_from,
+        year_to_attempt=year_to,
+    )
+    if source_type is not None:
+        add_attempt(
+            source_type_attempt=None,
+            year_from_attempt=year_from,
+            year_to_attempt=year_to,
+        )
+    if year_from is not None or year_to is not None:
+        add_attempt(
+            source_type_attempt=source_type,
+            year_from_attempt=None,
+            year_to_attempt=None,
+        )
+    if source_type is not None or year_from is not None or year_to is not None:
+        add_attempt(
+            source_type_attempt=None,
+            year_from_attempt=None,
+            year_to_attempt=None,
+        )
+
+    for attempt in attempts:
+        chunks = retrieve_similar_chunks(
+            query,
+            db,
+            top_k=top_k,
+            author_ids=author_ids if author_ids else None,
+            source_type=attempt["source_type"],
+            year_from=attempt["year_from"],
+            year_to=attempt["year_to"],
+        )
+        if chunks:
+            if attempt != attempts[0]:
+                log.info(
+                    "intent retrieval fallback applied for query=%r source_type=%r year_from=%r year_to=%r",
+                    query[:120],
+                    attempt["source_type"],
+                    attempt["year_from"],
+                    attempt["year_to"],
+                )
+            return chunks
+
+    return []
+
+
 # ── Core function ─────────────────────────────────────────────────────────────
 
 
@@ -309,25 +398,86 @@ def execute_concept_query(
     """
     Execute a concept-mode query for AI Sage.
 
-    Selects relevant authors, retrieves grounding passages, generates distinct
-    per-author views, synthesizes, critiques, and suggests next readings.
+    Runs a pre-retrieval intent-routing step to detect author/source/date
+    constraints before selecting authors and retrieving passages.  This
+    prevents author drift for single-author questions and narrows retrieval
+    when the user specifies source types or date ranges.
+
     Degrades gracefully when the corpus is thin or LLM is unavailable.
     """
-    # 1. Author selection
-    selected: list[SelectedAuthor] = select_authors(
-        query, db, top_k=top_k_authors
+    # 0. Parse intent — lightweight, uses cheap routing model or text parser
+    intent: QueryIntent = parse_intent(query)
+    log.debug(
+        "intent: query_type=%s authors=%s sources=%s dates=%s/%s sub_queries=%d",
+        intent.query_type,
+        intent.author_ids,
+        intent.source_types,
+        intent.date_from,
+        intent.date_to,
+        len(intent.sub_queries),
     )
+
+    # 1. Author selection — constrained by intent
+    if intent.query_type == "single_author" and intent.author_ids:
+        # Pin to the single detected author; ignore top_k_authors
+        selected: list[SelectedAuthor] = select_authors(
+            query,
+            db,
+            author_id=intent.author_ids[0],
+            top_k=1,
+        )
+        if not selected:
+            # Author not in DB — fall back to scored open selection
+            log.debug(
+                "single_author %s not found in DB, falling back to open selection",
+                intent.author_ids[0],
+            )
+            selected = select_authors(query, db, top_k=top_k_authors)
+    else:
+        selected = select_authors(
+            query, db, top_k=top_k_authors
+        )
+
     author_entries = _author_entries(selected, db)
     author_map = {e["author_id"]: e["name"] for e in author_entries}
 
-    # 2. Retrieve evidence
+    # 2. Retrieve evidence — apply source_type and date constraints from intent
     selected_ids = [a.author_id for a in selected]
-    raw_chunks: list[RetrievedChunk] = retrieve_similar_chunks(
-        query,
-        db,
-        top_k=top_k_chunks,
-        author_ids=selected_ids if selected_ids else None,
-    )
+    source_type_filter = intent.source_types[0] if intent.source_types else None
+
+    if intent.sub_queries:
+        # Multi-part: retrieve per sub-query and merge, dedup by chunk_id
+        seen_chunk_ids: set[str] = set()
+        raw_chunks: list[RetrievedChunk] = []
+        per_sub_k = max(top_k_chunks // len(intent.sub_queries), 4)
+        for sq in intent.sub_queries:
+            sq_chunks = _retrieve_with_intent_fallback(
+                sq,
+                db,
+                top_k=per_sub_k,
+                source_type=source_type_filter,
+                year_from=intent.date_from,
+                year_to=intent.date_to,
+                author_ids=selected_ids if selected_ids else None,
+            )
+            for c in sq_chunks:
+                if c.chunk_id not in seen_chunk_ids:
+                    seen_chunk_ids.add(c.chunk_id)
+                    raw_chunks.append(c)
+        # Re-sort merged chunks by cosine_distance
+        raw_chunks.sort(key=lambda c: c.cosine_distance)
+        raw_chunks = raw_chunks[:top_k_chunks]
+    else:
+        raw_chunks = _retrieve_with_intent_fallback(
+            query,
+            db,
+            top_k=top_k_chunks,
+            source_type=source_type_filter,
+            year_from=intent.date_from,
+            year_to=intent.date_to,
+            author_ids=selected_ids if selected_ids else None,
+        )
+
     evidence: list[EvidenceChunk] = _enrich_chunks(raw_chunks, db, author_map)
 
     evidence_sufficient = len(evidence) >= _MIN_CHUNKS_FOR_CONFIDENCE
@@ -453,4 +603,5 @@ def execute_concept_query(
         suggested_readings=[sr.as_dict() for sr in suggested_readings],
         evidence_sufficient=evidence_sufficient,
         weak_evidence_note=weak_evidence_note,
+        intent=intent.as_dict(),
     )
