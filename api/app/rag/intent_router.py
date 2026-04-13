@@ -24,10 +24,6 @@ log = logging.getLogger(__name__)
 # ── Source type aliases ───────────────────────────────────────────────────────
 
 _SOURCE_TYPE_MAP: dict[str, str] = {
-    "letter": "text",
-    "letters": "text",
-    "shareholder letter": "text",
-    "annual letter": "text",
     "memo": "text",
     "essay": "text",
     "annual report": "pdf",
