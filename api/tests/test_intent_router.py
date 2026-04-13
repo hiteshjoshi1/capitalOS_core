@@ -69,17 +69,17 @@ class TestParseIntentFromText:
 
     # ── Source type extraction ─────────────────────────────────────────────
 
-    def test_source_type_letter(self):
+    def test_source_type_letter_not_hard_mapped(self):
         intent = self._parse("What does Buffett say in his letters about patience?")
-        assert "text" in intent.source_types
+        assert intent.source_types == []
 
     def test_source_type_annual_report(self):
         intent = self._parse("What does Buffett discuss in annual reports?")
         assert "pdf" in intent.source_types
 
-    def test_source_type_shareholder_letter(self):
+    def test_source_type_shareholder_letter_not_hard_mapped(self):
         intent = self._parse("Buffett shareholder letter advice on investing.")
-        assert "text" in intent.source_types
+        assert intent.source_types == []
 
     def test_no_source_type_for_generic_query(self):
         intent = self._parse("What is a good business?")
