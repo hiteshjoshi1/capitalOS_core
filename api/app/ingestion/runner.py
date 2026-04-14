@@ -216,13 +216,26 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                 )
             )
 
+        delimiter = signature_debug.get("delimiter") if isinstance(signature_debug, dict) else None
+        file_kind = signature_debug.get("file_kind") if isinstance(signature_debug, dict) else None
+        # Defensive override: if a persisted signature mapping points to a CSV parser
+        # but this upload was fingerprinted as excel/html, recover with heuristic inference.
+        if parser_key in CSV_PARSERS and not delimiter and file_kind in {"excel", "html_table"}:
+            inferred = lookup_parser_key(
+                None,
+                signature,
+                signature_debug=signature_debug,
+                platform_hint=job.platform,
+            )
+            if inferred and inferred != parser_key:
+                parser_key = inferred
+
         job.parser_key = parser_key
         job.status = "PARSED"
         job.updated_at = _now()
         db.add(job)
         db.commit()
 
-        delimiter = signature_debug.get("delimiter") if isinstance(signature_debug, dict) else None
         parser_entry = PARSER_REGISTRY.get(parser_key)
         if parser_entry is None:
             job.status = "FAILED"

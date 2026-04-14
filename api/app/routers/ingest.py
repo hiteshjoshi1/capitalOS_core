@@ -29,7 +29,7 @@ def _require_account_platform(db: Session, account_id: int, current_user_id: int
     row = db.execute(
         text(
             """
-            SELECT COALESCE(p.code, a.platform)
+            SELECT COALESCE(NULLIF(TRIM(a.platform), ''), p.code)
             FROM accounts AS a
             LEFT JOIN platforms AS p ON p.id = a.platform_id
             WHERE a.id = :account_id

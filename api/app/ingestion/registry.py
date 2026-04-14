@@ -41,9 +41,10 @@ def _has_ordered_header_subset(header: object, expected: tuple[str, ...]) -> boo
     return False
 
 
-def _infer_parser_key(signature_debug: dict | None, _platform_hint: str | None) -> str | None:
+def _infer_parser_key(signature_debug: dict | None, platform_hint: str | None) -> str | None:
     header = signature_debug.get("header") if isinstance(signature_debug, dict) else None
     file_kind = signature_debug.get("file_kind") if isinstance(signature_debug, dict) else None
+    platform_text = (platform_hint or "").strip().upper()
     # UOB bank statements are currently identified by this ordered header shape.
     # R6 showed platform labels are not reliable enough to be the gating factor.
     has_uob_header = _has_ordered_header_subset(header, UOB_ACCOUNT_XLS_HEADERS)
@@ -55,6 +56,12 @@ def _infer_parser_key(signature_debug: dict | None, _platform_hint: str | None) 
     has_ocbc_header = _has_ordered_header_subset(header, OCBC_ACCOUNT_CSV_HEADERS)
     if file_kind == "flat_csv" and has_ocbc_header:
         return "ocbc_account_csv_v1"
+    # Defensive account/platform inference for broker XLS flows.
+    # This is intentionally conservative and only triggers for known platform labels.
+    if file_kind in {"excel", "html_table"} and "VICKERS" in platform_text:
+        return "dbs_vickers_holdings_xls_v1"
+    if file_kind in {"excel", "html_table"} and "SHAREKHAN" in platform_text:
+        return "sharekhan_holdings_xls_v1"
     return None
 
 

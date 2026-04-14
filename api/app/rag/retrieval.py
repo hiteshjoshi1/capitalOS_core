@@ -17,6 +17,7 @@ from typing import Any, Optional
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.models.rag import RagChunk
 from app.rag.ingestion.embedder import embed_query
 
 log = logging.getLogger(__name__)
@@ -156,3 +157,70 @@ def retrieve_similar_chunks(
         )
         for row in rows
     ]
+
+
+def expand_chunks_with_context(
+    chunks: list[RetrievedChunk],
+    db: Session,
+    *,
+    window_size: int = 2,
+    max_chars: int = 1800,
+) -> list[RetrievedChunk]:
+    """
+    Expand each winning chunk with neighboring chunks from the same document.
+
+    This keeps the selected evidence set size stable while materially enriching
+    each passage with surrounding context.
+    """
+    if not chunks or window_size < 1:
+        return chunks
+
+    expanded: list[RetrievedChunk] = []
+    for chunk in chunks:
+        try:
+            neighbors = (
+                db.query(RagChunk)
+                .filter(
+                    RagChunk.document_id == chunk.document_id,
+                    RagChunk.chunk_index >= chunk.chunk_index - window_size,
+                    RagChunk.chunk_index <= chunk.chunk_index + window_size,
+                )
+                .order_by(RagChunk.chunk_index.asc())
+                .all()
+            )
+        except Exception as exc:
+            log.warning("expand_chunks_with_context failed for chunk=%s: %s", chunk.chunk_id, exc)
+            expanded.append(chunk)
+            continue
+
+        if not neighbors:
+            expanded.append(chunk)
+            continue
+
+        merged_indices = [n.chunk_index for n in neighbors]
+        merged_passages = [n.text.strip() for n in neighbors if (n.text or "").strip()]
+        base_text = str(getattr(chunk, "text", "") or "")
+        merged_text = "\n\n".join(merged_passages).strip() or base_text
+        if max_chars > 0 and len(merged_text) > max_chars:
+            merged_text = merged_text[: max_chars - 3].rstrip() + "..."
+
+        summed_tokens = sum((n.token_count or 0) for n in neighbors)
+        raw_metadata = getattr(chunk, "metadata_json", None)
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        metadata["context_window"] = window_size
+        metadata["anchor_chunk_index"] = chunk.chunk_index
+        metadata["context_chunk_indices"] = merged_indices
+
+        expanded.append(
+            RetrievedChunk(
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                chunk_index=chunk.chunk_index,
+                text=merged_text,
+                token_count=summed_tokens or chunk.token_count,
+                metadata_json=metadata,
+                cosine_distance=chunk.cosine_distance,
+            )
+        )
+
+    return expanded
