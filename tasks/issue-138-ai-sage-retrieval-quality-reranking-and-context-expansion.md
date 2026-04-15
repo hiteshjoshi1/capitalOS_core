@@ -183,3 +183,121 @@ _Append command-level evidence here._
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `blocked`
+
+## Workflow Snapshot
+- latest_outcome: Implemented Issue 138 retrieval-quality upgrades for AI Sage concept mode: broad candidate retrieval, cheap-model reranking, diversity-aware winner selection, and context expansion before synthesis/critique. Added targeted backend tests for breadth, reranking, context expansion, and representative Buffett/Nick query shapes.
+- next_action: Inspect deterministic gate failures, apply mitigations, then rerun the workflow.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.3-codex`
+- retry_gate_pending: `no`
+- blocked_reason: Agent run reported semantic intent not achieved.
+
+## Active Requirements
+- Acceptance criterion: AI Sage no longer relies on a single small nearest-neighbor set as the whole evidence pack for concept-mode answers.
+- Acceptance criterion: Retrieval first gathers a broader candidate set from the selected author corpus before final evidence selection.
+- Acceptance criterion: A cheap/fast model call is used to rerank or filter candidate evidence against the full semantic intent of the query.
+- Acceptance criterion: Winning chunks are expanded into materially richer surrounding context before synthesis.
+- Acceptance criterion: Synthesis and critique both run over the curated expanded evidence pack, not just the first-pass chunk list.
+- Acceptance criterion: Buffett-focused queries about Charlie can surface more than recurring mistakes/thumb-sucking motifs when richer corpus material exists.
+- Acceptance criterion: Nick Sleep queries can surface multiple distinct examples/themes when they exist across writings.
+- Acceptance criterion: Tests cover retrieval breadth, reranking behavior, context expansion, and representative Buffett/Nick query shapes.
+
+## Prepare
+Checked out `feature/issue-138-ai-sage-retrieval-quality-reranking-and-context-expansion` from `main` and ensured task file exists.
+
+## Plan Summary
+Kept issue-137 intent routing/author pinning, then inserted a multi-stage evidence pipeline in concept mode: broad retrieval -> rerank with routing model -> expand context around winners -> synthesize/critique from expanded evidence; validated with new unit coverage and full make-based verification attempts.
+
+### Architecture Decisions
+- Preserved existing query-understanding and author-constraint behavior (issue 137) as stage 0/1 and changed only evidence-pipeline internals.
+- Used the routing model path (`routing_model` + `create_routing_client`) for reranking so reranking remains cheap/fast and separate from main synthesis model.
+- Expanded winning chunks by neighboring chunk indices within the same document while keeping final evidence-pack size controlled by `top_k_chunks`.
+- Added diversity capping per document during winner selection to reduce motif collapse from a single chunk family/document.
+- Maintained fallback behavior: heuristic reranking when routing LLM unavailable and graceful context-expansion fallback on DB/query errors.
+
+### Acceptance Criteria
+- AI Sage no longer relies on a single small nearest-neighbor set as the whole evidence pack for concept-mode answers.
+- Retrieval first gathers a broader candidate set from the selected author corpus before final evidence selection.
+- A cheap/fast model call is used to rerank or filter candidate evidence against the full semantic intent of the query.
+- Winning chunks are expanded into materially richer surrounding context before synthesis.
+- Synthesis and critique both run over the curated expanded evidence pack, not just the first-pass chunk list.
+- Buffett-focused queries about Charlie can surface more than recurring mistakes/thumb-sucking motifs when richer corpus material exists.
+- Nick Sleep queries can surface multiple distinct examples/themes when they exist across writings.
+- Tests cover retrieval breadth, reranking behavior, context expansion, and representative Buffett/Nick query shapes.
+
+### Planned Paths
+- `api/app/rag/concept_mode.py`
+- `api/app/rag/retrieval.py`
+- `api/tests/test_ai_sage_retrieval_pipeline.py`
+
+## Build Summary
+Implemented Issue 138 retrieval-quality upgrades for AI Sage concept mode: broad candidate retrieval, cheap-model reranking, diversity-aware winner selection, and context expansion before synthesis/critique. Added targeted backend tests for breadth, reranking, context expansion, and representative Buffett/Nick query shapes.
+
+### Changed Files
+- `api/app/rag/concept_mode.py`
+- `api/app/rag/retrieval.py`
+- `api/tests/test_ai_sage_retrieval_pipeline.py`
+- `tasks/issue-138-ai-sage-retrieval-quality-reranking-and-context-expansion.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented Issue 138 retrieval-quality upgrades for AI Sage concept mode: broad candidate retrieval, cheap-model reranking, diversity-aware winner selection, and context expansion before synthesis/critique. Added targeted backend tests for breadth, reranking, context expansion, and representative Buffett/Nick query shapes.
+
+- semantic_intent_achieved: `False`
+- provider_model: `codex/gpt-5.3-codex`
+
+### Semantic Checks
+- `pass` AI Sage no longer relies on a single small nearest-neighbor set as the whole evidence pack for concept-mode answers.: Concept mode now runs broad candidate retrieval + reranking + context expansion before evidence synthesis.
+- `pass` Retrieval first gathers a broader candidate set from the selected author corpus before final evidence selection.: Introduced broad candidate pool sizing (`_BROAD_RETRIEVAL_*`) and `_collect_candidate_chunks` before top-k winner selection.
+- `pass` A cheap/fast model call is used to rerank or filter candidate evidence against the full semantic intent of the query.: Added `_llm_rerank_candidate_indices` using routing-model client (`routing_model`/`create_routing_client`) independent of synthesis model.
+- `pass` Winning chunks are expanded into materially richer surrounding context before synthesis.: Added `expand_chunks_with_context` in retrieval layer and applied it to winning chunks before enrichment.
+- `pass` Synthesis and critique both run over the curated expanded evidence pack, not just the first-pass chunk list.: Author view/synthesis/critique now consume evidence derived from expanded winning chunks.
+- `partial` Buffett-focused queries about Charlie can surface more than recurring mistakes/thumb-sucking motif when richer material exists.: Added deterministic unit test (`test_buffett_query_surfaces_multiple_distinct_motifs`) validating multi-theme selection; live corpus smoke verification blocked by `make api-smoke` environment error.
+- `partial` Nick Sleep queries can surface multiple distinct examples/themes when those exist across writings.: Added deterministic unit test (`test_nick_sleep_query_surfaces_multiple_distinct_examples`) validating multi-theme retrieval; live corpus smoke verification blocked by `make api-smoke` environment error.
+- `pass` Tests cover retrieval breadth, reranking behavior, context expansion, and answer quality on representative Buffett/Nick query shapes.: New test module `api/tests/test_ai_sage_retrieval_pipeline.py` covers all required pipeline dimensions.
+
+### Risk Flags
+- verification-blocked-docker-socket
+- manual-live-corpus-checks-not-executed
+- contract-backend-gate-failed-in-environment
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Blockers
+- Agent run reported semantic intent not achieved.
+
+## Permanently Failed / Gave Up
+- Stop reason: Agent run reported semantic intent not achieved.
+- Attempted mitigations:
+- mitigation: No automated mitigation was recorded.
+- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.
+<!-- MACHINE_RENDERED_END -->

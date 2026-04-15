@@ -16,7 +16,9 @@ The LLM path produces richer output; the no-LLM fallback is always honest.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import textwrap
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -24,10 +26,21 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.rag.author_selection import SelectedAuthor, select_authors
-from app.rag.inference import create_inference_client, inference_available, inference_model
+from app.rag.inference import (
+    create_inference_client,
+    create_routing_client,
+    inference_available,
+    inference_model,
+    routing_available,
+    routing_model,
+)
 from app.rag.intent_router import QueryIntent, parse_intent
 from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
-from app.rag.retrieval import RetrievedChunk, retrieve_similar_chunks
+from app.rag.retrieval import (
+    RetrievedChunk,
+    expand_chunks_with_context,
+    retrieve_similar_chunks,
+)
 
 log = logging.getLogger(__name__)
 
@@ -36,6 +49,13 @@ _CONCEPT_TOP_K_CHUNKS = 12
 _MIN_CHUNKS_FOR_CONFIDENCE = 2
 _CHUNKS_PER_AUTHOR_VIEW = 4
 _SUGGESTED_READINGS_COUNT = 3
+_BROAD_RETRIEVAL_MULTIPLIER = 4
+_BROAD_RETRIEVAL_MIN = 24
+_BROAD_RETRIEVAL_MAX = 60
+_BROAD_RETRIEVAL_MIN_PER_SUB_QUERY = 8
+_RERANK_PER_DOCUMENT_CAP = 2
+_CONTEXT_EXPANSION_WINDOW = 2
+_CONTEXT_EXPANSION_MAX_CHARS = 1800
 
 
 # ── Data shapes ───────────────────────────────────────────────────────────────
@@ -385,6 +405,223 @@ def _retrieve_with_intent_fallback(
     return []
 
 
+def _dedupe_chunks_by_id(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+    deduped: list[RetrievedChunk] = []
+    seen_ids: set[str] = set()
+    for chunk in chunks:
+        if chunk.chunk_id in seen_ids:
+            continue
+        seen_ids.add(chunk.chunk_id)
+        deduped.append(chunk)
+    return deduped
+
+
+def _collect_candidate_chunks(
+    query: str,
+    db: Session,
+    *,
+    intent: QueryIntent,
+    author_ids: list[str] | None,
+    broad_top_k: int,
+) -> list[RetrievedChunk]:
+    """Retrieve a broad, deduplicated candidate pool before reranking."""
+    source_type_filter = intent.source_types[0] if intent.source_types else None
+    candidates: list[RetrievedChunk] = []
+
+    if intent.sub_queries:
+        per_sub_k = max(
+            broad_top_k // len(intent.sub_queries),
+            _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY,
+        )
+        for sub_query in intent.sub_queries:
+            candidates.extend(
+                _retrieve_with_intent_fallback(
+                    sub_query,
+                    db,
+                    top_k=per_sub_k,
+                    source_type=source_type_filter,
+                    year_from=intent.date_from,
+                    year_to=intent.date_to,
+                    author_ids=author_ids if author_ids else None,
+                )
+            )
+    else:
+        candidates = _retrieve_with_intent_fallback(
+            query,
+            db,
+            top_k=broad_top_k,
+            source_type=source_type_filter,
+            year_from=intent.date_from,
+            year_to=intent.date_to,
+            author_ids=author_ids if author_ids else None,
+        )
+
+    deduped = _dedupe_chunks_by_id(candidates)
+    deduped.sort(key=lambda c: c.cosine_distance)
+    return deduped[:broad_top_k]
+
+
+def _query_keywords(query: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) >= 3}
+
+
+def _heuristic_rank_candidates(
+    query: str,
+    candidates: list[RetrievedChunk],
+) -> list[RetrievedChunk]:
+    """
+    Fallback ranking when rerank model is unavailable.
+
+    Uses simple lexical overlap over query intent + retrieval similarity.
+    """
+    keywords = _query_keywords(query)
+
+    def score(chunk: RetrievedChunk) -> tuple[int, float]:
+        text = str(getattr(chunk, "text", "") or "").lower()
+        overlap = sum(1 for kw in keywords if kw in text)
+        similarity = getattr(chunk, "similarity", None)
+        if not isinstance(similarity, (int, float)):
+            cosine_distance = getattr(chunk, "cosine_distance", 1.0)
+            similarity = 1.0 - float(cosine_distance if isinstance(cosine_distance, (int, float)) else 1.0)
+        return overlap, float(similarity)
+
+    ranked = sorted(
+        candidates,
+        key=lambda c: (-score(c)[0], -score(c)[1], c.cosine_distance),
+    )
+    return ranked
+
+
+def _chunk_meta(chunk: RetrievedChunk) -> dict[str, Any]:
+    metadata = getattr(chunk, "metadata_json", None)
+    return metadata if isinstance(metadata, dict) else {}
+
+
+def _llm_rerank_candidate_indices(
+    query: str,
+    candidates: list[RetrievedChunk],
+    *,
+    keep_count: int,
+) -> list[int]:
+    """Use the cheap routing model to rerank candidate evidence by full-query intent."""
+    if not candidates or keep_count <= 0:
+        return []
+
+    candidate_block = "\n\n".join(
+        (
+            f"[{i+1}] author={_chunk_meta(c).get('author_name') or _chunk_meta(c).get('author_id') or 'unknown'} "
+            f"document={getattr(c, 'document_id', '')} idx={getattr(c, 'chunk_index', -1)}\n"
+            f"{str(getattr(c, 'text', '') or '')[:420]}"
+        )
+        for i, c in enumerate(candidates)
+    )
+    prompt = textwrap.dedent(f"""
+        Task: rerank evidence passages for semantic relevance to the full user query.
+
+        User query:
+        {query}
+
+        Candidate passages:
+        ---
+        {candidate_block}
+        ---
+
+        Instructions:
+        - Pick the {keep_count} most relevant passages for answering the full query intent.
+        - Favor semantic relevance over keyword matching.
+        - Prefer diversity when many passages repeat the same motif.
+        - Return ONLY a JSON array of 1-based indices.
+        Example: [4, 2, 10]
+    """).strip()
+
+    client = create_routing_client()
+    response = client.chat.completions.create(
+        model=routing_model(),
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.0,
+        max_tokens=180,
+    )
+    raw = (response.choices[0].message.content or "").strip()
+
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        m = re.search(r"\[.*?\]", raw, re.DOTALL)
+        parsed = json.loads(m.group()) if m else []
+
+    if not isinstance(parsed, list):
+        return []
+    valid = [i - 1 for i in parsed if isinstance(i, int) and 1 <= i <= len(candidates)]
+    return valid[:keep_count]
+
+
+def _select_diverse_top_chunks(
+    ranked_chunks: list[RetrievedChunk],
+    *,
+    top_k: int,
+    per_document_cap: int = _RERANK_PER_DOCUMENT_CAP,
+) -> list[RetrievedChunk]:
+    """Prevent one document/chunk-family from dominating the final evidence pack."""
+    if top_k <= 0:
+        return []
+
+    selected: list[RetrievedChunk] = []
+    overflow: list[RetrievedChunk] = []
+    by_document: dict[str, int] = {}
+
+    for chunk in ranked_chunks:
+        document_id = str(getattr(chunk, "document_id", ""))
+        count = by_document.get(document_id, 0)
+        if count < per_document_cap:
+            selected.append(chunk)
+            by_document[document_id] = count + 1
+            if len(selected) >= top_k:
+                return selected
+        else:
+            overflow.append(chunk)
+
+    for chunk in overflow:
+        if len(selected) >= top_k:
+            break
+        selected.append(chunk)
+    return selected[:top_k]
+
+
+def _rerank_candidate_chunks(
+    query: str,
+    candidates: list[RetrievedChunk],
+    *,
+    top_k: int,
+) -> list[RetrievedChunk]:
+    if not candidates:
+        return []
+    if top_k <= 0:
+        return []
+
+    heuristic_ranked = _heuristic_rank_candidates(query, candidates)
+    ranked = heuristic_ranked
+
+    if routing_available():
+        try:
+            indices = _llm_rerank_candidate_indices(query, candidates, keep_count=min(top_k, len(candidates)))
+            if indices:
+                llm_ranked: list[RetrievedChunk] = []
+                seen_ids: set[str] = set()
+                for idx in indices:
+                    chunk = candidates[idx]
+                    if chunk.chunk_id not in seen_ids:
+                        seen_ids.add(chunk.chunk_id)
+                        llm_ranked.append(chunk)
+                for chunk in heuristic_ranked:
+                    if chunk.chunk_id not in seen_ids:
+                        llm_ranked.append(chunk)
+                ranked = llm_ranked
+        except Exception as exc:
+            log.warning("candidate reranking failed; using heuristic rank: %s", exc)
+
+    return _select_diverse_top_chunks(ranked, top_k=min(top_k, len(candidates)))
+
+
 # ── Core function ─────────────────────────────────────────────────────────────
 
 
@@ -441,44 +678,38 @@ def execute_concept_query(
     author_entries = _author_entries(selected, db)
     author_map = {e["author_id"]: e["name"] for e in author_entries}
 
-    # 2. Retrieve evidence — apply source_type and date constraints from intent
+    # 2. Retrieve broad candidate evidence before reranking/context expansion
     selected_ids = [a.author_id for a in selected]
-    source_type_filter = intent.source_types[0] if intent.source_types else None
+    broad_top_k = min(
+        _BROAD_RETRIEVAL_MAX,
+        max(top_k_chunks * _BROAD_RETRIEVAL_MULTIPLIER, _BROAD_RETRIEVAL_MIN),
+    )
+    candidate_chunks = _collect_candidate_chunks(
+        query,
+        db,
+        intent=intent,
+        author_ids=selected_ids,
+        broad_top_k=broad_top_k,
+    )
+    winning_chunks = _rerank_candidate_chunks(
+        query,
+        candidate_chunks,
+        top_k=min(top_k_chunks, len(candidate_chunks)),
+    )
+    expanded_chunks = expand_chunks_with_context(
+        winning_chunks,
+        db,
+        window_size=_CONTEXT_EXPANSION_WINDOW,
+        max_chars=_CONTEXT_EXPANSION_MAX_CHARS,
+    )
+    evidence: list[EvidenceChunk] = _enrich_chunks(expanded_chunks, db, author_map)
 
-    if intent.sub_queries:
-        # Multi-part: retrieve per sub-query and merge, dedup by chunk_id
-        seen_chunk_ids: set[str] = set()
-        raw_chunks: list[RetrievedChunk] = []
-        per_sub_k = max(top_k_chunks // len(intent.sub_queries), 4)
-        for sq in intent.sub_queries:
-            sq_chunks = _retrieve_with_intent_fallback(
-                sq,
-                db,
-                top_k=per_sub_k,
-                source_type=source_type_filter,
-                year_from=intent.date_from,
-                year_to=intent.date_to,
-                author_ids=selected_ids if selected_ids else None,
-            )
-            for c in sq_chunks:
-                if c.chunk_id not in seen_chunk_ids:
-                    seen_chunk_ids.add(c.chunk_id)
-                    raw_chunks.append(c)
-        # Re-sort merged chunks by cosine_distance
-        raw_chunks.sort(key=lambda c: c.cosine_distance)
-        raw_chunks = raw_chunks[:top_k_chunks]
-    else:
-        raw_chunks = _retrieve_with_intent_fallback(
-            query,
-            db,
-            top_k=top_k_chunks,
-            source_type=source_type_filter,
-            year_from=intent.date_from,
-            year_to=intent.date_to,
-            author_ids=selected_ids if selected_ids else None,
-        )
-
-    evidence: list[EvidenceChunk] = _enrich_chunks(raw_chunks, db, author_map)
+    log.debug(
+        "concept evidence pipeline sizes: candidates=%d winners=%d expanded=%d",
+        len(candidate_chunks),
+        len(winning_chunks),
+        len(expanded_chunks),
+    )
 
     evidence_sufficient = len(evidence) >= _MIN_CHUNKS_FOR_CONFIDENCE
     weak_evidence_note: Optional[str] = None
