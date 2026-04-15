@@ -200,7 +200,8 @@ class TestChunkRecursive:
             assert c.token_count <= 100  # generous bound
 
     def test_multiple_paragraphs_force_split(self):
-        result = self._chunk(MULTI_PARA, target_tokens=80)
+        # MULTI_PARA is ~79 tokens; target=50 forces paragraph-level splits.
+        result = self._chunk(MULTI_PARA, target_tokens=50)
         assert len(result) > 1
 
     def test_overlap_approximately_15pct(self):
@@ -240,7 +241,8 @@ class TestChunkRecursive:
             assert c.text.strip() != ""
 
     def test_small_target_forces_many_chunks(self):
-        result = self._chunk(MULTI_PARA, target_tokens=30)
+        # target=20 forces sentence- and word-level splitting, producing > 3 chunks.
+        result = self._chunk(MULTI_PARA, target_tokens=20)
         assert len(result) > 3
 
     def test_very_large_target_single_chunk(self):

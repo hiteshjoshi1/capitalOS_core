@@ -199,18 +199,24 @@ def _greedy_merge(
     Returns:
         List of Chunk objects.
     """
+    # Cap min_tokens so it never exceeds half of target (avoids infinite merge loops
+    # when target is smaller than the configured min_tokens default).
+    effective_min = min(min_tokens, max(1, target_tokens // 2))
+
     chunks: list[Chunk] = []
     current_units: list[str] = []
     current_tokens = 0
     current_overlap_tok = 0
 
-    def _flush(overlap_tok: int) -> Optional[Chunk]:
+    def _flush(overlap_tok: int, *, is_final: bool = False) -> Optional[Chunk]:
         if not current_units:
             return None
         text = " ".join(current_units).strip()
         tok = _count_tokens(text)
-        if tok < min_tokens and chunks:
-            # Merge tiny remainder into the previous chunk
+        # Only merge tiny remainders into the previous chunk on the final flush.
+        # During regular flushes (mid-iteration) we always emit a chunk so that
+        # chunks at the target boundary are not swallowed into the prior chunk.
+        if is_final and tok < effective_min and chunks:
             prev = chunks[-1]
             merged = prev.text + " " + text
             mtok = _count_tokens(merged)
@@ -257,7 +263,7 @@ def _greedy_merge(
             current_tokens += unit_tokens
 
     if current_units:
-        chunk = _flush(current_overlap_tok)
+        chunk = _flush(current_overlap_tok, is_final=True)
         if chunk is not None:
             chunks.append(chunk)
 
