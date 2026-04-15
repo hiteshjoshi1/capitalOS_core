@@ -30,3 +30,4 @@ PyYAML>=6.0.1
 openai>=1.0.0
 voyageai>=0.3.2
 brotli>=1.1.0
+tiktoken>=0.7.0
