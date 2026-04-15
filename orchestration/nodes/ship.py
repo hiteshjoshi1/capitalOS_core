@@ -23,13 +23,8 @@ def run(state: GraphState) -> GraphState:
     cfg = get_config()
     IntegrityService(pipeline.issue.repo_root).assert_matches_planned_hash(pipeline)
 
-    if pipeline.pipeline_version == "v2":
-        cycle = pipeline.get_active_review_cycle()
-        if not cycle or cycle.status != "approved":
-            raise RuntimeError("Ship blocked: latest review cycle is not fully approved.")
-    else:
-        if pipeline.agent_run_output is None:
-            raise RuntimeError("Ship blocked: no v3 agent_run output recorded.")
+    if pipeline.agent_run_output is None:
+        raise RuntimeError("Ship blocked: no agent_run output recorded.")
 
     if pipeline.blockers:
         raise RuntimeError(
@@ -74,8 +69,8 @@ def run(state: GraphState) -> GraphState:
     render_task_file(pipeline)
     # Stage the task file (updated by render_task_file above)
     git.add(pipeline.issue.task_file)
-    # For v3: stage all code files changed by agent_run (they were never committed during the run)
-    if pipeline.pipeline_version == "v3" and pipeline.agent_run_output:
+    # Stage all code files changed by agent_run (they were never committed during the run)
+    if pipeline.agent_run_output:
         code_files = [
             f for f in pipeline.agent_run_output.changed_files
             if f != pipeline.issue.task_file

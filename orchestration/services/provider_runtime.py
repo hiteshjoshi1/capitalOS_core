@@ -44,7 +44,7 @@ class ProviderRuntimeService:
         self.cfg = get_config()
 
     def _prefix_with_caffeinate(self, args: list[str]) -> list[str]:
-        if not self.cfg.v3_enable_caffeinate:
+        if not self.cfg.enable_caffeinate:
             return args
         caffeinate = shutil.which("caffeinate")
         if not caffeinate:
@@ -88,8 +88,8 @@ class ProviderRuntimeService:
         stdout_thread.start()
         stderr_thread.start()
 
-        total_timeout_seconds = (timeout_minutes or self.cfg.v3_longrun_timeout_minutes) * 60
-        inactivity_limit_seconds = self.cfg.v3_inactivity_timeout_minutes * 60
+        total_timeout_seconds = (timeout_minutes or self.cfg.longrun_timeout_minutes) * 60
+        inactivity_limit_seconds = self.cfg.inactivity_timeout_minutes * 60
         deadline = time.monotonic() + total_timeout_seconds
         last_output_time = time.monotonic()
         try:
@@ -99,7 +99,7 @@ class ProviderRuntimeService:
                     proc.kill()
                     raise RuntimeError(
                         f"Provider subprocess exceeded total timeout of "
-                        f"{timeout_minutes or self.cfg.v3_longrun_timeout_minutes} minutes."
+                        f"{timeout_minutes or self.cfg.longrun_timeout_minutes} minutes."
                     )
                 try:
                     stream_name, chunk = queue.get(timeout=min(1.0, remaining))
@@ -111,7 +111,7 @@ class ProviderRuntimeService:
                         raise RuntimeError(
                             f"Provider subprocess stalled: no output for "
                             f"{int(inactivity_elapsed / 60)} minutes "
-                            f"(inactivity limit is {self.cfg.v3_inactivity_timeout_minutes} minutes)."
+                            f"(inactivity limit is {self.cfg.inactivity_timeout_minutes} minutes)."
                         )
                     continue
 
@@ -282,8 +282,8 @@ class ProviderRuntimeService:
         raise RuntimeError(f"Unsupported provider: {provider}")
 
     def complete_structured(self, prompt: str, model_cls: Type[T]) -> tuple[T, ProviderRunResult]:
-        provider = self.cfg.v3_provider
-        model_name = self.cfg.v3_model
+        provider = self.cfg.provider
+        model_name = self.cfg.model
 
         emit_event(
             "provider_run_started",
@@ -325,7 +325,7 @@ class ProviderRuntimeService:
         if (
             provider == "copilot"
             and run_result.session_events_path is not None
-            and self.cfg.v3_repair_enabled
+            and self.cfg.repair_enabled
         ):
             session_context = extract_session_repair_context(Path(run_result.session_events_path))
             if session_context:

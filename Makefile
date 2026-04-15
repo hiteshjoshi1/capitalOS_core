@@ -211,7 +211,7 @@ test: test-all
 verify: lint typecheck test-backend test-frontend
 
 # ---- LangGraph task workflow ----
-.PHONY: orch-bootstrap orch-test orch-coverage task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-salvage-plan task-state-show task-orch-smoke task-v3-run task-v3-resume task-v3-status
+.PHONY: orch-bootstrap orch-test orch-coverage task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-salvage-plan task-state-show task-orch-smoke task-run task-status
 
 orch-bootstrap:
 	$(PYTHON) -m venv "$(ORCH_VENV)"
@@ -281,24 +281,17 @@ task-all:
 	$(call require_thread,task-all)
 	$(call run_llm_orch,all $(ORCH_INIT_ARGS))
 
-task-v3-run:
-	$(call require_task,task-v3-run)
-	$(call require_thread,task-v3-run)
-	$(call require_orch_runtime,task-v3-run)
-	PIPELINE_VERSION=v3 $(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(ORCH_PYTHON) -m $(ORCH_MODULE) all $(ORCH_INIT_ARGS)
+task-run:
+	$(call require_task,task-run)
+	$(call require_thread,task-run)
+	$(call require_orch_runtime,task-run)
+	$(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(ORCH_PYTHON) -m $(ORCH_MODULE) all $(ORCH_INIT_ARGS)
 
-task-v3-resume:
-	$(call require_task,task-v3-resume)
-	$(call require_thread,task-v3-resume)
-	$(call require_resume_json,task-v3-resume)
-	$(call require_orch_runtime,task-v3-resume)
-	PIPELINE_VERSION=v3 $(if $(CAFFEINATE),$(CAFFEINATE) -dimsu ,)$(ORCH_PYTHON) -m $(ORCH_MODULE) resume $(ORCH_BASE_ARGS) --resume-json '$(RESUME_JSON)'
-
-task-v3-status:
-	$(call require_task,task-v3-status)
-	$(call require_thread,task-v3-status)
-	$(call require_orch_runtime,task-v3-status)
-	PIPELINE_VERSION=v3 $(ORCH_PYTHON) -m $(ORCH_MODULE) export-state $(ORCH_BASE_ARGS)
+task-status:
+	$(call require_task,task-status)
+	$(call require_thread,task-status)
+	$(call require_orch_runtime,task-status)
+	$(ORCH_PYTHON) -m $(ORCH_MODULE) export-state $(ORCH_BASE_ARGS)
 
 task-resume:
 	$(call require_task,task-resume)

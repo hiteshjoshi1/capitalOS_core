@@ -59,7 +59,7 @@ class PrepareResult(BaseModel):
 
 class PipelineState(BaseModel):
     issue: IssueMetadata
-    pipeline_version: Literal["v2", "v3"] = "v2"
+    pipeline_version: Literal["v2", "v3"] = "v3"
     current_stage: StageName = "dispatch"
     workflow_status: WorkflowStatus = "not_started"
 

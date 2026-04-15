@@ -10,6 +10,7 @@ from orchestration.services.git import GitService
 from orchestration.services.provider_runtime import ProviderRuntimeService
 from orchestration.services.task_markdown import TaskMarkdownService
 from orchestration.services.verification import VerificationService
+from orchestration.services.v3_policy import V3PolicyService
 from orchestration.state import GraphState, dump_pipeline_state, load_pipeline_state
 
 
@@ -89,22 +90,35 @@ def run(state: GraphState) -> GraphState:
     )
 
     # ---- integrity checks ----
-    # Only two hard gates:
-    # 1) changed_files mismatch: model reported different files than git actually sees.
-    # 2) semantic_intent_achieved=True with non-empty unresolved_failures is self-contradictory.
+    # 1. Changed-files policy: block only if restricted files were modified (.env, fixtures, .gitignore).
+    #    All other changes are allowed — the model may touch files it didn't predict.
+    # 2. Semantic contradiction: intent_achieved=True with non-empty unresolved_failures.
     #
     # Verification coverage is NOT gated here. The model is instructed to run the full
     # suite and report results, but whether it actually ran every required command is
     # verified by deterministic_gates, which re-runs the real suite independently.
-    # Blocking here on missing verification_commands_run entries meant the pipeline
-    # could fail before deterministic verification even ran.
     integrity_failures: list[str] = []
+
+    # Policy check: block restricted files
+    policy = V3PolicyService(pipeline.issue.repo_root)
+    non_task_actual = [p for p in actual_changed_files if p and p != task_file]
+    for path in non_task_actual:
+        restricted = policy._restricted_path(path)
+        if restricted:
+            integrity_failures.append(restricted)
+
+    # Log mismatch as warning, not a blocker — the model can touch files it didn't plan
     if normalized_actual_changed_files != normalized_reported_changed_files:
-        integrity_failures.append(
-            "agent_run reported changed_files that do not match the actual git diff. "
-            f"reported={normalized_reported_changed_files or ['<none>']} "
-            f"actual={normalized_actual_changed_files or ['<none>']}"
+        emit_progress(
+            PipelineStage.AGENT_RUN,
+            current_action="Warning: model-reported changed_files differ from actual git diff",
+            evidence=[
+                f"reported={normalized_reported_changed_files or ['<none>']}",
+                f"actual={normalized_actual_changed_files or ['<none>']}",
+                "using actual git changed files as source of truth",
+            ],
         )
+
     if output.semantic_intent_achieved and output.unresolved_failures:
         integrity_failures.append(
             "agent_run marked semantic intent achieved but still reported unresolved failures."

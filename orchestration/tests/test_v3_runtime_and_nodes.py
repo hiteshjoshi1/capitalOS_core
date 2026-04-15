@@ -140,7 +140,8 @@ def test_agent_run_failure_blocks_with_reason(tmp_path, monkeypatch) -> None:
     assert "agent_run failed" in pipeline.v3_permanent_failure_reason
 
 
-def test_agent_run_blocks_on_changed_files_mismatch(tmp_path, monkeypatch) -> None:
+def test_agent_run_allows_changed_files_mismatch_as_warning(tmp_path, monkeypatch) -> None:
+    """Changed files mismatch is now a warning, not a blocker — policy is the authority."""
     state = _v3_state(tmp_path)
     monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
     monkeypatch.setattr(
@@ -164,8 +165,41 @@ def test_agent_run_blocks_on_changed_files_mismatch(tmp_path, monkeypatch) -> No
 
     result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
     pipeline = PipelineState.model_validate(result["pipeline"])
+    # Mismatch alone no longer blocks — only restricted files block
+    assert pipeline.workflow_status == "running"
+    assert pipeline.agent_run_output is not None
+
+
+def test_agent_run_blocks_on_restricted_file_change(tmp_path, monkeypatch) -> None:
+    """Changing a restricted file (.env, .gitignore, fixtures) blocks the pipeline."""
+    state = _v3_state(tmp_path)
+    monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.GitService.changed_files",
+        lambda self: [".env", "web/src/App.tsx"],
+    )
+
+    output = _agent_output()
+    output.changed_files = [".env", "web/src/App.tsx"]
+
+    def fake_complete_structured(self, prompt, model_cls):
+        _ = (self, prompt, model_cls)
+        return output, ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
+    )
+
+    result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
     assert pipeline.workflow_status == "blocked"
-    assert any("changed_files" in item for item in pipeline.blockers)
+    assert any("Restricted" in item for item in pipeline.blockers)
 
 
 def test_agent_run_allows_pipeline_managed_task_file_diff(tmp_path, monkeypatch) -> None:
@@ -273,7 +307,7 @@ def test_deterministic_gates_success(tmp_path, monkeypatch) -> None:
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=False,
+            require_pre_ship_human_on_high_risk=False,
         ),
     )
     _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
@@ -294,7 +328,7 @@ def test_deterministic_gates_blocks_when_verification_fails(tmp_path, monkeypatc
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=False,
+            require_pre_ship_human_on_high_risk=False,
         ),
     )
     _patch_deterministic_deps(monkeypatch, verification=_verification_fail(), policy=V3PolicyResult(blocked=False))
@@ -314,7 +348,7 @@ def test_deterministic_gates_blocks_when_policy_fails(tmp_path, monkeypatch) -> 
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=False,
+            require_pre_ship_human_on_high_risk=False,
         ),
     )
     _patch_deterministic_deps(
@@ -340,7 +374,7 @@ def test_deterministic_gates_high_risk_rejected_blocks(tmp_path, monkeypatch) ->
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=True,
+            require_pre_ship_human_on_high_risk=True,
         ),
     )
     _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
@@ -363,13 +397,13 @@ def test_deterministic_gates_high_risk_rejected_blocks(tmp_path, monkeypatch) ->
 
 def test_provider_runtime_complete_structured_raises_on_primary_failure(monkeypatch, tmp_path) -> None:
     cfg = SimpleNamespace(
-        v3_enable_caffeinate=False,
+        enable_caffeinate=False,
         build_max_autopilot_continues=3,
-        v3_longrun_timeout_minutes=5,
-        v3_inactivity_timeout_minutes=30,
-        v3_repair_enabled=False,
-        v3_provider="copilot",
-        v3_model="gpt-5.3-codex",
+        longrun_timeout_minutes=5,
+        inactivity_timeout_minutes=30,
+        repair_enabled=False,
+        provider="copilot",
+        model="gpt-5.3-codex",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
 
@@ -390,13 +424,13 @@ def test_provider_runtime_complete_structured_raises_on_primary_failure(monkeypa
 
 def test_provider_runtime_run_provider_dispatch_and_prefix(monkeypatch, tmp_path) -> None:
     cfg = SimpleNamespace(
-        v3_enable_caffeinate=True,
+        enable_caffeinate=True,
         build_max_autopilot_continues=3,
-        v3_longrun_timeout_minutes=5,
-        v3_inactivity_timeout_minutes=30,
-        v3_repair_enabled=False,
-        v3_provider="copilot",
-        v3_model="gpt-5.3-codex",
+        longrun_timeout_minutes=5,
+        inactivity_timeout_minutes=30,
+        repair_enabled=False,
+        provider="copilot",
+        model="gpt-5.3-codex",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     monkeypatch.setattr("orchestration.services.provider_runtime.shutil.which", lambda _: "/usr/bin/caffeinate")
@@ -415,13 +449,13 @@ def test_provider_runtime_run_provider_dispatch_and_prefix(monkeypatch, tmp_path
 
 def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, tmp_path) -> None:
     cfg = SimpleNamespace(
-        v3_enable_caffeinate=False,
+        enable_caffeinate=False,
         build_max_autopilot_continues=3,
-        v3_longrun_timeout_minutes=5,
-        v3_inactivity_timeout_minutes=30,
-        v3_repair_enabled=False,
-        v3_provider="codex",
-        v3_model="gpt-5.3-codex",
+        longrun_timeout_minutes=5,
+        inactivity_timeout_minutes=30,
+        repair_enabled=False,
+        provider="codex",
+        model="gpt-5.3-codex",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     created: dict[str, Path] = {}
@@ -457,13 +491,13 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
 
 def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, capsys) -> None:
     cfg = SimpleNamespace(
-        v3_enable_caffeinate=False,
+        enable_caffeinate=False,
         build_max_autopilot_continues=3,
-        v3_longrun_timeout_minutes=5,
-        v3_inactivity_timeout_minutes=30,
-        v3_repair_enabled=False,
-        v3_provider="copilot",
-        v3_model="claude-sonnet-4.6",
+        longrun_timeout_minutes=5,
+        inactivity_timeout_minutes=30,
+        repair_enabled=False,
+        provider="copilot",
+        model="claude-sonnet-4.6",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
 
@@ -496,13 +530,13 @@ def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, caps
 
 def test_provider_runtime_complete_structured_uses_copilot_session_fallback(monkeypatch, tmp_path) -> None:
     cfg = SimpleNamespace(
-        v3_enable_caffeinate=False,
+        enable_caffeinate=False,
         build_max_autopilot_continues=3,
-        v3_longrun_timeout_minutes=5,
-        v3_inactivity_timeout_minutes=30,
-        v3_repair_enabled=False,
-        v3_provider="copilot",
-        v3_model="claude-sonnet-4.6",
+        longrun_timeout_minutes=5,
+        inactivity_timeout_minutes=30,
+        repair_enabled=False,
+        provider="copilot",
+        model="claude-sonnet-4.6",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
 
@@ -553,13 +587,13 @@ def test_deterministic_fix_branches(monkeypatch, tmp_path) -> None:
 
 def _make_cfg(*, repair_enabled: bool = True) -> SimpleNamespace:
     return SimpleNamespace(
-        v3_enable_caffeinate=False,
+        enable_caffeinate=False,
         build_max_autopilot_continues=3,
-        v3_longrun_timeout_minutes=5,
-        v3_inactivity_timeout_minutes=30,
-        v3_repair_enabled=repair_enabled,
-        v3_provider="copilot",
-        v3_model="claude-sonnet-4.6",
+        longrun_timeout_minutes=5,
+        inactivity_timeout_minutes=30,
+        repair_enabled=repair_enabled,
+        provider="copilot",
+        model="claude-sonnet-4.6",
     )
 
 
@@ -689,7 +723,7 @@ def test_deterministic_gates_success_sets_waiting_for_human(tmp_path, monkeypatc
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=False,
+            require_pre_ship_human_on_high_risk=False,
         ),
     )
     _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
@@ -818,12 +852,12 @@ def test_agent_run_does_not_block_when_only_some_commands_reported(tmp_path, mon
     assert pipeline.blockers == []
 
 
-def test_agent_run_still_blocks_on_changed_files_mismatch_regardless_of_verification(tmp_path, monkeypatch) -> None:
-    """changed_files integrity is a hard gate independent of verification_commands_run."""
+def test_agent_run_allows_mismatch_regardless_of_verification(tmp_path, monkeypatch) -> None:
+    """changed_files mismatch is a warning, not a blocker — only restricted files block."""
     state = _v3_state(tmp_path)
 
     monkeypatch.setattr(agent_run_node, "render_task_file", lambda pipeline: None)
-    # Git says api/ changed; model says web/ changed — mismatch must still block
+    # Git says api/ changed; model says web/ changed — mismatch is now just a warning
     monkeypatch.setattr(
         "orchestration.nodes.agent_run.GitService.changed_files",
         lambda self: ["api/app/main.py"],
@@ -853,8 +887,9 @@ def test_agent_run_still_blocks_on_changed_files_mismatch_regardless_of_verifica
     result = agent_run_node.run({"pipeline": state.model_dump(mode="json")})
     pipeline = PipelineState.model_validate(result["pipeline"])
 
-    assert pipeline.workflow_status == "blocked"
-    assert any("changed_files" in b for b in pipeline.blockers)
+    # Mismatch alone is a warning, pipeline continues
+    assert pipeline.workflow_status == "running"
+    assert pipeline.agent_run_output is not None
 
 
 def test_agent_run_still_blocks_on_intent_vs_unresolved_failures_contradiction(tmp_path, monkeypatch) -> None:
@@ -903,7 +938,7 @@ def test_deterministic_gates_is_authoritative_even_when_model_reported_all_pass(
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=False,
+            require_pre_ship_human_on_high_risk=False,
         ),
     )
     # Real deterministic run returns a failure
@@ -929,7 +964,7 @@ def test_deterministic_gates_runs_default_full_suite(tmp_path, monkeypatch) -> N
         "get_config",
         lambda: SimpleNamespace(
             max_retries=3,
-            v3_require_pre_ship_human_on_high_risk=False,
+            require_pre_ship_human_on_high_risk=False,
         ),
     )
     monkeypatch.setattr(deterministic_gates_node, "render_task_file", lambda pipeline: None)

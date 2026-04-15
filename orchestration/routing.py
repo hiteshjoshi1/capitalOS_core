@@ -10,17 +10,12 @@ def route_from_dispatch(state: GraphState) -> str:
 
 
 def route_after_prepare(state: GraphState) -> str:
-    pipeline = load_pipeline_state(state)
-    if pipeline.pipeline_version == "v3":
-        return "agent_run"
-    return "plan"
+    return "agent_run"
 
 
 def route_after_plan(state: GraphState) -> str:
-    pipeline = load_pipeline_state(state)
-    if pipeline.pipeline_version == "v3":
-        return "agent_run"
-    return "human_approval_gate"
+    """Legacy v2 plan node still routes to agent_run in unified pipeline."""
+    return "agent_run"
 
 
 def route_after_human_approval(state: GraphState) -> str:
