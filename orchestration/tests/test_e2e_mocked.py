@@ -41,6 +41,7 @@ _Not rendered yet._
 
 
 def test_full_e2e_happy_path(tmp_path: Path, monkeypatch):
+    """Unified pipeline e2e: prepare → agent_run → deterministic_gates → ship."""
     task_file = make_task_file(tmp_path)
 
     monkeypatch.setattr(
@@ -76,76 +77,42 @@ def test_full_e2e_happy_path(tmp_path: Path, monkeypatch):
         lambda self: "feature/issue-123-test",
     )
 
-    def fake_llm(self, prompt, model_cls):
-        name = model_cls.__name__
+    # Mock the unified pipeline provider runtime (agent_run uses ProviderRuntimeService)
+    from orchestration.models.agent_run import AgentRunOutput
+    from orchestration.services.provider_runtime import ProviderRunResult
 
-        if name == "PlanOutput":
-            return model_cls(
-                summary="Planned workflow",
-                architecture_decisions=["Use LangGraph"],
-                risks=["Low"],
-                open_questions=[],
-                acceptance_criteria=["Workflow runs"],
-                planned_paths=["orchestration/"],
-                checklist=[
-                    {
-                        "id": "CHK-1",
-                        "text": "Implement graph",
-                        "required": True,
-                        "human_only": False,
-                        "post_ship": False,
-                        "planned_paths": ["orchestration/graph.py"],
-                    }
-                ],
-            )
-
-        if name == "BuildOutput":
-            return model_cls(
-                summary="Implemented feature",
-                changed_files=["orchestration/graph.py"],
-                completed_checklist_item_ids=["CHK-1"],
-                implementation_notes=["Graph added"],
-            )
-
-        if name == "AgentReview":
-            return model_cls(
-                review_id="R1",
-                model_name="fake-reviewer",
-                decision="approved",
-                risk="low",
-                summary="Looks good",
-                findings=[],
-                test_gaps=[],
-                verification_considered=True,
-            )
-
-        if name == "ReworkAnalysis":
-            return model_cls(
-                rework_cycle_id="W1",
-                review_id="R1",
-                root_cause="n/a",
-                findings_addressed=[],
-                planned_changes=[],
-                validation_plan=[],
-                unresolved_assumptions=[],
-                answer_matrix=[],
-            )
-
-        if name == "ReworkImplementationResult":
-            return model_cls(
-                rework_cycle_id="W1",
-                review_id="R1",
-                summary="Rework applied",
-                changed_files=["orchestration/graph.py"],
-                verification_summary="ok",
-                completed=True,
-            )
-
-        raise AssertionError(f"Unexpected model requested: {name}")
+    def fake_complete_structured(self, prompt, model_cls):
+        return AgentRunOutput(
+            summary="Implemented feature",
+            plan_summary="Add graph support",
+            architecture_decisions=["Use LangGraph"],
+            risks=["Low"],
+            open_questions=[],
+            acceptance_criteria=["Workflow runs"],
+            planned_paths=["orchestration/"],
+            checklist=[],
+            changed_files=["orchestration/graph.py"],
+            extra_changed_files=[],
+            implementation_notes=["Graph added"],
+            verification_commands_run=[
+                {"command": "make lint", "status": "pass", "evidence": "ok"},
+            ],
+            unresolved_failures=[],
+            acceptance_criteria_checks=[
+                {"criterion": "Workflow runs", "status": "pass", "evidence": "ok"},
+            ],
+            semantic_intent_achieved=True,
+            risk_flags=[],
+        ), ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
 
     monkeypatch.setattr(
-        "orchestration.services.llm.LLMService.complete_structured",
-        fake_llm,
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
     )
 
     def fake_run_default_suite(self, max_attempts=3, on_code_retry_fix=None):
@@ -171,9 +138,23 @@ def test_full_e2e_happy_path(tmp_path: Path, monkeypatch):
         fake_run_default_suite,
     )
 
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.get_config",
+        lambda: type("Cfg", (), {
+            "max_retries": 3,
+            "require_pre_ship_human_on_high_risk": False,
+        })(),
+    )
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.ScopePolicyService.review_allowed_paths",
+        lambda self: ["orchestration/"],
+    )
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.V3PolicyService.evaluate",
+        lambda self, changed_files, allowed_paths, extra_changed_files: type("R", (), {"blocked": False, "blockers": [], "extra_files_with_reasons": []})(),
+    )
+
     graph = build_graph(InMemorySaver())
-    # db_path = tmp_path / ".task-flow" / "langgraph.sqlite"
-    # graph = build_graph(get_checkpointer(str(db_path)))
     config = {"configurable": {"thread_id": "issue-123"}}
 
     state = {
@@ -192,43 +173,32 @@ def test_full_e2e_happy_path(tmp_path: Path, monkeypatch):
         }
     }
 
+    # Run the graph — should go prepare → agent_run → deterministic_gates → interrupt (waiting_for_human)
     graph.invoke(state, config=config)
 
     snapshot = graph.get_state(config)
-    assert snapshot.interrupts, "Expected interrupt at plan approval"
+    # Unified pipeline ends at deterministic_gates with waiting_for_human (no interrupt in happy path since
+    # require_pre_ship_human_on_high_risk=False and no risk flags — pipeline ends with __end__)
+    pipeline = snapshot.values.get("pipeline", {})
+    if snapshot.interrupts:
+        # If interrupted, resume with approval
+        result = graph.invoke(
+            Command(
+                resume={
+                    "gate_type": "v3_high_risk_review",
+                    "decision": "approved",
+                    "reviewer": "Hitesh",
+                    "notes": "ship it",
+                    "questions": [],
+                    "response_requirements": [],
+                    "unresolved_comments": [],
+                }
+            ),
+            config=config,
+        )
+        pipeline = result["pipeline"]
 
-    graph.invoke(
-        Command(
-            resume={
-                "gate_type": "plan_approval",
-                "decision": "approved",
-                "reviewer": "Hitesh",
-                "notes": "approved",
-                "questions": [],
-                "response_requirements": [],
-                "unresolved_comments": [],
-            }
-        ),
-        config=config,
-    )
-
-    snapshot = graph.get_state(config)
-    assert snapshot.interrupts, "Expected interrupt at human review"
-
-    result = graph.invoke(
-        Command(
-            resume={
-                "decision": "approved",
-                "reviewer": "Hitesh",
-                "notes": "ship it",
-                "questions": [],
-                "response_requirements": [],
-                "unresolved_comments": [],
-            }
-        ),
-        config=config,
-    )
-
-    pipeline = result["pipeline"]
-    assert pipeline["workflow_status"] == "shipped"
-    assert pipeline["current_stage"] == "done"
+    # The unified pipeline sets waiting_for_human after deterministic_gates pass.
+    # Ship must be triggered manually via task-ship.
+    assert pipeline["workflow_status"] == "waiting_for_human"
+    assert pipeline["current_stage"] == "deterministic_gates"

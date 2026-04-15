@@ -120,10 +120,12 @@ def test_v3_policy_accepts_reasoned_out_of_scope_file(tmp_path) -> None:
 
 def test_model_routing_config_supports_v3_fields() -> None:
     cfg = ModelRoutingConfig(
-        pipeline_version="v3",
-        v3_provider="codex",
-        v3_model="gpt-5.3-codex",
+        provider="codex",
+        model="gpt-5.3-codex",
     )
     assert cfg.pipeline_version == "v3"
+    assert cfg.provider == "codex"
+    assert cfg.model == "gpt-5.3-codex"
+    # backward-compat aliases
     assert cfg.v3_provider == "codex"
     assert cfg.v3_model == "gpt-5.3-codex"

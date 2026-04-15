@@ -34,28 +34,28 @@ def _base_state(execution_mode: str = "workflow") -> PipelineState:
     )
 
 
-def test_route_after_prepare_step_advances_to_plan():
+def test_route_after_prepare_step_advances_to_agent_run():
     state = _base_state(execution_mode="step")
     state.current_stage = "prepare"
     state.workflow_status = "running"
 
-    assert route_after_prepare(dump_pipeline_state(state)) == "plan"
+    assert route_after_prepare(dump_pipeline_state(state)) == "agent_run"
 
 
-def test_route_after_plan_step_advances_to_human_approval_gate():
+def test_route_after_plan_step_advances_to_agent_run():
     state = _base_state(execution_mode="step")
     state.current_stage = "plan"
     state.workflow_status = "running"
 
-    assert route_after_plan(dump_pipeline_state(state)) == "human_approval_gate"
+    assert route_after_plan(dump_pipeline_state(state)) == "agent_run"
 
 
-def test_route_after_plan_workflow_still_advances_to_human_approval_gate():
+def test_route_after_plan_workflow_still_advances_to_agent_run():
     state = _base_state()
     state.current_stage = "plan"
     state.workflow_status = "running"
 
-    assert route_after_plan(dump_pipeline_state(state)) == "human_approval_gate"
+    assert route_after_plan(dump_pipeline_state(state)) == "agent_run"
 
 
 def test_route_after_human_approval_step_advances_to_build_when_approved():

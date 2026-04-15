@@ -41,6 +41,11 @@ _Not rendered yet._
 
 
 def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
+    """Unified pipeline: escalation/rework paths no longer exist.
+
+    This test now verifies the unified flow: prepare → agent_run → deterministic_gates.
+    The old v2 escalation/rework path is retired.
+    """
     task_file = make_task_file(tmp_path)
 
     monkeypatch.setattr(
@@ -76,117 +81,41 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
         lambda self: "feature/issue-123-test",
     )
 
-    call_counters = {
-        "agent_review": 0,
-        "escalation_review": 0,
-    }
+    from orchestration.models.agent_run import AgentRunOutput
+    from orchestration.services.provider_runtime import ProviderRunResult
 
-    def fake_llm(self, prompt, model_cls):
-        name = model_cls.__name__
-
-        if name == "PlanOutput":
-            return model_cls(
-                summary="Planned workflow",
-                architecture_decisions=["Use LangGraph"],
-                risks=["Medium"],
-                open_questions=[],
-                acceptance_criteria=["Workflow runs"],
-                planned_paths=["orchestration/"],
-                checklist=[
-                    {
-                        "id": "CHK-1",
-                        "text": "Implement graph",
-                        "required": True,
-                        "human_only": False,
-                        "post_ship": False,
-                        "planned_paths": ["orchestration/graph.py"],
-                    }
-                ],
-            )
-
-        if name == "BuildOutput":
-            return model_cls(
-                summary="Implemented initial feature",
-                changed_files=["orchestration/graph.py"],
-                completed_checklist_item_ids=["CHK-1"],
-                implementation_notes=["Graph added"],
-            )
-
-        if name == "AgentReview":
-            if self.stage == PipelineStage.AGENT_REVIEW:
-                call_counters["agent_review"] += 1
-                if call_counters["agent_review"] == 1:
-                    return model_cls(
-                        review_id="R1",
-                        model_name="reviewer",
-                        decision="escalate",
-                        risk="high",
-                        summary="Uncertain, escalating.",
-                        findings=["Potential issue in routing."],
-                        test_gaps=["Need more confidence in rework loop."],
-                        verification_considered=True,
-                    )
-                else:
-                    return model_cls(
-                        review_id="R2",
-                        model_name="reviewer",
-                        decision="approved",
-                        risk="low",
-                        summary="Rework addressed the issue.",
-                        findings=[],
-                        test_gaps=[],
-                        verification_considered=True,
-                    )
-
-            if self.stage == PipelineStage.ESCALATION_REVIEW:
-                call_counters["escalation_review"] += 1
-                return model_cls(
-                    review_id="R1",
-                    model_name="reviewer_escalation",
-                    decision="needs_fixes",
-                    risk="medium",
-                    summary="Needs targeted fixes.",
-                    findings=["Routing edge case needs correction."],
-                    test_gaps=["Need retest after rework."],
-                    verification_considered=True,
-                )
-
-        if name == "ReworkAnalysis":
-            return model_cls(
-                rework_cycle_id="W1",
-                review_id="R1",
-                root_cause="Routing decision too loose.",
-                findings_addressed=["Routing edge case needs correction."],
-                planned_changes=["Tighten routing decision logic."],
-                validation_plan=["Run verification suite again."],
-                unresolved_assumptions=[],
-                answer_matrix=[
-                    {
-                        "reviewer_finding": "Routing edge case needs correction.",
-                        "human_comment": "Please fix before ship.",
-                        "root_cause": "Branch condition too permissive.",
-                        "change_made": "",
-                        "verification_performed": "",
-                        "status": "planned",
-                    }
-                ],
-            )
-
-        if name == "ReworkImplementationResult":
-            return model_cls(
-                rework_cycle_id="W1",
-                review_id="R1",
-                summary="Routing logic tightened.",
-                changed_files=["orchestration/routing.py"],
-                verification_summary="All checks passed after rework.",
-                completed=True,
-            )
-
-        raise AssertionError(f"Unexpected model requested: {name}")
+    def fake_complete_structured(self, prompt, model_cls):
+        return AgentRunOutput(
+            summary="Implemented feature",
+            plan_summary="Add graph support",
+            architecture_decisions=["Use LangGraph"],
+            risks=["Medium"],
+            open_questions=[],
+            acceptance_criteria=["Workflow runs"],
+            planned_paths=["orchestration/"],
+            checklist=[],
+            changed_files=["orchestration/graph.py"],
+            extra_changed_files=[],
+            implementation_notes=["Graph added"],
+            verification_commands_run=[
+                {"command": "make lint", "status": "pass", "evidence": "ok"},
+            ],
+            unresolved_failures=[],
+            acceptance_criteria_checks=[
+                {"criterion": "Workflow runs", "status": "pass", "evidence": "ok"},
+            ],
+            semantic_intent_achieved=True,
+            risk_flags=[],
+        ), ProviderRunResult(
+            provider="copilot",
+            model="gpt-5.3-codex",
+            output="{}",
+            diagnostics=[],
+        )
 
     monkeypatch.setattr(
-        "orchestration.services.llm.LLMService.complete_structured",
-        fake_llm,
+        "orchestration.nodes.agent_run.ProviderRuntimeService.complete_structured",
+        fake_complete_structured,
     )
 
     def fake_run_default_suite(self, max_attempts=3, on_code_retry_fix=None):
@@ -201,13 +130,6 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
                         exit_code=0,
                         output_excerpt="ok",
                     ),
-                    VerificationCommandResult(
-                        name="typecheck",
-                        command="make typecheck",
-                        status="pass",
-                        exit_code=0,
-                        output_excerpt="ok",
-                    ),
                 ],
                 any_failures=False,
             ),
@@ -217,6 +139,22 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "orchestration.services.verification.VerificationService.run_default_suite",
         fake_run_default_suite,
+    )
+
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.get_config",
+        lambda: type("Cfg", (), {
+            "max_retries": 3,
+            "require_pre_ship_human_on_high_risk": False,
+        })(),
+    )
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.ScopePolicyService.review_allowed_paths",
+        lambda self: ["orchestration/"],
+    )
+    monkeypatch.setattr(
+        "orchestration.nodes.deterministic_gates.V3PolicyService.evaluate",
+        lambda self, changed_files, allowed_paths, extra_changed_files: type("R", (), {"blocked": False, "blockers": [], "extra_files_with_reasons": []})(),
     )
 
     db_path = tmp_path / ".task-flow" / "langgraph.sqlite"
@@ -242,45 +180,10 @@ def test_escalation_then_rework_then_ship(tmp_path: Path, monkeypatch):
     graph.invoke(state, config=config)
 
     snapshot = graph.get_state(config)
-    assert snapshot.interrupts, "Expected interrupt at plan approval"
-
-    graph.invoke(
-        Command(
-            resume={
-                "gate_type": "plan_approval",
-                "decision": "approved",
-                "reviewer": "Hitesh",
-                "notes": "approved",
-                "questions": [],
-                "response_requirements": [],
-                "unresolved_comments": [],
-            }
-        ),
-        config=config,
-    )
-
-    snapshot = graph.get_state(config)
-    assert snapshot.interrupts, "Expected human review interrupt after rework and re-review"
-
-    result = graph.invoke(
-        Command(
-            resume={
-                "decision": "approved",
-                "reviewer": "Hitesh",
-                "notes": "Looks good now.",
-                "questions": [],
-                "response_requirements": [],
-                "unresolved_comments": [],
-            }
-        ),
-        config=config,
-    )
-
-    pipeline = result["pipeline"]
-    assert pipeline["workflow_status"] == "shipped"
-    assert pipeline["current_stage"] == "done"
-    assert len(pipeline["review_cycles"]) == 2
-    assert len(pipeline["rework_cycles"]) == 1
+    pipeline = snapshot.values.get("pipeline", {})
+    # Unified pipeline ends at deterministic_gates with waiting_for_human
+    assert pipeline["workflow_status"] == "waiting_for_human"
+    assert pipeline["current_stage"] == "deterministic_gates"
 
 
 def test_ship_reconciles_stale_branch_metadata_with_current_branch(tmp_path: Path, monkeypatch):
@@ -322,10 +225,28 @@ def test_ship_reconciles_stale_branch_metadata_with_current_branch(tmp_path: Pat
                 "branch": "feature/issue-123-test",
                 "created_at": "2026-03-18T00:00:00Z",
             },
-            "current_stage": "human_review",
-            "workflow_status": "approved",
+            "current_stage": "deterministic_gates",
+            "workflow_status": "waiting_for_human",
             "requested_entrypoint": "ship",
             "execution_mode": "step",
+            "agent_run_output": {
+                "summary": "Implemented feature",
+                "plan_summary": "Add graph support",
+                "architecture_decisions": [],
+                "risks": [],
+                "open_questions": [],
+                "acceptance_criteria": [],
+                "planned_paths": ["orchestration/"],
+                "checklist": [],
+                "changed_files": ["orchestration/graph.py"],
+                "extra_changed_files": [],
+                "implementation_notes": [],
+                "verification_commands_run": [],
+                "unresolved_failures": [],
+                "acceptance_criteria_checks": [],
+                "semantic_intent_achieved": True,
+                "risk_flags": [],
+            },
             "build_output": {
                 "summary": "Implemented feature",
                 "changed_files": ["orchestration/graph.py"],
@@ -333,51 +254,11 @@ def test_ship_reconciles_stale_branch_metadata_with_current_branch(tmp_path: Pat
                 "implementation_notes": [],
                 "verification": {
                     "results": [
-                        {
-                            "name": "lint",
-                            "command": "make lint",
-                            "status": "pass",
-                            "exit_code": 0,
-                            "output_excerpt": "ok",
-                        }
+                        {"name": "lint", "command": "make lint", "status": "pass", "exit_code": 0, "output_excerpt": "ok"}
                     ],
-                    "summary": "ok",
                     "any_failures": False,
-                    "created_at": "2026-03-18T00:00:00Z",
                 },
-                "extra_changed_files": [],
-                "retry_entries": [],
             },
-            "review_cycles": [
-                {
-                    "review_id": "R1",
-                    "source": "build",
-                    "agent_review": {
-                        "review_id": "R1",
-                        "model_name": "reviewer",
-                        "decision": "approved",
-                        "risk": "low",
-                        "summary": "Looks good",
-                        "findings": [],
-                        "test_gaps": [],
-                        "verification_considered": True,
-                        "created_at": "2026-03-18T00:00:00Z",
-                    },
-                    "human_review": {
-                        "review_id": "R1",
-                        "decision": "approved",
-                        "reviewer": "Hitesh",
-                        "notes": "Ship it",
-                        "questions": [],
-                        "response_requirements": [],
-                        "unresolved_comments": [],
-                        "created_at": "2026-03-18T00:00:00Z",
-                    },
-                    "status": "approved",
-                    "created_at": "2026-03-18T00:00:00Z",
-                }
-            ],
-            "active_review_cycle_id": "R1",
         }
     }
 
@@ -434,10 +315,28 @@ def test_ship_renders_task_file_before_commit(tmp_path: Path, monkeypatch):
                 "branch": "issue-123-test",
                 "created_at": "2026-03-18T00:00:00Z",
             },
-            "current_stage": "human_review",
-            "workflow_status": "approved",
+            "current_stage": "deterministic_gates",
+            "workflow_status": "waiting_for_human",
             "requested_entrypoint": "ship",
             "execution_mode": "step",
+            "agent_run_output": {
+                "summary": "Implemented feature",
+                "plan_summary": "Add graph support",
+                "architecture_decisions": [],
+                "risks": [],
+                "open_questions": [],
+                "acceptance_criteria": [],
+                "planned_paths": ["orchestration/"],
+                "checklist": [],
+                "changed_files": ["orchestration/graph.py"],
+                "extra_changed_files": [],
+                "implementation_notes": [],
+                "verification_commands_run": [],
+                "unresolved_failures": [],
+                "acceptance_criteria_checks": [],
+                "semantic_intent_achieved": True,
+                "risk_flags": [],
+            },
             "build_output": {
                 "summary": "Implemented feature",
                 "changed_files": ["orchestration/graph.py"],
@@ -445,51 +344,11 @@ def test_ship_renders_task_file_before_commit(tmp_path: Path, monkeypatch):
                 "implementation_notes": [],
                 "verification": {
                     "results": [
-                        {
-                            "name": "lint",
-                            "command": "make lint",
-                            "status": "pass",
-                            "exit_code": 0,
-                            "output_excerpt": "ok",
-                        }
+                        {"name": "lint", "command": "make lint", "status": "pass", "exit_code": 0, "output_excerpt": "ok"}
                     ],
-                    "summary": "ok",
                     "any_failures": False,
-                    "created_at": "2026-03-18T00:00:00Z",
                 },
-                "extra_changed_files": [],
-                "retry_entries": [],
             },
-            "review_cycles": [
-                {
-                    "review_id": "R1",
-                    "source": "build",
-                    "agent_review": {
-                        "review_id": "R1",
-                        "model_name": "reviewer",
-                        "decision": "approved",
-                        "risk": "low",
-                        "summary": "Looks good",
-                        "findings": [],
-                        "test_gaps": [],
-                        "verification_considered": True,
-                        "created_at": "2026-03-18T00:00:00Z",
-                    },
-                    "human_review": {
-                        "review_id": "R1",
-                        "decision": "approved",
-                        "reviewer": "Hitesh",
-                        "notes": "Ship it",
-                        "questions": [],
-                        "response_requirements": [],
-                        "unresolved_comments": [],
-                        "created_at": "2026-03-18T00:00:00Z",
-                    },
-                    "status": "approved",
-                    "created_at": "2026-03-18T00:00:00Z",
-                }
-            ],
-            "active_review_cycle_id": "R1",
         }
     }
 

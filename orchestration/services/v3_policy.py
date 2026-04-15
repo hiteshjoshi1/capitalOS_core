@@ -21,6 +21,7 @@ class V3PolicyService:
     )
     RESTRICTED_EXACT = {
         ".gitignore",
+        ".env",
     }
     SECRET_PATTERNS = (
         re.compile(r"-----BEGIN (RSA|EC|OPENSSH) PRIVATE KEY-----"),

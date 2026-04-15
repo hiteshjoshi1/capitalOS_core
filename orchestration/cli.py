@@ -134,7 +134,7 @@ def make_initial_state(args: argparse.Namespace, entrypoint: str, mode: str) -> 
 
     pipeline = PipelineState(
         issue=issue,
-        pipeline_version=get_config().pipeline_version,
+        pipeline_version="v3",
         requested_entrypoint=entrypoint,  # type: ignore[arg-type]
         execution_mode=mode,              # type: ignore[arg-type]
     )

@@ -18,15 +18,15 @@ def _load_env_files() -> None:
 
 
 class ModelRoutingConfig(BaseModel):
-    pipeline_version: Literal["v2", "v3"] = "v2"
-    v3_provider: Literal["copilot", "codex"] = "copilot"
-    v3_model: str = Field(default="gpt-5.3-codex")
-    v3_longrun_timeout_minutes: int = Field(default=120, ge=1)
-    v3_enable_post_pr_human_review: bool = True
-    v3_require_pre_ship_human_on_high_risk: bool = True
-    v3_enable_caffeinate: bool = True
-    v3_inactivity_timeout_minutes: int = Field(default=30, ge=1)
-    v3_repair_enabled: bool = True
+    # --- Unified pipeline provider config ---
+    provider: Literal["copilot", "codex"] = "copilot"
+    model: str = Field(default="gpt-5.3-codex")
+    longrun_timeout_minutes: int = Field(default=120, ge=1)
+    enable_post_pr_human_review: bool = True
+    require_pre_ship_human_on_high_risk: bool = True
+    enable_caffeinate: bool = True
+    inactivity_timeout_minutes: int = Field(default=30, ge=1)
+    repair_enabled: bool = True
 
     planner_model: str = Field(default="claude-opus-4.6")
     builder_model: str = Field(default="gpt-5.3-codex")
@@ -43,6 +43,43 @@ class ModelRoutingConfig(BaseModel):
     base_branch: str = "main"
     allowed_aux_files: list[str] = Field(default_factory=list)
 
+    # --- Backward-compat aliases (read-only) ---
+    @property
+    def pipeline_version(self) -> str:
+        return "v3"
+
+    @property
+    def v3_provider(self) -> str:
+        return self.provider
+
+    @property
+    def v3_model(self) -> str:
+        return self.model
+
+    @property
+    def v3_longrun_timeout_minutes(self) -> int:
+        return self.longrun_timeout_minutes
+
+    @property
+    def v3_enable_post_pr_human_review(self) -> bool:
+        return self.enable_post_pr_human_review
+
+    @property
+    def v3_require_pre_ship_human_on_high_risk(self) -> bool:
+        return self.require_pre_ship_human_on_high_risk
+
+    @property
+    def v3_enable_caffeinate(self) -> bool:
+        return self.enable_caffeinate
+
+    @property
+    def v3_inactivity_timeout_minutes(self) -> int:
+        return self.inactivity_timeout_minutes
+
+    @property
+    def v3_repair_enabled(self) -> bool:
+        return self.repair_enabled
+
     @classmethod
     def from_env(cls) -> "ModelRoutingConfig":
         _load_env_files()
@@ -50,20 +87,19 @@ class ModelRoutingConfig(BaseModel):
         raw_aux = os.getenv("ALLOWED_AUX_FILES", "")
         aux_files = [x.strip() for x in raw_aux.replace(";", ",").split(",") if x.strip()]
 
+        # Accept both new names (PROVIDER, MODEL) and legacy v3-prefixed names
         return cls(
-            pipeline_version=os.getenv("PIPELINE_VERSION", "v2"),
-            v3_provider=os.getenv("V3_PROVIDER", "copilot"),
-            v3_model=os.getenv("V3_MODEL", os.getenv("BUILD_MODEL", "gpt-5.3-codex")),
-            v3_longrun_timeout_minutes=int(os.getenv("V3_LONGRUN_TIMEOUT_MINUTES", "120")),
-            v3_enable_post_pr_human_review=os.getenv("V3_ENABLE_POST_PR_HUMAN_REVIEW", "1") == "1",
-            v3_require_pre_ship_human_on_high_risk=os.getenv("V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", "1") == "1",
-            v3_enable_caffeinate=os.getenv(
-                "V3_ENABLE_CAFFEINATE",
-                os.getenv("ENABLE_CAFFEINATE", "1"),
-            )
-            == "1",
-            v3_inactivity_timeout_minutes=int(os.getenv("V3_INACTIVITY_TIMEOUT_MINUTES", "30")),
-            v3_repair_enabled=os.getenv("V3_REPAIR_ENABLED", "1") == "1",
+            provider=os.getenv("PROVIDER", os.getenv("V3_PROVIDER", "copilot")),
+            model=os.getenv("MODEL", os.getenv("V3_MODEL", os.getenv("BUILD_MODEL", "gpt-5.3-codex"))),
+            longrun_timeout_minutes=int(os.getenv("LONGRUN_TIMEOUT_MINUTES", os.getenv("V3_LONGRUN_TIMEOUT_MINUTES", "120"))),
+            enable_post_pr_human_review=os.getenv("ENABLE_POST_PR_HUMAN_REVIEW", os.getenv("V3_ENABLE_POST_PR_HUMAN_REVIEW", "1")) == "1",
+            require_pre_ship_human_on_high_risk=os.getenv("REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", os.getenv("V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", "1")) == "1",
+            enable_caffeinate=os.getenv(
+                "ENABLE_CAFFEINATE",
+                os.getenv("V3_ENABLE_CAFFEINATE", "1"),
+            ) == "1",
+            inactivity_timeout_minutes=int(os.getenv("INACTIVITY_TIMEOUT_MINUTES", os.getenv("V3_INACTIVITY_TIMEOUT_MINUTES", "30"))),
+            repair_enabled=os.getenv("REPAIR_ENABLED", os.getenv("V3_REPAIR_ENABLED", "1")) == "1",
             planner_model=os.getenv("PLAN_MODEL", "claude-opus-4.6"),
             builder_model=os.getenv("BUILD_MODEL", "claude-sonnet-4.6"),
             reviewer_model=os.getenv("REVIEW_MODEL", "claude-sonnet-4.6"),

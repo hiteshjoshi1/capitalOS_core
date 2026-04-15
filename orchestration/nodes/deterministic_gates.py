@@ -116,7 +116,7 @@ def run(state: GraphState) -> GraphState:
         return dump_pipeline_state(pipeline)
 
     high_risk_findings = list(pipeline.agent_run_output.risk_flags)
-    if high_risk_findings and cfg.v3_require_pre_ship_human_on_high_risk:
+    if high_risk_findings and cfg.require_pre_ship_human_on_high_risk:
         decision = _human_review_gate(pipeline, findings=high_risk_findings)
         reviewer = str(decision.get("reviewer", "")).strip()
         status = str(decision.get("decision", "")).strip()
