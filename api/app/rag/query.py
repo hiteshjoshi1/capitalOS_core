@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import textwrap
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -142,6 +143,7 @@ def execute_retrieve(
     Retrieve top-k evidence chunks with full citation metadata.
     Performs author selection and filters retrieval to selected authors.
     """
+    _t0 = time.monotonic()
     selected = select_authors(
         query, db,
         author_id=author_id,
@@ -165,7 +167,7 @@ def execute_retrieve(
     author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
     evidence = _enrich_chunks(chunks, db, author_map)
 
-    return QueryResult(
+    result = QueryResult(
         query=query,
         mode="retrieve",
         selected_authors=author_entries,
@@ -174,6 +176,13 @@ def execute_retrieve(
         missing_information=None if chunks else "No corpus evidence found for this query.",
         evidence_sufficient=len(chunks) > 0,
     )
+    _log_query_async(
+        db, query, "retrieve",
+        evidence=evidence,
+        latency_ms=int((time.monotonic() - _t0) * 1000),
+        retrieval_config={"top_k": top_k},
+    )
+    return result
 
 
 def execute_ask(
@@ -191,6 +200,7 @@ def execute_ask(
     Selects relevant authors, retrieves evidence, and synthesizes a short
     grounded answer (LLM if available, otherwise returns evidence summary).
     """
+    _t0 = time.monotonic()
     selected = select_authors(
         query, db,
         author_id=author_id,
@@ -229,7 +239,7 @@ def execute_ask(
     else:
         answer = _evidence_summary(evidence)
 
-    return QueryResult(
+    result = QueryResult(
         query=query,
         mode="ask",
         selected_authors=author_entries,
@@ -238,6 +248,14 @@ def execute_ask(
         missing_information=missing,
         evidence_sufficient=len(chunks) > 0,
     )
+    _log_query_async(
+        db, query, "ask",
+        evidence=evidence,
+        answer_text=answer,
+        latency_ms=int((time.monotonic() - _t0) * 1000),
+        retrieval_config={"top_k": top_k},
+    )
+    return result
 
 
 def execute_company_context(
@@ -342,3 +360,39 @@ def _evidence_summary(evidence: list[EvidenceChunk]) -> str:
         snippet = e.text[:200].replace("\n", " ").strip()
         lines.append(f"{i}. [{e.author_name}] {snippet}...")
     return "Evidence summary:\n" + "\n".join(lines)
+
+
+def _log_query_async(
+    db: Session,
+    query_text: str,
+    mode: str,
+    *,
+    evidence: list[EvidenceChunk],
+    answer_text: Optional[str] = None,
+    latency_ms: int = 0,
+    retrieval_config: Optional[dict] = None,
+    intent: Optional[dict] = None,
+) -> None:
+    """Fire-and-forget audit log. Failures are swallowed."""
+    try:
+        from app.rag.query_logger import log_query
+
+        evidence_dicts = [
+            {
+                "chunk_id": e.chunk_id,
+                "cosine_distance": 1.0 - e.similarity,
+            }
+            for e in evidence
+        ]
+        log_query(
+            db,
+            query_text,
+            mode,
+            intent=intent,
+            evidence_chunks=evidence_dicts,
+            answer_text=answer_text,
+            latency_ms=latency_ms,
+            retrieval_config=retrieval_config,
+        )
+    except Exception as exc:
+        log.debug("audit log skipped: %s", exc)

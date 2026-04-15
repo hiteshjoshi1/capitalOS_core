@@ -366,7 +366,7 @@ orch-clean:
 	rm -rf .task-flow/
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
-.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test
+.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test rag-eval rag-eval-compare rag-eval-seed
 
 api-rebuild:
 	docker compose build api
@@ -408,3 +408,14 @@ crypto-smoke:
 		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
 		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
 	curl -sf -H "Authorization: Bearer $$TOKEN" "http://127.0.0.1:8000/crypto/summary?base_currency=USD" && echo
+
+# ── RAG evaluation harness ────────────────────────────────────────────────────
+
+rag-eval:
+	docker compose exec -T api python -m app.rag.eval.cli run
+
+rag-eval-compare:
+	docker compose exec -T api python -m app.rag.eval.cli compare --a $(CONFIG_A) --b $(CONFIG_B)
+
+rag-eval-seed:
+	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/../data/fixtures/rag_golden_queries.yaml
