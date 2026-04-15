@@ -20,6 +20,7 @@ import json
 import logging
 import re
 import textwrap
+import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -642,6 +643,7 @@ def execute_concept_query(
 
     Degrades gracefully when the corpus is thin or LLM is unavailable.
     """
+    _t0 = time.monotonic()
     # 0. Parse intent — lightweight, uses cheap routing model or text parser
     intent: QueryIntent = parse_intent(query)
     log.debug(
@@ -825,7 +827,7 @@ def execute_concept_query(
                 if len(suggested_readings) >= _SUGGESTED_READINGS_COUNT:
                     break
 
-    return ConceptQueryResult(
+    result = ConceptQueryResult(
         query=query,
         best_passages=best_passages,
         author_views=[av.as_dict() for av in author_views],
@@ -836,3 +838,23 @@ def execute_concept_query(
         weak_evidence_note=weak_evidence_note,
         intent=intent.as_dict(),
     )
+    try:
+        from app.rag.query_logger import log_query
+
+        evidence_dicts = [
+            {"chunk_id": e.get("chunk_id", ""), "cosine_distance": 1.0 - e.get("similarity", 0.0)}
+            for e in best_passages
+        ]
+        log_query(
+            db,
+            query,
+            "concept",
+            intent=intent.as_dict(),
+            evidence_chunks=evidence_dicts,
+            answer_text=synthesis,
+            latency_ms=int((time.monotonic() - _t0) * 1000),
+            retrieval_config={"top_k_chunks": top_k_chunks, "top_k_authors": top_k_authors},
+        )
+    except Exception as _exc:
+        log.debug("concept audit log skipped: %s", _exc)
+    return result

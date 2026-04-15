@@ -260,3 +260,51 @@ class RagIngestionJob(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     source = relationship("RagSource", back_populates="jobs")
+
+
+# ── Retrieval evaluation models ───────────────────────────────────────────────
+
+
+class RagQuery(Base):
+    __tablename__ = "rag_queries"
+
+    id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    query_text = Column(Text, nullable=False)
+    mode = Column(String(64))
+    intent_json = Column(_JsonBlob, nullable=False, default=dict)
+    retrieval_config = Column(_JsonBlob, nullable=False, default=dict)
+    answer_text = Column(Text)
+    latency_ms = Column(Integer)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    evidence = relationship("RagQueryEvidence", back_populates="query", cascade="all, delete-orphan")
+
+
+class RagQueryEvidence(Base):
+    __tablename__ = "rag_query_evidence"
+
+    id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    query_id = Column(_UUIDStr, ForeignKey("rag_queries.id", ondelete="CASCADE"), nullable=False)
+    chunk_id = Column(_UUIDStr, ForeignKey("rag_chunks.id", ondelete="CASCADE"), nullable=False)
+    rank = Column(Integer, nullable=False)
+    cosine_distance = Column(Float)
+    reranker_score = Column(Float)
+    rrf_score = Column(Float)
+    ts_rank = Column(Float)
+    is_golden = Column(Boolean, nullable=False, default=False)
+
+    query = relationship("RagQuery", back_populates="evidence")
+    chunk = relationship("RagChunk")
+
+
+class RagEvalGolden(Base):
+    __tablename__ = "rag_eval_golden"
+
+    id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    query_text = Column(Text, nullable=False)
+    chunk_id = Column(_UUIDStr, ForeignKey("rag_chunks.id", ondelete="CASCADE"), nullable=False)
+    relevance_grade = Column(Integer, nullable=False, default=1)
+    notes = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    chunk = relationship("RagChunk")
