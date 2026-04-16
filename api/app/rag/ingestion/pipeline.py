@@ -20,10 +20,10 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models.rag import RagChunk, RagDocument, RagEmbedding, RagIngestionJob, RagSource
-from app.rag.ingestion.chunker import Chunk, chunk_text
+from app.rag.ingestion.chunker import Chunk, DocumentSection as ChunkerSection, chunk_structured, chunk_text
 from app.rag.ingestion.embedder import embed_batch, embedding_model_name
 from app.rag.ingestion.fetcher import FetchResult, detect_source_type, fetch_url
-from app.rag.ingestion.parser import ParseResult, parse
+from app.rag.ingestion.parser import DocumentSection, ParseResult, StructuredParseResult, parse
 
 log = logging.getLogger(__name__)
 
@@ -53,9 +53,9 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _build_base_metadata(source: RagSource, doc_hash: str, title: Optional[str]) -> dict:
+def _build_base_metadata(source: RagSource, doc_hash: str, title: Optional[str], doc_metadata: Optional[dict] = None) -> dict:
     author = source.author
-    return {
+    base = {
         "author": author.name if author else "unknown",
         "author_id": source.author_id,
         "work_title": title or "",
@@ -67,6 +67,39 @@ def _build_base_metadata(source: RagSource, doc_hash: str, title: Optional[str])
         "cleanliness_score": 1.0,
         "doc_hash": doc_hash,
     }
+    if doc_metadata:
+        # Merge document-level metadata from PDF/HTML properties
+        if "title" in doc_metadata and not base["work_title"]:
+            base["work_title"] = doc_metadata["title"]
+        if "author" in doc_metadata and base["author"] == "unknown":
+            base["author"] = doc_metadata["author"]
+        for key in ("subject", "creation_date"):
+            if key in doc_metadata:
+                base[key] = doc_metadata[key]
+    return base
+
+
+def _parser_sections_to_chunker(parser_sections: list) -> list[ChunkerSection]:
+    """Convert parser DocumentSection objects to chunker DocumentSection format."""
+    result: list[ChunkerSection] = []
+    for s in parser_sections:
+        # Use table_markdown as content for tables (more readable than raw text)
+        content = (
+            s.table_markdown
+            if s.content_type == "table" and s.table_markdown
+            else s.content
+        )
+        if not content:
+            continue
+        result.append(
+            ChunkerSection(
+                heading=s.heading or "",
+                content=content,
+                is_table=(s.content_type == "table"),
+                is_list=(s.content_type == "list"),
+            )
+        )
+    return result
 
 
 def _persist_document_and_chunks(
@@ -79,6 +112,9 @@ def _persist_document_and_chunks(
     """Create RagDocument + RagChunk rows; return both."""
     doc_hash = _sha256(parse_result.clean_text)
 
+    # Extract doc_metadata when available (StructuredParseResult)
+    doc_metadata: Optional[dict] = getattr(parse_result, "doc_metadata", None)
+
     doc = RagDocument(
         source_id=source.id,
         title=title,
@@ -89,8 +125,18 @@ def _persist_document_and_chunks(
     db.add(doc)
     db.flush()  # populate doc.id
 
-    base_meta = _build_base_metadata(source, doc_hash, title)
-    raw_chunks: list[Chunk] = chunk_text(parse_result.clean_text, base_metadata=base_meta)
+    base_meta = _build_base_metadata(source, doc_hash, title, doc_metadata)
+
+    # Use section-aware chunking when structured sections are available
+    parser_sections = getattr(parse_result, "sections", None)
+    if parser_sections:
+        chunker_sections = _parser_sections_to_chunker(parser_sections)
+        if chunker_sections:
+            raw_chunks: list[Chunk] = chunk_structured(chunker_sections, base_metadata=base_meta)
+        else:
+            raw_chunks = chunk_text(parse_result.clean_text, base_metadata=base_meta)
+    else:
+        raw_chunks = chunk_text(parse_result.clean_text, base_metadata=base_meta)
 
     orm_chunks: list[RagChunk] = []
     for rc in raw_chunks:

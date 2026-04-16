@@ -200,3 +200,117 @@ LLAMAPARSE_API_KEY=              # Only if using LlamaParse
 - [ ] Add/update tests
 - [ ] Run deterministic safety gates
 - [ ] Verify semantic intent is achieved
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-139-advanced-document-parsing`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: PDF parsing preserves section headings as labeled metadata
+- Acceptance criterion: PDF tables are extracted as readable markdown content, not space-separated gibberish
+- Acceptance criterion: HTML parsing preserves heading hierarchy
+- Acceptance criterion: Document-level metadata (title, date) is extracted and stored in chunk metadata
+- Acceptance criterion: Existing parse() dispatcher falls back gracefully if Unstructured is not installed
+- Acceptance criterion: New parser is configurable via RAG_PARSER_BACKEND env var
+- Acceptance criterion: All existing ingestion tests continue to pass
+- Acceptance criterion: New tests cover: section extraction, table markdown output, metadata extraction, fallback behavior
+
+## Prepare
+Checked out `feature/issue-139-advanced-document-parsing` from `main` and ensured task file exists.
+
+## Plan Summary
+1) Add DocumentSection + StructuredParseResult dataclasses to parser.py. 2) Implement parse_html_structured() with BeautifulSoup heading/table extraction. 3) Implement parse_pdf_structured() using unstructured.io (fast strategy) with pdfminer fallback. 4) Add _extract_pdf_metadata() for PDF properties. 5) Update parse() dispatcher to always return StructuredParseResult. 6) Update pipeline to use chunk_structured() when sections present and propagate doc_metadata into chunk metadata. 7) Add unstructured[pdf] to requirements.txt. 8) Write 33 new tests in test_rag_parser.py.
+
+### Architecture Decisions
+- StructuredParseResult is a standalone dataclass (not extending ParseResult) with all ParseResult fields plus sections and doc_metadata — backward compat via duck typing
+- DocumentSection in parser.py carries heading, level, content, content_type, table_markdown; pipeline converts these to chunker.DocumentSection (simpler shape) via _parser_sections_to_chunker()
+- parse() always returns StructuredParseResult — all callers using .clean_text/.raw_text/.source_type continue to work unchanged
+- Unstructured import guarded with stub functions (_unstructured_partition_pdf, _unstructured_partition_html) so monkeypatching works in tests even when package is absent
+- HTML structured parsing implemented purely with BeautifulSoup (_walk_html_blocks) — no new heavy dependency needed for HTML
+- PDF metadata extraction (_extract_pdf_metadata) uses pdfminer PDFDocument.info when available, silently returns {} on any error
+- RAG_PARSER_BACKEND env var: default=unstructured (when installed), pdfminer forces flat fallback path
+- Pipeline _persist_document_and_chunks() checks for sections via getattr; falls back to chunk_text() when sections list is empty — guarantees backward compat for text/manual sources
+
+### Acceptance Criteria
+- PDF parsing preserves section headings as labeled metadata
+- PDF tables are extracted as readable markdown content, not space-separated gibberish
+- HTML parsing preserves heading hierarchy
+- Document-level metadata (title, date) is extracted and stored in chunk metadata
+- Existing parse() dispatcher falls back gracefully if Unstructured is not installed
+- New parser is configurable via RAG_PARSER_BACKEND env var
+- All existing ingestion tests continue to pass
+- New tests cover: section extraction, table markdown output, metadata extraction, fallback behavior
+
+### Planned Paths
+- `api/app/rag/ingestion/parser.py`
+- `api/app/rag/ingestion/pipeline.py`
+- `api/requirements.txt`
+- `api/tests/test_rag_parser.py`
+
+## Build Summary
+Implemented Issue 139: Advanced Document Parsing. Replaced the flat parser with a structure-preserving pipeline that extracts section headings, converts tables to markdown, and captures document-level metadata. parse() now returns StructuredParseResult for all source types. Pipeline uses section-aware chunking (chunk_structured) when sections are present. All 502 existing backend tests pass plus 33 new parser tests.
+
+### Changed Files
+- `api/app/rag/ingestion/parser.py`
+- `api/app/rag/ingestion/pipeline.py`
+- `api/requirements.txt`
+- `api/tests/test_rag_parser.py`
+- `tasks/issue-139-advanced-document-parsing.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented Issue 139: Advanced Document Parsing. Replaced the flat parser with a structure-preserving pipeline that extracts section headings, converts tables to markdown, and captures document-level metadata. parse() now returns StructuredParseResult for all source types. Pipeline uses section-aware chunking (chunk_structured) when sections are present. All 502 existing backend tests pass plus 33 new parser tests.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` PDF parsing preserves section headings as labeled metadata: parse_pdf_structured() groups unstructured Title elements into DocumentSection objects with heading field; section_heading propagated to chunk metadata_json via chunk_structured(). Tests: test_unstructured_sections_extracted verifies heading='Investment Philosophy' in sections list.
+- `pass` PDF tables are extracted as readable markdown content, not space-separated gibberish: _html_table_to_markdown() converts unstructured Table.metadata.text_as_html to markdown pipe-table format. test_unstructured_table_markdown verifies '| Year | Value |' table_markdown on sections. Pipeline uses table_markdown as chunk content when is_table=True.
+- `pass` HTML parsing preserves heading hierarchy: parse_html_structured() extracts h1-h6 tags with their numeric level. test_heading_hierarchy verifies Top=1, Sub A=2, Sub B=2 for nested heading structure.
+- `pass` Document-level metadata (title, date) is extracted and stored in chunk metadata: _extract_pdf_metadata() reads pdfminer PDFDocument.info for Title/Author/Subject/CreationDate. _build_base_metadata() merges doc_metadata into base, making title/author/subject available in every chunk's metadata_json. test_extract_with_mocked_pdfminer and test_doc_metadata_enriches_base_metadata verify this.
+- `pass` Existing parse() dispatcher falls back gracefully if Unstructured is not installed: parse_pdf_structured() checks _UNSTRUCTURED_AVAILABLE flag and falls back to parse_pdf() (pdfminer) on ImportError or any runtime exception. test_pdfminer_backend_forced and test_unstructured_fallback_on_error verify the graceful degradation path.
+- `pass` New parser is configurable via RAG_PARSER_BACKEND env var: parse_pdf_structured() reads os.environ.get('RAG_PARSER_BACKEND','unstructured'). RAG_PARSER_BACKEND=pdfminer forces flat path (sections=[]). test_pdfminer_backend_forced and test_pdfminer_backend_skips_unstructured verify both paths.
+- `pass` All existing ingestion tests continue to pass: make test-backend: 502 passed, 1 skipped. All pre-existing tests including test_rag.py, test_rag_chunker.py, test_ingest.py pass without modification.
+- `pass` New tests cover: section extraction, table markdown output, metadata extraction, fallback behavior: api/tests/test_rag_parser.py: 33 tests across 7 test classes. Covers dataclasses, HTML structured parsing (10 tests), PDF structured parsing (6 tests), PDF metadata (3 tests), backend config (2 tests), pipeline integration (5 tests), dispatcher (3 tests).
+
+### Risk Flags
+- unstructured[pdf] not yet installed in Docker image — structured PDF parsing runs in mock/fallback mode until next api-rebuild installs the package from updated requirements.txt
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-139-advanced-document-parsing`.
+<!-- MACHINE_RENDERED_END -->
