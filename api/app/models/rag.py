@@ -111,6 +111,31 @@ def _uuid_default():
     return str(uuid.uuid4())
 
 
+# ── Dialect-aware tsvector type ───────────────────────────────────────────────
+
+
+class _TsVector(TypeDecorator):
+    """TSVECTOR on Postgres, Text (ignored) on SQLite.
+
+    Only used for ORM schema reflection; actual FTS queries bypass the ORM.
+    """
+
+    impl = types.Text
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            from sqlalchemy.dialects.postgresql import TSVECTOR
+            return dialect.type_descriptor(TSVECTOR())
+        return dialect.type_descriptor(types.Text)
+
+    def process_bind_param(self, value, dialect):
+        return value
+
+    def process_result_value(self, value, dialect):
+        return value
+
+
 # ── pgvector Vector type (optional) ──────────────────────────────────────────
 
 try:
@@ -196,6 +221,7 @@ class RagChunk(Base):
     text = Column(Text, nullable=False)
     token_count = Column(Integer)
     metadata_json = Column(_JsonBlob, nullable=False, default=dict)
+    tsv = Column(_TsVector, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     document = relationship("RagDocument", back_populates="chunks")

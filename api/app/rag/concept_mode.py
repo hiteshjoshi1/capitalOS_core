@@ -40,6 +40,7 @@ from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
 from app.rag.retrieval import (
     RetrievedChunk,
     expand_chunks_with_context,
+    retrieve_hybrid,
     retrieve_similar_chunks,
 )
 
@@ -425,9 +426,17 @@ def _collect_candidate_chunks(
     author_ids: list[str] | None,
     broad_top_k: int,
 ) -> list[RetrievedChunk]:
-    """Retrieve a broad, deduplicated candidate pool before reranking."""
+    """Retrieve a broad, deduplicated candidate pool before reranking.
+
+    Uses hybrid retrieval (dense + sparse via RRF) when RAG_RETRIEVAL_MODE
+    is 'hybrid' (the default). Falls back to intent-relaxing dense-only
+    retrieval when mode is 'dense_only' or for sub-query fan-out.
+    """
+    import os
+
     source_type_filter = intent.source_types[0] if intent.source_types else None
     candidates: list[RetrievedChunk] = []
+    retrieval_mode = os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
 
     if intent.sub_queries:
         per_sub_k = max(
@@ -435,17 +444,40 @@ def _collect_candidate_chunks(
             _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY,
         )
         for sub_query in intent.sub_queries:
-            candidates.extend(
-                _retrieve_with_intent_fallback(
-                    sub_query,
-                    db,
-                    top_k=per_sub_k,
-                    source_type=source_type_filter,
-                    year_from=intent.date_from,
-                    year_to=intent.date_to,
-                    author_ids=author_ids if author_ids else None,
+            if retrieval_mode == "hybrid":
+                candidates.extend(
+                    retrieve_hybrid(
+                        sub_query,
+                        db,
+                        top_k=per_sub_k,
+                        author_ids=author_ids if author_ids else None,
+                        source_type=source_type_filter,
+                        year_from=intent.date_from,
+                        year_to=intent.date_to,
+                    )
                 )
-            )
+            else:
+                candidates.extend(
+                    _retrieve_with_intent_fallback(
+                        sub_query,
+                        db,
+                        top_k=per_sub_k,
+                        source_type=source_type_filter,
+                        year_from=intent.date_from,
+                        year_to=intent.date_to,
+                        author_ids=author_ids if author_ids else None,
+                    )
+                )
+    elif retrieval_mode == "hybrid":
+        candidates = retrieve_hybrid(
+            query,
+            db,
+            top_k=broad_top_k,
+            author_ids=author_ids if author_ids else None,
+            source_type=source_type_filter,
+            year_from=intent.date_from,
+            year_to=intent.date_to,
+        )
     else:
         candidates = _retrieve_with_intent_fallback(
             query,
@@ -458,7 +490,11 @@ def _collect_candidate_chunks(
         )
 
     deduped = _dedupe_chunks_by_id(candidates)
-    deduped.sort(key=lambda c: c.cosine_distance)
+    if retrieval_mode == "hybrid":
+        # Sort by RRF score (descending) when available, else cosine_distance
+        deduped.sort(key=lambda c: -(c.rrf_score or 0.0) if c.rrf_score is not None else c.cosine_distance)
+    else:
+        deduped.sort(key=lambda c: c.cosine_distance)
     return deduped[:broad_top_k]
 
 
