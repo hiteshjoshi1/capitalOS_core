@@ -450,5 +450,112 @@ Validation requirements:
 
 
 <!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
 
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-142-hybrid-dense-sparse-retrieval`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: rag_chunks table has tsv tsvector column with GIN index — migration 041 handles this
+- Acceptance criterion: New chunks automatically get tsv populated via trigger — trigger created in migration
+- Acceptance criterion: Existing chunks are backfilled with tsvector data — UPDATE in migration
+- Acceptance criterion: retrieve_keyword_chunks() returns relevant chunks for keyword-heavy queries — implemented with plainto_tsquery
+- Acceptance criterion: retrieve_hybrid() combines dense and sparse results via RRF — implemented in retrieval.py
+- Acceptance criterion: Hybrid retrieval is the default mode — RAG_RETRIEVAL_MODE defaults to 'hybrid'
+- Acceptance criterion: dense-only available via RAG_RETRIEVAL_MODE=dense_only
+- Acceptance criterion: All existing retrieval tests pass — 523 passed, 1 skipped
+- Acceptance criterion: SQLite test compatibility maintained — keyword returns [] on non-Postgres
+- Acceptance criterion: New tests cover keyword retrieval, RRF combination, hybrid mode, filter compatibility — test_rag_retrieval.py
+
+## Prepare
+Checked out `feature/issue-142-hybrid-dense-sparse-retrieval` from `main` and ensured task file exists.
+
+## Plan Summary
+1. Identified that `_collect_candidate_chunks()` was bypassing `_retrieve_with_intent_fallback()` in hybrid mode, causing 9 test failures. 2. Updated `_retrieve_with_intent_fallback()` to embed hybrid logic: after a successful dense retrieval, also call `retrieve_keyword_chunks()` and combine via `reciprocal_rank_fusion()` when mode is hybrid. 3. Simplified `_collect_candidate_chunks()` to always route through `_retrieve_with_intent_fallback()`. 4. Updated imports in concept_mode.py. 5. Rebuilt API container and verified all 523 tests pass.
+
+### Architecture Decisions
+- Hybrid retrieval logic is embedded inside `_retrieve_with_intent_fallback()` rather than bypassing it — this preserves the constraint-relaxation contract that existing tests depend on
+- Each successful dense retrieval attempt in `_retrieve_with_intent_fallback()` is optionally augmented with sparse keyword retrieval (when mode=hybrid), then combined via RRF before returning
+- On non-Postgres backends (SQLite in tests), `retrieve_keyword_chunks()` returns [] so hybrid mode gracefully falls back to dense-only — all test assertions remain valid
+- `retrieve_hybrid()` remains available as a public function in retrieval.py for direct use by external callers, but is no longer imported or called from concept_mode.py
+- RAG_RETRIEVAL_MODE env var still controls mode: hybrid (default), dense_only, sparse_only — backward compatible
+
+### Acceptance Criteria
+- rag_chunks table has tsv tsvector column with GIN index — migration 041 handles this
+- New chunks automatically get tsv populated via trigger — trigger created in migration
+- Existing chunks are backfilled with tsvector data — UPDATE in migration
+- retrieve_keyword_chunks() returns relevant chunks for keyword-heavy queries — implemented with plainto_tsquery
+- retrieve_hybrid() combines dense and sparse results via RRF — implemented in retrieval.py
+- Hybrid retrieval is the default mode — RAG_RETRIEVAL_MODE defaults to 'hybrid'
+- dense-only available via RAG_RETRIEVAL_MODE=dense_only
+- All existing retrieval tests pass — 523 passed, 1 skipped
+- SQLite test compatibility maintained — keyword returns [] on non-Postgres
+- New tests cover keyword retrieval, RRF combination, hybrid mode, filter compatibility — test_rag_retrieval.py
+
+### Planned Paths
+- `migrations/041_hybrid_retrieval.sql`
+- `api/app/models/rag.py`
+- `api/app/rag/retrieval.py`
+- `api/app/rag/concept_mode.py`
+- `api/tests/test_rag_retrieval.py`
+
+## Build Summary
+Fixed the regression introduced in the previous implementation run. The root cause was that `_collect_candidate_chunks()` in concept_mode.py was calling `retrieve_hybrid()` directly, bypassing `_retrieve_with_intent_fallback()`. This caused all tests that patch `app.rag.concept_mode.retrieve_similar_chunks` to fail (call_count == 0). The fix moves hybrid retrieval logic inside `_retrieve_with_intent_fallback()`: after a successful dense retrieval attempt, if RAG_RETRIEVAL_MODE=hybrid, it also runs `retrieve_keyword_chunks()` and combines results via `reciprocal_rank_fusion()`. `_collect_candidate_chunks()` is restored to always route through `_retrieve_with_intent_fallback()`, preserving source/date/sub-query fallback semantics while adding hybrid recall.
+
+### Changed Files
+- `api/app/rag/concept_mode.py`
+- `tasks/issue-142-hybrid-dense-sparse-retrieval.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Fixed the regression introduced in the previous implementation run. The root cause was that `_collect_candidate_chunks()` in concept_mode.py was calling `retrieve_hybrid()` directly, bypassing `_retrieve_with_intent_fallback()`. This caused all tests that patch `app.rag.concept_mode.retrieve_similar_chunks` to fail (call_count == 0). The fix moves hybrid retrieval logic inside `_retrieve_with_intent_fallback()`: after a successful dense retrieval attempt, if RAG_RETRIEVAL_MODE=hybrid, it also runs `retrieve_keyword_chunks()` and combines results via `reciprocal_rank_fusion()`. `_collect_candidate_chunks()` is restored to always route through `_retrieve_with_intent_fallback()`, preserving source/date/sub-query fallback semantics while adding hybrid recall.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` rag_chunks table has tsv tsvector column with GIN index: migrations/041_hybrid_retrieval.sql: ALTER TABLE rag_chunks ADD COLUMN IF NOT EXISTS tsv tsvector; CREATE INDEX IF NOT EXISTS idx_rag_chunks_tsv ON rag_chunks USING GIN (tsv)
+- `pass` New chunks automatically get tsv populated via trigger: migrations/041_hybrid_retrieval.sql: BEFORE INSERT OR UPDATE OF text trigger calls to_tsvector('english', COALESCE(NEW.text, ''))
+- `pass` Existing chunks are backfilled with tsvector data: migrations/041_hybrid_retrieval.sql: UPDATE rag_chunks SET tsv = to_tsvector('english', COALESCE(text, '')) WHERE tsv IS NULL
+- `pass` retrieve_keyword_chunks() returns relevant chunks for keyword-heavy queries: Implemented in retrieval.py using plainto_tsquery; TestRetrieveKeywordChunks passes
+- `pass` retrieve_hybrid() combines dense and sparse results via RRF: Implemented in retrieval.py; TestRetrieveHybrid::test_hybrid_combines_via_rrf verifies 'shared' chunk ranks first
+- `pass` Hybrid retrieval is the default mode; dense-only available via config: _RETRIEVAL_MODE = os.getenv('RAG_RETRIEVAL_MODE', 'hybrid'); dense_only mode tested
+- `pass` All existing retrieval tests pass: 523 passed, 1 skipped — includes all previously failing test_ai_sage_retrieval_pipeline.py (5) and test_intent_router.py (4) tests
+- `pass` SQLite test compatibility maintained: retrieve_keyword_chunks returns [] on non-Postgres; hybrid falls back to dense; all 523 tests pass on SQLite
+- `pass` New tests cover: keyword retrieval, RRF combination, hybrid mode, filter compatibility: test_rag_retrieval.py: TestReciprocalRankFusion (7), TestRetrieveKeywordChunks (2), TestRetrieveHybrid (5), TestHybridFilterCompat (2), TestRetrievedChunkShape (5) — all pass
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-142-hybrid-dense-sparse-retrieval`.
 <!-- MACHINE_RENDERED_END -->
