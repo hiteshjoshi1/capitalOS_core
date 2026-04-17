@@ -40,6 +40,8 @@ from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
 from app.rag.retrieval import (
     RetrievedChunk,
     expand_chunks_with_context,
+    reciprocal_rank_fusion,
+    retrieve_keyword_chunks,
     retrieve_similar_chunks,
 )
 
@@ -335,7 +337,14 @@ def _retrieve_with_intent_fallback(
 
     Retrieval tries the most constrained query first, then progressively relaxes
     source/date filters if the corpus does not support them.
+
+    When RAG_RETRIEVAL_MODE=hybrid (the default), each successful dense retrieval
+    attempt is augmented with sparse keyword retrieval and combined via RRF.
+    This preserves the intent-fallback contract while adding hybrid recall.
     """
+    import os as _os
+
+    retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
 
     attempts: list[dict[str, Any]] = []
     seen: set[tuple[Optional[str], Optional[str], Optional[str]]] = set()
@@ -401,6 +410,18 @@ def _retrieve_with_intent_fallback(
                     attempt["year_from"],
                     attempt["year_to"],
                 )
+            if retrieval_mode == "hybrid":
+                sparse = retrieve_keyword_chunks(
+                    query,
+                    db,
+                    top_k=top_k,
+                    author_ids=author_ids if author_ids else None,
+                    source_type=attempt["source_type"],
+                    year_from=attempt["year_from"],
+                    year_to=attempt["year_to"],
+                )
+                if sparse:
+                    chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
             return chunks
 
     return []
@@ -425,9 +446,18 @@ def _collect_candidate_chunks(
     author_ids: list[str] | None,
     broad_top_k: int,
 ) -> list[RetrievedChunk]:
-    """Retrieve a broad, deduplicated candidate pool before reranking."""
+    """Retrieve a broad, deduplicated candidate pool before reranking.
+
+    Always routes through _retrieve_with_intent_fallback() to preserve
+    source/date constraint-relaxation semantics. When RAG_RETRIEVAL_MODE=hybrid
+    (the default), each fallback attempt also fetches sparse keyword results and
+    combines them via Reciprocal Rank Fusion internally.
+    """
+    import os as _os
+
     source_type_filter = intent.source_types[0] if intent.source_types else None
     candidates: list[RetrievedChunk] = []
+    retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
 
     if intent.sub_queries:
         per_sub_k = max(
@@ -458,7 +488,11 @@ def _collect_candidate_chunks(
         )
 
     deduped = _dedupe_chunks_by_id(candidates)
-    deduped.sort(key=lambda c: c.cosine_distance)
+    if retrieval_mode == "hybrid":
+        # Sort by RRF score (descending) when available, else by cosine_distance
+        deduped.sort(key=lambda c: -(c.rrf_score or 0.0) if c.rrf_score is not None else c.cosine_distance)
+    else:
+        deduped.sort(key=lambda c: c.cosine_distance)
     return deduped[:broad_top_k]
 
 
