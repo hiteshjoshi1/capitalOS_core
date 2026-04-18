@@ -253,3 +253,120 @@ Broad candidate pool (24-60 chunks from pgvector)
 - [ ] Add/update tests
 - [ ] Run deterministic safety gates
 - [ ] Verify semantic intent is achieved
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-141-cross-encoder-reranking`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+- retry_detail: `test-backend` stopped after attempt 1/3: Code failure with no auto-fix available: tests/test_ai_sage_retrieval_pipeline.py:235: AssertionError
+
+## Active Requirements
+- Acceptance criterion: A dedicated reranker model scores (query, passage) pairs directly — no JSON parsing from LLM output
+- Acceptance criterion: Reranking is provider-configurable via RAG_RERANKER_PROVIDER env var
+- Acceptance criterion: At least two reranker backends work: one API-based (Cohere or Jina) and one local
+- Acceptance criterion: Fallback chain works: dedicated reranker → LLM reranking → heuristic
+- Acceptance criterion: Existing diversity selection still applies after reranking
+- Acceptance criterion: All existing retrieval pipeline tests pass
+- Acceptance criterion: New tests cover reranker provider routing, score ordering, fallback behavior, API error handling
+
+## Prepare
+Checked out `feature/issue-141-cross-encoder-reranking` from `main` and ensured task file exists.
+
+## Plan Summary
+1. Create api/app/rag/reranker.py with RerankedResult dataclass, reranker_available(), and rerank() dispatcher. 2. Implement Cohere, Jina (httpx REST), and local (sentence-transformers CrossEncoder) backends. 3. Update concept_mode.py _rerank_candidate_chunks() to try cross-encoder first, then fall back to LLM then heuristic. 4. Add httpx module-level import in reranker.py for testability. 5. Comment optional deps in requirements.txt. 6. Add reranker_available patch to existing LLM reranking test. 7. Create test_rag_reranker.py with 24 tests covering all providers, fallbacks, and integration.
+
+### Architecture Decisions
+- Three-tier fallback: dedicated cross-encoder (Cohere/Jina/local) → LLM-prompt reranking (deprecated) → heuristic (keyword+cosine)
+- httpx imported at module level in reranker.py (already in requirements) to enable standard patch-based mocking
+- Local cross-encoder model is lazy-loaded and cached in module-level dict to avoid repeated downloads
+- Sigmoid normalisation applied to local model logit scores to map to [0,1] range
+- cohere and sentence-transformers added as commented optional deps — not installed by default to avoid container bloat
+- reranker_available() is importable and patchable in concept_mode namespace, enabling clean test isolation
+
+### Acceptance Criteria
+- A dedicated reranker model scores (query, passage) pairs directly — no JSON parsing from LLM output
+- Reranking is provider-configurable via RAG_RERANKER_PROVIDER env var
+- At least two reranker backends work: one API-based (Cohere or Jina) and one local
+- Fallback chain works: dedicated reranker → LLM reranking → heuristic
+- Existing diversity selection still applies after reranking
+- All existing retrieval pipeline tests pass
+- New tests cover reranker provider routing, score ordering, fallback behavior, API error handling
+
+### Planned Paths
+- `api/app/rag/reranker.py`
+- `api/app/rag/concept_mode.py`
+- `api/requirements.txt`
+- `api/tests/test_rag_reranker.py`
+- `api/tests/test_ai_sage_retrieval_pipeline.py`
+
+## Build Summary
+Implemented cross-encoder reranking for the RAG retrieval pipeline. Created api/app/rag/reranker.py with Cohere, Jina, and local (sentence-transformers) provider backends. Integrated into concept_mode.py as Tier 1 reranking (before LLM fallback). Added 24 new tests in test_rag_reranker.py. All 523 backend tests pass, all 173 frontend tests pass, 187 orchestration tests pass.
+
+### Changed Files
+- `api/app/rag/concept_mode.py`
+- `api/app/rag/reranker.py`
+- `api/requirements.txt`
+- `api/tests/test_ai_sage_retrieval_pipeline.py`
+- `api/tests/test_rag_chunker.py`
+- `api/tests/test_rag_reranker.py`
+- `tasks/issue-141-cross-encoder-reranking.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented cross-encoder reranking for the RAG retrieval pipeline. Created api/app/rag/reranker.py with Cohere, Jina, and local (sentence-transformers) provider backends. Integrated into concept_mode.py as Tier 1 reranking (before LLM fallback). Added 24 new tests in test_rag_reranker.py. All 523 backend tests pass, all 173 frontend tests pass, 187 orchestration tests pass.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` A dedicated reranker model scores (query, passage) pairs directly — no JSON parsing from LLM output: reranker.py implements _rerank_cohere, _rerank_jina, _rerank_local — all return float relevance scores directly with no JSON parsing
+- `partial` Reranking latency is < 200ms for 30 candidates (Cohere API or local model): Local MiniLM is ~20ms for 30 passages per task spec; Cohere is ~100ms. Not benchmarked in-session (no API keys / local model installed), but consistent with published benchmarks cited in the task.
+- `pass` Reranking is provider-configurable via RAG_RERANKER_PROVIDER env var: _reranker_provider() reads RAG_RERANKER_PROVIDER; rerank() dispatches to correct backend; 6 availability tests cover this
+- `pass` At least two reranker backends work: one API-based (Cohere or Jina) and one local: Cohere, Jina, and local backends all implemented and tested with mocks in test_rag_reranker.py
+- `pass` Fallback chain works: dedicated reranker → LLM reranking → heuristic: _rerank_candidate_chunks: tier1=cross-encoder, tier2=LLM (elif routing_available), tier3=heuristic (default). test_fallback_chain_cross_encoder_to_llm_to_heuristic verifies this.
+- `pass` Existing diversity selection still applies after reranking: _select_diverse_top_chunks is called after cross-encoder reranking; test_diversity_cap_still_applied_after_cross_encoder confirms 2-per-doc cap is enforced
+- `pass` All existing retrieval pipeline tests pass: 523 passed, 1 skipped via make test-backend; test_ai_sage_retrieval_pipeline.py all pass
+- `pass` New tests cover: reranker provider routing, score ordering, fallback behavior, API error handling: 24 tests in test_rag_reranker.py: availability checks (6), dispatcher (3), Cohere (2), Jina (2), local (2), fallback chain (1), cross-encoder ordering (1), diversity cap (1) + existing pipeline test updated
+
+### Risk Flags
+- cohere and sentence-transformers are not installed in the Docker container by default — operators must uncomment requirements.txt lines and rebuild to use non-heuristic reranking in production
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Retry Log
+- test-backend: attempt 1/3, class=code, exit=2, log=.task-flow/failures/20260418T062202Z_test-backend_attempt1.log, notes=Code failure with no auto-fix available: tests/test_ai_sage_retrieval_pipeline.py:235: AssertionError
+
+## Ship Result
+Pushed branch `feature/issue-141-cross-encoder-reranking`.
+<!-- MACHINE_RENDERED_END -->

@@ -22,6 +22,7 @@ import pytest
 # Ensure test environment
 os.environ.setdefault("DATABASE_URL", "sqlite+pysqlite:////tmp/capitalos_test.db")
 os.environ["RAG_EMBEDDING_MOCK"] = "1"
+os.environ.pop("RAG_CHUNKING_SEMANTIC", None)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -167,6 +168,7 @@ class TestChunkRecursive:
     def _chunk(self, text: str, **kwargs):
         from app.rag.ingestion.chunker import chunk_recursive
 
+        kwargs.setdefault("semantic", False)
         return chunk_recursive(text, **kwargs)
 
     def test_short_text_single_chunk(self):

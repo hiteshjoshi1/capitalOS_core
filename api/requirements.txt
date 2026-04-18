@@ -34,3 +34,6 @@ tiktoken>=0.7.0
 # RAG Phase 2 — structured document parsing (Issue 139)
 # Use strategy="fast" to avoid heavy model downloads; OCR needs strategy="hi_res"
 unstructured[pdf]>=0.11.0
+# RAG Issue 141 — cross-encoder reranking (optional; install as needed)
+# cohere>=5.0.0           # Cohere Rerank API provider
+# sentence-transformers>=3.0  # Local cross-encoder provider (downloads ~100MB model)
