@@ -35,7 +35,7 @@ from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource
 from app.rag.config import load_author_config, sync_authors_from_config
 from app.rag.discovery import discover_sources_for_author
 from app.rag.ingestion.pipeline import bulk_ingest_author, run_manual_ingestion, run_url_ingestion
-from app.rag.retrieval import retrieve_similar_chunks
+from app.rag.retrieval import retrieve_similar_chunks, retrieve_with_constraints
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/rag", tags=["rag"], dependencies=[Depends(require_current_user)])
@@ -661,8 +661,16 @@ class RetrieveIn(BaseModel):
     query: str
     top_k: int = 5
     author_id: Optional[str] = None
+    author_ids: Optional[list[str]] = None
+    source_type: Optional[str] = None
+    year_from: Optional[int] = None
+    year_to: Optional[int] = None
+    published_from: Optional[str] = None   # YYYY-MM-DD
+    published_to: Optional[str] = None     # YYYY-MM-DD
+    strict_constraints: bool = True
     domains: Optional[list[str]] = None
     expertise_tags: Optional[list[str]] = None
+    debug: bool = False
 
 
 class RetrieveOut(BaseModel):
@@ -673,6 +681,12 @@ class RetrieveOut(BaseModel):
     answer: Optional[str]
     missing_information: Optional[str]
     evidence_sufficient: bool
+    # Constraint transparency fields (new in issue-145)
+    constraints_requested: Optional[dict] = None
+    constraints_applied: Optional[dict] = None
+    constraints_relaxed: Optional[bool] = None
+    constraint_relaxation_reason: Optional[str] = None
+    diagnostics: Optional[dict] = None
 
 
 @router.post("/retrieve", response_model=RetrieveOut)
@@ -682,10 +696,63 @@ def retrieve(body: RetrieveIn, db: Session = Depends(get_db)):
 
     Performs dynamic author selection based on query relevance, then returns
     the top-k matching corpus chunks enriched with citation metadata.
+
+    Constraint fields (author_ids, source_type, year_from, year_to,
+    published_from, published_to) are strict by default: if the corpus
+    returns zero results under the requested constraints the response
+    returns an empty evidence list rather than silently broadening.
+
+    Set strict_constraints=false to allow staged fallback.  Any relaxation
+    is reported explicitly in constraints_relaxed / constraint_relaxation_reason.
+
+    Set debug=true to include candidate count diagnostics.
     """
+    # Check whether any explicit constraints were requested
+    has_constraints = any([
+        body.author_ids,
+        body.source_type,
+        body.year_from is not None,
+        body.year_to is not None,
+        body.published_from,
+        body.published_to,
+    ])
+
+    if has_constraints:
+        result = retrieve_with_constraints(
+            body.query,
+            db,
+            top_k=body.top_k,
+            author_id=body.author_id,
+            author_ids=body.author_ids,
+            source_type=body.source_type,
+            year_from=body.year_from,
+            year_to=body.year_to,
+            published_from=body.published_from,
+            published_to=body.published_to,
+            domains=body.domains,
+            expertise_tags=body.expertise_tags,
+            strict_constraints=body.strict_constraints,
+            debug=body.debug,
+        )
+        return {
+            "query": body.query,
+            "mode": "constrained_retrieve",
+            "selected_authors": [],
+            "evidence_chunks": [c.as_dict() for c in result.chunks],
+            "answer": None,
+            "missing_information": None if result.chunks else "No corpus evidence found matching the requested constraints.",
+            "evidence_sufficient": len(result.chunks) > 0,
+            "constraints_requested": result.constraints_requested,
+            "constraints_applied": result.constraints_applied,
+            "constraints_relaxed": result.constraints_relaxed,
+            "constraint_relaxation_reason": result.constraint_relaxation_reason,
+            "diagnostics": result.diagnostics,
+        }
+
+    # No constraints: use existing author-selection-based path
     from app.rag.query import execute_retrieve
 
-    result = execute_retrieve(
+    result_q = execute_retrieve(
         body.query,
         db,
         top_k=body.top_k,
@@ -693,7 +760,15 @@ def retrieve(body: RetrieveIn, db: Session = Depends(get_db)):
         domains=body.domains,
         expertise_tags=body.expertise_tags,
     )
-    return result.as_dict()
+    out = result_q.as_dict()
+    out.update({
+        "constraints_requested": None,
+        "constraints_applied": None,
+        "constraints_relaxed": None,
+        "constraint_relaxation_reason": None,
+        "diagnostics": None,
+    })
+    return out
 
 
 # ── Phase 2: Grounded query ────────────────────────────────────────────────────

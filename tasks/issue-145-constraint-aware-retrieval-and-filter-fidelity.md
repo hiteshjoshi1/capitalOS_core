@@ -295,20 +295,99 @@ This issue is specifically about **constraint fidelity and retrieval contract ho
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-**Current Stage**: `prepare`
-**Workflow Status**: `running`
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `waiting_for_human`
 
 ## Workflow Snapshot
-- latest_outcome: No workflow outcome recorded yet.
-- next_action: Workflow execution is in progress.
+- latest_outcome: Implemented Issue 145: Constraint-Aware Retrieval and Filter Fidelity. Extended POST /rag/retrieve with explicit author/date/source constraint fields, added ConstrainedRetrievalResult dataclass with transparency metadata, added retrieve_with_constraints() for strict/fallback retrieval separation, strengthened date filtering to prefer published_at over metadata_json year string, updated concept mode to surface constraint relaxation, and added ConceptQueryResult constraint tracking fields.
+- next_action: All deterministic gates passed. Review the changes in the working tree, then run `make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR.
 - pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
 - retry_gate_pending: `no`
 
 ## Active Requirements
-- No active requirements recorded yet.
+- Acceptance criterion: POST /rag/retrieve accepts direct author/date/source constraints without requiring AI Sage concept mode
+- Acceptance criterion: Explicit date/source constraints are strict by default (strict_constraints=True)
+- Acceptance criterion: If a retrieval path relaxes constraints, the response explicitly says so and explains why
+- Acceptance criterion: Retrieval uses reliable date metadata derived from document published_at where available (Postgres path)
+- Acceptance criterion: Missing date metadata is handled honestly via OR fallback rather than silently treating as matching
+- Acceptance criterion: Dense-only, sparse-only, and hybrid retrieval paths all honor the same constraint semantics via _apply_date_filters()
+- Acceptance criterion: Existing retrieval APIs remain backward-compatible for callers that do not pass the new fields
+- Acceptance criterion: Tests cover: exact date filtering, exact source filtering, strict zero-result behavior, explicit fallback behavior, missing-date edge cases, and constraint transparency fields
 
 ## Prepare
 Checked out `feature/issue-145-constraint-aware-retrieval-and-filter-fidelity` from `main` and ensured task file exists.
+
+## Plan Summary
+Step 1: Extend retrieval contracts (RetrieveIn, RetrieveOut, ConstrainedRetrievalResult). Step 2: Add retrieve_with_constraints() with strict/fallback modes. Step 3: Add _apply_date_filters() using published_at on Postgres. Step 4: Update concept mode _retrieve_with_intent_fallback to return (chunks, relaxed, reason) tuple. Step 5: Surface relaxation in ConceptQueryResult and ConceptQueryOut. Step 6: Write tests. Step 7: Fix existing test assertions (year type str->int).
+
+### Architecture Decisions
+- strict_constraints=True is the default for /rag/retrieve (explicit API callers get strict behavior); concept mode still uses fallback internally but now surfaces relaxation metadata
+- _apply_date_filters() uses EXTRACT(YEAR FROM rd.published_at) as the preferred date source on Postgres with OR fallback to metadata_json year string; SQLite uses metadata_json only
+- retrieve_with_constraints() is a separate function that wraps retrieve_hybrid() with staged fallback policy—concept mode fallback logic is preserved but made transparent
+- year_from/year_to are int throughout the retrieval layer; concept_mode converts intent string dates to int before calling retrieval
+- ConstrainedRetrievalResult.as_dict() omits diagnostics key entirely when debug=False to keep payload compact
+- Backward compatibility: /rag/retrieve falls back to old execute_retrieve() path when no constraint fields are set, preserving existing caller behavior
+
+### Acceptance Criteria
+- POST /rag/retrieve accepts direct author/date/source constraints without requiring AI Sage concept mode
+- Explicit date/source constraints are strict by default (strict_constraints=True)
+- If a retrieval path relaxes constraints, the response explicitly says so and explains why
+- Retrieval uses reliable date metadata derived from document published_at where available (Postgres path)
+- Missing date metadata is handled honestly via OR fallback rather than silently treating as matching
+- Dense-only, sparse-only, and hybrid retrieval paths all honor the same constraint semantics via _apply_date_filters()
+- Existing retrieval APIs remain backward-compatible for callers that do not pass the new fields
+- Tests cover: exact date filtering, exact source filtering, strict zero-result behavior, explicit fallback behavior, missing-date edge cases, and constraint transparency fields
+
+### Planned Paths
+- `api/app/rag/retrieval.py`
+- `api/app/rag/concept_mode.py`
+- `api/app/routers/rag.py`
+- `api/app/routers/ai_sage.py`
+- `api/tests/test_rag_constraint_retrieval.py`
+
+## Build Summary
+Implemented Issue 145: Constraint-Aware Retrieval and Filter Fidelity. Extended POST /rag/retrieve with explicit author/date/source constraint fields, added ConstrainedRetrievalResult dataclass with transparency metadata, added retrieve_with_constraints() for strict/fallback retrieval separation, strengthened date filtering to prefer published_at over metadata_json year string, updated concept mode to surface constraint relaxation, and added ConceptQueryResult constraint tracking fields.
+
+### Changed Files
+- `api/app/rag/concept_mode.py`
+- `api/app/rag/retrieval.py`
+- `api/app/routers/ai_sage.py`
+- `api/app/routers/rag.py`
+- `api/tests/test_intent_router.py`
+- `api/tests/test_rag_constraint_retrieval.py`
+- `tasks/issue-145-constraint-aware-retrieval-and-filter-fidelity.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented Issue 145: Constraint-Aware Retrieval and Filter Fidelity. Extended POST /rag/retrieve with explicit author/date/source constraint fields, added ConstrainedRetrievalResult dataclass with transparency metadata, added retrieve_with_constraints() for strict/fallback retrieval separation, strengthened date filtering to prefer published_at over metadata_json year string, updated concept mode to surface constraint relaxation, and added ConceptQueryResult constraint tracking fields.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` POST /rag/retrieve accepts direct author/date/source constraints without requiring AI Sage concept mode: RetrieveIn now includes author_ids, source_type, year_from, year_to, published_from, published_to, strict_constraints, debug; endpoint uses retrieve_with_constraints() when any constraint is set
+- `pass` Explicit date/source constraints are strict by default: strict_constraints: bool = True is the default on RetrieveIn; retrieve_with_constraints() strict mode makes only one retrieval call with no fallback
+- `pass` If a retrieval path relaxes constraints, the response explicitly says so and explains why: RetrieveOut includes constraints_relaxed and constraint_relaxation_reason; retrieve_with_constraints() populates these with staged relaxation reason strings; ConceptQueryResult/Out also include these fields
+- `pass` Retrieval uses reliable date metadata derived from document published_at where available: _apply_date_filters() on Postgres uses EXTRACT(YEAR FROM rd.published_at) as primary source with OR fallback to metadata_json year string; preferred over metadata-only approach
+- `pass` Missing date metadata is surfaced honestly in diagnostics instead of silently treated as matching: Postgres OR clause only matches documents where published_at IS NOT NULL (strong path) OR published_at IS NULL and metadata year matches (fallback); documents with neither are excluded from strict date filters; diagnostics exposed via debug=True
+- `pass` Dense-only, sparse-only, and hybrid retrieval paths all honor the same constraint semantics: _apply_date_filters() is called from retrieve_similar_chunks(), retrieve_keyword_chunks(), and retrieve_hybrid() all accept year_from/year_to/published_from/published_to/source_type
+- `pass` Existing retrieval APIs remain backward-compatible for callers that do not pass the new fields: All new fields are Optional with None defaults; /rag/retrieve falls back to execute_retrieve() when no constraint fields set; 579 existing tests all pass
+- `pass` Tests cover: exact date filtering, exact source filtering, strict zero-result behavior, explicit fallback behavior, and missing-date edge cases: api/tests/test_rag_constraint_retrieval.py added with 35 tests covering ConstrainedRetrievalResult, strict mode, fallback mode, _apply_date_filters SQLite/Postgres paths, RetrieveIn/Out schemas, concept mode tuple return, ConceptQueryResult fields, backward compat
 
 ## Human Gate Decisions
 

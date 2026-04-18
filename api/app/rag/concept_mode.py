@@ -111,6 +111,8 @@ class ConceptQueryResult:
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
     intent: Optional[dict[str, Any]] = None
+    constraints_relaxed: bool = False
+    constraint_relaxation_reason: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -123,6 +125,8 @@ class ConceptQueryResult:
             "evidence_sufficient": self.evidence_sufficient,
             "weak_evidence_note": self.weak_evidence_note,
             "intent": self.intent,
+            "constraints_relaxed": self.constraints_relaxed,
+            "constraint_relaxation_reason": self.constraint_relaxation_reason,
         }
 
 
@@ -333,12 +337,17 @@ def _retrieve_with_intent_fallback(
     source_type: Optional[str],
     year_from: Optional[str],
     year_to: Optional[str],
-) -> list[RetrievedChunk]:
+) -> tuple[list[RetrievedChunk], bool, Optional[str]]:
     """
     Apply source/date intent as preferences first, not zero-result traps.
 
     Retrieval tries the most constrained query first, then progressively relaxes
     source/date filters if the corpus does not support them.
+
+    Returns a 3-tuple of:
+      - list[RetrievedChunk]: the resulting chunks
+      - bool: whether constraints were relaxed
+      - Optional[str]: reason for relaxation (None if no relaxation occurred)
 
     When RAG_RETRIEVAL_MODE=hybrid (the default), each successful dense retrieval
     attempt is augmented with sparse keyword retrieval and combined via RRF.
@@ -348,14 +357,18 @@ def _retrieve_with_intent_fallback(
 
     retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
 
+    # Convert year strings to int for the new retrieval signature
+    year_from_int: Optional[int] = int(year_from) if year_from is not None else None
+    year_to_int: Optional[int] = int(year_to) if year_to is not None else None
+
     attempts: list[dict[str, Any]] = []
-    seen: set[tuple[Optional[str], Optional[str], Optional[str]]] = set()
+    seen: set[tuple[Optional[str], Optional[int], Optional[int]]] = set()
 
     def add_attempt(
         *,
         source_type_attempt: Optional[str],
-        year_from_attempt: Optional[str],
-        year_to_attempt: Optional[str],
+        year_from_attempt: Optional[int],
+        year_to_attempt: Optional[int],
     ) -> None:
         key = (source_type_attempt, year_from_attempt, year_to_attempt)
         if key in seen:
@@ -371,22 +384,22 @@ def _retrieve_with_intent_fallback(
 
     add_attempt(
         source_type_attempt=source_type,
-        year_from_attempt=year_from,
-        year_to_attempt=year_to,
+        year_from_attempt=year_from_int,
+        year_to_attempt=year_to_int,
     )
     if source_type is not None:
         add_attempt(
             source_type_attempt=None,
-            year_from_attempt=year_from,
-            year_to_attempt=year_to,
+            year_from_attempt=year_from_int,
+            year_to_attempt=year_to_int,
         )
-    if year_from is not None or year_to is not None:
+    if year_from_int is not None or year_to_int is not None:
         add_attempt(
             source_type_attempt=source_type,
             year_from_attempt=None,
             year_to_attempt=None,
         )
-    if source_type is not None or year_from is not None or year_to is not None:
+    if source_type is not None or year_from_int is not None or year_to_int is not None:
         add_attempt(
             source_type_attempt=None,
             year_from_attempt=None,
@@ -404,7 +417,17 @@ def _retrieve_with_intent_fallback(
             year_to=attempt["year_to"],
         )
         if chunks:
-            if attempt != attempts[0]:
+            was_relaxed = attempt != attempts[0]
+            relaxation_reason: Optional[str] = None
+            if was_relaxed:
+                relaxed_source = attempt["source_type"] != source_type
+                relaxed_date = attempt["year_from"] != year_from_int or attempt["year_to"] != year_to_int
+                parts: list[str] = []
+                if relaxed_source:
+                    parts.append("source_type filter removed")
+                if relaxed_date:
+                    parts.append("year range filter removed")
+                relaxation_reason = "No results under exact constraints; " + ", ".join(parts) + "."
                 log.info(
                     "intent retrieval fallback applied for query=%r source_type=%r year_from=%r year_to=%r",
                     query[:120],
@@ -424,9 +447,9 @@ def _retrieve_with_intent_fallback(
                 )
                 if sparse:
                     chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
-            return chunks
+            return chunks, was_relaxed, relaxation_reason
 
-    return []
+    return [], False, None
 
 
 def _dedupe_chunks_by_id(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
@@ -447,19 +470,26 @@ def _collect_candidate_chunks(
     intent: QueryIntent,
     author_ids: list[str] | None,
     broad_top_k: int,
-) -> list[RetrievedChunk]:
+) -> tuple[list[RetrievedChunk], bool, Optional[str]]:
     """Retrieve a broad, deduplicated candidate pool before reranking.
 
     Always routes through _retrieve_with_intent_fallback() to preserve
     source/date constraint-relaxation semantics. When RAG_RETRIEVAL_MODE=hybrid
     (the default), each fallback attempt also fetches sparse keyword results and
     combines them via Reciprocal Rank Fusion internally.
+
+    Returns:
+      - list[RetrievedChunk]: deduplicated candidate chunks
+      - bool: whether any constraints were relaxed
+      - Optional[str]: reason for relaxation (None if exact constraints satisfied)
     """
     import os as _os
 
     source_type_filter = intent.source_types[0] if intent.source_types else None
     candidates: list[RetrievedChunk] = []
     retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
+    any_relaxed = False
+    relaxation_reason: Optional[str] = None
 
     if intent.sub_queries:
         per_sub_k = max(
@@ -467,19 +497,21 @@ def _collect_candidate_chunks(
             _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY,
         )
         for sub_query in intent.sub_queries:
-            candidates.extend(
-                _retrieve_with_intent_fallback(
-                    sub_query,
-                    db,
-                    top_k=per_sub_k,
-                    source_type=source_type_filter,
-                    year_from=intent.date_from,
-                    year_to=intent.date_to,
-                    author_ids=author_ids if author_ids else None,
-                )
+            sub_chunks, sub_relaxed, sub_reason = _retrieve_with_intent_fallback(
+                sub_query,
+                db,
+                top_k=per_sub_k,
+                source_type=source_type_filter,
+                year_from=intent.date_from,
+                year_to=intent.date_to,
+                author_ids=author_ids if author_ids else None,
             )
+            candidates.extend(sub_chunks)
+            if sub_relaxed:
+                any_relaxed = True
+                relaxation_reason = sub_reason
     else:
-        candidates = _retrieve_with_intent_fallback(
+        candidates, any_relaxed, relaxation_reason = _retrieve_with_intent_fallback(
             query,
             db,
             top_k=broad_top_k,
@@ -495,7 +527,7 @@ def _collect_candidate_chunks(
         deduped.sort(key=lambda c: -(c.rrf_score or 0.0) if c.rrf_score is not None else c.cosine_distance)
     else:
         deduped.sort(key=lambda c: c.cosine_distance)
-    return deduped[:broad_top_k]
+    return deduped[:broad_top_k], any_relaxed, relaxation_reason
 
 
 def _query_keywords(query: str) -> set[str]:
@@ -753,6 +785,11 @@ def execute_concept_query(
         author_ids=selected_ids,
         broad_top_k=broad_top_k,
     )
+    # Unpack the tuple returned by _collect_candidate_chunks
+    if isinstance(candidate_chunks, tuple):
+        candidate_chunks, _constraints_relaxed, _relaxation_reason = candidate_chunks
+    else:
+        _constraints_relaxed, _relaxation_reason = False, None
     winning_chunks = _rerank_candidate_chunks(
         query,
         candidate_chunks,
@@ -897,6 +934,8 @@ def execute_concept_query(
         evidence_sufficient=evidence_sufficient,
         weak_evidence_note=weak_evidence_note,
         intent=intent.as_dict(),
+        constraints_relaxed=_constraints_relaxed,
+        constraint_relaxation_reason=_relaxation_reason,
     )
     try:
         from app.rag.query_logger import log_query

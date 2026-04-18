@@ -395,8 +395,8 @@ class TestConceptModeSingleAuthorEnforcement:
                 )
                 first_call = mock_retr.call_args_list[0].kwargs
                 second_call = mock_retr.call_args_list[1].kwargs
-                assert first_call.get("year_from") == "2010"
-                assert first_call.get("year_to") == "2020"
+                assert first_call.get("year_from") == 2010
+                assert first_call.get("year_to") == 2020
                 assert second_call.get("year_from") is None
                 assert second_call.get("year_to") is None
                 assert result.evidence_sufficient is True
@@ -458,8 +458,8 @@ class TestConceptModeSingleAuthorEnforcement:
 
                 assert mock_retr.call_count == 4
                 assert mock_retr.call_args_list[0].kwargs["source_type"] == "text"
-                assert mock_retr.call_args_list[0].kwargs["year_from"] == "2020"
-                assert mock_retr.call_args_list[0].kwargs["year_to"] == "2025"
+                assert mock_retr.call_args_list[0].kwargs["year_from"] == 2020
+                assert mock_retr.call_args_list[0].kwargs["year_to"] == 2025
                 assert mock_retr.call_args_list[-1].kwargs["source_type"] is None
                 assert mock_retr.call_args_list[-1].kwargs["year_from"] is None
                 assert mock_retr.call_args_list[-1].kwargs["year_to"] is None

@@ -10,13 +10,19 @@ Also provides sparse/keyword retrieval via Postgres full-text search
 Fusion (RRF).
 
 Returns citation-ready payloads with full metadata lineage.
+
+Constraint-aware retrieval (Issue 145):
+- retrieve_with_constraints(): strict no-fallback retrieval
+- All retrieval paths accept year_from/year_to (int) and published_from/published_to (YYYY-MM-DD)
+- Date filters prefer rag_documents.published_at where available (Postgres only)
+- ConstrainedRetrievalResult exposes what constraints were applied vs requested
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 from sqlalchemy import text
@@ -34,6 +40,36 @@ DEFAULT_TOP_K = 5
 _RETRIEVAL_MODE = os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
 _RRF_K = int(os.getenv("RAG_RETRIEVAL_RRF_K", "60"))
 _DENSE_TOP_K_MULTIPLIER = int(os.getenv("RAG_RETRIEVAL_DENSE_TOP_K_MULTIPLIER", "3"))
+
+
+@dataclass
+class ConstrainedRetrievalResult:
+    """
+    Result of a constraint-aware retrieval operation.
+
+    Tracks which constraints were requested, which were actually applied,
+    and whether any were relaxed (and why).  Diagnostics are opt-in via
+    the ``debug`` parameter on ``retrieve_with_constraints()``.
+    """
+
+    chunks: list["RetrievedChunk"]
+    constraints_requested: dict[str, Any]
+    constraints_applied: dict[str, Any]
+    constraints_relaxed: bool = False
+    constraint_relaxation_reason: Optional[str] = None
+    diagnostics: Optional[dict[str, Any]] = None
+
+    def as_dict(self) -> dict[str, Any]:
+        d: dict[str, Any] = {
+            "constraints_requested": self.constraints_requested,
+            "constraints_applied": self.constraints_applied,
+            "constraints_relaxed": self.constraints_relaxed,
+            "constraint_relaxation_reason": self.constraint_relaxation_reason,
+            "evidence_chunks": [c.as_dict() for c in self.chunks],
+        }
+        if self.diagnostics is not None:
+            d["diagnostics"] = self.diagnostics
+        return d
 
 
 @dataclass
@@ -80,8 +116,10 @@ def retrieve_similar_chunks(
     source_type: Optional[str] = None,
     domains: Optional[list[str]] = None,
     expertise_tags: Optional[list[str]] = None,
-    year_from: Optional[str] = None,
-    year_to: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    published_from: Optional[str] = None,
+    published_to: Optional[str] = None,
 ) -> list[RetrievedChunk]:
     """
     Embed query and return the top-k most similar chunks.
@@ -92,8 +130,12 @@ def retrieve_similar_chunks(
       source_type    -- restrict to 'html', 'pdf', 'text', or 'manual'
       domains        -- restrict to authors in these domain categories (Postgres only)
       expertise_tags -- restrict to authors with these expertise tags (Postgres only)
-      year_from      -- restrict to chunks whose metadata_json->>'year' >= year_from
-      year_to        -- restrict to chunks whose metadata_json->>'year' <= year_to
+      year_from      -- restrict to chunks whose year >= year_from
+                        (prefers rag_documents.published_at on Postgres,
+                         falls back to metadata_json->>'year')
+      year_to        -- restrict to chunks whose year <= year_to (same precedence)
+      published_from -- restrict to documents with published_at >= published_from (YYYY-MM-DD)
+      published_to   -- restrict to documents with published_at <= published_to (YYYY-MM-DD)
 
     Returns an empty list if no embeddings exist yet.
     """
@@ -102,6 +144,8 @@ def retrieve_similar_chunks(
 
     where_clauses: list[str] = []
     params: dict[str, Any] = {"top_k": top_k, "query_vec": vector_literal}
+
+    is_postgres = _is_postgres(db)
 
     if author_id:
         where_clauses.append("rs.author_id = :author_id")
@@ -126,12 +170,8 @@ def retrieve_similar_chunks(
         where_clauses.append(f"({tag_conditions})")
         for i, t in enumerate(expertise_tags):
             params[f"tag_{i}"] = t
-    if year_from:
-        where_clauses.append("(rc.metadata_json->>'year') >= :year_from")
-        params["year_from"] = year_from
-    if year_to:
-        where_clauses.append("(rc.metadata_json->>'year') <= :year_to")
-        params["year_to"] = year_to
+
+    _apply_date_filters(where_clauses, params, is_postgres, year_from, year_to, published_from, published_to)
 
     where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
@@ -256,8 +296,10 @@ def retrieve_keyword_chunks(
     source_type: Optional[str] = None,
     domains: Optional[list[str]] = None,
     expertise_tags: Optional[list[str]] = None,
-    year_from: Optional[str] = None,
-    year_to: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    published_from: Optional[str] = None,
+    published_to: Optional[str] = None,
 ) -> list[RetrievedChunk]:
     """
     Full-text search using Postgres tsvector/tsquery.
@@ -277,6 +319,8 @@ def retrieve_keyword_chunks(
 
     where_clauses: list[str] = ["rc.tsv @@ plainto_tsquery('english', :fts_query)"]
     params: dict[str, Any] = {"top_k": top_k, "fts_query": query}
+
+    is_postgres = True  # already verified above
 
     if author_id:
         where_clauses.append("rs.author_id = :author_id")
@@ -301,12 +345,8 @@ def retrieve_keyword_chunks(
         where_clauses.append(f"({tag_conditions})")
         for i, t in enumerate(expertise_tags):
             params[f"tag_{i}"] = t
-    if year_from:
-        where_clauses.append("(rc.metadata_json->>'year') >= :year_from")
-        params["year_from"] = year_from
-    if year_to:
-        where_clauses.append("(rc.metadata_json->>'year') <= :year_to")
-        params["year_to"] = year_to
+
+    _apply_date_filters(where_clauses, params, is_postgres, year_from, year_to, published_from, published_to)
 
     where_sql = "WHERE " + " AND ".join(where_clauses)
 
@@ -415,8 +455,10 @@ def retrieve_hybrid(
     source_type: Optional[str] = None,
     domains: Optional[list[str]] = None,
     expertise_tags: Optional[list[str]] = None,
-    year_from: Optional[str] = None,
-    year_to: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    published_from: Optional[str] = None,
+    published_to: Optional[str] = None,
 ) -> list[RetrievedChunk]:
     """
     Hybrid retrieval combining dense vector search and sparse keyword search.
@@ -443,6 +485,8 @@ def retrieve_hybrid(
         "expertise_tags": expertise_tags,
         "year_from": year_from,
         "year_to": year_to,
+        "published_from": published_from,
+        "published_to": published_to,
     }
 
     if mode == "dense_only":
@@ -463,3 +507,218 @@ def retrieve_hybrid(
     combined = reciprocal_rank_fusion(dense_results, sparse_results, k=_RRF_K)
     return combined[:top_k]
 
+
+# ── Private helpers ───────────────────────────────────────────────────────────
+
+
+def _is_postgres(db: Session) -> bool:
+    """Return True when the session is connected to PostgreSQL."""
+    try:
+        return (db.bind.dialect.name if db.bind else "unknown") == "postgresql"
+    except Exception:
+        return False
+
+
+def _apply_date_filters(
+    where_clauses: list[str],
+    params: dict[str, Any],
+    is_postgres: bool,
+    year_from: Optional[int],
+    year_to: Optional[int],
+    published_from: Optional[str],
+    published_to: Optional[str],
+) -> None:
+    """
+    Append date-related WHERE clauses and bind params in-place.
+
+    On Postgres: prefers rd.published_at for year and date filtering.
+    On SQLite: falls back to metadata_json->>'year' string comparison
+               (published_from/published_to are ignored as SQLite has no
+               native DATE column; that column is stored as TEXT).
+    """
+    if is_postgres:
+        if year_from is not None:
+            where_clauses.append(
+                "(rd.published_at IS NOT NULL AND EXTRACT(YEAR FROM rd.published_at) >= :year_from"
+                " OR rd.published_at IS NULL AND (rc.metadata_json->>'year') >= :year_from_str)"
+            )
+            params["year_from"] = year_from
+            params["year_from_str"] = str(year_from)
+        if year_to is not None:
+            where_clauses.append(
+                "(rd.published_at IS NOT NULL AND EXTRACT(YEAR FROM rd.published_at) <= :year_to"
+                " OR rd.published_at IS NULL AND (rc.metadata_json->>'year') <= :year_to_str)"
+            )
+            params["year_to"] = year_to
+            params["year_to_str"] = str(year_to)
+        if published_from:
+            where_clauses.append("rd.published_at >= :published_from")
+            params["published_from"] = published_from
+        if published_to:
+            where_clauses.append("rd.published_at <= :published_to")
+            params["published_to"] = published_to
+    else:
+        # SQLite: string comparison on metadata_json->>'year'
+        if year_from is not None:
+            where_clauses.append("(rc.metadata_json->>'year') >= :year_from_str")
+            params["year_from_str"] = str(year_from)
+        if year_to is not None:
+            where_clauses.append("(rc.metadata_json->>'year') <= :year_to_str")
+            params["year_to_str"] = str(year_to)
+
+
+# ── Constraint-aware retrieval ────────────────────────────────────────────────
+
+
+def retrieve_with_constraints(
+    query: str,
+    db: Session,
+    *,
+    top_k: int = DEFAULT_TOP_K,
+    author_id: Optional[str] = None,
+    author_ids: Optional[list[str]] = None,
+    source_type: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    published_from: Optional[str] = None,
+    published_to: Optional[str] = None,
+    domains: Optional[list[str]] = None,
+    expertise_tags: Optional[list[str]] = None,
+    strict_constraints: bool = True,
+    debug: bool = False,
+) -> ConstrainedRetrievalResult:
+    """
+    Strict constraint-aware retrieval — no silent fallback.
+
+    When ``strict_constraints=True`` (default), the query is executed once
+    with the full set of requested filters.  If the corpus returns zero
+    results the caller receives an empty chunk list and
+    ``constraints_relaxed=False``.  The caller decides whether to retry
+    with relaxed constraints.
+
+    When ``strict_constraints=False``, the function performs staged
+    fallback:
+      1. Full constraints
+      2. Drop source_type
+      3. Drop year/date filters
+      4. Fully unconstrained
+
+    Each relaxation step is recorded in ``constraint_relaxation_reason``.
+
+    The ``debug`` flag enables candidate count diagnostics in the response.
+    """
+    requested: dict[str, Any] = {
+        "author_id": author_id,
+        "author_ids": author_ids,
+        "source_type": source_type,
+        "year_from": year_from,
+        "year_to": year_to,
+        "published_from": published_from,
+        "published_to": published_to,
+        "domains": domains,
+        "expertise_tags": expertise_tags,
+    }
+    # Prune None values for cleaner response output
+    requested = {k: v for k, v in requested.items() if v is not None}
+
+    common_base: dict[str, Any] = {
+        "author_id": author_id,
+        "author_ids": author_ids,
+        "domains": domains,
+        "expertise_tags": expertise_tags,
+    }
+
+    if strict_constraints:
+        chunks = retrieve_hybrid(
+            query,
+            db,
+            top_k=top_k,
+            source_type=source_type,
+            year_from=year_from,
+            year_to=year_to,
+            published_from=published_from,
+            published_to=published_to,
+            **common_base,
+        )
+        applied = dict(requested)
+        diagnostics = {"candidate_count": len(chunks)} if debug else None
+        return ConstrainedRetrievalResult(
+            chunks=chunks,
+            constraints_requested=requested,
+            constraints_applied=applied,
+            constraints_relaxed=False,
+            constraint_relaxation_reason=None,
+            diagnostics=diagnostics,
+        )
+
+    # Fallback mode: staged relaxation
+    attempts: list[tuple[dict[str, Any], str]] = [
+        (
+            {"source_type": source_type, "year_from": year_from, "year_to": year_to,
+             "published_from": published_from, "published_to": published_to},
+            "full constraints",
+        ),
+        (
+            {"source_type": None, "year_from": year_from, "year_to": year_to,
+             "published_from": published_from, "published_to": published_to},
+            "source_type relaxed",
+        ),
+        (
+            {"source_type": source_type, "year_from": None, "year_to": None,
+             "published_from": None, "published_to": None},
+            "date/year filters relaxed",
+        ),
+        (
+            {"source_type": None, "year_from": None, "year_to": None,
+             "published_from": None, "published_to": None},
+            "all filters relaxed",
+        ),
+    ]
+
+    # Deduplicate attempt signatures
+    seen_sigs: set[tuple] = set()
+    deduped_attempts = []
+    for attempt_filters, reason in attempts:
+        sig = tuple(sorted(attempt_filters.items()))
+        if sig not in seen_sigs:
+            seen_sigs.add(sig)
+            deduped_attempts.append((attempt_filters, reason))
+
+    for attempt_filters, reason in deduped_attempts:
+        chunks = retrieve_hybrid(
+            query,
+            db,
+            top_k=top_k,
+            **attempt_filters,
+            **common_base,
+        )
+        if chunks:
+            is_first = (attempt_filters, reason) == deduped_attempts[0]
+            applied = {k: v for k, v in {**attempt_filters, **common_base}.items() if v is not None}
+            relaxation_reason: Optional[str] = None if is_first else f"No results under exact constraints; {reason}."
+            if not is_first:
+                log.info(
+                    "retrieve_with_constraints: fallback applied query=%r reason=%r",
+                    query[:120],
+                    relaxation_reason,
+                )
+            diagnostics = {"candidate_count": len(chunks)} if debug else None
+            return ConstrainedRetrievalResult(
+                chunks=chunks,
+                constraints_requested=requested,
+                constraints_applied=applied,
+                constraints_relaxed=not is_first,
+                constraint_relaxation_reason=relaxation_reason,
+                diagnostics=diagnostics,
+            )
+
+    # All attempts returned zero results
+    applied_empty = {k: v for k, v in {**deduped_attempts[-1][0], **common_base}.items() if v is not None}
+    return ConstrainedRetrievalResult(
+        chunks=[],
+        constraints_requested=requested,
+        constraints_applied=applied_empty,
+        constraints_relaxed=True,
+        constraint_relaxation_reason="No results found even after full constraint relaxation.",
+        diagnostics={"candidate_count": 0} if debug else None,
+    )
