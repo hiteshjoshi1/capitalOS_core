@@ -120,6 +120,8 @@ class QueryIntent:
     query_type: str = "open"
     # Non-empty when the query naturally decomposes into focused sub-asks.
     sub_queries: list[str] = field(default_factory=list)
+    # People/entities that are the *topic* of the query, not corpus sources.
+    topic_entities: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -131,24 +133,115 @@ class QueryIntent:
             "output_shape": self.output_shape,
             "query_type": self.query_type,
             "sub_queries": self.sub_queries,
+            "topic_entities": self.topic_entities,
         }
 
 
 # ── Text-based (no-LLM) parser ────────────────────────────────────────────────
 
 
-def _extract_authors(query: str) -> tuple[list[str], list[str]]:
-    """Return (author_ids, display_names) found in query, deduped in order."""
+# Prepositions that signal the following name is a topic, not a corpus source.
+_TOPIC_PREPOSITIONS = re.compile(
+    r"\b(?:about|regarding|on|concerning|of|toward|towards|with|mention(?:s|ed|ing)?)"
+    r"(?:\s+(?:the\s+)?(?:role\s+of\s+)?(?:his\s+|her\s+|their\s+)?(?:views?\s+on\s+|thoughts?\s+on\s+)?)?",
+    re.IGNORECASE,
+)
+
+# Verbs/phrases that signal the preceding name is the *source* author.
+_SOURCE_SIGNALS = re.compile(
+    r"\b(?:what\s+did|what\s+does|what\s+has|how\s+does|how\s+did|according\s+to"
+    r"|\bsay(?:s|ing)?\b|\bsaid\b|\bwrit(?:e|es|ten|ing)\b|\bwrote\b"
+    r"|\bthink(?:s|ing)?\b|\bthought\b|\bdescrib(?:e|es|ed|ing)\b"
+    r"|\bdiscuss(?:es|ed|ing)?\b|\bview(?:s)?\b)",
+    re.IGNORECASE,
+)
+
+
+def _extract_authors(query: str) -> tuple[list[str], list[str], list[str]]:
+    """Return (corpus_author_ids, corpus_display_names, topic_entity_names).
+
+    Distinguishes between authors whose *corpus* to search (source authors)
+    and authors who are the *topic* of the question.  For example:
+      "What did Warren Buffett say about Charlie Munger?"
+    → corpus_authors=[warren_buffett], topic_entities=[Charlie Munger]
+    """
     q = query.lower()
-    seen_ids: list[str] = []
-    seen_names: list[str] = []
+
+    # 1. Find all author name matches with their positions
+    matches: list[tuple[str, str, int, int]] = []  # (author_id, display_name, start, end)
     for name in _KNOWN_AUTHOR_PATTERNS:
-        if re.search(r"\b" + re.escape(name) + r"\b", q):
+        for m in re.finditer(r"\b" + re.escape(name) + r"\b", q):
             aid = _KNOWN_AUTHORS[name]
-            if aid not in seen_ids:
-                seen_ids.append(aid)
-                seen_names.append(name.title())
-    return seen_ids, seen_names
+            matches.append((aid, name.title(), m.start(), m.end()))
+
+    # Dedupe by author_id, keeping the first (longest) match
+    seen_aids: set[str] = set()
+    unique_matches: list[tuple[str, str, int, int]] = []
+    for aid, display, start, end in matches:
+        if aid not in seen_aids:
+            seen_aids.add(aid)
+            unique_matches.append((aid, display, start, end))
+
+    if len(unique_matches) <= 1:
+        # 0 or 1 author: no disambiguation needed
+        ids = [m[0] for m in unique_matches]
+        names = [m[1] for m in unique_matches]
+        return ids, names, []
+
+    # 2. Multiple authors detected → disambiguate source vs topic
+    # Check for "compare" / "vs" patterns → all are corpus authors
+    compare_re = re.compile(
+        r"\b(?:compare|comparing|contrast|vs\.?|versus|difference|similarities)"
+        r"\s+(?:between\s+)?\b",
+        re.IGNORECASE,
+    )
+    if compare_re.search(query):
+        ids = [m[0] for m in unique_matches]
+        names = [m[1] for m in unique_matches]
+        return ids, names, []
+
+    # Check for "what do authors say" pattern → all are corpus authors
+    all_authors_re = re.compile(
+        r"\b(?:what\s+do\s+(?:all\s+)?authors|across\s+authors|every\s+author)\b",
+        re.IGNORECASE,
+    )
+    if all_authors_re.search(query):
+        ids = [m[0] for m in unique_matches]
+        names = [m[1] for m in unique_matches]
+        return ids, names, []
+
+    # For each author, determine if they appear after a topic preposition
+    corpus_ids: list[str] = []
+    corpus_names: list[str] = []
+    topic_entities: list[str] = []
+
+    for aid, display, start, end in unique_matches:
+        # Check if this author name is preceded by a topic-signaling preposition
+        prefix = q[:start]
+        is_topic = False
+        if _TOPIC_PREPOSITIONS.search(prefix):
+            # Verify: does the preposition end right before (within a few chars of) this author?
+            for m in _TOPIC_PREPOSITIONS.finditer(prefix):
+                if m.end() >= start - 3:  # preposition ending near author start
+                    is_topic = True
+                    break
+
+        if is_topic:
+            topic_entities.append(display)
+        else:
+            corpus_ids.append(aid)
+            corpus_names.append(display)
+
+    # If disambiguation left no corpus authors, treat the first as corpus author
+    if not corpus_ids and unique_matches:
+        first = unique_matches[0]
+        corpus_ids.append(first[0])
+        corpus_names.append(first[1])
+        # Remove from topic_entities if present
+        if first[1] in topic_entities:
+            topic_entities.remove(first[1])
+
+    return corpus_ids, corpus_names, topic_entities
 
 
 def _extract_source_types(query: str) -> list[str]:
@@ -242,7 +335,7 @@ def parse_intent_from_text(query: str) -> QueryIntent:
     - Single vs multi-author vs open classification
     - Basic sub-query decomposition
     """
-    author_ids, author_names = _extract_authors(query)
+    author_ids, author_names, topic_entities = _extract_authors(query)
     source_types = _extract_source_types(query)
     date_from, date_to = _extract_dates(query)
     output_shape = _extract_output_shape(query)
@@ -264,6 +357,7 @@ def parse_intent_from_text(query: str) -> QueryIntent:
         output_shape=output_shape,
         query_type=query_type,
         sub_queries=sub_queries,
+        topic_entities=topic_entities,
     )
 
 
@@ -276,7 +370,8 @@ _LLM_SYSTEM_PROMPT = textwrap.dedent("""
 
     JSON schema:
     {
-      "author_names": ["string"],        // explicit author names mentioned
+      "author_names": ["string"],        // authors whose CORPUS/WRITINGS to search
+      "topic_entities": ["string"],      // people/companies/entities being ASKED ABOUT
       "source_types": ["string"],        // e.g. ["letter", "annual_report", "pdf"]
       "date_from": "YYYY" | null,        // earliest year, or null
       "date_to": "YYYY" | null,          // latest year, or null
@@ -285,14 +380,37 @@ _LLM_SYSTEM_PROMPT = textwrap.dedent("""
       "sub_queries": ["string"]          // decomposed sub-asks, or []
     }
 
+    CRITICAL distinction — author_names vs topic_entities:
+    - author_names: authors whose writings/corpus should be SEARCHED.
+      These are the SOURCE of information.
+    - topic_entities: people, companies, or concepts being DISCUSSED or ASKED ABOUT.
+      These are the SUBJECT/TOPIC of the query, not a corpus source.
+
+    Examples:
+    - "What did Warren Buffett say about Charlie Munger?"
+      → author_names: ["Warren Buffett"], topic_entities: ["Charlie Munger"]
+      → query_type: "single_author" (only Buffett's corpus is searched)
+    - "Compare Buffett and Munger on patience"
+      → author_names: ["Warren Buffett", "Charlie Munger"], topic_entities: []
+      → query_type: "multi_author" (both corpora searched)
+    - "What do authors say about GEICO?"
+      → author_names: [], topic_entities: ["GEICO"]
+      → query_type: "open"
+    - "What did Buffett say about GEICO's moat?"
+      → author_names: ["Warren Buffett"], topic_entities: ["GEICO"]
+      → query_type: "single_author"
+
     Rules:
-    - query_type is "single_author" when the question is about exactly one explicitly
-      named author and comparison with other authors is NOT requested.
-    - query_type is "multi_author" when the question explicitly names or compares
-      two or more authors.
-    - query_type is "open" when no author is explicitly named.
+    - query_type is "single_author" when exactly ONE author's corpus should be searched.
+    - query_type is "multi_author" when the query explicitly COMPARES or requests
+      writings from two or more authors.
+    - query_type is "open" when no specific author's corpus is targeted.
+    - A person mentioned after "about", "regarding", "on" is typically a topic_entity,
+      NOT an author_name, unless the query explicitly asks to compare or search
+      multiple corpora.
     - Do NOT add authors that are not explicitly mentioned in the query.
     - If uncertain, preserve the user's wording — do not broaden scope.
+    - Never silently expand a single-author query into multi-author.
 """).strip()
 
 
@@ -363,6 +481,7 @@ def _parse_intent_with_llm(query: str) -> Optional[QueryIntent]:
         output_shape=data.get("output_shape") or None,
         query_type=query_type,
         sub_queries=list(data.get("sub_queries") or []),
+        topic_entities=list(data.get("topic_entities") or []),
     )
 
 

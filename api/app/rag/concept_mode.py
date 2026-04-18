@@ -49,6 +49,46 @@ from app.rag.retrieval import (
 
 log = logging.getLogger(__name__)
 
+
+def _clean_query_for_keyword_search(
+    query: str,
+    *,
+    author_ids: list[str] | None = None,
+    topic_entities: list[str] | None = None,
+    year_from: Optional[str] = None,
+    year_to: Optional[str] = None,
+) -> str:
+    """Strip author names & year numbers from query for keyword search.
+
+    These are already handled as SQL WHERE filters.  Leaving them in the
+    tsquery causes AND-conjunction mismatches (e.g. a chunk about Munger
+    authored by Buffett won't match ``'buffett' & 'munger'`` if the chunk
+    text only contains "Munger").
+
+    Instead, extract the *semantic core* of the question and append any
+    topic_entities so keyword search is focused on the subject matter.
+    """
+    from app.rag.intent_router import _KNOWN_AUTHORS
+
+    q = query
+    # Remove known author names (case-insensitive)
+    for name in sorted(_KNOWN_AUTHORS.keys(), key=len, reverse=True):
+        q = re.sub(r"\b" + re.escape(name) + r"\b", " ", q, flags=re.IGNORECASE)
+    # Remove year numbers that are used as date filters
+    for yr in [year_from, year_to]:
+        if yr:
+            q = re.sub(r"\b" + re.escape(str(yr)) + r"\b", " ", q)
+    # Remove common question scaffolding
+    q = re.sub(
+        r"\b(?:what|did|does|how|say|said|from|to|about|in|his|her|their|the|and|of|is|are|was|were)\b",
+        " ", q, flags=re.IGNORECASE,
+    )
+    q = re.sub(r"\s+", " ", q).strip()
+    # Append topic entities so keyword search targets the subject
+    if topic_entities:
+        q = q + " " + " ".join(topic_entities) if q else " ".join(topic_entities)
+    return q.strip() or query  # fall back to original if nothing left
+
 _CONCEPT_TOP_K_AUTHORS = 5
 _CONCEPT_TOP_K_CHUNKS = 12
 _MIN_CHUNKS_FOR_CONFIDENCE = 2
@@ -337,12 +377,18 @@ def _retrieve_with_intent_fallback(
     source_type: Optional[str],
     year_from: Optional[str],
     year_to: Optional[str],
+    strict: bool = False,
+    keyword_query: Optional[str] = None,
 ) -> tuple[list[RetrievedChunk], bool, Optional[str]]:
     """
     Apply source/date intent as preferences first, not zero-result traps.
 
-    Retrieval tries the most constrained query first, then progressively relaxes
-    source/date filters if the corpus does not support them.
+    When ``strict=True``, runs the query once with full constraints and
+    returns whatever comes back (even if empty).  No silent relaxation.
+
+    When ``strict=False`` (default), retrieval tries the most constrained
+    query first, then progressively relaxes source/date filters if the
+    corpus does not support them.
 
     Returns a 3-tuple of:
       - list[RetrievedChunk]: the resulting chunks
@@ -360,6 +406,34 @@ def _retrieve_with_intent_fallback(
     # Convert year strings to int for the new retrieval signature
     year_from_int: Optional[int] = int(year_from) if year_from is not None else None
     year_to_int: Optional[int] = int(year_to) if year_to is not None else None
+
+    # Use cleaned keyword query for sparse search to avoid AND-conjunction mismatches
+    kw_q = keyword_query or query
+
+    if strict:
+        # Strict mode: execute once with full constraints, no fallback
+        chunks = retrieve_similar_chunks(
+            query,
+            db,
+            top_k=top_k,
+            author_ids=author_ids if author_ids else None,
+            source_type=source_type,
+            year_from=year_from_int,
+            year_to=year_to_int,
+        )
+        if retrieval_mode == "hybrid":
+            sparse = retrieve_keyword_chunks(
+                kw_q,
+                db,
+                top_k=top_k,
+                author_ids=author_ids if author_ids else None,
+                source_type=source_type,
+                year_from=year_from_int,
+                year_to=year_to_int,
+            )
+            if sparse:
+                chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
+        return chunks, False, None
 
     attempts: list[dict[str, Any]] = []
     seen: set[tuple[Optional[str], Optional[int], Optional[int]]] = set()
@@ -437,7 +511,7 @@ def _retrieve_with_intent_fallback(
                 )
             if retrieval_mode == "hybrid":
                 sparse = retrieve_keyword_chunks(
-                    query,
+                    kw_q,
                     db,
                     top_k=top_k,
                     author_ids=author_ids if author_ids else None,
@@ -473,10 +547,9 @@ def _collect_candidate_chunks(
 ) -> tuple[list[RetrievedChunk], bool, Optional[str]]:
     """Retrieve a broad, deduplicated candidate pool before reranking.
 
-    Always routes through _retrieve_with_intent_fallback() to preserve
-    source/date constraint-relaxation semantics. When RAG_RETRIEVAL_MODE=hybrid
-    (the default), each fallback attempt also fetches sparse keyword results and
-    combines them via Reciprocal Rank Fusion internally.
+    When the intent carries explicit date or source constraints, retrieval
+    runs in strict mode (no silent relaxation).  Otherwise, progressive
+    fallback is used so that thin metadata doesn't cause zero-result traps.
 
     Returns:
       - list[RetrievedChunk]: deduplicated candidate chunks
@@ -491,12 +564,31 @@ def _collect_candidate_chunks(
     any_relaxed = False
     relaxation_reason: Optional[str] = None
 
+    # Use strict mode when the user gave explicit date or source constraints
+    has_explicit_constraints = bool(intent.date_from or intent.date_to or intent.source_types)
+
+    # Build cleaned keyword query: strip author names and years already used as filters
+    kw_query = _clean_query_for_keyword_search(
+        query,
+        author_ids=author_ids,
+        topic_entities=intent.topic_entities if intent.topic_entities else None,
+        year_from=intent.date_from,
+        year_to=intent.date_to,
+    )
+
     if intent.sub_queries:
         per_sub_k = max(
             broad_top_k // len(intent.sub_queries),
             _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY,
         )
         for sub_query in intent.sub_queries:
+            sub_kw = _clean_query_for_keyword_search(
+                sub_query,
+                author_ids=author_ids,
+                topic_entities=intent.topic_entities if intent.topic_entities else None,
+                year_from=intent.date_from,
+                year_to=intent.date_to,
+            )
             sub_chunks, sub_relaxed, sub_reason = _retrieve_with_intent_fallback(
                 sub_query,
                 db,
@@ -505,6 +597,8 @@ def _collect_candidate_chunks(
                 year_from=intent.date_from,
                 year_to=intent.date_to,
                 author_ids=author_ids if author_ids else None,
+                strict=has_explicit_constraints,
+                keyword_query=sub_kw,
             )
             candidates.extend(sub_chunks)
             if sub_relaxed:
@@ -519,6 +613,8 @@ def _collect_candidate_chunks(
             year_from=intent.date_from,
             year_to=intent.date_to,
             author_ids=author_ids if author_ids else None,
+            strict=has_explicit_constraints,
+            keyword_query=kw_query,
         )
 
     deduped = _dedupe_chunks_by_id(candidates)
