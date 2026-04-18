@@ -281,3 +281,44 @@ This should be available in retrieval-only mode behind a debug flag, not mixed i
 - Broader answer-synthesis or critique improvements
 
 This issue is specifically about **constraint fidelity and retrieval contract honesty**.
+
+## Human Approval Gate
+- [ ] Approved for implementation
+
+<!-- IMMUTABLE_PLAN_END -->
+
+## Task Checklist
+- [ ] Implement scoped code changes
+- [ ] Add/update tests
+- [ ] Run deterministic safety gates
+- [ ] Verify semantic intent is achieved
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `prepare`
+**Workflow Status**: `running`
+
+## Workflow Snapshot
+- latest_outcome: No workflow outcome recorded yet.
+- next_action: Workflow execution is in progress.
+- pipeline_version: `v3`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- No active requirements recorded yet.
+
+## Prepare
+Checked out `feature/issue-145-constraint-aware-retrieval-and-filter-fidelity` from `main` and ensured task file exists.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->
