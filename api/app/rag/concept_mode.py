@@ -37,6 +37,8 @@ from app.rag.inference import (
 )
 from app.rag.intent_router import QueryIntent, parse_intent
 from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
+from app.rag.reranker import rerank as _cross_encoder_rerank
+from app.rag.reranker import reranker_available
 from app.rag.retrieval import (
     RetrievedChunk,
     expand_chunks_with_context,
@@ -636,23 +638,47 @@ def _rerank_candidate_chunks(
     heuristic_ranked = _heuristic_rank_candidates(query, candidates)
     ranked = heuristic_ranked
 
-    if routing_available():
+    # Tier 1: dedicated cross-encoder reranker (preferred — fast, deterministic, no JSON)
+    if reranker_available():
+        try:
+            passages = [str(getattr(c, "text", "") or "") for c in candidates]
+            results = _cross_encoder_rerank(query, passages, top_k=len(candidates))
+            if results:
+                ce_ranked: list[RetrievedChunk] = []
+                seen_ids: set[str] = set()
+                for r in results:
+                    chunk = candidates[r.index]
+                    if chunk.chunk_id not in seen_ids:
+                        seen_ids.add(chunk.chunk_id)
+                        ce_ranked.append(chunk)
+                for chunk in heuristic_ranked:
+                    if chunk.chunk_id not in seen_ids:
+                        ce_ranked.append(chunk)
+                ranked = ce_ranked
+                log.debug("cross-encoder reranked %d candidates", len(candidates))
+        except Exception as exc:
+            log.warning("cross-encoder reranking failed; falling back: %s", exc)
+
+    # Tier 2: deprecated LLM-prompt reranking (kept as fallback when no cross-encoder)
+    elif routing_available():
         try:
             indices = _llm_rerank_candidate_indices(query, candidates, keep_count=min(top_k, len(candidates)))
             if indices:
                 llm_ranked: list[RetrievedChunk] = []
-                seen_ids: set[str] = set()
+                seen_ids_llm: set[str] = set()
                 for idx in indices:
                     chunk = candidates[idx]
-                    if chunk.chunk_id not in seen_ids:
-                        seen_ids.add(chunk.chunk_id)
+                    if chunk.chunk_id not in seen_ids_llm:
+                        seen_ids_llm.add(chunk.chunk_id)
                         llm_ranked.append(chunk)
                 for chunk in heuristic_ranked:
-                    if chunk.chunk_id not in seen_ids:
+                    if chunk.chunk_id not in seen_ids_llm:
                         llm_ranked.append(chunk)
                 ranked = llm_ranked
         except Exception as exc:
-            log.warning("candidate reranking failed; using heuristic rank: %s", exc)
+            log.warning("LLM candidate reranking failed; using heuristic rank: %s", exc)
+
+    # Tier 3: heuristic (keyword overlap + cosine similarity) — already set as default above
 
     return _select_diverse_top_chunks(ranked, top_k=min(top_k, len(candidates)))
 
