@@ -238,6 +238,7 @@ _CONCEPT_TOP_K_AUTHORS = 5
 _CONCEPT_TOP_K_CHUNKS = 12
 _MIN_CHUNKS_FOR_CONFIDENCE = 2
 _CHUNKS_PER_AUTHOR_VIEW = 4
+_SINGLE_AUTHOR_SUMMARY_CHUNKS = 10
 _SUGGESTED_READINGS_COUNT = 3
 _BROAD_RETRIEVAL_MULTIPLIER = 4
 _BROAD_RETRIEVAL_MIN = 24
@@ -397,6 +398,43 @@ def _llm_synthesis(query: str, author_views: list[AuthorView]) -> str:
     return response.choices[0].message.content or ""
 
 
+def _llm_single_author_summary(
+    query: str,
+    author_name: str,
+    passages: list[str],
+) -> str:
+    passages_block = "\n\n---\n\n".join(passages[:_SINGLE_AUTHOR_SUMMARY_CHUNKS])
+    prompt = textwrap.dedent(f"""
+        You are summarizing what {author_name} says in their corpus.
+
+        User question: {query}
+
+        Grounding passages from {author_name}:
+        ---
+        {passages_block}
+        ---
+
+        Instructions:
+        - Write a concise 3-5 sentence summary of what {author_name} says about this question.
+        - Use only the provided passages.
+        - Do not mention other authors, perspectives, agreements, contrasts, or divergences.
+        - Prefer specific, grounded statements over generic abstractions.
+        - If the passages are thin or only partially relevant, say so plainly.
+    """).strip()
+
+    client = create_inference_client()
+    response = logged_chat_completion(
+        client=client,
+        model=inference_model(),
+        purpose="single_author_summary",
+        logger=log,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=400,
+    )
+    return response.choices[0].message.content or ""
+
+
 def _llm_critique(query: str, synthesis: str, author_views: list[AuthorView]) -> str:
     views_block = "\n\n".join(
         f"{av.author_name}: {av.view}" for av in author_views
@@ -523,6 +561,15 @@ def _template_synthesis(author_views: list[AuthorView]) -> str:
         f"The perspectives from {names} converge on some principles while diverging on emphasis. "
         "Review each author view above for their distinct framing."
     )
+
+
+def _template_single_author_summary(author_name: str, passages: list[str]) -> Optional[str]:
+    if not passages:
+        return None
+    snippet = passages[0][:280].strip()
+    if not snippet:
+        return None
+    return f"{author_name}'s corpus most directly says: {snippet}"
 
 
 def _retrieve_with_intent_fallback(
@@ -1098,8 +1145,6 @@ def execute_concept_query(
         author_chunk_map.setdefault(chunk.author_id, []).append(chunk.text)
 
     # 4. Generate author views
-    # For single-author grounded queries, skip LLM author views entirely —
-    # the evidence passages speak for themselves (issue-146 §1).
     is_single_author_grounded = (
         intent.query_type == "single_author"
         and len(author_chunk_map) == 1
@@ -1108,10 +1153,9 @@ def execute_concept_query(
     use_llm_author_views = (
         inference_available()
         and _synthesis_enabled()
-        and not is_single_author_grounded
     )
-    if is_single_author_grounded:
-        log.info("single-author grounded query — skipping LLM author views")
+    if is_single_author_grounded and use_llm_author_views:
+        log.info("single-author grounded query — using LLM author view")
 
     author_views: list[AuthorView] = []
     _llm_call_failed = False
@@ -1152,17 +1196,44 @@ def execute_concept_query(
     # 5. Synthesis — controlled by AI_SAGE_SYNTHESIS_ENABLED env toggle
     synthesis: Optional[str] = None
     if author_views:
+        is_single_author_summary = intent.query_type == "single_author" and len(author_chunk_map) == 1
         if _synthesis_enabled() and inference_available() and not _llm_call_failed:
             try:
-                synthesis = _llm_synthesis(query, author_views)
+                if is_single_author_summary:
+                    only_author_id = next(iter(author_chunk_map.keys()))
+                    author_name = next(
+                        (entry["name"] for entry in author_entries if entry["author_id"] == only_author_id),
+                        author_views[0].author_name,
+                    )
+                    synthesis = _llm_single_author_summary(
+                        query,
+                        author_name,
+                        author_chunk_map.get(only_author_id, [])[:_SINGLE_AUTHOR_SUMMARY_CHUNKS],
+                    )
+                else:
+                    synthesis = _llm_synthesis(query, author_views)
             except Exception as exc:
                 log.warning("LLM synthesis failed (degrading to template): %s", exc)
                 _llm_call_failed = True
-                synthesis = _template_synthesis(author_views)
+                if is_single_author_summary:
+                    only_author_id = next(iter(author_chunk_map.keys()))
+                    author_name = next(
+                        (entry["name"] for entry in author_entries if entry["author_id"] == only_author_id),
+                        author_views[0].author_name,
+                    )
+                    synthesis = _template_single_author_summary(
+                        author_name,
+                        author_chunk_map.get(only_author_id, [])[:_SINGLE_AUTHOR_SUMMARY_CHUNKS],
+                    )
+                else:
+                    synthesis = _template_synthesis(author_views)
         else:
             if not _synthesis_enabled():
                 log.info("synthesis disabled via AI_SAGE_SYNTHESIS_ENABLED")
-            synthesis = _template_synthesis(author_views)
+            if is_single_author_summary:
+                synthesis = None
+            else:
+                synthesis = _template_synthesis(author_views)
 
     # 6. Critique — disabled by default (issue-146 §1), enable via AI_SAGE_CRITIQUE_ENABLED
     critique: Optional[str] = None

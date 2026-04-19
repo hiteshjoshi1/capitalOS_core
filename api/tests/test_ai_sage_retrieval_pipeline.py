@@ -200,6 +200,73 @@ def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
     assert result.critique == "critique text"
 
 
+def test_single_author_queries_use_llm_author_view_and_single_author_summary():
+    import app.rag.concept_mode as cm
+
+    candidates = [
+        _mk_chunk("b1", text="Charlie became my partner and changed Berkshire.", cosine_distance=0.01),
+        _mk_chunk("b2", text="Charlie and I think pretty much alike.", cosine_distance=0.02, document_id="doc-2", chunk_index=1),
+    ]
+    selected = [
+        SelectedAuthor(
+            author_id="warren_buffett",
+            name="Warren Buffett",
+            score=5.0,
+            domains=["investing"],
+            expertise_tags=[],
+            overall_weight=4.0,
+            role_type="investor",
+        )
+    ]
+    author_entries = [{"author_id": "warren_buffett", "name": "Warren Buffett"}]
+
+    def _expand(chunks: list[RetrievedChunk], *_args, **_kwargs) -> list[RetrievedChunk]:
+        expanded: list[RetrievedChunk] = []
+        for chunk in chunks:
+            expanded.append(
+                RetrievedChunk(
+                    chunk_id=chunk.chunk_id,
+                    document_id=chunk.document_id,
+                    chunk_index=chunk.chunk_index,
+                    text=f"{chunk.text} [expanded context]",
+                    token_count=chunk.token_count,
+                    metadata_json=chunk.metadata_json,
+                    cosine_distance=chunk.cosine_distance,
+                )
+            )
+        return expanded
+
+    with (
+        patch.dict("os.environ", {"AI_SAGE_SYNTHESIS_ENABLED": "1"}, clear=False),
+        patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="single_author", author_ids=["warren_buffett"])),
+        patch("app.rag.concept_mode.select_authors", return_value=selected),
+        patch("app.rag.concept_mode._author_entries", return_value=author_entries),
+        patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
+        patch("app.rag.concept_mode.reranker_available", return_value=False),
+        patch("app.rag.concept_mode.routing_available", return_value=False),
+        patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=_expand),
+        patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
+        patch("app.rag.concept_mode.inference_available", return_value=True),
+        patch("app.rag.concept_mode._llm_author_view", return_value="buffett view") as mock_author_view,
+        patch("app.rag.concept_mode._llm_single_author_summary", return_value="buffett summary") as mock_single_summary,
+        patch("app.rag.concept_mode._llm_synthesis", return_value="cross author synthesis") as mock_cross_synthesis,
+    ):
+        result = cm.execute_concept_query(
+            "What does Warren Buffett say about Charlie Munger?",
+            MagicMock(),
+            top_k_chunks=2,
+        )
+
+    assert mock_author_view.called
+    passages = mock_author_view.call_args.args[4]
+    assert any("[expanded context]" in passage for passage in passages)
+    assert mock_single_summary.called
+    summary_passages = mock_single_summary.call_args.args[2]
+    assert any("[expanded context]" in passage for passage in summary_passages)
+    assert not mock_cross_synthesis.called
+    assert result.synthesis == "buffett summary"
+
+
 def test_buffett_query_surfaces_results_by_heuristic_rank():
     """Without cross-encoder, heuristic ranking uses keyword overlap + cosine distance."""
     import app.rag.concept_mode as cm
