@@ -4,6 +4,12 @@
 - Reduce AI Sage dependence on multiple serial OpenRouter calls.
 - Make retrieval substantially more self-sufficient so common grounded questions do not depend on expensive multi-call LLM orchestration.
 - Fix the remaining behavior gaps around explicit author/entity/date/source queries, especially the Buffett/Munger/date-range case.
+- Fix retrieval first before polishing synthesis behavior.
+
+## Guiding Principles
+- Quality should be as high as possible while keeping cost at zero or as low as possible.
+- Value delivered must be high; otherwise the system is not worth the complexity or spend.
+- Costs may not be zero because users are not running their own LLMs, so the system must make disciplined tradeoffs and deliver value without burning budget.
 
 ## Architecture Decisions
 - Retrieval should be the primary source of correctness. LLM usage should be minimized and reserved for synthesis, external-data grounding, or broad questions that cannot be answered directly from corpus evidence.
@@ -12,6 +18,7 @@
 - Disable LLM author views for low-evidence cases and for single-author cases where grounded passages already answer the question sufficiently.
 - Critique and suggested readings should be opt-in or conditional, not default on every request.
 - If author views are still needed, batch them into one inference call rather than one call per author.
+- Add an `.env` toggle that disables LLM synthesis entirely for grounded retrieval queries. When enabled, the system should return retrieval results plus deterministic/template summarization only; routing and reranking may still run if needed.
 - Add request-level degradation rules for OpenRouter slowness/rate limits:
   - no critique
   - no suggested readings
@@ -57,6 +64,34 @@ Observed bad behavior:
 - A query like:
   - `What did Warren Buffett say about Charlie Munger from 2020 to 2025?`
   should not depend on a chain of expensive inference calls to get the core retrieval right.
+- Tighten the call graph explicitly:
+  - remove critique from the default request path
+  - remove LLM suggested-readings generation from the default path
+  - remove per-author author-view calls from the default response path for grounded single-author queries
+  - disable per-author LLM views by default for single-author grounded queries
+  - keep LLM rerank fallback effectively off in normal operation when Jina is available
+  - use at most one synthesis call for ordinary grounded queries when synthesis is enabled
+- If richer output is still needed, combine author views and synthesis into one single post-retrieval LLM call that returns:
+  - final answer
+  - optional per-author bullets
+  - grounded caveats
+- Do not combine routing with synthesis:
+  - routing is pre-retrieval
+  - synthesis is post-retrieval
+  - they are different stages and should remain separate
+- Add and document an `.env` toggle for no-synthesis mode so operators can force retrieval-first behavior while debugging or controlling cost.
+- Target architecture for grounded corpus queries:
+  - deterministic intent parse
+  - DB retrieval
+  - Jina rerank
+  - one synthesis call only if needed
+- Target call budget after the fix:
+  - grounded single-author explicit query: 0 to 1 OpenRouter calls
+  - grounded single-author weak-evidence or rate-limited query: 0 OpenRouter calls with passages plus deterministic/template summary
+  - grounded multi-author query: 0 to 1 OpenRouter calls
+  - ambiguous/broad routed query: 1 to 2 OpenRouter calls
+  - external-web/model-search query: 2 to 3 OpenRouter calls maximum
+  - critique and suggested readings should not add default calls
 
 ### 2) Harden constrained retrieval behavior
 - Fix the real user-facing behavior for explicit author/entity/date/source questions.
@@ -89,6 +124,16 @@ Observed bad behavior:
   - degradation decisions
   - major retrieval fallback/constraint-relaxation decisions
 - Ensure important failures are visible in the UI/log stream and highlighted clearly.
+
+### 5) Fix the retrieval scoring / percentage UI bug
+- Fix the current UI behavior where correct passages can show `0% match`.
+- The displayed percentage must not be derived blindly from vector cosine similarity when the result came from sparse retrieval, hybrid RRF, or reranking.
+- For hybrid results, expose and display the correct notion of score:
+  - vector similarity when the result is dense-only
+  - reranker score when reranking is authoritative
+  - otherwise show a neutral label such as `Matched` instead of a fake percentage
+- Do not show misleading percentages that imply irrelevance when the passage is actually a valid keyword/RRF/reranked hit.
+- Add tests for the scoring display contract so hybrid keyword matches no longer appear as `0%`.
 
 ## Query Test Suite
 
@@ -145,11 +190,13 @@ Expected:
 ## Acceptance Criteria
 - [ ] AI Sage no longer relies on a chain of unnecessary serial OpenRouter calls for ordinary retrieval requests.
 - [ ] Deterministic parsing handles obvious author/date/source/entity queries without spending LLM budget.
+- [ ] An `.env` toggle exists to disable LLM synthesis for grounded retrieval flows while still allowing routing/reranking if configured.
 - [ ] LLM author views are disabled for low-evidence or clearly single-author grounded cases.
 - [ ] Critique and suggested readings are not generated by default on every request.
 - [ ] If author views remain enabled, they are batched rather than one-call-per-author.
 - [ ] Jina remains the primary reranker and LLM reranking fallback is avoided unless strictly necessary.
 - [ ] Explicit author/entity/date/source queries behave correctly on the real query suite above.
+- [ ] The AI Sage UI no longer shows misleading `0% match` or fake percentages for hybrid/sparse/reranked results.
 - [ ] OpenRouter and Jina failure/rate-limit conditions are logged clearly and surfaced to the UI/log stream.
 
 ## Human Approval Gate
