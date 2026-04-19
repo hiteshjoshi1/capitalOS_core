@@ -83,11 +83,21 @@ class RetrievedChunk:
     cosine_distance: float
     ts_rank: Optional[float] = None
     rrf_score: Optional[float] = None
+    reranker_score: Optional[float] = None
 
     @property
     def similarity(self) -> float:
-        """Cosine similarity (1 - distance)."""
-        return round(1.0 - self.cosine_distance, 6)
+        """Cosine similarity (1 - distance), or a normalized score for keyword/RRF results."""
+        if self.cosine_distance < 1.0:
+            return round(1.0 - self.cosine_distance, 6)
+        # Keyword-only or RRF-merged chunk without dense score
+        if self.rrf_score is not None:
+            # RRF scores are small (typically 0.01-0.03); normalize to 0-1 range
+            return round(min(self.rrf_score * 30, 1.0), 6)
+        if self.ts_rank is not None:
+            # ts_rank is typically 0-1 already but can exceed 1
+            return round(min(self.ts_rank, 1.0), 6)
+        return 0.0
 
     def as_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -103,7 +113,21 @@ class RetrievedChunk:
             d["ts_rank"] = self.ts_rank
         if self.rrf_score is not None:
             d["rrf_score"] = self.rrf_score
+        if self.reranker_score is not None:
+            d["reranker_score"] = self.reranker_score
         return d
+
+
+def _should_expand_chunk_text(text: str) -> bool:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return False
+    if len(cleaned) < 280:
+        return True
+    if cleaned.endswith("...") or cleaned.endswith("…"):
+        return True
+    tail = cleaned[-30:]
+    return not any(p in tail for p in ".!?")
 
 
 def retrieve_similar_chunks(
@@ -222,6 +246,7 @@ def expand_chunks_with_context(
     *,
     window_size: int = 2,
     max_chars: int = 1800,
+    only_when_needed: bool = False,
 ) -> list[RetrievedChunk]:
     """
     Expand each winning chunk with neighboring chunks from the same document.
@@ -234,6 +259,9 @@ def expand_chunks_with_context(
 
     expanded: list[RetrievedChunk] = []
     for chunk in chunks:
+        if only_when_needed and not _should_expand_chunk_text(str(getattr(chunk, "text", "") or "")):
+            expanded.append(chunk)
+            continue
         try:
             neighbors = (
                 db.query(RagChunk)
@@ -277,6 +305,9 @@ def expand_chunks_with_context(
                 token_count=summed_tokens or chunk.token_count,
                 metadata_json=metadata,
                 cosine_distance=chunk.cosine_distance,
+                ts_rank=chunk.ts_rank,
+                rrf_score=chunk.rrf_score,
+                reranker_score=chunk.reranker_score,
             )
         )
 

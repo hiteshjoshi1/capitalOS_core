@@ -7,8 +7,12 @@ silently assume a specific vendor/model in feature code.
 
 from __future__ import annotations
 
+import logging
 import os
+import time
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 
 def inference_provider() -> str:
@@ -35,6 +39,15 @@ def inference_base_url() -> str | None:
     return None
 
 
+def inference_timeout_seconds() -> float:
+    raw = os.getenv("INFERENCE_LLM_TIMEOUT_SECONDS", "60").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        value = 60.0
+    return max(1.0, value)
+
+
 def inference_available() -> bool:
     provider = inference_provider()
     api_key = inference_api_key()
@@ -55,7 +68,10 @@ def create_inference_client() -> Any:
     if provider in {"openai", "openrouter"}:
         import openai
 
-        kwargs: dict[str, Any] = {"api_key": api_key}
+        kwargs: dict[str, Any] = {
+            "api_key": api_key,
+            "timeout": inference_timeout_seconds(),
+        }
         base_url = inference_base_url()
         if base_url:
             kwargs["base_url"] = base_url
@@ -71,6 +87,60 @@ def create_inference_client() -> Any:
                 kwargs["default_headers"] = headers
         return openai.OpenAI(**kwargs)
     raise RuntimeError(f"Unsupported inference provider: {provider}")
+
+
+def logged_chat_completion(
+    *,
+    client: Any,
+    model: str,
+    messages: list[dict[str, str]],
+    purpose: str,
+    logger: Any | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Run a chat completion with timing/error logs."""
+    active_log = logger or log
+    started = time.perf_counter()
+    provider = inference_provider()
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            **kwargs,
+        )
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        content = ""
+        finish_reason = None
+        try:
+            choices = getattr(response, "choices", []) or []
+            if choices:
+                finish_reason = getattr(choices[0], "finish_reason", None)
+                message = getattr(choices[0], "message", None)
+                content = (getattr(message, "content", None) or "") if message else ""
+        except Exception:
+            content = ""
+        active_log.info(
+            "llm_call_ok purpose=%s provider=%s model=%s duration_ms=%s content_chars=%d finish_reason=%s",
+            purpose,
+            provider,
+            model,
+            elapsed_ms,
+            len(content),
+            finish_reason,
+        )
+        return response
+    except Exception as exc:
+        elapsed_ms = round((time.perf_counter() - started) * 1000, 1)
+        active_log.warning(
+            "llm_call_failed purpose=%s provider=%s model=%s duration_ms=%s error_type=%s error=%s",
+            purpose,
+            provider,
+            model,
+            elapsed_ms,
+            type(exc).__name__,
+            exc,
+        )
+        raise
 
 
 # ── Routing / planning model (cheap, fast, independent) ───────────────────────

@@ -48,7 +48,13 @@ const MOCK_CONCEPT_RESULT = {
       author_name: "Warren Buffett",
       text: "A wonderful business can compound capital over time.",
       similarity: 0.91,
-      metadata: { title: "Letter", source_url: "https://example.com/letters" },
+      metadata: {
+        title: "Letter",
+        source_url: "https://example.com/letters",
+        context_text:
+          "A wonderful business can compound capital over time. It also benefits from durable customer demand and disciplined capital allocation.",
+        reranker_score: 0.77,
+      },
     },
     {
       chunk_id: "chunk-2",
@@ -283,6 +289,9 @@ describe("AISage Concept Mode", () => {
 
     // After clicking, the evidence panel opens and shows passage labels
     expect(screen.getByText("Passage 1")).toBeInTheDocument();
+    expect(screen.getByText("91.0% relevance")).toBeInTheDocument();
+    expect(screen.getByText("Reranked")).toBeInTheDocument();
+    expect(screen.getByText("Show surrounding context")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Hide Sources" })).toBeInTheDocument();
   });
 

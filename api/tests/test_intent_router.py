@@ -15,6 +15,7 @@ Coverage:
 
 from __future__ import annotations
 
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
@@ -171,6 +172,25 @@ class TestParseIntentFallback:
             intent = parse_intent("What does Buffett say about moat?")
         assert "warren_buffett" in intent.author_ids
         assert intent.query_type == "single_author"
+
+    def test_llm_parse_failure_logs_raw_preview_and_falls_back(self, caplog):
+        from app.rag.intent_router import _parse_intent_with_llm
+
+        response = MagicMock()
+        response.choices[0].message.content = "not json at all"
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("app.rag.inference.routing_available", return_value=True),
+            patch("app.rag.inference.create_routing_client", return_value=MagicMock()),
+            patch("app.rag.inference.routing_model", return_value="qwen/qwen-2.5-7b-instruct"),
+            patch("app.rag.inference.logged_chat_completion", return_value=response),
+        ):
+            intent = _parse_intent_with_llm("What does Buffett say about moat?")
+
+        assert intent is None
+        assert "routing LLM intent parse failed:" in caplog.text
+        assert "raw_preview='not json at all'" in caplog.text
 
 
 # ── Routing model config independence ─────────────────────────────────────────
@@ -356,9 +376,9 @@ class TestConceptModeSingleAuthorEnforcement:
                     "What does Buffett say in his letters?",
                     mock_db,
                 )
-                # With strict mode, only one call is made (no fallback)
+                # source_type is no longer used as a retrieval filter (issue-146)
                 first_call = mock_retr.call_args_list[0].kwargs
-                assert first_call.get("source_type") == "text"
+                assert first_call.get("source_type") is None
                 assert mock_retr.call_count == 1
 
     def test_date_constraints_passed_to_retrieval(self, rag_yaml_for_intent):
@@ -462,9 +482,10 @@ class TestConceptModeSingleAuthorEnforcement:
                     mock_db,
                 )
 
-                # With strict mode, constraints are not relaxed — single call
+                # With strict mode (date constraints), single call
                 assert mock_retr.call_count == 1
-                assert mock_retr.call_args_list[0].kwargs["source_type"] == "text"
+                # source_type is no longer used as a retrieval filter (issue-146)
+                assert mock_retr.call_args_list[0].kwargs["source_type"] is None
                 assert mock_retr.call_args_list[0].kwargs["year_from"] == 2020
                 assert mock_retr.call_args_list[0].kwargs["year_to"] == 2025
 

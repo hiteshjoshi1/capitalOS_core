@@ -419,16 +419,24 @@ def _parse_intent_with_llm(query: str) -> Optional[QueryIntent]:
     Call the routing model to extract structured intent.
     Returns None if the call fails or returns unparseable output.
     """
-    from app.rag.inference import routing_model, create_routing_client, routing_available
+    from app.rag.inference import (
+        create_routing_client,
+        logged_chat_completion,
+        routing_available,
+        routing_model,
+    )
 
     if not routing_available():
         return None
 
+    client = create_routing_client()
+    model = routing_model()
     try:
-        client = create_routing_client()
-        model = routing_model()
-        response = client.chat.completions.create(
+        response = logged_chat_completion(
+            client=client,
             model=model,
+            purpose="routing_intent",
+            logger=log,
             messages=[
                 {"role": "system", "content": _LLM_SYSTEM_PROMPT},
                 {"role": "user", "content": query},
@@ -436,13 +444,29 @@ def _parse_intent_with_llm(query: str) -> Optional[QueryIntent]:
             temperature=0.0,
             max_tokens=300,
         )
-        raw = (response.choices[0].message.content or "").strip()
-        # Strip accidental markdown fences
-        raw = re.sub(r"^```(?:json)?\s*", "", raw)
-        raw = re.sub(r"\s*```$", "", raw)
+    except Exception:
+        return None
+
+    raw = (response.choices[0].message.content or "").strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    if not raw:
+        log.warning(
+            "routing_llm_empty_content model=%s query=%r",
+            model,
+            query[:120],
+        )
+        return None
+    try:
         data: dict[str, Any] = json.loads(raw)
     except Exception as exc:
-        log.warning("routing LLM intent parse failed: %s", exc)
+        log.warning(
+            "routing LLM intent parse failed: %s model=%s raw_chars=%d raw_preview=%r",
+            exc,
+            model,
+            len(raw),
+            raw[:240],
+        )
         return None
 
     # Map raw author names → author_ids using the known-author table

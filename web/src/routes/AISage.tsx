@@ -443,25 +443,46 @@ function AssistantTurn({
             <div className="aiSageEvidenceList">
               {/* Corpus evidence — thinker corpus */}
               {bestPassages.map((chunk: RagEvidenceChunk, index: number) => (
-                <article key={chunk.chunk_id} className="aiSageEvidenceCard">
-                  <div className="aiSageEvidenceHeader">
-                    <div>
-                      <strong>{chunk.author_name}</strong>
-                      <span className="muted aiSageEvidenceRank">Passage {index + 1}</span>
-                      <span className="aiSagePill aiSagePillCorpus">Thinker Corpus</span>
-                    </div>
-                    <span className="aiSagePill">
-                      {(chunk.similarity * 100).toFixed(1)}% match
-                    </span>
-                  </div>
-                  <p className="aiSageEvidenceText">
-                    {chunk.text.length > 520 ? `${chunk.text.slice(0, 520)}...` : chunk.text}
-                  </p>
-                  <div className="muted aiSageEvidenceMeta">
-                    {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
-                    {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
-                  </div>
-                </article>
+                (() => {
+                  const contextText =
+                    typeof chunk.metadata.context_text === "string"
+                      ? chunk.metadata.context_text
+                      : null;
+                  const rerankerScore =
+                    typeof chunk.metadata.reranker_score === "number"
+                      ? chunk.metadata.reranker_score
+                      : null;
+                  return (
+                    <article key={chunk.chunk_id} className="aiSageEvidenceCard">
+                      <div className="aiSageEvidenceHeader">
+                        <div>
+                          <strong>{chunk.author_name}</strong>
+                          <span className="muted aiSageEvidenceRank">Passage {index + 1}</span>
+                          <span className="aiSagePill aiSagePillCorpus">Thinker Corpus</span>
+                          {rerankerScore !== null ? <span className="aiSagePill">Reranked</span> : null}
+                        </div>
+                        <span className="aiSagePill">
+                          {(chunk.similarity * 100).toFixed(1)}% relevance
+                        </span>
+                      </div>
+                      <p className="aiSageEvidenceText">
+                        {chunk.text.length > 520 ? `${chunk.text.slice(0, 520)}...` : chunk.text}
+                      </p>
+                      {contextText && contextText !== chunk.text ? (
+                        <details>
+                          <summary>Show surrounding context</summary>
+                          <p className="aiSageEvidenceText">
+                            {contextText.length > 1200 ? `${contextText.slice(0, 1200)}...` : contextText}
+                          </p>
+                        </details>
+                      ) : null}
+                      <div className="muted aiSageEvidenceMeta">
+                        {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
+                        {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
+                      </div>
+                    </article>
+                  );
+                })()
               ))}
 
               {/* Live sources — web / filings */}
