@@ -31,6 +31,7 @@ def _make_chunk(
     cosine_distance: float = 0.2,
     ts_rank: Optional[float] = None,
     rrf_score: Optional[float] = None,
+    reranker_score: Optional[float] = None,
 ) -> Any:
     from app.rag.retrieval import RetrievedChunk
 
@@ -44,6 +45,7 @@ def _make_chunk(
         cosine_distance=cosine_distance,
         ts_rank=ts_rank,
         rrf_score=rrf_score,
+        reranker_score=reranker_score,
     )
 
 
@@ -142,6 +144,11 @@ class TestRetrievedChunkShape:
     def test_similarity_property(self):
         chunk = _make_chunk("c5", cosine_distance=0.3)
         assert chunk.similarity == pytest.approx(0.7, abs=1e-5)
+
+    def test_as_dict_includes_reranker_score_when_set(self):
+        chunk = _make_chunk("c6", reranker_score=0.8123)
+        d = chunk.as_dict()
+        assert d["reranker_score"] == pytest.approx(0.8123)
 
 
 # ── retrieve_keyword_chunks tests ─────────────────────────────────────────────

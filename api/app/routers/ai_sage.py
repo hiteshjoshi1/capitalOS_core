@@ -98,6 +98,9 @@ class ConceptQueryOut(BaseModel):
     follow_up_questions: list[str] = Field(default_factory=list)
     # Intent routing metadata — included for all concept-mode responses
     intent: Optional[dict[str, Any]] = None
+    # Constraint transparency fields (issue-145)
+    constraints_relaxed: bool = False
+    constraint_relaxation_reason: Optional[str] = None
 
 
 # ── Endpoint ──────────────────────────────────────────────────────────────────

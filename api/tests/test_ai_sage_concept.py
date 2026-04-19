@@ -110,6 +110,26 @@ class TestAuthorViewShape:
         assert av.key_passages == []
 
 
+class TestEnvFlagSemantics:
+    def test_positive_synthesis_flag_uses_zero_as_disabled(self):
+        from app.rag.concept_mode import _synthesis_enabled
+
+        with patch.dict(os.environ, {"AI_SAGE_SYNTHESIS_ENABLED": "0"}, clear=False):
+            assert _synthesis_enabled() is False
+
+        with patch.dict(os.environ, {"AI_SAGE_SYNTHESIS_ENABLED": "1"}, clear=False):
+            assert _synthesis_enabled() is True
+
+    def test_legacy_negative_synthesis_flag_still_supported(self):
+        from app.rag.concept_mode import _synthesis_enabled
+
+        env = dict(os.environ)
+        env.pop("AI_SAGE_SYNTHESIS_ENABLED", None)
+        env["AI_SAGE_NO_SYNTHESIS"] = "1"
+        with patch.dict(os.environ, env, clear=True):
+            assert _synthesis_enabled() is False
+
+
 class TestSuggestedReadingShape:
     def test_as_dict_contains_required_fields(self):
         from app.rag.concept_mode import SuggestedReading
@@ -542,6 +562,7 @@ class TestCritiqueShape:
         )
 
         with (
+            patch.dict("os.environ", {"AI_SAGE_CRITIQUE_ENABLED": "1"}, clear=False),
             patch("app.rag.concept_mode.select_authors", return_value=[mock_author]),
             patch("app.rag.concept_mode._author_entries", return_value=[mock_entry]),
             patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=[MagicMock()]),

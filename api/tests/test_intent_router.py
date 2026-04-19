@@ -15,6 +15,7 @@ Coverage:
 
 from __future__ import annotations
 
+import logging
 import os
 from unittest.mock import MagicMock, patch
 
@@ -52,6 +53,22 @@ class TestParseIntentFromText:
         assert "warren_buffett" in intent.author_ids
         assert "charlie_munger" in intent.author_ids
         assert intent.query_type == "multi_author"
+
+    def test_topic_entity_munger_not_corpus_author(self):
+        """'What did Buffett say about Munger' → Munger is a topic, not a corpus source."""
+        intent = self._parse("What did Warren Buffett say about Charlie Munger?")
+        assert intent.author_ids == ["warren_buffett"]
+        assert intent.query_type == "single_author"
+        assert "Charlie Munger" in intent.topic_entities
+
+    def test_topic_entity_with_date_range(self):
+        """Topic entity + date constraints should all parse correctly."""
+        intent = self._parse("What did Buffett say about Munger from 2020 to 2025?")
+        assert intent.author_ids == ["warren_buffett"]
+        assert intent.query_type == "single_author"
+        assert "Munger" in intent.topic_entities
+        assert intent.date_from == "2020"
+        assert intent.date_to == "2025"
 
     def test_open_query_no_author(self):
         intent = self._parse("What is a good framework for valuing businesses?")
@@ -155,6 +172,25 @@ class TestParseIntentFallback:
             intent = parse_intent("What does Buffett say about moat?")
         assert "warren_buffett" in intent.author_ids
         assert intent.query_type == "single_author"
+
+    def test_llm_parse_failure_logs_raw_preview_and_falls_back(self, caplog):
+        from app.rag.intent_router import _parse_intent_with_llm
+
+        response = MagicMock()
+        response.choices[0].message.content = "not json at all"
+
+        with (
+            caplog.at_level(logging.WARNING),
+            patch("app.rag.inference.routing_available", return_value=True),
+            patch("app.rag.inference.create_routing_client", return_value=MagicMock()),
+            patch("app.rag.inference.routing_model", return_value="qwen/qwen-2.5-7b-instruct"),
+            patch("app.rag.inference.logged_chat_completion", return_value=response),
+        ):
+            intent = _parse_intent_with_llm("What does Buffett say about moat?")
+
+        assert intent is None
+        assert "routing LLM intent parse failed:" in caplog.text
+        assert "raw_preview='not json at all'" in caplog.text
 
 
 # ── Routing model config independence ─────────────────────────────────────────
@@ -333,19 +369,17 @@ class TestConceptModeSingleAuthorEnforcement:
                 patch("app.rag.concept_mode._enrich_chunks", return_value=fake_evidence),
                 patch(
                     "app.rag.concept_mode.retrieve_similar_chunks",
-                    side_effect=[[], [MagicMock(chunk_id="c1", cosine_distance=0.1)]],
+                    return_value=[],
                 ) as mock_retr,
             ):
                 result = cm.execute_concept_query(
                     "What does Buffett say in his letters?",
                     mock_db,
                 )
+                # source_type is no longer used as a retrieval filter (issue-146)
                 first_call = mock_retr.call_args_list[0].kwargs
-                second_call = mock_retr.call_args_list[1].kwargs
-                assert first_call.get("source_type") == "text"
-                assert second_call.get("source_type") is None
-                assert result.evidence_sufficient is True
-                assert result.weak_evidence_note is None
+                assert first_call.get("source_type") is None
+                assert mock_retr.call_count == 1
 
     def test_date_constraints_passed_to_retrieval(self, rag_yaml_for_intent):
         """Date constraints are relaxed if the corpus has no matching year metadata."""
@@ -386,21 +420,18 @@ class TestConceptModeSingleAuthorEnforcement:
                 patch("app.rag.concept_mode._enrich_chunks", return_value=fake_evidence),
                 patch(
                     "app.rag.concept_mode.retrieve_similar_chunks",
-                    side_effect=[[], [MagicMock(chunk_id="c1", cosine_distance=0.1)]],
+                    return_value=[],
                 ) as mock_retr,
             ):
                 result = cm.execute_concept_query(
                     "Buffett letters from 2010 to 2020.",
                     mock_db,
                 )
+                # With strict mode, only one call with date constraints (no fallback)
                 first_call = mock_retr.call_args_list[0].kwargs
-                second_call = mock_retr.call_args_list[1].kwargs
-                assert first_call.get("year_from") == "2010"
-                assert first_call.get("year_to") == "2020"
-                assert second_call.get("year_from") is None
-                assert second_call.get("year_to") is None
-                assert result.evidence_sufficient is True
-                assert result.weak_evidence_note is None
+                assert first_call.get("year_from") == 2010
+                assert first_call.get("year_to") == 2020
+                assert mock_retr.call_count == 1
 
     def test_combined_source_and_date_constraints_fall_back_to_unfiltered(self, rag_yaml_for_intent):
         """If both source and date constraints fail, retrieval must eventually fall back to unfiltered corpus search."""
@@ -443,12 +474,7 @@ class TestConceptModeSingleAuthorEnforcement:
                 patch("app.rag.concept_mode._enrich_chunks", return_value=fake_evidence),
                 patch(
                     "app.rag.concept_mode.retrieve_similar_chunks",
-                    side_effect=[
-                        [],
-                        [],
-                        [],
-                        [MagicMock(chunk_id="c1", cosine_distance=0.1)],
-                    ],
+                    return_value=[],
                 ) as mock_retr,
             ):
                 result = cm.execute_concept_query(
@@ -456,15 +482,12 @@ class TestConceptModeSingleAuthorEnforcement:
                     mock_db,
                 )
 
-                assert mock_retr.call_count == 4
-                assert mock_retr.call_args_list[0].kwargs["source_type"] == "text"
-                assert mock_retr.call_args_list[0].kwargs["year_from"] == "2020"
-                assert mock_retr.call_args_list[0].kwargs["year_to"] == "2025"
-                assert mock_retr.call_args_list[-1].kwargs["source_type"] is None
-                assert mock_retr.call_args_list[-1].kwargs["year_from"] is None
-                assert mock_retr.call_args_list[-1].kwargs["year_to"] is None
-                assert result.evidence_sufficient is True
-                assert result.weak_evidence_note is None
+                # With strict mode (date constraints), single call
+                assert mock_retr.call_count == 1
+                # source_type is no longer used as a retrieval filter (issue-146)
+                assert mock_retr.call_args_list[0].kwargs["source_type"] is None
+                assert mock_retr.call_args_list[0].kwargs["year_from"] == 2020
+                assert mock_retr.call_args_list[0].kwargs["year_to"] == 2025
 
     def test_multi_part_query_uses_sub_queries(self, rag_yaml_for_intent):
         """Multi-part queries trigger per-sub-query retrieval calls."""

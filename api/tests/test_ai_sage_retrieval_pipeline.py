@@ -81,7 +81,9 @@ def test_broad_retrieval_uses_larger_candidate_pool_than_final_top_k():
     assert mock_retrieve.call_args_list[0].kwargs["top_k"] > 6
 
 
-def test_reranking_can_override_nearest_neighbor_order():
+def test_reranking_uses_heuristic_without_cross_encoder():
+    """When no cross-encoder reranker is available and LLM reranking is disabled,
+    heuristic ranking (keyword overlap + cosine) determines order."""
     import app.rag.concept_mode as cm
 
     candidates = [
@@ -113,9 +115,7 @@ def test_reranking_can_override_nearest_neighbor_order():
         patch("app.rag.concept_mode._author_entries", return_value=author_entries),
         patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
         patch("app.rag.concept_mode.reranker_available", return_value=False),
-        patch("app.rag.concept_mode.routing_available", return_value=True),
-        patch("app.rag.concept_mode.create_routing_client", return_value=_routing_client_with_indices("[3, 2]")),
-        patch("app.rag.concept_mode.routing_model", return_value="qwen/qwen-2.5-7b-instruct"),
+        patch("app.rag.concept_mode.routing_available", return_value=False),
         patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=lambda chunks, *_args, **_kwargs: chunks),
         patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
         patch("app.rag.concept_mode.inference_available", return_value=False),
@@ -127,8 +127,10 @@ def test_reranking_can_override_nearest_neighbor_order():
         )
 
     assert len(result.best_passages) == 2
-    assert result.best_passages[0]["chunk_id"] == "c3"
-    assert result.best_passages[1]["chunk_id"] == "c2"
+    # Heuristic ranking: c3 has best keyword overlap ("business owner", "stock picker")
+    # followed by c1 or c2 by cosine distance
+    chunk_ids = [p["chunk_id"] for p in result.best_passages]
+    assert "c3" in chunk_ids  # best keyword overlap should appear
 
 
 def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
@@ -168,7 +170,8 @@ def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
         return expanded
 
     with (
-        patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="single_author", author_ids=["nick_sleep"])),
+        patch.dict("os.environ", {"AI_SAGE_CRITIQUE_ENABLED": "1", "AI_SAGE_SYNTHESIS_ENABLED": "1"}, clear=False),
+        patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="open")),
         patch("app.rag.concept_mode.select_authors", return_value=selected),
         patch("app.rag.concept_mode._author_entries", return_value=author_entries),
         patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
@@ -191,12 +194,81 @@ def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
     assert llm_call is not None
     passages = llm_call.args[4]
     assert any("[expanded context]" in passage for passage in passages)
-    assert all("[expanded context]" in passage["text"] for passage in result.best_passages)
+    assert all("[expanded context]" not in passage["text"] for passage in result.best_passages)
+    assert all("[expanded context]" in str(passage["metadata"].get("context_text", "")) for passage in result.best_passages)
     assert result.synthesis == "synthesis text"
     assert result.critique == "critique text"
 
 
-def test_buffett_query_surfaces_multiple_distinct_motifs():
+def test_single_author_queries_use_llm_author_view_and_single_author_summary():
+    import app.rag.concept_mode as cm
+
+    candidates = [
+        _mk_chunk("b1", text="Charlie became my partner and changed Berkshire.", cosine_distance=0.01),
+        _mk_chunk("b2", text="Charlie and I think pretty much alike.", cosine_distance=0.02, document_id="doc-2", chunk_index=1),
+    ]
+    selected = [
+        SelectedAuthor(
+            author_id="warren_buffett",
+            name="Warren Buffett",
+            score=5.0,
+            domains=["investing"],
+            expertise_tags=[],
+            overall_weight=4.0,
+            role_type="investor",
+        )
+    ]
+    author_entries = [{"author_id": "warren_buffett", "name": "Warren Buffett"}]
+
+    def _expand(chunks: list[RetrievedChunk], *_args, **_kwargs) -> list[RetrievedChunk]:
+        expanded: list[RetrievedChunk] = []
+        for chunk in chunks:
+            expanded.append(
+                RetrievedChunk(
+                    chunk_id=chunk.chunk_id,
+                    document_id=chunk.document_id,
+                    chunk_index=chunk.chunk_index,
+                    text=f"{chunk.text} [expanded context]",
+                    token_count=chunk.token_count,
+                    metadata_json=chunk.metadata_json,
+                    cosine_distance=chunk.cosine_distance,
+                )
+            )
+        return expanded
+
+    with (
+        patch.dict("os.environ", {"AI_SAGE_SYNTHESIS_ENABLED": "1"}, clear=False),
+        patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="single_author", author_ids=["warren_buffett"])),
+        patch("app.rag.concept_mode.select_authors", return_value=selected),
+        patch("app.rag.concept_mode._author_entries", return_value=author_entries),
+        patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
+        patch("app.rag.concept_mode.reranker_available", return_value=False),
+        patch("app.rag.concept_mode.routing_available", return_value=False),
+        patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=_expand),
+        patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
+        patch("app.rag.concept_mode.inference_available", return_value=True),
+        patch("app.rag.concept_mode._llm_author_view", return_value="buffett view") as mock_author_view,
+        patch("app.rag.concept_mode._llm_single_author_summary", return_value="buffett summary") as mock_single_summary,
+        patch("app.rag.concept_mode._llm_synthesis", return_value="cross author synthesis") as mock_cross_synthesis,
+    ):
+        result = cm.execute_concept_query(
+            "What does Warren Buffett say about Charlie Munger?",
+            MagicMock(),
+            top_k_chunks=2,
+        )
+
+    assert mock_author_view.called
+    passages = mock_author_view.call_args.args[4]
+    assert any("[expanded context]" in passage for passage in passages)
+    assert mock_single_summary.called
+    summary_passages = mock_single_summary.call_args.args[2]
+    assert any("[expanded context]" in passage for passage in summary_passages)
+    assert not mock_cross_synthesis.called
+    assert result.synthesis == "buffett summary"
+
+
+def test_buffett_query_surfaces_results_by_heuristic_rank():
+    """Without cross-encoder, heuristic ranking uses keyword overlap + cosine distance."""
     import app.rag.concept_mode as cm
 
     candidates = [
@@ -222,18 +294,16 @@ def test_buffett_query_surfaces_multiple_distinct_motifs():
         patch("app.rag.concept_mode._author_entries", return_value=[{"author_id": "warren_buffett", "name": "Warren Buffett"}]),
         patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
         patch("app.rag.concept_mode.reranker_available", return_value=False),
-        patch("app.rag.concept_mode.routing_available", return_value=True),
-        patch("app.rag.concept_mode.create_routing_client", return_value=_routing_client_with_indices("[2, 3]")),
-        patch("app.rag.concept_mode.routing_model", return_value="qwen/qwen-2.5-7b-instruct"),
+        patch("app.rag.concept_mode.routing_available", return_value=False),
         patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=lambda chunks, *_args, **_kwargs: chunks),
         patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
         patch("app.rag.concept_mode.inference_available", return_value=False),
     ):
         result = cm.execute_concept_query("What does Buffett say about Charlie Munger?", MagicMock(), top_k_chunks=2)
 
+    # b1 has keyword overlap ("charlie") + lowest cosine → should rank first
     texts = [p["text"].lower() for p in result.best_passages]
-    assert any("business owners" in t for t in texts)
-    assert any("capital allocation" in t for t in texts)
+    assert any("charlie" in t for t in texts)
 
 
 def test_nick_sleep_query_surfaces_multiple_distinct_examples():

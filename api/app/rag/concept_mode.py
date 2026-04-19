@@ -32,6 +32,7 @@ from app.rag.inference import (
     create_routing_client,
     inference_available,
     inference_model,
+    logged_chat_completion,
     routing_available,
     routing_model,
 )
@@ -49,10 +50,195 @@ from app.rag.retrieval import (
 
 log = logging.getLogger(__name__)
 
+
+def _env_flag_enabled(name: str, *, default: bool = False) -> bool:
+    import os
+
+    raw = os.getenv(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _synthesis_enabled() -> bool:
+    """
+    Positive semantics: 1 means enabled, 0 means disabled.
+
+    Preferred flag:
+      AI_SAGE_SYNTHESIS_ENABLED
+
+    Legacy fallback:
+      AI_SAGE_NO_SYNTHESIS
+    """
+    import os
+
+    if os.getenv("AI_SAGE_SYNTHESIS_ENABLED", "").strip():
+        return _env_flag_enabled("AI_SAGE_SYNTHESIS_ENABLED", default=True)
+
+    legacy = os.getenv("AI_SAGE_NO_SYNTHESIS", "").strip().lower()
+    if legacy:
+        return legacy not in {"1", "true", "yes", "on"}
+    return True
+
+
+def _critique_enabled() -> bool:
+    """Check AI_SAGE_CRITIQUE_ENABLED env toggle. Defaults to disabled."""
+    return _env_flag_enabled("AI_SAGE_CRITIQUE_ENABLED", default=False)
+
+
+def _suggested_readings_llm_enabled() -> bool:
+    """Check AI_SAGE_READINGS_ENABLED env toggle. Defaults to disabled."""
+    return _env_flag_enabled("AI_SAGE_READINGS_ENABLED", default=False)
+
+
+def _trace_chunks(stage: str, query: str, chunks: list[RetrievedChunk], *, limit: int = 8) -> None:
+    def _safe_number(value: Any) -> Any:
+        if isinstance(value, (int, float)):
+            return value
+        try:
+            return float(value)
+        except Exception:
+            return None
+
+    def _safe_text(value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    def _safe_similarity_for_chunk(chunk: RetrievedChunk) -> Any:
+        cosine_distance = _safe_number(getattr(chunk, "cosine_distance", None))
+        if cosine_distance is not None and cosine_distance < 1.0:
+            return round(1.0 - cosine_distance, 6)
+        rrf_score = _safe_number(getattr(chunk, "rrf_score", None))
+        if rrf_score is not None:
+            return round(min(rrf_score * 30, 1.0), 6)
+        ts_rank = _safe_number(getattr(chunk, "ts_rank", None))
+        if ts_rank is not None:
+            return round(min(ts_rank, 1.0), 6)
+        return None
+
+    preview = [
+        {
+            "chunk_id": _safe_text(getattr(chunk, "chunk_id", "")),
+            "document_id": _safe_text(getattr(chunk, "document_id", "")),
+            "chunk_index": _safe_number(getattr(chunk, "chunk_index", None)),
+            "similarity": _safe_similarity_for_chunk(chunk),
+            "reranker_score": _safe_number(getattr(chunk, "reranker_score", None)),
+            "rrf_score": _safe_number(getattr(chunk, "rrf_score", None)),
+            "ts_rank": _safe_number(getattr(chunk, "ts_rank", None)),
+            "source_url": _safe_text(((getattr(chunk, "metadata_json", None) or {}).get("source_url"))),
+            "published_at": _safe_text(((getattr(chunk, "metadata_json", None) or {}).get("published_at"))),
+            "text": _safe_text(getattr(chunk, "text", ""))[:180],
+        }
+        for chunk in chunks[:limit]
+    ]
+    log.info(
+        "ai_sage_trace stage=%s query=%r chunk_count=%d preview=%s",
+        stage,
+        query[:120],
+        len(chunks),
+        json.dumps(preview, ensure_ascii=False),
+    )
+
+
+def _with_display_context(
+    anchor_chunks: list[RetrievedChunk],
+    expanded_chunks: list[RetrievedChunk],
+) -> list[RetrievedChunk]:
+    expanded_by_id = {chunk.chunk_id: chunk for chunk in expanded_chunks}
+    display_chunks: list[RetrievedChunk] = []
+
+    for chunk in anchor_chunks:
+        expanded = expanded_by_id.get(chunk.chunk_id)
+        metadata = dict(chunk.metadata_json or {})
+        metadata["score_type"] = "reranked" if chunk.reranker_score is not None else "retrieved"
+        metadata["anchor_text"] = chunk.text
+        metadata["expanded_context_applied"] = False
+        if chunk.reranker_score is not None:
+            metadata["reranker_score"] = chunk.reranker_score
+        if chunk.rrf_score is not None:
+            metadata["rrf_score"] = chunk.rrf_score
+        if chunk.ts_rank is not None:
+            metadata["ts_rank"] = chunk.ts_rank
+        if expanded and expanded.text != chunk.text:
+            expanded_meta = expanded.metadata_json or {}
+            metadata["context_text"] = expanded.text
+            metadata["expanded_context_applied"] = True
+            metadata["context_chunk_indices"] = expanded_meta.get("context_chunk_indices")
+            metadata["anchor_chunk_index"] = expanded_meta.get("anchor_chunk_index", chunk.chunk_index)
+            metadata["context_window"] = expanded_meta.get("context_window")
+        display_chunks.append(
+            RetrievedChunk(
+                chunk_id=chunk.chunk_id,
+                document_id=chunk.document_id,
+                chunk_index=chunk.chunk_index,
+                text=chunk.text,
+                token_count=chunk.token_count,
+                metadata_json=metadata,
+                cosine_distance=chunk.cosine_distance,
+                ts_rank=chunk.ts_rank,
+                rrf_score=chunk.rrf_score,
+                reranker_score=chunk.reranker_score,
+            )
+        )
+    return display_chunks
+
+
+def _clean_query_for_keyword_search(
+    query: str,
+    *,
+    author_ids: list[str] | None = None,
+    topic_entities: list[str] | None = None,
+    year_from: Optional[str] = None,
+    year_to: Optional[str] = None,
+) -> str:
+    """Strip author names & year numbers from query for keyword search.
+
+    These are already handled as SQL WHERE filters.  Leaving them in the
+    tsquery causes AND-conjunction mismatches (e.g. a chunk about Munger
+    authored by Buffett won't match ``'buffett' & 'munger'`` if the chunk
+    text only contains "Munger").
+
+    Instead, extract the *semantic core* of the question and append any
+    topic_entities so keyword search is focused on the subject matter.
+    """
+    from app.rag.intent_router import _KNOWN_AUTHORS
+
+    q = query
+    # Remove known author names (case-insensitive)
+    for name in sorted(_KNOWN_AUTHORS.keys(), key=len, reverse=True):
+        q = re.sub(r"\b" + re.escape(name) + r"\b", " ", q, flags=re.IGNORECASE)
+    # Remove year numbers that are used as date filters
+    for yr in [year_from, year_to]:
+        if yr:
+            q = re.sub(r"\b" + re.escape(str(yr)) + r"\b", " ", q)
+    # Remove source-indicator words (user means them as source type, not topic)
+    q = re.sub(
+        r"\b(?:letters?|essays?|memos?|reports?|transcripts?|speeches?|pdfs?|writings?|articles?|annual\s+reports?)\b",
+        " ", q, flags=re.IGNORECASE,
+    )
+    # Remove common question scaffolding
+    q = re.sub(
+        r"\b(?:what|did|does|how|say|said|from|to|about|in|his|her|their|the|and|of|is|are|was|were)\b",
+        " ", q, flags=re.IGNORECASE,
+    )
+    q = re.sub(r"\s+", " ", q).strip()
+    # Append topic entities so keyword search targets the subject
+    if topic_entities:
+        q = q + " " + " ".join(topic_entities) if q else " ".join(topic_entities)
+    return q.strip() or query  # fall back to original if nothing left
+
 _CONCEPT_TOP_K_AUTHORS = 5
 _CONCEPT_TOP_K_CHUNKS = 12
 _MIN_CHUNKS_FOR_CONFIDENCE = 2
 _CHUNKS_PER_AUTHOR_VIEW = 4
+_SINGLE_AUTHOR_SUMMARY_CHUNKS = 10
 _SUGGESTED_READINGS_COUNT = 3
 _BROAD_RETRIEVAL_MULTIPLIER = 4
 _BROAD_RETRIEVAL_MIN = 24
@@ -111,6 +297,8 @@ class ConceptQueryResult:
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
     intent: Optional[dict[str, Any]] = None
+    constraints_relaxed: bool = False
+    constraint_relaxation_reason: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -123,6 +311,8 @@ class ConceptQueryResult:
             "evidence_sufficient": self.evidence_sufficient,
             "weak_evidence_note": self.weak_evidence_note,
             "intent": self.intent,
+            "constraints_relaxed": self.constraints_relaxed,
+            "constraint_relaxation_reason": self.constraint_relaxation_reason,
         }
 
 
@@ -161,8 +351,11 @@ def _llm_author_view(
     """).strip()
 
     client = create_inference_client()
-    response = client.chat.completions.create(
+    response = logged_chat_completion(
+        client=client,
         model=inference_model(),
+        purpose="concept_author_view",
+        logger=log,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         max_tokens=300,
@@ -193,8 +386,48 @@ def _llm_synthesis(query: str, author_views: list[AuthorView]) -> str:
     """).strip()
 
     client = create_inference_client()
-    response = client.chat.completions.create(
+    response = logged_chat_completion(
+        client=client,
         model=inference_model(),
+        purpose="concept_synthesis",
+        logger=log,
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.2,
+        max_tokens=400,
+    )
+    return response.choices[0].message.content or ""
+
+
+def _llm_single_author_summary(
+    query: str,
+    author_name: str,
+    passages: list[str],
+) -> str:
+    passages_block = "\n\n---\n\n".join(passages[:_SINGLE_AUTHOR_SUMMARY_CHUNKS])
+    prompt = textwrap.dedent(f"""
+        You are summarizing what {author_name} says in their corpus.
+
+        User question: {query}
+
+        Grounding passages from {author_name}:
+        ---
+        {passages_block}
+        ---
+
+        Instructions:
+        - Write a concise 3-5 sentence summary of what {author_name} says about this question.
+        - Use only the provided passages.
+        - Do not mention other authors, perspectives, agreements, contrasts, or divergences.
+        - Prefer specific, grounded statements over generic abstractions.
+        - If the passages are thin or only partially relevant, say so plainly.
+    """).strip()
+
+    client = create_inference_client()
+    response = logged_chat_completion(
+        client=client,
+        model=inference_model(),
+        purpose="single_author_summary",
+        logger=log,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.2,
         max_tokens=400,
@@ -229,8 +462,11 @@ def _llm_critique(query: str, synthesis: str, author_views: list[AuthorView]) ->
     """).strip()
 
     client = create_inference_client()
-    response = client.chat.completions.create(
+    response = logged_chat_completion(
+        client=client,
         model=inference_model(),
+        purpose="concept_critique",
+        logger=log,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.3,
         max_tokens=300,
@@ -269,8 +505,11 @@ def _llm_suggested_readings(
     """).strip()
 
     client = create_inference_client()
-    response = client.chat.completions.create(
+    response = logged_chat_completion(
+        client=client,
         model=inference_model(),
+        purpose="concept_suggested_readings",
+        logger=log,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=50,
@@ -324,6 +563,15 @@ def _template_synthesis(author_views: list[AuthorView]) -> str:
     )
 
 
+def _template_single_author_summary(author_name: str, passages: list[str]) -> Optional[str]:
+    if not passages:
+        return None
+    snippet = passages[0][:280].strip()
+    if not snippet:
+        return None
+    return f"{author_name}'s corpus most directly says: {snippet}"
+
+
 def _retrieve_with_intent_fallback(
     query: str,
     db: Session,
@@ -333,12 +581,23 @@ def _retrieve_with_intent_fallback(
     source_type: Optional[str],
     year_from: Optional[str],
     year_to: Optional[str],
-) -> list[RetrievedChunk]:
+    strict: bool = False,
+    keyword_query: Optional[str] = None,
+) -> tuple[list[RetrievedChunk], bool, Optional[str]]:
     """
     Apply source/date intent as preferences first, not zero-result traps.
 
-    Retrieval tries the most constrained query first, then progressively relaxes
-    source/date filters if the corpus does not support them.
+    When ``strict=True``, runs the query once with full constraints and
+    returns whatever comes back (even if empty).  No silent relaxation.
+
+    When ``strict=False`` (default), retrieval tries the most constrained
+    query first, then progressively relaxes source/date filters if the
+    corpus does not support them.
+
+    Returns a 3-tuple of:
+      - list[RetrievedChunk]: the resulting chunks
+      - bool: whether constraints were relaxed
+      - Optional[str]: reason for relaxation (None if no relaxation occurred)
 
     When RAG_RETRIEVAL_MODE=hybrid (the default), each successful dense retrieval
     attempt is augmented with sparse keyword retrieval and combined via RRF.
@@ -348,14 +607,46 @@ def _retrieve_with_intent_fallback(
 
     retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
 
+    # Convert year strings to int for the new retrieval signature
+    year_from_int: Optional[int] = int(year_from) if year_from is not None else None
+    year_to_int: Optional[int] = int(year_to) if year_to is not None else None
+
+    # Use cleaned keyword query for sparse search to avoid AND-conjunction mismatches
+    kw_q = keyword_query or query
+
+    if strict:
+        # Strict mode: execute once with full constraints, no fallback
+        chunks = retrieve_similar_chunks(
+            query,
+            db,
+            top_k=top_k,
+            author_ids=author_ids if author_ids else None,
+            source_type=source_type,
+            year_from=year_from_int,
+            year_to=year_to_int,
+        )
+        if retrieval_mode == "hybrid":
+            sparse = retrieve_keyword_chunks(
+                kw_q,
+                db,
+                top_k=top_k,
+                author_ids=author_ids if author_ids else None,
+                source_type=source_type,
+                year_from=year_from_int,
+                year_to=year_to_int,
+            )
+            if sparse:
+                chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
+        return chunks, False, None
+
     attempts: list[dict[str, Any]] = []
-    seen: set[tuple[Optional[str], Optional[str], Optional[str]]] = set()
+    seen: set[tuple[Optional[str], Optional[int], Optional[int]]] = set()
 
     def add_attempt(
         *,
         source_type_attempt: Optional[str],
-        year_from_attempt: Optional[str],
-        year_to_attempt: Optional[str],
+        year_from_attempt: Optional[int],
+        year_to_attempt: Optional[int],
     ) -> None:
         key = (source_type_attempt, year_from_attempt, year_to_attempt)
         if key in seen:
@@ -371,22 +662,22 @@ def _retrieve_with_intent_fallback(
 
     add_attempt(
         source_type_attempt=source_type,
-        year_from_attempt=year_from,
-        year_to_attempt=year_to,
+        year_from_attempt=year_from_int,
+        year_to_attempt=year_to_int,
     )
     if source_type is not None:
         add_attempt(
             source_type_attempt=None,
-            year_from_attempt=year_from,
-            year_to_attempt=year_to,
+            year_from_attempt=year_from_int,
+            year_to_attempt=year_to_int,
         )
-    if year_from is not None or year_to is not None:
+    if year_from_int is not None or year_to_int is not None:
         add_attempt(
             source_type_attempt=source_type,
             year_from_attempt=None,
             year_to_attempt=None,
         )
-    if source_type is not None or year_from is not None or year_to is not None:
+    if source_type is not None or year_from_int is not None or year_to_int is not None:
         add_attempt(
             source_type_attempt=None,
             year_from_attempt=None,
@@ -404,7 +695,17 @@ def _retrieve_with_intent_fallback(
             year_to=attempt["year_to"],
         )
         if chunks:
-            if attempt != attempts[0]:
+            was_relaxed = attempt != attempts[0]
+            relaxation_reason: Optional[str] = None
+            if was_relaxed:
+                relaxed_source = attempt["source_type"] != source_type
+                relaxed_date = attempt["year_from"] != year_from_int or attempt["year_to"] != year_to_int
+                parts: list[str] = []
+                if relaxed_source:
+                    parts.append("source_type filter removed")
+                if relaxed_date:
+                    parts.append("year range filter removed")
+                relaxation_reason = "No results under exact constraints; " + ", ".join(parts) + "."
                 log.info(
                     "intent retrieval fallback applied for query=%r source_type=%r year_from=%r year_to=%r",
                     query[:120],
@@ -414,7 +715,7 @@ def _retrieve_with_intent_fallback(
                 )
             if retrieval_mode == "hybrid":
                 sparse = retrieve_keyword_chunks(
-                    query,
+                    kw_q,
                     db,
                     top_k=top_k,
                     author_ids=author_ids if author_ids else None,
@@ -424,9 +725,9 @@ def _retrieve_with_intent_fallback(
                 )
                 if sparse:
                     chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
-            return chunks
+            return chunks, was_relaxed, relaxation_reason
 
-    return []
+    return [], False, None
 
 
 def _dedupe_chunks_by_id(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
@@ -447,19 +748,40 @@ def _collect_candidate_chunks(
     intent: QueryIntent,
     author_ids: list[str] | None,
     broad_top_k: int,
-) -> list[RetrievedChunk]:
+) -> tuple[list[RetrievedChunk], bool, Optional[str]]:
     """Retrieve a broad, deduplicated candidate pool before reranking.
 
-    Always routes through _retrieve_with_intent_fallback() to preserve
-    source/date constraint-relaxation semantics. When RAG_RETRIEVAL_MODE=hybrid
-    (the default), each fallback attempt also fetches sparse keyword results and
-    combines them via Reciprocal Rank Fusion internally.
+    When the intent carries explicit date or source constraints, retrieval
+    runs in strict mode (no silent relaxation).  Otherwise, progressive
+    fallback is used so that thin metadata doesn't cause zero-result traps.
+
+    Returns:
+      - list[RetrievedChunk]: deduplicated candidate chunks
+      - bool: whether any constraints were relaxed
+      - Optional[str]: reason for relaxation (None if exact constraints satisfied)
     """
     import os as _os
 
-    source_type_filter = intent.source_types[0] if intent.source_types else None
+    # source_type is intentionally NOT used as a retrieval filter (issue-146).
+    # Users saying "in letters" want the best results with source highlighted,
+    # not a reduced candidate set. Source filtering can be added as a future
+    # explicit re-query feature.
     candidates: list[RetrievedChunk] = []
     retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
+    any_relaxed = False
+    relaxation_reason: Optional[str] = None
+
+    # Use strict mode when the user gave explicit date constraints
+    has_explicit_constraints = bool(intent.date_from or intent.date_to)
+
+    # Build cleaned keyword query: strip author names and years already used as filters
+    kw_query = _clean_query_for_keyword_search(
+        query,
+        author_ids=author_ids,
+        topic_entities=intent.topic_entities if intent.topic_entities else None,
+        year_from=intent.date_from,
+        year_to=intent.date_to,
+    )
 
     if intent.sub_queries:
         per_sub_k = max(
@@ -467,26 +789,39 @@ def _collect_candidate_chunks(
             _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY,
         )
         for sub_query in intent.sub_queries:
-            candidates.extend(
-                _retrieve_with_intent_fallback(
-                    sub_query,
-                    db,
-                    top_k=per_sub_k,
-                    source_type=source_type_filter,
-                    year_from=intent.date_from,
-                    year_to=intent.date_to,
-                    author_ids=author_ids if author_ids else None,
-                )
+            sub_kw = _clean_query_for_keyword_search(
+                sub_query,
+                author_ids=author_ids,
+                topic_entities=intent.topic_entities if intent.topic_entities else None,
+                year_from=intent.date_from,
+                year_to=intent.date_to,
             )
+            sub_chunks, sub_relaxed, sub_reason = _retrieve_with_intent_fallback(
+                sub_query,
+                db,
+                top_k=per_sub_k,
+                source_type=None,
+                year_from=intent.date_from,
+                year_to=intent.date_to,
+                author_ids=author_ids if author_ids else None,
+                strict=has_explicit_constraints,
+                keyword_query=sub_kw,
+            )
+            candidates.extend(sub_chunks)
+            if sub_relaxed:
+                any_relaxed = True
+                relaxation_reason = sub_reason
     else:
-        candidates = _retrieve_with_intent_fallback(
+        candidates, any_relaxed, relaxation_reason = _retrieve_with_intent_fallback(
             query,
             db,
             top_k=broad_top_k,
-            source_type=source_type_filter,
+            source_type=None,
             year_from=intent.date_from,
             year_to=intent.date_to,
             author_ids=author_ids if author_ids else None,
+            strict=has_explicit_constraints,
+            keyword_query=kw_query,
         )
 
     deduped = _dedupe_chunks_by_id(candidates)
@@ -495,7 +830,7 @@ def _collect_candidate_chunks(
         deduped.sort(key=lambda c: -(c.rrf_score or 0.0) if c.rrf_score is not None else c.cosine_distance)
     else:
         deduped.sort(key=lambda c: c.cosine_distance)
-    return deduped[:broad_top_k]
+    return deduped[:broad_top_k], any_relaxed, relaxation_reason
 
 
 def _query_keywords(query: str) -> set[str]:
@@ -572,8 +907,11 @@ def _llm_rerank_candidate_indices(
     """).strip()
 
     client = create_routing_client()
-    response = client.chat.completions.create(
+    response = logged_chat_completion(
+        client=client,
         model=routing_model(),
+        purpose="routing_rerank_fallback",
+        logger=log,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.0,
         max_tokens=180,
@@ -621,6 +959,13 @@ def _select_diverse_top_chunks(
         if len(selected) >= top_k:
             break
         selected.append(chunk)
+    if overflow:
+        log.info(
+            "ai_sage_trace stage=diversity_cap top_k=%d per_document_cap=%d overflow=%d",
+            top_k,
+            per_document_cap,
+            len(overflow),
+        )
     return selected[:top_k]
 
 
@@ -644,10 +989,21 @@ def _rerank_candidate_chunks(
             passages = [str(getattr(c, "text", "") or "") for c in candidates]
             results = _cross_encoder_rerank(query, passages, top_k=len(candidates))
             if results:
+                log.info(
+                    "ai_sage_trace stage=jina_rerank query=%r top_scores=%s",
+                    query[:120],
+                    json.dumps(
+                        [
+                            {"index": r.index, "score": round(float(r.relevance_score), 6)}
+                            for r in results[:10]
+                        ]
+                    ),
+                )
                 ce_ranked: list[RetrievedChunk] = []
                 seen_ids: set[str] = set()
                 for r in results:
                     chunk = candidates[r.index]
+                    chunk.reranker_score = float(getattr(r, "relevance_score", 0.0))
                     if chunk.chunk_id not in seen_ids:
                         seen_ids.add(chunk.chunk_id)
                         ce_ranked.append(chunk)
@@ -659,24 +1015,8 @@ def _rerank_candidate_chunks(
         except Exception as exc:
             log.warning("cross-encoder reranking failed; falling back: %s", exc)
 
-    # Tier 2: deprecated LLM-prompt reranking (kept as fallback when no cross-encoder)
-    elif routing_available():
-        try:
-            indices = _llm_rerank_candidate_indices(query, candidates, keep_count=min(top_k, len(candidates)))
-            if indices:
-                llm_ranked: list[RetrievedChunk] = []
-                seen_ids_llm: set[str] = set()
-                for idx in indices:
-                    chunk = candidates[idx]
-                    if chunk.chunk_id not in seen_ids_llm:
-                        seen_ids_llm.add(chunk.chunk_id)
-                        llm_ranked.append(chunk)
-                for chunk in heuristic_ranked:
-                    if chunk.chunk_id not in seen_ids_llm:
-                        llm_ranked.append(chunk)
-                ranked = llm_ranked
-        except Exception as exc:
-            log.warning("LLM candidate reranking failed; using heuristic rank: %s", exc)
+    # Tier 2: LLM-prompt reranking — DISABLED (issue-146: reshuffles results poorly)
+    # Falls through to Tier 3 heuristic when no cross-encoder is available.
 
     # Tier 3: heuristic (keyword overlap + cosine similarity) — already set as default above
 
@@ -753,18 +1093,29 @@ def execute_concept_query(
         author_ids=selected_ids,
         broad_top_k=broad_top_k,
     )
+    # Unpack the tuple returned by _collect_candidate_chunks
+    if isinstance(candidate_chunks, tuple):
+        candidate_chunks, _constraints_relaxed, _relaxation_reason = candidate_chunks
+    else:
+        _constraints_relaxed, _relaxation_reason = False, None
+    _trace_chunks("candidate_pool", query, candidate_chunks)
     winning_chunks = _rerank_candidate_chunks(
         query,
         candidate_chunks,
         top_k=min(top_k_chunks, len(candidate_chunks)),
     )
+    _trace_chunks("reranked", query, winning_chunks)
     expanded_chunks = expand_chunks_with_context(
         winning_chunks,
         db,
         window_size=_CONTEXT_EXPANSION_WINDOW,
         max_chars=_CONTEXT_EXPANSION_MAX_CHARS,
+        only_when_needed=True,
     )
-    evidence: list[EvidenceChunk] = _enrich_chunks(expanded_chunks, db, author_map)
+    _trace_chunks("expanded_for_synthesis", query, expanded_chunks)
+    display_chunks = _with_display_context(winning_chunks, expanded_chunks)
+    evidence: list[EvidenceChunk] = _enrich_chunks(display_chunks, db, author_map)
+    synthesis_evidence: list[EvidenceChunk] = _enrich_chunks(expanded_chunks, db, author_map)
 
     log.debug(
         "concept evidence pipeline sizes: candidates=%d winners=%d expanded=%d",
@@ -790,11 +1141,24 @@ def execute_concept_query(
 
     # 3. Build per-author chunk map
     author_chunk_map: dict[str, list[str]] = {}
-    for chunk in evidence:
+    for chunk in synthesis_evidence:
         author_chunk_map.setdefault(chunk.author_id, []).append(chunk.text)
 
     # 4. Generate author views
+    is_single_author_grounded = (
+        intent.query_type == "single_author"
+        and len(author_chunk_map) == 1
+        and evidence_sufficient
+    )
+    use_llm_author_views = (
+        inference_available()
+        and _synthesis_enabled()
+    )
+    if is_single_author_grounded and use_llm_author_views:
+        log.info("single-author grounded query — using LLM author view")
+
     author_views: list[AuthorView] = []
+    _llm_call_failed = False
     for entry in author_entries:
         a_id = entry["author_id"]
         a_name = entry["name"]
@@ -808,13 +1172,14 @@ def execute_concept_query(
         worldview = entry.get("worldview", "")
         key_maxims = entry.get("key_maxims") or []
 
-        if inference_available() and passages_for_author:
+        if use_llm_author_views and passages_for_author and not _llm_call_failed:
             try:
                 view_text = _llm_author_view(
                     query, a_name, worldview or "", key_maxims, passages_for_author
                 )
             except Exception as exc:
-                log.warning("LLM author view failed for %s: %s", a_id, exc)
+                log.warning("LLM author view failed for %s: %s — degrading to template for remaining authors", a_id, exc)
+                _llm_call_failed = True
                 view_text = _template_author_view(a_name, worldview, key_maxims, passages_for_author)
         else:
             view_text = _template_author_view(a_name, worldview, key_maxims, passages_for_author)
@@ -828,30 +1193,60 @@ def execute_concept_query(
             )
         )
 
-    # 5. Synthesis
+    # 5. Synthesis — controlled by AI_SAGE_SYNTHESIS_ENABLED env toggle
     synthesis: Optional[str] = None
     if author_views:
-        if inference_available():
+        is_single_author_summary = intent.query_type == "single_author" and len(author_chunk_map) == 1
+        if _synthesis_enabled() and inference_available() and not _llm_call_failed:
             try:
-                synthesis = _llm_synthesis(query, author_views)
+                if is_single_author_summary:
+                    only_author_id = next(iter(author_chunk_map.keys()))
+                    author_name = next(
+                        (entry["name"] for entry in author_entries if entry["author_id"] == only_author_id),
+                        author_views[0].author_name,
+                    )
+                    synthesis = _llm_single_author_summary(
+                        query,
+                        author_name,
+                        author_chunk_map.get(only_author_id, [])[:_SINGLE_AUTHOR_SUMMARY_CHUNKS],
+                    )
+                else:
+                    synthesis = _llm_synthesis(query, author_views)
             except Exception as exc:
-                log.warning("LLM synthesis failed: %s", exc)
-                synthesis = _template_synthesis(author_views)
+                log.warning("LLM synthesis failed (degrading to template): %s", exc)
+                _llm_call_failed = True
+                if is_single_author_summary:
+                    only_author_id = next(iter(author_chunk_map.keys()))
+                    author_name = next(
+                        (entry["name"] for entry in author_entries if entry["author_id"] == only_author_id),
+                        author_views[0].author_name,
+                    )
+                    synthesis = _template_single_author_summary(
+                        author_name,
+                        author_chunk_map.get(only_author_id, [])[:_SINGLE_AUTHOR_SUMMARY_CHUNKS],
+                    )
+                else:
+                    synthesis = _template_synthesis(author_views)
         else:
-            synthesis = _template_synthesis(author_views)
+            if not _synthesis_enabled():
+                log.info("synthesis disabled via AI_SAGE_SYNTHESIS_ENABLED")
+            if is_single_author_summary:
+                synthesis = None
+            else:
+                synthesis = _template_synthesis(author_views)
 
-    # 6. Critique
+    # 6. Critique — disabled by default (issue-146 §1), enable via AI_SAGE_CRITIQUE_ENABLED
     critique: Optional[str] = None
-    if synthesis and author_views and inference_available():
+    if synthesis and author_views and _critique_enabled() and inference_available() and not _llm_call_failed:
         try:
             critique = _llm_critique(query, synthesis, author_views)
         except Exception as exc:
             log.warning("LLM critique failed: %s", exc)
 
-    # 7. Suggested readings
+    # 7. Suggested readings — LLM disabled by default (issue-146 §1), always uses heuristic fallback
     suggested_readings: list[SuggestedReading] = []
     if evidence:
-        if inference_available() and len(evidence) > _SUGGESTED_READINGS_COUNT:
+        if _suggested_readings_llm_enabled() and inference_available() and len(evidence) > _SUGGESTED_READINGS_COUNT and not _llm_call_failed:
             try:
                 indices = _llm_suggested_readings(query, evidence, _SUGGESTED_READINGS_COUNT)
                 for idx in indices:
@@ -897,12 +1292,20 @@ def execute_concept_query(
         evidence_sufficient=evidence_sufficient,
         weak_evidence_note=weak_evidence_note,
         intent=intent.as_dict(),
+        constraints_relaxed=_constraints_relaxed,
+        constraint_relaxation_reason=_relaxation_reason,
     )
     try:
         from app.rag.query_logger import log_query
 
         evidence_dicts = [
-            {"chunk_id": e.get("chunk_id", ""), "cosine_distance": 1.0 - e.get("similarity", 0.0)}
+            {
+                "chunk_id": e.get("chunk_id", ""),
+                "cosine_distance": 1.0 - e.get("similarity", 0.0),
+                "reranker_score": (e.get("metadata") or {}).get("reranker_score"),
+                "rrf_score": (e.get("metadata") or {}).get("rrf_score"),
+                "ts_rank": (e.get("metadata") or {}).get("ts_rank"),
+            }
             for e in best_passages
         ]
         log_query(
