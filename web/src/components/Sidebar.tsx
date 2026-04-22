@@ -31,6 +31,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Companies", to: "/companies" },
       { label: "Alerts", to: "/alerts" },
       { label: "AI Sage", to: "/ai-sage" },
+      { label: "Author Ingestion", to: "/author-ingestion" },
     ],
   },
   {

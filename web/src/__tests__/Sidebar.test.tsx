@@ -107,6 +107,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Companies" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Alerts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "AI Sage" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Author Ingestion" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "AI Guru" })).not.toBeInTheDocument();
   });
 

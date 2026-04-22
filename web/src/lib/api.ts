@@ -787,6 +787,58 @@ export type ExpectedDividendsOverview = {
   companies: ExpectedDividendCompany[];
 };
 
+export type RagAuthor = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  domains: string[];
+  expertise_tags: string[];
+  overall_weight: number;
+  role_type: string | null;
+};
+
+export type RagSourceRecord = {
+  id: string;
+  author_id: string;
+  url: string | null;
+  source_type: string;
+  status: string;
+  hash: string | null;
+  last_ingested_at: string | null;
+  created_at: string;
+};
+
+export type RagIngestionJobRecord = {
+  id: string;
+  source_id: string;
+  status: string;
+  failure_category: string | null;
+  error: string | null;
+  stats_json: Record<string, unknown>;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+};
+
+export type IngestUrlsBatchResult = {
+  author_id: string;
+  registered: number;
+  skipped_duplicate: number;
+  jobs_queued: number;
+  sources: RagSourceRecord[];
+  job_ids: string[];
+};
+
+export type RagAuthorCreate = {
+  id: string;
+  name: string;
+  enabled: boolean;
+  domains?: string[];
+  expertise_tags?: string[];
+  overall_weight?: number;
+  role_type?: string | null;
+};
+
 export type RagSelectedAuthor = {
   author_id: string;
   name: string;
@@ -1085,4 +1137,28 @@ export const api = {
     req<RagCompanyContextResult>("/rag/analyze/company-context", { method: "POST", body: JSON.stringify(payload) }),
   aiSageQuery: (payload: { query: string; top_k?: number }) =>
     req<ConceptQueryResult>("/ai-sage/query", { method: "POST", body: JSON.stringify(payload) }),
+  ragAuthors: (enabledOnly = false) =>
+    req<RagAuthor[]>(`/rag/authors${enabledOnly ? "?enabled_only=true" : ""}`),
+  ragCreateAuthor: (payload: RagAuthorCreate) =>
+    req<RagAuthor>("/rag/authors", { method: "POST", body: JSON.stringify(payload) }),
+  ragSources: (authorId?: string, status?: string) =>
+    req<RagSourceRecord[]>(
+      `/rag/sources${authorId ? `?author_id=${encodeURIComponent(authorId)}` : ""}${status ? `${authorId ? "&" : "?"}status=${encodeURIComponent(status)}` : ""}`
+    ),
+  ragIngestUrls: (authorId: string, payload: { urls: string[]; source_type: string }) =>
+    req<IngestUrlsBatchResult>(`/rag/authors/${encodeURIComponent(authorId)}/ingest-urls`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  ragIngestionJobs: (params?: { author_id?: string; source_id?: string; status?: string; limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.author_id) qs.set("author_id", params.author_id);
+    if (params?.source_id) qs.set("source_id", params.source_id);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    const query = qs.toString();
+    return req<RagIngestionJobRecord[]>(`/rag/ingest/jobs${query ? `?${query}` : ""}`);
+  },
+  ragRetryIngestion: (sourceId: string) =>
+    req<RagIngestionJobRecord>(`/rag/ingest/retry/${encodeURIComponent(sourceId)}`, { method: "POST" }),
 };

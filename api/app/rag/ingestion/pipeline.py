@@ -224,14 +224,30 @@ def _close_job(
 # ── Public pipeline entry points ──────────────────────────────────────────────
 
 
-def run_url_ingestion(source: RagSource, db: Session) -> RagIngestionJob:
+def run_url_ingestion(
+    source: RagSource,
+    db: Session,
+    *,
+    existing_job: Optional["RagIngestionJob"] = None,
+) -> RagIngestionJob:
     """
     Fetch, parse, chunk, embed, and store content from source.url.
+
+    If *existing_job* is provided (e.g. a pre-created "queued" job from a
+    background-ingestion flow), it is reused and transitioned to "running"
+    instead of creating a second job row.
 
     On any error the job is marked 'failed' and the error message is stored.
     The caller is responsible for committing the session.
     """
-    job = _open_job(db, source)
+    if existing_job is not None:
+        from datetime import datetime, timezone
+        job = existing_job
+        job.status = "running"
+        job.started_at = datetime.now(timezone.utc)
+        db.flush()
+    else:
+        job = _open_job(db, source)
     source.status = "fetched"
 
     try:

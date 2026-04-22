@@ -24,6 +24,7 @@ import Dividends from "./routes/Dividends.tsx";
 import Loans from "./routes/Loans.tsx";
 import Companies from "./routes/Companies.tsx";
 import AISage from "./routes/AISage.tsx";
+import AuthorIngestion from "./routes/AuthorIngestion.tsx";
 import Settings from "./routes/Settings.tsx";
 import Platforms from "./routes/Platforms.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
@@ -63,6 +64,7 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/companies" element={<Companies />} />
                       <Route path="/alerts" element={<Alerts />} />
                       <Route path="/ai-sage" element={<AISage />} />
+                      <Route path="/author-ingestion" element={<AuthorIngestion />} />
                       <Route path="/ingest" element={<Ingest />} />
                       <Route path="/market-data" element={<MarketData />} />
                       <Route path="/settings" element={<Settings />} />
