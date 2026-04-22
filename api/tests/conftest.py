@@ -16,6 +16,9 @@ os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
 os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
 os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "1"
+# Never allow backend tests to hit live inference just because the runtime
+# container has real credentials configured in .env.
+os.environ["INFERENCE_LLM_API_KEY"] = ""
 
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402

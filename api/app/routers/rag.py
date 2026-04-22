@@ -22,6 +22,7 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from typing import Any, Optional
 
@@ -30,7 +31,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.auth_context import require_current_user
-from app.db.session import get_db
+from app.db.session import SessionLocal, get_db
 from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource
 from app.rag.config import load_author_config, sync_authors_from_config
 from app.rag.discovery import discover_sources_for_author
@@ -107,6 +108,31 @@ class JobOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class CreateAuthorIn(BaseModel):
+    id: str = Field(..., pattern="^[a-z0-9_-]+$", description="Unique slug for the author")
+    name: str = Field(..., min_length=1)
+    enabled: bool = True
+    # Optional advanced fields
+    domains: list[str] = Field(default_factory=list)
+    expertise_tags: list[str] = Field(default_factory=list)
+    overall_weight: float = Field(1.0, ge=0.0)
+    role_type: Optional[str] = None
+
+
+class IngestUrlsBatchIn(BaseModel):
+    urls: list[str] = Field(..., min_length=1, description="One or more URLs to register and ingest")
+    source_type: str = Field("html", pattern="^(html|pdf|text)$")
+
+
+class IngestUrlsBatchOut(BaseModel):
+    author_id: str
+    registered: int
+    skipped_duplicate: int
+    jobs_queued: int
+    sources: list[SourceOut]
+    job_ids: list[str]
+
+
 class RetrieveSmokeIn(BaseModel):
     query: str
     top_k: int = 5
@@ -155,6 +181,35 @@ def list_authors(
     if enabled_only:
         q = q.filter(RagAuthor.enabled == True)  # noqa: E712
     return q.order_by(RagAuthor.name).all()
+
+
+@router.post("/authors", response_model=AuthorOut, status_code=201)
+def create_author(body: CreateAuthorIn, db: Session = Depends(get_db)):
+    """
+    Create a new author from the UI without editing config files.
+
+    Required: id (slug), name, enabled.
+    Optional advanced: domains, expertise_tags, overall_weight, role_type.
+    Returns 409 if the author id already exists.
+    """
+    existing = db.get(RagAuthor, body.id)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Author '{body.id}' already exists.")
+
+    author = RagAuthor(
+        id=body.id,
+        name=body.name,
+        enabled=body.enabled,
+        domains=body.domains,
+        expertise_tags=body.expertise_tags,
+        overall_weight=body.overall_weight,
+        role_type=body.role_type,
+        config_source="ui",
+    )
+    db.add(author)
+    db.commit()
+    db.refresh(author)
+    return author
 
 
 @router.post("/authors/sync-config", response_model=SyncConfigOut)
@@ -239,6 +294,160 @@ def _get_source_or_404(source_id: str, db: Session) -> RagSource:
     if not source:
         raise HTTPException(status_code=404, detail=f"Source {source_id} not found")
     return source
+
+
+@router.post("/authors/{author_id}/ingest-urls", response_model=IngestUrlsBatchOut, status_code=202)
+def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session = Depends(get_db)):
+    """
+    Register one or more URLs for an author and kick off background ingestion.
+
+    - Deduplicates: URLs already registered for this author are skipped.
+    - Registers new sources with status=pending and creates queued ingestion jobs.
+    - Spawns a background thread that processes URLs one at a time (explicit in logs).
+    - Returns immediately with job IDs and source records for client polling.
+    """
+    author = db.get(RagAuthor, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail=f"Author '{author_id}' not found.")
+
+    # Deduplicate against already-registered URLs for this author
+    existing_urls: set[str] = {
+        s.url for s in db.query(RagSource).filter(
+            RagSource.author_id == author_id,
+            RagSource.url.isnot(None),
+        ).all()
+        if s.url
+    }
+
+    new_sources: list[RagSource] = []
+    skipped = 0
+    for url in body.urls:
+        url = url.strip()
+        if not url:
+            continue
+        if url in existing_urls:
+            skipped += 1
+            continue
+        source = RagSource(
+            author_id=author_id,
+            url=url,
+            source_type=body.source_type,
+            status="pending",
+        )
+        db.add(source)
+        existing_urls.add(url)
+        new_sources.append(source)
+
+    db.flush()
+
+    # Create queued job rows so clients can poll status immediately
+    queued_jobs: list[RagIngestionJob] = []
+    for source in new_sources:
+        job = RagIngestionJob(
+            source_id=source.id,
+            status="queued",
+        )
+        db.add(job)
+        queued_jobs.append(job)
+
+    db.commit()
+    for source in new_sources:
+        db.refresh(source)
+    for job in queued_jobs:
+        db.refresh(job)
+
+    source_ids = [str(s.id) for s in new_sources]
+    job_ids = [str(j.id) for j in queued_jobs]
+
+    if source_ids:
+        thread = threading.Thread(
+            target=_run_background_ingestion,
+            args=(source_ids,),
+            daemon=True,
+            name=f"rag-ingest-{author_id}",
+        )
+        thread.start()
+        log.info(
+            "Background ingestion thread started: author=%s sources=%d",
+            author_id,
+            len(source_ids),
+        )
+
+    source_outs = [
+        SourceOut(
+            id=str(s.id),
+            author_id=s.author_id,
+            url=s.url,
+            source_type=s.source_type,
+            status=s.status,
+            hash=s.hash,
+            last_ingested_at=s.last_ingested_at,
+            created_at=s.created_at,
+        )
+        for s in new_sources
+    ]
+
+    return IngestUrlsBatchOut(
+        author_id=author_id,
+        registered=len(new_sources),
+        skipped_duplicate=skipped,
+        jobs_queued=len(queued_jobs),
+        sources=source_outs,
+        job_ids=job_ids,
+    )
+
+
+def _run_background_ingestion(source_ids: list[str]) -> None:
+    """
+    Background worker: ingest one source at a time using a fresh DB session.
+
+    Each source is processed in sequence with explicit log entries.
+    Uses its own SessionLocal to avoid reusing the request-scoped session.
+    """
+    for source_id in source_ids:
+        db = SessionLocal()
+        try:
+            source = db.get(RagSource, source_id)
+            if not source or not source.url:
+                log.warning("Background ingestion: source %s not found or has no URL, skipping", source_id)
+                continue
+
+            log.info(
+                "Background ingestion starting: source_id=%s url=%s author=%s",
+                source_id,
+                source.url,
+                source.author_id,
+            )
+
+            # Transition any queued job to running; reuse it in run_url_ingestion
+            # to avoid creating a duplicate job row.
+            queued_job = (
+                db.query(RagIngestionJob)
+                .filter(
+                    RagIngestionJob.source_id == source_id,
+                    RagIngestionJob.status == "queued",
+                )
+                .order_by(RagIngestionJob.created_at.desc())
+                .first()
+            )
+
+            job = run_url_ingestion(source, db, existing_job=queued_job)
+            db.commit()
+
+            log.info(
+                "Background ingestion complete: source_id=%s status=%s job=%s",
+                source_id,
+                source.status,
+                job.id,
+            )
+        except Exception:
+            log.exception("Background ingestion error for source %s", source_id)
+            try:
+                db.rollback()
+            except Exception:
+                pass
+        finally:
+            db.close()
 
 
 @router.post("/ingest/url", response_model=JobOut, status_code=202)
@@ -353,7 +562,7 @@ async def ingest_manual_upload(
 
 @router.post("/ingest/retry/{source_id}", response_model=JobOut, status_code=202)
 def retry_ingestion(source_id: str, db: Session = Depends(get_db)):
-    """Re-run ingestion for a previously failed source."""
+    """Re-run ingestion asynchronously for a previously failed or stalled source."""
     source = _get_source_or_404(source_id, db)
     if not source.url:
         raise HTTPException(
@@ -361,8 +570,24 @@ def retry_ingestion(source_id: str, db: Session = Depends(get_db)):
             detail="Source has no URL; cannot retry URL ingestion. Use POST /rag/ingest/manual.",
         )
     source.status = "pending"
-    job = run_url_ingestion(source, db)
+
+    job = RagIngestionJob(
+        source_id=source.id,
+        status="queued",
+    )
+    db.add(job)
     db.commit()
+    db.refresh(job)
+
+    thread = threading.Thread(
+        target=_run_background_ingestion,
+        args=([str(source.id)],),
+        daemon=True,
+        name=f"rag-retry-{source_id}",
+    )
+    thread.start()
+    log.info("Retry ingestion thread started: source_id=%s", source_id)
+
     return _job_out(job)
 
 
@@ -467,11 +692,12 @@ def bulk_ingest_author_sources(
 @router.get("/ingest/jobs", response_model=list[JobOut])
 def list_jobs(
     source_id: Optional[str] = Query(None),
+    author_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    """List ingestion jobs, optionally filtered by source or status."""
+    """List ingestion jobs, optionally filtered by source, author, or status."""
     q = db.query(RagIngestionJob)
     if source_id:
         try:
@@ -479,6 +705,10 @@ def list_jobs(
         except ValueError:
             raise HTTPException(status_code=422, detail="Invalid source_id UUID")
         q = q.filter(RagIngestionJob.source_id == source_id)
+    if author_id:
+        q = q.join(RagSource, RagIngestionJob.source_id == RagSource.id).filter(
+            RagSource.author_id == author_id
+        )
     if status:
         q = q.filter(RagIngestionJob.status == status)
     jobs = q.order_by(RagIngestionJob.created_at.desc()).limit(limit).all()

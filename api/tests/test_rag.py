@@ -616,18 +616,25 @@ def setup_rag_tables_in_test_db():
     """
     Ensure RAG tables exist in the test SQLite DB.
     The main conftest.py calls Base.metadata.create_all(), which now includes
-    the RAG models (with SQLite-compatible dialect-aware types), so we just
-    need to yield and clean up after the module.
+    the RAG models when they have been imported before startup, but this test
+    module should not rely on import order from other modules. Explicitly
+    create the RAG tables here, then clean rows up after the module.
     """
-    yield
-
-    # Cleanup RAG rows after this test module runs
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import create_engine
+    from app.models.base import Base
+    from app.models import rag as _rag_models  # noqa: F401
 
     engine = create_engine(
         "sqlite+pysqlite:////tmp/capitalos_test.db",
         connect_args={"check_same_thread": False},
     )
+    Base.metadata.create_all(bind=engine)
+
+    yield
+
+    # Cleanup RAG rows after this test module runs
+    from sqlalchemy import text
+
     with engine.begin() as conn:
         for table in [
             "rag_author_profile_citations",
@@ -651,7 +658,15 @@ def client(rag_yaml_file):
     """FastAPI TestClient with RAG_AUTHORS_CONFIG pointing to test yaml."""
     from fastapi.testclient import TestClient
 
-    with patch.dict(os.environ, {"RAG_AUTHORS_CONFIG": rag_yaml_file}):
+    with patch.dict(
+        os.environ,
+        {
+            "RAG_AUTHORS_CONFIG": rag_yaml_file,
+            # Keep Phase 2/profile/query tests deterministic even when the
+            # container has live inference credentials configured.
+            "INFERENCE_LLM_API_KEY": "",
+        },
+    ):
         from app.main import app
 
         yield TestClient(app)
