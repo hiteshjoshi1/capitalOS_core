@@ -77,7 +77,33 @@ app.include_router(ai_sage_router)
 app.include_router(realtime_router)
 
 
+def _schedule_alerts_pruning() -> None:
+    """Schedule a daily background job to prune expired realtime_events (6-month retention)."""
+    import logging
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from app.db.session import SessionLocal
+    from app.services.alerts import prune_old_realtime_events
+
+    log = logging.getLogger("capitalos.alerts.pruning")
+
+    def _run_prune() -> None:
+        db = SessionLocal()
+        try:
+            deleted = prune_old_realtime_events(db)
+            log.info("Daily pruning complete: deleted=%d", deleted)
+        except Exception:
+            log.exception("Daily alerts pruning failed")
+        finally:
+            db.close()
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(_run_prune, "interval", hours=24, id="alerts_prune_daily")
+    scheduler.start()
+    log.info("Alerts pruning scheduler started (interval=24h, retention_days=180)")
+
+
 @app.on_event("startup")
 def _start_schedulers():
     start_scheduler()
     start_market_scheduler()
+    _schedule_alerts_pruning()

@@ -84,6 +84,7 @@ migrations/__pycache__/
 web/node_modules/
 web/dist/
 web/.vite/
+.vite/
 web/.cache/
 
 # Optional: if you run frontend tests

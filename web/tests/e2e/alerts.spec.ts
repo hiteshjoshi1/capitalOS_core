@@ -1,12 +1,23 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedSession } from "./helpers/auth";
 
-async function mockAlertsApis(page: Page, alerts: object[] = []) {
+async function mockAlertsApis(page: Page, uploadReminders: object[] = []) {
+  // Legacy endpoints — still available for compatibility
   await page.route("**/alerts/upload-reminders/count", async (route) => {
-    await route.fulfill({ json: { count: alerts.length } });
+    await route.fulfill({ json: { count: uploadReminders.length } });
   });
   await page.route("**/alerts/upload-reminders", async (route) => {
-    await route.fulfill({ json: alerts });
+    await route.fulfill({ json: uploadReminders });
+  });
+  // New unified endpoint used by the Alerts page
+  await page.route("**/alerts/notifications", async (route) => {
+    await route.fulfill({
+      json: {
+        upload_reminders: uploadReminders,
+        system_notifications: [],
+        total_count: uploadReminders.length,
+      },
+    });
   });
 }
 

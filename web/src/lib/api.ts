@@ -143,6 +143,10 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
+export async function refreshAccessTokenNow(): Promise<string | null> {
+  return refreshAccessToken();
+}
+
 async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {}): Promise<T> {
   const execute = async (): Promise<Response> => {
     try {
@@ -681,6 +685,27 @@ export type UploadReminderCount = {
   count: number;
 };
 
+export type SystemNotification = {
+  id: string;
+  alert_type: "system_notification";
+  topic: string;
+  event_name: string;
+  author_id: string | null;
+  source_id: string | null;
+  job_id: string | null;
+  batch_id: string | null;
+  status: string | null;
+  message: string;
+  created_at: string;
+  payload: Record<string, unknown>;
+};
+
+export type UnifiedAlertsResponse = {
+  upload_reminders: UploadReminder[];
+  system_notifications: SystemNotification[];
+  total_count: number;
+};
+
 export type DividendTotals = {
   gross: number;
   withholding: number;
@@ -1130,6 +1155,7 @@ export const api = {
     }),
   uploadReminders: () => req<UploadReminder[]>("/alerts/upload-reminders"),
   uploadReminderCount: () => req<UploadReminderCount>("/alerts/upload-reminders/count"),
+  alertNotifications: () => req<UnifiedAlertsResponse>("/alerts/notifications"),
   dividendsSummary: (
     fromMonth: string,
     toMonth: string,
