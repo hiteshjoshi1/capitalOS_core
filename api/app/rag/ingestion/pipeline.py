@@ -20,6 +20,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from app.models.rag import RagChunk, RagDocument, RagEmbedding, RagIngestionJob, RagSource
+from app.rag.ingestion.events import record_source_event
 from app.rag.ingestion.chunker import Chunk, DocumentSection as ChunkerSection, chunk_structured, chunk_text
 from app.rag.ingestion.embedder import embed_batch, embedding_model_name
 from app.rag.ingestion.fetcher import FetchResult, detect_source_type, fetch_url
@@ -195,6 +196,7 @@ def _ensure_clean_text(parsed: ParseResult, source_type: str) -> None:
 
 def _open_job(db: Session, source: RagSource) -> RagIngestionJob:
     job = RagIngestionJob(
+        user_id=source.user_id,
         source_id=source.id,
         status="running",
         started_at=_now(),
@@ -229,6 +231,7 @@ def run_url_ingestion(
     db: Session,
     *,
     existing_job: Optional["RagIngestionJob"] = None,
+    batch_id: str | None = None,
 ) -> RagIngestionJob:
     """
     Fetch, parse, chunk, embed, and store content from source.url.
@@ -243,12 +246,27 @@ def run_url_ingestion(
     if existing_job is not None:
         from datetime import datetime, timezone
         job = existing_job
+        job.user_id = source.user_id
+        job.batch_id = batch_id or job.batch_id
         job.status = "running"
         job.started_at = datetime.now(timezone.utc)
         db.flush()
     else:
         job = _open_job(db, source)
-    source.status = "fetched"
+        job.batch_id = batch_id
+    source.status = "running"
+    db.flush()
+
+    if source.user_id is not None:
+        record_source_event(
+            db,
+            user_id=source.user_id,
+            source=source,
+            job=job,
+            event_name="source_running",
+            status="running",
+            batch_id=batch_id,
+        )
 
     try:
         log.info("Fetching %s", source.url)
@@ -279,6 +297,16 @@ def run_url_ingestion(
                 "model": embedding_model_name(),
             },
         )
+        if source.user_id is not None:
+            record_source_event(
+                db,
+                user_id=source.user_id,
+                source=source,
+                job=job,
+                event_name="source_ingested",
+                status="ingested",
+                batch_id=batch_id,
+            )
     except Exception as exc:
         log.exception("Ingestion failed for source %s", source.id)
         source.status = "failed"
@@ -290,6 +318,16 @@ def run_url_ingestion(
             error=str(exc),
             failure_category=_classify_failure(exc, source.source_type),
         )
+        if source.user_id is not None:
+            record_source_event(
+                db,
+                user_id=source.user_id,
+                source=source,
+                job=job,
+                event_name="source_failed",
+                status="failed",
+                batch_id=batch_id,
+            )
 
     return job
 
@@ -298,6 +336,7 @@ def bulk_ingest_author(
     author_id: str,
     db: Session,
     *,
+    current_user_id: int | None = None,
     statuses: tuple[str, ...] = ("pending", "failed"),
 ) -> list[RagIngestionJob]:
     """
@@ -316,6 +355,7 @@ def bulk_ingest_author(
         .filter(
             and_(
                 RagSource.author_id == author_id,
+                *(() if current_user_id is None else (RagSource.user_id == current_user_id,)),
                 RagSource.status.in_(statuses),
                 RagSource.url.isnot(None),
             )
@@ -348,10 +388,10 @@ def run_manual_ingestion(
     The caller is responsible for committing the session.
     """
     job = _open_job(db, source)
+    source.status = "running"
 
     try:
         source.hash = _sha256(text)
-        source.status = "fetched"
 
         from app.rag.ingestion.parser import parse_text
 

@@ -23,6 +23,7 @@ from .rag import (
     RagChunk,
     RagEmbedding,
     RagIngestionJob,
+    RealtimeEvent,
 )
 
 __all__ = [
@@ -53,4 +54,5 @@ __all__ = [
     "RagChunk",
     "RagEmbedding",
     "RagIngestionJob",
+    "RealtimeEvent",
 ]

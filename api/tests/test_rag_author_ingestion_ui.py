@@ -139,8 +139,8 @@ class TestIngestUrls:
         assert len(data["sources"]) == 1
         assert len(data["job_ids"]) == 1
         assert data["sources"][0]["url"] == url
-        # Status is pending (background thread hasn't run yet in test mode)
-        assert data["sources"][0]["status"] in {"pending", "fetched", "ingested", "failed"}
+        # Status is queued until the background worker starts.
+        assert data["sources"][0]["status"] in {"queued", "running", "ingested", "failed"}
 
     def test_register_multiple_urls(self, client):
         """POST ingest-urls with multiple URLs registers all of them."""
@@ -188,6 +188,40 @@ class TestIngestUrls:
         assert resp.status_code == 200
         registered_urls = [s["url"] for s in resp.json()]
         assert url in registered_urls
+
+    def test_ingestion_activity_returns_durable_events_for_reload_recovery(self, client):
+        """GET /rag/ingest/activity returns durable backend state and lifecycle events."""
+        url = f"https://example.com/activity-{_uid()}"
+        ingest_resp = client.post(
+            f"/rag/authors/{self.author_id}/ingest-urls",
+            json={"urls": [url], "source_type": "html"},
+        )
+        assert ingest_resp.status_code == 202, ingest_resp.text
+        source_id = ingest_resp.json()["sources"][0]["id"]
+
+        activity_resp = client.get(f"/rag/ingest/activity?author_id={self.author_id}")
+        assert activity_resp.status_code == 200, activity_resp.text
+        activity = activity_resp.json()
+
+        assert any(source["url"] == url for source in activity["sources"])
+        assert any(job["source_id"] == source_id for job in activity["jobs"])
+
+        batch_events = [
+            event
+            for event in activity["events"]
+            if event["payload"].get("source", {}).get("url") == url or event["payload"].get("author", {}).get("id") == self.author_id
+        ]
+        event_names = {event["event_name"] for event in batch_events}
+        assert "batch_submitted" in event_names
+        assert "source_queued" in event_names
+
+        queued_event = next(event for event in batch_events if event["event_name"] == "source_queued")
+        assert queued_event["author_id"] == self.author_id
+        assert queued_event["source_id"]
+        assert queued_event["job_id"]
+        assert queued_event["status"] == "queued"
+        assert queued_event["payload"]["author"]["id"] == self.author_id
+        assert queued_event["payload"]["source"]["url"] == url
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,6 +297,16 @@ class TestRetryIngestion:
         job = resp.json()
         assert job["source_id"] == self.source_id
         assert job["status"] in {"queued", "running", "done", "failed"}
+        assert job["batch_id"]
+
+        activity_resp = client.get(f"/rag/ingest/activity?author_id={self.author_id}")
+        assert activity_resp.status_code == 200, activity_resp.text
+        activity = activity_resp.json()
+
+        retry_events = [event for event in activity["events"] if event["batch_id"] == job["batch_id"]]
+        retry_event_names = {event["event_name"] for event in retry_events}
+        assert "batch_submitted" in retry_event_names
+        assert "source_queued" in retry_event_names
 
     def test_retry_on_source_without_url_returns_422(self, client):
         """POST /rag/ingest/retry for a source with no URL returns 422."""
@@ -271,6 +315,7 @@ class TestRetryIngestion:
         db = TestingSessionLocal()
         try:
             no_url_source = RagSource(
+                user_id=1,
                 author_id=self.author_id,
                 url=None,
                 source_type="manual",

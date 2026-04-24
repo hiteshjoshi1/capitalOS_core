@@ -30,11 +30,20 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Upload
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth_context import require_current_user
+from app.auth_context import CurrentUser, require_current_user
 from app.db.session import SessionLocal, get_db
-from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource
+from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource, RealtimeEvent
 from app.rag.config import load_author_config, sync_authors_from_config
 from app.rag.discovery import discover_sources_for_author
+from app.rag.ingestion.events import (
+    AUTHOR_INGESTION_TOPIC,
+    publish_event,
+    record_batch_event,
+    record_source_event,
+    serialize_event,
+    serialize_job,
+    serialize_source,
+)
 from app.rag.ingestion.pipeline import bulk_ingest_author, run_manual_ingestion, run_url_ingestion
 from app.rag.retrieval import retrieve_similar_chunks, retrieve_with_constraints
 
@@ -66,6 +75,7 @@ class SyncConfigOut(BaseModel):
 class SourceOut(BaseModel):
     id: str
     author_id: str
+    author_name: Optional[str] = None
     url: Optional[str]
     source_type: str
     status: str
@@ -97,6 +107,7 @@ class IngestManualIn(BaseModel):
 class JobOut(BaseModel):
     id: str
     source_id: str
+    batch_id: Optional[str] = None
     status: str
     failure_category: Optional[str]
     error: Optional[str]
@@ -168,6 +179,26 @@ class BulkIngestOut(BaseModel):
     jobs: list[JobOut]
 
 
+class RealtimeEventOut(BaseModel):
+    id: str
+    topic: str
+    event_name: str
+    batch_id: Optional[str]
+    author_id: Optional[str]
+    source_id: Optional[str]
+    job_id: Optional[str]
+    status: Optional[str]
+    created_at: Optional[str]
+    payload: dict[str, Any]
+
+
+class IngestionActivityOut(BaseModel):
+    topic: str = AUTHOR_INGESTION_TOPIC
+    sources: list[SourceOut]
+    jobs: list[JobOut]
+    events: list[RealtimeEventOut]
+
+
 # ── Catalog / config ──────────────────────────────────────────────────────────
 
 
@@ -230,9 +261,10 @@ def list_sources(
     author_id: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     """Return registered sources, optionally filtered by author or status."""
-    q = db.query(RagSource)
+    q = db.query(RagSource).filter(RagSource.user_id == current_user.id)
     if author_id:
         q = q.filter(RagSource.author_id == author_id)
     if status:
@@ -242,6 +274,7 @@ def list_sources(
         SourceOut(
             id=str(s.id),
             author_id=s.author_id,
+            author_name=s.author.name if s.author else None,
             url=s.url,
             source_type=s.source_type,
             status=s.status,
@@ -254,13 +287,18 @@ def list_sources(
 
 
 @router.post("/sources", response_model=SourceOut, status_code=201)
-def register_source(body: RegisterSourceIn, db: Session = Depends(get_db)):
+def register_source(
+    body: RegisterSourceIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     """Register a new source URL for an author (does not trigger ingestion)."""
     author = db.get(RagAuthor, body.author_id)
     if not author:
         raise HTTPException(status_code=404, detail=f"Author '{body.author_id}' not found. Run sync-config first.")
 
     source = RagSource(
+        user_id=current_user.id,
         author_id=body.author_id,
         url=body.url,
         source_type=body.source_type,
@@ -272,6 +310,7 @@ def register_source(body: RegisterSourceIn, db: Session = Depends(get_db)):
     return SourceOut(
         id=str(source.id),
         author_id=source.author_id,
+        author_name=source.author.name if source.author else None,
         url=source.url,
         source_type=source.source_type,
         status=source.status,
@@ -284,20 +323,25 @@ def register_source(body: RegisterSourceIn, db: Session = Depends(get_db)):
 # ── Ingestion ─────────────────────────────────────────────────────────────────
 
 
-def _get_source_or_404(source_id: str, db: Session) -> RagSource:
+def _get_source_or_404(source_id: str, db: Session, current_user: CurrentUser) -> RagSource:
     # Validate UUID format
     try:
         uuid.UUID(source_id)
     except ValueError:
         raise HTTPException(status_code=422, detail="Invalid source_id UUID format")
     source = db.get(RagSource, source_id)
-    if not source:
+    if not source or source.user_id != current_user.id:
         raise HTTPException(status_code=404, detail=f"Source {source_id} not found")
     return source
 
 
 @router.post("/authors/{author_id}/ingest-urls", response_model=IngestUrlsBatchOut, status_code=202)
-def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session = Depends(get_db)):
+def ingest_urls_for_author(
+    author_id: str,
+    body: IngestUrlsBatchIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     """
     Register one or more URLs for an author and kick off background ingestion.
 
@@ -313,6 +357,7 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
     # Deduplicate against already-registered URLs for this author
     existing_urls: set[str] = {
         s.url for s in db.query(RagSource).filter(
+            RagSource.user_id == current_user.id,
             RagSource.author_id == author_id,
             RagSource.url.isnot(None),
         ).all()
@@ -321,6 +366,7 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
 
     new_sources: list[RagSource] = []
     skipped = 0
+    batch_id = str(uuid.uuid4())
     for url in body.urls:
         url = url.strip()
         if not url:
@@ -329,10 +375,11 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
             skipped += 1
             continue
         source = RagSource(
+            user_id=current_user.id,
             author_id=author_id,
             url=url,
             source_type=body.source_type,
-            status="pending",
+            status="queued",
         )
         db.add(source)
         existing_urls.add(url)
@@ -342,13 +389,40 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
 
     # Create queued job rows so clients can poll status immediately
     queued_jobs: list[RagIngestionJob] = []
+    queued_events: list[RealtimeEvent] = []
     for source in new_sources:
         job = RagIngestionJob(
+            user_id=current_user.id,
             source_id=source.id,
+            batch_id=batch_id,
             status="queued",
         )
         db.add(job)
         queued_jobs.append(job)
+        db.flush()
+        queued_events.append(
+            record_source_event(
+                db,
+                user_id=current_user.id,
+                source=source,
+                job=job,
+                event_name="source_queued",
+                status="queued",
+                batch_id=batch_id,
+            )
+        )
+
+    batch_submitted_event: RealtimeEvent | None = None
+    if new_sources:
+        batch_submitted_event = record_batch_event(
+            db,
+            user_id=current_user.id,
+            author=author,
+            batch_id=batch_id,
+            event_name="batch_submitted",
+            status="submitted",
+            source_count=len(new_sources),
+        )
 
     db.commit()
     for source in new_sources:
@@ -356,13 +430,18 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
     for job in queued_jobs:
         db.refresh(job)
 
+    if batch_submitted_event is not None:
+        publish_event(batch_submitted_event)
+    for queued_event in queued_events:
+        publish_event(queued_event)
+
     source_ids = [str(s.id) for s in new_sources]
     job_ids = [str(j.id) for j in queued_jobs]
 
     if source_ids:
         thread = threading.Thread(
             target=_run_background_ingestion,
-            args=(source_ids,),
+            args=(source_ids, batch_id, author_id, current_user.id),
             daemon=True,
             name=f"rag-ingest-{author_id}",
         )
@@ -377,6 +456,7 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
         SourceOut(
             id=str(s.id),
             author_id=s.author_id,
+            author_name=s.author.name if s.author else None,
             url=s.url,
             source_type=s.source_type,
             status=s.status,
@@ -397,7 +477,12 @@ def ingest_urls_for_author(author_id: str, body: IngestUrlsBatchIn, db: Session 
     )
 
 
-def _run_background_ingestion(source_ids: list[str]) -> None:
+def _run_background_ingestion(
+    source_ids: list[str],
+    batch_id: str | None,
+    author_id: str | None,
+    user_id: int,
+) -> None:
     """
     Background worker: ingest one source at a time using a fresh DB session.
 
@@ -408,7 +493,7 @@ def _run_background_ingestion(source_ids: list[str]) -> None:
         db = SessionLocal()
         try:
             source = db.get(RagSource, source_id)
-            if not source or not source.url:
+            if not source or source.user_id != user_id or not source.url:
                 log.warning("Background ingestion: source %s not found or has no URL, skipping", source_id)
                 continue
 
@@ -431,8 +516,22 @@ def _run_background_ingestion(source_ids: list[str]) -> None:
                 .first()
             )
 
-            job = run_url_ingestion(source, db, existing_job=queued_job)
+            job = run_url_ingestion(source, db, existing_job=queued_job, batch_id=batch_id)
             db.commit()
+            if source.user_id is not None:
+                events = (
+                    db.query(RealtimeEvent)
+                    .filter(
+                        RealtimeEvent.user_id == source.user_id,
+                        RealtimeEvent.source_id == source.id,
+                        RealtimeEvent.job_id == job.id,
+                        RealtimeEvent.event_name.in_(["source_running", "source_ingested", "source_failed"]),
+                    )
+                    .order_by(RealtimeEvent.created_at.asc())
+                    .all()
+                )
+                for event in events:
+                    publish_event(event)
 
             log.info(
                 "Background ingestion complete: source_id=%s status=%s job=%s",
@@ -449,16 +548,52 @@ def _run_background_ingestion(source_ids: list[str]) -> None:
         finally:
             db.close()
 
+    if batch_id and author_id:
+        db = SessionLocal()
+        try:
+            author = db.get(RagAuthor, author_id)
+            if author is None:
+                return
+            jobs = (
+                db.query(RagIngestionJob)
+                .filter(
+                    RagIngestionJob.user_id == user_id,
+                    RagIngestionJob.batch_id == batch_id,
+                )
+                .all()
+            )
+            completed_jobs = [job for job in jobs if job.status in {"done", "failed"}]
+            failed_jobs = [job for job in completed_jobs if job.status == "failed"]
+            event = record_batch_event(
+                db,
+                user_id=user_id,
+                author=author,
+                batch_id=batch_id,
+                event_name="batch_completed",
+                status="completed",
+                source_count=len(jobs),
+                completed_source_count=len(completed_jobs),
+                failed_source_count=len(failed_jobs),
+            )
+            db.commit()
+            publish_event(event)
+        finally:
+            db.close()
+
 
 @router.post("/ingest/url", response_model=JobOut, status_code=202)
-def ingest_url(body: IngestUrlIn, db: Session = Depends(get_db)):
+def ingest_url(
+    body: IngestUrlIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     """
     Trigger URL ingestion for a registered source.
 
     The pipeline fetches, parses, chunks, embeds, and persists the content.
     If the URL cannot be fetched, use POST /rag/ingest/manual instead.
     """
-    source = _get_source_or_404(body.source_id, db)
+    source = _get_source_or_404(body.source_id, db, current_user)
     if not source.url:
         raise HTTPException(status_code=422, detail="Source has no URL. Use POST /rag/ingest/manual.")
 
@@ -468,7 +603,11 @@ def ingest_url(body: IngestUrlIn, db: Session = Depends(get_db)):
 
 
 @router.post("/ingest/manual", response_model=JobOut, status_code=202)
-def ingest_manual(body: IngestManualIn, db: Session = Depends(get_db)):
+def ingest_manual(
+    body: IngestManualIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     """
     Ingest manually supplied text for an author.
 
@@ -484,6 +623,7 @@ def ingest_manual(body: IngestManualIn, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail=f"Author '{body.author_id}' not found. Run sync-config first.")
 
     source = RagSource(
+        user_id=current_user.id,
         author_id=body.author_id,
         url=None,
         source_type=body.source_type,
@@ -519,6 +659,7 @@ async def ingest_manual_upload(
     published_at: Optional[str] = Form(None),
     file: UploadFile = File(..., description="Plain text (.txt) or pre-extracted PDF text file"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     """
     Upload a text file for manual ingestion.
@@ -538,6 +679,7 @@ async def ingest_manual_upload(
         raise HTTPException(status_code=422, detail=f"Could not decode file: {exc}")
 
     source = RagSource(
+        user_id=current_user.id,
         author_id=author_id,
         url=None,
         source_type="manual",
@@ -561,27 +703,55 @@ async def ingest_manual_upload(
 
 
 @router.post("/ingest/retry/{source_id}", response_model=JobOut, status_code=202)
-def retry_ingestion(source_id: str, db: Session = Depends(get_db)):
+def retry_ingestion(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     """Re-run ingestion asynchronously for a previously failed or stalled source."""
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not source.url:
         raise HTTPException(
             status_code=422,
             detail="Source has no URL; cannot retry URL ingestion. Use POST /rag/ingest/manual.",
         )
-    source.status = "pending"
+    source.status = "queued"
+    batch_id = str(uuid.uuid4())
 
     job = RagIngestionJob(
+        user_id=current_user.id,
         source_id=source.id,
+        batch_id=batch_id,
         status="queued",
     )
     db.add(job)
+    db.flush()
+    batch_event = record_batch_event(
+        db,
+        user_id=current_user.id,
+        author=source.author,
+        batch_id=batch_id,
+        event_name="batch_submitted",
+        status="submitted",
+        source_count=1,
+    )
+    queued_event = record_source_event(
+        db,
+        user_id=current_user.id,
+        source=source,
+        job=job,
+        event_name="source_queued",
+        status="queued",
+        batch_id=batch_id,
+    )
     db.commit()
     db.refresh(job)
+    publish_event(batch_event)
+    publish_event(queued_event)
 
     thread = threading.Thread(
         target=_run_background_ingestion,
-        args=([str(source.id)],),
+        args=([str(source.id)], batch_id, source.author_id, current_user.id),
         daemon=True,
         name=f"rag-retry-{source_id}",
     )
@@ -595,7 +765,11 @@ def retry_ingestion(source_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/authors/{author_id}/discover", response_model=DiscoverAuthorOut, status_code=200)
-def discover_author_sources(author_id: str, db: Session = Depends(get_db)):
+def discover_author_sources(
+    author_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     """
     Discover child source URLs for an author from their config discovery_seeds.
 
@@ -629,7 +803,7 @@ def discover_author_sources(author_id: str, db: Session = Depends(get_db)):
             results=[],
         )
 
-    results = discover_sources_for_author(author_id, author_cfg, db)
+    results = discover_sources_for_author(author_id, author_cfg, db, user_id=current_user.id)
     db.commit()
 
     result_outs = [
@@ -661,6 +835,7 @@ def bulk_ingest_author_sources(
     author_id: str,
     statuses: str = Query("pending,failed", description="Comma-separated source statuses to ingest"),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     """
     Ingest all sources in pending or failed status for the given author.
@@ -679,7 +854,7 @@ def bulk_ingest_author_sources(
     if not status_list:
         raise HTTPException(status_code=422, detail="statuses must be a non-empty comma-separated list")
 
-    jobs = bulk_ingest_author(author_id, db, statuses=status_list)
+    jobs = bulk_ingest_author(author_id, db, current_user_id=current_user.id, statuses=status_list)
     db.commit()
 
     return BulkIngestOut(
@@ -696,9 +871,10 @@ def list_jobs(
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
     """List ingestion jobs, optionally filtered by source, author, or status."""
-    q = db.query(RagIngestionJob)
+    q = db.query(RagIngestionJob).filter(RagIngestionJob.user_id == current_user.id)
     if source_id:
         try:
             uuid.UUID(source_id)
@@ -713,6 +889,78 @@ def list_jobs(
         q = q.filter(RagIngestionJob.status == status)
     jobs = q.order_by(RagIngestionJob.created_at.desc()).limit(limit).all()
     return [_job_out(j) for j in jobs]
+
+
+@router.get("/ingest/activity", response_model=IngestionActivityOut)
+def ingestion_activity(
+    author_id: Optional[str] = Query(None),
+    limit: int = Query(100, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    source_query = (
+        db.query(RagSource)
+        .filter(RagSource.user_id == current_user.id)
+        .order_by(RagSource.created_at.desc())
+    )
+    if author_id:
+        source_query = source_query.filter(RagSource.author_id == author_id)
+    sources = source_query.limit(limit).all()
+
+    job_query = (
+        db.query(RagIngestionJob)
+        .join(RagSource, RagIngestionJob.source_id == RagSource.id)
+        .filter(RagIngestionJob.user_id == current_user.id)
+        .order_by(RagIngestionJob.created_at.desc())
+    )
+    if author_id:
+        job_query = job_query.filter(RagSource.author_id == author_id)
+    jobs = job_query.limit(limit).all()
+
+    event_query = (
+        db.query(RealtimeEvent)
+        .filter(
+            RealtimeEvent.user_id == current_user.id,
+            RealtimeEvent.topic == AUTHOR_INGESTION_TOPIC,
+        )
+        .order_by(RealtimeEvent.created_at.desc())
+    )
+    if author_id:
+        event_query = event_query.filter(RealtimeEvent.author_id == author_id)
+    events = event_query.limit(limit).all()
+
+    return IngestionActivityOut(
+        sources=[
+            SourceOut(
+                id=serialized["id"],
+                author_id=serialized["author_id"],
+                author_name=serialized["author_name"],
+                url=serialized["url"],
+                source_type=serialized["source_type"],
+                status=serialized["status"],
+                hash=serialized["hash"],
+                last_ingested_at=serialized["last_ingested_at"],
+                created_at=serialized["created_at"],
+            )
+            for serialized in [serialize_source(source) for source in sources]
+        ],
+        jobs=[
+            JobOut(
+                id=serialized["id"],
+                source_id=serialized["source_id"],
+                batch_id=serialized["batch_id"],
+                status=serialized["status"],
+                failure_category=serialized["failure_category"],
+                error=serialized["error"],
+                stats_json=serialized["stats_json"],
+                started_at=serialized["started_at"],
+                finished_at=serialized["finished_at"],
+                created_at=serialized["created_at"],
+            )
+            for serialized in [serialize_job(job) for job in jobs]
+        ],
+        events=[RealtimeEventOut(**serialize_event(event)) for event in events],
+    )
 
 
 @router.get("/documents/{document_id}")
@@ -773,6 +1021,7 @@ def _job_out(job: RagIngestionJob) -> JobOut:
     return JobOut(
         id=str(job.id),
         source_id=str(job.source_id),
+        batch_id=str(job.batch_id) if job.batch_id else None,
         status=job.status,
         failure_category=job.failure_category,
         error=job.error,

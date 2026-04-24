@@ -5,6 +5,7 @@ from datetime import datetime, date
 from typing import Optional
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     Date,
@@ -184,10 +185,11 @@ class RagSource(Base):
     __tablename__ = "rag_sources"
 
     id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     author_id = Column(String, ForeignKey("rag_authors.id", ondelete="CASCADE"), nullable=False)
     url = Column(Text)
     source_type = Column(String, nullable=False)  # html | pdf | text | manual
-    status = Column(String, nullable=False, default="pending")  # pending | fetched | failed | ingested
+    status = Column(String, nullable=False, default="pending")  # pending | queued | running | failed | ingested
     hash = Column(String)
     last_ingested_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
@@ -276,8 +278,10 @@ class RagIngestionJob(Base):
     __tablename__ = "rag_ingestion_jobs"
 
     id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     source_id = Column(_UUIDStr, ForeignKey("rag_sources.id", ondelete="CASCADE"), nullable=False)
-    status = Column(String, nullable=False, default="pending")  # pending | running | done | failed
+    batch_id = Column(_UUIDStr)
+    status = Column(String, nullable=False, default="pending")  # pending | queued | running | done | failed
     failure_category = Column(String)
     error = Column(Text)
     stats_json = Column(_JsonBlob, nullable=False, default=dict)
@@ -286,6 +290,22 @@ class RagIngestionJob(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     source = relationship("RagSource", back_populates="jobs")
+
+
+class RealtimeEvent(Base):
+    __tablename__ = "realtime_events"
+
+    id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    topic = Column(String, nullable=False)
+    event_name = Column(String, nullable=False)
+    batch_id = Column(_UUIDStr)
+    author_id = Column(String)
+    source_id = Column(_UUIDStr)
+    job_id = Column(_UUIDStr)
+    status = Column(String)
+    payload = Column(_JsonBlob, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
 
 # ── Retrieval evaluation models ───────────────────────────────────────────────

@@ -78,8 +78,14 @@ def sqlite_rag_db():
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
 
+    db_path = "/tmp/capitalos_rag_test.db"
+    try:
+        os.remove(db_path)
+    except FileNotFoundError:
+        pass
+
     engine = create_engine(
-        "sqlite+pysqlite:////tmp/capitalos_rag_test.db",
+        f"sqlite+pysqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
 
@@ -112,6 +118,7 @@ def sqlite_rag_db():
         """
         CREATE TABLE IF NOT EXISTS rag_sources (
             id TEXT PRIMARY KEY,
+            user_id INTEGER,
             author_id TEXT NOT NULL,
             url TEXT,
             source_type TEXT NOT NULL,
@@ -154,7 +161,9 @@ def sqlite_rag_db():
         """
         CREATE TABLE IF NOT EXISTS rag_ingestion_jobs (
             id TEXT PRIMARY KEY,
+            user_id INTEGER,
             source_id TEXT NOT NULL,
+            batch_id TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             error TEXT,
             stats_json TEXT NOT NULL DEFAULT '{}',

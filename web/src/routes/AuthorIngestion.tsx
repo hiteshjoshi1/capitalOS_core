@@ -1,37 +1,50 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import { api } from "../lib/api";
+import { subscribeToRealtimeTopic } from "../lib/realtime";
 import type {
   IngestUrlsBatchResult,
   RagAuthor,
   RagAuthorCreate,
+  RagAuthorIngestionEventPayload,
+  RagIngestionActivity,
   RagIngestionJobRecord,
   RagSourceRecord,
+  RealtimeEventEnvelope,
 } from "../lib/api";
 
 type AuthorMode = "select" | "create";
+type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 const STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
-  fetched: "Fetched",
-  ingested: "Ingested",
-  failed: "Failed",
   queued: "Queued",
   running: "Running",
+  ingested: "Ingested",
+  failed: "Failed",
   done: "Done",
+  submitted: "Submitted",
+  completed: "Completed",
 };
 
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "pending"]);
+const EVENT_LABELS: Record<string, string> = {
+  batch_submitted: "Batch submitted",
+  source_queued: "Source queued",
+  source_running: "Source running",
+  source_ingested: "Source ingested",
+  source_failed: "Source failed",
+  batch_completed: "Batch completed",
+};
 
 function statusBadgeClass(status: string): string {
-  if (status === "ingested" || status === "done") return "statusBadge statusBadgeDone";
+  if (status === "ingested" || status === "done" || status === "completed") return "statusBadge statusBadgeDone";
   if (status === "failed") return "statusBadge statusBadgeFailed";
-  if (status === "running" || status === "fetched") return "statusBadge statusBadgeRunning";
+  if (status === "running") return "statusBadge statusBadgeRunning";
   return "statusBadge statusBadgePending";
 }
 
-function formatDatetime(iso: string | null): string {
+function formatDatetime(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
     return new Date(iso).toLocaleString();
@@ -40,14 +53,28 @@ function formatDatetime(iso: string | null): string {
   }
 }
 
+function sortByCreatedAtDesc<T extends { created_at?: string | null }>(items: T[]): T[] {
+  return [...items].sort((left, right) => {
+    const leftTime = left.created_at ? new Date(left.created_at).getTime() : 0;
+    const rightTime = right.created_at ? new Date(right.created_at).getTime() : 0;
+    return rightTime - leftTime;
+  });
+}
+
+function upsertById<T extends { id: string }>(items: T[], nextItem: T): T[] {
+  const existingIndex = items.findIndex((item) => item.id === nextItem.id);
+  if (existingIndex === -1) {
+    return [nextItem, ...items];
+  }
+  return items.map((item) => (item.id === nextItem.id ? nextItem : item));
+}
+
 export default function AuthorIngestion() {
-  // Author selection/creation
   const [authorMode, setAuthorMode] = useState<AuthorMode>("select");
   const [authors, setAuthors] = useState<RagAuthor[]>([]);
   const [authorsLoading, setAuthorsLoading] = useState(false);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
 
-  // Create author form
   const [newId, setNewId] = useState("");
   const [newName, setNewName] = useState("");
   const [newEnabled, setNewEnabled] = useState(true);
@@ -59,23 +86,27 @@ export default function AuthorIngestion() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [createLoading, setCreateLoading] = useState(false);
 
-  // URL ingestion
   const [urls, setUrls] = useState<string[]>([""]);
   const [sourceType, setSourceType] = useState("html");
   const [ingestLoading, setIngestLoading] = useState(false);
   const [ingestResult, setIngestResult] = useState<IngestUrlsBatchResult | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
 
-  // Status views
   const [sources, setSources] = useState<RagSourceRecord[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [jobs, setJobs] = useState<RagIngestionJobRecord[]>([]);
   const [jobsLoading, setJobsLoading] = useState(false);
+  const [events, setEvents] = useState<RealtimeEventEnvelope<RagAuthorIngestionEventPayload>[]>([]);
+  const [activityError, setActivityError] = useState<string | null>(null);
   const [retryingSourceId, setRetryingSourceId] = useState<string | null>(null);
+  const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("disconnected");
 
-  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const selectedAuthorIdRef = useRef<string>("");
 
-  // Load author list on mount
+  useEffect(() => {
+    selectedAuthorIdRef.current = selectedAuthorId;
+  }, [selectedAuthorId]);
+
   useEffect(() => {
     setAuthorsLoading(true);
     api
@@ -85,50 +116,87 @@ export default function AuthorIngestion() {
       .finally(() => setAuthorsLoading(false));
   }, []);
 
-  // Load sources and jobs when author is selected
+  useEffect(() => {
+    const unsubscribe = subscribeToRealtimeTopic<RagAuthorIngestionEventPayload>("author-ingestion", {
+      onStatusChange: setRealtimeStatus,
+      onEvent: (event) => {
+        const currentAuthorId = selectedAuthorIdRef.current;
+        const eventAuthorId = event.payload.author?.id ?? event.author_id ?? null;
+        if (!currentAuthorId || eventAuthorId !== currentAuthorId) {
+          return;
+        }
+        if (event.payload.source) {
+          setSources((prev) => upsertById(prev, event.payload.source as RagSourceRecord));
+        }
+        if (event.payload.job) {
+          setJobs((prev) => sortByCreatedAtDesc(upsertById(prev, event.payload.job as RagIngestionJobRecord)));
+        }
+        setEvents((prev) => sortByCreatedAtDesc(upsertById(prev, event)).slice(0, 50));
+      },
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  function applyActivity(activity: RagIngestionActivity) {
+    setSources(activity.sources);
+    setJobs(sortByCreatedAtDesc(activity.jobs));
+    setEvents(sortByCreatedAtDesc(activity.events).slice(0, 50));
+  }
+
+  const loadActivity = useCallback(async (authorId: string) => {
+    setActivityError(null);
+    setSourcesLoading(true);
+    setJobsLoading(true);
+    try {
+      const activity = await api.ragIngestionActivity(authorId, 100);
+      applyActivity(activity);
+    } catch (e: unknown) {
+      setActivityError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSourcesLoading(false);
+      setJobsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedAuthorId) {
       setSources([]);
       setJobs([]);
+      setEvents([]);
+      setActivityError(null);
       return;
     }
-    loadSourcesAndJobs(selectedAuthorId);
-  }, [selectedAuthorId]);
+    void loadActivity(selectedAuthorId);
+  }, [loadActivity, selectedAuthorId]);
 
-  // Poll while active jobs exist
-  useEffect(() => {
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
+  function realtimeStatusMessage(): string {
+    if (realtimeStatus === "connected") return "Live updates connected.";
+    if (realtimeStatus === "connecting") return "Connecting live updates…";
+    return "Live updates unavailable. Showing the latest backend snapshot.";
+  }
+
+  function eventSummary(event: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>): string {
+    const sourceUrl = event.payload.source?.url;
+    if (sourceUrl) {
+      return sourceUrl.length > 60 ? `${sourceUrl.slice(0, 60)}…` : sourceUrl;
     }
-    const hasActive = jobs.some((j) => ACTIVE_JOB_STATUSES.has(j.status));
-    if (hasActive && selectedAuthorId) {
-      pollIntervalRef.current = setInterval(() => {
-        loadSourcesAndJobs(selectedAuthorId);
-      }, 5000);
+    const authorName = event.payload.author?.name;
+    if (authorName) {
+      return authorName;
     }
-    return () => {
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current);
-        pollIntervalRef.current = null;
-      }
-    };
-  }, [jobs, selectedAuthorId]);
+    const batchId = event.payload.batch?.id ?? event.batch_id ?? null;
+    return batchId ? `Batch ${batchId.slice(0, 8)}…` : event.event_name;
+  }
 
-  function loadSourcesAndJobs(authorId: string) {
-    setSourcesLoading(true);
-    api
-      .ragSources(authorId)
-      .then((data) => setSources(data))
-      .catch(() => {})
-      .finally(() => setSourcesLoading(false));
+  function eventFailureReason(event: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>): string {
+    return event.payload.failure_reason ?? event.payload.job?.failure_category ?? event.payload.job?.error ?? "—";
+  }
 
-    setJobsLoading(true);
-    api
-      .ragIngestionJobs({ author_id: authorId, limit: 100 })
-      .then((data) => setJobs(data))
-      .catch(() => {})
-      .finally(() => setJobsLoading(false));
+  async function refreshSelectedAuthorActivity() {
+    if (!selectedAuthorId) return;
+    await loadActivity(selectedAuthorId);
   }
 
   async function handleCreateAuthor() {
@@ -152,7 +220,6 @@ export default function AuthorIngestion() {
       setAuthors((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectedAuthorId(created.id);
       setAuthorMode("select");
-      // Reset form
       setNewId("");
       setNewName("");
       setNewEnabled(true);
@@ -182,8 +249,7 @@ export default function AuthorIngestion() {
       const result = await api.ragIngestUrls(selectedAuthorId, { urls: validUrls, source_type: sourceType });
       setIngestResult(result);
       setUrls([""]);
-      // Refresh status tables
-      loadSourcesAndJobs(selectedAuthorId);
+      await refreshSelectedAuthorActivity();
     } catch (e: unknown) {
       setIngestError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -193,11 +259,12 @@ export default function AuthorIngestion() {
 
   async function handleRetry(sourceId: string) {
     setRetryingSourceId(sourceId);
+    setActivityError(null);
     try {
       await api.ragRetryIngestion(sourceId);
-      if (selectedAuthorId) loadSourcesAndJobs(selectedAuthorId);
-    } catch {
-      // Errors are surfaced via job status table on next poll
+      await refreshSelectedAuthorActivity();
+    } catch (e: unknown) {
+      setActivityError(e instanceof Error ? e.message : String(e));
     } finally {
       setRetryingSourceId(null);
     }
@@ -212,15 +279,14 @@ export default function AuthorIngestion() {
   }
 
   function updateUrl(index: number, value: string) {
-    setUrls((prev) => prev.map((u, i) => (i === index ? value : u)));
+    setUrls((prev) => prev.map((url, itemIndex) => (itemIndex === index ? value : url)));
   }
 
-  const selectedAuthor = authors.find((a) => a.id === selectedAuthorId) ?? null;
+  const selectedAuthor = authors.find((author) => author.id === selectedAuthorId) ?? null;
 
   return (
     <PageShell title="Author Ingestion">
       <div className="wrap">
-        {/* ── Author Selection / Creation ─────────────────────── */}
         <section className="card" aria-label="Author selection">
           <h2 className="cardTitle">Author</h2>
           <div className="formRow">
@@ -258,9 +324,9 @@ export default function AuthorIngestion() {
                   onChange={(e) => setSelectedAuthorId(e.target.value)}
                 >
                   <option value="">— Select an author —</option>
-                  {authors.map((a) => (
-                    <option key={a.id} value={a.id}>
-                      {a.name} ({a.id}){a.enabled ? "" : " [disabled]"}
+                  {authors.map((author) => (
+                    <option key={author.id} value={author.id}>
+                      {author.name} ({author.id}){author.enabled ? "" : " [disabled]"}
                     </option>
                   ))}
                 </select>
@@ -386,16 +452,12 @@ export default function AuthorIngestion() {
           )}
         </section>
 
-        {/* ── URL Entry (only when author is selected) ────────── */}
         {selectedAuthorId && (
           <section className="card" aria-label="URL ingestion">
             <h2 className="cardTitle">
-              Add URLs for{" "}
-              <span className="highlight">{selectedAuthor?.name ?? selectedAuthorId}</span>
+              Add URLs for <span className="highlight">{selectedAuthor?.name ?? selectedAuthorId}</span>
             </h2>
-            <p className="muted">
-              Enter one or more URLs. Ingestion runs in the background — one URL at a time.
-            </p>
+            <p className="muted">Enter one or more URLs. Ingestion runs in the background — one URL at a time.</p>
 
             <div className="urlInputList">
               {urls.map((url, index) => (
@@ -463,19 +525,18 @@ export default function AuthorIngestion() {
           </section>
         )}
 
-        {/* ── Source Status ───────────────────────────────────── */}
         {selectedAuthorId && (
           <section className="card" aria-label="Source status">
             <div className="cardTitleRow">
               <h2 className="cardTitle">Sources</h2>
-              <button
-                type="button"
-                className="btn"
-                onClick={() => loadSourcesAndJobs(selectedAuthorId)}
-              >
+              <button type="button" className="btn" onClick={() => void refreshSelectedAuthorActivity()}>
                 Refresh
               </button>
             </div>
+            <p className="muted" style={{ marginBottom: "8px" }}>
+              {realtimeStatusMessage()}
+            </p>
+            {activityError && <div className="error formRow">{activityError}</div>}
             {sourcesLoading ? (
               <div className="muted">Loading sources...</div>
             ) : sources.length === 0 ? (
@@ -532,15 +593,9 @@ export default function AuthorIngestion() {
           </section>
         )}
 
-        {/* ── Job Status ──────────────────────────────────────── */}
         {selectedAuthorId && (
           <section className="card" aria-label="Ingestion job status">
             <h2 className="cardTitle">Ingestion Jobs</h2>
-            {jobs.some((j) => ACTIVE_JOB_STATUSES.has(j.status)) && (
-              <p className="muted" style={{ marginBottom: "8px" }}>
-                ⟳ Active jobs — auto-refreshing every 5 seconds.
-              </p>
-            )}
             {jobsLoading ? (
               <div className="muted">Loading jobs...</div>
             ) : jobs.length === 0 ? (
@@ -560,16 +615,14 @@ export default function AuthorIngestion() {
                   </thead>
                   <tbody>
                     {jobs.map((job) => {
-                      const linkedSource = sources.find((s) => s.id === job.source_id);
+                      const linkedSource = sources.find((source) => source.id === job.source_id);
                       return (
                         <tr key={job.id}>
                           <td className="muted monospace">{job.id.slice(0, 8)}…</td>
                           <td className="urlCell">
                             {linkedSource?.url ? (
                               <span title={linkedSource.url}>
-                                {linkedSource.url.length > 40
-                                  ? `${linkedSource.url.slice(0, 40)}…`
-                                  : linkedSource.url}
+                                {linkedSource.url.length > 40 ? `${linkedSource.url.slice(0, 40)}…` : linkedSource.url}
                               </span>
                             ) : (
                               <span className="muted">{job.source_id.slice(0, 8)}…</span>
@@ -583,11 +636,49 @@ export default function AuthorIngestion() {
                           <td className="muted">{formatDatetime(job.started_at)}</td>
                           <td className="muted">{formatDatetime(job.finished_at)}</td>
                           <td className="error">
-                            {job.failure_category ?? (job.error ? job.error.slice(0, 80) : null)}
+                            {job.failure_category ?? (job.error ? job.error.slice(0, 80) : "—")}
                           </td>
                         </tr>
                       );
                     })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        )}
+
+        {selectedAuthorId && (
+          <section className="card" aria-label="Ingestion activity">
+            <h2 className="cardTitle">Recent Activity</h2>
+            {events.length === 0 ? (
+              <div className="muted">No ingestion activity for this author yet.</div>
+            ) : (
+              <div className="tableWrap">
+                <table className="dataTable">
+                  <thead>
+                    <tr>
+                      <th>When</th>
+                      <th>Event</th>
+                      <th>Item</th>
+                      <th>Status</th>
+                      <th>Failure Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {events.map((event) => (
+                      <tr key={event.id}>
+                        <td className="muted">{formatDatetime(event.created_at)}</td>
+                        <td>{EVENT_LABELS[event.event_name] ?? event.event_name}</td>
+                        <td className="urlCell">{eventSummary(event)}</td>
+                        <td>
+                          <span className={statusBadgeClass(event.status ?? "pending")}>
+                            {STATUS_LABELS[event.status ?? "pending"] ?? event.status ?? "Pending"}
+                          </span>
+                        </td>
+                        <td className="error">{eventFailureReason(event)}</td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>

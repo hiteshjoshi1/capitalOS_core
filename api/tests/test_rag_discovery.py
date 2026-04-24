@@ -98,8 +98,14 @@ def sqlite_session():
     from sqlalchemy import create_engine, text
     from sqlalchemy.orm import sessionmaker
 
+    db_path = "/tmp/capitalos_discovery_test.db"
+    try:
+        os.remove(db_path)
+    except FileNotFoundError:
+        pass
+
     engine = create_engine(
-        "sqlite+pysqlite:////tmp/capitalos_discovery_test.db",
+        f"sqlite+pysqlite:///{db_path}",
         connect_args={"check_same_thread": False},
     )
     ddl = [
@@ -118,13 +124,13 @@ def sqlite_session():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         """CREATE TABLE IF NOT EXISTS rag_sources (
-            id TEXT PRIMARY KEY, author_id TEXT NOT NULL, url TEXT,
+            id TEXT PRIMARY KEY, user_id INTEGER, author_id TEXT NOT NULL, url TEXT,
             source_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
             hash TEXT, last_ingested_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         """CREATE TABLE IF NOT EXISTS rag_ingestion_jobs (
-            id TEXT PRIMARY KEY, source_id TEXT NOT NULL,
+            id TEXT PRIMARY KEY, user_id INTEGER, source_id TEXT NOT NULL, batch_id TEXT,
             status TEXT NOT NULL DEFAULT 'pending',
             failure_category TEXT, error TEXT,
             stats_json TEXT NOT NULL DEFAULT '{}',

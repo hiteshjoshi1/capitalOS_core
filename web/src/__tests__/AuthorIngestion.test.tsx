@@ -1,21 +1,32 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import AuthorIngestion from "../routes/AuthorIngestion";
 import { api } from "../lib/api";
+import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { AuthContext } from "../context/AuthContext";
+import type {
+  RagAuthorIngestionEventPayload,
+  RagIngestionActivity,
+  RagIngestionJobRecord,
+  RagSourceRecord,
+  RealtimeEventEnvelope,
+} from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     ragAuthors: vi.fn(),
     ragCreateAuthor: vi.fn(),
-    ragSources: vi.fn(),
+    ragIngestionActivity: vi.fn(),
     ragIngestUrls: vi.fn(),
-    ragIngestionJobs: vi.fn(),
     ragRetryIngestion: vi.fn(),
   },
+}));
+
+vi.mock("../lib/realtime", () => ({
+  subscribeToRealtimeTopic: vi.fn(),
 }));
 
 const MOCK_AUTHORS = [
@@ -23,10 +34,11 @@ const MOCK_AUTHORS = [
   { id: "charlie_munger", name: "Charlie Munger", enabled: true, domains: [], expertise_tags: [], overall_weight: 1.0, role_type: null },
 ];
 
-const MOCK_SOURCES = [
+const MOCK_SOURCES: RagSourceRecord[] = [
   {
     id: "src-1",
     author_id: "warren_buffett",
+    author_name: "Warren Buffett",
     url: "https://example.com/article-1",
     source_type: "html",
     status: "ingested",
@@ -36,10 +48,11 @@ const MOCK_SOURCES = [
   },
 ];
 
-const MOCK_JOBS = [
+const MOCK_JOBS: RagIngestionJobRecord[] = [
   {
     id: "job-1",
     source_id: "src-1",
+    batch_id: "batch-1",
     status: "done",
     failure_category: null,
     error: null,
@@ -47,6 +60,27 @@ const MOCK_JOBS = [
     started_at: "2024-01-01T00:00:00",
     finished_at: "2024-01-01T00:01:00",
     created_at: "2024-01-01T00:00:00",
+  },
+];
+
+const MOCK_EVENTS: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>[] = [
+  {
+    id: "event-1",
+    topic: "author-ingestion",
+    event_name: "source_ingested",
+    batch_id: "batch-1",
+    author_id: "warren_buffett",
+    source_id: "src-1",
+    job_id: "job-1",
+    status: "ingested",
+    created_at: "2024-01-01T00:01:00",
+    payload: {
+      author: { id: "warren_buffett", name: "Warren Buffett" },
+      batch: { id: "batch-1", status: "completed" },
+      source: MOCK_SOURCES[0],
+      job: MOCK_JOBS[0],
+      failure_reason: null,
+    },
   },
 ];
 
@@ -80,11 +114,19 @@ describe("AuthorIngestion page", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     (api.ragAuthors as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_AUTHORS);
-    (api.ragSources as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_SOURCES);
-    (api.ragIngestionJobs as ReturnType<typeof vi.fn>).mockResolvedValue(MOCK_JOBS);
+    (api.ragIngestionActivity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      topic: "author-ingestion",
+      sources: MOCK_SOURCES,
+      jobs: MOCK_JOBS,
+      events: MOCK_EVENTS,
+    } satisfies RagIngestionActivity);
+    (subscribeToRealtimeTopic as ReturnType<typeof vi.fn>).mockImplementation((_topic, handlers) => {
+      handlers.onStatusChange?.("connected");
+      return () => {};
+    });
   });
 
-  it("renders the page title with end-user language", async () => {
+  it("renders the page title with end-user language", () => {
     renderAuthorIngestion();
     expect(screen.getByText(/Author Ingestion/i)).toBeInTheDocument();
   });
@@ -94,13 +136,12 @@ describe("AuthorIngestion page", () => {
     await waitFor(() => {
       expect(api.ragAuthors).toHaveBeenCalled();
     });
-    // After authors load, the select dropdown should have options
     await waitFor(() => {
       expect(screen.getByRole("combobox")).toBeInTheDocument();
     });
   });
 
-  it("shows Select Author and Create Author tabs", async () => {
+  it("shows Select Author and Create Author tabs", () => {
     renderAuthorIngestion();
     expect(screen.getByText(/Select Author/i)).toBeInTheDocument();
     expect(screen.getByText(/Create Author/i)).toBeInTheDocument();
@@ -109,8 +150,7 @@ describe("AuthorIngestion page", () => {
   it("shows create author form when Create Author tab is clicked", async () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
-    const createTab = screen.getByText(/Create Author/i);
-    await user.click(createTab);
+    await user.click(screen.getByText(/Create Author/i));
     expect(screen.getByLabelText(/Author ID/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Display Name/i)).toBeInTheDocument();
   });
@@ -119,8 +159,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "warren_buffett");
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /add another url/i })).toBeInTheDocument();
     });
@@ -130,71 +169,49 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "warren_buffett");
-    const addBtn = await screen.findByRole("button", { name: /add another url/i });
-    await user.click(addBtn);
-    const inputs = screen.getAllByPlaceholderText(/https:\/\//i);
-    expect(inputs.length).toBeGreaterThanOrEqual(2);
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: /add another url/i }));
+    expect(screen.getAllByPlaceholderText(/https:\/\//i).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("shows sources table when author is selected", async () => {
+  it("loads the backend snapshot when an author is selected", async () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
 
     await waitFor(() => {
-      expect(api.ragAuthors).toHaveBeenCalled();
-    });
-
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "warren_buffett");
-
-    await waitFor(() => {
-      expect(api.ragSources).toHaveBeenCalledWith("warren_buffett");
+      expect(api.ragIngestionActivity).toHaveBeenCalledWith("warren_buffett", 100);
     });
   });
 
-  it("shows job status table when author is selected", async () => {
+  it("renders recent activity from the durable backend snapshot", async () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
 
-    await waitFor(() => {
-      expect(api.ragAuthors).toHaveBeenCalled();
-    });
-
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "warren_buffett");
-
-    await waitFor(() => {
-      expect(api.ragIngestionJobs).toHaveBeenCalledWith(
-        expect.objectContaining({ author_id: "warren_buffett" }),
-      );
-    });
+    expect(await screen.findByText(/Recent Activity/i)).toBeInTheDocument();
+    expect(screen.getByText(/Source ingested/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/https:\/\/example.com\/article-1/i).length).toBeGreaterThan(0);
   });
 
   it("submits URLs and calls ragIngestUrls", async () => {
     const user = userEvent.setup();
-    const mockResult = {
+    (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",
       registered: 1,
       skipped_duplicate: 0,
       jobs_queued: 1,
-      sources: [MOCK_SOURCES[0]],
+      sources: [{ ...MOCK_SOURCES[0], id: "src-new", status: "queued" }],
       job_ids: ["job-new-1"],
-    };
-    (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue(mockResult);
+    });
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-
-    const select = await screen.findByRole("combobox");
-    await user.selectOptions(select, "warren_buffett");
-
-    const urlInput = await screen.findByPlaceholderText(/https:\/\//i);
-    await user.type(urlInput, "https://example.com/new-article");
-
-    const submitBtn = screen.getByRole("button", { name: /start ingestion/i });
-    await user.click(submitBtn);
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/new-article");
+    await user.click(screen.getByRole("button", { name: /start ingestion/i }));
 
     await waitFor(() => {
       expect(api.ragIngestUrls).toHaveBeenCalledWith(
@@ -209,18 +226,15 @@ describe("AuthorIngestion page", () => {
   it("shows create author form with required fields distinct from optional", async () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
-    const createTab = screen.getByText(/Create Author/i);
-    await user.click(createTab);
-    // Required fields should be visible
+    await user.click(screen.getByText(/Create Author/i));
     expect(screen.getByLabelText(/Author ID/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/Display Name/i)).toBeInTheDocument();
-    // Advanced section should exist but optional
     expect(screen.getByText(/Advanced/i)).toBeInTheDocument();
   });
 
   it("calls ragCreateAuthor when create author form is submitted", async () => {
     const user = userEvent.setup();
-    const newAuthor = {
+    (api.ragCreateAuthor as ReturnType<typeof vi.fn>).mockResolvedValue({
       id: "new_author",
       name: "New Author",
       enabled: true,
@@ -228,24 +242,74 @@ describe("AuthorIngestion page", () => {
       expertise_tags: [],
       overall_weight: 1.0,
       role_type: null,
-    };
-    (api.ragCreateAuthor as ReturnType<typeof vi.fn>).mockResolvedValue(newAuthor);
+    });
 
     renderAuthorIngestion();
-    const createTab = screen.getByText(/Create Author/i);
-    await user.click(createTab);
-
+    await user.click(screen.getByText(/Create Author/i));
     await user.type(screen.getByLabelText(/Author ID/i), "new_author");
     await user.type(screen.getByLabelText(/Display Name/i), "New Author");
 
     const createForm = screen.getByLabelText(/Create new author/i);
-    const submitCreateBtn = within(createForm).getByRole("button", { name: /create author/i });
-    await user.click(submitCreateBtn);
+    await user.click(within(createForm).getByRole("button", { name: /create author/i }));
 
     await waitFor(() => {
       expect(api.ragCreateAuthor).toHaveBeenCalledWith(
         expect.objectContaining({ id: "new_author", name: "New Author" }),
       );
     });
+  });
+
+  it("subscribes to realtime updates instead of using polling timers", () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    renderAuthorIngestion();
+
+    expect(subscribeToRealtimeTopic).toHaveBeenCalledWith(
+      "author-ingestion",
+      expect.objectContaining({
+        onEvent: expect.any(Function),
+        onStatusChange: expect.any(Function),
+      }),
+    );
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    setIntervalSpy.mockRestore();
+  });
+
+  it("applies realtime source and job updates for the selected author", async () => {
+    let realtimeHandlers: { onEvent?: (event: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>) => void } = {};
+    (subscribeToRealtimeTopic as ReturnType<typeof vi.fn>).mockImplementation((_topic, handlers) => {
+      realtimeHandlers = handlers;
+      handlers.onStatusChange?.("connected");
+      return () => {};
+    });
+
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await screen.findByText(/Recent Activity/i);
+
+    await act(async () => {
+      realtimeHandlers.onEvent?.({
+        id: "event-2",
+        topic: "author-ingestion",
+        event_name: "source_failed",
+        batch_id: "batch-2",
+        author_id: "warren_buffett",
+        source_id: "src-1",
+        job_id: "job-1",
+        status: "failed",
+        created_at: "2024-01-01T00:02:00",
+        payload: {
+          author: { id: "warren_buffett", name: "Warren Buffett" },
+          batch: { id: "batch-2", status: "completed" },
+          source: { ...MOCK_SOURCES[0], status: "failed" },
+          job: { ...MOCK_JOBS[0], status: "failed", failure_category: "network_error", error: "timeout" },
+          failure_reason: "timeout",
+        },
+      });
+    });
+
+    expect(await screen.findAllByText(/Failed/i)).not.toHaveLength(0);
+    expect(screen.getByText(/timeout/i)).toBeInTheDocument();
   });
 });

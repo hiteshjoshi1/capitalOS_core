@@ -30,10 +30,7 @@ def account_scope_sql(alias: str = "a") -> str:
     return f"{alias}.user_id = :current_user_id"
 
 
-def require_current_user(
-    db: Session = Depends(get_db),
-    authorization: str | None = Header(default=None),
-) -> CurrentUser:
+def _bypass_current_user() -> CurrentUser | None:
     bypass = os.getenv("AUTH_BYPASS_USER_ID", "").strip()
     if bypass:
         try:
@@ -41,28 +38,10 @@ def require_current_user(
         except ValueError as exc:  # pragma: no cover - config misuse
             raise HTTPException(status_code=500, detail="Invalid AUTH_BYPASS_USER_ID") from exc
         return CurrentUser(id=user_id, username=f"bypass-{user_id}", is_admin=True)
+    return None
 
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing authorization")
-    parts = authorization.split(" ", 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer":
-        raise HTTPException(status_code=401, detail="Invalid authorization header")
 
-    token = parts[1].strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="Invalid authorization token")
-
-    try:
-        payload = decode_access_token(token)
-    except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
-
-    subject = payload.get("sub")
-    try:
-        user_id = int(subject)
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=401, detail="Invalid token subject") from exc
-
+def _load_current_user(db: Session, user_id: int) -> CurrentUser:
     row = db.execute(
         text(
             """
@@ -82,3 +61,46 @@ def require_current_user(
         username=str(row["username"]),
         is_admin=bool(row["is_admin"]),
     )
+
+
+def resolve_current_user_from_access_token(db: Session, access_token: str | None) -> CurrentUser:
+    bypass_user = _bypass_current_user()
+    if bypass_user is not None:
+        return bypass_user
+
+    if not access_token:
+        raise HTTPException(status_code=401, detail="Missing access token")
+
+    try:
+        payload = decode_access_token(access_token)
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+
+    subject = payload.get("sub")
+    try:
+        user_id = int(subject)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=401, detail="Invalid token subject") from exc
+
+    return _load_current_user(db, user_id)
+
+
+def require_current_user(
+    db: Session = Depends(get_db),
+    authorization: str | None = Header(default=None),
+) -> CurrentUser:
+    bypass_user = _bypass_current_user()
+    if bypass_user is not None:
+        return bypass_user
+
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing authorization")
+    parts = authorization.split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Invalid authorization header")
+
+    token = parts[1].strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Invalid authorization token")
+
+    return resolve_current_user_from_access_token(db, token)
