@@ -17,6 +17,7 @@ from app.routers.alerts import router as alerts_router
 from app.routers.dividends import router as dividends_router
 from app.routers.rag import router as rag_router
 from app.routers.ai_sage import router as ai_sage_router
+from app.routers.realtime import router as realtime_router
 from app.crypto.scheduler import start_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
 
@@ -73,6 +74,7 @@ app.include_router(alerts_router)
 app.include_router(dividends_router)
 app.include_router(rag_router)
 app.include_router(ai_sage_router)
+app.include_router(realtime_router)
 
 
 @app.on_event("startup")

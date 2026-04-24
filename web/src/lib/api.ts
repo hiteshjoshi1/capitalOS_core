@@ -800,6 +800,7 @@ export type RagAuthor = {
 export type RagSourceRecord = {
   id: string;
   author_id: string;
+  author_name?: string | null;
   url: string | null;
   source_type: string;
   status: string;
@@ -811,6 +812,7 @@ export type RagSourceRecord = {
 export type RagIngestionJobRecord = {
   id: string;
   source_id: string;
+  batch_id?: string | null;
   status: string;
   failure_category: string | null;
   error: string | null;
@@ -837,6 +839,47 @@ export type RagAuthorCreate = {
   expertise_tags?: string[];
   overall_weight?: number;
   role_type?: string | null;
+};
+
+export type RagIngestionAuthorSummary = {
+  id: string;
+  name: string;
+};
+
+export type RagIngestionBatchSummary = {
+  id: string | null;
+  status: string;
+  source_count?: number;
+  completed_source_count?: number;
+  failed_source_count?: number;
+};
+
+export type RagAuthorIngestionEventPayload = {
+  author?: RagIngestionAuthorSummary;
+  batch?: RagIngestionBatchSummary;
+  source?: RagSourceRecord;
+  job?: RagIngestionJobRecord;
+  failure_reason?: string | null;
+};
+
+export type RealtimeEventEnvelope<TPayload = Record<string, unknown>> = {
+  id: string;
+  topic: string;
+  event_name: string;
+  batch_id?: string | null;
+  author_id?: string | null;
+  source_id?: string | null;
+  job_id?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  payload: TPayload;
+};
+
+export type RagIngestionActivity = {
+  topic: string;
+  sources: RagSourceRecord[];
+  jobs: RagIngestionJobRecord[];
+  events: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>[];
 };
 
 export type RagSelectedAuthor = {
@@ -1158,6 +1201,12 @@ export const api = {
     if (params?.limit != null) qs.set("limit", String(params.limit));
     const query = qs.toString();
     return req<RagIngestionJobRecord[]>(`/rag/ingest/jobs${query ? `?${query}` : ""}`);
+  },
+  ragIngestionActivity: (authorId?: string, limit = 100) => {
+    const qs = new URLSearchParams();
+    if (authorId) qs.set("author_id", authorId);
+    qs.set("limit", String(limit));
+    return req<RagIngestionActivity>(`/rag/ingest/activity?${qs.toString()}`);
   },
   ragRetryIngestion: (sourceId: string) =>
     req<RagIngestionJobRecord>(`/rag/ingest/retry/${encodeURIComponent(sourceId)}`, { method: "POST" }),

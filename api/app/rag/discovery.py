@@ -270,14 +270,17 @@ def _parse_seeds_from_config(author_cfg: dict) -> list[DiscoverySeed]:
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 
-def _existing_urls_for_author(author_id: str, db) -> set[str]:
+def _existing_urls_for_author(author_id: str, db, user_id: int | None = None) -> set[str]:
     """Return the set of normalised URLs already registered for this author."""
     from app.models.rag import RagSource
 
-    rows = db.query(RagSource.url).filter(
+    query = db.query(RagSource.url).filter(
         RagSource.author_id == author_id,
         RagSource.url.isnot(None),
-    ).all()
+    )
+    if user_id is not None:
+        query = query.filter(RagSource.user_id == user_id)
+    rows = query.all()
     return {_normalize_url(r.url) for r in rows if r.url}
 
 
@@ -286,6 +289,7 @@ def _register_sources(
     sources: list[DiscoveredSource],
     existing_urls: set[str],
     db,
+    user_id: int | None = None,
 ) -> tuple[int, int]:
     """
     Insert new rag_sources rows; skip duplicates.
@@ -302,6 +306,7 @@ def _register_sources(
             skipped += 1
             continue
         row = RagSource(
+            user_id=user_id,
             author_id=author_id,
             url=src.url,
             source_type=src.source_type,
@@ -320,6 +325,7 @@ def discover_sources_for_author(
     author_id: str,
     author_cfg: dict,
     db,
+    user_id: int | None = None,
 ) -> list[DiscoveryResult]:
     """
     Discover child source URLs for an author from their config discovery_seeds.
@@ -336,14 +342,14 @@ def discover_sources_for_author(
     if not seeds:
         return []
 
-    existing_urls = _existing_urls_for_author(author_id, db)
+    existing_urls = _existing_urls_for_author(author_id, db, user_id=user_id)
     results: list[DiscoveryResult] = []
 
     for seed in seeds:
         log.info("Discovering sources for %s from seed %s", author_id, seed.url)
         discovered, errors = _process_seed(seed)
 
-        registered, skipped = _register_sources(author_id, discovered, existing_urls, db)
+        registered, skipped = _register_sources(author_id, discovered, existing_urls, db, user_id=user_id)
         results.append(
             DiscoveryResult(
                 author_id=author_id,
