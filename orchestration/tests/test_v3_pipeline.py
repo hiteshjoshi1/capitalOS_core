@@ -89,7 +89,7 @@ def test_route_after_deterministic_gates_running_goes_to_ship() -> None:
     assert route_after_deterministic_gates(dump_pipeline_state(state)) == "ship"
 
 
-def test_v3_policy_blocks_restricted_and_missing_reason(tmp_path) -> None:
+def test_v3_policy_blocks_restricted_files_and_records_inferred_extra_files(tmp_path) -> None:
     service = V3PolicyService(str(tmp_path))
     result = service.evaluate(
         changed_files=[".gitignore", "web/src/App.tsx"],
@@ -98,7 +98,22 @@ def test_v3_policy_blocks_restricted_and_missing_reason(tmp_path) -> None:
     )
     assert result.blocked is True
     assert any("Restricted file modified" in item for item in result.blockers)
-    assert any("missing explicit reason" in item for item in result.blockers)
+    assert len(result.extra_files_with_reasons) == 1
+    assert result.extra_files_with_reasons[0].path == "web/src/App.tsx"
+    assert result.extra_files_with_reasons[0].reason_source in {"inferred", "unknown"}
+
+
+def test_v3_policy_allows_unscoped_file_without_explicit_reason(tmp_path) -> None:
+    service = V3PolicyService(str(tmp_path))
+    result = service.evaluate(
+        changed_files=["web/src/App.tsx"],
+        allowed_paths=["tasks/issue-126-v3.md"],
+        extra_changed_files=[],
+    )
+    assert result.blocked is False
+    assert result.blockers == []
+    assert len(result.extra_files_with_reasons) == 1
+    assert result.extra_files_with_reasons[0].path == "web/src/App.tsx"
 
 
 def test_v3_policy_accepts_reasoned_out_of_scope_file(tmp_path) -> None:
