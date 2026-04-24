@@ -41,6 +41,11 @@ vi.mock("../lib/api", () => ({
       items: [],
     }),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
+    alertNotifications: vi.fn().mockResolvedValue({
+      upload_reminders: [],
+      system_notifications: [],
+      total_count: 0,
+    }),
     platforms: vi.fn().mockResolvedValue([]),
     platformOptions: vi.fn().mockResolvedValue({
       platform_types: ["BANK", "BROKER"],
@@ -49,6 +54,10 @@ vi.mock("../lib/api", () => ({
     }),
     createPlatform: vi.fn(),
   },
+}));
+
+vi.mock("../lib/realtime", () => ({
+  subscribeToRealtimeTopic: vi.fn().mockReturnValue(() => {}),
 }));
 
 describe("AppShell", () => {

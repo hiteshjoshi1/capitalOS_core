@@ -1,13 +1,18 @@
-"""Tests for GET /alerts/upload-reminders and GET /alerts/upload-reminders/count."""
+"""Tests for alerts endpoints: upload-reminders, notifications, and pruning."""
 from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
+
+from app.models.rag import RealtimeEvent, RagAuthor, RagSource, RagIngestionJob
+from app.services.alerts import prune_old_realtime_events
+from tests.conftest import TestingSessionLocal
 
 
 def _iso(dt: datetime) -> str:
@@ -196,3 +201,257 @@ class TestUploadReminders:
         for field in ("account_id", "account_name", "platform", "account_type",
                       "last_upload_date", "last_transaction_date", "days_since_upload", "message"):
             assert field in alert, f"Missing field: {field}"
+
+
+# ---------------------------------------------------------------------------
+# helpers for system notification tests
+# ---------------------------------------------------------------------------
+
+def _insert_realtime_event(
+    user_id: int,
+    event_name: str,
+    author_id: str,
+    created_at: datetime,
+    status: str = "done",
+) -> RealtimeEvent:
+    db = TestingSessionLocal()
+    try:
+        event = RealtimeEvent(
+            user_id=user_id,
+            topic="author-ingestion",
+            event_name=event_name,
+            author_id=author_id,
+            status=status,
+            payload={
+                "author": {"id": author_id, "name": author_id},
+                "batch": {"id": None, "status": status},
+                "source": {"url": f"https://example.com/{author_id}", "author_id": author_id},
+                "job": {"error": None, "status": status},
+            },
+            created_at=created_at,
+        )
+        db.add(event)
+        db.commit()
+        db.refresh(event)
+        return event
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Tests for GET /alerts/notifications
+# ---------------------------------------------------------------------------
+
+class TestUnifiedNotifications:
+    @pytest.fixture(autouse=True)
+    def _cleanup_events(self, db_engine):
+        yield
+        with db_engine.begin() as conn:
+            conn.execute(text("DELETE FROM realtime_events WHERE user_id = 1"))
+
+    def test_notifications_returns_upload_reminders(self, client: TestClient, db_engine):
+        """Unified notifications endpoint includes stale upload reminders."""
+        Session = sessionmaker(bind=db_engine)
+        db = Session()
+        try:
+            _insert_account(db, 901, "Stale Account")
+            _insert_import_job(db, 9001, 901, "IMPORTED", _days_ago(35))
+        finally:
+            db.close()
+
+        resp = client.get("/alerts/notifications")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "upload_reminders" in data
+        assert "system_notifications" in data
+        assert "total_count" in data
+        ids = [r["account_id"] for r in data["upload_reminders"]]
+        assert 901 in ids
+
+    def test_notifications_includes_system_events(self, client: TestClient, db_engine):
+        """Unified notifications endpoint returns realtime events as system notifications."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="batch_completed",
+            author_id="test_author",
+            created_at=_days_ago(1),
+        )
+
+        resp = client.get("/alerts/notifications")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["system_notifications"]) >= 1
+        notif = data["system_notifications"][0]
+        for field in ("id", "alert_type", "topic", "event_name", "message", "created_at"):
+            assert field in notif, f"Missing field: {field}"
+        assert notif["alert_type"] == "system_notification"
+        assert "test_author" in notif["message"]
+
+    def test_notifications_total_count_is_sum(self, client: TestClient, db_engine):
+        """total_count equals len(upload_reminders) + len(system_notifications)."""
+        Session = sessionmaker(bind=db_engine)
+        db = Session()
+        try:
+            _insert_account(db, 901, "Stale Account")
+            _insert_import_job(db, 9001, 901, "IMPORTED", _days_ago(35))
+        finally:
+            db.close()
+
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="test_author",
+            created_at=_days_ago(2),
+        )
+
+        resp = client.get("/alerts/notifications")
+        data = resp.json()
+        assert data["total_count"] == len(data["upload_reminders"]) + len(data["system_notifications"])
+
+    def test_system_notification_message_formats(self, client: TestClient, db_engine):
+        """Each event_name produces a sensible human-readable message."""
+        for event_name in ("batch_submitted", "source_queued", "source_running", "source_ingested", "source_failed", "batch_completed"):
+            _insert_realtime_event(
+                user_id=1,
+                event_name=event_name,
+                author_id="buffett",
+                created_at=_days_ago(1),
+            )
+
+        resp = client.get("/alerts/notifications")
+        assert resp.status_code == 200
+        messages = [n["message"] for n in resp.json()["system_notifications"]]
+        # All messages must be non-empty
+        assert all(m for m in messages)
+
+    def test_notifications_empty_when_no_data(self, client: TestClient, db_engine):
+        """Returns empty lists when no reminders and no events."""
+        resp = client.get("/alerts/notifications")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data["upload_reminders"], list)
+        assert isinstance(data["system_notifications"], list)
+        assert data["total_count"] == len(data["upload_reminders"]) + len(data["system_notifications"])
+
+    def test_notifications_author_fields_populated(self, client: TestClient, db_engine):
+        """System notifications include author_id when available."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="charlie_munger",
+            created_at=_days_ago(3),
+        )
+
+        resp = client.get("/alerts/notifications")
+        notifs = resp.json()["system_notifications"]
+        charlie_notifs = [n for n in notifs if n.get("author_id") == "charlie_munger"]
+        assert len(charlie_notifs) >= 1
+
+
+# ---------------------------------------------------------------------------
+# Tests for POST /alerts/prune (retention policy)
+# ---------------------------------------------------------------------------
+
+class TestAlertsRetentionPruning:
+    @pytest.fixture(autouse=True)
+    def _cleanup_events(self, db_engine):
+        yield
+        with db_engine.begin() as conn:
+            conn.execute(text("DELETE FROM realtime_events WHERE user_id = 1"))
+
+    def test_prune_removes_old_events(self, db_engine):
+        """prune_old_realtime_events deletes events older than 180 days."""
+        # Insert one old event (200 days ago) and one recent event (10 days ago)
+        _insert_realtime_event(
+            user_id=1,
+            event_name="batch_completed",
+            author_id="old_author",
+            created_at=_days_ago(200),
+        )
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="recent_author",
+            created_at=_days_ago(10),
+        )
+
+        db = TestingSessionLocal()
+        try:
+            deleted = prune_old_realtime_events(db)
+        finally:
+            db.close()
+
+        assert deleted >= 1
+
+        # Verify the recent event still exists
+        db2 = TestingSessionLocal()
+        try:
+            remaining = db2.query(RealtimeEvent).filter(
+                RealtimeEvent.user_id == 1,
+                RealtimeEvent.author_id == "recent_author",
+            ).all()
+            assert len(remaining) == 1, "Recent event must not be pruned"
+
+            pruned = db2.query(RealtimeEvent).filter(
+                RealtimeEvent.user_id == 1,
+                RealtimeEvent.author_id == "old_author",
+            ).all()
+            assert len(pruned) == 0, "Old event must be pruned"
+        finally:
+            db2.close()
+
+    def test_prune_does_not_remove_recent_events(self, db_engine):
+        """prune_old_realtime_events does NOT delete events within 180 days."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="fresh_author",
+            created_at=_days_ago(5),
+        )
+
+        db = TestingSessionLocal()
+        try:
+            deleted = prune_old_realtime_events(db)
+        finally:
+            db.close()
+
+        db2 = TestingSessionLocal()
+        try:
+            remaining = db2.query(RealtimeEvent).filter(
+                RealtimeEvent.user_id == 1,
+                RealtimeEvent.author_id == "fresh_author",
+            ).all()
+            assert len(remaining) == 1, "Recent event must still exist after pruning"
+        finally:
+            db2.close()
+
+    def test_prune_endpoint_returns_deleted_count(self, client: TestClient, db_engine):
+        """POST /alerts/prune returns the number of deleted records."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="batch_completed",
+            author_id="expire_author",
+            created_at=_days_ago(200),
+        )
+
+        resp = client.post("/alerts/prune")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "deleted" in data
+        assert data["deleted"] >= 1
+        assert data["retention_days"] == 180
+
+    def test_prune_endpoint_when_nothing_to_prune(self, client: TestClient, db_engine):
+        """POST /alerts/prune returns 0 when no expired events exist."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="new_author",
+            created_at=_days_ago(1),
+        )
+
+        resp = client.post("/alerts/prune")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["deleted"] == 0
+

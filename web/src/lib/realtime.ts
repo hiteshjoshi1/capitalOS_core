@@ -1,4 +1,4 @@
-import { getAccessToken } from "./api";
+import { getAccessToken, refreshAccessTokenNow } from "./api";
 import type { RealtimeEventEnvelope } from "./api";
 
 const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "http://localhost:8000";
@@ -21,13 +21,14 @@ class RealtimeClient {
   private listeners = new Set<RealtimeListener>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private shouldReconnect = false;
+  private connectInFlight: Promise<void> | null = null;
 
   subscribe<TPayload = Record<string, unknown>>(topic: string, handlers: RealtimeHandlers<TPayload>): () => void {
     const listener: RealtimeListener = { topic, handlers: handlers as RealtimeHandlers };
     this.listeners.add(listener);
     this.shouldReconnect = true;
     handlers.onStatusChange?.("connecting");
-    this.ensureConnected();
+    void this.ensureConnected();
 
     return () => {
       this.listeners.delete(listener);
@@ -43,12 +44,22 @@ class RealtimeClient {
     };
   }
 
-  private ensureConnected(): void {
-    if (this.socket || !this.listeners.size) {
+  private async ensureConnected(): Promise<void> {
+    if (this.socket || !this.listeners.size || this.connectInFlight) {
       return;
     }
 
-    const token = getAccessToken();
+    this.connectInFlight = this.connect().finally(() => {
+      this.connectInFlight = null;
+    });
+    await this.connectInFlight;
+  }
+
+  private async connect(): Promise<void> {
+    let token = getAccessToken();
+    if (!token || tokenExpiresSoon(token)) {
+      token = await refreshAccessTokenNow();
+    }
     if (!token) {
       this.notifyStatus("disconnected");
       return;
@@ -58,8 +69,10 @@ class RealtimeClient {
     const url = new URL(`${API_BASE.replace(/^http/i, "ws")}/realtime/ws`);
     url.searchParams.set("access_token", token);
     this.socket = new WebSocket(url.toString());
+    let opened = false;
 
     this.socket.addEventListener("open", () => {
+      opened = true;
       this.notifyStatus("connected");
       const topics = [...new Set([...this.listeners].map((listener) => listener.topic))];
       this.socket?.send(JSON.stringify({ action: "subscribe", topics }));
@@ -83,9 +96,12 @@ class RealtimeClient {
       if (!this.shouldReconnect || !this.listeners.size) {
         return;
       }
-      this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = setTimeout(async () => {
         this.reconnectTimer = null;
-        this.ensureConnected();
+        if (!opened) {
+          await refreshAccessTokenNow();
+        }
+        await this.ensureConnected();
       }, 1000);
     });
 
@@ -99,6 +115,28 @@ class RealtimeClient {
       listener.handlers.onStatusChange?.(status);
     }
   }
+}
+
+function tokenExpiresSoon(token: string): boolean {
+  const parts = token.split(".");
+  if (parts.length < 2) {
+    return true;
+  }
+  try {
+    const payload = JSON.parse(decodeBase64Url(parts[1])) as { exp?: number };
+    if (typeof payload.exp !== "number") {
+      return true;
+    }
+    return payload.exp <= Math.floor(Date.now() / 1000) + 30;
+  } catch {
+    return true;
+  }
+}
+
+function decodeBase64Url(value: string): string {
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  return atob(padded);
 }
 
 const realtimeClient = new RealtimeClient();

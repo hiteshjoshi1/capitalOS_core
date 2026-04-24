@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useTheme } from "../context/ThemeContext";
 import { useAuth } from "../context/useAuth";
 import { api } from "../lib/api";
+import { subscribeToRealtimeTopic } from "../lib/realtime";
 
 type NavChild = { label: string; to: string };
 type NavSection = { label: string; children: NavChild[] };
@@ -67,11 +68,39 @@ export default function Sidebar() {
   );
   const [alertCount, setAlertCount] = useState<number>(0);
 
-  useEffect(() => {
-    api.uploadReminderCount?.()
-      ?.then((r) => setAlertCount(r.count))
-      .catch(() => {});
+  const hydrateAlertCount = useCallback(() => {
+    api
+      .alertNotifications()
+      .then((r) => setAlertCount(r.total_count))
+      .catch(() => {
+        // Fallback to upload-reminder count if the unified endpoint is unavailable
+        api.uploadReminderCount?.()
+          ?.then((r) => setAlertCount(r.count))
+          .catch(() => {});
+      });
   }, []);
+
+  // Initial hydration: fetch total count from unified notifications endpoint
+  useEffect(() => {
+    hydrateAlertCount();
+  }, [hydrateAlertCount]);
+
+  // Stay fresh via shared realtime websocket — no polling
+  useEffect(() => {
+    const unsubscribe = subscribeToRealtimeTopic("author-ingestion", {
+      onEvent: () => {
+        setAlertCount((prev) => prev + 1);
+      },
+      onStatusChange: (status) => {
+        if (status === "connected") {
+          hydrateAlertCount();
+        }
+      },
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, [hydrateAlertCount]);
 
   const toggleSection = (label: string) => {
     setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
@@ -115,7 +144,7 @@ export default function Sidebar() {
                     {child.to === "/alerts" && alertCount > 0 && (
                       <span
                         className="sidebarBadge alertBadge"
-                        aria-label={`${alertCount} upload alerts`}
+                        aria-label={`${alertCount} alerts`}
                       >
                         {alertCount}
                       </span>

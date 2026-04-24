@@ -20,7 +20,16 @@ vi.mock("../lib/api", () => ({
     spendingSummary: vi.fn(),
     unmappedTransactions: vi.fn(),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
+    alertNotifications: vi.fn().mockResolvedValue({
+      upload_reminders: [],
+      system_notifications: [],
+      total_count: 0,
+    }),
   },
+}));
+
+vi.mock("../lib/realtime", () => ({
+  subscribeToRealtimeTopic: vi.fn().mockReturnValue(() => {}),
 }));
 
 function renderSidebar(initialPath = "/") {
