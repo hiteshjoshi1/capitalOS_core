@@ -1,6 +1,8 @@
 PROJECT=capitalos
 
 # ---- Config ----
+GIT_REMOTE?=origin
+BASE_BRANCH?=main
 DB_CONTAINER=capitalos-postgres
 DB_USER?=capitalos
 DB_NAME?=capitalos
@@ -66,7 +68,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: up down ps logs api-up web-up api-logs openapi web-deps
+.PHONY: up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead
 
 up:
 	docker compose up -d
@@ -92,6 +94,26 @@ api-logs:
 openapi:
 	curl -s http://localhost:8000/openapi.json > openapi.json
 	@echo "Wrote openapi.json"
+
+pr-open-if-ahead:
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$branch" = "$(BASE_BRANCH)" ]; then \
+		echo "Refusing to open a PR from base branch '$(BASE_BRANCH)'."; \
+		exit 2; \
+	fi; \
+	git fetch $(GIT_REMOTE) $(BASE_BRANCH); \
+	ahead=$$(git rev-list --count $(GIT_REMOTE)/$(BASE_BRANCH)..HEAD); \
+	if [ "$$ahead" -eq 0 ]; then \
+		echo "Branch '$$branch' is not ahead of $(GIT_REMOTE)/$(BASE_BRANCH); no PR created."; \
+		exit 0; \
+	fi; \
+	if gh pr view --head "$$branch" --json url >/dev/null 2>&1; then \
+		url=$$(gh pr view --head "$$branch" --json url --jq .url); \
+		echo "PR already exists: $$url"; \
+	else \
+		git push -u $(GIT_REMOTE) "$$branch"; \
+		gh pr create --base "$(BASE_BRANCH)" --head "$$branch" --fill; \
+	fi
 
 $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 	cd $(WEB_DIR) && npm ci
