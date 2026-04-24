@@ -30,6 +30,7 @@ def serialize_source(source: RagSource) -> dict[str, Any]:
         "source_type": source.source_type,
         "status": source.status,
         "hash": source.hash,
+        "selective_options": source.selective_options or None,
         "last_ingested_at": _iso(source.last_ingested_at),
         "created_at": _iso(source.created_at),
     }

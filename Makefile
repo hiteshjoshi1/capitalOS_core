@@ -40,7 +40,7 @@ define require_thread
 endef
 
 define require_resume_json
-	@test -n "$(RESUME_JSON)" || (echo "Usage: make $(1) TASK=tasks/issue-<id>-<slug>.md THREAD_ID=<thread-id> RESUME_JSON='{\"decision\":\"approved\",...}'" && exit 2)
+	$(if $(strip $(RESUME_JSON)),,@echo "Usage: make $(1) TASK=tasks/issue-<id>-<slug>.md THREAD_ID=<thread-id> RESUME_JSON='{\"decision\":\"approved\",...}'" && exit 2)
 endef
 
 define require_state_file

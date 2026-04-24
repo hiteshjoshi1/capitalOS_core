@@ -67,14 +67,16 @@ function realtimeEventToSystemNotification(
 }
 
 export default function Alerts() {
-  const [state, setState] = useState<LoadState>("idle");
+  const [state, setState] = useState<LoadState>("loading");
   const [err, setErr] = useState<string>("");
   const [reminders, setReminders] = useState<UploadReminder[]>([]);
   const [systemNotifications, setSystemNotifications] = useState<SystemNotification[]>([]);
 
-  const hydrateAlerts = useCallback(async () => {
+  const hydrateAlerts = useCallback(async (opts?: { markLoading?: boolean }) => {
     try {
-      setState("loading");
+      if (opts?.markLoading) {
+        setState("loading");
+      }
       setErr("");
       const data = await api.alertNotifications();
       setReminders(data.upload_reminders);
@@ -88,8 +90,19 @@ export default function Alerts() {
 
   // Initial hydration from backend
   useEffect(() => {
-    void hydrateAlerts();
-  }, [hydrateAlerts]);
+    void (async () => {
+      try {
+        setErr("");
+        const data = await api.alertNotifications();
+        setReminders(data.upload_reminders);
+        setSystemNotifications(data.system_notifications);
+        setState("ready");
+      } catch (e: unknown) {
+        setErr(e instanceof Error ? e.message : String(e));
+        setState("error");
+      }
+    })();
+  }, []);
 
   // Stay fresh via shared realtime websocket — no polling
   useEffect(() => {
@@ -100,7 +113,7 @@ export default function Alerts() {
       },
       onStatusChange: (status) => {
         if (status === "connected") {
-          void hydrateAlerts();
+          void hydrateAlerts({ markLoading: true });
         }
       },
     });

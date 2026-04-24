@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from orchestration.models.build import ExtraChangedFile
+from orchestration.services.scope import ScopePolicyService
 
 
 @dataclass
@@ -79,22 +80,20 @@ class V3PolicyService:
             if restricted:
                 result.blocked = True
                 result.blockers.append(restricted)
+                continue
 
             secret = self._contains_secret(path)
             if secret:
                 result.blocked = True
                 result.blockers.append(secret)
+                continue
 
             if self._is_path_allowed(path, allowed_paths):
                 continue
 
             item = provided.get(path)
             if item is None or not item.reason.strip():
-                result.blocked = True
-                result.blockers.append(
-                    f"Out-of-scope file `{path}` missing explicit reason in task markdown."
-                )
-                continue
+                item = ScopePolicyService.infer_extra_file_reason(path)
             result.extra_files_with_reasons.append(item)
 
         return result
