@@ -191,6 +191,7 @@ class RagSource(Base):
     source_type = Column(String, nullable=False)  # html | pdf | text | manual
     status = Column(String, nullable=False, default="pending")  # pending | queued | running | failed | ingested
     hash = Column(String)
+    selective_options = Column(_JsonBlob, nullable=True)  # optional selective ingestion rules
     last_ingested_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 

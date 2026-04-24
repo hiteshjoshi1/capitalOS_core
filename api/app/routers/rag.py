@@ -45,6 +45,7 @@ from app.rag.ingestion.events import (
     serialize_source,
 )
 from app.rag.ingestion.pipeline import bulk_ingest_author, run_manual_ingestion, run_url_ingestion
+from app.rag.ingestion.selector import SelectiveIngestionOptions
 from app.rag.retrieval import retrieve_similar_chunks, retrieve_with_constraints
 
 log = logging.getLogger(__name__)
@@ -80,6 +81,7 @@ class SourceOut(BaseModel):
     source_type: str
     status: str
     hash: Optional[str]
+    selective_options: Optional[dict] = None
     last_ingested_at: Optional[Any]
     created_at: Any
 
@@ -130,9 +132,39 @@ class CreateAuthorIn(BaseModel):
     role_type: Optional[str] = None
 
 
+class SelectiveIngestionOptionsIn(BaseModel):
+    """Optional selective-ingestion controls for HTML/text sources.
+
+    All fields are optional.  When omitted the full source is ingested.
+
+    - start_after:      Begin ingestion only after the first heading that
+                        contains this string (case-insensitive substring match).
+    - stop_before:      Stop ingesting when a heading matches this string.
+    - include_headings: Include only sections whose heading matches any entry.
+    - exclude_sections: Drop sections whose heading matches any entry.
+    """
+
+    start_after: Optional[str] = None
+    stop_before: Optional[str] = None
+    include_headings: list[str] = Field(default_factory=list)
+    exclude_sections: list[str] = Field(default_factory=list)
+
+    def to_selector_options(self) -> SelectiveIngestionOptions:
+        return SelectiveIngestionOptions(
+            start_after=self.start_after,
+            stop_before=self.stop_before,
+            include_headings=self.include_headings,
+            exclude_sections=self.exclude_sections,
+        )
+
+
 class IngestUrlsBatchIn(BaseModel):
     urls: list[str] = Field(..., min_length=1, description="One or more URLs to register and ingest")
     source_type: str = Field("html", pattern="^(html|pdf|text)$")
+    selective_ingestion: Optional[SelectiveIngestionOptionsIn] = Field(
+        None,
+        description="Optional selective-ingestion controls. Hidden by default in the UI.",
+    )
 
 
 class IngestUrlsBatchOut(BaseModel):
@@ -279,6 +311,7 @@ def list_sources(
             source_type=s.source_type,
             status=s.status,
             hash=s.hash,
+            selective_options=s.selective_options or None,
             last_ingested_at=s.last_ingested_at,
             created_at=s.created_at,
         )
@@ -315,6 +348,7 @@ def register_source(
         source_type=source.source_type,
         status=source.status,
         hash=source.hash,
+        selective_options=source.selective_options or None,
         last_ingested_at=source.last_ingested_at,
         created_at=source.created_at,
     )
@@ -367,6 +401,7 @@ def ingest_urls_for_author(
     new_sources: list[RagSource] = []
     skipped = 0
     batch_id = str(uuid.uuid4())
+    selective_opts_dict = body.selective_ingestion.to_selector_options().to_dict() if body.selective_ingestion else None
     for url in body.urls:
         url = url.strip()
         if not url:
@@ -380,6 +415,7 @@ def ingest_urls_for_author(
             url=url,
             source_type=body.source_type,
             status="queued",
+            selective_options=selective_opts_dict,
         )
         db.add(source)
         existing_urls.add(url)
@@ -461,6 +497,7 @@ def ingest_urls_for_author(
             source_type=s.source_type,
             status=s.status,
             hash=s.hash,
+            selective_options=s.selective_options or None,
             last_ingested_at=s.last_ingested_at,
             created_at=s.created_at,
         )
@@ -939,6 +976,7 @@ def ingestion_activity(
                 source_type=serialized["source_type"],
                 status=serialized["status"],
                 hash=serialized["hash"],
+                selective_options=serialized.get("selective_options"),
                 last_ingested_at=serialized["last_ingested_at"],
                 created_at=serialized["created_at"],
             )

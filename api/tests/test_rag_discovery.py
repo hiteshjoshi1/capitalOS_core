@@ -126,7 +126,7 @@ def sqlite_session():
         """CREATE TABLE IF NOT EXISTS rag_sources (
             id TEXT PRIMARY KEY, user_id INTEGER, author_id TEXT NOT NULL, url TEXT,
             source_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
-            hash TEXT, last_ingested_at TIMESTAMP,
+            hash TEXT, selective_options TEXT, last_ingested_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         """CREATE TABLE IF NOT EXISTS rag_ingestion_jobs (

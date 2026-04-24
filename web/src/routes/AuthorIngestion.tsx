@@ -12,6 +12,7 @@ import type {
   RagIngestionJobRecord,
   RagSourceRecord,
   RealtimeEventEnvelope,
+  SelectiveIngestionOptions,
 } from "../lib/api";
 
 type AuthorMode = "select" | "create";
@@ -91,6 +92,13 @@ export default function AuthorIngestion() {
   const [ingestLoading, setIngestLoading] = useState(false);
   const [ingestResult, setIngestResult] = useState<IngestUrlsBatchResult | null>(null);
   const [ingestError, setIngestError] = useState<string | null>(null);
+
+  // Selective ingestion controls (hidden by default behind advanced toggle)
+  const [showSelectiveOptions, setShowSelectiveOptions] = useState(false);
+  const [selStartAfter, setSelStartAfter] = useState("");
+  const [selStopBefore, setSelStopBefore] = useState("");
+  const [selIncludeHeadings, setSelIncludeHeadings] = useState("");
+  const [selExcludeSections, setSelExcludeSections] = useState("");
 
   const [sources, setSources] = useState<RagSourceRecord[]>([]);
   const [sourcesLoading, setSourcesLoading] = useState(false);
@@ -245,8 +253,33 @@ export default function AuthorIngestion() {
     setIngestError(null);
     setIngestResult(null);
     setIngestLoading(true);
+
+    // Build selective_ingestion only when the user has filled in at least one field
+    let selectiveIngestion: SelectiveIngestionOptions | null = null;
+    const hasSel =
+      selStartAfter.trim() ||
+      selStopBefore.trim() ||
+      selIncludeHeadings.trim() ||
+      selExcludeSections.trim();
+    if (hasSel) {
+      selectiveIngestion = {
+        start_after: selStartAfter.trim() || null,
+        stop_before: selStopBefore.trim() || null,
+        include_headings: selIncludeHeadings
+          ? selIncludeHeadings.split(",").map((h) => h.trim()).filter(Boolean)
+          : [],
+        exclude_sections: selExcludeSections
+          ? selExcludeSections.split(",").map((s) => s.trim()).filter(Boolean)
+          : [],
+      };
+    }
+
     try {
-      const result = await api.ragIngestUrls(selectedAuthorId, { urls: validUrls, source_type: sourceType });
+      const result = await api.ragIngestUrls(selectedAuthorId, {
+        urls: validUrls,
+        source_type: sourceType,
+        selective_ingestion: selectiveIngestion,
+      });
       setIngestResult(result);
       setUrls([""]);
       await refreshSelectedAuthorActivity();
@@ -502,6 +535,76 @@ export default function AuthorIngestion() {
                 <option value="text">Plain Text</option>
               </select>
             </div>
+
+            <details
+              open={showSelectiveOptions}
+              onToggle={(e) => setShowSelectiveOptions((e.target as HTMLDetailsElement).open)}
+              aria-label="Selective ingestion options"
+            >
+              <summary className="formLabel" style={{ cursor: "pointer", marginBottom: "8px" }}>
+                Advanced: selective ingestion (optional)
+              </summary>
+              <p className="muted" style={{ marginBottom: "8px" }}>
+                Limit which sections of the source are ingested. Matching is case-insensitive substring.
+                Leave all fields empty to ingest the full source.
+              </p>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="selStartAfter">
+                  Start after heading
+                </label>
+                <input
+                  id="selStartAfter"
+                  className="formInput"
+                  type="text"
+                  placeholder="e.g. Introduction"
+                  value={selStartAfter}
+                  onChange={(e) => setSelStartAfter(e.target.value)}
+                />
+                <span className="formHint">Begin ingesting after the first heading that contains this text.</span>
+              </div>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="selStopBefore">
+                  Stop before heading
+                </label>
+                <input
+                  id="selStopBefore"
+                  className="formInput"
+                  type="text"
+                  placeholder="e.g. Appendix"
+                  value={selStopBefore}
+                  onChange={(e) => setSelStopBefore(e.target.value)}
+                />
+                <span className="formHint">Stop ingesting when a heading contains this text.</span>
+              </div>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="selIncludeHeadings">
+                  Include headings only
+                </label>
+                <input
+                  id="selIncludeHeadings"
+                  className="formInput"
+                  type="text"
+                  placeholder="Portfolio, Risk (comma-separated)"
+                  value={selIncludeHeadings}
+                  onChange={(e) => setSelIncludeHeadings(e.target.value)}
+                />
+                <span className="formHint">Only include sections whose heading matches any of these (comma-separated).</span>
+              </div>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="selExcludeSections">
+                  Exclude sections
+                </label>
+                <input
+                  id="selExcludeSections"
+                  className="formInput"
+                  type="text"
+                  placeholder="Notes, Disclaimer (comma-separated)"
+                  value={selExcludeSections}
+                  onChange={(e) => setSelExcludeSections(e.target.value)}
+                />
+                <span className="formHint">Remove sections whose heading matches any of these (comma-separated).</span>
+              </div>
+            </details>
 
             {ingestError && <div className="error formRow">{ingestError}</div>}
             {ingestResult && (

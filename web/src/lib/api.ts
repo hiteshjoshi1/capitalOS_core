@@ -830,6 +830,7 @@ export type RagSourceRecord = {
   source_type: string;
   status: string;
   hash: string | null;
+  selective_options?: SelectiveIngestionOptions | null;
   last_ingested_at: string | null;
   created_at: string;
 };
@@ -845,6 +846,13 @@ export type RagIngestionJobRecord = {
   started_at: string | null;
   finished_at: string | null;
   created_at: string;
+};
+
+export type SelectiveIngestionOptions = {
+  start_after?: string | null;
+  stop_before?: string | null;
+  include_headings?: string[];
+  exclude_sections?: string[];
 };
 
 export type IngestUrlsBatchResult = {
@@ -1214,7 +1222,7 @@ export const api = {
     req<RagSourceRecord[]>(
       `/rag/sources${authorId ? `?author_id=${encodeURIComponent(authorId)}` : ""}${status ? `${authorId ? "&" : "?"}status=${encodeURIComponent(status)}` : ""}`
     ),
-  ragIngestUrls: (authorId: string, payload: { urls: string[]; source_type: string }) =>
+  ragIngestUrls: (authorId: string, payload: { urls: string[]; source_type: string; selective_ingestion?: SelectiveIngestionOptions | null }) =>
     req<IngestUrlsBatchResult>(`/rag/authors/${encodeURIComponent(authorId)}/ingest-urls`, {
       method: "POST",
       body: JSON.stringify(payload),

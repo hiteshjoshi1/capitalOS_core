@@ -25,6 +25,7 @@ from app.rag.ingestion.chunker import Chunk, DocumentSection as ChunkerSection, 
 from app.rag.ingestion.embedder import embed_batch, embedding_model_name
 from app.rag.ingestion.fetcher import FetchResult, detect_source_type, fetch_url
 from app.rag.ingestion.parser import DocumentSection, ParseResult, StructuredParseResult, parse
+from app.rag.ingestion.selector import NoContentSelectedError, SelectiveIngestionOptions, apply_selective_options
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,7 @@ FAILURE_PARSE_FAILED = "parse_failed"
 FAILURE_EMPTY_TEXT_EXTRACTION = "empty_text_extraction"
 FAILURE_OCR_REQUIRED = "ocr_required"
 FAILURE_MANUAL_REVIEW_REQUIRED = "manual_review_required"
+FAILURE_NO_CONTENT_SELECTED = "no_content_selected"
 
 
 class EmptyTextExtractionError(RuntimeError):
@@ -109,8 +111,14 @@ def _persist_document_and_chunks(
     parse_result: ParseResult,
     title: Optional[str] = None,
     published_at=None,
+    selected_sections: Optional[list] = None,
 ) -> tuple[RagDocument, list[RagChunk]]:
-    """Create RagDocument + RagChunk rows; return both."""
+    """Create RagDocument + RagChunk rows; return both.
+
+    If *selected_sections* is provided it replaces the parsed sections for
+    chunking purposes; the raw_text / clean_text on the document still reflect
+    the full fetched content so the record is auditable.
+    """
     doc_hash = _sha256(parse_result.clean_text)
 
     # Extract doc_metadata when available (StructuredParseResult)
@@ -128,8 +136,9 @@ def _persist_document_and_chunks(
 
     base_meta = _build_base_metadata(source, doc_hash, title, doc_metadata)
 
-    # Use section-aware chunking when structured sections are available
-    parser_sections = getattr(parse_result, "sections", None)
+    # Use selected_sections when provided (selective ingestion), otherwise fall
+    # back to the sections from the parse result.
+    parser_sections = selected_sections if selected_sections is not None else getattr(parse_result, "sections", None)
     if parser_sections:
         chunker_sections = _parser_sections_to_chunker(parser_sections)
         if chunker_sections:
@@ -181,6 +190,8 @@ def _classify_failure(exc: Exception, source_type: Optional[str]) -> str:
         return FAILURE_OCR_REQUIRED
     if isinstance(exc, EmptyTextExtractionError):
         return FAILURE_EMPTY_TEXT_EXTRACTION
+    if isinstance(exc, NoContentSelectedError):
+        return FAILURE_NO_CONTENT_SELECTED
     if isinstance(exc, (RuntimeError, UnicodeDecodeError)):
         return FAILURE_PARSE_FAILED
     return FAILURE_MANUAL_REVIEW_REQUIRED
@@ -232,6 +243,7 @@ def run_url_ingestion(
     *,
     existing_job: Optional["RagIngestionJob"] = None,
     batch_id: str | None = None,
+    selective_options: Optional["SelectiveIngestionOptions"] = None,
 ) -> RagIngestionJob:
     """
     Fetch, parse, chunk, embed, and store content from source.url.
@@ -280,22 +292,44 @@ def run_url_ingestion(
         parsed: ParseResult = parse(fetch.raw_bytes, source.source_type)
         _ensure_clean_text(parsed, source.source_type)
 
-        doc, chunks = _persist_document_and_chunks(db, source, parsed)
+        # Resolve effective selective options: prefer argument, then source column.
+        effective_options: Optional[SelectiveIngestionOptions] = selective_options
+        if effective_options is None and getattr(source, "selective_options", None):
+            effective_options = SelectiveIngestionOptions.from_dict(source.selective_options)
+
+        selected_sections: Optional[list] = None
+        if effective_options and not effective_options.is_empty():
+            raw_sections = getattr(parsed, "sections", None) or []
+            selected_sections = apply_selective_options(raw_sections, effective_options)
+            log.info(
+                "Selective ingestion applied: source=%s sections_in=%d sections_out=%d options=%s",
+                source.id,
+                len(raw_sections),
+                len(selected_sections),
+                effective_options.to_dict(),
+            )
+
+        doc, chunks = _persist_document_and_chunks(db, source, parsed, selected_sections=selected_sections)
         n_emb = _embed_and_persist(db, chunks)
 
         source.status = "ingested"
         source.last_ingested_at = _now()
 
+        stats: dict = {
+            "chunks": len(chunks),
+            "embeddings": n_emb,
+            "char_count": len(parsed.clean_text),
+            "model": embedding_model_name(),
+        }
+        if effective_options and not effective_options.is_empty():
+            stats["selective_options"] = effective_options.to_dict()
+            stats["sections_selected"] = len(selected_sections) if selected_sections is not None else None
+
         _close_job(
             db,
             job,
             success=True,
-            stats={
-                "chunks": len(chunks),
-                "embeddings": n_emb,
-                "char_count": len(parsed.clean_text),
-                "model": embedding_model_name(),
-            },
+            stats=stats,
         )
         if source.user_id is not None:
             record_source_event(

@@ -223,6 +223,91 @@ describe("AuthorIngestion page", () => {
     });
   });
 
+  it("selective ingestion controls are hidden by default", async () => {
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await waitFor(() => expect(screen.getByRole("button", { name: /add another url/i })).toBeInTheDocument());
+
+    // The selective controls summary should exist but inputs should not be visible
+    expect(screen.getByText(/advanced.*selective ingestion/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/start after heading/i)).not.toBeVisible();
+  });
+
+  it("selective ingestion controls are revealed after expanding advanced section", async () => {
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await waitFor(() => expect(screen.getByText(/advanced.*selective ingestion/i)).toBeInTheDocument());
+
+    // Click the summary to expand
+    await user.click(screen.getByText(/advanced.*selective ingestion/i));
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/start after heading/i)).toBeVisible();
+      expect(screen.getByLabelText(/stop before heading/i)).toBeVisible();
+      expect(screen.getByLabelText(/include headings only/i)).toBeVisible();
+      expect(screen.getByLabelText(/exclude sections/i)).toBeVisible();
+    });
+  });
+
+  it("sends selective_ingestion payload when fields are filled", async () => {
+    const user = userEvent.setup();
+    (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
+      author_id: "warren_buffett",
+      registered: 1,
+      skipped_duplicate: 0,
+      jobs_queued: 1,
+      sources: [{ ...MOCK_SOURCES[0], id: "src-sel", status: "queued", selective_options: { start_after: "Intro", stop_before: null, include_headings: [], exclude_sections: [] } }],
+      job_ids: ["job-sel-1"],
+    });
+
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/selective-article");
+
+    // Expand selective options
+    await user.click(screen.getByText(/advanced.*selective ingestion/i));
+    await user.type(await screen.findByLabelText(/start after heading/i), "Intro");
+
+    await user.click(screen.getByRole("button", { name: /start ingestion/i }));
+
+    await waitFor(() => {
+      expect(api.ragIngestUrls).toHaveBeenCalledWith(
+        "warren_buffett",
+        expect.objectContaining({
+          selective_ingestion: expect.objectContaining({ start_after: "Intro" }),
+        }),
+      );
+    });
+  });
+
+  it("does not send selective_ingestion when all fields are empty", async () => {
+    const user = userEvent.setup();
+    (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
+      author_id: "warren_buffett",
+      registered: 1,
+      skipped_duplicate: 0,
+      jobs_queued: 1,
+      sources: [{ ...MOCK_SOURCES[0], id: "src-nosel", status: "queued" }],
+      job_ids: ["job-nosel-1"],
+    });
+
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/no-selective");
+    await user.click(screen.getByRole("button", { name: /start ingestion/i }));
+
+    await waitFor(() => {
+      const call = (api.ragIngestUrls as ReturnType<typeof vi.fn>).mock.calls[0];
+      expect(call[1].selective_ingestion).toBeNull();
+    });
+  });
+
   it("shows create author form with required fields distinct from optional", async () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
