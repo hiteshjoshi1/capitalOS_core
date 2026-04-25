@@ -172,11 +172,11 @@ def retrieve_similar_chunks(
     is_postgres = _is_postgres(db)
 
     if author_id:
-        where_clauses.append("rs.author_id = :author_id")
+        where_clauses.append("COALESCE(rd.author_id, rs.author_id) = :author_id")
         params["author_id"] = author_id
     elif author_ids:
         author_id_conditions = " OR ".join(
-            f"rs.author_id = :author_id_{i}" for i in range(len(author_ids))
+            f"COALESCE(rd.author_id, rs.author_id) = :author_id_{i}" for i in range(len(author_ids))
         )
         where_clauses.append(f"({author_id_conditions})")
         for i, selected_author_id in enumerate(author_ids):
@@ -213,7 +213,7 @@ def retrieve_similar_chunks(
         JOIN rag_chunks    rc ON rc.id = re.chunk_id
         JOIN rag_documents rd ON rd.id = rc.document_id
         JOIN rag_sources   rs ON rs.id = rd.source_id
-        JOIN rag_authors   ra ON ra.id = rs.author_id
+        JOIN rag_authors   ra ON ra.id = COALESCE(rd.author_id, rs.author_id)
         {where_sql}
         ORDER BY cosine_distance ASC
         LIMIT :top_k
@@ -354,11 +354,11 @@ def retrieve_keyword_chunks(
     is_postgres = True  # already verified above
 
     if author_id:
-        where_clauses.append("rs.author_id = :author_id")
+        where_clauses.append("COALESCE(rd.author_id, rs.author_id) = :author_id")
         params["author_id"] = author_id
     elif author_ids:
         author_id_conditions = " OR ".join(
-            f"rs.author_id = :author_id_{i}" for i in range(len(author_ids))
+            f"COALESCE(rd.author_id, rs.author_id) = :author_id_{i}" for i in range(len(author_ids))
         )
         where_clauses.append(f"({author_id_conditions})")
         for i, aid in enumerate(author_ids):
@@ -394,7 +394,7 @@ def retrieve_keyword_chunks(
         FROM rag_chunks    rc
         JOIN rag_documents rd ON rd.id = rc.document_id
         JOIN rag_sources   rs ON rs.id = rd.source_id
-        JOIN rag_authors   ra ON ra.id = rs.author_id
+        JOIN rag_authors   ra ON ra.id = COALESCE(rd.author_id, rs.author_id)
         {where_sql}
         ORDER BY ts_rank DESC
         LIMIT :top_k
@@ -562,23 +562,29 @@ def _apply_date_filters(
     """
     Append date-related WHERE clauses and bind params in-place.
 
-    On Postgres: prefers rd.published_at for year and date filtering.
-    On SQLite: falls back to metadata_json->>'year' string comparison
-               (published_from/published_to are ignored as SQLite has no
-               native DATE column; that column is stored as TEXT).
+    On Postgres: prefers rd.published_at, then rd.publication_year for year filters.
+    On SQLite: falls back to rd.publication_year and metadata_json->>'year'
+                (published_from/published_to are ignored as SQLite has no
+                native DATE column; that column is stored as TEXT).
     """
     if is_postgres:
         if year_from is not None:
             where_clauses.append(
-                "(rd.published_at IS NOT NULL AND EXTRACT(YEAR FROM rd.published_at) >= :year_from"
-                " OR rd.published_at IS NULL AND (rc.metadata_json->>'year') >= :year_from_str)"
+                "("
+                " (rd.published_at IS NOT NULL AND EXTRACT(YEAR FROM rd.published_at) >= :year_from)"
+                " OR (rd.published_at IS NULL AND rd.publication_year IS NOT NULL AND rd.publication_year >= :year_from)"
+                " OR (rd.published_at IS NULL AND rd.publication_year IS NULL AND (rc.metadata_json->>'year') >= :year_from_str)"
+                ")"
             )
             params["year_from"] = year_from
             params["year_from_str"] = str(year_from)
         if year_to is not None:
             where_clauses.append(
-                "(rd.published_at IS NOT NULL AND EXTRACT(YEAR FROM rd.published_at) <= :year_to"
-                " OR rd.published_at IS NULL AND (rc.metadata_json->>'year') <= :year_to_str)"
+                "("
+                " (rd.published_at IS NOT NULL AND EXTRACT(YEAR FROM rd.published_at) <= :year_to)"
+                " OR (rd.published_at IS NULL AND rd.publication_year IS NOT NULL AND rd.publication_year <= :year_to)"
+                " OR (rd.published_at IS NULL AND rd.publication_year IS NULL AND (rc.metadata_json->>'year') <= :year_to_str)"
+                ")"
             )
             params["year_to"] = year_to
             params["year_to_str"] = str(year_to)
@@ -589,12 +595,20 @@ def _apply_date_filters(
             where_clauses.append("rd.published_at <= :published_to")
             params["published_to"] = published_to
     else:
-        # SQLite: string comparison on metadata_json->>'year'
+        # SQLite: prefer the document column, then fall back to metadata_json->>'year'
         if year_from is not None:
-            where_clauses.append("(rc.metadata_json->>'year') >= :year_from_str")
+            where_clauses.append(
+                "(rd.publication_year IS NOT NULL AND rd.publication_year >= :year_from"
+                " OR rd.publication_year IS NULL AND (rc.metadata_json->>'year') >= :year_from_str)"
+            )
+            params["year_from"] = year_from
             params["year_from_str"] = str(year_from)
         if year_to is not None:
-            where_clauses.append("(rc.metadata_json->>'year') <= :year_to_str")
+            where_clauses.append(
+                "(rd.publication_year IS NOT NULL AND rd.publication_year <= :year_to"
+                " OR rd.publication_year IS NULL AND (rc.metadata_json->>'year') <= :year_to_str)"
+            )
+            params["year_to"] = year_to
             params["year_to_str"] = str(year_to)
 
 

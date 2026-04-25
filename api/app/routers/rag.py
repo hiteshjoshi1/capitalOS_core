@@ -393,9 +393,9 @@ def ingest_urls_for_author(
 
     existing_sources_by_url: dict[str, RagSource] = {
         s.url: s for s in db.query(RagSource).filter(
-            RagSource.user_id == current_user.id,
             RagSource.author_id == author_id,
             RagSource.url.isnot(None),
+            (RagSource.user_id == current_user.id) | (RagSource.user_id.is_(None)),
         ).all()
         if s.url
     }
@@ -411,9 +411,8 @@ def ingest_urls_for_author(
             continue
         existing = existing_sources_by_url.get(url)
         if existing is not None:
-            if existing.status in {"queued", "running"}:
-                skipped += 1
-                continue
+            db.expire_all()
+            existing = db.get(RagSource, existing.id) or existing
             existing.source_type = body.source_type
             existing.status = "queued"
             existing.selective_options = selective_opts_dict
@@ -1027,8 +1026,21 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
     return {
         "id": str(doc.id),
         "source_id": str(doc.source_id),
+        "author_id": doc.author_id,
+        "parent_document_id": str(doc.parent_document_id) if doc.parent_document_id else None,
+        "source_document_index": doc.source_document_index,
         "title": doc.title,
         "published_at": doc.published_at.isoformat() if doc.published_at else None,
+        "publication_year": doc.publication_year,
+        "venue": doc.venue,
+        "collection": doc.collection,
+        "canonical_work_id": doc.canonical_work_id,
+        "canonical_status": doc.canonical_status,
+        "dedupe_priority": doc.dedupe_priority,
+        "source_section": doc.source_section,
+        "note_taker": doc.note_taker,
+        "work_type": doc.work_type,
+        "metadata_json": doc.metadata_json or {},
         "char_count": len(doc.clean_text or ""),
         "chunk_count": len(doc.chunks),
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
