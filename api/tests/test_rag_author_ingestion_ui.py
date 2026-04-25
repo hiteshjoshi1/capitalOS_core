@@ -191,6 +191,43 @@ class TestIngestUrls:
         registered_urls = [s["url"] for s in resp.json()]
         assert url in registered_urls
 
+    def test_ingest_urls_persists_fanout_ingestion_config(self, client):
+        """POST ingest-urls accepts and stores deterministic fanout configuration."""
+        override_author = _make_author(client, id_suffix=f"override_{_uid()}")
+        url = f"https://example.com/compendium-{_uid()}"
+        payload = {
+            "urls": [url],
+            "source_type": "html",
+            "ingestion_config": {
+                "mode": "fanout",
+                "documents": [
+                    {
+                        "key": "essay-a",
+                        "title": "Essay A",
+                        "author_id": override_author["id"],
+                        "publication_year": 2024,
+                        "venue": "Letters",
+                        "collection": "Collected Letters",
+                        "canonical_work_id": "essay-a",
+                        "canonical_status": "canonical",
+                        "dedupe_priority": 10,
+                        "source_section": "Essay A",
+                        "work_type": "essay",
+                        "metadata": {"edition": "first"},
+                        "selective_ingestion": {"include_headings": ["Essay A"]},
+                    }
+                ],
+            },
+        }
+
+        resp = client.post(f"/rag/authors/{self.author_id}/ingest-urls", json=payload)
+        assert resp.status_code == 202, resp.text
+        source = resp.json()["sources"][0]
+        assert source["ingestion_config"]["mode"] == "fanout"
+        assert source["ingestion_config"]["documents"][0]["key"] == "essay-a"
+        assert source["ingestion_config"]["documents"][0]["author_id"] == override_author["id"]
+        assert source["ingestion_config"]["documents"][0]["selective_options"]["include_headings"] == ["Essay A"]
+
     def test_ingestion_activity_returns_durable_events_for_reload_recovery(self, client):
         """GET /rag/ingest/activity returns durable backend state and lifecycle events."""
         url = f"https://example.com/activity-{_uid()}"
@@ -224,6 +261,117 @@ class TestIngestUrls:
         assert queued_event["status"] == "queued"
         assert queued_event["payload"]["author"]["id"] == self.author_id
         assert queued_event["payload"]["source"]["url"] == url
+
+
+class TestFanoutConfigApis:
+    def test_preview_returns_logical_documents_and_metadata(self, client):
+        source_author = _make_author(client, id_suffix=f"source_{_uid()}")
+        override_author = _make_author(client, id_suffix=f"override_{_uid()}")
+        resp = client.post(
+            "/rag/fanout/preview",
+            json={
+                "author_id": source_author["id"],
+                "source_title": "Collected Writings",
+                "source_published_at": "2024-04-01",
+                "ingestion_config": {
+                    "mode": "fanout",
+                    "documents": [
+                        {
+                            "key": "letter-1",
+                            "title": "Letter 1",
+                            "author_id": override_author["id"],
+                            "collection": "Collected Writings",
+                            "canonical_work_id": "letter-1",
+                            "canonical_status": "canonical",
+                            "source_section": "Letter 1",
+                            "work_type": "letter",
+                            "metadata": {"topic": "quality"},
+                            "canonical_metadata": {"edition": "annotated"},
+                            "selective_ingestion": {"include_headings": ["Letter 1"]},
+                        },
+                        {
+                            "key": "letter-1-notes",
+                            "title": "Letter 1 Notes",
+                            "parent_key": "letter-1",
+                            "note_taker": "Archivist",
+                            "work_type": "notes",
+                            "selective_ingestion": {"include_headings": ["Letter 1 Notes"]},
+                        },
+                    ],
+                },
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["mode"] == "fanout"
+        assert body["document_count"] == 2
+        primary, notes = body["documents"]
+        assert primary["author_id"] == override_author["id"]
+        assert primary["canonical_work_id"] == "letter-1"
+        assert primary["metadata"]["topic"] == "quality"
+        assert primary["metadata"]["canonical_metadata"]["edition"] == "annotated"
+        assert primary["selective_ingestion"]["include_headings"] == ["Letter 1"]
+        assert notes["parent_key"] == "letter-1"
+        assert notes["note_taker"] == "Archivist"
+
+    def test_preview_rejects_unknown_parent_key(self, client):
+        source_author = _make_author(client, id_suffix=f"source_{_uid()}")
+        resp = client.post(
+            "/rag/fanout/preview",
+            json={
+                "author_id": source_author["id"],
+                "ingestion_config": {
+                    "mode": "fanout",
+                    "documents": [
+                        {
+                            "key": "child",
+                            "title": "Child",
+                            "parent_key": "missing-parent",
+                        }
+                    ],
+                },
+            },
+        )
+        assert resp.status_code == 422
+        assert "unknown parent" in resp.json()["detail"]
+
+    def test_patch_source_ingestion_config_updates_existing_source(self, client):
+        author = _make_author(client, id_suffix=f"patch_{_uid()}")
+        source_resp = client.post(
+            "/rag/sources",
+            json={
+                "author_id": author["id"],
+                "url": f"https://example.com/source-{_uid()}",
+                "source_type": "html",
+            },
+        )
+        assert source_resp.status_code == 201, source_resp.text
+        source_id = source_resp.json()["id"]
+
+        patch_resp = client.patch(
+            f"/rag/sources/{source_id}/ingestion-config",
+            json={
+                "ingestion_config": {
+                    "mode": "fanout",
+                    "documents": [
+                        {
+                            "key": "doc-1",
+                            "title": "Doc 1",
+                            "collection": "Compendium",
+                            "source_section": "Doc 1",
+                            "selective_ingestion": {"include_headings": ["Doc 1"]},
+                        }
+                    ],
+                }
+            },
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["ingestion_config"]["mode"] == "fanout"
+
+        sources_resp = client.get(f"/rag/sources?author_id={author['id']}")
+        assert sources_resp.status_code == 200, sources_resp.text
+        updated = next(source for source in sources_resp.json() if source["id"] == source_id)
+        assert updated["ingestion_config"]["documents"][0]["source_section"] == "Doc 1"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
