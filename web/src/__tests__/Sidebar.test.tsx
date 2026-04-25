@@ -192,18 +192,24 @@ describe("Sidebar", () => {
     });
   });
 
-  it("increments badge count when realtime event arrives", async () => {
+  it("rehydrates badge count from backend when realtime event arrives", async () => {
     let capturedOnEvent: ((event: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>) => void) | undefined;
     mockSubscribe.mockImplementation((_topic, handlers) => {
       capturedOnEvent = handlers.onEvent as typeof capturedOnEvent;
       return () => {};
     });
 
-    mockApi.alertNotifications.mockResolvedValueOnce({
-      upload_reminders: [],
-      system_notifications: [],
-      total_count: 0,
-    });
+    mockApi.alertNotifications
+      .mockResolvedValueOnce({
+        upload_reminders: [],
+        system_notifications: [],
+        total_count: 0,
+      })
+      .mockResolvedValueOnce({
+        upload_reminders: [],
+        system_notifications: [{ id: "sys-1" } as never],
+        total_count: 1,
+      });
 
     renderSidebar("/alerts");
     await waitFor(() => expect(screen.queryByLabelText(/0 alerts/i)).not.toBeInTheDocument());
@@ -226,6 +232,7 @@ describe("Sidebar", () => {
     });
 
     await waitFor(() => {
+      expect(mockApi.alertNotifications).toHaveBeenCalledTimes(2);
       expect(screen.getByLabelText(/1 alerts/i)).toBeInTheDocument();
     });
   });

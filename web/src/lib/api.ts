@@ -858,6 +858,7 @@ export type SelectiveIngestionOptions = {
 export type IngestUrlsBatchResult = {
   author_id: string;
   registered: number;
+  requeued_existing?: number;
   skipped_duplicate: number;
   jobs_queued: number;
   sources: RagSourceRecord[];

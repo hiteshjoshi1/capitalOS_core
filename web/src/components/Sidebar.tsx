@@ -89,7 +89,7 @@ export default function Sidebar() {
   useEffect(() => {
     const unsubscribe = subscribeToRealtimeTopic("author-ingestion", {
       onEvent: () => {
-        setAlertCount((prev) => prev + 1);
+        hydrateAlertCount();
       },
       onStatusChange: (status) => {
         if (status === "connected") {

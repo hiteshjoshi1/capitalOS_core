@@ -609,8 +609,9 @@ export default function AuthorIngestion() {
             {ingestError && <div className="error formRow">{ingestError}</div>}
             {ingestResult && (
               <div className="successBanner formRow">
-                ✓ Registered {ingestResult.registered} URLs
-                {ingestResult.skipped_duplicate > 0 && `, skipped ${ingestResult.skipped_duplicate} duplicate(s)`}.
+                ✓ Registered {ingestResult.registered} URL{ingestResult.registered === 1 ? "" : "s"}
+                {ingestResult.requeued_existing ? `, re-queued ${ingestResult.requeued_existing} existing URL${ingestResult.requeued_existing === 1 ? "" : "s"}` : ""}
+                {ingestResult.skipped_duplicate > 0 && `, skipped ${ingestResult.skipped_duplicate} already queued/running duplicate(s)`}.
                 {ingestResult.jobs_queued > 0 && ` ${ingestResult.jobs_queued} job(s) queued for background ingestion.`}
               </div>
             )}

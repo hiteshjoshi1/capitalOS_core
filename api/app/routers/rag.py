@@ -170,6 +170,7 @@ class IngestUrlsBatchIn(BaseModel):
 class IngestUrlsBatchOut(BaseModel):
     author_id: str
     registered: int
+    requeued_existing: int = 0
     skipped_duplicate: int
     jobs_queued: int
     sources: list[SourceOut]
@@ -379,8 +380,10 @@ def ingest_urls_for_author(
     """
     Register one or more URLs for an author and kick off background ingestion.
 
-    - Deduplicates: URLs already registered for this author are skipped.
-    - Registers new sources with status=pending and creates queued ingestion jobs.
+    - Registers new URLs with queued ingestion jobs.
+    - Re-queues existing URLs that are not already queued/running, updating
+      their persisted selective-ingestion rules to the latest submitted values.
+    - Skips URLs already queued/running to avoid duplicate in-flight jobs.
     - Spawns a background thread that processes URLs one at a time (explicit in logs).
     - Returns immediately with job IDs and source records for client polling.
     """
@@ -388,9 +391,8 @@ def ingest_urls_for_author(
     if not author:
         raise HTTPException(status_code=404, detail=f"Author '{author_id}' not found.")
 
-    # Deduplicate against already-registered URLs for this author
-    existing_urls: set[str] = {
-        s.url for s in db.query(RagSource).filter(
+    existing_sources_by_url: dict[str, RagSource] = {
+        s.url: s for s in db.query(RagSource).filter(
             RagSource.user_id == current_user.id,
             RagSource.author_id == author_id,
             RagSource.url.isnot(None),
@@ -399,6 +401,7 @@ def ingest_urls_for_author(
     }
 
     new_sources: list[RagSource] = []
+    requeued_sources: list[RagSource] = []
     skipped = 0
     batch_id = str(uuid.uuid4())
     selective_opts_dict = body.selective_ingestion.to_selector_options().to_dict() if body.selective_ingestion else None
@@ -406,8 +409,15 @@ def ingest_urls_for_author(
         url = url.strip()
         if not url:
             continue
-        if url in existing_urls:
-            skipped += 1
+        existing = existing_sources_by_url.get(url)
+        if existing is not None:
+            if existing.status in {"queued", "running"}:
+                skipped += 1
+                continue
+            existing.source_type = body.source_type
+            existing.status = "queued"
+            existing.selective_options = selective_opts_dict
+            requeued_sources.append(existing)
             continue
         source = RagSource(
             user_id=current_user.id,
@@ -418,15 +428,16 @@ def ingest_urls_for_author(
             selective_options=selective_opts_dict,
         )
         db.add(source)
-        existing_urls.add(url)
+        existing_sources_by_url[url] = source
         new_sources.append(source)
 
     db.flush()
 
     # Create queued job rows so clients can poll status immediately
+    queued_sources = [*new_sources, *requeued_sources]
     queued_jobs: list[RagIngestionJob] = []
     queued_events: list[RealtimeEvent] = []
-    for source in new_sources:
+    for source in queued_sources:
         job = RagIngestionJob(
             user_id=current_user.id,
             source_id=source.id,
@@ -449,7 +460,7 @@ def ingest_urls_for_author(
         )
 
     batch_submitted_event: RealtimeEvent | None = None
-    if new_sources:
+    if queued_sources:
         batch_submitted_event = record_batch_event(
             db,
             user_id=current_user.id,
@@ -457,11 +468,11 @@ def ingest_urls_for_author(
             batch_id=batch_id,
             event_name="batch_submitted",
             status="submitted",
-            source_count=len(new_sources),
+            source_count=len(queued_sources),
         )
 
     db.commit()
-    for source in new_sources:
+    for source in queued_sources:
         db.refresh(source)
     for job in queued_jobs:
         db.refresh(job)
@@ -471,7 +482,7 @@ def ingest_urls_for_author(
     for queued_event in queued_events:
         publish_event(queued_event)
 
-    source_ids = [str(s.id) for s in new_sources]
+    source_ids = [str(s.id) for s in queued_sources]
     job_ids = [str(j.id) for j in queued_jobs]
 
     if source_ids:
@@ -501,12 +512,13 @@ def ingest_urls_for_author(
             last_ingested_at=s.last_ingested_at,
             created_at=s.created_at,
         )
-        for s in new_sources
+        for s in queued_sources
     ]
 
     return IngestUrlsBatchOut(
         author_id=author_id,
         registered=len(new_sources),
+        requeued_existing=len(requeued_sources),
         skipped_duplicate=skipped,
         jobs_queued=len(queued_jobs),
         sources=source_outs,

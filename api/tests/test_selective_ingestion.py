@@ -251,6 +251,45 @@ class TestSelectiveIngestionAPI:
         assert source["selective_options"] is not None
         assert source["selective_options"]["start_after"] == "Part 2"
 
+    def test_requeue_existing_url_without_selective_options_clears_stored_rules(self, client):
+        """Re-submitting an existing URL with blank selective_ingestion clears stored rules."""
+        from app.models.rag import RagSource
+
+        url = f"https://example.com/selective-clear-{_uid()}"
+        first = client.post(
+            f"/rag/authors/{self.author_id}/ingest-urls",
+            json={
+                "urls": [url],
+                "source_type": "html",
+                "selective_ingestion": {
+                    "start_after": "Introduction",
+                    "stop_before": None,
+                    "include_headings": [],
+                    "exclude_sections": [],
+                },
+            },
+        )
+        assert first.status_code == 202, first.text
+        source_id = first.json()["sources"][0]["id"]
+
+        second = client.post(
+            f"/rag/authors/{self.author_id}/ingest-urls",
+            json={"urls": [url], "source_type": "html"},
+        )
+        assert second.status_code == 202, second.text
+        payload = second.json()
+        assert payload["registered"] == 0
+        assert payload["requeued_existing"] == 1
+        assert payload["jobs_queued"] == 1
+
+        db = TestingSessionLocal()
+        try:
+            source = db.get(RagSource, source_id)
+            assert source is not None
+            assert source.selective_options is None
+        finally:
+            db.close()
+
     def test_selective_options_in_get_sources(self, client):
         """GET /rag/sources includes selective_options for sources that have them."""
         url = f"https://example.com/selective-list-{_uid()}"
