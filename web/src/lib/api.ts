@@ -831,6 +831,7 @@ export type RagSourceRecord = {
   status: string;
   hash: string | null;
   selective_options?: SelectiveIngestionOptions | null;
+  ingestion_config?: Record<string, unknown> | null;
   last_ingested_at: string | null;
   created_at: string;
 };
@@ -853,6 +854,56 @@ export type SelectiveIngestionOptions = {
   stop_before?: string | null;
   include_headings?: string[];
   exclude_sections?: string[];
+};
+
+export type RagLogicalDocumentConfigInput = {
+  key: string;
+  title: string;
+  author_id?: string | null;
+  published_at?: string | null;
+  publication_year?: number | null;
+  venue?: string | null;
+  collection?: string | null;
+  canonical_work_id?: string | null;
+  canonical_status?: string | null;
+  canonical_metadata?: Record<string, string>;
+  dedupe_priority?: number | null;
+  source_section?: string | null;
+  note_taker?: string | null;
+  work_type?: string | null;
+  parent_key?: string | null;
+  metadata?: Record<string, string>;
+  selective_ingestion?: SelectiveIngestionOptions | null;
+};
+
+export type RagIngestionConfigInput = {
+  mode: "single_work" | "fanout";
+  documents: RagLogicalDocumentConfigInput[];
+};
+
+export type RagLogicalDocumentPreview = {
+  key: string;
+  title: string | null;
+  author_id: string | null;
+  published_at: string | null;
+  publication_year: number | null;
+  venue: string | null;
+  collection: string | null;
+  canonical_work_id: string | null;
+  canonical_status: string | null;
+  dedupe_priority: number | null;
+  source_section: string | null;
+  note_taker: string | null;
+  work_type: string | null;
+  parent_key: string | null;
+  metadata: Record<string, unknown>;
+  selective_ingestion: Record<string, unknown>;
+};
+
+export type RagFanoutPreview = {
+  mode: string;
+  document_count: number;
+  documents: RagLogicalDocumentPreview[];
 };
 
 export type IngestUrlsBatchResult = {
@@ -1223,10 +1274,33 @@ export const api = {
     req<RagSourceRecord[]>(
       `/rag/sources${authorId ? `?author_id=${encodeURIComponent(authorId)}` : ""}${status ? `${authorId ? "&" : "?"}status=${encodeURIComponent(status)}` : ""}`
     ),
-  ragIngestUrls: (authorId: string, payload: { urls: string[]; source_type: string; selective_ingestion?: SelectiveIngestionOptions | null }) =>
+  ragIngestUrls: (
+    authorId: string,
+    payload: {
+      urls: string[];
+      source_type: string;
+      selective_ingestion?: SelectiveIngestionOptions | null;
+      ingestion_config?: RagIngestionConfigInput | null;
+    }
+  ) =>
     req<IngestUrlsBatchResult>(`/rag/authors/${encodeURIComponent(authorId)}/ingest-urls`, {
       method: "POST",
       body: JSON.stringify(payload),
+    }),
+  ragPreviewFanout: (payload: {
+    author_id: string;
+    source_title?: string | null;
+    source_published_at?: string | null;
+    ingestion_config?: RagIngestionConfigInput | null;
+  }) =>
+    req<RagFanoutPreview>("/rag/fanout/preview", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  ragUpdateSourceIngestionConfig: (sourceId: string, ingestion_config: RagIngestionConfigInput | null) =>
+    req<RagSourceRecord>(`/rag/sources/${encodeURIComponent(sourceId)}/ingestion-config`, {
+      method: "PATCH",
+      body: JSON.stringify({ ingestion_config }),
     }),
   ragIngestionJobs: (params?: { author_id?: string; source_id?: string; status?: string; limit?: number }) => {
     const qs = new URLSearchParams();

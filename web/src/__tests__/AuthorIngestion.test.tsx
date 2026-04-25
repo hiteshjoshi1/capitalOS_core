@@ -21,6 +21,7 @@ vi.mock("../lib/api", () => ({
     ragCreateAuthor: vi.fn(),
     ragIngestionActivity: vi.fn(),
     ragIngestUrls: vi.fn(),
+    ragPreviewFanout: vi.fn(),
     ragRetryIngestion: vi.fn(),
   },
 }));
@@ -236,6 +237,89 @@ describe("AuthorIngestion page", () => {
     expect(screen.queryByLabelText(/start after heading/i)).not.toBeVisible();
   });
 
+  it("fanout controls are hidden until compendium mode is enabled", async () => {
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+
+    expect(screen.getByLabelText(/compendium.*fanout/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /preview logical documents/i })).not.toBeInTheDocument();
+  });
+
+  it("previews logical documents from the advanced fanout workflow", async () => {
+    const user = userEvent.setup();
+    (api.ragPreviewFanout as ReturnType<typeof vi.fn>).mockResolvedValue({
+      mode: "fanout",
+      document_count: 1,
+      documents: [
+        {
+          key: "essay-a",
+          title: "Essay A",
+          author_id: "warren_buffett",
+          published_at: null,
+          publication_year: 2024,
+          venue: null,
+          collection: "Letters",
+          canonical_work_id: "essay-a",
+          canonical_status: "canonical",
+          dedupe_priority: 5,
+          source_section: "Essay A",
+          note_taker: null,
+          work_type: "essay",
+          parent_key: null,
+          metadata: { topic: "moat" },
+          selective_ingestion: { include_headings: ["Essay A"] },
+        },
+      ],
+    });
+
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(screen.getByLabelText(/compendium.*fanout/i));
+    await user.clear(screen.getByLabelText(/logical key/i));
+    await user.type(screen.getByLabelText(/logical key/i), "essay-a");
+    await user.type(screen.getByLabelText(/^Title \*/i), "Essay A");
+    await user.click(screen.getByRole("button", { name: /preview logical documents/i }));
+
+    await waitFor(() => {
+      expect(api.ragPreviewFanout).toHaveBeenCalledWith(
+        expect.objectContaining({
+          author_id: "warren_buffett",
+          ingestion_config: expect.objectContaining({
+            mode: "fanout",
+            documents: [
+              expect.objectContaining({
+                key: "essay-a",
+                title: "Essay A",
+              }),
+            ],
+          }),
+        }),
+      );
+    });
+
+    expect(await screen.findByText(/Preview ready/i)).toBeInTheDocument();
+    expect(screen.getByText("essay-a")).toBeInTheDocument();
+  });
+
+  it("shows fanout validation errors returned by the backend preview", async () => {
+    const user = userEvent.setup();
+    (api.ragPreviewFanout as ReturnType<typeof vi.fn>).mockRejectedValue(new Error("unknown parent"));
+
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(screen.getByLabelText(/compendium.*fanout/i));
+    await user.clear(screen.getByLabelText(/logical key/i));
+    await user.type(screen.getByLabelText(/logical key/i), "child");
+    await user.type(screen.getByLabelText(/^Title \*/i), "Child");
+    await user.click(screen.getByRole("button", { name: /preview logical documents/i }));
+
+    expect(await screen.findByText(/unknown parent/i)).toBeInTheDocument();
+  });
+
   it("selective ingestion controls are revealed after expanding advanced section", async () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
@@ -308,6 +392,48 @@ describe("AuthorIngestion page", () => {
     await waitFor(() => {
       const call = (api.ragIngestUrls as ReturnType<typeof vi.fn>).mock.calls[0];
       expect(call[1].selective_ingestion).toBeNull();
+    });
+  });
+
+  it("submits fanout definitions without raw JSON editing", async () => {
+    const user = userEvent.setup();
+    (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
+      author_id: "warren_buffett",
+      registered: 1,
+      requeued_existing: 0,
+      skipped_duplicate: 0,
+      jobs_queued: 1,
+      sources: [{ ...MOCK_SOURCES[0], id: "src-fanout", status: "queued" }],
+      job_ids: ["job-fanout-1"],
+    });
+
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/compendium");
+    await user.click(screen.getByLabelText(/compendium.*fanout/i));
+    await user.clear(screen.getByLabelText(/logical key/i));
+    await user.type(screen.getByLabelText(/logical key/i), "essay-a");
+    await user.type(screen.getByLabelText(/^Title \*/i), "Essay A");
+    await user.type(screen.getByLabelText(/collection/i), "Collected Essays");
+    await user.click(screen.getByRole("button", { name: /start ingestion/i }));
+
+    await waitFor(() => {
+      expect(api.ragIngestUrls).toHaveBeenCalledWith(
+        "warren_buffett",
+        expect.objectContaining({
+          ingestion_config: expect.objectContaining({
+            mode: "fanout",
+            documents: [
+              expect.objectContaining({
+                key: "essay-a",
+                title: "Essay A",
+                collection: "Collected Essays",
+              }),
+            ],
+          }),
+        }),
+      );
     });
   });
 
@@ -399,5 +525,35 @@ describe("AuthorIngestion page", () => {
 
     expect(await screen.findAllByText(/Failed/i)).not.toHaveLength(0);
     expect(screen.getByText(/timeout/i)).toBeInTheDocument();
+  });
+
+  it("renders logical-document outcomes from ingestion jobs", async () => {
+    (api.ragIngestionActivity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      topic: "author-ingestion",
+      sources: MOCK_SOURCES,
+      jobs: [
+        {
+          ...MOCK_JOBS[0],
+          stats_json: {
+            documents: [
+              { key: "essay-a", status: "created", author_id: "warren_buffett" },
+              { key: "essay-b", status: "rejected", author_id: "warren_buffett", failure_category: "low_quality_extraction" },
+            ],
+          },
+        },
+      ],
+      events: MOCK_EVENTS,
+    } satisfies RagIngestionActivity);
+
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+
+    expect(await screen.findByText(/1 Created \/ 1 Rejected/i)).toBeInTheDocument();
+    await user.click(screen.getByText(/View outcomes/i));
+    expect(screen.getByText("essay-a")).toBeInTheDocument();
+    expect(screen.getByText("essay-b")).toBeInTheDocument();
+    expect(screen.getByText(/low_quality_extraction/i)).toBeInTheDocument();
   });
 });

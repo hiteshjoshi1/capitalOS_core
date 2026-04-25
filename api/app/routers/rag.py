@@ -24,6 +24,7 @@ from __future__ import annotations
 import logging
 import threading
 import uuid
+from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -35,6 +36,7 @@ from app.db.session import SessionLocal, get_db
 from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource, RealtimeEvent
 from app.rag.config import load_author_config, sync_authors_from_config
 from app.rag.discovery import discover_sources_for_author
+from app.rag.ingestion.fanout import build_fanout_preview
 from app.rag.ingestion.events import (
     AUTHOR_INGESTION_TOPIC,
     publish_event,
@@ -82,6 +84,7 @@ class SourceOut(BaseModel):
     status: str
     hash: Optional[str]
     selective_options: Optional[dict] = None
+    ingestion_config: Optional[dict[str, Any]] = None
     last_ingested_at: Optional[Any]
     created_at: Any
 
@@ -92,6 +95,7 @@ class RegisterSourceIn(BaseModel):
     author_id: str
     url: Optional[str] = None
     source_type: str = Field(..., pattern="^(html|pdf|text|manual)$")
+    ingestion_config: Optional["IngestionConfigIn"] = None
 
 
 class IngestUrlIn(BaseModel):
@@ -165,6 +169,10 @@ class IngestUrlsBatchIn(BaseModel):
         None,
         description="Optional selective-ingestion controls. Hidden by default in the UI.",
     )
+    ingestion_config: Optional["IngestionConfigIn"] = Field(
+        None,
+        description="Optional deterministic fanout configuration persisted on each source before ingestion.",
+    )
 
 
 class IngestUrlsBatchOut(BaseModel):
@@ -232,7 +240,212 @@ class IngestionActivityOut(BaseModel):
     events: list[RealtimeEventOut]
 
 
+class LogicalDocumentConfigIn(BaseModel):
+    key: str = Field(..., min_length=1)
+    title: str = Field(..., min_length=1)
+    author_id: Optional[str] = None
+    published_at: Optional[str] = None
+    publication_year: Optional[int] = Field(None, ge=0, le=9999)
+    venue: Optional[str] = None
+    collection: Optional[str] = None
+    canonical_work_id: Optional[str] = None
+    canonical_status: Optional[str] = None
+    canonical_metadata: dict[str, Any] = Field(default_factory=dict)
+    dedupe_priority: Optional[int] = None
+    source_section: Optional[str] = None
+    note_taker: Optional[str] = None
+    work_type: Optional[str] = None
+    parent_key: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    selective_ingestion: Optional[SelectiveIngestionOptionsIn] = None
+
+
+class IngestionConfigIn(BaseModel):
+    mode: str = Field("single_work", pattern="^(single_work|fanout)$")
+    documents: list[LogicalDocumentConfigIn] = Field(default_factory=list)
+
+
+class UpdateSourceIngestionConfigIn(BaseModel):
+    ingestion_config: Optional[IngestionConfigIn] = None
+
+
+class FanoutPreviewIn(BaseModel):
+    author_id: str
+    source_title: Optional[str] = None
+    source_published_at: Optional[str] = None
+    ingestion_config: Optional[IngestionConfigIn] = None
+
+
+class LogicalDocumentPreviewOut(BaseModel):
+    key: str
+    title: Optional[str]
+    author_id: Optional[str]
+    published_at: Optional[str]
+    publication_year: Optional[int]
+    venue: Optional[str]
+    collection: Optional[str]
+    canonical_work_id: Optional[str]
+    canonical_status: Optional[str]
+    dedupe_priority: Optional[int]
+    source_section: Optional[str]
+    note_taker: Optional[str]
+    work_type: Optional[str]
+    parent_key: Optional[str]
+    metadata: dict[str, Any]
+    selective_ingestion: dict[str, Any]
+
+
+class FanoutPreviewOut(BaseModel):
+    mode: str
+    document_count: int
+    documents: list[LogicalDocumentPreviewOut]
+
+
 # ── Catalog / config ──────────────────────────────────────────────────────────
+
+
+def _parse_iso_date(value: Optional[str], *, field_name: str) -> Optional[date]:
+    if value in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"{field_name} must be YYYY-MM-DD")
+
+
+def _ingestion_config_to_dict(ingestion_config: Optional[IngestionConfigIn]) -> Optional[dict[str, Any]]:
+    if ingestion_config is None:
+        return None
+
+    if ingestion_config.mode == "fanout" and not ingestion_config.documents:
+        raise HTTPException(
+            status_code=422,
+            detail="ingestion_config.documents must contain at least one logical document when mode=fanout",
+        )
+    if ingestion_config.mode != "fanout" and ingestion_config.documents:
+        raise HTTPException(
+            status_code=422,
+            detail="ingestion_config.documents may only be provided when mode=fanout",
+        )
+
+    seen_keys: set[str] = set()
+    for document in ingestion_config.documents:
+        key = document.key.strip()
+        if key in seen_keys:
+            raise HTTPException(status_code=422, detail=f"Duplicate logical document key '{key}' is not allowed")
+        seen_keys.add(key)
+    for document in ingestion_config.documents:
+        if not document.parent_key:
+            continue
+        parent_key = document.parent_key.strip()
+        if parent_key == document.key.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=f"Logical document '{document.key.strip()}' cannot reference itself as parent",
+            )
+        if parent_key not in seen_keys:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Logical document '{document.key.strip()}' references unknown parent '{parent_key}'"
+                ),
+            )
+
+    documents: list[dict[str, Any]] = []
+    for document in ingestion_config.documents:
+        published_at = _parse_iso_date(
+            document.published_at,
+            field_name=f"ingestion_config.documents[{len(documents)}].published_at",
+        )
+        metadata = dict(document.metadata)
+        if document.canonical_metadata:
+            metadata["canonical_metadata"] = dict(document.canonical_metadata)
+
+        payload: dict[str, Any] = {
+            "key": document.key.strip(),
+            "title": document.title.strip(),
+            "author_id": document.author_id,
+            "published_at": published_at.isoformat() if published_at else None,
+            "publication_year": document.publication_year,
+            "venue": document.venue,
+            "collection": document.collection,
+            "canonical_work_id": document.canonical_work_id,
+            "canonical_status": document.canonical_status,
+            "dedupe_priority": document.dedupe_priority,
+            "source_section": document.source_section,
+            "note_taker": document.note_taker,
+            "work_type": document.work_type,
+            "parent_key": document.parent_key.strip() if document.parent_key else None,
+            "metadata": metadata,
+        }
+        if document.selective_ingestion is not None:
+            payload["selective_options"] = document.selective_ingestion.to_selector_options().to_dict()
+        documents.append({key: value for key, value in payload.items() if value not in (None, {}, [])})
+
+    config_payload: dict[str, Any] = {"mode": ingestion_config.mode}
+    if documents:
+        config_payload["documents"] = documents
+    return config_payload
+
+
+def _ensure_ingestion_config_authors_exist(
+    db: Session,
+    *,
+    source_author_id: str,
+    ingestion_config: Optional[dict[str, Any]],
+) -> None:
+    mode, preview_documents = build_fanout_preview(
+        source_author_id=source_author_id,
+        source_title=None,
+        source_published_at=None,
+        ingestion_config=ingestion_config,
+    )
+    author_ids = {source_author_id}
+    if mode == "fanout":
+        author_ids.update(document.author_id for document in preview_documents if document.author_id)
+    for author_id in author_ids:
+        if author_id and db.get(RagAuthor, author_id) is None:
+            raise HTTPException(status_code=422, detail=f"Author '{author_id}' does not exist")
+
+
+def _fanout_preview_out(
+    *,
+    source_author_id: str,
+    source_title: Optional[str],
+    source_published_at: Optional[date],
+    ingestion_config: Optional[dict[str, Any]],
+) -> FanoutPreviewOut:
+    mode, preview_documents = build_fanout_preview(
+        source_author_id=source_author_id,
+        source_title=source_title,
+        source_published_at=source_published_at,
+        ingestion_config=ingestion_config,
+    )
+    return FanoutPreviewOut(
+        mode=mode,
+        document_count=len(preview_documents),
+        documents=[
+            LogicalDocumentPreviewOut(
+                key=document.key,
+                title=document.title,
+                author_id=document.author_id,
+                published_at=document.published_at.isoformat() if document.published_at else None,
+                publication_year=document.publication_year,
+                venue=document.venue,
+                collection=document.collection,
+                canonical_work_id=document.canonical_work_id,
+                canonical_status=document.canonical_status,
+                dedupe_priority=document.dedupe_priority,
+                source_section=document.source_section,
+                note_taker=document.note_taker,
+                work_type=document.work_type,
+                parent_key=document.parent_key,
+                metadata=document.metadata,
+                selective_ingestion=document.selective_options,
+            )
+            for document in preview_documents
+        ],
+    )
 
 
 @router.get("/authors", response_model=list[AuthorOut])
@@ -313,6 +526,7 @@ def list_sources(
             status=s.status,
             hash=s.hash,
             selective_options=s.selective_options or None,
+            ingestion_config=s.ingestion_config or None,
             last_ingested_at=s.last_ingested_at,
             created_at=s.created_at,
         )
@@ -330,6 +544,8 @@ def register_source(
     author = db.get(RagAuthor, body.author_id)
     if not author:
         raise HTTPException(status_code=404, detail=f"Author '{body.author_id}' not found. Run sync-config first.")
+    ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
+    _ensure_ingestion_config_authors_exist(db, source_author_id=body.author_id, ingestion_config=ingestion_config)
 
     source = RagSource(
         user_id=current_user.id,
@@ -337,6 +553,7 @@ def register_source(
         url=body.url,
         source_type=body.source_type,
         status="pending",
+        ingestion_config=ingestion_config,
     )
     db.add(source)
     db.commit()
@@ -350,8 +567,56 @@ def register_source(
         status=source.status,
         hash=source.hash,
         selective_options=source.selective_options or None,
+        ingestion_config=source.ingestion_config or None,
         last_ingested_at=source.last_ingested_at,
         created_at=source.created_at,
+    )
+
+
+@router.patch("/sources/{source_id}/ingestion-config", response_model=SourceOut)
+def update_source_ingestion_config(
+    source_id: str,
+    body: UpdateSourceIngestionConfigIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    source = _get_source_or_404(source_id, db, current_user)
+    ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
+    _ensure_ingestion_config_authors_exist(db, source_author_id=source.author_id, ingestion_config=ingestion_config)
+    source.ingestion_config = ingestion_config
+    db.commit()
+    db.refresh(source)
+    return SourceOut(
+        id=str(source.id),
+        author_id=source.author_id,
+        author_name=source.author.name if source.author else None,
+        url=source.url,
+        source_type=source.source_type,
+        status=source.status,
+        hash=source.hash,
+        selective_options=source.selective_options or None,
+        ingestion_config=source.ingestion_config or None,
+        last_ingested_at=source.last_ingested_at,
+        created_at=source.created_at,
+    )
+
+
+@router.post("/fanout/preview", response_model=FanoutPreviewOut)
+def preview_fanout_config(
+    body: FanoutPreviewIn,
+    db: Session = Depends(get_db),
+):
+    author = db.get(RagAuthor, body.author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail=f"Author '{body.author_id}' not found.")
+    source_published_at = _parse_iso_date(body.source_published_at, field_name="source_published_at")
+    ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
+    _ensure_ingestion_config_authors_exist(db, source_author_id=body.author_id, ingestion_config=ingestion_config)
+    return _fanout_preview_out(
+        source_author_id=body.author_id,
+        source_title=body.source_title,
+        source_published_at=source_published_at,
+        ingestion_config=ingestion_config,
     )
 
 
@@ -405,6 +670,8 @@ def ingest_urls_for_author(
     skipped = 0
     batch_id = str(uuid.uuid4())
     selective_opts_dict = body.selective_ingestion.to_selector_options().to_dict() if body.selective_ingestion else None
+    ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
+    _ensure_ingestion_config_authors_exist(db, source_author_id=author_id, ingestion_config=ingestion_config)
     for url in body.urls:
         url = url.strip()
         if not url:
@@ -416,6 +683,7 @@ def ingest_urls_for_author(
             existing.source_type = body.source_type
             existing.status = "queued"
             existing.selective_options = selective_opts_dict
+            existing.ingestion_config = ingestion_config
             requeued_sources.append(existing)
             continue
         source = RagSource(
@@ -425,6 +693,7 @@ def ingest_urls_for_author(
             source_type=body.source_type,
             status="queued",
             selective_options=selective_opts_dict,
+            ingestion_config=ingestion_config,
         )
         db.add(source)
         existing_sources_by_url[url] = source
@@ -508,6 +777,7 @@ def ingest_urls_for_author(
             status=s.status,
             hash=s.hash,
             selective_options=s.selective_options or None,
+            ingestion_config=s.ingestion_config or None,
             last_ingested_at=s.last_ingested_at,
             created_at=s.created_at,
         )
@@ -988,6 +1258,7 @@ def ingestion_activity(
                 status=serialized["status"],
                 hash=serialized["hash"],
                 selective_options=serialized.get("selective_options"),
+                ingestion_config=serialized.get("ingestion_config"),
                 last_ingested_at=serialized["last_ingested_at"],
                 created_at=serialized["created_at"],
             )

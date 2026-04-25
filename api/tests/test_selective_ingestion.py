@@ -139,6 +139,17 @@ class TestApplySelectiveOptions:
         result = apply_selective_options(sections, opts)
         assert [s.heading for s in result] == ["Portfolio", "Risk"]
 
+    def test_include_headings_keeps_descendant_sections_under_matched_heading(self):
+        sections = [
+            _Section("Foreword: Collison on Munger", level=1, content=""),
+            _Section("John Collison", level=3, content="Actual foreword body"),
+            _Section("Foreword: Buffett on Munger", level=1, content=""),
+            _Section("Warren E. Buffett", level=3, content="Another foreword body"),
+        ]
+        opts = SelectiveIngestionOptions(include_headings=["Foreword: Collison on Munger"])
+        result = apply_selective_options(sections, opts)
+        assert [s.heading for s in result] == ["Foreword: Collison on Munger", "John Collison"]
+
     def test_include_headings_no_match_raises(self):
         sections = _make_sections(["Intro", "Methods"])
         opts = SelectiveIngestionOptions(include_headings=["Nonexistent"])
@@ -150,6 +161,16 @@ class TestApplySelectiveOptions:
         opts = SelectiveIngestionOptions(exclude_sections=["Appendix"])
         result = apply_selective_options(sections, opts)
         assert [s.heading for s in result] == ["Intro", "Methods"]
+
+    def test_exclude_sections_removes_descendant_sections_under_matched_heading(self):
+        sections = [
+            _Section("Foreword: Collison on Munger", level=1, content=""),
+            _Section("John Collison", level=3, content="Actual foreword body"),
+            _Section("Recommended reading", level=1, content="Book list"),
+        ]
+        opts = SelectiveIngestionOptions(exclude_sections=["Foreword: Collison on Munger"])
+        result = apply_selective_options(sections, opts)
+        assert [s.heading for s in result] == ["Recommended reading"]
 
     def test_exclude_sections_all_removed_raises(self):
         sections = _make_sections(["Appendix"])

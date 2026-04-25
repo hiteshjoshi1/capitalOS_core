@@ -114,6 +114,26 @@ class FanoutPlan:
     documents: list[LogicalDocumentPlan]
 
 
+@dataclass
+class FanoutPreviewDocument:
+    key: str
+    title: Optional[str]
+    author_id: Optional[str]
+    published_at: Optional[date]
+    publication_year: Optional[int]
+    venue: Optional[str]
+    collection: Optional[str]
+    canonical_work_id: Optional[str]
+    canonical_status: Optional[str]
+    dedupe_priority: Optional[int]
+    source_section: Optional[str]
+    note_taker: Optional[str]
+    work_type: Optional[str]
+    parent_key: Optional[str]
+    metadata: dict[str, Any]
+    selective_options: dict[str, Any]
+
+
 def build_selected_text(sections: list[DocumentSection]) -> str:
     parts: list[str] = []
     for section in sections:
@@ -124,6 +144,105 @@ def build_selected_text(sections: list[DocumentSection]) -> str:
         if content:
             parts.append(content)
     return "\n\n".join(part for part in parts if part).strip()
+
+
+def _validate_document_relationships(specs: list[LogicalDocumentSpec]) -> None:
+    seen_keys: set[str] = set()
+    for spec in specs:
+        if spec.key in seen_keys:
+            raise RuntimeError(f"Duplicate logical document key '{spec.key}' is not allowed")
+        seen_keys.add(spec.key)
+
+    for spec in specs:
+        if not spec.parent_key:
+            continue
+        if spec.parent_key == spec.key:
+            raise RuntimeError(f"Logical document '{spec.key}' cannot reference itself as parent")
+        if spec.parent_key not in seen_keys:
+            raise RuntimeError(
+                f"Logical document '{spec.key}' references unknown parent '{spec.parent_key}'"
+            )
+
+
+def _preview_document_from_spec(
+    spec: LogicalDocumentSpec,
+    *,
+    index: int,
+    source_author_id: str,
+    source_title: Optional[str],
+) -> FanoutPreviewDocument:
+    return FanoutPreviewDocument(
+        key=spec.key,
+        title=spec.title or source_title or f"Logical document {index + 1}",
+        author_id=spec.author_id or source_author_id,
+        published_at=spec.published_at,
+        publication_year=spec.publication_year or (spec.published_at.year if spec.published_at else None),
+        venue=spec.venue,
+        collection=spec.collection,
+        canonical_work_id=spec.canonical_work_id,
+        canonical_status=spec.canonical_status,
+        dedupe_priority=spec.dedupe_priority,
+        source_section=spec.source_section,
+        note_taker=spec.note_taker,
+        work_type=spec.work_type,
+        parent_key=spec.parent_key,
+        metadata=dict(spec.metadata),
+        selective_options=spec.selective_options.to_dict(),
+    )
+
+
+def build_fanout_preview(
+    *,
+    source_author_id: str,
+    source_title: Optional[str],
+    source_published_at: Optional[date],
+    ingestion_config: Optional[dict[str, Any]],
+) -> tuple[str, list[FanoutPreviewDocument]]:
+    config = dict(ingestion_config or {})
+    mode = str(config.get("mode") or INGESTION_MODE_SINGLE_WORK)
+    if mode != INGESTION_MODE_FANOUT:
+        return (
+            INGESTION_MODE_SINGLE_WORK,
+            [
+                FanoutPreviewDocument(
+                    key="document-0",
+                    title=source_title,
+                    author_id=source_author_id,
+                    published_at=source_published_at,
+                    publication_year=source_published_at.year if source_published_at else None,
+                    venue=None,
+                    collection=None,
+                    canonical_work_id=None,
+                    canonical_status=None,
+                    dedupe_priority=None,
+                    source_section=None,
+                    note_taker=None,
+                    work_type=None,
+                    parent_key=None,
+                    metadata={},
+                    selective_options={},
+                )
+            ],
+        )
+
+    documents_payload = list(config.get("documents") or [])
+    if not documents_payload:
+        raise RuntimeError("Fanout ingestion requires at least one logical document definition")
+
+    specs = [LogicalDocumentSpec.from_dict(payload, index) for index, payload in enumerate(documents_payload)]
+    _validate_document_relationships(specs)
+    return (
+        INGESTION_MODE_FANOUT,
+        [
+            _preview_document_from_spec(
+                spec,
+                index=index,
+                source_author_id=source_author_id,
+                source_title=source_title,
+            )
+            for index, spec in enumerate(specs)
+        ],
+    )
 
 
 def build_fanout_plan(
@@ -139,8 +258,12 @@ def build_fanout_plan(
     if source_selective_options and not source_selective_options.is_empty():
         sections = apply_selective_options(sections, source_selective_options)
 
-    config = dict(ingestion_config or {})
-    mode = str(config.get("mode") or INGESTION_MODE_SINGLE_WORK)
+    mode, preview_documents = build_fanout_preview(
+        source_author_id=source_author_id,
+        source_title=source_title or parsed.doc_metadata.get("title"),
+        source_published_at=source_published_at,
+        ingestion_config=ingestion_config,
+    )
     if mode != INGESTION_MODE_FANOUT:
         clean_text = build_selected_text(sections) if sections else parsed.clean_text.strip()
         raw_text = clean_text or parsed.raw_text.strip()
@@ -173,34 +296,30 @@ def build_fanout_plan(
             ],
         )
 
-    documents_payload = list(config.get("documents") or [])
-    if not documents_payload:
-        raise RuntimeError("Fanout ingestion requires at least one logical document definition")
     if not sections:
         raise RuntimeError("Fanout ingestion requires structured sections from the parsed source")
 
     planned_documents: list[LogicalDocumentPlan] = []
-    for index, payload in enumerate(documents_payload):
-        spec = LogicalDocumentSpec.from_dict(payload, index)
+    for index, preview in enumerate(preview_documents):
         planned_documents.append(
             LogicalDocumentPlan(
-                key=spec.key,
+                key=preview.key,
                 index=index,
-                title=spec.title or parsed.doc_metadata.get("title"),
-                author_id=spec.author_id or source_author_id,
-                published_at=spec.published_at,
-                publication_year=spec.publication_year or (spec.published_at.year if spec.published_at else None),
-                venue=spec.venue,
-                collection=spec.collection,
-                canonical_work_id=spec.canonical_work_id,
-                canonical_status=spec.canonical_status,
-                dedupe_priority=spec.dedupe_priority,
-                source_section=spec.source_section,
-                note_taker=spec.note_taker,
-                work_type=spec.work_type,
-                parent_key=spec.parent_key,
-                metadata=spec.metadata,
-                selective_options=spec.selective_options,
+                title=preview.title or parsed.doc_metadata.get("title"),
+                author_id=preview.author_id or source_author_id,
+                published_at=preview.published_at,
+                publication_year=preview.publication_year,
+                venue=preview.venue,
+                collection=preview.collection,
+                canonical_work_id=preview.canonical_work_id,
+                canonical_status=preview.canonical_status,
+                dedupe_priority=preview.dedupe_priority,
+                source_section=preview.source_section,
+                note_taker=preview.note_taker,
+                work_type=preview.work_type,
+                parent_key=preview.parent_key,
+                metadata=preview.metadata,
+                selective_options=SelectiveIngestionOptions.from_dict(preview.selective_options),
                 selected_sections=[],
                 raw_text="",
                 clean_text="",

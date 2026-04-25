@@ -70,6 +70,27 @@ def _heading_matches(heading: Optional[str], marker: str) -> bool:
     return marker.lower() in heading.lower()
 
 
+def _collect_descendant_indexes(sections: list, start_index: int) -> set[int]:
+    """
+    Return the index of the matched heading plus any immediately following
+    descendant sections until the hierarchy returns to the same-or-higher level.
+    """
+    matched = sections[start_index]
+    matched_level = getattr(matched, "level", 1) or 1
+    indexes = {start_index}
+    for idx in range(start_index + 1, len(sections)):
+        section = sections[idx]
+        heading = getattr(section, "heading", None)
+        if not heading:
+            indexes.add(idx)
+            continue
+        section_level = getattr(section, "level", 1) or 1
+        if section_level <= matched_level:
+            break
+        indexes.add(idx)
+    return indexes
+
+
 def apply_selective_options(sections: list, options: SelectiveIngestionOptions) -> list:
     """
     Filter *sections* according to *options*.
@@ -124,18 +145,22 @@ def apply_selective_options(sections: list, options: SelectiveIngestionOptions) 
     # ── include_headings ─────────────────────────────────────────────────────
     if options.include_headings:
         markers = [m.lower() for m in options.include_headings]
-        result = [
-            s for s in result
-            if s.heading and any(m in s.heading.lower() for m in markers)
-        ]
+        matched_indexes: set[int] = set()
+        for idx, section in enumerate(result):
+            heading = getattr(section, "heading", None)
+            if heading and any(m in heading.lower() for m in markers):
+                matched_indexes.update(_collect_descendant_indexes(result, idx))
+        result = [section for idx, section in enumerate(result) if idx in matched_indexes]
 
     # ── exclude_sections ─────────────────────────────────────────────────────
     if options.exclude_sections:
         markers = [m.lower() for m in options.exclude_sections]
-        result = [
-            s for s in result
-            if not (s.heading and any(m in s.heading.lower() for m in markers))
-        ]
+        excluded_indexes: set[int] = set()
+        for idx, section in enumerate(result):
+            heading = getattr(section, "heading", None)
+            if heading and any(m in heading.lower() for m in markers):
+                excluded_indexes.update(_collect_descendant_indexes(result, idx))
+        result = [section for idx, section in enumerate(result) if idx not in excluded_indexes]
 
     # ── guard: rules were specified but produced nothing ──────────────────────
     if not result:
