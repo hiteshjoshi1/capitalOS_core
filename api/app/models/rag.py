@@ -68,15 +68,17 @@ class _JsonBlob(TypeDecorator):
 
     def process_bind_param(self, value, dialect):
         if dialect.name == "postgresql":
-            return value if value is not None else {}
+            return value
+        if value is None:
+            return None
         import json
-        return json.dumps(value if value is not None else {})
+        return json.dumps(value)
 
     def process_result_value(self, value, dialect):
         if dialect.name == "postgresql":
-            return value if value is not None else {}
+            return value
         if value is None:
-            return {}
+            return None
         import json
         return json.loads(value)
 
@@ -192,6 +194,9 @@ class RagSource(Base):
     status = Column(String, nullable=False, default="pending")  # pending | queued | running | failed | ingested
     hash = Column(String)
     selective_options = Column(_JsonBlob, nullable=True)  # optional selective ingestion rules
+    ingestion_config = Column(_JsonBlob, nullable=True)  # optional deterministic fanout config
+    raw_text = Column(Text)
+    clean_text = Column(Text)
     last_ingested_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -205,13 +210,28 @@ class RagDocument(Base):
 
     id = Column(_UUIDStr, primary_key=True, default=_uuid_default)
     source_id = Column(_UUIDStr, ForeignKey("rag_sources.id", ondelete="CASCADE"), nullable=False)
+    author_id = Column(String, ForeignKey("rag_authors.id", ondelete="SET NULL"), nullable=True)
+    parent_document_id = Column(_UUIDStr, ForeignKey("rag_documents.id", ondelete="SET NULL"), nullable=True)
+    source_document_index = Column(Integer, nullable=False, default=0)
     title = Column(Text)
     published_at = Column(Date)
+    publication_year = Column(Integer)
+    venue = Column(Text)
+    collection = Column(Text)
+    canonical_work_id = Column(Text)
+    canonical_status = Column(String)
+    dedupe_priority = Column(Integer)
+    source_section = Column(Text)
+    note_taker = Column(Text)
+    work_type = Column(String)
+    metadata_json = Column(_JsonBlob, nullable=False, default=dict)
     raw_text = Column(Text)
     clean_text = Column(Text)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     source = relationship("RagSource", back_populates="documents")
+    author = relationship("RagAuthor")
+    parent_document = relationship("RagDocument", remote_side=[id], backref="child_documents")
     chunks = relationship("RagChunk", back_populates="document", cascade="all, delete-orphan")
 
 

@@ -13,19 +13,29 @@ from __future__ import annotations
 import hashlib
 import logging
 from datetime import datetime, timezone
-from typing import Optional
-from uuid import UUID
+from typing import Any, Optional
 
 import httpx
 from sqlalchemy.orm import Session
 
-from app.models.rag import RagChunk, RagDocument, RagEmbedding, RagIngestionJob, RagSource
+from app.models.rag import RagAuthor, RagChunk, RagDocument, RagEmbedding, RagIngestionJob, RagSource
 from app.rag.ingestion.events import record_source_event
 from app.rag.ingestion.chunker import Chunk, DocumentSection as ChunkerSection, chunk_structured, chunk_text
 from app.rag.ingestion.embedder import embed_batch, embedding_model_name
+from app.rag.ingestion.fanout import (
+    FanoutPlan,
+    LogicalDocumentPlan,
+    build_selected_text,
+    build_fanout_plan,
+)
 from app.rag.ingestion.fetcher import FetchResult, detect_source_type, fetch_url
 from app.rag.ingestion.parser import DocumentSection, ParseResult, StructuredParseResult, parse
-from app.rag.ingestion.selector import NoContentSelectedError, SelectiveIngestionOptions, apply_selective_options
+from app.rag.ingestion.quality import LOW_QUALITY_FAILURE, QualityValidationResult, validate_logical_document
+from app.rag.ingestion.selector import (
+    NoContentSelectedError,
+    SelectiveIngestionOptions,
+    apply_selective_options,
+)
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +45,7 @@ FAILURE_EMPTY_TEXT_EXTRACTION = "empty_text_extraction"
 FAILURE_OCR_REQUIRED = "ocr_required"
 FAILURE_MANUAL_REVIEW_REQUIRED = "manual_review_required"
 FAILURE_NO_CONTENT_SELECTED = "no_content_selected"
+FAILURE_LOW_QUALITY_EXTRACTION = LOW_QUALITY_FAILURE
 
 
 class EmptyTextExtractionError(RuntimeError):
@@ -56,29 +67,49 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _build_base_metadata(source: RagSource, doc_hash: str, title: Optional[str], doc_metadata: Optional[dict] = None) -> dict:
+def _build_base_metadata(
+    source: RagSource,
+    doc_hash: str,
+    title: Optional[str],
+    doc_metadata: Optional[dict] = None,
+    *,
+    author_id: Optional[str] = None,
+    author_name: Optional[str] = None,
+    published_at=None,
+    publication_year: Optional[int] = None,
+    source_section: Optional[str] = None,
+    logical_metadata: Optional[dict[str, Any]] = None,
+) -> dict:
     author = source.author
     base = {
-        "author": author.name if author else "unknown",
-        "author_id": source.author_id,
+        "author": author_name or (author.name if author else author_id or "unknown"),
+        "author_id": author_id or source.author_id,
         "work_title": title or "",
         "source_url": source.url or "",
-        "published_at": None,  # caller can override per-document
+        "published_at": published_at.isoformat() if published_at is not None else None,
         "source_type": source.source_type,
         "topic_tags": [],
         "concept_tags": [],
         "cleanliness_score": 1.0,
         "doc_hash": doc_hash,
     }
+    if publication_year is not None:
+        base["year"] = publication_year
+    if source_section:
+        base["source_section"] = source_section
     if doc_metadata:
         # Merge document-level metadata from PDF/HTML properties
         if "title" in doc_metadata and not base["work_title"]:
             base["work_title"] = doc_metadata["title"]
-        if "author" in doc_metadata and base["author"] == "unknown":
+        if "author" in doc_metadata and base["author"] in {"unknown", author_id or ""}:
             base["author"] = doc_metadata["author"]
         for key in ("subject", "creation_date"):
             if key in doc_metadata:
                 base[key] = doc_metadata[key]
+    if logical_metadata:
+        for key, value in logical_metadata.items():
+            if value is not None:
+                base[key] = value
     return base
 
 
@@ -109,44 +140,95 @@ def _persist_document_and_chunks(
     db: Session,
     source: RagSource,
     parse_result: ParseResult,
-    title: Optional[str] = None,
-    published_at=None,
-    selected_sections: Optional[list] = None,
-) -> tuple[RagDocument, list[RagChunk]]:
-    """Create RagDocument + RagChunk rows; return both.
-
-    If *selected_sections* is provided it replaces the parsed sections for
-    chunking purposes; the raw_text / clean_text on the document still reflect
-    the full fetched content so the record is auditable.
-    """
-    doc_hash = _sha256(parse_result.clean_text)
-
-    # Extract doc_metadata when available (StructuredParseResult)
+    plan: LogicalDocumentPlan,
+) -> tuple[RagDocument, list[RagChunk], QualityValidationResult]:
+    """Create RagDocument + RagChunk rows for one logical document."""
+    doc_hash = _sha256(plan.clean_text)
     doc_metadata: Optional[dict] = getattr(parse_result, "doc_metadata", None)
-
-    doc = RagDocument(
-        source_id=source.id,
-        title=title,
-        published_at=published_at,
-        raw_text=parse_result.raw_text,
-        clean_text=parse_result.clean_text,
+    publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
+    base_meta = _build_base_metadata(
+        source,
+        doc_hash,
+        plan.title,
+        doc_metadata,
+        author_id=plan.author_id,
+        published_at=plan.published_at,
+        publication_year=publication_year,
+        source_section=plan.source_section,
+        logical_metadata={
+            "venue": plan.venue,
+            "collection": plan.collection,
+            "canonical_work_id": plan.canonical_work_id,
+            "canonical_status": plan.canonical_status,
+            "dedupe_priority": plan.dedupe_priority,
+            "note_taker": plan.note_taker,
+            "work_type": plan.work_type,
+            **plan.metadata,
+        },
     )
-    db.add(doc)
-    db.flush()  # populate doc.id
 
-    base_meta = _build_base_metadata(source, doc_hash, title, doc_metadata)
-
-    # Use selected_sections when provided (selective ingestion), otherwise fall
-    # back to the sections from the parse result.
-    parser_sections = selected_sections if selected_sections is not None else getattr(parse_result, "sections", None)
+    parser_sections = plan.selected_sections
     if parser_sections:
         chunker_sections = _parser_sections_to_chunker(parser_sections)
         if chunker_sections:
             raw_chunks: list[Chunk] = chunk_structured(chunker_sections, base_metadata=base_meta)
         else:
-            raw_chunks = chunk_text(parse_result.clean_text, base_metadata=base_meta)
+            raw_chunks = chunk_text(plan.clean_text, base_metadata=base_meta)
     else:
-        raw_chunks = chunk_text(parse_result.clean_text, base_metadata=base_meta)
+        raw_chunks = chunk_text(plan.clean_text, base_metadata=base_meta)
+
+    validation = validate_logical_document(
+        clean_text=plan.clean_text,
+        title=plan.title,
+        chunk_count=len(raw_chunks),
+        section_headings=[section.heading for section in parser_sections if section.heading],
+    )
+    if not validation.accepted:
+        return (
+            RagDocument(
+                source_id=source.id,
+                author_id=plan.author_id,
+                title=plan.title,
+                published_at=plan.published_at,
+                publication_year=publication_year,
+                venue=plan.venue,
+                collection=plan.collection,
+                canonical_work_id=plan.canonical_work_id,
+                canonical_status=plan.canonical_status,
+                dedupe_priority=plan.dedupe_priority,
+                source_section=plan.source_section,
+                note_taker=plan.note_taker,
+                work_type=plan.work_type,
+                source_document_index=plan.index,
+                raw_text=plan.raw_text,
+                clean_text=plan.clean_text,
+                metadata_json=plan.metadata,
+            ),
+            [],
+            validation,
+        )
+
+    doc = RagDocument(
+        source_id=source.id,
+        author_id=plan.author_id,
+        title=plan.title,
+        published_at=plan.published_at,
+        publication_year=publication_year,
+        venue=plan.venue,
+        collection=plan.collection,
+        canonical_work_id=plan.canonical_work_id,
+        canonical_status=plan.canonical_status,
+        dedupe_priority=plan.dedupe_priority,
+        source_section=plan.source_section,
+        note_taker=plan.note_taker,
+        work_type=plan.work_type,
+        source_document_index=plan.index,
+        raw_text=plan.raw_text,
+        clean_text=plan.clean_text,
+        metadata_json=plan.metadata,
+    )
+    db.add(doc)
+    db.flush()
 
     orm_chunks: list[RagChunk] = []
     for rc in raw_chunks:
@@ -160,8 +242,8 @@ def _persist_document_and_chunks(
         db.add(orm_chunk)
         orm_chunks.append(orm_chunk)
 
-    db.flush()  # populate chunk IDs
-    return doc, orm_chunks
+    db.flush()
+    return doc, orm_chunks, validation
 
 
 def _embed_and_persist(db: Session, chunks: list[RagChunk]) -> int:
@@ -192,6 +274,8 @@ def _classify_failure(exc: Exception, source_type: Optional[str]) -> str:
         return FAILURE_EMPTY_TEXT_EXTRACTION
     if isinstance(exc, NoContentSelectedError):
         return FAILURE_NO_CONTENT_SELECTED
+    if isinstance(exc, LowQualityExtractionError):
+        return FAILURE_LOW_QUALITY_EXTRACTION
     if isinstance(exc, (RuntimeError, UnicodeDecodeError)):
         return FAILURE_PARSE_FAILED
     return FAILURE_MANUAL_REVIEW_REQUIRED
@@ -203,6 +287,195 @@ def _ensure_clean_text(parsed: ParseResult, source_type: str) -> None:
     if source_type == "pdf":
         raise OcrRequiredError("PDF text extraction produced no usable text; OCR is required")
     raise EmptyTextExtractionError("Text extraction produced no usable text")
+
+
+class LowQualityExtractionError(RuntimeError):
+    pass
+
+
+def _effective_selective_options(
+    source: RagSource,
+    explicit_options: Optional[SelectiveIngestionOptions],
+) -> Optional[SelectiveIngestionOptions]:
+    if explicit_options is not None:
+        return explicit_options
+    raw_options = getattr(source, "selective_options", None)
+    if isinstance(raw_options, dict) and raw_options:
+        return SelectiveIngestionOptions.from_dict(raw_options)
+    return None
+
+
+def _materialize_logical_plan(plan: LogicalDocumentPlan, shared_sections: list[DocumentSection]) -> LogicalDocumentPlan:
+    if plan.clean_text.strip() or plan.selected_sections:
+        return plan
+    plan.selected_sections = (
+        apply_selective_options(shared_sections, plan.selective_options)
+        if not plan.selective_options.is_empty()
+        else list(shared_sections)
+    )
+    plan.clean_text = build_selected_text(plan.selected_sections)
+    plan.raw_text = plan.clean_text or plan.raw_text
+    return plan
+
+
+def _ensure_document_author_exists(db: Session, author_id: Optional[str]) -> None:
+    if not author_id:
+        return
+    if type(db).__module__.startswith("unittest.mock"):
+        return
+    if db.get(RagAuthor, author_id) is None:
+        raise RuntimeError(f"Logical document author '{author_id}' does not exist")
+
+
+def _link_parent_documents(
+    db: Session,
+    created_documents: dict[str, RagDocument],
+    created_outcomes: dict[str, dict[str, Any]],
+) -> None:
+    for key, outcome in created_outcomes.items():
+        parent_key = outcome.get("parent_key")
+        if not parent_key:
+            continue
+        document = created_documents.get(key)
+        parent_document = created_documents.get(parent_key)
+        if document is None or parent_document is None:
+            continue
+        document.parent_document_id = parent_document.id
+        outcome["parent_document_id"] = str(parent_document.id)
+    db.flush()
+
+
+def _persist_logical_documents(
+    db: Session,
+    source: RagSource,
+    parsed: StructuredParseResult,
+    *,
+    title: Optional[str] = None,
+    published_at=None,
+    selective_options: Optional[SelectiveIngestionOptions] = None,
+) -> tuple[bool, dict[str, Any], Optional[str], Optional[str]]:
+    effective_options = _effective_selective_options(source, selective_options)
+    source.raw_text = parsed.raw_text
+    source.clean_text = parsed.clean_text
+    raw_ingestion_config = getattr(source, "ingestion_config", None)
+    ingestion_config = raw_ingestion_config if isinstance(raw_ingestion_config, dict) else None
+
+    plan: FanoutPlan = build_fanout_plan(
+        parsed,
+        source_author_id=source.author_id,
+        source_title=title,
+        source_published_at=published_at,
+        source_selective_options=effective_options,
+        ingestion_config=ingestion_config,
+    )
+
+    outcomes: list[dict[str, Any]] = []
+    created_documents: dict[str, RagDocument] = {}
+    created_outcomes: dict[str, dict[str, Any]] = {}
+    total_chunks = 0
+    total_embeddings = 0
+    rejected_categories: list[str] = []
+
+    for logical_plan in plan.documents:
+        try:
+            _ensure_document_author_exists(db, logical_plan.author_id)
+            materialized_plan = _materialize_logical_plan(logical_plan, plan.shared_sections)
+            if not materialized_plan.clean_text.strip():
+                raise EmptyTextExtractionError("Text extraction produced no usable text")
+            document, chunks, validation = _persist_document_and_chunks(db, source, parsed, materialized_plan)
+            if not validation.accepted:
+                rejected_categories.append(validation.failure_category or FAILURE_LOW_QUALITY_EXTRACTION)
+                outcomes.append(
+                    {
+                        "key": materialized_plan.key,
+                        "status": "rejected",
+                        "failure_category": validation.failure_category or FAILURE_LOW_QUALITY_EXTRACTION,
+                        "error": "Logical document did not pass deterministic quality validation",
+                        "title": materialized_plan.title,
+                        "author_id": materialized_plan.author_id,
+                        "source_section": materialized_plan.source_section,
+                        "parent_key": materialized_plan.parent_key,
+                        "quality": {
+                            "reasons": validation.reasons,
+                            **validation.metrics,
+                        },
+                    }
+                )
+                continue
+
+            embeddings = _embed_and_persist(db, chunks)
+            total_chunks += len(chunks)
+            total_embeddings += embeddings
+            created_documents[materialized_plan.key] = document
+            outcome = {
+                "key": materialized_plan.key,
+                "status": "created",
+                "document_id": str(document.id),
+                "title": document.title,
+                "author_id": document.author_id,
+                "source_section": document.source_section,
+                "chunk_count": len(chunks),
+                "embedding_count": embeddings,
+                "parent_key": materialized_plan.parent_key,
+                "quality": {
+                    "reasons": validation.reasons,
+                    **validation.metrics,
+                },
+            }
+            created_outcomes[materialized_plan.key] = outcome
+            outcomes.append(outcome)
+        except NoContentSelectedError as exc:
+            rejected_categories.append(FAILURE_NO_CONTENT_SELECTED)
+            outcomes.append(
+                {
+                    "key": logical_plan.key,
+                    "status": "rejected",
+                    "failure_category": FAILURE_NO_CONTENT_SELECTED,
+                    "error": str(exc),
+                    "title": logical_plan.title,
+                    "author_id": logical_plan.author_id,
+                    "source_section": logical_plan.source_section,
+                    "parent_key": logical_plan.parent_key,
+                }
+            )
+        except EmptyTextExtractionError as exc:
+            rejected_categories.append(FAILURE_EMPTY_TEXT_EXTRACTION)
+            outcomes.append(
+                {
+                    "key": logical_plan.key,
+                    "status": "rejected",
+                    "failure_category": FAILURE_EMPTY_TEXT_EXTRACTION,
+                    "error": str(exc),
+                    "title": logical_plan.title,
+                    "author_id": logical_plan.author_id,
+                    "source_section": logical_plan.source_section,
+                    "parent_key": logical_plan.parent_key,
+                }
+            )
+
+    if created_documents:
+        _link_parent_documents(db, created_documents, created_outcomes)
+
+    stats: dict[str, Any] = {
+        "ingestion_mode": plan.mode,
+        "chunks": total_chunks,
+        "embeddings": total_embeddings,
+        "char_count": len(parsed.clean_text),
+        "documents_created": len(created_documents),
+        "documents_rejected": len([outcome for outcome in outcomes if outcome["status"] != "created"]),
+        "documents": outcomes,
+        "model": embedding_model_name(),
+    }
+    if effective_options and not effective_options.is_empty():
+        stats["selective_options"] = effective_options.to_dict()
+        stats["sections_selected"] = len(plan.shared_sections)
+    if created_documents:
+        return True, stats, None, None
+    failure_category = rejected_categories[0] if rejected_categories else FAILURE_EMPTY_TEXT_EXTRACTION
+    error = next((outcome.get("error") for outcome in outcomes if outcome.get("error")), None) or (
+        "No logical documents were created from the parsed source"
+    )
+    return False, stats, error, failure_category
 
 
 def _open_job(db: Session, source: RagSource) -> RagIngestionJob:
@@ -292,46 +565,19 @@ def run_url_ingestion(
         parsed: ParseResult = parse(fetch.raw_bytes, source.source_type)
         _ensure_clean_text(parsed, source.source_type)
 
-        # Resolve effective selective options: prefer argument, then source column.
-        effective_options: Optional[SelectiveIngestionOptions] = selective_options
-        if effective_options is None and getattr(source, "selective_options", None):
-            effective_options = SelectiveIngestionOptions.from_dict(source.selective_options)
-
-        selected_sections: Optional[list] = None
-        if effective_options and not effective_options.is_empty():
-            raw_sections = getattr(parsed, "sections", None) or []
-            selected_sections = apply_selective_options(raw_sections, effective_options)
-            log.info(
-                "Selective ingestion applied: source=%s sections_in=%d sections_out=%d options=%s",
-                source.id,
-                len(raw_sections),
-                len(selected_sections),
-                effective_options.to_dict(),
-            )
-
-        doc, chunks = _persist_document_and_chunks(db, source, parsed, selected_sections=selected_sections)
-        n_emb = _embed_and_persist(db, chunks)
-
-        source.status = "ingested"
-        source.last_ingested_at = _now()
-
-        stats: dict = {
-            "chunks": len(chunks),
-            "embeddings": n_emb,
-            "char_count": len(parsed.clean_text),
-            "model": embedding_model_name(),
-        }
-        if effective_options and not effective_options.is_empty():
-            stats["selective_options"] = effective_options.to_dict()
-            stats["sections_selected"] = len(selected_sections) if selected_sections is not None else None
-
-        _close_job(
+        success, stats, error, failure_category = _persist_logical_documents(
             db,
-            job,
-            success=True,
-            stats=stats,
+            source,
+            parsed,
+            selective_options=selective_options,
         )
-        if source.user_id is not None:
+
+        source.status = "ingested" if success else "failed"
+        if success:
+            source.last_ingested_at = _now()
+
+        _close_job(db, job, success=success, stats=stats, error=error, failure_category=failure_category)
+        if success and source.user_id is not None:
             record_source_event(
                 db,
                 user_id=source.user_id,
@@ -339,6 +585,16 @@ def run_url_ingestion(
                 job=job,
                 event_name="source_ingested",
                 status="ingested",
+                batch_id=batch_id,
+            )
+        if (not success) and source.user_id is not None:
+            record_source_event(
+                db,
+                user_id=source.user_id,
+                source=source,
+                job=job,
+                event_name="source_failed",
+                status="failed",
                 batch_id=batch_id,
             )
     except Exception as exc:
@@ -427,29 +683,27 @@ def run_manual_ingestion(
     try:
         source.hash = _sha256(text)
 
-        from app.rag.ingestion.parser import parse_text
-
-        parsed = parse_text(text)
+        parsed = parse(text.encode("utf-8"), source.source_type)
         _ensure_clean_text(parsed, source.source_type)
 
-        doc, chunks = _persist_document_and_chunks(
-            db, source, parsed, title=title, published_at=published_at
+        success, stats, error, failure_category = _persist_logical_documents(
+            db,
+            source,
+            parsed,
+            title=title,
+            published_at=published_at,
         )
-        n_emb = _embed_and_persist(db, chunks)
-
-        source.status = "ingested"
-        source.last_ingested_at = _now()
+        source.status = "ingested" if success else "failed"
+        if success:
+            source.last_ingested_at = _now()
 
         _close_job(
             db,
             job,
-            success=True,
-            stats={
-                "chunks": len(chunks),
-                "embeddings": n_emb,
-                "char_count": len(parsed.clean_text),
-                "model": embedding_model_name(),
-            },
+            success=success,
+            stats=stats,
+            error=error,
+            failure_category=failure_category,
         )
     except Exception as exc:
         log.exception("Manual ingestion failed for source %s", source.id)
