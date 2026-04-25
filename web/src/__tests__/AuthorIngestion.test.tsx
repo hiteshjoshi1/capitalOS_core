@@ -201,6 +201,7 @@ describe("AuthorIngestion page", () => {
     (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",
       registered: 1,
+      requeued_existing: 0,
       skipped_duplicate: 0,
       jobs_queued: 1,
       sources: [{ ...MOCK_SOURCES[0], id: "src-new", status: "queued" }],
@@ -258,6 +259,7 @@ describe("AuthorIngestion page", () => {
     (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",
       registered: 1,
+      requeued_existing: 0,
       skipped_duplicate: 0,
       jobs_queued: 1,
       sources: [{ ...MOCK_SOURCES[0], id: "src-sel", status: "queued", selective_options: { start_after: "Intro", stop_before: null, include_headings: [], exclude_sections: [] } }],
@@ -290,6 +292,7 @@ describe("AuthorIngestion page", () => {
     (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",
       registered: 1,
+      requeued_existing: 0,
       skipped_duplicate: 0,
       jobs_queued: 1,
       sources: [{ ...MOCK_SOURCES[0], id: "src-nosel", status: "queued" }],

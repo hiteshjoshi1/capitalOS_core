@@ -151,8 +151,8 @@ class TestIngestUrls:
         assert data["registered"] == 3
         assert data["jobs_queued"] == 3
 
-    def test_deduplicates_already_registered_url(self, client):
-        """POST ingest-urls with an already-registered URL skips the duplicate."""
+    def test_requeues_already_registered_url_when_not_running(self, client):
+        """POST ingest-urls requeues an existing URL and updates the existing source."""
         url = f"https://example.com/dedup-{_uid()}"
         # First registration
         r1 = client.post(f"/rag/authors/{self.author_id}/ingest-urls", json={"urls": [url], "source_type": "html"})
@@ -165,7 +165,9 @@ class TestIngestUrls:
         assert r2.status_code == 202
         data = r2.json()
         assert data["registered"] == 1
-        assert data["skipped_duplicate"] == 1
+        assert data["requeued_existing"] == 1
+        assert data["skipped_duplicate"] == 0
+        assert data["jobs_queued"] == 2
 
     def test_author_not_found_returns_404(self, client):
         """POST ingest-urls for a non-existent author returns 404."""
