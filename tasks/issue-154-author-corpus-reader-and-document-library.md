@@ -56,23 +56,23 @@
 - [ ] Verify semantic intent is achieved
 
 ## Execution Journal (Codex Mutable)
-- Current Stage: `not_started`
-- Workflow Status: `running`
+- Current Stage: `verified`
+- Workflow Status: `completed`
 - Provider/Model: `openai/gpt-5`
 - Last Updated: `2026-04-25`
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
-- `lint`: `<pass|fail|skip>` — `<notes/log path>`
-- `typecheck`: `<pass|fail|skip>` — `<notes/log path>`
-- `tests`: `<pass|fail|skip>` — `<notes/log path>`
-- `e2e`: `<pass|fail|skip>` — `<notes/log path>`
-- `api-smoke`: `<pass|fail|skip>` — `<notes/log path>`
-- `policy-checks`: `<pass|fail>` — `<notes/log path>`
+- `lint`: `pass` — `make lint`
+- `typecheck`: `pass` — `make typecheck`
+- `tests`: `pass` — `make contract-backend && make test-backend && make contract-frontend && make test-frontend && make orch-test`
+- `e2e`: `pass` — `make e2e`
+- `api-smoke`: `pass` — `make api-smoke`
+- `policy-checks`: `pass` — `openapi-compatible router additions with user-scoped read APIs`
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._
-- `<path>` — reason: `<why this file was required>`
+- `tasks/issue-154-author-corpus-reader-and-document-library.md` — reason: updated execution journal and deterministic gate results for this task
 
 ## Permanently Failed / Gave Up (Codex Mutable)
 _Fill only if workflow stops without shipping._
@@ -84,13 +84,127 @@ _Fill only if workflow stops without shipping._
 
 ## Human Action Summary (Codex Mutable)
 _Human-readable next steps._
-- Next expected action: `<command or decision>`
+- Next expected action: `Review the working tree and ship if acceptable`
 - Open questions:
-  - `Should the first version prioritize a list/detail reader or also include search/filtering within one author corpus?`
-  - `Should raw source audit text be visible anywhere in the reader, or remain backend-only?`
+  - `None`
 - If PR raised but intent partial:
   - unmet criteria: `<criterion ids>`
   - follow-up issue: `<issue link or TODO>`
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `waiting_for_human`
+
+## Workflow Snapshot
+- latest_outcome: Implemented an end-user Author Library for browsing and reading ingested author corpora, added read-only corpus APIs with metadata-driven grouping and logical-document detail, kept ingestion authoring separate, and covered the flow with backend, frontend, and end-to-end verification.
+- next_action: All deterministic gates passed. Review the changes in the working tree, then run `make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR.
+- pipeline_version: `v3`
+- provider_model: `copilot/gpt-5.4`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: User-facing Author Library route added under Intelligence with author selection and corpus browsing.
+- Acceptance criterion: Library lists logical documents and groups them generically by metadata, with secondary year grouping when available.
+- Acceptance criterion: Document list items render key metadata including author, date/year, venue, collection, canonical status, source type, source URL, and work type.
+- Acceptance criterion: Reader detail view loads stored logical-document text and provenance, not full raw source blobs by default.
+- Acceptance criterion: Parent/child related documents are linked from the reading view.
+- Acceptance criterion: Mixed-author fanout documents browse under their effective author, and legacy non-fanout documents still appear via fallback attribution.
+- Acceptance criterion: Backend read APIs added for library authors, grouped author corpus listing, and document detail.
+- Acceptance criterion: Backend, frontend, Playwright, and Makefile verification all passed.
+
+## Prepare
+Checked out `feature/issue-154-author-corpus-reader-and-document-library` from `main` and ensured task file exists.
+
+## Plan Summary
+Add user-facing corpus reader APIs and UI, group documents generically from metadata with logical-document detail and provenance, cover mixed-author and fallback behavior in tests, and verify through the full Makefile suite.
+
+### Architecture Decisions
+- Added a separate Author Library reader surface in the Intelligence area instead of extending the ingestion authoring page.
+- Built library author attribution on the effective author identity `coalesce(rag_documents.author_id, rag_sources.author_id)` so fanout author overrides browse under the correct author.
+- Kept grouping metadata-driven and generic by deriving primary groups from standard corpus fields plus scalar document metadata, with year/date as secondary grouping when meaningful.
+- Used stored logical-document `clean_text` for the reading view and surfaced provenance from the source record rather than defaulting to raw source blobs.
+- Surfaced parent/child document relationships in the detail API and reader without changing the existing ingestion persistence model.
+
+### Acceptance Criteria
+- User-facing Author Library route added under Intelligence with author selection and corpus browsing.
+- Library lists logical documents and groups them generically by metadata, with secondary year grouping when available.
+- Document list items render key metadata including author, date/year, venue, collection, canonical status, source type, source URL, and work type.
+- Reader detail view loads stored logical-document text and provenance, not full raw source blobs by default.
+- Parent/child related documents are linked from the reading view.
+- Mixed-author fanout documents browse under their effective author, and legacy non-fanout documents still appear via fallback attribution.
+- Backend read APIs added for library authors, grouped author corpus listing, and document detail.
+- Backend, frontend, Playwright, and Makefile verification all passed.
+
+### Planned Paths
+- `api/app/routers/rag.py`
+- `api/tests`
+- `web/src/routes`
+- `web/src/lib/api.ts`
+- `web/src/components/Sidebar.tsx`
+- `web/src/__tests__`
+- `web/src/App.css`
+
+## Build Summary
+Implemented an end-user Author Library for browsing and reading ingested author corpora, added read-only corpus APIs with metadata-driven grouping and logical-document detail, kept ingestion authoring separate, and covered the flow with backend, frontend, and end-to-end verification.
+
+### Changed Files
+- `api/app/routers/rag.py`
+- `api/tests/test_rag_document_library.py`
+- `tasks/issue-154-author-corpus-reader-and-document-library.md`
+- `web/src/App.css`
+- `web/src/__tests__/AuthorLibrary.test.tsx`
+- `web/src/__tests__/Sidebar.test.tsx`
+- `web/src/__tests__/contracts.test.tsx`
+- `web/src/components/Sidebar.tsx`
+- `web/src/lib/api.ts`
+- `web/src/main.tsx`
+- `web/src/routes/AuthorLibrary.tsx`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented an end-user Author Library for browsing and reading ingested author corpora, added read-only corpus APIs with metadata-driven grouping and logical-document detail, kept ingestion authoring separate, and covered the flow with backend, frontend, and end-to-end verification.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/gpt-5.4`
+
+### Semantic Checks
+- `pass` There is a user-facing UI where a user can choose an author and browse that author’s ingested corpus.: Added `web/src/routes/AuthorLibrary.tsx`, routed it in `web/src/main.tsx`, and exposed it in the Intelligence nav via `web/src/components/Sidebar.tsx`; covered by `web/src/__tests__/AuthorLibrary.test.tsx`.
+- `pass` The UI lists logical documents rather than rendering one giant source blob by default, and supports generic grouping plus secondary year/date grouping.: Server-side grouping and document summaries were added in `api/app/routers/rag.py`, and the UI renders grouped sections and year buckets in `web/src/routes/AuthorLibrary.tsx`; backend grouping behavior is covered by `api/tests/test_rag_document_library.py`.
+- `pass` Each listed document shows key metadata when available including title, author, year/date, venue, collection, canonical status, source type, source URL, and work type.: Document summary payloads include those fields in `api/app/routers/rag.py`, and they are rendered as metadata chips in `web/src/routes/AuthorLibrary.tsx`; verified by `web/src/__tests__/AuthorLibrary.test.tsx`.
+- `pass` The UI allows the user to open and read an individual logical document cleanly using stored logical-document text rather than raw source blobs.: The detail endpoint `/rag/library/documents/{document_id}` returns `clean_text`, and the reader panel in `web/src/routes/AuthorLibrary.tsx` renders that field; covered by `api/tests/test_rag_document_library.py` and `web/src/__tests__/AuthorLibrary.test.tsx`.
+- `pass` Parent-child related documents can be surfaced or linked when available.: Parent and child document relations are included in the detail response from `api/app/routers/rag.py` and rendered as related-document buttons in `web/src/routes/AuthorLibrary.tsx`; covered by `api/tests/test_rag_document_library.py`.
+- `pass` The UI supports mixed-author corpora correctly and existing non-fanout documents still appear in a reasonable fallback form.: Library author and document queries use effective author attribution in `api/app/routers/rag.py`; mixed-author and fallback coverage is in `api/tests/test_rag_document_library.py`.
+- `pass` The backend exposes any additional read APIs needed to support the reader/library and remains curl-verifiable.: Added `/rag/library/authors`, `/rag/library/authors/{author_id}`, and `/rag/library/documents/{document_id}` in `api/app/routers/rag.py`; curl verification against the running app returned a non-empty author list from `/rag/library/authors`.
+- `pass` Tests cover author listing, document listing, metadata rendering, document reading, and parent-child navigation or fallback behavior.: Added `api/tests/test_rag_document_library.py` and `web/src/__tests__/AuthorLibrary.test.tsx`, plus updated nav contract tests in `web/src/__tests__/Sidebar.test.tsx` and `web/src/__tests__/contracts.test.tsx`.
+- `pass` The feature is verifiable via Makefile commands and curl-verifiable APIs.: Completed `make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`, `make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`, `make e2e`, and `make orch-test`, and verified `/rag/library/authors` via authenticated curl.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->

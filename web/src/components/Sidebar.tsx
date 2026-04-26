@@ -32,7 +32,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Companies", to: "/companies" },
       { label: "Alerts", to: "/alerts" },
       { label: "AI Sage", to: "/ai-sage" },
-      { label: "Author Ingestion", to: "/author-ingestion" },
+      { label: "Author Library", to: "/author-library" },
     ],
   },
   {
@@ -43,6 +43,7 @@ const NAV_SECTIONS: NavSection[] = [
       { label: "Crypto Wallets", to: "/crypto" },
       { label: "Ingest", to: "/ingest" },
       { label: "Market Data", to: "/market-data" },
+      { label: "Author Sources", to: "/author-ingestion" },
     ],
   },
 ];

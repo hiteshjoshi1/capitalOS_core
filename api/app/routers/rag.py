@@ -21,6 +21,7 @@ Endpoints:
 
 from __future__ import annotations
 
+from collections import defaultdict
 import logging
 import threading
 import uuid
@@ -29,7 +30,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy import func, or_
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.auth_context import CurrentUser, require_current_user
 from app.db.session import SessionLocal, get_db
@@ -351,6 +353,110 @@ class FanoutPreviewOut(BaseModel):
     documents: list[LogicalDocumentPreviewOut]
 
 
+class LibraryAuthorOut(BaseModel):
+    id: str
+    name: str
+    document_count: int
+    source_count: int
+    collections: list[str]
+    work_types: list[str]
+    latest_document_at: Optional[str]
+
+
+class LibraryDocumentSummaryOut(BaseModel):
+    id: str
+    source_id: str
+    title: str
+    author_id: Optional[str]
+    author_name: Optional[str]
+    published_at: Optional[str]
+    publication_year: Optional[int]
+    publication_label: Optional[str]
+    venue: Optional[str]
+    collection: Optional[str]
+    canonical_work_id: Optional[str]
+    canonical_status: Optional[str]
+    source_type: str
+    source_url: Optional[str]
+    work_type: Optional[str]
+    source_section: Optional[str]
+    metadata: dict[str, Any]
+    char_count: int
+    parent_document_id: Optional[str]
+    parent_title: Optional[str]
+    child_count: int
+
+
+class LibrarySecondaryGroupOut(BaseModel):
+    field: str
+    label: str
+    value: str
+    document_count: int
+    documents: list[LibraryDocumentSummaryOut]
+
+
+class LibraryGroupOut(BaseModel):
+    field: str
+    label: str
+    value: str
+    document_count: int
+    documents: list[LibraryDocumentSummaryOut]
+    secondary_field: Optional[str] = None
+    secondary_groups: list[LibrarySecondaryGroupOut] = Field(default_factory=list)
+
+
+class LibraryGroupingOut(BaseModel):
+    primary_field: Optional[str]
+    secondary_field: Optional[str]
+    available_fields: list[str]
+
+
+class AuthorLibraryOut(BaseModel):
+    author: LibraryAuthorOut
+    grouping: LibraryGroupingOut
+    groups: list[LibraryGroupOut]
+    documents: list[LibraryDocumentSummaryOut]
+
+
+class RelatedLibraryDocumentOut(BaseModel):
+    id: str
+    title: str
+    author_id: Optional[str]
+    author_name: Optional[str]
+    publication_label: Optional[str]
+    work_type: Optional[str]
+    source_url: Optional[str]
+    relationship: str
+
+
+class LibraryDocumentDetailOut(BaseModel):
+    id: str
+    source_id: str
+    title: str
+    author_id: Optional[str]
+    author_name: Optional[str]
+    published_at: Optional[str]
+    publication_year: Optional[int]
+    publication_label: Optional[str]
+    venue: Optional[str]
+    collection: Optional[str]
+    canonical_work_id: Optional[str]
+    canonical_status: Optional[str]
+    source_type: str
+    source_url: Optional[str]
+    work_type: Optional[str]
+    source_section: Optional[str]
+    metadata: dict[str, Any]
+    clean_text: str
+    char_count: int
+    parent_document: Optional[RelatedLibraryDocumentOut]
+    child_documents: list[RelatedLibraryDocumentOut]
+    source_author_id: Optional[str]
+    source_author_name: Optional[str]
+    source_status: str
+    created_at: Optional[str]
+
+
 # ── Catalog / config ──────────────────────────────────────────────────────────
 
 
@@ -510,6 +616,393 @@ def _fanout_preview_out(
             )
             for document in preview_documents
         ],
+    )
+
+
+def _source_access_filter(current_user: CurrentUser):
+    return or_(RagSource.user_id == current_user.id, RagSource.user_id.is_(None))
+
+
+def _library_documents_query(db: Session, current_user: CurrentUser):
+    return (
+        db.query(RagDocument)
+        .join(RagSource, RagDocument.source_id == RagSource.id)
+        .filter(_source_access_filter(current_user))
+        .options(
+            joinedload(RagDocument.author),
+            joinedload(RagDocument.source).joinedload(RagSource.author),
+            joinedload(RagDocument.parent_document),
+            selectinload(RagDocument.child_documents),
+        )
+    )
+
+
+def _effective_author_id(doc: RagDocument) -> Optional[str]:
+    return doc.author_id or (doc.source.author_id if doc.source else None)
+
+
+def _effective_author_name(doc: RagDocument) -> Optional[str]:
+    if doc.author and doc.author.name:
+        return doc.author.name
+    if doc.source and doc.source.author and doc.source.author.name:
+        return doc.source.author.name
+    return None
+
+
+def _publication_label(doc: RagDocument) -> Optional[str]:
+    if doc.published_at:
+        return doc.published_at.isoformat()
+    if doc.publication_year is not None:
+        return str(doc.publication_year)
+    return None
+
+
+def _source_type_label(doc: RagDocument) -> str:
+    return doc.source.source_type if doc.source else "unknown"
+
+
+def _source_url(doc: RagDocument) -> Optional[str]:
+    return doc.source.url if doc.source else None
+
+
+def _metadata_scalar(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, str):
+        trimmed = value.strip()
+        return trimmed or None
+    return None
+
+
+def _group_candidate_values(doc: RagDocument) -> dict[str, str]:
+    metadata = doc.metadata_json or {}
+    values: dict[str, str] = {}
+
+    standard_candidates = {
+        "collection": doc.collection,
+        "corpus_section": metadata.get("corpus_section") or metadata.get("section"),
+        "work_class": metadata.get("work_class") or metadata.get("document_class"),
+        "work_type": doc.work_type,
+        "venue": doc.venue,
+        "source_type": _source_type_label(doc),
+        "canonical_status": doc.canonical_status,
+    }
+    for field, raw_value in standard_candidates.items():
+        normalized = _metadata_scalar(raw_value)
+        if normalized:
+            values[field] = normalized
+
+    for key, raw_value in metadata.items():
+        if key in {"canonical_metadata", "selective_options"} or key in values:
+            continue
+        normalized = _metadata_scalar(raw_value)
+        if normalized:
+            values[key] = normalized
+    return values
+
+
+def _meaningful_group_fields(documents: list[RagDocument]) -> list[str]:
+    stats: dict[str, dict[str, Any]] = {}
+    preferred_order = [
+        "collection",
+        "corpus_section",
+        "work_class",
+        "work_type",
+        "venue",
+        "source_type",
+        "canonical_status",
+    ]
+    for doc in documents:
+        for field, value in _group_candidate_values(doc).items():
+            entry = stats.setdefault(field, {"coverage": 0, "values": set()})
+            entry["coverage"] += 1
+            entry["values"].add(value)
+
+    ordered_fields: list[str] = []
+    for field in preferred_order:
+        entry = stats.get(field)
+        if entry and entry["coverage"] >= 2:
+            ordered_fields.append(field)
+
+    dynamic_fields = sorted(
+        (
+            field
+            for field, entry in stats.items()
+            if field not in preferred_order and entry["coverage"] >= 2
+        ),
+        key=lambda field: (-int(stats[field]["coverage"]), field),
+    )
+    ordered_fields.extend(dynamic_fields)
+    return ordered_fields
+
+
+def _select_primary_group_field(documents: list[RagDocument]) -> Optional[str]:
+    fields = _meaningful_group_fields(documents)
+    return fields[0] if fields else None
+
+
+def _select_secondary_group_field(documents: list[RagDocument]) -> Optional[str]:
+    labels = {_publication_label(doc) for doc in documents if _publication_label(doc)}
+    if len(documents) < 2 or len(labels) < 2:
+        return None
+    return "publication_year"
+
+
+def _document_sort_key(doc: RagDocument) -> tuple[int, str, str]:
+    year = doc.publication_year or (doc.published_at.year if doc.published_at else 0)
+    date_value = doc.published_at.isoformat() if doc.published_at else ""
+    title = (doc.title or "").lower()
+    return (-year, date_value, title)
+
+
+def _document_summary_out(doc: RagDocument) -> LibraryDocumentSummaryOut:
+    parent_title = None
+    if doc.parent_document is not None:
+        parent_title = (doc.parent_document.title or "").strip() or "Untitled document"
+    return LibraryDocumentSummaryOut(
+        id=str(doc.id),
+        source_id=str(doc.source_id),
+        title=(doc.title or "").strip() or "Untitled document",
+        author_id=_effective_author_id(doc),
+        author_name=_effective_author_name(doc),
+        published_at=doc.published_at.isoformat() if doc.published_at else None,
+        publication_year=doc.publication_year,
+        publication_label=_publication_label(doc),
+        venue=doc.venue,
+        collection=doc.collection,
+        canonical_work_id=doc.canonical_work_id,
+        canonical_status=doc.canonical_status,
+        source_type=_source_type_label(doc),
+        source_url=_source_url(doc),
+        work_type=doc.work_type,
+        source_section=doc.source_section,
+        metadata=doc.metadata_json or {},
+        char_count=len(doc.clean_text or ""),
+        parent_document_id=str(doc.parent_document_id) if doc.parent_document_id else None,
+        parent_title=parent_title,
+        child_count=len(doc.child_documents),
+    )
+
+
+def _related_document_out(doc: RagDocument, *, relationship: str) -> RelatedLibraryDocumentOut:
+    return RelatedLibraryDocumentOut(
+        id=str(doc.id),
+        title=(doc.title or "").strip() or "Untitled document",
+        author_id=_effective_author_id(doc),
+        author_name=_effective_author_name(doc),
+        publication_label=_publication_label(doc),
+        work_type=doc.work_type,
+        source_url=_source_url(doc),
+        relationship=relationship,
+    )
+
+
+def _build_library_groups(documents: list[RagDocument]) -> tuple[list[LibraryGroupOut], LibraryGroupingOut]:
+    primary_field = _select_primary_group_field(documents)
+    available_fields = _meaningful_group_fields(documents)
+    if primary_field is None:
+        return [], LibraryGroupingOut(primary_field=None, secondary_field=None, available_fields=available_fields)
+
+    grouped: dict[str, list[RagDocument]] = defaultdict(list)
+    for doc in documents:
+        label = _group_candidate_values(doc).get(primary_field) or "Other"
+        grouped[label].append(doc)
+
+    groups: list[LibraryGroupOut] = []
+    secondary_field_used: Optional[str] = None
+    for label in sorted(grouped.keys(), key=lambda value: (value == "Other", value.lower())):
+        docs_in_group = sorted(grouped[label], key=_document_sort_key)
+        secondary_field = _select_secondary_group_field(docs_in_group)
+        secondary_groups: list[LibrarySecondaryGroupOut] = []
+        if secondary_field:
+            secondary_field_used = secondary_field
+            by_label: dict[str, list[RagDocument]] = defaultdict(list)
+            for doc in docs_in_group:
+                by_label[_publication_label(doc) or "Unknown"].append(doc)
+            secondary_groups = [
+                LibrarySecondaryGroupOut(
+                    field=secondary_field,
+                    label=year_label,
+                    value=year_label,
+                    document_count=len(group_docs),
+                    documents=[_document_summary_out(group_doc) for group_doc in sorted(group_docs, key=_document_sort_key)],
+                )
+                for year_label, group_docs in sorted(
+                    by_label.items(),
+                    key=lambda item: (item[0] == "Unknown", item[0]),
+                )
+            ]
+        groups.append(
+            LibraryGroupOut(
+                field=primary_field,
+                label=label,
+                value=label,
+                document_count=len(docs_in_group),
+                documents=[_document_summary_out(doc) for doc in docs_in_group],
+                secondary_field=secondary_field,
+                secondary_groups=secondary_groups,
+            )
+        )
+
+    grouping = LibraryGroupingOut(
+        primary_field=primary_field,
+        secondary_field=secondary_field_used,
+        available_fields=available_fields,
+    )
+    return groups, grouping
+
+
+@router.get("/library/authors", response_model=list[LibraryAuthorOut])
+def list_library_authors(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    documents = _library_documents_query(db, current_user).all()
+    by_author: dict[str, dict[str, Any]] = {}
+    for doc in documents:
+        author_id = _effective_author_id(doc)
+        if not author_id:
+            continue
+        entry = by_author.setdefault(
+            author_id,
+            {
+                "id": author_id,
+                "name": _effective_author_name(doc) or author_id,
+                "document_count": 0,
+                "source_ids": set(),
+                "collections": set(),
+                "work_types": set(),
+                "latest_document_at": None,
+            },
+        )
+        entry["document_count"] += 1
+        entry["source_ids"].add(str(doc.source_id))
+        if doc.collection:
+            entry["collections"].add(doc.collection)
+        if doc.work_type:
+            entry["work_types"].add(doc.work_type)
+        if doc.created_at and (
+            entry["latest_document_at"] is None or doc.created_at > entry["latest_document_at"]
+        ):
+            entry["latest_document_at"] = doc.created_at
+
+    return [
+        LibraryAuthorOut(
+            id=entry["id"],
+            name=entry["name"],
+            document_count=entry["document_count"],
+            source_count=len(entry["source_ids"]),
+            collections=sorted(entry["collections"]),
+            work_types=sorted(entry["work_types"]),
+            latest_document_at=entry["latest_document_at"].isoformat() if entry["latest_document_at"] else None,
+        )
+        for entry in sorted(by_author.values(), key=lambda item: item["name"].lower())
+    ]
+
+
+@router.get("/library/authors/{author_id}", response_model=AuthorLibraryOut)
+def get_author_library(
+    author_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    documents = (
+        _library_documents_query(db, current_user)
+        .filter(func.coalesce(RagDocument.author_id, RagSource.author_id) == author_id)
+        .all()
+    )
+    if not documents:
+        raise HTTPException(status_code=404, detail=f"No corpus found for author '{author_id}'.")
+
+    ordered_documents = sorted(documents, key=_document_sort_key)
+    groups, grouping = _build_library_groups(ordered_documents)
+    latest_document_at = max(
+        (doc.created_at for doc in ordered_documents if doc.created_at is not None),
+        default=None,
+    )
+    return AuthorLibraryOut(
+        author=LibraryAuthorOut(
+            id=author_id,
+            name=_effective_author_name(ordered_documents[0]) or author_id,
+            document_count=len(ordered_documents),
+            source_count=len({str(doc.source_id) for doc in ordered_documents}),
+            collections=sorted({doc.collection for doc in ordered_documents if doc.collection}),
+            work_types=sorted({doc.work_type for doc in ordered_documents if doc.work_type}),
+            latest_document_at=latest_document_at.isoformat() if latest_document_at else None,
+        ),
+        grouping=grouping,
+        groups=groups,
+        documents=[_document_summary_out(doc) for doc in ordered_documents],
+    )
+
+
+@router.get("/library/documents/{document_id}", response_model=LibraryDocumentDetailOut)
+def get_library_document(
+    document_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    try:
+        uuid.UUID(document_id)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Invalid document_id UUID")
+
+    document = (
+        db.query(RagDocument)
+        .join(RagSource, RagDocument.source_id == RagSource.id)
+        .filter(RagDocument.id == document_id)
+        .filter(_source_access_filter(current_user))
+        .options(
+            joinedload(RagDocument.author),
+            joinedload(RagDocument.source).joinedload(RagSource.author),
+            joinedload(RagDocument.parent_document).joinedload(RagDocument.author),
+            joinedload(RagDocument.parent_document).joinedload(RagDocument.source).joinedload(RagSource.author),
+            selectinload(RagDocument.child_documents).joinedload(RagDocument.author),
+            selectinload(RagDocument.child_documents).joinedload(RagDocument.source).joinedload(RagSource.author),
+        )
+        .first()
+    )
+    if document is None:
+        raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+
+    parent_document = (
+        _related_document_out(document.parent_document, relationship="parent")
+        if document.parent_document is not None
+        else None
+    )
+    return LibraryDocumentDetailOut(
+        id=str(document.id),
+        source_id=str(document.source_id),
+        title=(document.title or "").strip() or "Untitled document",
+        author_id=_effective_author_id(document),
+        author_name=_effective_author_name(document),
+        published_at=document.published_at.isoformat() if document.published_at else None,
+        publication_year=document.publication_year,
+        publication_label=_publication_label(document),
+        venue=document.venue,
+        collection=document.collection,
+        canonical_work_id=document.canonical_work_id,
+        canonical_status=document.canonical_status,
+        source_type=_source_type_label(document),
+        source_url=_source_url(document),
+        work_type=document.work_type,
+        source_section=document.source_section,
+        metadata=document.metadata_json or {},
+        clean_text=document.clean_text or "",
+        char_count=len(document.clean_text or ""),
+        parent_document=parent_document,
+        child_documents=[
+            _related_document_out(child, relationship="child")
+            for child in sorted(document.child_documents, key=_document_sort_key)
+        ],
+        source_author_id=document.source.author_id if document.source else None,
+        source_author_name=document.source.author.name if document.source and document.source.author else None,
+        source_status=document.source.status if document.source else "unknown",
+        created_at=document.created_at.isoformat() if document.created_at else None,
     )
 
 
