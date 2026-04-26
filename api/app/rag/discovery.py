@@ -24,6 +24,7 @@ import httpx
 import requests
 
 from app.rag.ingestion.fetcher import decode_response_bytes
+from app.rag.ingestion.source_presets import apply_source_preset
 
 log = logging.getLogger(__name__)
 
@@ -305,12 +306,18 @@ def _register_sources(
         if norm in existing_urls:
             skipped += 1
             continue
+        ingestion_config, selective_options = apply_source_preset(
+            author_id=author_id,
+            url=src.url,
+        )
         row = RagSource(
             user_id=user_id,
             author_id=author_id,
             url=src.url,
             source_type=src.source_type,
             status="pending",
+            selective_options=selective_options,
+            ingestion_config=ingestion_config,
         )
         db.add(row)
         existing_urls.add(norm)  # track within this call

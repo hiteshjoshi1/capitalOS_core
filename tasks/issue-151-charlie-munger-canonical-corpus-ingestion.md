@@ -121,47 +121,157 @@
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Implement scoped code changes
-- [ ] Add/update tests
-- [ ] Run deterministic safety gates
-- [ ] Verify semantic intent is achieved
+- [x] Implement scoped code changes
+- [x] Add/update tests
+- [x] Run deterministic safety gates
+- [x] Verify semantic intent is achieved
 
 ## Execution Journal (Codex Mutable)
-- Current Stage: `not_started`
-- Workflow Status: `running`
-- Provider/Model: `openai/gpt-5`
+- Current Stage: `completed`
+- Workflow Status: `completed`
+- Provider/Model: `gpt-5.4`
 - Last Updated: `2026-04-25`
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
-- `lint`: `<pass|fail|skip>` — `<notes/log path>`
-- `typecheck`: `<pass|fail|skip>` — `<notes/log path>`
-- `tests`: `<pass|fail|skip>` — `<notes/log path>`
-- `e2e`: `<pass|fail|skip>` — `<notes/log path>`
-- `api-smoke`: `<pass|fail|skip>` — `<notes/log path>`
-- `policy-checks`: `<pass|fail>` — `<notes/log path>`
+- `lint`: `pass` — `make lint`
+- `typecheck`: `pass` — `make typecheck`
+- `tests`: `pass` — `make contract-backend && make test-backend && make contract-frontend && make test-frontend && make orch-test`
+- `e2e`: `pass` — `make e2e`
+- `api-smoke`: `pass` — `make api-smoke`
+- `policy-checks`: `pass` — `Charlie Munger Stripe validation endpoint + preset-driven phase workflow + metadata weighting added`
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._
-- `<path>` — reason: `<why this file was required>`
+- `docs/rag-ingestion.md` — reason: Charlie workflow requires curl-verifiable phased validation/insertion documentation.
 
 ## Permanently Failed / Gave Up (Codex Mutable)
 _Fill only if workflow stops without shipping._
-- Stop reason: `<concrete reason>`
+- Stop reason: `none`
 - Attempted mitigations:
-  - `<mitigation 1>`
-  - `<mitigation 2>`
-- Suggested human action: `<next action>`
+  - `n/a`
+  - `n/a`
+- Suggested human action: `none`
 
 ## Human Action Summary (Codex Mutable)
 _Human-readable next steps._
-- Next expected action: `<command or decision>`
+- Next expected action: `curl POST /rag/authors/charlie_munger/discover -> POST /rag/ingest/validate -> POST /rag/ingest/url`
 - Open questions:
-  - `Can revisited sections be modeled as separate documents with parent linkage using the current schema, or is a schema extension required?`
-  - `Should source-specific retrieval weighting be persisted as metadata or implemented in ranking logic only?`
+  - `none`
+  - `none`
 - If PR raised but intent partial:
-  - unmet criteria: `<criterion ids>`
-  - follow-up issue: `<issue link or TODO>`
+  - unmet criteria: `none`
+  - follow-up issue: `none`
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `running`
+
+## Workflow Snapshot
+- latest_outcome: Implemented a Charlie Munger canonical-corpus ingestion workflow with URL-based source presets, Stripe omnibus section fanout, validation-before-insert support, phased/curl-verifiable docs, and regression coverage. The final required Makefile verification suite passed on the current tree.
+- next_action: Workflow execution is in progress.
+- pipeline_version: `v3`
+- provider_model: `copilot/gpt-5.4`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: Charlie Munger ingestion follows the requested source hierarchy with Stripe omnibus as canonical PCA input, DJCO as primary meeting-note corpus, late interviews as separate sources, and fallback-only guidance for duplicate classic-talk sources.
+- Acceptance criterion: Stripe omnibus content is parsed into multiple logical documents with explicit exclusions, Buffett foreword author override, Chapter Three and Recommended Reading support, and separate logical talk/Q&A/revisited handling.
+- Acceptance criterion: Execution is phased and validation-first, with concrete validation artifacts available before insertion and failed sources skipped rather than force-ingested.
+- Acceptance criterion: Retrieval-facing metadata includes canonical work identifiers, canonical/fallback status, dedupe priority, collection/source metadata, and parent linkage for companion sections.
+- Acceptance criterion: Tests cover Stripe section parsing behavior, Charlie preset registration/discovery, author fidelity, exclusion behavior, and validation preview behavior.
+- Acceptance criterion: The workflow is documented and verifiable with Makefile targets and curl-based ingestion endpoints.
+
+## Prepare
+Checked out `feature/issue-151-charlie-munger-canonical-corpus-ingestion` from `main` and ensured task file exists.
+
+## Plan Summary
+Extend the existing RAG ingestion pipeline instead of building a parallel path: add Charlie-specific source presets and discovery seeds, normalize Stripe omnibus parsing quirks, expose a validation-only preview endpoint that emits review artifacts before insertion, persist retrieval-facing metadata for canonical/companion/fallback handling, document the phased workflow, and cover the new behavior with backend tests.
+
+### Architecture Decisions
+- Encoded Charlie-specific ingestion behavior in a dedicated preset module so discovery, manual source registration, and ingestion share the same deterministic source rules.
+- Kept Stripe omnibus ingestion as one raw source URL that fans out into multiple logical documents, rather than persisting one monolithic omnibus document.
+- Added a validation-only ingestion preview flow so Stripe, DJCO, and late-interview sources can be reviewed and skipped before any DB insertion.
+- Used source-specific Stripe normalization to split embedded omnibus sections such as revisited talks into stable logical sections before selector fanout.
+- Persisted retrieval-facing metadata and weights in logical-document metadata instead of hardcoding ranking behavior elsewhere.
+
+### Acceptance Criteria
+- Charlie Munger ingestion follows the requested source hierarchy with Stripe omnibus as canonical PCA input, DJCO as primary meeting-note corpus, late interviews as separate sources, and fallback-only guidance for duplicate classic-talk sources.
+- Stripe omnibus content is parsed into multiple logical documents with explicit exclusions, Buffett foreword author override, Chapter Three and Recommended Reading support, and separate logical talk/Q&A/revisited handling.
+- Execution is phased and validation-first, with concrete validation artifacts available before insertion and failed sources skipped rather than force-ingested.
+- Retrieval-facing metadata includes canonical work identifiers, canonical/fallback status, dedupe priority, collection/source metadata, and parent linkage for companion sections.
+- Tests cover Stripe section parsing behavior, Charlie preset registration/discovery, author fidelity, exclusion behavior, and validation preview behavior.
+- The workflow is documented and verifiable with Makefile targets and curl-based ingestion endpoints.
+
+### Planned Paths
+- `api/app/rag`
+- `api/tests`
+- `config/rag_authors.yaml`
+- `docs/rag-ingestion.md`
+- `tasks/issue-151-charlie-munger-canonical-corpus-ingestion.md`
+
+## Build Summary
+Implemented a Charlie Munger canonical-corpus ingestion workflow with URL-based source presets, Stripe omnibus section fanout, validation-before-insert support, phased/curl-verifiable docs, and regression coverage. The final required Makefile verification suite passed on the current tree.
+
+### Changed Files
+- `api/app/rag/discovery.py`
+- `api/app/rag/ingestion/pipeline.py`
+- `api/app/rag/ingestion/selector.py`
+- `api/app/rag/ingestion/source_presets.py`
+- `api/app/routers/rag.py`
+- `api/tests/test_munger_corpus_presets.py`
+- `config/rag_authors.yaml`
+- `docs/rag-ingestion.md`
+- `tasks/issue-151-charlie-munger-canonical-corpus-ingestion.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented a Charlie Munger canonical-corpus ingestion workflow with URL-based source presets, Stripe omnibus section fanout, validation-before-insert support, phased/curl-verifiable docs, and regression coverage. The final required Makefile verification suite passed on the current tree.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/gpt-5.4`
+
+### Semantic Checks
+- `pass` Documented Charlie ingestion workflow follows the requested source hierarchy and keeps fallback-only sources out of the primary path.: `config/rag_authors.yaml` now seeds Stripe omnibus, DJCO, late interviews, and preserves Wesco separately; `docs/rag-ingestion.md` documents WorldlyPartners classic-talk PDFs and Valueplays as fallback/audit-only.
+- `pass` Stripe omnibus is parsed into multiple logical documents instead of one monolithic document.: `api/app/rag/ingestion/source_presets.py` defines Stripe fanout documents by section boundaries and `api/app/rag/ingestion/pipeline.py` previews/persists logical documents per fanout entry.
+- `pass` Stripe exclusions, Buffett foreword author attribution, Chapter Three, and Recommended Reading behavior are explicit.: Stripe preset config excludes the Collison foreword, both Munger rebuttals, Kaufman introduction, Chapter One, Chapter Two, and acknowledgments; it separately includes Buffett foreword with `speaker/author` override plus Chapter Three and Recommended Reading support.
+- `pass` The eleven PCA talks come from the single Stripe omnibus with deterministic talk boundaries and separate Q&A/revisited handling.: The Stripe preset maps the canonical work IDs to omnibus heading windows, keeps `Worldly Wisdom, Updated: Q&A with Charlie` separate, and uses child linkage metadata for revisited documents where split sections are supported.
+- `pass` Execution is phased and validation-first, with concrete artifacts before insertion and poor sources skipped.: `api/app/routers/rag.py` adds `/rag/ingest/validate`; `api/app/rag/ingestion/pipeline.py` builds `validation_artifacts` with metadata, section lists, extracted lengths, previews, and rejection details before persistence.
+- `pass` Metadata and weighting fields exist for retrieval-facing prioritization and author/source fidelity.: Preset metadata populates `collection`, `source_type`, `speaker`, `canonical_work_id`, `canonical_status`, `dedupe_priority`, `source_section`, `source_publisher`, `note_taker`, and `parent_work_id`, along with deterministic retrieval weights by source class.
+- `pass` DJCO and late-interview sources are included as separate collections without reworking away from their listed URLs, while Wesco remains separate.: `config/rag_authors.yaml` adds the listed 2013-2023 DJCO and late-interview sources, and the new preset tests assert the Charlie config still includes the Berkshire Wesco archive URL while leaving it unmodified by Charlie presets.
+- `pass` Tests cover Stripe parsing/presets, author fidelity, exclusions, collection metadata, and validation preview behavior.: `api/tests/test_munger_corpus_presets.py` covers Stripe preset structure, Stripe normalization, Charlie source discovery/registration, config seeding, and validation preview behavior; the full backend suite also passed after these additions.
+- `pass` The implementation is verifiable via Makefile commands and curl-verifiable ingestion flows.: `docs/rag-ingestion.md` now documents the phased `discover -> validate -> ingest` curl workflow, and the full required Makefile verification suite passed.
+
+### Risk Flags
+- external-source-layout-drift
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->

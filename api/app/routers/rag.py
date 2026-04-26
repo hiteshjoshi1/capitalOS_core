@@ -46,8 +46,14 @@ from app.rag.ingestion.events import (
     serialize_job,
     serialize_source,
 )
-from app.rag.ingestion.pipeline import bulk_ingest_author, run_manual_ingestion, run_url_ingestion
+from app.rag.ingestion.pipeline import (
+    bulk_ingest_author,
+    preview_url_ingestion,
+    run_manual_ingestion,
+    run_url_ingestion,
+)
 from app.rag.ingestion.selector import SelectiveIngestionOptions
+from app.rag.ingestion.source_presets import apply_source_preset
 from app.rag.retrieval import retrieve_similar_chunks, retrieve_with_constraints
 
 log = logging.getLogger(__name__)
@@ -102,6 +108,10 @@ class IngestUrlIn(BaseModel):
     source_id: str
 
 
+class ValidateSourceIn(BaseModel):
+    source_id: str
+
+
 class IngestManualIn(BaseModel):
     author_id: str
     text: str
@@ -123,6 +133,34 @@ class JobOut(BaseModel):
     created_at: Any
 
     model_config = {"from_attributes": True}
+
+
+class ValidationDocumentOut(BaseModel):
+    key: str
+    status: str
+    title: Optional[str]
+    author_id: Optional[str]
+    source_section: Optional[str]
+    parent_key: Optional[str]
+    proposed_metadata: dict[str, Any]
+    included_sections: list[str]
+    extracted_char_count: int
+    preview_text: str
+    quality: dict[str, Any]
+    failure_category: Optional[str] = None
+    error: Optional[str] = None
+
+
+class ValidationPreviewOut(BaseModel):
+    source_id: str
+    source_url: Optional[str]
+    source_type: str
+    ingestion_mode: str
+    source_char_count: int
+    document_count: int
+    accepted_count: int
+    rejected_count: int
+    documents: list[ValidationDocumentOut]
 
 
 class CreateAuthorIn(BaseModel):
@@ -260,9 +298,21 @@ class LogicalDocumentConfigIn(BaseModel):
     selective_ingestion: Optional[SelectiveIngestionOptionsIn] = None
 
 
+class SectionSplitMarkerIn(BaseModel):
+    marker: str = Field(..., min_length=1)
+    heading: str = Field(..., min_length=1)
+    level: Optional[int] = Field(None, ge=1, le=6)
+
+
+class SectionSplitRuleIn(BaseModel):
+    match_heading: str = Field(..., min_length=1)
+    markers: list[SectionSplitMarkerIn] = Field(..., min_length=1)
+
+
 class IngestionConfigIn(BaseModel):
     mode: str = Field("single_work", pattern="^(single_work|fanout)$")
     documents: list[LogicalDocumentConfigIn] = Field(default_factory=list)
+    section_splits: list[SectionSplitRuleIn] = Field(default_factory=list)
 
 
 class UpdateSourceIngestionConfigIn(BaseModel):
@@ -385,6 +435,21 @@ def _ingestion_config_to_dict(ingestion_config: Optional[IngestionConfigIn]) -> 
     config_payload: dict[str, Any] = {"mode": ingestion_config.mode}
     if documents:
         config_payload["documents"] = documents
+    if ingestion_config.section_splits:
+        config_payload["section_splits"] = [
+            {
+                "match_heading": split.match_heading.strip(),
+                "markers": [
+                    {
+                        "marker": marker.marker.strip(),
+                        "heading": marker.heading.strip(),
+                        **({"level": marker.level} if marker.level is not None else {}),
+                    }
+                    for marker in split.markers
+                ],
+            }
+            for split in ingestion_config.section_splits
+        ]
     return config_payload
 
 
@@ -545,6 +610,12 @@ def register_source(
     if not author:
         raise HTTPException(status_code=404, detail=f"Author '{body.author_id}' not found. Run sync-config first.")
     ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
+    ingestion_config, _ = apply_source_preset(
+        author_id=body.author_id,
+        url=body.url,
+        ingestion_config=ingestion_config,
+        selective_options=None,
+    )
     _ensure_ingestion_config_authors_exist(db, source_author_id=body.author_id, ingestion_config=ingestion_config)
 
     source = RagSource(
@@ -669,13 +740,19 @@ def ingest_urls_for_author(
     requeued_sources: list[RagSource] = []
     skipped = 0
     batch_id = str(uuid.uuid4())
-    selective_opts_dict = body.selective_ingestion.to_selector_options().to_dict() if body.selective_ingestion else None
-    ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
-    _ensure_ingestion_config_authors_exist(db, source_author_id=author_id, ingestion_config=ingestion_config)
+    submitted_selective_opts = body.selective_ingestion.to_selector_options().to_dict() if body.selective_ingestion else None
+    submitted_ingestion_config = _ingestion_config_to_dict(body.ingestion_config)
     for url in body.urls:
         url = url.strip()
         if not url:
             continue
+        ingestion_config, selective_opts_dict = apply_source_preset(
+            author_id=author_id,
+            url=url,
+            ingestion_config=submitted_ingestion_config,
+            selective_options=submitted_selective_opts,
+        )
+        _ensure_ingestion_config_authors_exist(db, source_author_id=author_id, ingestion_config=ingestion_config)
         existing = existing_sources_by_url.get(url)
         if existing is not None:
             db.expire_all()
@@ -918,6 +995,30 @@ def ingest_url(
     job = run_url_ingestion(source, db)
     db.commit()
     return _job_out(job)
+
+
+@router.post("/ingest/validate", response_model=ValidationPreviewOut, status_code=200)
+def validate_url_source(
+    body: ValidateSourceIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    source = _get_source_or_404(body.source_id, db, current_user)
+    if not source.url:
+        raise HTTPException(status_code=422, detail="Source has no URL. Use POST /rag/ingest/manual.")
+
+    preview = preview_url_ingestion(source, db)
+    return ValidationPreviewOut(
+        source_id=str(source.id),
+        source_url=source.url,
+        source_type=str(preview["source_type"]),
+        ingestion_mode=str(preview["ingestion_mode"]),
+        source_char_count=int(preview["source_char_count"]),
+        document_count=len(preview["documents"]),
+        accepted_count=int(preview["accepted_count"]),
+        rejected_count=int(preview["rejected_count"]),
+        documents=[ValidationDocumentOut(**document) for document in preview["documents"]],
+    )
 
 
 @router.post("/ingest/manual", response_model=JobOut, status_code=202)

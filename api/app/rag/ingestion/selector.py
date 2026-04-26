@@ -70,7 +70,12 @@ def _heading_matches(heading: Optional[str], marker: str) -> bool:
     return marker.lower() in heading.lower()
 
 
-def _collect_descendant_indexes(sections: list, start_index: int) -> set[int]:
+def _collect_descendant_indexes(
+    sections: list,
+    start_index: int,
+    *,
+    include_headingless: bool,
+) -> set[int]:
     """
     Return the index of the matched heading plus any immediately following
     descendant sections until the hierarchy returns to the same-or-higher level.
@@ -82,7 +87,8 @@ def _collect_descendant_indexes(sections: list, start_index: int) -> set[int]:
         section = sections[idx]
         heading = getattr(section, "heading", None)
         if not heading:
-            indexes.add(idx)
+            if include_headingless:
+                indexes.add(idx)
             continue
         section_level = getattr(section, "level", 1) or 1
         if section_level <= matched_level:
@@ -149,7 +155,7 @@ def apply_selective_options(sections: list, options: SelectiveIngestionOptions) 
         for idx, section in enumerate(result):
             heading = getattr(section, "heading", None)
             if heading and any(m in heading.lower() for m in markers):
-                matched_indexes.update(_collect_descendant_indexes(result, idx))
+                matched_indexes.update(_collect_descendant_indexes(result, idx, include_headingless=False))
         result = [section for idx, section in enumerate(result) if idx in matched_indexes]
 
     # ── exclude_sections ─────────────────────────────────────────────────────
@@ -159,7 +165,7 @@ def apply_selective_options(sections: list, options: SelectiveIngestionOptions) 
         for idx, section in enumerate(result):
             heading = getattr(section, "heading", None)
             if heading and any(m in heading.lower() for m in markers):
-                excluded_indexes.update(_collect_descendant_indexes(result, idx))
+                excluded_indexes.update(_collect_descendant_indexes(result, idx, include_headingless=True))
         result = [section for idx, section in enumerate(result) if idx not in excluded_indexes]
 
     # ── guard: rules were specified but produced nothing ──────────────────────

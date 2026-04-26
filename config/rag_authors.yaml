@@ -78,15 +78,6 @@ authors:
       biases:
         - strong scepticism of incentive-distorted advice
         - preference for extreme patience
-    discovery_seeds:
-      - url: "https://www.berkshirehathaway.com/wesco/wescoa.html"
-        seed_type: archive_page
-        link_patterns:
-          - ".*ar[0-9]{2}\\.pdf$"
-          - ".*wesco.*\\.pdf$"
-        base_url: "https://www.berkshirehathaway.com/wesco/"
-        domain_filter: "berkshirehathaway.com"
-        prefer_type: pdf
 
   - id: howard_marks
     name: Howard Marks
