@@ -184,6 +184,90 @@ curl -X POST http://localhost:8000/rag/ingest/url \
   -d '{"source_id": "<source-uuid>"}'
 ```
 
+### Validate before insert
+
+For deterministic corpus reviews, fetch + parse + fanout can be previewed without
+persisting any documents:
+
+```bash
+curl -X POST http://localhost:8000/rag/ingest/validate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source_id": "<source-uuid>"}'
+```
+
+The response includes one validation artifact per logical document with:
+
+- proposed metadata
+- included section headings
+- extracted text length
+- preview text
+- deterministic quality metrics / rejection reason
+
+Use this as the approval gate before `POST /rag/ingest/url`.
+
+---
+
+## Validation-first workflow for compendiums and curated corpora
+
+The application should not infer corpus rules from hardcoded URLs or author
+IDs. For compendiums, omnibus documents, or curated corpora, operators must
+supply explicit `ingestion_config` and/or `selective_ingestion` rules at
+registration time or update them on the source before ingestion.
+
+Recommended operator flow:
+
+```bash
+# 1. Register a source with explicit fanout or selective rules when needed
+curl -X POST http://localhost:8000/rag/sources \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "author_id": "your_author_id",
+    "url": "https://example.com/omnibus",
+    "source_type": "html",
+    "ingestion_config": {
+      "mode": "fanout",
+      "documents": [
+        {
+          "key": "doc-one",
+          "title": "Document One",
+          "canonical_work_id": "doc_one",
+          "source_section": "Document One -> before Document Two",
+          "selective_ingestion": {
+            "start_after": "Document One",
+            "stop_before": "Document Two"
+          }
+        }
+      ]
+    }
+  }'
+
+# 2. Validate before insert
+curl -X POST http://localhost:8000/rag/ingest/validate \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source_id": "<source-id>"}'
+
+# 3. Only ingest after the validation artifacts look correct
+curl -X POST http://localhost:8000/rag/ingest/url \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"source_id": "<source-id>"}'
+```
+
+Validation artifacts should confirm:
+
+- the included section headings are the ones you intended
+- the extracted text is real body text, not heading-only noise
+- per-document metadata looks correct before persistence
+- low-quality or mis-bounded documents can be skipped before insert
+
+If a source contains embedded subsection headings inside one parsed section, use
+`ingestion_config.section_splits` to split that section generically before
+fanout/selection. This keeps compendium handling source-agnostic and avoids
+hardcoded URL-specific parsing rules.
+
 ---
 
 ## Manual Ingestion (Required Fallback)

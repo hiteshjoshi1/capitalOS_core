@@ -29,12 +29,17 @@ from app.rag.ingestion.fanout import (
     build_fanout_plan,
 )
 from app.rag.ingestion.fetcher import FetchResult, detect_source_type, fetch_url
+from app.rag.ingestion.normalization import normalize_with_ingestion_config
 from app.rag.ingestion.parser import DocumentSection, ParseResult, StructuredParseResult, parse
 from app.rag.ingestion.quality import LOW_QUALITY_FAILURE, QualityValidationResult, validate_logical_document
 from app.rag.ingestion.selector import (
     NoContentSelectedError,
     SelectiveIngestionOptions,
     apply_selective_options,
+)
+from app.rag.ingestion.source_presets import (
+    apply_source_preset,
+    normalize_source_parse_result,
 )
 
 log = logging.getLogger(__name__)
@@ -141,72 +146,10 @@ def _persist_document_and_chunks(
     source: RagSource,
     parse_result: ParseResult,
     plan: LogicalDocumentPlan,
-) -> tuple[RagDocument, list[RagChunk], QualityValidationResult]:
+) -> tuple[RagDocument, list[RagChunk]]:
     """Create RagDocument + RagChunk rows for one logical document."""
-    doc_hash = _sha256(plan.clean_text)
-    doc_metadata: Optional[dict] = getattr(parse_result, "doc_metadata", None)
+    _, raw_chunks, _ = _build_document_chunks_and_validation(source, parse_result, plan)
     publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
-    base_meta = _build_base_metadata(
-        source,
-        doc_hash,
-        plan.title,
-        doc_metadata,
-        author_id=plan.author_id,
-        published_at=plan.published_at,
-        publication_year=publication_year,
-        source_section=plan.source_section,
-        logical_metadata={
-            "venue": plan.venue,
-            "collection": plan.collection,
-            "canonical_work_id": plan.canonical_work_id,
-            "canonical_status": plan.canonical_status,
-            "dedupe_priority": plan.dedupe_priority,
-            "note_taker": plan.note_taker,
-            "work_type": plan.work_type,
-            **plan.metadata,
-        },
-    )
-
-    parser_sections = plan.selected_sections
-    if parser_sections:
-        chunker_sections = _parser_sections_to_chunker(parser_sections)
-        if chunker_sections:
-            raw_chunks: list[Chunk] = chunk_structured(chunker_sections, base_metadata=base_meta)
-        else:
-            raw_chunks = chunk_text(plan.clean_text, base_metadata=base_meta)
-    else:
-        raw_chunks = chunk_text(plan.clean_text, base_metadata=base_meta)
-
-    validation = validate_logical_document(
-        clean_text=plan.clean_text,
-        title=plan.title,
-        chunk_count=len(raw_chunks),
-        section_headings=[section.heading for section in parser_sections if section.heading],
-    )
-    if not validation.accepted:
-        return (
-            RagDocument(
-                source_id=source.id,
-                author_id=plan.author_id,
-                title=plan.title,
-                published_at=plan.published_at,
-                publication_year=publication_year,
-                venue=plan.venue,
-                collection=plan.collection,
-                canonical_work_id=plan.canonical_work_id,
-                canonical_status=plan.canonical_status,
-                dedupe_priority=plan.dedupe_priority,
-                source_section=plan.source_section,
-                note_taker=plan.note_taker,
-                work_type=plan.work_type,
-                source_document_index=plan.index,
-                raw_text=plan.raw_text,
-                clean_text=plan.clean_text,
-                metadata_json=plan.metadata,
-            ),
-            [],
-            validation,
-        )
 
     doc = RagDocument(
         source_id=source.id,
@@ -243,7 +186,7 @@ def _persist_document_and_chunks(
         orm_chunks.append(orm_chunk)
 
     db.flush()
-    return doc, orm_chunks, validation
+    return doc, orm_chunks
 
 
 def _embed_and_persist(db: Session, chunks: list[RagChunk]) -> int:
@@ -299,10 +242,38 @@ def _effective_selective_options(
 ) -> Optional[SelectiveIngestionOptions]:
     if explicit_options is not None:
         return explicit_options
-    raw_options = getattr(source, "selective_options", None)
+    _, preset_selective_options = apply_source_preset(
+        author_id=source.author_id,
+        url=source.url,
+        ingestion_config=None,
+        selective_options=getattr(source, "selective_options", None),
+    )
+    raw_options = preset_selective_options
     if isinstance(raw_options, dict) and raw_options:
         return SelectiveIngestionOptions.from_dict(raw_options)
     return None
+
+
+def _effective_ingestion_config(source: RagSource) -> Optional[dict[str, Any]]:
+    preset_ingestion_config, _ = apply_source_preset(
+        author_id=source.author_id,
+        url=source.url,
+        ingestion_config=getattr(source, "ingestion_config", None),
+        selective_options=None,
+    )
+    return preset_ingestion_config if isinstance(preset_ingestion_config, dict) else None
+
+
+def _prepare_parse_result(source: RagSource, parsed: ParseResult) -> StructuredParseResult:
+    structured = parsed if isinstance(parsed, StructuredParseResult) else StructuredParseResult(
+        raw_text=parsed.raw_text,
+        clean_text=parsed.clean_text,
+        source_type=parsed.source_type,
+        sections=[],
+        doc_metadata={},
+    )
+    normalized = normalize_source_parse_result(source.url, structured)
+    return normalize_with_ingestion_config(normalized, getattr(source, "ingestion_config", None))
 
 
 def _materialize_logical_plan(plan: LogicalDocumentPlan, shared_sections: list[DocumentSection]) -> LogicalDocumentPlan:
@@ -345,21 +316,92 @@ def _link_parent_documents(
     db.flush()
 
 
-def _persist_logical_documents(
-    db: Session,
+def _build_document_chunks_and_validation(
     source: RagSource,
+    parse_result: ParseResult,
+    plan: LogicalDocumentPlan,
+) -> tuple[dict[str, Any], list[Chunk], QualityValidationResult]:
+    doc_hash = _sha256(plan.clean_text)
+    doc_metadata: Optional[dict] = getattr(parse_result, "doc_metadata", None)
+    publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
+    base_meta = _build_base_metadata(
+        source,
+        doc_hash,
+        plan.title,
+        doc_metadata,
+        author_id=plan.author_id,
+        published_at=plan.published_at,
+        publication_year=publication_year,
+        source_section=plan.source_section,
+        logical_metadata={
+            "venue": plan.venue,
+            "collection": plan.collection,
+            "canonical_work_id": plan.canonical_work_id,
+            "canonical_status": plan.canonical_status,
+            "dedupe_priority": plan.dedupe_priority,
+            "note_taker": plan.note_taker,
+            "work_type": plan.work_type,
+            **plan.metadata,
+        },
+    )
+
+    parser_sections = plan.selected_sections
+    if parser_sections:
+        chunker_sections = _parser_sections_to_chunker(parser_sections)
+        raw_chunks = chunk_structured(chunker_sections, base_metadata=base_meta) if chunker_sections else chunk_text(
+            plan.clean_text, base_metadata=base_meta
+        )
+    else:
+        raw_chunks = chunk_text(plan.clean_text, base_metadata=base_meta)
+
+    validation = validate_logical_document(
+        clean_text=plan.clean_text,
+        title=plan.title,
+        chunk_count=len(raw_chunks),
+        section_headings=[section.heading for section in parser_sections if section.heading],
+    )
+    return base_meta, raw_chunks, validation
+
+
+def _build_validation_artifact(
+    plan: LogicalDocumentPlan,
+    *,
+    base_meta: dict[str, Any],
+    validation: QualityValidationResult,
+    error: Optional[str] = None,
+    failure_category: Optional[str] = None,
+) -> dict[str, Any]:
+    return {
+        "key": plan.key,
+        "status": "accepted" if validation.accepted and not error else "rejected",
+        "title": plan.title,
+        "author_id": plan.author_id,
+        "source_section": plan.source_section,
+        "parent_key": plan.parent_key,
+        "proposed_metadata": base_meta,
+        "included_sections": [section.heading for section in plan.selected_sections if section.heading],
+        "extracted_char_count": len(plan.clean_text or ""),
+        "preview_text": (plan.clean_text or "")[:1200],
+        "quality": {
+            "reasons": validation.reasons,
+            **validation.metrics,
+        },
+        "failure_category": failure_category or validation.failure_category,
+        "error": error,
+    }
+
+
+def _preview_logical_documents(
+    source: RagSource,
+    db: Session,
     parsed: StructuredParseResult,
     *,
     title: Optional[str] = None,
     published_at=None,
     selective_options: Optional[SelectiveIngestionOptions] = None,
-) -> tuple[bool, dict[str, Any], Optional[str], Optional[str]]:
+) -> tuple[FanoutPlan, list[dict[str, Any]], list[tuple[LogicalDocumentPlan, list[Chunk], QualityValidationResult]], list[str], Optional[SelectiveIngestionOptions]]:
     effective_options = _effective_selective_options(source, selective_options)
-    source.raw_text = parsed.raw_text
-    source.clean_text = parsed.clean_text
-    raw_ingestion_config = getattr(source, "ingestion_config", None)
-    ingestion_config = raw_ingestion_config if isinstance(raw_ingestion_config, dict) else None
-
+    ingestion_config = _effective_ingestion_config(source)
     plan: FanoutPlan = build_fanout_plan(
         parsed,
         source_author_id=source.author_id,
@@ -369,11 +411,8 @@ def _persist_logical_documents(
         ingestion_config=ingestion_config,
     )
 
-    outcomes: list[dict[str, Any]] = []
-    created_documents: dict[str, RagDocument] = {}
-    created_outcomes: dict[str, dict[str, Any]] = {}
-    total_chunks = 0
-    total_embeddings = 0
+    artifacts: list[dict[str, Any]] = []
+    prepared_documents: list[tuple[LogicalDocumentPlan, list[Chunk], QualityValidationResult]] = []
     rejected_categories: list[str] = []
 
     for logical_plan in plan.documents:
@@ -382,76 +421,112 @@ def _persist_logical_documents(
             materialized_plan = _materialize_logical_plan(logical_plan, plan.shared_sections)
             if not materialized_plan.clean_text.strip():
                 raise EmptyTextExtractionError("Text extraction produced no usable text")
-            document, chunks, validation = _persist_document_and_chunks(db, source, parsed, materialized_plan)
-            if not validation.accepted:
+            base_meta, raw_chunks, validation = _build_document_chunks_and_validation(source, parsed, materialized_plan)
+            artifacts.append(_build_validation_artifact(materialized_plan, base_meta=base_meta, validation=validation))
+            if validation.accepted:
+                prepared_documents.append((materialized_plan, raw_chunks, validation))
+            else:
                 rejected_categories.append(validation.failure_category or FAILURE_LOW_QUALITY_EXTRACTION)
-                outcomes.append(
-                    {
-                        "key": materialized_plan.key,
-                        "status": "rejected",
-                        "failure_category": validation.failure_category or FAILURE_LOW_QUALITY_EXTRACTION,
-                        "error": "Logical document did not pass deterministic quality validation",
-                        "title": materialized_plan.title,
-                        "author_id": materialized_plan.author_id,
-                        "source_section": materialized_plan.source_section,
-                        "parent_key": materialized_plan.parent_key,
-                        "quality": {
-                            "reasons": validation.reasons,
-                            **validation.metrics,
-                        },
-                    }
-                )
-                continue
-
-            embeddings = _embed_and_persist(db, chunks)
-            total_chunks += len(chunks)
-            total_embeddings += embeddings
-            created_documents[materialized_plan.key] = document
-            outcome = {
-                "key": materialized_plan.key,
-                "status": "created",
-                "document_id": str(document.id),
-                "title": document.title,
-                "author_id": document.author_id,
-                "source_section": document.source_section,
-                "chunk_count": len(chunks),
-                "embedding_count": embeddings,
-                "parent_key": materialized_plan.parent_key,
-                "quality": {
-                    "reasons": validation.reasons,
-                    **validation.metrics,
-                },
-            }
-            created_outcomes[materialized_plan.key] = outcome
-            outcomes.append(outcome)
         except NoContentSelectedError as exc:
             rejected_categories.append(FAILURE_NO_CONTENT_SELECTED)
-            outcomes.append(
-                {
-                    "key": logical_plan.key,
-                    "status": "rejected",
-                    "failure_category": FAILURE_NO_CONTENT_SELECTED,
-                    "error": str(exc),
-                    "title": logical_plan.title,
-                    "author_id": logical_plan.author_id,
-                    "source_section": logical_plan.source_section,
-                    "parent_key": logical_plan.parent_key,
-                }
+            artifacts.append(
+                _build_validation_artifact(
+                    logical_plan,
+                    base_meta={},
+                    validation=QualityValidationResult(
+                        accepted=False,
+                        failure_category=FAILURE_NO_CONTENT_SELECTED,
+                        reasons=["no_content_selected"],
+                        metrics={"char_count": 0, "word_count": 0, "body_char_count": 0, "body_word_count": 0, "chunk_count": 0, "body_ratio": 0.0, "section_count": 0},
+                    ),
+                    error=str(exc),
+                    failure_category=FAILURE_NO_CONTENT_SELECTED,
+                )
             )
         except EmptyTextExtractionError as exc:
             rejected_categories.append(FAILURE_EMPTY_TEXT_EXTRACTION)
+            artifacts.append(
+                _build_validation_artifact(
+                    logical_plan,
+                    base_meta={},
+                    validation=QualityValidationResult(
+                        accepted=False,
+                        failure_category=FAILURE_EMPTY_TEXT_EXTRACTION,
+                        reasons=["empty_text"],
+                        metrics={"char_count": 0, "word_count": 0, "body_char_count": 0, "body_word_count": 0, "chunk_count": 0, "body_ratio": 0.0, "section_count": 0},
+                    ),
+                    error=str(exc),
+                    failure_category=FAILURE_EMPTY_TEXT_EXTRACTION,
+                )
+            )
+
+    return plan, artifacts, prepared_documents, rejected_categories, effective_options
+
+
+def _persist_logical_documents(
+    db: Session,
+    source: RagSource,
+    parsed: StructuredParseResult,
+    *,
+    title: Optional[str] = None,
+    published_at=None,
+    selective_options: Optional[SelectiveIngestionOptions] = None,
+) -> tuple[bool, dict[str, Any], Optional[str], Optional[str]]:
+    source.raw_text = parsed.raw_text
+    source.clean_text = parsed.clean_text
+    plan, validation_artifacts, prepared_documents, rejected_categories, effective_options = _preview_logical_documents(
+        source,
+        db,
+        parsed,
+        title=title,
+        published_at=published_at,
+        selective_options=selective_options,
+    )
+
+    outcomes: list[dict[str, Any]] = []
+    created_documents: dict[str, RagDocument] = {}
+    created_outcomes: dict[str, dict[str, Any]] = {}
+    total_chunks = 0
+    total_embeddings = 0
+    for artifact in validation_artifacts:
+        if artifact["status"] != "accepted":
             outcomes.append(
                 {
-                    "key": logical_plan.key,
+                    "key": artifact["key"],
                     "status": "rejected",
-                    "failure_category": FAILURE_EMPTY_TEXT_EXTRACTION,
-                    "error": str(exc),
-                    "title": logical_plan.title,
-                    "author_id": logical_plan.author_id,
-                    "source_section": logical_plan.source_section,
-                    "parent_key": logical_plan.parent_key,
+                    "failure_category": artifact.get("failure_category") or FAILURE_LOW_QUALITY_EXTRACTION,
+                    "error": artifact.get("error") or "Logical document did not pass deterministic quality validation",
+                    "title": artifact.get("title"),
+                    "author_id": artifact.get("author_id"),
+                    "source_section": artifact.get("source_section"),
+                    "parent_key": artifact.get("parent_key"),
+                    "quality": artifact.get("quality", {}),
                 }
             )
+
+    for materialized_plan, _, validation in prepared_documents:
+        document, chunks = _persist_document_and_chunks(db, source, parsed, materialized_plan)
+        embeddings = _embed_and_persist(db, chunks)
+        total_chunks += len(chunks)
+        total_embeddings += embeddings
+        created_documents[materialized_plan.key] = document
+        outcome = {
+            "key": materialized_plan.key,
+            "status": "created",
+            "document_id": str(document.id),
+            "title": document.title,
+            "author_id": document.author_id,
+            "source_section": document.source_section,
+            "chunk_count": len(chunks),
+            "embedding_count": embeddings,
+            "parent_key": materialized_plan.parent_key,
+            "quality": {
+                "reasons": validation.reasons,
+                **validation.metrics,
+            },
+        }
+        created_outcomes[materialized_plan.key] = outcome
+        outcomes.append(outcome)
 
     if created_documents:
         _link_parent_documents(db, created_documents, created_outcomes)
@@ -464,6 +539,9 @@ def _persist_logical_documents(
         "documents_created": len(created_documents),
         "documents_rejected": len([outcome for outcome in outcomes if outcome["status"] != "created"]),
         "documents": outcomes,
+        "validation_artifacts": validation_artifacts,
+        "accepted_count": len(prepared_documents),
+        "rejected_count": len([artifact for artifact in validation_artifacts if artifact["status"] != "accepted"]),
         "model": embedding_model_name(),
     }
     if effective_options and not effective_options.is_empty():
@@ -564,11 +642,12 @@ def run_url_ingestion(
         log.info("Parsing %s (%s)", source.url, source.source_type)
         parsed: ParseResult = parse(fetch.raw_bytes, source.source_type)
         _ensure_clean_text(parsed, source.source_type)
+        structured = _prepare_parse_result(source, parsed)
 
         success, stats, error, failure_category = _persist_logical_documents(
             db,
             source,
-            parsed,
+            structured,
             selective_options=selective_options,
         )
 
@@ -662,6 +741,36 @@ def bulk_ingest_author(
     return jobs
 
 
+def preview_url_ingestion(
+    source: RagSource,
+    db: Session,
+    *,
+    selective_options: Optional["SelectiveIngestionOptions"] = None,
+) -> dict[str, Any]:
+    if not source.url:
+        raise RuntimeError("Source has no URL")
+
+    fetch: FetchResult = fetch_url(source.url)
+    effective_source_type = detect_source_type(fetch.content_type, source.url)
+    parsed: ParseResult = parse(fetch.raw_bytes, effective_source_type)
+    _ensure_clean_text(parsed, effective_source_type)
+    structured = _prepare_parse_result(source, parsed)
+    plan, validation_artifacts, prepared_documents, _, _ = _preview_logical_documents(
+        source,
+        db,
+        structured,
+        selective_options=selective_options,
+    )
+    return {
+        "source_type": effective_source_type,
+        "ingestion_mode": plan.mode,
+        "source_char_count": len(structured.clean_text),
+        "accepted_count": len(prepared_documents),
+        "rejected_count": len([artifact for artifact in validation_artifacts if artifact["status"] != "accepted"]),
+        "documents": validation_artifacts,
+    }
+
+
 def run_manual_ingestion(
     source: RagSource,
     text: str,
@@ -685,11 +794,12 @@ def run_manual_ingestion(
 
         parsed = parse(text.encode("utf-8"), source.source_type)
         _ensure_clean_text(parsed, source.source_type)
+        structured = _prepare_parse_result(source, parsed)
 
         success, stats, error, failure_category = _persist_logical_documents(
             db,
             source,
-            parsed,
+            structured,
             title=title,
             published_at=published_at,
         )
