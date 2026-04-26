@@ -5,6 +5,7 @@
 - Make the corpus usable as a reading surface, not just a retrieval backend.
 - Let users inspect canonical works, metadata, source provenance, and logical-document boundaries without dealing with one giant blob of text.
 
+
 ## Architecture Decisions
 - Decision 1: Build an author-centric corpus reader that lists logical documents for a chosen author with metadata and readable content.
 - Decision 2: Use the richer logical-document model from issue 152 when available, but degrade gracefully for existing pre-fanout documents.
@@ -13,10 +14,16 @@
 - Decision 5: Preserve provenance by surfacing source URL, source type, publisher/venue metadata, date/year, collection, canonical status, and related context.
 - Decision 6: Parent-child linkage should be used when available so companion/editorial documents can be navigated from the main work.
 - Decision 7: The UI should live in a user-facing Intelligence area and use end-user language, not backend jargon.
+- Decision 8: The reader should support generic hierarchical grouping so future authors can be browsed by collection, corpus section, work class, year, or similar metadata-derived groupings instead of a single flat list.
+- Decision 9: Grouping behavior must be metadata-driven and generic. It must not hardcode special-case UI logic for only the currently ingested authors.
 
 ## Acceptance Criteria
 - [ ] There is a user-facing UI where a user can choose an author and browse that author’s ingested corpus.
 - [ ] The UI lists logical documents rather than rendering one giant source blob by default.
+- [ ] The UI supports generic grouping/segregation of documents using available metadata rather than only a flat per-author list.
+- [ ] The reader can organize an author corpus into higher-level sections such as collections, corpus sections, work classes, or similar metadata-derived groupings when those fields are present.
+- [ ] The reader supports secondary grouping such as by year/date when that grouping makes sense for a section or collection.
+- [ ] Grouping behavior works for current authors and future authors without requiring author-specific code paths.
 - [ ] Each listed document shows key metadata when available, including:
 - [ ] title
 - [ ] author
