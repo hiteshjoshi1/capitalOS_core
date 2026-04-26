@@ -5,25 +5,44 @@
 - Make the corpus usable as a reading surface, not just a retrieval backend.
 - Let users inspect canonical works, metadata, source provenance, and logical-document boundaries without dealing with one giant blob of text.
 
-
 ## Architecture Decisions
 - Decision 1: Build an author-centric corpus reader that lists logical documents for a chosen author with metadata and readable content.
 - Decision 2: Use the richer logical-document model from issue 152 when available, but degrade gracefully for existing pre-fanout documents.
 - Decision 3: Treat this as a read/view surface, not an editing workflow; ingestion authoring remains in the ingestion area.
-- Decision 4: The reader should prefer logical-document boundaries and metadata over raw-source blobs.
+- Decision 4: The reader must be document-first. It should prefer `rag_documents` and logical-document boundaries over raw-source blobs or source-level fallback rendering.
 - Decision 5: Preserve provenance by surfacing source URL, source type, publisher/venue metadata, date/year, collection, canonical status, and related context.
 - Decision 6: Parent-child linkage should be used when available so companion/editorial documents can be navigated from the main work.
 - Decision 7: The UI should live in a user-facing Intelligence area and use end-user language, not backend jargon.
 - Decision 8: The reader should support generic hierarchical grouping so future authors can be browsed by collection, corpus section, work class, year, or similar metadata-derived groupings instead of a single flat list.
 - Decision 9: Grouping behavior must be metadata-driven and generic. It must not hardcode special-case UI logic for only the currently ingested authors.
+- Decision 10: The first screen should be an author gallery using cards with author photo, name, short biography/about text, and a link into that author’s corpus.
+- Decision 11: The second screen should be an author detail/library page with grouped child links rather than a flat metadata table.
+- Decision 12: The third screen should be a dedicated reading view for one logical document with a large reading surface, a metadata header, provenance link(s), and a fullscreen option.
+- Decision 13: Generic grouping should support patterns like:
+- Decision 13a: letters grouped by year
+- Decision 13b: talks/speeches grouped by work
+- Decision 13c: meeting notes grouped into their own section and then by year
+- Decision 13d: interviews/conversations grouped as their own section
+- Decision 14: Corpus remediation is out of scope for this issue. If an author is still represented by a bad omnibus or other poor ingestion shape, the library should display the best available document structure honestly while remediation happens in a separate ingestion issue.
 
 ## Acceptance Criteria
-- [ ] There is a user-facing UI where a user can choose an author and browse that author’s ingested corpus.
+- [ ] There is a user-facing author gallery UI where a user can see available authors as cards and choose an author to browse.
+- [ ] Each author card shows, when available:
+- [ ] author photo
+- [ ] author name
+- [ ] short biography/about text
+- [ ] link into the author’s corpus
 - [ ] The UI lists logical documents rather than rendering one giant source blob by default.
 - [ ] The UI supports generic grouping/segregation of documents using available metadata rather than only a flat per-author list.
 - [ ] The reader can organize an author corpus into higher-level sections such as collections, corpus sections, work classes, or similar metadata-derived groupings when those fields are present.
 - [ ] The reader supports secondary grouping such as by year/date when that grouping makes sense for a section or collection.
 - [ ] Grouping behavior works for current authors and future authors without requiring author-specific code paths.
+- [ ] The author detail page exposes grouped child links rather than forcing users through a flat table-like browsing experience.
+- [ ] Grouping supports library shapes such as:
+- [ ] letters segregated by year
+- [ ] talks/speeches segregated as individual works
+- [ ] meeting notes segregated into their own section and then by year
+- [ ] interviews/conversations segregated into their own section
 - [ ] Each listed document shows key metadata when available, including:
 - [ ] title
 - [ ] author
@@ -36,12 +55,15 @@
 - [ ] work type
 - [ ] The UI allows the user to open and read an individual logical document cleanly.
 - [ ] The reading view uses stored logical-document text, not the full raw source blob by default.
+- [ ] The reading view occupies most of the page except the main application navigation and supports a fullscreen reading mode.
+- [ ] The reading view presents metadata and provenance in a reader-friendly header rather than burying them in a raw JSON-style layout.
 - [ ] Parent-child related documents can be surfaced or linked when available.
 - [ ] The UI supports mixed-author corpora correctly; author overrides from fanout documents appear under the correct author.
 - [ ] Existing non-fanout documents still appear in the library in a reasonable fallback form.
+- [ ] Existing poor-ingestion corpora do not force raw source blobs when better logical documents exist; document-first rendering is used wherever document rows are available.
 - [ ] The backend exposes any additional read APIs needed to support the reader/library.
 - [ ] The reader is compatible with current metadata and with future richer corpus metadata.
-- [ ] Tests cover author listing, document listing, metadata rendering, document reading, and parent-child navigation/fallback behavior.
+- [ ] Tests cover author gallery rendering, document grouping, metadata rendering, document reading, fullscreen mode, and parent-child navigation/fallback behavior.
 - [ ] The feature is verifiable via Makefile commands and curl-verifiable APIs.
 
 ## Human Approval Gate
