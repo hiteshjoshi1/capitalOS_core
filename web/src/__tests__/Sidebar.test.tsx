@@ -123,7 +123,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Companies" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Alerts" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "AI Sage" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Author Ingestion" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Author Library" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "AI Guru" })).not.toBeInTheDocument();
   });
 
@@ -140,6 +140,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Crypto Wallets" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ingest" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Market Data" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Author Sources" })).toBeInTheDocument();
   });
 
   it("non-active sections start collapsed on /holdings route", () => {

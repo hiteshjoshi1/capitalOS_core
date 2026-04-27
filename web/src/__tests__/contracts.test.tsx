@@ -201,6 +201,7 @@ describe("frontend contracts", () => {
     expect(screen.getByRole("link", { name: "Crypto Wallets" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ingest" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Market Data" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Author Sources" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Toggle theme" })).toBeInTheDocument();
   });
 

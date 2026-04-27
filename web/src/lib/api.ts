@@ -967,6 +967,110 @@ export type RagIngestionActivity = {
   events: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>[];
 };
 
+export type RagLibraryAuthor = {
+  id: string;
+  name: string;
+  document_count: number;
+  source_count: number;
+  collections: string[];
+  work_types: string[];
+  latest_document_at: string | null;
+  photo_url: string | null;
+  about_text: string | null;
+};
+
+export type RagLibraryDocumentSummary = {
+  id: string;
+  source_id: string;
+  title: string;
+  author_id: string | null;
+  author_name: string | null;
+  published_at: string | null;
+  publication_year: number | null;
+  publication_label: string | null;
+  venue: string | null;
+  collection: string | null;
+  canonical_work_id: string | null;
+  canonical_status: string | null;
+  source_type: string;
+  source_url: string | null;
+  work_type: string | null;
+  source_section: string | null;
+  metadata: Record<string, unknown>;
+  char_count: number;
+  parent_document_id: string | null;
+  parent_title: string | null;
+  child_count: number;
+};
+
+export type RagLibrarySecondaryGroup = {
+  field: string;
+  label: string;
+  value: string;
+  document_count: number;
+  documents: RagLibraryDocumentSummary[];
+};
+
+export type RagLibraryGroup = {
+  field: string;
+  label: string;
+  value: string;
+  document_count: number;
+  documents: RagLibraryDocumentSummary[];
+  secondary_field: string | null;
+  secondary_groups: RagLibrarySecondaryGroup[];
+};
+
+export type RagAuthorLibrary = {
+  author: RagLibraryAuthor;
+  grouping: {
+    primary_field: string | null;
+    secondary_field: string | null;
+    available_fields: string[];
+  };
+  groups: RagLibraryGroup[];
+  documents: RagLibraryDocumentSummary[];
+};
+
+export type RagLibraryRelatedDocument = {
+  id: string;
+  title: string;
+  author_id: string | null;
+  author_name: string | null;
+  publication_label: string | null;
+  work_type: string | null;
+  source_url: string | null;
+  relationship: string;
+};
+
+export type RagLibraryDocumentDetail = {
+  id: string;
+  source_id: string;
+  title: string;
+  author_id: string | null;
+  author_name: string | null;
+  published_at: string | null;
+  publication_year: number | null;
+  publication_label: string | null;
+  venue: string | null;
+  collection: string | null;
+  canonical_work_id: string | null;
+  canonical_status: string | null;
+  source_type: string;
+  source_url: string | null;
+  work_type: string | null;
+  source_section: string | null;
+  metadata: Record<string, unknown>;
+  clean_text: string;
+  char_count: number;
+  parent_document: RagLibraryRelatedDocument | null;
+  child_documents: RagLibraryRelatedDocument[];
+  source_author_id: string | null;
+  source_author_name: string | null;
+  source_status: string;
+  created_at: string | null;
+};
+
 export type RagSelectedAuthor = {
   author_id: string;
   name: string;
@@ -1317,6 +1421,11 @@ export const api = {
     qs.set("limit", String(limit));
     return req<RagIngestionActivity>(`/rag/ingest/activity?${qs.toString()}`);
   },
+  ragLibraryAuthors: () => req<RagLibraryAuthor[]>("/rag/library/authors"),
+  ragAuthorLibrary: (authorId: string) =>
+    req<RagAuthorLibrary>(`/rag/library/authors/${encodeURIComponent(authorId)}`),
+  ragLibraryDocument: (documentId: string) =>
+    req<RagLibraryDocumentDetail>(`/rag/library/documents/${encodeURIComponent(documentId)}`),
   ragRetryIngestion: (sourceId: string) =>
     req<RagIngestionJobRecord>(`/rag/ingest/retry/${encodeURIComponent(sourceId)}`, { method: "POST" }),
 };
