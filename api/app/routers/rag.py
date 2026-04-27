@@ -361,6 +361,8 @@ class LibraryAuthorOut(BaseModel):
     collections: list[str]
     work_types: list[str]
     latest_document_at: Optional[str]
+    photo_url: Optional[str] = None
+    about_text: Optional[str] = None
 
 
 class LibraryDocumentSummaryOut(BaseModel):
@@ -649,6 +651,14 @@ def _effective_author_name(doc: RagDocument) -> Optional[str]:
     return None
 
 
+def _effective_author_model(doc: RagDocument) -> Optional[RagAuthor]:
+    if doc.author is not None:
+        return doc.author
+    if doc.source and doc.source.author is not None:
+        return doc.source.author
+    return None
+
+
 def _publication_label(doc: RagDocument) -> Optional[str]:
     if doc.published_at:
         return doc.published_at.isoformat()
@@ -676,6 +686,69 @@ def _metadata_scalar(value: Any) -> Optional[str]:
         trimmed = value.strip()
         return trimmed or None
     return None
+
+
+def _author_library_config() -> dict[str, dict[str, Any]]:
+    try:
+        config_data = load_author_config()
+    except FileNotFoundError:
+        return {}
+    return {
+        entry["id"]: entry
+        for entry in config_data.get("authors", [])
+        if isinstance(entry, dict) and entry.get("id")
+    }
+
+
+def _format_author_label(value: str) -> str:
+    return value.replace("_", " ").strip()
+
+
+def _author_photo_url(config_entry: Optional[dict[str, Any]]) -> Optional[str]:
+    if not config_entry:
+        return None
+    return _metadata_scalar(
+        config_entry.get("photo_url")
+        or config_entry.get("photo")
+        or config_entry.get("image_url")
+        or config_entry.get("avatar_url")
+    )
+
+
+def _author_about_text(author: Optional[RagAuthor], config_entry: Optional[dict[str, Any]]) -> Optional[str]:
+    if config_entry:
+        explicit_about = _metadata_scalar(
+            config_entry.get("about")
+            or config_entry.get("about_text")
+            or config_entry.get("bio")
+            or config_entry.get("biography")
+            or config_entry.get("summary")
+        )
+        if explicit_about:
+            return explicit_about
+
+    if author is None:
+        return None
+
+    parts: list[str] = []
+    if author.role_type:
+        parts.append(_format_author_label(author.role_type))
+
+    domains = [_format_author_label(domain) for domain in (author.domains or [])[:2] if domain]
+    expertise = [_format_author_label(tag) for tag in (author.expertise_tags or [])[:3] if tag]
+
+    description = ""
+    if parts and domains:
+        description = f"{parts[0].capitalize()} focused on {', '.join(domains)}."
+    elif parts:
+        description = f"{parts[0].capitalize()}."
+    elif domains:
+        description = f"Focus areas: {', '.join(domains)}."
+
+    if expertise:
+        expertise_text = f"Themes: {', '.join(expertise)}."
+        return " ".join(part for part in [description, expertise_text] if part).strip()
+    return description or None
 
 
 def _group_candidate_values(doc: RagDocument) -> dict[str, str]:
@@ -862,11 +935,13 @@ def list_library_authors(
     current_user: CurrentUser = Depends(require_current_user),
 ):
     documents = _library_documents_query(db, current_user).all()
+    author_config = _author_library_config()
     by_author: dict[str, dict[str, Any]] = {}
     for doc in documents:
         author_id = _effective_author_id(doc)
         if not author_id:
             continue
+        author = _effective_author_model(doc)
         entry = by_author.setdefault(
             author_id,
             {
@@ -877,6 +952,7 @@ def list_library_authors(
                 "collections": set(),
                 "work_types": set(),
                 "latest_document_at": None,
+                "author": author,
             },
         )
         entry["document_count"] += 1
@@ -899,6 +975,8 @@ def list_library_authors(
             collections=sorted(entry["collections"]),
             work_types=sorted(entry["work_types"]),
             latest_document_at=entry["latest_document_at"].isoformat() if entry["latest_document_at"] else None,
+            photo_url=_author_photo_url(author_config.get(entry["id"])),
+            about_text=_author_about_text(entry["author"], author_config.get(entry["id"])),
         )
         for entry in sorted(by_author.values(), key=lambda item: item["name"].lower())
     ]
@@ -910,6 +988,7 @@ def get_author_library(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
+    author_config = _author_library_config()
     documents = (
         _library_documents_query(db, current_user)
         .filter(func.coalesce(RagDocument.author_id, RagSource.author_id) == author_id)
@@ -924,6 +1003,7 @@ def get_author_library(
         (doc.created_at for doc in ordered_documents if doc.created_at is not None),
         default=None,
     )
+    author = _effective_author_model(ordered_documents[0])
     return AuthorLibraryOut(
         author=LibraryAuthorOut(
             id=author_id,
@@ -933,6 +1013,8 @@ def get_author_library(
             collections=sorted({doc.collection for doc in ordered_documents if doc.collection}),
             work_types=sorted({doc.work_type for doc in ordered_documents if doc.work_type}),
             latest_document_at=latest_document_at.isoformat() if latest_document_at else None,
+            photo_url=_author_photo_url(author_config.get(author_id)),
+            about_text=_author_about_text(author, author_config.get(author_id)),
         ),
         grouping=grouping,
         groups=groups,

@@ -66,6 +66,8 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/alerts" element={<Alerts />} />
                       <Route path="/ai-sage" element={<AISage />} />
                       <Route path="/author-library" element={<AuthorLibrary />} />
+                      <Route path="/author-library/:authorId" element={<AuthorLibrary />} />
+                      <Route path="/author-library/:authorId/documents/:documentId" element={<AuthorLibrary />} />
                       <Route path="/author-ingestion" element={<AuthorIngestion />} />
                       <Route path="/ingest" element={<Ingest />} />
                       <Route path="/market-data" element={<MarketData />} />

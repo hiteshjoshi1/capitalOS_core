@@ -1,11 +1,11 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import AuthorLibrary from "../routes/AuthorLibrary";
 import { api } from "../lib/api";
-import type { RagAuthorLibrary, RagLibraryDocumentDetail } from "../lib/api";
+import type { RagAuthorLibrary, RagLibraryAuthor, RagLibraryDocumentDetail } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -15,7 +15,7 @@ vi.mock("../lib/api", () => ({
   },
 }));
 
-const AUTHORS = [
+const AUTHORS: RagLibraryAuthor[] = [
   {
     id: "warren_buffett",
     name: "Warren Buffett",
@@ -24,6 +24,8 @@ const AUTHORS = [
     collections: ["Letters", "Essays"],
     work_types: ["essay", "letter"],
     latest_document_at: "2024-01-01T00:00:00Z",
+    photo_url: "https://example.com/buffett.jpg",
+    about_text: "Builder of Berkshire Hathaway and steward of a long-running corpus of letters and essays.",
   },
 ];
 
@@ -141,77 +143,7 @@ const LIBRARY: RagAuthorLibrary = {
       secondary_groups: [],
     },
   ],
-  documents: [
-    {
-      id: "doc-1987",
-      source_id: "src-letters",
-      title: "1987 Shareholder Letter",
-      author_id: "warren_buffett",
-      author_name: "Warren Buffett",
-      published_at: null,
-      publication_year: 1987,
-      publication_label: "1987",
-      venue: "Annual Meeting",
-      collection: "Letters",
-      canonical_work_id: "letter-1987",
-      canonical_status: "canonical",
-      source_type: "html",
-      source_url: "https://example.com/1987-letter",
-      work_type: "letter",
-      source_section: "1987 Letter",
-      metadata: { corpus_section: "Letters" },
-      char_count: 420,
-      parent_document_id: null,
-      parent_title: null,
-      child_count: 1,
-    },
-    {
-      id: "doc-1988",
-      source_id: "src-letters",
-      title: "1988 Shareholder Letter",
-      author_id: "warren_buffett",
-      author_name: "Warren Buffett",
-      published_at: null,
-      publication_year: 1988,
-      publication_label: "1988",
-      venue: "Annual Meeting",
-      collection: "Letters",
-      canonical_work_id: "letter-1988",
-      canonical_status: "canonical",
-      source_type: "html",
-      source_url: "https://example.com/1988-letter",
-      work_type: "letter",
-      source_section: "1988 Letter",
-      metadata: { corpus_section: "Letters" },
-      char_count: 430,
-      parent_document_id: null,
-      parent_title: null,
-      child_count: 0,
-    },
-    {
-      id: "doc-essay",
-      source_id: "src-essay",
-      title: "Owner Earnings",
-      author_id: "warren_buffett",
-      author_name: "Warren Buffett",
-      published_at: null,
-      publication_year: 1986,
-      publication_label: "1986",
-      venue: null,
-      collection: "Essays",
-      canonical_work_id: null,
-      canonical_status: "canonical",
-      source_type: "pdf",
-      source_url: "https://example.com/owner-earnings.pdf",
-      work_type: "essay",
-      source_section: "Owner Earnings",
-      metadata: {},
-      char_count: 315,
-      parent_document_id: null,
-      parent_title: null,
-      child_count: 0,
-    },
-  ],
+  documents: [],
 };
 
 const DOCUMENTS: Record<string, RagLibraryDocumentDetail> = {
@@ -291,11 +223,13 @@ const DOCUMENTS: Record<string, RagLibraryDocumentDetail> = {
   },
 };
 
-function renderAuthorLibrary() {
+function renderAuthorLibrary(initialEntry: string) {
   return render(
-    <MemoryRouter initialEntries={["/author-library"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/author-library" element={<AuthorLibrary />} />
+        <Route path="/author-library/:authorId" element={<AuthorLibrary />} />
+        <Route path="/author-library/:authorId/documents/:documentId" element={<AuthorLibrary />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -303,40 +237,74 @@ function renderAuthorLibrary() {
 
 describe("AuthorLibrary", () => {
   beforeEach(() => {
+    let fullscreenElement: Element | null = null;
+
     vi.clearAllMocks();
     vi.mocked(api.ragLibraryAuthors).mockResolvedValue(AUTHORS);
     vi.mocked(api.ragAuthorLibrary).mockResolvedValue(LIBRARY);
     vi.mocked(api.ragLibraryDocument).mockImplementation(async (documentId) => DOCUMENTS[documentId]);
+
+    Object.defineProperty(document, "fullscreenElement", {
+      configurable: true,
+      get: () => fullscreenElement,
+    });
+    Object.defineProperty(document, "exitFullscreen", {
+      configurable: true,
+      value: vi.fn(async () => {
+        fullscreenElement = null;
+        document.dispatchEvent(new Event("fullscreenchange"));
+      }),
+    });
+    Object.defineProperty(HTMLDivElement.prototype, "requestFullscreen", {
+      configurable: true,
+      value: vi.fn(async () => {
+        fullscreenElement = document.querySelector(".authorLibraryReaderSurface");
+        document.dispatchEvent(new Event("fullscreenchange"));
+      }),
+    });
   });
 
-  it("loads the author library and renders grouped logical documents with metadata", async () => {
-    renderAuthorLibrary();
+  it("renders an author gallery with metadata-rich cards", async () => {
+    renderAuthorLibrary("/author-library");
 
     expect(await screen.findByRole("heading", { name: "Author Library" })).toBeInTheDocument();
+    expect(api.ragLibraryAuthors).toHaveBeenCalled();
+    expect(await screen.findByRole("img", { name: "Photo of Warren Buffett" })).toHaveAttribute(
+      "src",
+      "https://example.com/buffett.jpg",
+    );
+    expect(screen.getByText(/Berkshire Hathaway/i)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Browse Warren Buffett's library" })).toHaveAttribute(
+      "href",
+      "/author-library/warren_buffett",
+    );
+  });
+
+  it("renders grouped child links and document metadata on the author detail page", async () => {
+    renderAuthorLibrary("/author-library/warren_buffett");
+
+    expect((await screen.findAllByRole("heading", { name: "Warren Buffett" })).length).toBeGreaterThan(0);
     await waitFor(() => {
-      expect(api.ragLibraryAuthors).toHaveBeenCalled();
       expect(api.ragAuthorLibrary).toHaveBeenCalledWith("warren_buffett");
     });
 
     expect(await screen.findByRole("heading", { name: "Letters" })).toBeInTheDocument();
-    expect(screen.getAllByText("1987 Shareholder Letter").length).toBeGreaterThan(0);
+    expect(screen.getByText("Publication Year: 1987")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /1987 Shareholder Letter/i })).toHaveAttribute(
+      "href",
+      "/author-library/warren_buffett/documents/doc-1987",
+    );
+    expect(screen.getByRole("link", { name: /Owner Earnings/i })).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "Primary grouping: Collection")).toBeInTheDocument();
     expect(
-      screen.getAllByText((_, element) => element?.textContent === "Author: Warren Buffett").length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText((_, element) => element?.textContent === "Source type: html").length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText((_, element) => element?.textContent === "Source: https://example.com/1987-letter").length,
-    ).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText((_, element) => element?.textContent === "Grouped by: Collection").length,
-    ).toBeGreaterThan(0);
+      screen.getByText((_, element) => element?.textContent === "Source: https://example.com/owner-earnings.pdf"),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("author-library-reader-text")).not.toBeInTheDocument();
   });
 
-  it("opens the logical-document reader and follows related document links", async () => {
+  it("opens the reader, supports fullscreen mode, and follows related document links", async () => {
     const user = userEvent.setup();
-    renderAuthorLibrary();
+    renderAuthorLibrary("/author-library/warren_buffett/documents/doc-1987");
 
     expect(await screen.findByTestId("author-library-reader-text")).toHaveTextContent(
       "Stored logical document text for the 1987 shareholder letter.",
@@ -346,15 +314,20 @@ describe("AuthorLibrary", () => {
       "https://example.com/1987-letter",
     );
 
-    await user.click(screen.getByRole("button", { name: /1987 Shareholder Letter Notes/i }));
+    await user.click(screen.getByRole("button", { name: "Fullscreen" }));
+    expect(HTMLDivElement.prototype.requestFullscreen).toHaveBeenCalled();
 
+    await user.click(screen.getByRole("link", { name: /1987 Shareholder Letter Notes/i }));
     await waitFor(() => {
       expect(api.ragLibraryDocument).toHaveBeenCalledWith("doc-1987-notes");
     });
+
     expect(await screen.findByTestId("author-library-reader-text")).toHaveTextContent(
       "Editorial notes linked from the main logical document.",
     );
-    expect(screen.getByText(/Parent document/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: /1987 Shareholder Letter/i }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Parent document")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Exit fullscreen" }));
+    expect(document.exitFullscreen).toHaveBeenCalled();
   });
 });

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from unittest.mock import patch
 
 os.environ.setdefault("RAG_EMBEDDING_MOCK", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
@@ -14,8 +15,23 @@ def _uid(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:8]}"
 
 
-def _add_author(db, author_id: str, name: str) -> RagAuthor:
-    author = RagAuthor(id=author_id, name=name, enabled=True)
+def _add_author(
+    db,
+    author_id: str,
+    name: str,
+    *,
+    role_type: str | None = None,
+    domains: list[str] | None = None,
+    expertise_tags: list[str] | None = None,
+) -> RagAuthor:
+    author = RagAuthor(
+        id=author_id,
+        name=name,
+        enabled=True,
+        role_type=role_type,
+        domains=domains or [],
+        expertise_tags=expertise_tags or [],
+    )
     db.add(author)
     db.flush()
     return author
@@ -79,8 +95,22 @@ def test_library_lists_effective_authors_grouped_documents_and_fallbacks(client)
     munger_id = ""
     try:
         editor = _add_author(db, _uid("editor"), "Collected Works Editor")
-        buffett = _add_author(db, _uid("buffett"), "Warren Buffett")
-        munger = _add_author(db, _uid("munger"), "Charlie Munger")
+        buffett = _add_author(
+            db,
+            _uid("buffett"),
+            "Warren Buffett",
+            role_type="investor",
+            domains=["investing", "business"],
+            expertise_tags=["moat", "capital_allocation"],
+        )
+        munger = _add_author(
+            db,
+            _uid("munger"),
+            "Charlie Munger",
+            role_type="investor",
+            domains=["investing", "psychology"],
+            expertise_tags=["mental_models"],
+        )
         editor_id = editor.id
         buffett_id = buffett.id
         munger_id = munger.id
@@ -155,7 +185,18 @@ def test_library_lists_effective_authors_grouped_documents_and_fallbacks(client)
     finally:
         db.close()
 
-    authors_response = client.get("/rag/library/authors")
+    config_payload = {
+        "authors": [
+            {
+                "id": buffett_id,
+                "name": "Warren Buffett",
+                "photo_url": "https://example.com/buffett.jpg",
+                "about": "Builder of Berkshire Hathaway and steward of the shareholder letters.",
+            }
+        ]
+    }
+    with patch("app.routers.rag.load_author_config", return_value=config_payload):
+        authors_response = client.get("/rag/library/authors")
     assert authors_response.status_code == 200, authors_response.text
     authors = {author["id"]: author for author in authors_response.json()}
 
@@ -164,12 +205,22 @@ def test_library_lists_effective_authors_grouped_documents_and_fallbacks(client)
     assert editor_id not in authors
     assert authors[buffett_id]["document_count"] == 3
     assert authors[buffett_id]["source_count"] == 2
+    assert authors[buffett_id]["photo_url"] == "https://example.com/buffett.jpg"
+    assert authors[buffett_id]["about_text"] == (
+        "Builder of Berkshire Hathaway and steward of the shareholder letters."
+    )
+    assert authors[munger_id]["about_text"] == "Investor focused on investing, psychology. Themes: mental models."
 
-    library_response = client.get(f"/rag/library/authors/{buffett_id}")
+    with patch("app.routers.rag.load_author_config", return_value=config_payload):
+        library_response = client.get(f"/rag/library/authors/{buffett_id}")
     assert library_response.status_code == 200, library_response.text
     library = library_response.json()
 
     assert library["author"]["name"] == "Warren Buffett"
+    assert library["author"]["photo_url"] == "https://example.com/buffett.jpg"
+    assert library["author"]["about_text"] == (
+        "Builder of Berkshire Hathaway and steward of the shareholder letters."
+    )
     assert library["grouping"]["primary_field"] == "collection"
     assert "collection" in library["grouping"]["available_fields"]
 

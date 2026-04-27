@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 
 import PageShell from "../components/PageShell";
 import "../App.css";
@@ -11,6 +12,19 @@ import {
   type RagLibraryRelatedDocument,
 } from "../lib/api";
 
+type RouteParams = {
+  authorId?: string;
+  documentId?: string;
+};
+
+function authorRoute(authorId: string): string {
+  return `/author-library/${encodeURIComponent(authorId)}`;
+}
+
+function documentRoute(authorId: string, documentId: string): string {
+  return `${authorRoute(authorId)}/documents/${encodeURIComponent(documentId)}`;
+}
+
 function prettyFieldName(field: string | null | undefined): string {
   if (!field) return "Documents";
   return field
@@ -22,11 +36,19 @@ function prettyFieldName(field: string | null | undefined): string {
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "—";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
+  const timestamp = Date.parse(value);
+  if (Number.isNaN(timestamp)) return value;
+  return new Date(timestamp).toLocaleString();
+}
+
+function authorInitials(name: string): string {
+  const initials = name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+  return initials || "?";
 }
 
 function documentMetaEntries(document: RagLibraryDocumentSummary | RagLibraryDocumentDetail): Array<[string, string]> {
@@ -42,71 +64,85 @@ function documentMetaEntries(document: RagLibraryDocumentSummary | RagLibraryDoc
   return entries.filter(([, value]) => Boolean(value)) as Array<[string, string]>;
 }
 
-function renderRelatedDocuments(
-  label: string,
-  documents: RagLibraryRelatedDocument[],
-  onOpenDocument: (documentId: string) => void,
-) {
-  if (!documents.length) return null;
+function AuthorPortrait({
+  author,
+  className = "",
+}: {
+  author: Pick<RagLibraryAuthor, "name" | "photo_url">;
+  className?: string;
+}) {
+  if (author.photo_url) {
+    return <img className={`authorLibraryPortrait ${className}`.trim()} src={author.photo_url} alt={`Photo of ${author.name}`} />;
+  }
+
   return (
-    <div className="authorLibraryRelatedGroup">
-      <div className="cardTitle">{label}</div>
-      <div className="authorLibraryRelatedList">
-        {documents.map((document) => (
-          <button
-            key={document.id}
-            className="authorLibraryRelatedButton"
-            type="button"
-            onClick={() => onOpenDocument(document.id)}
-          >
-            <span className="authorLibraryRelatedTitle">{document.title}</span>
-            <span className="muted">
-              {[
-                document.author_name,
-                document.publication_label,
-                document.work_type,
-              ]
-                .filter(Boolean)
-                .join(" • ") || "Open related document"}
-            </span>
-          </button>
-        ))}
-      </div>
+    <div className={`authorLibraryPortrait authorLibraryPortraitFallback ${className}`.trim()} aria-hidden="true">
+      {authorInitials(author.name)}
     </div>
   );
 }
 
-function DocumentCard({
-  document,
-  selected,
-  onOpen,
+function MetadataChips({ entries }: { entries: Array<[string, string]> }) {
+  if (!entries.length) return null;
+  return (
+    <div className="authorLibraryMetaGrid">
+      {entries.map(([label, value]) => (
+        <span key={`${label}:${value}`} className="authorLibraryMetaChip">
+          <strong>{label}:</strong> {value}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function RelatedDocumentLinks({
+  label,
+  authorId,
+  documents,
 }: {
+  label: string;
+  authorId: string;
+  documents: RagLibraryRelatedDocument[];
+}) {
+  if (!documents.length) return null;
+  return (
+    <section className="authorLibraryRelatedGroup">
+      <div className="cardTitle">{label}</div>
+      <div className="authorLibraryRelatedList">
+        {documents.map((document) => (
+          <Link
+            key={document.id}
+            className="authorLibraryRelatedButton"
+            to={documentRoute(authorId, document.id)}
+          >
+            <span className="authorLibraryRelatedTitle">{document.title}</span>
+            <span className="muted">
+              {[document.author_name, document.publication_label, document.work_type].filter(Boolean).join(" • ") || "Open related document"}
+            </span>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function DocumentLinkCard({
+  authorId,
+  document,
+}: {
+  authorId: string;
   document: RagLibraryDocumentSummary;
-  selected: boolean;
-  onOpen: (documentId: string) => void;
 }) {
   return (
-    <button
-      type="button"
-      className={`authorLibraryDocumentCard${selected ? " authorLibraryDocumentCardActive" : ""}`}
-      onClick={() => onOpen(document.id)}
-    >
+    <Link className="authorLibraryDocumentCard authorLibraryDocumentLink" to={documentRoute(authorId, document.id)}>
       <div className="authorLibraryDocumentHeader">
         <div>
           <div className="authorLibraryDocumentTitle">{document.title}</div>
-          <div className="muted">
-            {document.author_name ?? document.author_id ?? "Unknown author"}
-          </div>
+          <div className="muted">{document.author_name ?? document.author_id ?? "Unknown author"}</div>
         </div>
         <span className="pill">{document.char_count.toLocaleString()} chars</span>
       </div>
-      <div className="authorLibraryMetaGrid">
-        {documentMetaEntries(document).map(([label, value]) => (
-          <span key={`${document.id}-${label}`} className="authorLibraryMetaChip">
-            <strong>{label}:</strong> {value}
-          </span>
-        ))}
-      </div>
+      <MetadataChips entries={documentMetaEntries(document)} />
       <div className="authorLibraryMetaGrid">
         {document.parent_title ? (
           <span className="authorLibraryMetaChip">
@@ -124,30 +160,35 @@ function DocumentCard({
           <strong>Source:</strong> {document.source_url}
         </span>
       ) : null}
-    </button>
+    </Link>
   );
 }
 
 export default function AuthorLibrary() {
+  const { authorId = "", documentId = "" } = useParams<RouteParams>();
+  const isGallery = !authorId;
+  const isReader = Boolean(authorId && documentId);
+  const readerSurfaceRef = useRef<HTMLDivElement | null>(null);
+
   const [authors, setAuthors] = useState<RagLibraryAuthor[]>([]);
-  const [authorsLoading, setAuthorsLoading] = useState(true);
-  const [libraryLoading, setLibraryLoading] = useState(false);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [selectedAuthorId, setSelectedAuthorId] = useState("");
-  const [selectedDocumentId, setSelectedDocumentId] = useState("");
+  const [authorsLoading, setAuthorsLoading] = useState(false);
   const [library, setLibrary] = useState<RagAuthorLibrary | null>(null);
+  const [libraryLoading, setLibraryLoading] = useState(false);
   const [documentDetail, setDocumentDetail] = useState<RagLibraryDocumentDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isGallery) return;
     let cancelled = false;
     const loadAuthors = async () => {
+      setAuthorsLoading(true);
       try {
-        setError(null);
         const data = await api.ragLibraryAuthors();
         if (cancelled) return;
         setAuthors(data);
-        setSelectedAuthorId((currentAuthorId) => currentAuthorId || data[0]?.id || "");
+        setError(null);
       } catch (err: unknown) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : String(err));
@@ -159,27 +200,21 @@ export default function AuthorLibrary() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isGallery]);
 
   useEffect(() => {
-    if (!selectedAuthorId) return;
+    if (!authorId) return;
     let cancelled = false;
     const loadLibrary = async () => {
       setLibraryLoading(true);
       try {
-        setError(null);
-        const data = await api.ragAuthorLibrary(selectedAuthorId);
+        const data = await api.ragAuthorLibrary(authorId);
         if (cancelled) return;
         setLibrary(data);
-        setSelectedDocumentId((previousDocumentId) =>
-          data.documents.some((document) => document.id === previousDocumentId)
-            ? previousDocumentId
-            : (data.documents[0]?.id ?? ""),
-        );
+        setError(null);
       } catch (err: unknown) {
         if (cancelled) return;
         setLibrary(null);
-        setSelectedDocumentId("");
         setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setLibraryLoading(false);
@@ -189,17 +224,18 @@ export default function AuthorLibrary() {
     return () => {
       cancelled = true;
     };
-  }, [selectedAuthorId]);
+  }, [authorId]);
 
   useEffect(() => {
-    if (!selectedDocumentId) return;
+    if (!documentId) return;
     let cancelled = false;
     const loadDocument = async () => {
       setDetailLoading(true);
       try {
+        const data = await api.ragLibraryDocument(documentId);
+        if (cancelled) return;
+        setDocumentDetail(data);
         setError(null);
-        const data = await api.ragLibraryDocument(selectedDocumentId);
-        if (!cancelled) setDocumentDetail(data);
       } catch (err: unknown) {
         if (cancelled) return;
         setDocumentDetail(null);
@@ -212,42 +248,76 @@ export default function AuthorLibrary() {
     return () => {
       cancelled = true;
     };
-  }, [selectedDocumentId]);
+  }, [documentId]);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(document.fullscreenElement === readerSurfaceRef.current);
+    };
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    if (!readerSurfaceRef.current) return;
+
+    if (document.fullscreenElement === readerSurfaceRef.current) {
+      if (document.exitFullscreen) {
+        await document.exitFullscreen();
+      }
+      setIsFullscreen(false);
+      return;
+    }
+
+    if (readerSurfaceRef.current.requestFullscreen) {
+      await readerSurfaceRef.current.requestFullscreen();
+      setIsFullscreen(true);
+      return;
+    }
+
+    setIsFullscreen((current) => !current);
+  };
 
   const groupedSections = useMemo(() => library?.groups ?? [], [library]);
+  const title = isGallery
+    ? "Author Library"
+    : isReader
+      ? (documentDetail?.title ?? "Reader")
+      : (library?.author.name ?? "Author Library");
+  const subtitle = isGallery
+    ? "Browse available authors as readable corpora, then open any logical document inside a dedicated reader."
+    : isReader
+      ? (library?.author.about_text ?? "Read one logical document with provenance, metadata, and related works.")
+      : (library?.author.about_text ?? "Browse this corpus by collection, section, work type, and date.");
 
   return (
     <PageShell
-      title="Author Library"
-      subtitle="Browse each author’s corpus as readable documents instead of one raw ingestion blob."
+      title={title}
+      subtitle={subtitle}
       headerActions={(
-        <label className="pill">
-          <span>Author</span>
-          <select
-            aria-label="Choose author corpus"
-            className="monthInput"
-            disabled={!authors.length}
-            value={selectedAuthorId}
-            onChange={(event) => setSelectedAuthorId(event.target.value)}
-          >
-            {!authors.length ? <option value="">No corpus yet</option> : null}
-            {authors.map((author) => (
-              <option key={author.id} value={author.id}>
-                {author.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <div className="authorLibraryHeaderActions">
+          {!isGallery ? <Link className="btn" to="/author-library">All authors</Link> : null}
+          {authorId && !isReader ? (
+            <span className="pill">
+              {library?.grouping.primary_field
+                ? `Grouped by ${prettyFieldName(library.grouping.primary_field)}`
+                : "Flat document list"}
+            </span>
+          ) : null}
+          {authorId && isReader ? (
+            <>
+              <Link className="btn" to={authorRoute(authorId)}>Back to library</Link>
+              <button className="btn" type="button" onClick={() => void toggleFullscreen()}>
+                {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
+              </button>
+            </>
+          ) : null}
+        </div>
       )}
     >
       <div className="dashboardWrap">
-        {authorsLoading || libraryLoading ? (
-          <div className="card">
-            <div className="cardTitle">Loading author library</div>
-            <div className="muted">Fetching corpus metadata and logical documents…</div>
-          </div>
-        ) : null}
-
         {error ? (
           <div className="card error">
             <div className="cardTitle">Unable to load author library</div>
@@ -255,171 +325,258 @@ export default function AuthorLibrary() {
           </div>
         ) : null}
 
-        {!authorsLoading && !authors.length && !error ? (
-          <div className="card">
-            <div className="cardTitle">No author corpus available yet</div>
-            <div className="muted">
-              Ingested logical documents will appear here once an author corpus has been loaded into CapitalOS.
-            </div>
-          </div>
-        ) : null}
-
-        {library ? (
+        {isGallery ? (
           <>
-            <section className="grid authorLibraryOverview">
+            {authorsLoading ? (
               <div className="card">
-                <div className="cardTitle">Corpus overview</div>
-                <h2>{library.author.name}</h2>
-                <div className="authorLibraryMetaGrid">
-                  <span className="authorLibraryMetaChip">
-                    <strong>Documents:</strong> {library.author.document_count}
-                  </span>
-                  <span className="authorLibraryMetaChip">
-                    <strong>Sources:</strong> {library.author.source_count}
-                  </span>
-                  {library.grouping.primary_field ? (
-                    <span className="authorLibraryMetaChip">
-                      <strong>Grouped by:</strong> {prettyFieldName(library.grouping.primary_field)}
-                    </span>
-                  ) : null}
-                  {library.grouping.secondary_field ? (
-                    <span className="authorLibraryMetaChip">
-                      <strong>Secondary:</strong> {prettyFieldName(library.grouping.secondary_field)}
-                    </span>
-                  ) : null}
-                </div>
-                <div className="authorLibraryMetaGrid">
-                  {library.author.collections.map((collection) => (
-                    <span key={collection} className="authorLibraryMetaChip">
-                      <strong>Collection:</strong> {collection}
-                    </span>
-                  ))}
-                  {library.author.work_types.map((workType) => (
-                    <span key={workType} className="authorLibraryMetaChip">
-                      <strong>Work type:</strong> {workType}
-                    </span>
-                  ))}
-                  <span className="authorLibraryMetaChip">
-                    <strong>Updated:</strong> {formatDateTime(library.author.latest_document_at)}
-                  </span>
+                <div className="cardTitle">Loading authors</div>
+                <div className="muted">Fetching available corpora and gallery metadata...</div>
+              </div>
+            ) : null}
+
+            {!authorsLoading && !authors.length && !error ? (
+              <div className="card">
+                <div className="cardTitle">No author corpus available yet</div>
+                <div className="muted">
+                  Ingested logical documents will appear here once an author corpus has been loaded into CapitalOS.
                 </div>
               </div>
-            </section>
+            ) : null}
 
-            <section className="grid authorLibraryLayout">
-              <div className="card authorLibraryListPanel">
-                <div className="cardTitle">Logical documents</div>
-                {groupedSections.length ? (
-                  <div className="authorLibraryGroupStack">
-                    {groupedSections.map((group) => (
-                      <section key={`${group.field}:${group.value}`} className="authorLibraryGroup">
-                        <div className="authorLibraryGroupHeader">
-                          <h3>{group.label}</h3>
-                          <span className="pill">
-                            {prettyFieldName(group.field)} • {group.document_count}
-                          </span>
-                        </div>
-                        {group.secondary_groups.length ? (
-                          <div className="authorLibrarySecondaryStack">
-                            {group.secondary_groups.map((secondaryGroup) => (
-                              <div key={`${group.value}:${secondaryGroup.value}`} className="authorLibrarySecondaryGroup">
-                                <div className="cardTitle">
-                                  {prettyFieldName(secondaryGroup.field)}: {secondaryGroup.label}
-                                </div>
-                                <div className="authorLibraryDocumentStack">
-                                  {secondaryGroup.documents.map((document) => (
-                                    <DocumentCard
-                                      key={document.id}
-                                      document={document}
-                                      selected={selectedDocumentId === document.id}
-                                      onOpen={setSelectedDocumentId}
-                                    />
-                                  ))}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : (
-                          <div className="authorLibraryDocumentStack">
-                            {group.documents.map((document) => (
-                              <DocumentCard
-                                key={document.id}
-                                document={document}
-                                selected={selectedDocumentId === document.id}
-                                onOpen={setSelectedDocumentId}
-                              />
-                            ))}
-                          </div>
-                        )}
-                      </section>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="authorLibraryDocumentStack">
-                    {library.documents.map((document) => (
-                      <DocumentCard
-                        key={document.id}
-                        document={document}
-                        selected={selectedDocumentId === document.id}
-                        onOpen={setSelectedDocumentId}
-                      />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="card authorLibraryReaderPanel">
-                <div className="cardTitle">Reader</div>
-                {detailLoading ? (
-                  <div className="muted">Loading logical document…</div>
-                ) : documentDetail ? (
-                  <div className="authorLibraryReaderContent">
-                    <div className="authorLibraryReaderHeader">
-                      <div>
-                        <h2>{documentDetail.title}</h2>
+            {authors.length ? (
+              <section className="grid authorLibraryGallery" aria-label="Author gallery">
+                {authors.map((author) => (
+                  <article key={author.id} className="card authorLibraryGalleryCard">
+                    <div className="authorLibraryGalleryHeader">
+                      <AuthorPortrait author={author} className="authorLibraryGalleryPortrait" />
+                      <div className="authorLibraryGalleryIdentity">
+                        <h2>{author.name}</h2>
                         <div className="muted">
-                          {documentDetail.author_name ?? documentDetail.author_id ?? "Unknown author"}
+                          {author.about_text ?? "Open this corpus to browse its logical documents and provenance."}
                         </div>
                       </div>
-                      <span className="pill">{documentDetail.char_count.toLocaleString()} chars</span>
                     </div>
-
                     <div className="authorLibraryMetaGrid">
-                      {documentMetaEntries(documentDetail).map(([label, value]) => (
-                        <span key={`${documentDetail.id}-${label}`} className="authorLibraryMetaChip">
-                          <strong>{label}:</strong> {value}
-                        </span>
-                      ))}
-                      {documentDetail.source_author_name ? (
+                      <span className="authorLibraryMetaChip">
+                        <strong>Documents:</strong> {author.document_count}
+                      </span>
+                      <span className="authorLibraryMetaChip">
+                        <strong>Sources:</strong> {author.source_count}
+                      </span>
+                      {author.latest_document_at ? (
                         <span className="authorLibraryMetaChip">
-                          <strong>Source provenance:</strong> {documentDetail.source_author_name}
+                          <strong>Updated:</strong> {formatDateTime(author.latest_document_at)}
                         </span>
                       ) : null}
                     </div>
+                    <div className="authorLibraryMetaGrid">
+                      {author.collections.map((collection) => (
+                        <span key={`${author.id}:${collection}`} className="authorLibraryMetaChip">
+                          <strong>Collection:</strong> {collection}
+                        </span>
+                      ))}
+                      {author.work_types.map((workType) => (
+                        <span key={`${author.id}:${workType}`} className="authorLibraryMetaChip">
+                          <strong>Work type:</strong> {workType}
+                        </span>
+                      ))}
+                    </div>
+                    <Link className="btn authorLibraryBrowseLink" to={authorRoute(author.id)}>
+                      Browse {author.name}'s library
+                    </Link>
+                  </article>
+                ))}
+              </section>
+            ) : null}
+          </>
+        ) : null}
 
-                    {documentDetail.source_url ? (
-                      <a className="authorLibrarySourceLink" href={documentDetail.source_url} rel="noreferrer" target="_blank">
-                        Open provenance link
-                      </a>
-                    ) : null}
+        {authorId && !isReader ? (
+          <>
+            {libraryLoading ? (
+              <div className="card">
+                <div className="cardTitle">Loading library</div>
+                <div className="muted">Fetching grouped logical documents for this author...</div>
+              </div>
+            ) : null}
 
-                    {renderRelatedDocuments(
-                      "Parent document",
-                      documentDetail.parent_document ? [documentDetail.parent_document] : [],
-                      setSelectedDocumentId,
-                    )}
-                    {renderRelatedDocuments("Related documents", documentDetail.child_documents, setSelectedDocumentId)}
-
-                    <div className="authorLibraryReaderText" data-testid="author-library-reader-text">
-                      {documentDetail.clean_text}
+            {library ? (
+              <>
+                <section className="grid authorLibraryOverview">
+                  <div className="card authorLibraryAuthorCard">
+                    <div className="authorLibraryGalleryHeader">
+                      <AuthorPortrait author={library.author} />
+                      <div className="authorLibraryGalleryIdentity">
+                        <h2>{library.author.name}</h2>
+                        <div className="muted">
+                          {library.author.about_text ?? "Browse grouped logical documents, provenance, and related works."}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="authorLibraryMetaGrid">
+                      <span className="authorLibraryMetaChip">
+                        <strong>Documents:</strong> {library.author.document_count}
+                      </span>
+                      <span className="authorLibraryMetaChip">
+                        <strong>Sources:</strong> {library.author.source_count}
+                      </span>
+                      {library.grouping.primary_field ? (
+                        <span className="authorLibraryMetaChip">
+                          <strong>Primary grouping:</strong> {prettyFieldName(library.grouping.primary_field)}
+                        </span>
+                      ) : null}
+                      {library.grouping.secondary_field ? (
+                        <span className="authorLibraryMetaChip">
+                          <strong>Secondary grouping:</strong> {prettyFieldName(library.grouping.secondary_field)}
+                        </span>
+                      ) : null}
+                    </div>
+                    <div className="authorLibraryMetaGrid">
+                      {library.author.collections.map((collection) => (
+                        <span key={`${library.author.id}:${collection}`} className="authorLibraryMetaChip">
+                          <strong>Collection:</strong> {collection}
+                        </span>
+                      ))}
+                      {library.author.work_types.map((workType) => (
+                        <span key={`${library.author.id}:${workType}`} className="authorLibraryMetaChip">
+                          <strong>Work type:</strong> {workType}
+                        </span>
+                      ))}
+                      {library.author.latest_document_at ? (
+                        <span className="authorLibraryMetaChip">
+                          <strong>Updated:</strong> {formatDateTime(library.author.latest_document_at)}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
-                ) : (
-                  <div className="muted">Choose a logical document to read it here.</div>
-                )}
-              </div>
-            </section>
+                </section>
+
+                <section className="grid authorLibraryLibraryPage">
+                  <div className="card authorLibraryListPanel">
+                    <div className="cardTitle">Browse logical documents</div>
+                    {groupedSections.length ? (
+                      <div className="authorLibraryGroupStack">
+                        {groupedSections.map((group) => (
+                          <section key={`${group.field}:${group.value}`} className="authorLibraryGroup">
+                            <div className="authorLibraryGroupHeader">
+                              <h3>{group.label}</h3>
+                              <span className="pill">
+                                {prettyFieldName(group.field)} • {group.document_count}
+                              </span>
+                            </div>
+                            {group.secondary_groups.length ? (
+                              <div className="authorLibrarySecondaryStack">
+                                {group.secondary_groups.map((secondaryGroup) => (
+                                  <div key={`${group.value}:${secondaryGroup.value}`} className="authorLibrarySecondaryGroup">
+                                    <div className="cardTitle">
+                                      {prettyFieldName(secondaryGroup.field)}: {secondaryGroup.label}
+                                    </div>
+                                    <div className="authorLibraryDocumentStack">
+                                      {secondaryGroup.documents.map((document) => (
+                                        <DocumentLinkCard key={document.id} authorId={authorId} document={document} />
+                                      ))}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="authorLibraryDocumentStack">
+                                {group.documents.map((document) => (
+                                  <DocumentLinkCard key={document.id} authorId={authorId} document={document} />
+                                ))}
+                              </div>
+                            )}
+                          </section>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="authorLibraryDocumentStack">
+                        {library.documents.map((document) => (
+                          <DocumentLinkCard key={document.id} authorId={authorId} document={document} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </section>
+              </>
+            ) : null}
           </>
+        ) : null}
+
+        {authorId && isReader ? (
+          <section className="grid authorLibraryReaderPage">
+            {(libraryLoading || detailLoading) ? (
+              <div className="card">
+                <div className="cardTitle">Loading reader</div>
+                <div className="muted">Fetching the logical document and its related metadata...</div>
+              </div>
+            ) : null}
+
+            {documentDetail ? (
+              <div
+                ref={readerSurfaceRef}
+                className={`card authorLibraryReaderSurface${isFullscreen ? " authorLibraryReaderSurfaceFullscreen" : ""}`}
+              >
+                <div className="authorLibraryReaderContent">
+                  <div className="authorLibraryReaderHeader">
+                    <div>
+                      <div className="authorLibraryBreadcrumbs">
+                        <Link to="/author-library">Authors</Link>
+                        <span aria-hidden="true">/</span>
+                        <Link to={authorRoute(authorId)}>{library?.author.name ?? "Library"}</Link>
+                        <span aria-hidden="true">/</span>
+                        <span>{documentDetail.title}</span>
+                      </div>
+                      <h2>{documentDetail.title}</h2>
+                      <div className="muted">
+                        {documentDetail.author_name ?? documentDetail.author_id ?? "Unknown author"}
+                      </div>
+                    </div>
+                    <span className="pill">{documentDetail.char_count.toLocaleString()} chars</span>
+                  </div>
+
+                  <MetadataChips entries={documentMetaEntries(documentDetail)} />
+
+                  <div className="authorLibraryMetaGrid">
+                    {documentDetail.source_section ? (
+                      <span className="authorLibraryMetaChip">
+                        <strong>Section:</strong> {documentDetail.source_section}
+                      </span>
+                    ) : null}
+                    {documentDetail.source_author_name ? (
+                      <span className="authorLibraryMetaChip">
+                        <strong>Source provenance:</strong> {documentDetail.source_author_name}
+                      </span>
+                    ) : null}
+                    <span className="authorLibraryMetaChip">
+                      <strong>Stored:</strong> {formatDateTime(documentDetail.created_at)}
+                    </span>
+                  </div>
+
+                  {documentDetail.source_url ? (
+                    <a className="authorLibrarySourceLink" href={documentDetail.source_url} rel="noreferrer" target="_blank">
+                      Open provenance link
+                    </a>
+                  ) : null}
+
+                  <RelatedDocumentLinks
+                    label="Parent document"
+                    authorId={authorId}
+                    documents={documentDetail.parent_document ? [documentDetail.parent_document] : []}
+                  />
+                  <RelatedDocumentLinks
+                    label="Related documents"
+                    authorId={authorId}
+                    documents={documentDetail.child_documents}
+                  />
+
+                  <div className="authorLibraryReaderText" data-testid="author-library-reader-text">
+                    {documentDetail.clean_text}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </section>
         ) : null}
       </div>
     </PageShell>

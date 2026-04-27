@@ -975,6 +975,8 @@ export type RagLibraryAuthor = {
   collections: string[];
   work_types: string[];
   latest_document_at: string | null;
+  photo_url: string | null;
+  about_text: string | null;
 };
 
 export type RagLibraryDocumentSummary = {
