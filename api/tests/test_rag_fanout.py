@@ -8,6 +8,7 @@ os.environ.setdefault("RAG_EMBEDDING_MOCK", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
 
 from app.models.rag import RagAuthor, RagDocument, RagSource
+from app.rag.ingestion.parser import StructuredParseResult
 from app.rag.ingestion.pipeline import (
     FAILURE_LOW_QUALITY_EXTRACTION,
     run_url_ingestion,
@@ -277,5 +278,210 @@ class TestRagFanoutPipeline:
             assert outcomes["brief-note"]["status"] == "created"
             assert outcomes["shell-only"]["status"] == "rejected"
             assert outcomes["shell-only"]["failure_category"] == FAILURE_LOW_QUALITY_EXTRACTION
+        finally:
+            db.close()
+
+    def test_reingesting_source_replaces_legacy_omnibus_document_set(self):
+        db = TestingSessionLocal()
+        try:
+            author = _add_author(db, _uid("sleep"), "Nick Sleep")
+            source = RagSource(
+                user_id=1,
+                author_id=author.id,
+                url="https://example.com/nomad-letters",
+                source_type="html",
+                status="pending",
+            )
+            db.add(source)
+            db.flush()
+
+            legacy_html = """
+            <html><body>
+              <h1>Full Collection of Nomad Letters</h1>
+              <p>This omnibus edition combines many years of letters into a single giant work and should be replaced on reingestion.</p>
+              <p>It also contains enough extra body text to pass validation as a single document before remediation happens.</p>
+            </body></html>
+            """
+
+            with patch("app.rag.ingestion.pipeline.fetch_url", return_value=_mock_fetch(legacy_html, sha256="legacy-blob")):
+                first_job = run_url_ingestion(source, db)
+                db.commit()
+
+            legacy_documents = db.query(RagDocument).filter(RagDocument.source_id == source.id).all()
+            assert first_job.status == "done"
+            assert len(legacy_documents) == 1
+            assert "single giant work" in (legacy_documents[0].clean_text or "")
+
+            source.ingestion_config = {
+                "mode": "fanout",
+                "documents": [
+                    {
+                        "key": "letter-2008",
+                        "title": "Nomad Letter 2008",
+                        "author_id": author.id,
+                        "published_at": "2008-06-30",
+                        "publication_year": 2008,
+                        "collection": "Nomad Letters",
+                        "canonical_work_id": "letter-2008",
+                        "canonical_status": "canonical",
+                        "source_section": "June 30th, 2008",
+                        "work_type": "letter",
+                        "selective_options": {"include_headings": ["June 30th, 2008"]},
+                    },
+                    {
+                        "key": "letter-2009",
+                        "title": "Nomad Letter 2009",
+                        "author_id": author.id,
+                        "published_at": "2009-06-30",
+                        "publication_year": 2009,
+                        "collection": "Nomad Letters",
+                        "canonical_work_id": "letter-2009",
+                        "canonical_status": "canonical",
+                        "source_section": "June 30th, 2009",
+                        "work_type": "letter",
+                        "selective_options": {"include_headings": ["June 30th, 2009"]},
+                    },
+                ],
+            }
+
+            fanout_html = """
+            <html><body>
+              <h1>June 30th, 2008</h1>
+              <p>The 2008 letter explains why scale economies shared can create a durable edge when savings are handed back to customers.</p>
+              <p>It also discusses patience, customer trust, and long holding periods with enough real body text for validation.</p>
+              <h1>June 30th, 2009</h1>
+              <p>The 2009 letter continues the same ideas with more discussion of Amazon, Costco, and long-term owner behavior.</p>
+              <p>This section is likewise substantial and should become its own logical document after reingestion.</p>
+            </body></html>
+            """
+
+            with patch("app.rag.ingestion.pipeline.fetch_url", return_value=_mock_fetch(fanout_html, sha256="letter-split")):
+                second_job = run_url_ingestion(source, db)
+                db.commit()
+
+            documents = (
+                db.query(RagDocument)
+                .filter(RagDocument.source_id == source.id)
+                .order_by(RagDocument.source_document_index.asc())
+                .all()
+            )
+
+            assert second_job.status == "done"
+            assert second_job.stats_json["ingestion_mode"] == "fanout"
+            assert second_job.stats_json["documents_created"] == 2
+            artifacts = {entry["key"]: entry for entry in second_job.stats_json["validation_artifacts"]}
+            assert artifacts["letter-2008"]["status"] == "accepted"
+            assert artifacts["letter-2008"]["author_id"] == author.id
+            assert artifacts["letter-2008"]["quality"]["body_word_count"] >= 8
+            assert artifacts["letter-2009"]["status"] == "accepted"
+            assert artifacts["letter-2009"]["quality"]["body_word_count"] >= 8
+            assert len(documents) == 2
+            assert [document.title for document in documents] == ["Nomad Letter 2008", "Nomad Letter 2009"]
+            assert all(document.author_id == author.id for document in documents)
+            assert not any("single giant work" in (document.clean_text or "") for document in documents)
+        finally:
+            db.close()
+
+    def test_fanout_can_split_flat_pdf_text_with_source_level_markers(self):
+        db = TestingSessionLocal()
+        try:
+            author = _add_author(db, _uid("nick"), "Nick Sleep")
+            source = RagSource(
+                user_id=1,
+                author_id=author.id,
+                url="https://example.com/nomad_letters.pdf",
+                source_type="pdf",
+                status="pending",
+                ingestion_config={
+                    "mode": "fanout",
+                    "split_markers": [
+                        {"marker": "18th January 2002", "heading": "18th January 2002"},
+                        {"marker": "June 30th, 2002", "heading": "June 30th, 2002"},
+                        {"marker": "Postamble", "heading": "Postamble"},
+                    ],
+                    "documents": [
+                        {
+                            "key": "nomad-letter-2002-01-18",
+                            "title": "Nomad Investment Partnership Letter — 18 January 2002",
+                            "author_id": author.id,
+                            "published_at": "2002-01-18",
+                            "publication_year": 2002,
+                            "collection": "Nomad Investment Partnership Letters",
+                            "canonical_work_id": "nomad-letter-2002-01-18",
+                            "canonical_status": "canonical",
+                            "source_section": "18th January 2002",
+                            "work_type": "letter",
+                            "selective_options": {"include_headings": ["18th January 2002"]},
+                        },
+                        {
+                            "key": "nomad-letter-2002-06-30",
+                            "title": "Nomad Investment Partnership Interim Report — June 2002",
+                            "author_id": author.id,
+                            "published_at": "2002-06-30",
+                            "publication_year": 2002,
+                            "collection": "Nomad Investment Partnership Letters",
+                            "canonical_work_id": "nomad-letter-2002-06-30",
+                            "canonical_status": "canonical",
+                            "source_section": "For the period ended June 30th, 2002",
+                            "work_type": "letter",
+                            "selective_options": {"include_headings": ["June 30th, 2002"]},
+                        },
+                    ],
+                },
+            )
+            db.add(source)
+            db.flush()
+
+            parsed = StructuredParseResult(
+                raw_text=(
+                    "Preamble\nSkip this opening material.\n\n"
+                    "18th January 2002\n"
+                    "To the Partners of the Nomad Investment Partnership.\n"
+                    "The inaugural annual letter explains the fund launch, early holdings, and long-term orientation.\n\n"
+                    "June 30th, 2002\n"
+                    "Interim Report\n"
+                    "This interim report discusses performance, Buffett partnership letters, and compressed time horizons.\n\n"
+                    "Postamble\n"
+                    "Skip this ending material.\n"
+                ),
+                clean_text=(
+                    "Preamble\nSkip this opening material.\n\n"
+                    "18th January 2002\n"
+                    "To the Partners of the Nomad Investment Partnership.\n"
+                    "The inaugural annual letter explains the fund launch, early holdings, and long-term orientation.\n\n"
+                    "June 30th, 2002\n"
+                    "Interim Report\n"
+                    "This interim report discusses performance, Buffett partnership letters, and compressed time horizons.\n\n"
+                    "Postamble\n"
+                    "Skip this ending material.\n"
+                ),
+                source_type="pdf",
+                sections=[],
+                doc_metadata={},
+            )
+
+            with patch("app.rag.ingestion.pipeline.fetch_url", return_value=MagicMock(raw_bytes=b"%PDF-1.4", sha256="nick-flat", content_type="application/pdf")):
+                with patch("app.rag.ingestion.pipeline.parse", return_value=parsed):
+                    job = run_url_ingestion(source, db)
+                    db.commit()
+
+            documents = (
+                db.query(RagDocument)
+                .filter(RagDocument.source_id == source.id)
+                .order_by(RagDocument.source_document_index.asc())
+                .all()
+            )
+
+            assert job.status == "done"
+            assert job.stats_json["ingestion_mode"] == "fanout"
+            assert job.stats_json["documents_created"] == 2
+            assert [document.title for document in documents] == [
+                "Nomad Investment Partnership Letter — 18 January 2002",
+                "Nomad Investment Partnership Interim Report — June 2002",
+            ]
+            assert "Skip this opening material" not in (documents[0].clean_text or "")
+            assert "Skip this ending material" not in (documents[1].clean_text or "")
+            assert "To the Partners of the Nomad Investment Partnership." in (documents[0].clean_text or "")
+            assert "Interim Report" in (documents[1].clean_text or "")
         finally:
             db.close()

@@ -50,6 +50,8 @@ class DiscoverySeed:
     domain_filter: Optional[str] = None
     prefer_type: Optional[str] = None  # pdf | html — prefer this type when duplicates exist
     source_type: Optional[str] = None  # for direct_source seeds
+    ingestion_config: Optional[dict] = None
+    selective_options: Optional[dict] = None
 
 
 @dataclass
@@ -263,6 +265,8 @@ def _parse_seeds_from_config(author_cfg: dict) -> list[DiscoverySeed]:
             domain_filter=entry.get("domain_filter"),
             prefer_type=entry.get("prefer_type"),
             source_type=entry.get("source_type"),
+            ingestion_config=entry.get("ingestion_config"),
+            selective_options=entry.get("selective_options"),
         )
         seeds.append(seed)
     return seeds
@@ -291,6 +295,9 @@ def _register_sources(
     existing_urls: set[str],
     db,
     user_id: int | None = None,
+    *,
+    seed_ingestion_config: Optional[dict] = None,
+    seed_selective_options: Optional[dict] = None,
 ) -> tuple[int, int]:
     """
     Insert new rag_sources rows; skip duplicates.
@@ -309,6 +316,8 @@ def _register_sources(
         ingestion_config, selective_options = apply_source_preset(
             author_id=author_id,
             url=src.url,
+            ingestion_config=seed_ingestion_config,
+            selective_options=seed_selective_options,
         )
         row = RagSource(
             user_id=user_id,
@@ -356,7 +365,15 @@ def discover_sources_for_author(
         log.info("Discovering sources for %s from seed %s", author_id, seed.url)
         discovered, errors = _process_seed(seed)
 
-        registered, skipped = _register_sources(author_id, discovered, existing_urls, db, user_id=user_id)
+        registered, skipped = _register_sources(
+            author_id,
+            discovered,
+            existing_urls,
+            db,
+            user_id=user_id,
+            seed_ingestion_config=seed.ingestion_config,
+            seed_selective_options=seed.selective_options,
+        )
         results.append(
             DiscoveryResult(
                 author_id=author_id,

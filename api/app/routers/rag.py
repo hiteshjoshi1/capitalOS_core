@@ -340,10 +340,17 @@ class SectionSplitRuleIn(BaseModel):
     markers: list[SectionSplitMarkerIn] = Field(..., min_length=1)
 
 
+class FlatTextSplitMarkerIn(BaseModel):
+    marker: str = Field(..., min_length=1)
+    heading: str = Field(..., min_length=1)
+    level: Optional[int] = Field(None, ge=1, le=6)
+
+
 class IngestionConfigIn(BaseModel):
     mode: str = Field("single_work", pattern="^(single_work|fanout)$")
     documents: list[LogicalDocumentConfigIn] = Field(default_factory=list)
     section_splits: list[SectionSplitRuleIn] = Field(default_factory=list)
+    split_markers: list[FlatTextSplitMarkerIn] = Field(default_factory=list)
 
 
 class UpdateSourceIngestionConfigIn(BaseModel):
@@ -586,6 +593,15 @@ def _ingestion_config_to_dict(ingestion_config: Optional[IngestionConfigIn]) -> 
                 ],
             }
             for split in ingestion_config.section_splits
+        ]
+    if ingestion_config.split_markers:
+        config_payload["split_markers"] = [
+            {
+                "marker": marker.marker.strip(),
+                "heading": marker.heading.strip(),
+                **({"level": marker.level} if marker.level is not None else {}),
+            }
+            for marker in ingestion_config.split_markers
         ]
     return config_payload
 

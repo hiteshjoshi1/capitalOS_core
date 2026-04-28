@@ -61,14 +61,13 @@ test("navigates to AI Sage and renders grounded query results", async ({ page })
     .press("Enter");
 
   await expect(page.getByText("What matters?")).toBeVisible();
-  await expect(page.getByText("Perspectives", { exact: true })).toBeVisible();
+  await expect(page.getByText("Review the top ranked passages below.")).toBeVisible();
+  await expect(page.getByText("Top Passages", { exact: true })).toBeVisible();
   await expect(page.getByText("Warren Buffett").first()).toBeVisible();
-  await expect(page.getByText("Focus on business quality.").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: "Show Sources (1)" })).toBeVisible();
-  await expect(page.getByText("Passage 1")).toHaveCount(0);
-
-  await page.getByRole("button", { name: "Show Sources (1)" }).click();
+  await expect(page.getByText("Critique", { exact: true })).toBeVisible();
+  await expect(page.getByText("Durability still needs to be tested against industry change.")).toBeVisible();
   await expect(page.getByText("Passage 1")).toBeVisible();
+  await expect(page.getByText("Rank score 0.91")).toBeVisible();
   await expect(
     page
       .locator("article")
