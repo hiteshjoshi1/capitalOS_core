@@ -13,13 +13,57 @@ def normalize_with_ingestion_config(
     if not ingestion_config:
         return parsed
 
+    normalized = deepcopy(parsed)
+
+    split_markers = ingestion_config.get("split_markers")
+    if not normalized.sections and isinstance(split_markers, list) and split_markers:
+        normalized.sections = synthesize_sections_from_markers(
+            normalized.clean_text or normalized.raw_text,
+            split_markers,
+        )
+
     section_splits = ingestion_config.get("section_splits")
     if not isinstance(section_splits, list) or not section_splits:
-        return parsed
+        return normalized
 
-    normalized = deepcopy(parsed)
-    normalized.sections = apply_section_splits(list(parsed.sections or []), section_splits)
+    normalized.sections = apply_section_splits(list(normalized.sections or []), section_splits)
     return normalized
+
+
+def synthesize_sections_from_markers(
+    text: str,
+    split_markers: list[dict[str, Any]],
+) -> list[DocumentSection]:
+    if not split_markers:
+        return []
+
+    positions: list[tuple[int, str, str, int]] = []
+    search_start = 0
+    for rule in split_markers:
+        marker_text = str(rule.get("marker") or "").strip()
+        heading = str(rule.get("heading") or marker_text).strip()
+        if not marker_text:
+            raise RuntimeError("split_markers entries require a non-empty marker")
+        position = text.find(marker_text, search_start)
+        if position < 0:
+            raise RuntimeError(f"split_marker='{marker_text}' did not match any text in the document.")
+        positions.append((position, marker_text, heading, int(rule.get("level") or 1)))
+        search_start = position + len(marker_text)
+
+    sections: list[DocumentSection] = []
+    for index, (position, marker_text, heading, level) in enumerate(positions):
+        next_position = positions[index + 1][0] if index + 1 < len(positions) else len(text)
+        body = text[position + len(marker_text) : next_position].strip()
+        sections.append(
+            DocumentSection(
+                heading=heading,
+                level=level,
+                content=body,
+                content_type="text",
+                table_markdown=None,
+            )
+        )
+    return sections
 
 
 def apply_section_splits(

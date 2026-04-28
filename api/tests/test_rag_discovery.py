@@ -218,6 +218,41 @@ class TestDiscoverySeedParsing:
         assert seeds[0].seed_type == "direct_source"
         assert seeds[0].source_type == "pdf"
 
+    def test_parses_direct_source_seed_with_ingestion_config(self):
+        from app.rag.discovery import _parse_seeds_from_config
+
+        author_cfg = {
+            "discovery_seeds": [
+                {
+                    "url": "https://example.com/letters.pdf",
+                    "seed_type": "direct_source",
+                    "source_type": "pdf",
+                    "ingestion_config": {
+                        "mode": "fanout",
+                        "documents": [
+                            {
+                                "key": "letter-2004",
+                                "title": "Letter 2004",
+                                "author_id": "nick_sleep",
+                                "publication_year": 2004,
+                                "collection": "Letters",
+                                "canonical_status": "canonical",
+                                "source_section": "December 31st, 2004",
+                                "work_type": "letter",
+                                "selective_options": {"include_headings": ["December 31st, 2004"]},
+                            }
+                        ],
+                    },
+                }
+            ]
+        }
+
+        seeds = _parse_seeds_from_config(author_cfg)
+        assert len(seeds) == 1
+        assert seeds[0].ingestion_config is not None
+        assert seeds[0].ingestion_config["mode"] == "fanout"
+        assert seeds[0].ingestion_config["documents"][0]["key"] == "letter-2004"
+
     def test_empty_discovery_seeds_returns_empty(self):
         from app.rag.discovery import _parse_seeds_from_config
 
@@ -675,6 +710,7 @@ class TestDiscoverSourcesForAuthor:
 
     def test_direct_source_registered_without_fetch(self, sqlite_session):
         from app.rag.discovery import discover_sources_for_author
+        from app.models.rag import RagSource
 
         Session = sqlite_session
         db = Session()
@@ -707,6 +743,74 @@ class TestDiscoverSourcesForAuthor:
             assert r.registered == 1
             assert r.skipped_duplicate == 0
             assert r.errors == []
+
+            source = db.query(RagSource).filter(RagSource.author_id == "ns_direct_test").one()
+            assert source.ingestion_config is None
+        finally:
+            db.close()
+
+    def test_direct_source_seed_registers_generic_ingestion_config(self, sqlite_session):
+        from app.rag.discovery import discover_sources_for_author
+        from app.models.rag import RagSource
+
+        Session = sqlite_session
+        db = Session()
+        try:
+            from sqlalchemy import text
+
+            db.execute(
+                text(
+                    "INSERT OR IGNORE INTO rag_authors (id, name, enabled, domains, expertise_tags, overall_weight, config_source) "
+                    "VALUES ('ns_fanout_test', 'Nick Sleep Fanout', 1, '[]', '[]', 3.5, 'test')"
+                )
+            )
+            db.commit()
+
+            author_cfg = {
+                "discovery_seeds": [
+                    {
+                        "url": "https://example.com/nomad_letters.pdf",
+                        "seed_type": "direct_source",
+                        "source_type": "pdf",
+                        "ingestion_config": {
+                            "mode": "fanout",
+                            "split_markers": [
+                                {"marker": "December 31st, 2002", "heading": "December 31st, 2002"},
+                                {"marker": "Postamble", "heading": "Postamble"},
+                            ],
+                            "documents": [
+                                {
+                                    "key": "letter-2002",
+                                    "title": "Nomad Letter 2002",
+                                    "author_id": "ns_fanout_test",
+                                    "published_at": "2002-12-31",
+                                    "publication_year": 2002,
+                                    "collection": "Nomad Letters",
+                                    "canonical_status": "canonical",
+                                    "source_section": "December 31st, 2002",
+                                    "work_type": "letter",
+                                    "metadata": {"corpus": "nomad_letters"},
+                                    "selective_options": {"include_headings": ["December 31st, 2002"]},
+                                }
+                            ],
+                        },
+                    }
+                ]
+            }
+
+            results = discover_sources_for_author("ns_fanout_test", author_cfg, db)
+            db.commit()
+
+            assert len(results) == 1
+            assert results[0].registered == 1
+
+            source = db.query(RagSource).filter(RagSource.author_id == "ns_fanout_test").one()
+            assert source.ingestion_config["mode"] == "fanout"
+            assert source.ingestion_config["split_markers"][0]["heading"] == "December 31st, 2002"
+            assert source.ingestion_config["documents"][0]["author_id"] == "ns_fanout_test"
+            assert source.ingestion_config["documents"][0]["selective_options"]["include_headings"] == [
+                "December 31st, 2002"
+            ]
         finally:
             db.close()
 
@@ -931,6 +1035,36 @@ class TestPRDAuthorRegistry:
             author = authors_by_id.get(aid, {})
             seeds = author.get("discovery_seeds", [])
             assert len(seeds) > 0, f"Author {aid} has no discovery_seeds in config"
+
+    def test_nick_sleep_config_uses_letter_level_fanout_metadata(self, tmp_path, monkeypatch):
+        config_path = _repo_config_path()
+
+        if not config_path.exists():
+            pytest.skip(f"Config file not found at {config_path}")
+
+        monkeypatch.setenv("RAG_AUTHORS_CONFIG", str(config_path))
+        from app.rag.config import load_author_config
+
+        data = load_author_config()
+        authors_by_id = {a["id"]: a for a in data.get("authors", [])}
+        author = authors_by_id["nick_sleep"]
+        seed = author["discovery_seeds"][0]
+        ingestion_config = seed["ingestion_config"]
+        documents = ingestion_config["documents"]
+
+        assert ingestion_config["mode"] == "fanout"
+        assert len(ingestion_config["split_markers"]) >= len(documents)
+        assert ingestion_config["split_markers"][-1]["heading"] == "Postamble"
+        assert len(documents) >= 20
+        assert all(doc["work_type"] == "letter" for doc in documents)
+
+        assert len(documents) >= 20
+        for doc in documents:
+            assert doc["author_id"] == "nick_sleep"
+            assert doc["collection"] == "Nomad Investment Partnership Letters"
+            assert doc["canonical_status"] == "canonical"
+            assert doc["published_at"]
+            assert doc["selective_options"]["include_headings"]
 
     def test_sync_config_loads_all_prd_authors(self, sqlite_session, tmp_path, monkeypatch):
         """sync_authors_from_config creates rows for all PRD seed authors."""

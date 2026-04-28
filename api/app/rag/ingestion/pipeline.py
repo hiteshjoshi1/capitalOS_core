@@ -504,32 +504,43 @@ def _persist_logical_documents(
                 }
             )
 
-    for materialized_plan, _, validation in prepared_documents:
-        document, chunks = _persist_document_and_chunks(db, source, parsed, materialized_plan)
-        embeddings = _embed_and_persist(db, chunks)
-        total_chunks += len(chunks)
-        total_embeddings += embeddings
-        created_documents[materialized_plan.key] = document
-        outcome = {
-            "key": materialized_plan.key,
-            "status": "created",
-            "document_id": str(document.id),
-            "title": document.title,
-            "author_id": document.author_id,
-            "source_section": document.source_section,
-            "chunk_count": len(chunks),
-            "embedding_count": embeddings,
-            "parent_key": materialized_plan.parent_key,
-            "quality": {
-                "reasons": validation.reasons,
-                **validation.metrics,
-            },
-        }
-        created_outcomes[materialized_plan.key] = outcome
-        outcomes.append(outcome)
+    if prepared_documents:
+        with db.begin_nested():
+            existing_documents = (
+                db.query(RagDocument)
+                .filter(RagDocument.source_id == source.id)
+                .all()
+            )
+            for existing_document in existing_documents:
+                db.delete(existing_document)
+            db.flush()
 
-    if created_documents:
-        _link_parent_documents(db, created_documents, created_outcomes)
+            for materialized_plan, _, validation in prepared_documents:
+                document, chunks = _persist_document_and_chunks(db, source, parsed, materialized_plan)
+                embeddings = _embed_and_persist(db, chunks)
+                total_chunks += len(chunks)
+                total_embeddings += embeddings
+                created_documents[materialized_plan.key] = document
+                outcome = {
+                    "key": materialized_plan.key,
+                    "status": "created",
+                    "document_id": str(document.id),
+                    "title": document.title,
+                    "author_id": document.author_id,
+                    "source_section": document.source_section,
+                    "chunk_count": len(chunks),
+                    "embedding_count": embeddings,
+                    "parent_key": materialized_plan.parent_key,
+                    "quality": {
+                        "reasons": validation.reasons,
+                        **validation.metrics,
+                    },
+                }
+                created_outcomes[materialized_plan.key] = outcome
+                outcomes.append(outcome)
+
+            if created_documents:
+                _link_parent_documents(db, created_documents, created_outcomes)
 
     stats: dict[str, Any] = {
         "ingestion_mode": plan.mode,
