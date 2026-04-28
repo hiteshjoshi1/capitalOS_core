@@ -8,7 +8,7 @@ Coverage:
   - Source attribution: corpus vs live sources
   - Follow-up questions are surfaced but not recursively researched
   - Live research fetch routing (mocked)
-  - Synthesis and critique response shape
+  - Critique response shape
   - /ai-sage/query endpoint routes to thesis mode for thesis queries
   - /ai-sage/query endpoint routes to concept mode for concept queries
   - Concept mode regression (mode=="concept" on non-thesis queries)
@@ -100,10 +100,7 @@ def test_thesis_query_result_as_dict_shape():
         query="My thesis on Spotify.",
         mode="thesis",
         best_passages=[],
-        author_views=[],
-        synthesis="Synthesis text.",
         critique="Critique text.",
-        suggested_readings=[],
         evidence_sufficient=False,
         weak_evidence_note="Thin corpus.",
         thesis_question="Is Spotify's moat durable?",
@@ -217,7 +214,6 @@ def test_fallback_thesis_analysis_shape():
     assert len(result["pushback_questions"]) >= 1
     assert isinstance(result["missing_information"], list)
     assert isinstance(result["key_facts"], list)
-    assert "synthesis" in result
     assert "critique" in result
     assert "updated_thesis_view" in result
     assert isinstance(result["updated_thesis_view"]["stronger"], list)
@@ -258,11 +254,9 @@ def test_execute_thesis_query_shape():
         assert isinstance(d["pushback_questions"], list)
         assert isinstance(d["missing_information"], list)
         assert isinstance(d["key_facts"], list)
-        assert isinstance(d["author_views"], list)
         assert isinstance(d["best_passages"], list)
         assert isinstance(d["live_sources"], list)
         assert isinstance(d["follow_up_questions"], list)
-        assert "synthesis" in d
         assert "critique" in d
         assert "updated_thesis_view" in d
         assert isinstance(d.get("evidence_sufficient"), bool)
@@ -391,8 +385,6 @@ def test_api_thesis_response_has_all_required_sections(test_client):
     assert "pushback_questions" in data        # key pushback questions
     assert "missing_information" in data       # missing information
     assert "key_facts" in data                 # key facts extracted
-    assert "author_views" in data              # author views
-    assert "synthesis" in data                 # synthesis
     assert "critique" in data                  # critique
     assert "updated_thesis_view" in data       # updated thesis view
     assert "live_sources" in data              # fetched sources used
@@ -409,8 +401,5 @@ def test_api_concept_mode_regression(test_client):
 
     # Concept mode fields still present
     assert "best_passages" in data
-    assert "author_views" in data
-    assert "synthesis" in data
     assert "critique" in data
-    assert "suggested_readings" in data
     assert "evidence_sufficient" in data

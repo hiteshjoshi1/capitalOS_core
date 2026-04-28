@@ -4,14 +4,9 @@ Concept Mode — AI Sage single-query flow.
 Takes one natural language concept question and returns a structured response:
   - query
   - best_passages (evidence, inspectable on demand)
-  - author_views (distinct per-author perspectives grounded in corpus)
-  - synthesis (cross-author synthesis)
-  - critique (pushback to prevent false confidence)
-  - suggested_readings (best next passages from the corpus)
+  - critique (optional pushback)
   - evidence_sufficient
   - weak_evidence_note (honest signal when corpus grounding is thin)
-
-The LLM path produces richer output; the no-LLM fallback is always honest.
 """
 
 from __future__ import annotations
@@ -21,7 +16,7 @@ import logging
 import re
 import textwrap
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -47,6 +42,11 @@ from app.rag.retrieval import (
     retrieve_keyword_chunks,
     retrieve_similar_chunks,
 )
+from app.rag.retrieval_weighting import (
+    apply_weight_to_score,
+    metadata_weighting_enabled,
+    ranking_sort_key,
+)
 
 log = logging.getLogger(__name__)
 
@@ -63,36 +63,9 @@ def _env_flag_enabled(name: str, *, default: bool = False) -> bool:
         return False
     return default
 
-
-def _synthesis_enabled() -> bool:
-    """
-    Positive semantics: 1 means enabled, 0 means disabled.
-
-    Preferred flag:
-      AI_SAGE_SYNTHESIS_ENABLED
-
-    Legacy fallback:
-      AI_SAGE_NO_SYNTHESIS
-    """
-    import os
-
-    if os.getenv("AI_SAGE_SYNTHESIS_ENABLED", "").strip():
-        return _env_flag_enabled("AI_SAGE_SYNTHESIS_ENABLED", default=True)
-
-    legacy = os.getenv("AI_SAGE_NO_SYNTHESIS", "").strip().lower()
-    if legacy:
-        return legacy not in {"1", "true", "yes", "on"}
-    return True
-
-
 def _critique_enabled() -> bool:
     """Check AI_SAGE_CRITIQUE_ENABLED env toggle. Defaults to disabled."""
     return _env_flag_enabled("AI_SAGE_CRITIQUE_ENABLED", default=False)
-
-
-def _suggested_readings_llm_enabled() -> bool:
-    """Check AI_SAGE_READINGS_ENABLED env toggle. Defaults to disabled."""
-    return _env_flag_enabled("AI_SAGE_READINGS_ENABLED", default=False)
 
 
 def _trace_chunks(stage: str, query: str, chunks: list[RetrievedChunk], *, limit: int = 8) -> None:
@@ -157,7 +130,14 @@ def _with_display_context(
     for chunk in anchor_chunks:
         expanded = expanded_by_id.get(chunk.chunk_id)
         metadata = dict(chunk.metadata_json or {})
+        metadata["document_id"] = chunk.document_id
         metadata["score_type"] = "reranked" if chunk.reranker_score is not None else "retrieved"
+        if chunk.base_score is not None:
+            metadata["base_score"] = chunk.base_score
+        if chunk.weighted_score is not None:
+            metadata["ranking_score"] = chunk.weighted_score
+        elif chunk.base_score is not None:
+            metadata["ranking_score"] = chunk.base_score
         metadata["anchor_text"] = chunk.text
         metadata["expanded_context_applied"] = False
         if chunk.reranker_score is not None:
@@ -237,9 +217,7 @@ def _clean_query_for_keyword_search(
 _CONCEPT_TOP_K_AUTHORS = 5
 _CONCEPT_TOP_K_CHUNKS = 12
 _MIN_CHUNKS_FOR_CONFIDENCE = 2
-_CHUNKS_PER_AUTHOR_VIEW = 4
 _SINGLE_AUTHOR_SUMMARY_CHUNKS = 10
-_SUGGESTED_READINGS_COUNT = 3
 _BROAD_RETRIEVAL_MULTIPLIER = 4
 _BROAD_RETRIEVAL_MIN = 24
 _BROAD_RETRIEVAL_MAX = 60
@@ -253,47 +231,10 @@ _CONTEXT_EXPANSION_MAX_CHARS = 1800
 
 
 @dataclass
-class AuthorView:
-    author_id: str
-    author_name: str
-    view: str
-    key_passages: list[str] = field(default_factory=list)
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "author_id": self.author_id,
-            "author_name": self.author_name,
-            "view": self.view,
-            "key_passages": self.key_passages,
-        }
-
-
-@dataclass
-class SuggestedReading:
-    author_id: str
-    author_name: str
-    passage: str
-    source_url: Optional[str]
-    reason: str
-
-    def as_dict(self) -> dict[str, Any]:
-        return {
-            "author_id": self.author_id,
-            "author_name": self.author_name,
-            "passage": self.passage,
-            "source_url": self.source_url,
-            "reason": self.reason,
-        }
-
-
-@dataclass
 class ConceptQueryResult:
     query: str
     best_passages: list[dict[str, Any]]
-    author_views: list[dict[str, Any]]
-    synthesis: Optional[str]
     critique: Optional[str]
-    suggested_readings: list[dict[str, Any]]
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
     intent: Optional[dict[str, Any]] = None
@@ -304,10 +245,7 @@ class ConceptQueryResult:
         return {
             "query": self.query,
             "best_passages": self.best_passages,
-            "author_views": self.author_views,
-            "synthesis": self.synthesis,
             "critique": self.critique,
-            "suggested_readings": self.suggested_readings,
             "evidence_sufficient": self.evidence_sufficient,
             "weak_evidence_note": self.weak_evidence_note,
             "intent": self.intent,
@@ -316,149 +254,24 @@ class ConceptQueryResult:
         }
 
 
-# ── LLM helpers ───────────────────────────────────────────────────────────────
-
-
-def _llm_author_view(
-    query: str,
-    author_name: str,
-    author_worldview: str,
-    key_maxims: list[str],
-    passages: list[str],
-) -> str:
-    joined = "\n\n---\n\n".join(passages[:_CHUNKS_PER_AUTHOR_VIEW])
-    maxims_str = "; ".join(key_maxims[:4]) if key_maxims else "not specified"
-
+def _llm_critique(query: str, passages: list[str]) -> str:
+    passages_block = "\n\n---\n\n".join(passages[:_SINGLE_AUTHOR_SUMMARY_CHUNKS]) or "No corpus evidence available."
     prompt = textwrap.dedent(f"""
-        You are writing a short, distinct perspective on a concept question as {author_name} would frame it.
-
-        The user's question: {query}
-
-        {author_name}'s worldview: {author_worldview or "not specified"}
-        {author_name}'s key maxims: {maxims_str}
-
-        Relevant passages from {author_name}'s corpus:
-        ---
-        {joined}
-        ---
-
-        Instructions:
-        - Write 2-4 sentences expressing how {author_name} specifically would think about this question.
-        - Use language and framing that reflects their worldview and corpus — not generic finance.
-        - Ground every claim in what the passages support. Do not speculate.
-        - If the passages do not support a clear view, say so honestly in 1-2 sentences.
-        - Do NOT start with "{author_name} would say..." — just write their perspective directly.
-    """).strip()
-
-    client = create_inference_client()
-    response = logged_chat_completion(
-        client=client,
-        model=inference_model(),
-        purpose="concept_author_view",
-        logger=log,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=300,
-    )
-    return response.choices[0].message.content or ""
-
-
-def _llm_synthesis(query: str, author_views: list[AuthorView]) -> str:
-    views_block = "\n\n".join(
-        f"{av.author_name}: {av.view}" for av in author_views
-    )
-
-    prompt = textwrap.dedent(f"""
-        You are synthesizing multiple thinker perspectives on a concept question.
+        You are providing a critique of the following corpus-grounded answer context.
 
         Question: {query}
 
-        Author perspectives:
-        ---
-        {views_block}
-        ---
-
-        Instructions:
-        - Write a 3-5 sentence synthesis that captures the most important agreements and contrasts.
-        - Preserve meaningful distinctions — do not flatten differences into one generic answer.
-        - Make clear where these thinkers align and where they diverge.
-        - Do not invent views not present in the perspectives above.
-    """).strip()
-
-    client = create_inference_client()
-    response = logged_chat_completion(
-        client=client,
-        model=inference_model(),
-        purpose="concept_synthesis",
-        logger=log,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=400,
-    )
-    return response.choices[0].message.content or ""
-
-
-def _llm_single_author_summary(
-    query: str,
-    author_name: str,
-    passages: list[str],
-) -> str:
-    passages_block = "\n\n---\n\n".join(passages[:_SINGLE_AUTHOR_SUMMARY_CHUNKS])
-    prompt = textwrap.dedent(f"""
-        You are summarizing what {author_name} says in their corpus.
-
-        User question: {query}
-
-        Grounding passages from {author_name}:
+        Corpus passages:
         ---
         {passages_block}
         ---
 
         Instructions:
-        - Write a concise 3-5 sentence summary of what {author_name} says about this question.
-        - Use only the provided passages.
-        - Do not mention other authors, perspectives, agreements, contrasts, or divergences.
-        - Prefer specific, grounded statements over generic abstractions.
-        - If the passages are thin or only partially relevant, say so plainly.
-    """).strip()
-
-    client = create_inference_client()
-    response = logged_chat_completion(
-        client=client,
-        model=inference_model(),
-        purpose="single_author_summary",
-        logger=log,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.2,
-        max_tokens=400,
-    )
-    return response.choices[0].message.content or ""
-
-
-def _llm_critique(query: str, synthesis: str, author_views: list[AuthorView]) -> str:
-    views_block = "\n\n".join(
-        f"{av.author_name}: {av.view}" for av in author_views
-    )
-
-    prompt = textwrap.dedent(f"""
-        You are providing a critique of the following synthesis and author perspectives on a concept question.
-
-        Question: {query}
-
-        Author perspectives:
-        ---
-        {views_block}
-        ---
-
-        Synthesis:
-        {synthesis}
-
-        Instructions:
         - Write 2-4 sentences of genuine pushback.
-        - Identify what the perspectives collectively miss, overstate, or leave unresolved.
-        - Point out where the corpus-grounded views might be limited, biased, or context-dependent.
+        - Identify what the retrieved evidence may miss, overstate, or leave unresolved.
+        - Point out where the corpus grounding might be limited, biased, or context-dependent.
         - Do not be ritually pessimistic — make the critique substantive and specific.
-        - If the synthesis is sound and the perspectives are well-balanced, say so briefly and explain what would stress-test them.
+        - If the evidence is balanced, say so briefly and explain what would still stress-test it.
     """).strip()
 
     client = create_inference_client()
@@ -474,102 +287,7 @@ def _llm_critique(query: str, synthesis: str, author_views: list[AuthorView]) ->
     return response.choices[0].message.content or ""
 
 
-def _llm_suggested_readings(
-    query: str,
-    chunks: list[EvidenceChunk],
-    count: int = _SUGGESTED_READINGS_COUNT,
-) -> str:
-    """Ask LLM to pick the best next-step passages from the corpus evidence."""
-    if not chunks:
-        return ""
-
-    passages_block = "\n\n".join(
-        f"[{i+1}] {c.author_name}: {c.text[:300]}"
-        for i, c in enumerate(chunks[:10])
-    )
-
-    prompt = textwrap.dedent(f"""
-        A user asked: {query}
-
-        Below are evidence passages from the author corpus.
-        Pick the {count} passages that would best help the user go deeper on this topic.
-
-        Passages:
-        ---
-        {passages_block}
-        ---
-
-        Return ONLY a JSON array of integers (1-based indices) in order of recommendation quality.
-        Example: [3, 1, 7]
-        No other text.
-    """).strip()
-
-    client = create_inference_client()
-    response = logged_chat_completion(
-        client=client,
-        model=inference_model(),
-        purpose="concept_suggested_readings",
-        logger=log,
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.0,
-        max_tokens=50,
-    )
-    raw = (response.choices[0].message.content or "").strip()
-
-    import json
-    import re
-    try:
-        indices = json.loads(raw)
-    except Exception:
-        m = re.search(r"\[.*?\]", raw)
-        try:
-            indices = json.loads(m.group()) if m else []
-        except Exception:
-            indices = []
-
-    valid = [i - 1 for i in indices if isinstance(i, int) and 1 <= i <= len(chunks)]
-    return valid[:count]
-
-
 # ── Fallback helpers ──────────────────────────────────────────────────────────
-
-
-def _template_author_view(
-    author_name: str,
-    worldview: Optional[str],
-    key_maxims: list[str],
-    passages: list[str],
-) -> str:
-    parts: list[str] = []
-    if worldview:
-        parts.append(worldview)
-    if key_maxims:
-        parts.append("Key principles: " + "; ".join(key_maxims[:3]) + ".")
-    if passages:
-        snippet = passages[0][:200].replace("\n", " ").strip()
-        parts.append(f'From corpus: "{snippet}..."')
-    if not parts:
-        return f"{author_name}'s corpus was matched but does not yield a strong view on this question."
-    return " ".join(parts)
-
-
-def _template_synthesis(author_views: list[AuthorView]) -> str:
-    if not author_views:
-        return "No author views could be assembled for synthesis."
-    names = ", ".join(av.author_name for av in author_views)
-    return (
-        f"The perspectives from {names} converge on some principles while diverging on emphasis. "
-        "Review each author view above for their distinct framing."
-    )
-
-
-def _template_single_author_summary(author_name: str, passages: list[str]) -> Optional[str]:
-    if not passages:
-        return None
-    snippet = passages[0][:280].strip()
-    if not snippet:
-        return None
-    return f"{author_name}'s corpus most directly says: {snippet}"
 
 
 def _retrieve_with_intent_fallback(
@@ -833,35 +551,88 @@ def _collect_candidate_chunks(
     return deduped[:broad_top_k], any_relaxed, relaxation_reason
 
 
-def _query_keywords(query: str) -> set[str]:
-    return {w for w in re.findall(r"[a-z0-9]+", query.lower()) if len(w) >= 3}
+_HEURISTIC_STOPWORDS = {
+    "about",
+    "does",
+    "from",
+    "have",
+    "into",
+    "just",
+    "more",
+    "over",
+    "said",
+    "says",
+    "say",
+    "than",
+    "that",
+    "them",
+    "they",
+    "this",
+    "what",
+    "when",
+    "where",
+    "which",
+    "with",
+    "would",
+}
+
+
+def _query_keywords(query: str, *, topic_entities: list[str] | None = None) -> set[str]:
+    keywords = {
+        w
+        for w in re.findall(r"[a-z0-9]+", query.lower())
+        if len(w) >= 3 and w not in _HEURISTIC_STOPWORDS
+    }
+    for entity in topic_entities or []:
+        for token in re.findall(r"[a-z0-9]+", str(entity).lower()):
+            if len(token) >= 2:
+                keywords.add(token)
+    return keywords
 
 
 def _heuristic_rank_candidates(
     query: str,
     candidates: list[RetrievedChunk],
+    *,
+    topic_entities: list[str] | None = None,
 ) -> list[RetrievedChunk]:
     """
     Fallback ranking when rerank model is unavailable.
 
     Uses simple lexical overlap over query intent + retrieval similarity.
     """
-    keywords = _query_keywords(query)
+    keywords = _query_keywords(query, topic_entities=topic_entities)
+    entity_phrases = [
+        phrase.strip().lower()
+        for phrase in (topic_entities or [])
+        if isinstance(phrase, str) and phrase.strip()
+    ]
 
     def score(chunk: RetrievedChunk) -> tuple[int, float]:
         text = str(getattr(chunk, "text", "") or "").lower()
         overlap = sum(1 for kw in keywords if kw in text)
+        entity_phrase_hits = sum(1 for phrase in entity_phrases if phrase in text)
         similarity = getattr(chunk, "similarity", None)
         if not isinstance(similarity, (int, float)):
             cosine_distance = getattr(chunk, "cosine_distance", 1.0)
             similarity = 1.0 - float(cosine_distance if isinstance(cosine_distance, (int, float)) else 1.0)
-        return overlap, float(similarity)
+        return (overlap * 10) + (entity_phrase_hits * 15), float(similarity)
 
-    ranked = sorted(
-        candidates,
-        key=lambda c: (-score(c)[0], -score(c)[1], c.cosine_distance),
-    )
-    return ranked
+    weighting_active = metadata_weighting_enabled()
+    for chunk in candidates:
+        lexical_score, similarity = score(chunk)
+        base_score = float(lexical_score) + float(similarity)
+        decision = apply_weight_to_score(
+            getattr(chunk, "metadata_json", None),
+            base_score=base_score,
+            enabled=weighting_active,
+        )
+        chunk.base_score = decision.base_score
+        chunk.metadata_weight = decision.weight
+        chunk.weighted_score = decision.weighted_score
+        chunk.corpus_class = decision.corpus_class
+        chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
+    return sorted(candidates, key=ranking_sort_key)
 
 
 def _chunk_meta(chunk: RetrievedChunk) -> dict[str, Any]:
@@ -974,13 +745,14 @@ def _rerank_candidate_chunks(
     candidates: list[RetrievedChunk],
     *,
     top_k: int,
+    topic_entities: list[str] | None = None,
 ) -> list[RetrievedChunk]:
     if not candidates:
         return []
     if top_k <= 0:
         return []
 
-    heuristic_ranked = _heuristic_rank_candidates(query, candidates)
+    heuristic_ranked = _heuristic_rank_candidates(query, candidates, topic_entities=topic_entities)
     ranked = heuristic_ranked
 
     # Tier 1: dedicated cross-encoder reranker (preferred — fast, deterministic, no JSON)
@@ -1004,13 +776,23 @@ def _rerank_candidate_chunks(
                 for r in results:
                     chunk = candidates[r.index]
                     chunk.reranker_score = float(getattr(r, "relevance_score", 0.0))
+                    decision = apply_weight_to_score(
+                        getattr(chunk, "metadata_json", None),
+                        base_score=chunk.reranker_score,
+                        enabled=metadata_weighting_enabled(),
+                    )
+                    chunk.base_score = decision.base_score
+                    chunk.metadata_weight = decision.weight
+                    chunk.weighted_score = decision.weighted_score
+                    chunk.corpus_class = decision.corpus_class
+                    chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
                     if chunk.chunk_id not in seen_ids:
                         seen_ids.add(chunk.chunk_id)
                         ce_ranked.append(chunk)
                 for chunk in heuristic_ranked:
                     if chunk.chunk_id not in seen_ids:
                         ce_ranked.append(chunk)
-                ranked = ce_ranked
+                ranked = sorted(ce_ranked, key=ranking_sort_key)
                 log.debug("cross-encoder reranked %d candidates", len(candidates))
         except Exception as exc:
             log.warning("cross-encoder reranking failed; falling back: %s", exc)
@@ -1103,6 +885,7 @@ def execute_concept_query(
         query,
         candidate_chunks,
         top_k=min(top_k_chunks, len(candidate_chunks)),
+        topic_entities=intent.topic_entities,
     )
     _trace_chunks("reranked", query, winning_chunks)
     expanded_chunks = expand_chunks_with_context(
@@ -1110,12 +893,11 @@ def execute_concept_query(
         db,
         window_size=_CONTEXT_EXPANSION_WINDOW,
         max_chars=_CONTEXT_EXPANSION_MAX_CHARS,
-        only_when_needed=True,
+        only_when_needed=False,
     )
-    _trace_chunks("expanded_for_synthesis", query, expanded_chunks)
+    _trace_chunks("expanded_for_display", query, expanded_chunks)
     display_chunks = _with_display_context(winning_chunks, expanded_chunks)
     evidence: list[EvidenceChunk] = _enrich_chunks(display_chunks, db, author_map)
-    synthesis_evidence: list[EvidenceChunk] = _enrich_chunks(expanded_chunks, db, author_map)
 
     log.debug(
         "concept evidence pipeline sizes: candidates=%d winners=%d expanded=%d",
@@ -1134,161 +916,26 @@ def execute_concept_query(
     elif not evidence_sufficient:
         weak_evidence_note = (
             "Evidence from the corpus is thin for this question. "
-            "The author views below are based on limited passages and should be read cautiously."
+            "The ranked passages below are based on limited evidence and should be read cautiously."
         )
 
     best_passages = [e.as_dict() for e in evidence]
 
-    # 3. Build per-author chunk map
-    author_chunk_map: dict[str, list[str]] = {}
-    for chunk in synthesis_evidence:
-        author_chunk_map.setdefault(chunk.author_id, []).append(chunk.text)
-
-    # 4. Generate author views
-    is_single_author_grounded = (
-        intent.query_type == "single_author"
-        and len(author_chunk_map) == 1
-        and evidence_sufficient
-    )
-    use_llm_author_views = (
-        inference_available()
-        and _synthesis_enabled()
-    )
-    if is_single_author_grounded and use_llm_author_views:
-        log.info("single-author grounded query — using LLM author view")
-
-    author_views: list[AuthorView] = []
-    _llm_call_failed = False
-    for entry in author_entries:
-        a_id = entry["author_id"]
-        a_name = entry["name"]
-        passages_for_author = author_chunk_map.get(a_id, [])
-
-        # Skip authors with zero corpus grounding
-        if not passages_for_author and not evidence_sufficient:
-            continue
-
-        key_passages = [p[:280] for p in passages_for_author[:2]]
-        worldview = entry.get("worldview", "")
-        key_maxims = entry.get("key_maxims") or []
-
-        if use_llm_author_views and passages_for_author and not _llm_call_failed:
-            try:
-                view_text = _llm_author_view(
-                    query, a_name, worldview or "", key_maxims, passages_for_author
-                )
-            except Exception as exc:
-                log.warning("LLM author view failed for %s: %s — degrading to template for remaining authors", a_id, exc)
-                _llm_call_failed = True
-                view_text = _template_author_view(a_name, worldview, key_maxims, passages_for_author)
-        else:
-            view_text = _template_author_view(a_name, worldview, key_maxims, passages_for_author)
-
-        author_views.append(
-            AuthorView(
-                author_id=a_id,
-                author_name=a_name,
-                view=view_text,
-                key_passages=key_passages,
-            )
-        )
-
-    # 5. Synthesis — controlled by AI_SAGE_SYNTHESIS_ENABLED env toggle
-    synthesis: Optional[str] = None
-    if author_views:
-        is_single_author_summary = intent.query_type == "single_author" and len(author_chunk_map) == 1
-        if _synthesis_enabled() and inference_available() and not _llm_call_failed:
-            try:
-                if is_single_author_summary:
-                    only_author_id = next(iter(author_chunk_map.keys()))
-                    author_name = next(
-                        (entry["name"] for entry in author_entries if entry["author_id"] == only_author_id),
-                        author_views[0].author_name,
-                    )
-                    synthesis = _llm_single_author_summary(
-                        query,
-                        author_name,
-                        author_chunk_map.get(only_author_id, [])[:_SINGLE_AUTHOR_SUMMARY_CHUNKS],
-                    )
-                else:
-                    synthesis = _llm_synthesis(query, author_views)
-            except Exception as exc:
-                log.warning("LLM synthesis failed (degrading to template): %s", exc)
-                _llm_call_failed = True
-                if is_single_author_summary:
-                    only_author_id = next(iter(author_chunk_map.keys()))
-                    author_name = next(
-                        (entry["name"] for entry in author_entries if entry["author_id"] == only_author_id),
-                        author_views[0].author_name,
-                    )
-                    synthesis = _template_single_author_summary(
-                        author_name,
-                        author_chunk_map.get(only_author_id, [])[:_SINGLE_AUTHOR_SUMMARY_CHUNKS],
-                    )
-                else:
-                    synthesis = _template_synthesis(author_views)
-        else:
-            if not _synthesis_enabled():
-                log.info("synthesis disabled via AI_SAGE_SYNTHESIS_ENABLED")
-            if is_single_author_summary:
-                synthesis = None
-            else:
-                synthesis = _template_synthesis(author_views)
-
-    # 6. Critique — disabled by default (issue-146 §1), enable via AI_SAGE_CRITIQUE_ENABLED
+    # 3. Critique — disabled by default, optionally computed from the retrieved evidence.
     critique: Optional[str] = None
-    if synthesis and author_views and _critique_enabled() and inference_available() and not _llm_call_failed:
+    if best_passages and _critique_enabled() and inference_available():
         try:
-            critique = _llm_critique(query, synthesis, author_views)
+            critique = _llm_critique(
+                query,
+                [chunk.text for chunk in expanded_chunks[:_SINGLE_AUTHOR_SUMMARY_CHUNKS]],
+            )
         except Exception as exc:
             log.warning("LLM critique failed: %s", exc)
-
-    # 7. Suggested readings — LLM disabled by default (issue-146 §1), always uses heuristic fallback
-    suggested_readings: list[SuggestedReading] = []
-    if evidence:
-        if _suggested_readings_llm_enabled() and inference_available() and len(evidence) > _SUGGESTED_READINGS_COUNT and not _llm_call_failed:
-            try:
-                indices = _llm_suggested_readings(query, evidence, _SUGGESTED_READINGS_COUNT)
-                for idx in indices:
-                    chunk = evidence[idx]
-                    reason = f"Strong corpus passage from {chunk.author_name} relevant to '{query[:60]}'"
-                    suggested_readings.append(
-                        SuggestedReading(
-                            author_id=chunk.author_id,
-                            author_name=chunk.author_name,
-                            passage=chunk.text[:400],
-                            source_url=str(chunk.metadata.get("source_url") or "") or None,
-                            reason=reason,
-                        )
-                    )
-            except Exception as exc:
-                log.warning("LLM suggested readings failed: %s", exc)
-
-        if not suggested_readings:
-            # Fallback: top distinct-author chunks
-            seen_authors: set[str] = set()
-            for chunk in evidence:
-                if chunk.author_id not in seen_authors:
-                    seen_authors.add(chunk.author_id)
-                    suggested_readings.append(
-                        SuggestedReading(
-                            author_id=chunk.author_id,
-                            author_name=chunk.author_name,
-                            passage=chunk.text[:400],
-                            source_url=str(chunk.metadata.get("source_url") or "") or None,
-                            reason=f"Top-matched passage from {chunk.author_name} for this concept.",
-                        )
-                    )
-                if len(suggested_readings) >= _SUGGESTED_READINGS_COUNT:
-                    break
 
     result = ConceptQueryResult(
         query=query,
         best_passages=best_passages,
-        author_views=[av.as_dict() for av in author_views],
-        synthesis=synthesis,
         critique=critique,
-        suggested_readings=[sr.as_dict() for sr in suggested_readings],
         evidence_sufficient=evidence_sufficient,
         weak_evidence_note=weak_evidence_note,
         intent=intent.as_dict(),
@@ -1314,7 +961,7 @@ def execute_concept_query(
             "concept",
             intent=intent.as_dict(),
             evidence_chunks=evidence_dicts,
-            answer_text=synthesis,
+            answer_text=(best_passages[0].get("text") if best_passages else weak_evidence_note),
             latency_ms=int((time.monotonic() - _t0) * 1000),
             retrieval_config={"top_k_chunks": top_k_chunks, "top_k_authors": top_k_authors},
         )

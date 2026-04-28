@@ -30,6 +30,14 @@ from sqlalchemy.orm import Session
 
 from app.models.rag import RagChunk
 from app.rag.ingestion.embedder import embed_query
+from app.rag.retrieval_weighting import (
+    apply_weight_to_score,
+    merge_retrieval_metadata,
+    metadata_weighting_enabled,
+    ranking_sort_key,
+    weighting_candidate_limit,
+    weighting_feature_flag,
+)
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +92,11 @@ class RetrievedChunk:
     ts_rank: Optional[float] = None
     rrf_score: Optional[float] = None
     reranker_score: Optional[float] = None
+    metadata_weight: float = 1.0
+    base_score: Optional[float] = None
+    weighted_score: Optional[float] = None
+    corpus_class: Optional[str] = None
+    weighting_applied: bool = False
 
     @property
     def similarity(self) -> float:
@@ -115,6 +128,16 @@ class RetrievedChunk:
             d["rrf_score"] = self.rrf_score
         if self.reranker_score is not None:
             d["reranker_score"] = self.reranker_score
+        if self.metadata_weight != 1.0:
+            d["metadata_weight"] = self.metadata_weight
+        if self.base_score is not None:
+            d["base_score"] = self.base_score
+        if self.weighted_score is not None:
+            d["weighted_score"] = self.weighted_score
+        if self.corpus_class is not None:
+            d["corpus_class"] = self.corpus_class
+        if self.weighting_applied:
+            d["weighting_applied"] = True
         return d
 
 
@@ -144,6 +167,7 @@ def retrieve_similar_chunks(
     year_to: Optional[int] = None,
     published_from: Optional[str] = None,
     published_to: Optional[str] = None,
+    weighting_enabled: Optional[bool] = None,
 ) -> list[RetrievedChunk]:
     """
     Embed query and return the top-k most similar chunks.
@@ -163,11 +187,15 @@ def retrieve_similar_chunks(
 
     Returns an empty list if no embeddings exist yet.
     """
+    weighting_active = metadata_weighting_enabled(override=weighting_enabled)
     query_vector = embed_query(query)
     vector_literal = "[" + ",".join(str(v) for v in query_vector) + "]"
 
     where_clauses: list[str] = []
-    params: dict[str, Any] = {"top_k": top_k, "query_vec": vector_literal}
+    params: dict[str, Any] = {
+        "top_k": weighting_candidate_limit(top_k, enabled=weighting_active),
+        "query_vec": vector_literal,
+    }
 
     is_postgres = _is_postgres(db)
 
@@ -208,6 +236,11 @@ def retrieve_similar_chunks(
             rc.text,
             rc.token_count,
             rc.metadata_json,
+            rd.collection,
+            rd.canonical_status,
+            rd.dedupe_priority,
+            rd.work_type,
+            rd.metadata_json AS document_metadata_json,
             (re.embedding <=> CAST(:query_vec AS vector)) AS cosine_distance
         FROM rag_embeddings re
         JOIN rag_chunks    rc ON rc.id = re.chunk_id
@@ -226,18 +259,26 @@ def retrieve_similar_chunks(
         log.exception("retrieve_similar_chunks query failed: %s", exc)
         return []
 
-    return [
+    chunks = [
         RetrievedChunk(
             chunk_id=str(row["chunk_id"]),
             document_id=str(row["document_id"]),
             chunk_index=row["chunk_index"],
             text=row["text"],
             token_count=row["token_count"],
-            metadata_json=dict(row["metadata_json"]) if row["metadata_json"] else {},
+            metadata_json=merge_retrieval_metadata(
+                dict(row["metadata_json"]) if row["metadata_json"] else {},
+                collection=row["collection"],
+                canonical_status=row["canonical_status"],
+                dedupe_priority=row["dedupe_priority"],
+                work_type=row["work_type"],
+                document_metadata=dict(row["document_metadata_json"]) if row["document_metadata_json"] else {},
+            ),
             cosine_distance=float(row["cosine_distance"]),
         )
         for row in rows
     ]
+    return _rank_chunks(chunks, top_k=top_k, stage="dense", weighting_enabled=weighting_active)
 
 
 def expand_chunks_with_context(
@@ -331,6 +372,7 @@ def retrieve_keyword_chunks(
     year_to: Optional[int] = None,
     published_from: Optional[str] = None,
     published_to: Optional[str] = None,
+    weighting_enabled: Optional[bool] = None,
 ) -> list[RetrievedChunk]:
     """
     Full-text search using Postgres tsvector/tsquery.
@@ -340,6 +382,7 @@ def retrieve_keyword_chunks(
 
     Same filter parameters as retrieve_similar_chunks().
     """
+    weighting_active = metadata_weighting_enabled(override=weighting_enabled)
     dialect_name = db.bind.dialect.name if db.bind else "unknown"
     if dialect_name != "postgresql":
         log.debug("retrieve_keyword_chunks: skipping FTS on non-Postgres dialect=%s", dialect_name)
@@ -349,7 +392,10 @@ def retrieve_keyword_chunks(
         return []
 
     where_clauses: list[str] = ["rc.tsv @@ plainto_tsquery('english', :fts_query)"]
-    params: dict[str, Any] = {"top_k": top_k, "fts_query": query}
+    params: dict[str, Any] = {
+        "top_k": weighting_candidate_limit(top_k, enabled=weighting_active),
+        "fts_query": query,
+    }
 
     is_postgres = True  # already verified above
 
@@ -390,6 +436,11 @@ def retrieve_keyword_chunks(
             rc.text,
             rc.token_count,
             rc.metadata_json,
+            rd.collection,
+            rd.canonical_status,
+            rd.dedupe_priority,
+            rd.work_type,
+            rd.metadata_json AS document_metadata_json,
             ts_rank(rc.tsv, plainto_tsquery('english', :fts_query)) AS ts_rank
         FROM rag_chunks    rc
         JOIN rag_documents rd ON rd.id = rc.document_id
@@ -407,19 +458,27 @@ def retrieve_keyword_chunks(
         log.exception("retrieve_keyword_chunks query failed: %s", exc)
         return []
 
-    return [
+    chunks = [
         RetrievedChunk(
             chunk_id=str(row["chunk_id"]),
             document_id=str(row["document_id"]),
             chunk_index=row["chunk_index"],
             text=row["text"],
             token_count=row["token_count"],
-            metadata_json=dict(row["metadata_json"]) if row["metadata_json"] else {},
+            metadata_json=merge_retrieval_metadata(
+                dict(row["metadata_json"]) if row["metadata_json"] else {},
+                collection=row["collection"],
+                canonical_status=row["canonical_status"],
+                dedupe_priority=row["dedupe_priority"],
+                work_type=row["work_type"],
+                document_metadata=dict(row["document_metadata_json"]) if row["document_metadata_json"] else {},
+            ),
             cosine_distance=1.0,  # no cosine distance for keyword results
             ts_rank=float(row["ts_rank"]),
         )
         for row in rows
     ]
+    return _rank_chunks(chunks, top_k=top_k, stage="sparse", weighting_enabled=weighting_active)
 
 
 # ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
@@ -428,6 +487,7 @@ def retrieve_keyword_chunks(
 def reciprocal_rank_fusion(
     *result_lists: list[RetrievedChunk],
     k: int = _RRF_K,
+    weighting_enabled: Optional[bool] = None,
 ) -> list[RetrievedChunk]:
     """
     Combine multiple ranked result lists using Reciprocal Rank Fusion (RRF).
@@ -442,6 +502,7 @@ def reciprocal_rank_fusion(
     Returns:
         Combined list sorted by descending RRF score, with rrf_score set.
     """
+    weighting_active = metadata_weighting_enabled(override=weighting_enabled)
     scores: dict[str, float] = {}
     chunk_map: dict[str, RetrievedChunk] = {}
 
@@ -451,11 +512,8 @@ def reciprocal_rank_fusion(
             scores[chunk_id] = scores.get(chunk_id, 0.0) + 1.0 / (k + rank + 1)
             if chunk_id not in chunk_map:
                 chunk_map[chunk_id] = chunk
-
-    sorted_ids = sorted(scores.keys(), key=lambda cid: -scores[cid])
-
     combined: list[RetrievedChunk] = []
-    for cid in sorted_ids:
+    for cid, rrf_score in scores.items():
         chunk = chunk_map[cid]
         combined.append(
             RetrievedChunk(
@@ -467,10 +525,11 @@ def reciprocal_rank_fusion(
                 metadata_json=chunk.metadata_json,
                 cosine_distance=chunk.cosine_distance,
                 ts_rank=chunk.ts_rank,
-                rrf_score=scores[cid],
+                rrf_score=rrf_score,
+                reranker_score=chunk.reranker_score,
             )
         )
-    return combined
+    return _rank_chunks(combined, top_k=len(combined), stage="rrf", weighting_enabled=weighting_active)
 
 
 # ── Hybrid retrieval ──────────────────────────────────────────────────────────
@@ -490,6 +549,8 @@ def retrieve_hybrid(
     year_to: Optional[int] = None,
     published_from: Optional[str] = None,
     published_to: Optional[str] = None,
+    weighting_enabled: Optional[bool] = None,
+    retrieval_mode: Optional[str] = None,
 ) -> list[RetrievedChunk]:
     """
     Hybrid retrieval combining dense vector search and sparse keyword search.
@@ -505,7 +566,8 @@ def retrieve_hybrid(
       dense_only  — dense vector search only
       sparse_only — sparse keyword search only
     """
-    mode = _RETRIEVAL_MODE
+    weighting_active = metadata_weighting_enabled(override=weighting_enabled)
+    mode = retrieval_mode or _RETRIEVAL_MODE
     fetch_k = top_k * _DENSE_TOP_K_MULTIPLIER
 
     common_kwargs: dict[str, Any] = {
@@ -518,6 +580,7 @@ def retrieve_hybrid(
         "year_to": year_to,
         "published_from": published_from,
         "published_to": published_to,
+        "weighting_enabled": weighting_active,
     }
 
     if mode == "dense_only":
@@ -535,8 +598,54 @@ def retrieve_hybrid(
         log.debug("retrieve_hybrid: sparse retrieval returned 0 results, using dense only")
         return dense_results[:top_k]
 
-    combined = reciprocal_rank_fusion(dense_results, sparse_results, k=_RRF_K)
+    combined = reciprocal_rank_fusion(
+        dense_results,
+        sparse_results,
+        k=_RRF_K,
+        weighting_enabled=weighting_active,
+    )
     return combined[:top_k]
+
+
+def compare_retrieval_weighting(
+    query: str,
+    db: Session,
+    *,
+    top_k: int = DEFAULT_TOP_K,
+    author_id: Optional[str] = None,
+    author_ids: Optional[list[str]] = None,
+    source_type: Optional[str] = None,
+    domains: Optional[list[str]] = None,
+    expertise_tags: Optional[list[str]] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    published_from: Optional[str] = None,
+    published_to: Optional[str] = None,
+    retrieval_mode: Optional[str] = None,
+) -> dict[str, Any]:
+    common_kwargs: dict[str, Any] = {
+        "top_k": top_k,
+        "author_id": author_id,
+        "author_ids": author_ids,
+        "source_type": source_type,
+        "domains": domains,
+        "expertise_tags": expertise_tags,
+        "year_from": year_from,
+        "year_to": year_to,
+        "published_from": published_from,
+        "published_to": published_to,
+        "retrieval_mode": retrieval_mode,
+    }
+    baseline = retrieve_hybrid(query, db, weighting_enabled=False, **common_kwargs)
+    weighted = retrieve_hybrid(query, db, weighting_enabled=True, **common_kwargs)
+    return {
+        "query": query,
+        "retrieval_mode": retrieval_mode or _RETRIEVAL_MODE,
+        "weighting_feature_flag": weighting_feature_flag(),
+        "default_weighting_enabled": metadata_weighting_enabled(),
+        "baseline_results": [chunk.as_dict() for chunk in baseline],
+        "weighted_results": [chunk.as_dict() for chunk in weighted],
+    }
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────
@@ -548,6 +657,47 @@ def _is_postgres(db: Session) -> bool:
         return (db.bind.dialect.name if db.bind else "unknown") == "postgresql"
     except Exception:
         return False
+
+
+def _rank_chunks(
+    chunks: list[RetrievedChunk],
+    *,
+    top_k: int,
+    stage: str,
+    weighting_enabled: bool,
+) -> list[RetrievedChunk]:
+    if not chunks:
+        return []
+
+    for chunk in chunks:
+        base_score = _base_score_for_stage(chunk, stage)
+        decision = apply_weight_to_score(
+            chunk.metadata_json,
+            base_score=base_score,
+            enabled=weighting_enabled,
+        )
+        chunk.base_score = decision.base_score
+        chunk.metadata_weight = decision.weight
+        chunk.weighted_score = decision.weighted_score
+        chunk.corpus_class = decision.corpus_class
+        chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
+
+    ranked = sorted(chunks, key=ranking_sort_key)
+    return ranked[:top_k]
+
+
+def _base_score_for_stage(chunk: RetrievedChunk, stage: str) -> float:
+    if stage == "dense":
+        return max(0.0, 1.0 - float(chunk.cosine_distance))
+    if stage == "sparse":
+        return float(chunk.ts_rank or 0.0)
+    if stage == "rrf":
+        return float(chunk.rrf_score or 0.0)
+    if stage == "rerank":
+        if chunk.reranker_score is not None:
+            return float(chunk.reranker_score)
+        return _base_score_for_stage(chunk, "dense")
+    return float(chunk.weighted_score or chunk.base_score or chunk.similarity)
 
 
 def _apply_date_filters(

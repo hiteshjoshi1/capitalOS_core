@@ -16,6 +16,8 @@ from sqlalchemy.orm import Session
 from app.rag.eval.metrics import ndcg_at_k, recall_at_k, precision_at_k, mrr
 
 log = logging.getLogger(__name__)
+_NO_REGRESSION_NDCG_DELTA = -0.02
+_NO_REGRESSION_RECALL_DELTA = -0.02
 
 
 @dataclass
@@ -84,6 +86,66 @@ class EvalReport:
         }
 
 
+@dataclass(frozen=True)
+class EvalConfig:
+    label: str
+    retrieval_mode: Optional[str]
+    weighting_enabled: Optional[bool]
+
+
+def no_regression_bar() -> dict[str, float]:
+    return {
+        "mean_ndcg@10_min_delta": _NO_REGRESSION_NDCG_DELTA,
+        "mean_recall@10_min_delta": _NO_REGRESSION_RECALL_DELTA,
+    }
+
+
+def parse_eval_config(label: str) -> EvalConfig:
+    normalized = label.strip().lower()
+    retrieval_mode: Optional[str] = None
+    weighting_enabled: Optional[bool] = None
+
+    if "dense_only" in normalized:
+        retrieval_mode = "dense_only"
+    elif "sparse_only" in normalized:
+        retrieval_mode = "sparse_only"
+    elif "hybrid" in normalized:
+        retrieval_mode = "hybrid"
+
+    if any(token in normalized for token in ("metadata_weighting_on", "weighting_on", "weighted")):
+        weighting_enabled = True
+    elif any(token in normalized for token in ("metadata_weighting_off", "weighting_off", "unweighted")):
+        weighting_enabled = False
+
+    return EvalConfig(
+        label=label,
+        retrieval_mode=retrieval_mode,
+        weighting_enabled=weighting_enabled,
+    )
+
+
+def compare_reports(report_a: EvalReport, report_b: EvalReport) -> dict[str, Any]:
+    delta_ndcg = round(report_b.mean_ndcg_at_10 - report_a.mean_ndcg_at_10, 4)
+    delta_recall = round(report_b.mean_recall_at_10 - report_a.mean_recall_at_10, 4)
+    return {
+        "config_a": report_a.as_dict(),
+        "config_b": report_b.as_dict(),
+        "delta": {
+            "mean_ndcg@10": delta_ndcg,
+            "mean_recall@10": delta_recall,
+            "mean_precision@10": round(
+                report_b.mean_precision_at_10 - report_a.mean_precision_at_10, 4
+            ),
+            "mean_mrr": round(report_b.mean_mrr - report_a.mean_mrr, 4),
+        },
+        "no_regression_bar": no_regression_bar(),
+        "passes_no_regression_bar": (
+            delta_ndcg >= _NO_REGRESSION_NDCG_DELTA
+            and delta_recall >= _NO_REGRESSION_RECALL_DELTA
+        ),
+    }
+
+
 def load_golden_queries(db: Session) -> list[GoldenQuery]:
     """Load all golden queries from rag_eval_golden, grouped by query_text."""
     from app.models.rag import RagEvalGolden
@@ -130,13 +192,23 @@ def run_evaluation(
     """
     Run all golden queries through *retrieval_fn* and return aggregate metrics.
 
-    If *retrieval_fn* is None, the default dense retrieval (retrieve_similar_chunks)
-    is used.  The function must accept (query_text, db, top_k=N) and return a list
-    of objects with a .chunk_id attribute (or plain strings).
+    If *retrieval_fn* is None, the current hybrid retrieval stack is used. The
+    config label can optionally encode the retrieval mode and whether metadata
+    weighting is enabled (for example: "hybrid+metadata_weighting_on").
     """
     if retrieval_fn is None:
-        from app.rag.retrieval import retrieve_similar_chunks
-        retrieval_fn = retrieve_similar_chunks
+        from app.rag.retrieval import retrieve_hybrid
+
+        config = parse_eval_config(config_label)
+
+        def retrieval_fn(query_text: str, session: Session, *, top_k: int = top_k):
+            return retrieve_hybrid(
+                query_text,
+                session,
+                top_k=top_k,
+                retrieval_mode=config.retrieval_mode,
+                weighting_enabled=config.weighting_enabled,
+            )
 
     golden_queries = load_golden_queries(db)
     if not golden_queries:

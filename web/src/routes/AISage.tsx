@@ -1,13 +1,12 @@
 import { useContext, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
+import { Link } from "react-router-dom";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import { AuthContext } from "../context/AuthContext";
 import { api } from "../lib/api";
 import type {
-  ConceptAuthorView,
   ConceptQueryResult,
-  ConceptSuggestedReading,
   RagEvidenceChunk,
   ThesisLiveSource,
   UpdatedThesisView,
@@ -32,6 +31,19 @@ type ConversationTurn = {
 
 function createTurnId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readerRoute(authorId: string, documentId: string): string {
+  return `/author-library/${encodeURIComponent(authorId)}/documents/${encodeURIComponent(documentId)}`;
+}
+
+function passageSortScore(chunk: RagEvidenceChunk): number {
+  if (typeof chunk.ranking_score === "number") return chunk.ranking_score;
+  if (typeof chunk.metadata.ranking_score === "number") return chunk.metadata.ranking_score;
+  if (typeof chunk.metadata.reranker_score === "number") return chunk.metadata.reranker_score;
+  if (typeof chunk.metadata.rrf_score === "number") return chunk.metadata.rrf_score;
+  if (typeof chunk.metadata.ts_rank === "number") return chunk.metadata.ts_rank;
+  return chunk.similarity;
 }
 
 export default function AISage() {
@@ -234,33 +246,31 @@ function AssistantTurn({
   turn: ConversationTurn;
   onToggleSources: () => void;
 }) {
+  const [passageLimit, setPassageLimit] = useState(5);
   const result = turn.result;
   if (!result) return null;
 
   const isThesisMode = result.mode === "thesis";
   const bestPassages = result.best_passages ?? [];
-  const authorViews = result.author_views ?? [];
-  const suggestedReadings = result.suggested_readings ?? [];
+  const sortedPassages = [...bestPassages].sort((a, b) => passageSortScore(b) - passageSortScore(a));
   const liveSourcesRaw = result.live_sources ?? [];
   const pushbackQuestions = result.pushback_questions ?? [];
   const missingInformation = result.missing_information ?? [];
   const keyFacts = result.key_facts ?? [];
   const followUpQuestions = result.follow_up_questions ?? [];
   const updatedThesisView = result.updated_thesis_view ?? null;
+  const visiblePassages = sortedPassages.slice(0, Math.min(passageLimit, sortedPassages.length));
 
   const answerText =
-    result.synthesis ??
     result.weak_evidence_note ??
-    "AI Sage could not ground a useful answer from the current corpus.";
+    (isThesisMode
+      ? "Review the pressure test, ranked passages, and supporting sources below."
+      : "Review the top ranked passages below.");
 
   return (
     <section className="card aiSageBubbleCard aiSageAssistantBubble">
-      {/* Lead answer — synthesis or weak evidence note */}
+      {/* Lead answer — weak evidence note or compact guidance */}
       <p className="aiSageAnswerLead">{answerText}</p>
-
-      {result.weak_evidence_note && result.synthesis ? (
-        <p className="muted aiSageNote">{result.weak_evidence_note}</p>
-      ) : null}
 
       {/* ── Thesis mode sections ─────────────────────────────────────── */}
 
@@ -303,35 +313,6 @@ function AssistantTurn({
           </ul>
         </section>
       ) : null}
-
-      {/* ── Author views (shared between concept and thesis mode) ─────── */}
-
-      {authorViews.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">{isThesisMode ? "Author Views" : "Perspectives"}</div>
-          <div className="aiSageAuthorViewList">
-            {authorViews.map((av: ConceptAuthorView) => (
-              <article key={av.author_id} className="aiSageAuthorViewCard">
-                <div className="aiSageAuthorViewHeader">
-                  <strong>{av.author_name}</strong>
-                </div>
-                <p className="aiSageAuthorViewText">{av.view}</p>
-                {av.key_passages.length > 0 ? (
-                  <div className="aiSageKeyPassages">
-                    {av.key_passages.map((passage, index) => (
-                      <blockquote key={index} className="aiSageKeyPassage">
-                        {passage.length > 260 ? `${passage.slice(0, 260)}...` : passage}
-                      </blockquote>
-                    ))}
-                  </div>
-                ) : null}
-              </article>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      {/* ── Synthesis (shared) ────────────────────────────────────────── */}
 
       {/* ── Critique (shared) ────────────────────────────────────────── */}
       {result.critique ? (
@@ -393,39 +374,102 @@ function AssistantTurn({
         </section>
       ) : null}
 
-      {/* ── Suggested readings (concept mode) ───────────────────────── */}
-      {!isThesisMode && suggestedReadings.length > 0 ? (
+      {/* ── Top passages (shared) ───────────────────────────────────── */}
+      {bestPassages.length > 0 ? (
         <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Suggested Readings</div>
-          <div className="aiSageSuggestedReadingList">
-            {suggestedReadings.map((sr: ConceptSuggestedReading, index: number) => (
-              <article key={index} className="aiSageSuggestedReadingCard">
-                <div className="aiSageSuggestedReadingHeader">
-                  <strong>{sr.author_name}</strong>
-                  <span className="muted aiSageSuggestedReadingReason">{sr.reason}</span>
-                </div>
-                <p className="aiSageEvidenceText">
-                  {sr.passage.length > 400 ? `${sr.passage.slice(0, 400)}...` : sr.passage}
-                </p>
-                {sr.source_url ? (
-                  <div className="muted aiSageEvidenceMeta">{sr.source_url}</div>
-                ) : null}
-              </article>
-            ))}
+          <div className="aiSageSourcesHeader">
+            <div>
+              <div className="aiSageSectionTitle">Top Passages</div>
+              <p className="muted aiSageSourcesHint">
+                Highest-ranked corpus passages for this answer, in ranking order.
+              </p>
+            </div>
+            {sortedPassages.length > 5 ? (
+              <div className="aiSagePassageLimitControls" role="group" aria-label="Passage count">
+                {[5, 10].map((limit) => (
+                  <button
+                    key={limit}
+                    type="button"
+                    className={`btn aiSagePassageLimitBtn ${passageLimit === limit ? "aiSagePassageLimitBtnActive" : ""}`}
+                    onClick={() => setPassageLimit(limit)}
+                  >
+                    Top {Math.min(limit, sortedPassages.length)}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+
+          <div className="aiSageEvidenceList">
+            {visiblePassages.map((chunk: RagEvidenceChunk, index: number) => {
+              const contextText =
+                typeof chunk.metadata.context_text === "string"
+                  ? chunk.metadata.context_text
+                  : null;
+              const rerankerScore =
+                typeof chunk.metadata.reranker_score === "number"
+                  ? chunk.metadata.reranker_score
+                  : null;
+              const documentId = typeof chunk.document_id === "string"
+                ? chunk.document_id
+                : typeof chunk.metadata.document_id === "string"
+                  ? chunk.metadata.document_id
+                  : null;
+              const rankingScore = passageSortScore(chunk);
+              return (
+                <article key={chunk.chunk_id} className="aiSageEvidenceCard">
+                  <div className="aiSageEvidenceHeader">
+                    <div>
+                      <strong>{chunk.author_name}</strong>
+                      <span className="muted aiSageEvidenceRank">Passage {index + 1}</span>
+                      <span className="aiSagePill aiSagePillCorpus">Thinker Corpus</span>
+                      {rerankerScore !== null ? <span className="aiSagePill">Reranked</span> : null}
+                    </div>
+                    <span className="aiSagePill">
+                      Rank score {rankingScore.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="aiSageEvidenceText">
+                    {chunk.text.length > 520 ? `${chunk.text.slice(0, 520)}...` : chunk.text}
+                  </p>
+                  <div className="muted aiSageEvidenceMeta">
+                    {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
+                    {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
+                    {` · semantic ${(chunk.similarity * 100).toFixed(1)}%`}
+                  </div>
+                  <div className="aiSageEvidenceActions">
+                    {documentId ? (
+                      <Link
+                        className="btn aiSageEvidenceLink"
+                        to={readerRoute(chunk.author_id, documentId)}
+                      >
+                        Read more
+                      </Link>
+                    ) : null}
+                    {contextText && contextText !== chunk.text ? (
+                      <details>
+                        <summary>Show surrounding context</summary>
+                        <p className="aiSageEvidenceText">
+                          {contextText.length > 1200 ? `${contextText.slice(0, 1200)}...` : contextText}
+                        </p>
+                      </details>
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
           </div>
         </section>
       ) : null}
 
-      {/* ── Sources (collapsible) ─────────────────────────────────────── */}
-      {bestPassages.length > 0 || liveSourcesRaw.length > 0 ? (
+      {/* ── Additional sources (collapsible) ─────────────────────────── */}
+      {liveSourcesRaw.length > 0 ? (
         <section className="aiSageResponseSection">
           <div className="aiSageSourcesHeader">
             <div>
-              <div className="aiSageSectionTitle">Sources</div>
+              <div className="aiSageSectionTitle">Additional Sources</div>
               <p className="muted aiSageSourcesHint">
-                {isThesisMode
-                  ? "Corpus passages and live research used in this analysis."
-                  : "Open to inspect the passages behind the answer."}
+                Live research inputs used alongside the ranked corpus passages above.
               </p>
             </div>
             <button
@@ -434,57 +478,13 @@ function AssistantTurn({
               onClick={onToggleSources}
             >
               {turn.showSources
-                ? "Hide Sources"
-                : `Show Sources (${bestPassages.length + liveSourcesRaw.length})`}
+                ? "Hide Additional Sources"
+                : `Show Additional Sources (${liveSourcesRaw.length})`}
             </button>
           </div>
 
           {turn.showSources ? (
             <div className="aiSageEvidenceList">
-              {/* Corpus evidence — thinker corpus */}
-              {bestPassages.map((chunk: RagEvidenceChunk, index: number) => (
-                (() => {
-                  const contextText =
-                    typeof chunk.metadata.context_text === "string"
-                      ? chunk.metadata.context_text
-                      : null;
-                  const rerankerScore =
-                    typeof chunk.metadata.reranker_score === "number"
-                      ? chunk.metadata.reranker_score
-                      : null;
-                  return (
-                    <article key={chunk.chunk_id} className="aiSageEvidenceCard">
-                      <div className="aiSageEvidenceHeader">
-                        <div>
-                          <strong>{chunk.author_name}</strong>
-                          <span className="muted aiSageEvidenceRank">Passage {index + 1}</span>
-                          <span className="aiSagePill aiSagePillCorpus">Thinker Corpus</span>
-                          {rerankerScore !== null ? <span className="aiSagePill">Reranked</span> : null}
-                        </div>
-                        <span className="aiSagePill">
-                          {(chunk.similarity * 100).toFixed(1)}% relevance
-                        </span>
-                      </div>
-                      <p className="aiSageEvidenceText">
-                        {chunk.text.length > 520 ? `${chunk.text.slice(0, 520)}...` : chunk.text}
-                      </p>
-                      {contextText && contextText !== chunk.text ? (
-                        <details>
-                          <summary>Show surrounding context</summary>
-                          <p className="aiSageEvidenceText">
-                            {contextText.length > 1200 ? `${contextText.slice(0, 1200)}...` : contextText}
-                          </p>
-                        </details>
-                      ) : null}
-                      <div className="muted aiSageEvidenceMeta">
-                        {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
-                        {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
-                      </div>
-                    </article>
-                  );
-                })()
-              ))}
-
               {/* Live sources — web / filings */}
               {liveSourcesRaw.map((src: ThesisLiveSource, index: number) => (
                 <article key={index} className="aiSageEvidenceCard">

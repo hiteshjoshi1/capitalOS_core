@@ -56,7 +56,12 @@ from app.rag.ingestion.pipeline import (
 )
 from app.rag.ingestion.selector import SelectiveIngestionOptions
 from app.rag.ingestion.source_presets import apply_source_preset
-from app.rag.retrieval import retrieve_similar_chunks, retrieve_with_constraints
+from app.rag.retrieval import (
+    compare_retrieval_weighting,
+    retrieve_similar_chunks,
+    retrieve_with_constraints,
+)
+from app.rag.retrieval_weighting import weighting_feature_flag
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/rag", tags=["rag"], dependencies=[Depends(require_current_user)])
@@ -235,6 +240,30 @@ class RetrieveSmokeIn(BaseModel):
 class RetrieveSmokeOut(BaseModel):
     query: str
     results: list[dict]
+
+
+class RetrieveCompareIn(BaseModel):
+    query: str
+    top_k: int = 5
+    author_id: Optional[str] = None
+    author_ids: Optional[list[str]] = None
+    source_type: Optional[str] = None
+    year_from: Optional[int] = None
+    year_to: Optional[int] = None
+    published_from: Optional[str] = None
+    published_to: Optional[str] = None
+    domains: Optional[list[str]] = None
+    expertise_tags: Optional[list[str]] = None
+    retrieval_mode: str = Field("hybrid", pattern="^(hybrid|dense_only|sparse_only)$")
+
+
+class RetrieveCompareOut(BaseModel):
+    query: str
+    retrieval_mode: str
+    weighting_feature_flag: str
+    default_weighting_enabled: bool
+    baseline_results: list[dict]
+    weighted_results: list[dict]
 
 
 class DiscoveryResultOut(BaseModel):
@@ -2021,6 +2050,27 @@ def retrieve_smoke(body: RetrieveSmokeIn, db: Session = Depends(get_db)):
         query=body.query,
         results=[r.as_dict() for r in results],
     )
+
+
+@router.post("/retrieve-compare", response_model=RetrieveCompareOut)
+def retrieve_compare(body: RetrieveCompareIn, db: Session = Depends(get_db)):
+    comparison = compare_retrieval_weighting(
+        body.query,
+        db,
+        top_k=body.top_k,
+        author_id=body.author_id,
+        author_ids=body.author_ids,
+        source_type=body.source_type,
+        domains=body.domains,
+        expertise_tags=body.expertise_tags,
+        year_from=body.year_from,
+        year_to=body.year_to,
+        published_from=body.published_from,
+        published_to=body.published_to,
+        retrieval_mode=body.retrieval_mode,
+    )
+    comparison["weighting_feature_flag"] = weighting_feature_flag()
+    return RetrieveCompareOut(**comparison)
 
 
 # ── Private helpers ───────────────────────────────────────────────────────────

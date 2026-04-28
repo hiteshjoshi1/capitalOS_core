@@ -440,4 +440,4 @@ rag-eval-compare:
 	docker compose exec -T api python -m app.rag.eval.cli compare --a $(CONFIG_A) --b $(CONFIG_B)
 
 rag-eval-seed:
-	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/../data/fixtures/rag_golden_queries.yaml
+	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/data/fixtures/rag_golden_queries.yaml

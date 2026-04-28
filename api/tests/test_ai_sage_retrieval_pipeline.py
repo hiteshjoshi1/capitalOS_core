@@ -133,7 +133,38 @@ def test_reranking_uses_heuristic_without_cross_encoder():
     assert "c3" in chunk_ids  # best keyword overlap should appear
 
 
-def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
+def test_heuristic_ranking_boosts_explicit_topic_entities_and_ignores_stopword_overlap():
+    import app.rag.concept_mode as cm
+
+    candidates = [
+        _mk_chunk(
+            "generic-byd",
+            text="Charlie Munger says he avoids complicated technology and prefers simple games with an edge. BYD is mentioned in passing.",
+            cosine_distance=0.02,
+            author_id="charlie_munger",
+            author_name="Charlie Munger",
+        ),
+        _mk_chunk(
+            "byd-li-lu",
+            text="We got into BYD through Li Lu, and Charlie Munger said it was a remarkable company.",
+            cosine_distance=0.08,
+            chunk_index=1,
+            author_id="charlie_munger",
+            author_name="Charlie Munger",
+        ),
+    ]
+
+    ranked = cm._rerank_candidate_chunks(
+        "What does Munger say about BYD in conversation with Li Lu ?",
+        candidates,
+        top_k=2,
+        topic_entities=["BYD", "Li Lu"],
+    )
+
+    assert [chunk.chunk_id for chunk in ranked][:2] == ["byd-li-lu", "generic-byd"]
+
+
+def test_context_expansion_is_used_for_ranked_passages_and_critique():
     import app.rag.concept_mode as cm
 
     candidates = [
@@ -170,7 +201,7 @@ def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
         return expanded
 
     with (
-        patch.dict("os.environ", {"AI_SAGE_CRITIQUE_ENABLED": "1", "AI_SAGE_SYNTHESIS_ENABLED": "1"}, clear=False),
+        patch.dict("os.environ", {"AI_SAGE_CRITIQUE_ENABLED": "1"}, clear=False),
         patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="open")),
         patch("app.rag.concept_mode.select_authors", return_value=selected),
         patch("app.rag.concept_mode._author_entries", return_value=author_entries),
@@ -179,10 +210,7 @@ def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
         patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=_expand),
         patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
         patch("app.rag.concept_mode.inference_available", return_value=True),
-        patch("app.rag.concept_mode._llm_author_view", return_value="author view") as mock_author_view,
-        patch("app.rag.concept_mode._llm_synthesis", return_value="synthesis text"),
         patch("app.rag.concept_mode._llm_critique", return_value="critique text"),
-        patch("app.rag.concept_mode._llm_suggested_readings", return_value=[]),
     ):
         result = cm.execute_concept_query(
             "What does Nick Sleep mean by scale economies shared?",
@@ -190,81 +218,9 @@ def test_context_expansion_is_used_for_author_view_synthesis_and_critique():
             top_k_chunks=2,
         )
 
-    llm_call = mock_author_view.call_args
-    assert llm_call is not None
-    passages = llm_call.args[4]
-    assert any("[expanded context]" in passage for passage in passages)
     assert all("[expanded context]" not in passage["text"] for passage in result.best_passages)
     assert all("[expanded context]" in str(passage["metadata"].get("context_text", "")) for passage in result.best_passages)
-    assert result.synthesis == "synthesis text"
     assert result.critique == "critique text"
-
-
-def test_single_author_queries_use_llm_author_view_and_single_author_summary():
-    import app.rag.concept_mode as cm
-
-    candidates = [
-        _mk_chunk("b1", text="Charlie became my partner and changed Berkshire.", cosine_distance=0.01),
-        _mk_chunk("b2", text="Charlie and I think pretty much alike.", cosine_distance=0.02, document_id="doc-2", chunk_index=1),
-    ]
-    selected = [
-        SelectedAuthor(
-            author_id="warren_buffett",
-            name="Warren Buffett",
-            score=5.0,
-            domains=["investing"],
-            expertise_tags=[],
-            overall_weight=4.0,
-            role_type="investor",
-        )
-    ]
-    author_entries = [{"author_id": "warren_buffett", "name": "Warren Buffett"}]
-
-    def _expand(chunks: list[RetrievedChunk], *_args, **_kwargs) -> list[RetrievedChunk]:
-        expanded: list[RetrievedChunk] = []
-        for chunk in chunks:
-            expanded.append(
-                RetrievedChunk(
-                    chunk_id=chunk.chunk_id,
-                    document_id=chunk.document_id,
-                    chunk_index=chunk.chunk_index,
-                    text=f"{chunk.text} [expanded context]",
-                    token_count=chunk.token_count,
-                    metadata_json=chunk.metadata_json,
-                    cosine_distance=chunk.cosine_distance,
-                )
-            )
-        return expanded
-
-    with (
-        patch.dict("os.environ", {"AI_SAGE_SYNTHESIS_ENABLED": "1"}, clear=False),
-        patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="single_author", author_ids=["warren_buffett"])),
-        patch("app.rag.concept_mode.select_authors", return_value=selected),
-        patch("app.rag.concept_mode._author_entries", return_value=author_entries),
-        patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
-        patch("app.rag.concept_mode.reranker_available", return_value=False),
-        patch("app.rag.concept_mode.routing_available", return_value=False),
-        patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=_expand),
-        patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
-        patch("app.rag.concept_mode.inference_available", return_value=True),
-        patch("app.rag.concept_mode._llm_author_view", return_value="buffett view") as mock_author_view,
-        patch("app.rag.concept_mode._llm_single_author_summary", return_value="buffett summary") as mock_single_summary,
-        patch("app.rag.concept_mode._llm_synthesis", return_value="cross author synthesis") as mock_cross_synthesis,
-    ):
-        result = cm.execute_concept_query(
-            "What does Warren Buffett say about Charlie Munger?",
-            MagicMock(),
-            top_k_chunks=2,
-        )
-
-    assert mock_author_view.called
-    passages = mock_author_view.call_args.args[4]
-    assert any("[expanded context]" in passage for passage in passages)
-    assert mock_single_summary.called
-    summary_passages = mock_single_summary.call_args.args[2]
-    assert any("[expanded context]" in passage for passage in summary_passages)
-    assert not mock_cross_synthesis.called
-    assert result.synthesis == "buffett summary"
 
 
 def test_buffett_query_surfaces_results_by_heuristic_rank():

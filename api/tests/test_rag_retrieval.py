@@ -32,6 +32,7 @@ def _make_chunk(
     ts_rank: Optional[float] = None,
     rrf_score: Optional[float] = None,
     reranker_score: Optional[float] = None,
+    metadata: Optional[dict[str, Any]] = None,
 ) -> Any:
     from app.rag.retrieval import RetrievedChunk
 
@@ -41,7 +42,7 @@ def _make_chunk(
         chunk_index=0,
         text=text,
         token_count=10,
-        metadata_json={},
+        metadata_json=metadata or {},
         cosine_distance=cosine_distance,
         ts_rank=ts_rank,
         rrf_score=rrf_score,
@@ -288,6 +289,84 @@ class TestRetrieveHybrid:
             result = retrieve_hybrid("test query", db, top_k=5)
 
         assert len(result) <= 5
+
+    def test_weighting_can_promote_higher_authority_chunks(self):
+        """Metadata weighting softly promotes canonical material without filtering."""
+        from app.rag.retrieval import retrieve_hybrid
+
+        canonical = _make_chunk(
+            "canonical",
+            cosine_distance=0.15,
+            metadata={"work_type": "talk", "canonical_status": "canonical", "dedupe_priority": 40},
+        )
+        notes = _make_chunk(
+            "notes",
+            cosine_distance=0.1,
+            metadata={"work_type": "meeting_notes", "collection": "meeting notes"},
+        )
+
+        with patch("app.rag.retrieval._RETRIEVAL_MODE", "hybrid"), \
+             patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[notes, canonical]), \
+             patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[notes, canonical]):
+            db = MagicMock()
+            result = retrieve_hybrid("capital allocation", db, top_k=2, weighting_enabled=True)
+
+        assert [chunk.chunk_id for chunk in result] == ["canonical", "notes"]
+        assert result[0].metadata_weight > 1.0
+        assert result[1].metadata_weight < 1.0
+
+    def test_weighting_missing_metadata_falls_back_to_baseline_scores(self):
+        from app.rag.retrieval import retrieve_hybrid
+
+        left = _make_chunk("left", cosine_distance=0.1)
+        right = _make_chunk("right", cosine_distance=0.2)
+
+        with patch("app.rag.retrieval._RETRIEVAL_MODE", "dense_only"), \
+             patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[left, right]):
+            db = MagicMock()
+            result = retrieve_hybrid("test", db, top_k=2, weighting_enabled=True)
+
+        assert [chunk.chunk_id for chunk in result] == ["left", "right"]
+        assert all(chunk.metadata_weight == pytest.approx(1.0) for chunk in result)
+
+
+class TestMetadataWeightingHelpers:
+    def test_merge_retrieval_metadata_includes_document_fields_and_hint(self):
+        from app.rag.retrieval_weighting import merge_retrieval_metadata
+
+        merged = merge_retrieval_metadata(
+            {"author_id": "charlie_munger"},
+            collection="annual meeting",
+            canonical_status="canonical",
+            dedupe_priority=75,
+            work_type="talk",
+            document_metadata={"retrieval_weight": 1.07},
+        )
+
+        assert merged["collection"] == "annual meeting"
+        assert merged["canonical_status"] == "canonical"
+        assert merged["dedupe_priority"] == 75
+        assert merged["work_type"] == "talk"
+        assert merged["retrieval_weight"] == pytest.approx(1.07)
+
+    def test_apply_weight_to_score_defaults_to_neutral_when_metadata_missing(self):
+        from app.rag.retrieval_weighting import apply_weight_to_score
+
+        decision = apply_weight_to_score(None, base_score=0.8, enabled=True)
+        assert decision.weight == pytest.approx(1.0)
+        assert decision.weighted_score == pytest.approx(0.8)
+
+    def test_apply_weight_to_score_downweights_reference_material(self):
+        from app.rag.retrieval_weighting import apply_weight_to_score
+
+        decision = apply_weight_to_score(
+            {"work_type": "reference", "canonical_status": "reference"},
+            base_score=0.9,
+            enabled=True,
+        )
+        assert decision.corpus_class == "reference_material"
+        assert decision.weight < 1.0
+        assert decision.weighted_score < decision.base_score
 
 
 # ── Filter compatibility tests ────────────────────────────────────────────────
