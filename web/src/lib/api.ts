@@ -1090,6 +1090,9 @@ export type RagEvidenceChunk = {
   text: string;
   similarity: number;
   metadata: Record<string, unknown>;
+  document_id?: string;
+  ranking_score?: number;
+  score_type?: string;
 };
 
 export type RagQueryResult = {
@@ -1110,21 +1113,6 @@ export type RagCompanyContextResult = {
   evidence_sufficient: boolean;
 };
 
-export type ConceptAuthorView = {
-  author_id: string;
-  author_name: string;
-  view: string;
-  key_passages: string[];
-};
-
-export type ConceptSuggestedReading = {
-  author_id: string;
-  author_name: string;
-  passage: string;
-  source_url: string | null;
-  reason: string;
-};
-
 export type ThesisLiveSource = {
   url: string;
   title: string;
@@ -1141,10 +1129,7 @@ export type UpdatedThesisView = {
 export type ConceptQueryResult = {
   query: string;
   best_passages: RagEvidenceChunk[];
-  author_views: ConceptAuthorView[];
-  synthesis: string | null;
   critique: string | null;
-  suggested_readings: ConceptSuggestedReading[];
   evidence_sufficient: boolean;
   weak_evidence_note: string | null;
   // Thesis mode fields — present and populated only when mode === "thesis"

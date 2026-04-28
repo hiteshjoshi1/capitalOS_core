@@ -861,6 +861,39 @@ class TestRagRetrieveSmokeAPI:
             client.post("/rag/authors/sync-config")
 
 
+class TestRagRetrieveCompareAPI:
+    def test_retrieve_compare_returns_weighted_and_unweighted_results(self, client, rag_yaml_file):
+        """Comparison endpoint exposes both baseline and weighted retrieval variants."""
+        self._ensure_author(client, rag_yaml_file)
+
+        with patch("app.routers.rag.compare_retrieval_weighting") as mock_compare:
+            mock_compare.return_value = {
+                "query": "capital allocation",
+                "retrieval_mode": "hybrid",
+                "weighting_feature_flag": "RAG_RETRIEVAL_METADATA_WEIGHTING_ENABLED",
+                "default_weighting_enabled": False,
+                "baseline_results": [{"chunk_id": "baseline-1", "similarity": 0.8}],
+                "weighted_results": [{"chunk_id": "weighted-1", "similarity": 0.82, "metadata_weight": 1.08}],
+            }
+
+            resp = client.post(
+                "/rag/retrieve-compare",
+                json={"query": "capital allocation", "top_k": 3, "retrieval_mode": "hybrid"},
+            )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["query"] == "capital allocation"
+        assert body["retrieval_mode"] == "hybrid"
+        assert body["weighting_feature_flag"] == "RAG_RETRIEVAL_METADATA_WEIGHTING_ENABLED"
+        assert body["baseline_results"][0]["chunk_id"] == "baseline-1"
+        assert body["weighted_results"][0]["chunk_id"] == "weighted-1"
+
+    def _ensure_author(self, client, rag_yaml_file):
+        with patch.dict(os.environ, {"RAG_AUTHORS_CONFIG": rag_yaml_file}):
+            client.post("/rag/authors/sync-config")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Retrieval unit (no DB required — tests the RetrievedChunk helper)
 # ─────────────────────────────────────────────────────────────────────────────

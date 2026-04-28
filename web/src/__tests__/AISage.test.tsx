@@ -48,7 +48,9 @@ const MOCK_CONCEPT_RESULT = {
       author_name: "Warren Buffett",
       text: "A wonderful business can compound capital over time.",
       similarity: 0.91,
+      ranking_score: 0.91,
       metadata: {
+        document_id: "doc-buffett",
         title: "Letter",
         source_url: "https://example.com/letters",
         context_text:
@@ -62,34 +64,14 @@ const MOCK_CONCEPT_RESULT = {
       author_name: "Nick Sleep",
       text: "Businesses that share scale benefits with customers build durable advantages.",
       similarity: 0.85,
-      metadata: { title: "Nomad Letters" },
+      ranking_score: 0.85,
+      metadata: {
+        document_id: "doc-sleep",
+        title: "Nomad Letters",
+      },
     },
   ],
-  author_views: [
-    {
-      author_id: "warren_buffett",
-      author_name: "Warren Buffett",
-      view: "A good business earns high returns on capital with durable competitive advantage.",
-      key_passages: ["A wonderful business can compound capital over time."],
-    },
-    {
-      author_id: "nick_sleep",
-      author_name: "Nick Sleep",
-      view: "A good business is a destination — customers return because value compounds on their behalf.",
-      key_passages: ["Businesses that share scale benefits with customers build durable advantages."],
-    },
-  ],
-  synthesis: "Both authors agree that a good business earns high returns over a long horizon, but Buffett focuses on competitive moat while Sleep emphasises customer-aligned compounding.",
   critique: "These views may underweight the role of execution and management quality in sustaining advantage.",
-  suggested_readings: [
-    {
-      author_id: "warren_buffett",
-      author_name: "Warren Buffett",
-      passage: "A wonderful business can compound capital over time.",
-      source_url: "https://example.com/letters",
-      reason: "Top-matched passage from Warren Buffett for this concept.",
-    },
-  ],
   evidence_sufficient: true,
   weak_evidence_note: null,
 };
@@ -163,7 +145,7 @@ describe("AISage Concept Mode", () => {
     resolveQuery(MOCK_CONCEPT_RESULT);
 
     expect(
-      await screen.findByText(/Both authors agree that a good business/i),
+      await screen.findByText(/Review the top ranked passages below/i),
     ).toBeInTheDocument();
   });
 
@@ -180,11 +162,11 @@ describe("AISage Concept Mode", () => {
 
     expect(await screen.findByText("What makes a good business?")).toBeInTheDocument();
     expect(
-      screen.getByText(/Both authors agree that a good business/i),
+      screen.getByText(/Review the top ranked passages below/i),
     ).toBeInTheDocument();
   });
 
-  it("does not render repeated author metadata cards", async () => {
+  it("does not render old perspective scaffolding", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_CONCEPT_RESULT);
 
     const user = userEvent.setup();
@@ -195,33 +177,14 @@ describe("AISage Concept Mode", () => {
       "What makes a good business?{Enter}",
     );
 
-    await screen.findByText("Perspectives");
+    await screen.findByText("Top Passages");
     expect(screen.queryByText("Relevant Authors")).not.toBeInTheDocument();
+    expect(screen.queryByText("Perspectives")).not.toBeInTheDocument();
     expect(screen.queryByText("Score 4.50")).not.toBeInTheDocument();
     expect(screen.queryByText("Stay within competence")).not.toBeInTheDocument();
   });
 
-  it("renders distinct author perspectives inside the assistant answer", async () => {
-    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_CONCEPT_RESULT);
-
-    const user = userEvent.setup();
-    renderAISage();
-
-    await user.type(
-      screen.getByPlaceholderText(/Ask AI Sage anything/i),
-      "What makes a good business?{Enter}",
-    );
-
-    expect(await screen.findByText("Perspectives")).toBeInTheDocument();
-    expect(
-      screen.getByText(/A good business earns high returns on capital/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(/A good business is a destination/i),
-    ).toBeInTheDocument();
-  });
-
-  it("renders the synthesis as the lead assistant answer", async () => {
+  it("renders compact guidance as the lead assistant answer", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_CONCEPT_RESULT);
 
     const user = userEvent.setup();
@@ -233,7 +196,7 @@ describe("AISage Concept Mode", () => {
     );
 
     expect(
-      await screen.findByText(/Both authors agree that a good business/i),
+      await screen.findByText(/Review the top ranked passages below/i),
     ).toBeInTheDocument();
   });
 
@@ -254,7 +217,7 @@ describe("AISage Concept Mode", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders suggested readings section", async () => {
+  it("renders top passages instead of heuristic suggested readings", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_CONCEPT_RESULT);
 
     const user = userEvent.setup();
@@ -265,10 +228,15 @@ describe("AISage Concept Mode", () => {
       "What makes a good business?{Enter}",
     );
 
-    expect(await screen.findByText("Suggested Readings")).toBeInTheDocument();
+    expect(await screen.findByText("Top Passages")).toBeInTheDocument();
+    expect(screen.queryByText("Suggested Readings")).not.toBeInTheDocument();
+    expect(screen.getByText("Passage 1")).toBeInTheDocument();
+    expect(screen.getByText("Passage 2")).toBeInTheDocument();
+    expect(screen.getByText("Rank score 0.91")).toBeInTheDocument();
+    expect(screen.getByText("Reranked")).toBeInTheDocument();
   });
 
-  it("hides passages by default and shows them on demand", async () => {
+  it("shows read more links for all ranked passages and optional surrounding context", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_CONCEPT_RESULT);
 
     const user = userEvent.setup();
@@ -279,20 +247,52 @@ describe("AISage Concept Mode", () => {
       "What makes a good business?{Enter}",
     );
 
-    const showSources = await screen.findByRole("button", { name: /Show Sources/i });
-
-    // Evidence text should not appear in the sources panel (hidden), though it may
-    // appear in key_passages within author views. Confirm the source panel toggle works.
-    expect(screen.queryByText(/Passage 1/i)).not.toBeInTheDocument();
-
-    await user.click(showSources);
-
-    // After clicking, the evidence panel opens and shows passage labels
-    expect(screen.getByText("Passage 1")).toBeInTheDocument();
-    expect(screen.getByText("91.0% relevance")).toBeInTheDocument();
-    expect(screen.getByText("Reranked")).toBeInTheDocument();
+    await screen.findByText("Top Passages");
     expect(screen.getByText("Show surrounding context")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Hide Sources" })).toBeInTheDocument();
+    const readMoreLinks = screen.getAllByRole("link", { name: "Read more" });
+    expect(readMoreLinks).toHaveLength(2);
+    expect(readMoreLinks[0]).toHaveAttribute(
+      "href",
+      "/author-library/warren_buffett/documents/doc-buffett",
+    );
+    expect(readMoreLinks[1]).toHaveAttribute(
+      "href",
+      "/author-library/nick_sleep/documents/doc-sleep",
+    );
+  });
+
+  it("expands from top 5 to top 10 ranked passages when configured", async () => {
+    vi.mocked(api.aiSageQuery).mockResolvedValue({
+      ...MOCK_CONCEPT_RESULT,
+      best_passages: Array.from({ length: 7 }, (_, index) => ({
+        chunk_id: `chunk-${index + 1}`,
+        author_id: "charlie_munger",
+        author_name: "Charlie Munger",
+        text: `Passage text ${index + 1}`,
+        similarity: 0.99 - index * 0.01,
+        ranking_score: 100 - index,
+        metadata: {
+          document_id: `doc-${index + 1}`,
+          source_url: `https://example.com/${index + 1}`,
+        },
+      })),
+    });
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(
+      screen.getByPlaceholderText(/Ask AI Sage anything/i),
+      "What makes a good business?{Enter}",
+    );
+
+    await screen.findByText("Top Passages");
+    expect(screen.queryByText("Passage 6")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Top 7" }));
+
+    expect(screen.getByText("Passage 6")).toBeInTheDocument();
+    expect(screen.getByText("Passage 7")).toBeInTheDocument();
   });
 
   it("shows weak evidence note when corpus is insufficient", async () => {
@@ -301,10 +301,7 @@ describe("AISage Concept Mode", () => {
       evidence_sufficient: false,
       weak_evidence_note:
         "The author corpus does not contain passages strongly relevant to this question.",
-      author_views: [],
-      synthesis: null,
       critique: null,
-      suggested_readings: [],
       best_passages: [],
     });
 
@@ -326,10 +323,7 @@ describe("AISage Concept Mode", () => {
       ...MOCK_CONCEPT_RESULT,
       evidence_sufficient: false,
       weak_evidence_note: "Corpus is thin.",
-      author_views: [],
-      synthesis: null,
       critique: null,
-      suggested_readings: [],
       best_passages: [],
     });
 
@@ -350,7 +344,7 @@ describe("AISage Concept Mode", () => {
       .mockResolvedValueOnce({
         ...MOCK_CONCEPT_RESULT,
         query: "How should I think about network effects?",
-        synthesis: "Network effects matter when they reinforce user value and lower customer acquisition costs over time.",
+        weak_evidence_note: "Network effects matter when they reinforce user value and lower customer acquisition costs over time.",
       });
 
     const user = userEvent.setup();
@@ -358,7 +352,7 @@ describe("AISage Concept Mode", () => {
 
     const input = screen.getByPlaceholderText(/Ask AI Sage anything/i);
     await user.type(input, "What makes a good business?{Enter}");
-    await screen.findByText(/Both authors agree that a good business/i);
+    await screen.findByText(/Review the top ranked passages below/i);
 
     await user.type(screen.getByPlaceholderText(/Ask AI Sage anything/i), "How should I think about network effects?{Enter}");
     await screen.findByText(/Network effects matter when they reinforce user value/i);
@@ -416,23 +410,7 @@ const MOCK_THESIS_RESULT = {
       metadata: { title: "Letter", source_url: "https://example.com/letters" },
     },
   ],
-  author_views: [
-    {
-      author_id: "warren_buffett",
-      author_name: "Warren Buffett",
-      view: "Tencent Music operates in a space where platform control matters, but the music rights cost structure creates a ceiling on return on capital.",
-      key_passages: ["A wonderful business can compound capital over time."],
-    },
-    {
-      author_id: "nick_sleep",
-      author_name: "Nick Sleep",
-      view: "The key question is whether Tencent Music shares scale benefits with users or extracts value from them.",
-      key_passages: [],
-    },
-  ],
-  synthesis: "Both Buffett and Sleep would focus on the sustainability of capital returns and whether the platform genuinely compounds value for users.",
   critique: "The thesis may overestimate the durability of the moat given rising competition from short-video platforms for music consumption.",
-  suggested_readings: [],
   evidence_sufficient: true,
   weak_evidence_note: null,
   thesis_question: "Is Tencent Music's moat durable enough to support a long-term investment thesis?",
@@ -544,22 +522,6 @@ describe("AISage Thesis Mode", () => {
     expect(screen.getByText(/88M paying subscribers/i)).toBeInTheDocument();
   });
 
-  it("renders author views in thesis mode", async () => {
-    vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
-
-    const user = userEvent.setup();
-    renderAISage();
-
-    await user.type(
-      screen.getByPlaceholderText(/Ask AI Sage anything/i),
-      "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
-    );
-
-    expect(await screen.findByText("Author Views")).toBeInTheDocument();
-    expect(screen.getByText(/platform control matters/i)).toBeInTheDocument();
-    expect(screen.getByText(/shares scale benefits with users/i)).toBeInTheDocument();
-  });
-
   it("renders critique section in thesis mode", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
 
@@ -611,7 +573,7 @@ describe("AISage Thesis Mode", () => {
     expect(api.aiSageQuery).toHaveBeenCalledTimes(1);
   });
 
-  it("shows live sources in the collapsible sources panel", async () => {
+  it("shows live sources in the collapsible additional sources panel", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
 
     const user = userEvent.setup();
@@ -622,13 +584,13 @@ describe("AISage Thesis Mode", () => {
       "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
     );
 
-    const showSources = await screen.findByRole("button", { name: /Show Sources/i });
+    const showSources = await screen.findByRole("button", { name: /Show Additional Sources/i });
     await user.click(showSources);
 
     // Live sources are visible after expanding
     expect(screen.getByText("Tencent Music 20-F Filing")).toBeInTheDocument();
     expect(screen.getByText("SEC Filing")).toBeInTheDocument();
-    // Corpus sources also present
+    // Corpus passages remain visible in the main ranked list
     expect(screen.getByText("Thinker Corpus")).toBeInTheDocument();
   });
 
@@ -643,7 +605,7 @@ describe("AISage Thesis Mode", () => {
       "Here is my thesis on Tencent Music. Pressure test it.{Enter}",
     );
 
-    const showSources = await screen.findByRole("button", { name: /Show Sources/i });
+    const showSources = await screen.findByRole("button", { name: /Show Additional Sources/i });
     await user.click(showSources);
 
     // Corpus pill
@@ -673,7 +635,7 @@ describe("AISage Thesis Mode", () => {
       "What makes a good business?{Enter}",
     );
 
-    await screen.findByText(/Both authors agree/i);
+    await screen.findByText(/Review the top ranked passages below/i);
 
     expect(screen.queryByText("Key Pushback Questions")).not.toBeInTheDocument();
     expect(screen.queryByText("Missing Information")).not.toBeInTheDocument();
@@ -681,7 +643,7 @@ describe("AISage Thesis Mode", () => {
     expect(screen.queryByText("Follow-up Questions to Explore")).not.toBeInTheDocument();
   });
 
-  it("shows synthesis as the lead answer in thesis mode", async () => {
+  it("shows compact guidance as the lead answer in thesis mode", async () => {
     vi.mocked(api.aiSageQuery).mockResolvedValue(MOCK_THESIS_RESULT);
 
     const user = userEvent.setup();
@@ -693,7 +655,7 @@ describe("AISage Thesis Mode", () => {
     );
 
     expect(
-      await screen.findByText(/Both Buffett and Sleep would focus/i),
+      await screen.findByText(/Review the pressure test, ranked passages, and supporting sources below/i),
     ).toBeInTheDocument();
   });
 });

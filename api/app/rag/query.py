@@ -39,9 +39,12 @@ class EvidenceChunk:
     text: str
     similarity: float
     metadata: dict[str, Any]
+    document_id: Optional[str] = None
+    ranking_score: Optional[float] = None
+    score_type: Optional[str] = None
 
     def as_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "chunk_id": self.chunk_id,
             "author_id": self.author_id,
             "author_name": self.author_name,
@@ -49,6 +52,13 @@ class EvidenceChunk:
             "similarity": self.similarity,
             "metadata": self.metadata,
         }
+        if self.document_id is not None:
+            payload["document_id"] = self.document_id
+        if self.ranking_score is not None:
+            payload["ranking_score"] = self.ranking_score
+        if self.score_type is not None:
+            payload["score_type"] = self.score_type
+        return payload
 
 
 @dataclass
@@ -346,6 +356,9 @@ def _enrich_chunks(
                 text=c.text,
                 similarity=c.similarity,
                 metadata=meta,
+                document_id=getattr(c, "document_id", None),
+                ranking_score=float(c.weighted_score if c.weighted_score is not None else (c.base_score if c.base_score is not None else c.similarity)),
+                score_type=str(meta.get("score_type", "retrieved")),
             )
         )
     return result

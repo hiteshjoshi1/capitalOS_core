@@ -1987,6 +1987,17 @@ a.btn {
   font-size: 12px;
 }
 
+.aiSagePassageLimitControls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiSagePassageLimitBtnActive {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 78%, transparent 22%);
+}
+
 @media (max-width: 900px) {
   .aiSagePageEmpty {
     min-height: calc(100vh - 140px);
@@ -2041,6 +2052,17 @@ a.btn {
 .aiSageEvidenceMeta {
   font-size: 12px;
   overflow-wrap: anywhere;
+}
+
+.aiSageEvidenceActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.aiSageEvidenceLink {
+  text-decoration: none;
 }
 
 @media (max-width: 768px) {

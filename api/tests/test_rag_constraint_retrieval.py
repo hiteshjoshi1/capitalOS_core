@@ -577,10 +577,7 @@ class TestConceptQueryResultConstraintFields:
         r = ConceptQueryResult(
             query="test",
             best_passages=[],
-            author_views=[],
-            synthesis=None,
             critique=None,
-            suggested_readings=[],
             evidence_sufficient=False,
             weak_evidence_note=None,
         )
@@ -593,10 +590,7 @@ class TestConceptQueryResultConstraintFields:
         r = ConceptQueryResult(
             query="test",
             best_passages=[],
-            author_views=[],
-            synthesis=None,
             critique=None,
-            suggested_readings=[],
             evidence_sufficient=False,
             weak_evidence_note=None,
             constraints_relaxed=True,

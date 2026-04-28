@@ -8,8 +8,6 @@ structured pressure-tested response:
   - pushback_questions:    non-obvious questions that stress-test the thesis
   - missing_information:   blind spots and gaps in the current thesis
   - key_facts:             live-researched facts relevant to the thesis
-  - author_views:          distinct per-author corpus-grounded perspectives
-  - synthesis:             cross-author synthesis
   - critique:              genuine critical pushback
   - updated_thesis_view:   what got stronger, weaker, unresolved
   - live_sources:          live web/company research sources used
@@ -35,12 +33,6 @@ from typing import Any, Optional
 from sqlalchemy.orm import Session
 
 from app.rag.author_selection import SelectedAuthor, select_authors
-from app.rag.concept_mode import (
-    AuthorView,
-    _llm_author_view,
-    _template_author_view,
-    _template_synthesis,
-)
 from app.rag.inference import create_inference_client, inference_available, inference_model
 from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
 from app.rag.retrieval import RetrievedChunk, retrieve_similar_chunks
@@ -133,15 +125,10 @@ class UpdatedThesisView:
 class ThesisQueryResult:
     query: str
     mode: str
-    # Concept mode shared fields
     best_passages: list[dict[str, Any]]
-    author_views: list[dict[str, Any]]
-    synthesis: Optional[str]
     critique: Optional[str]
-    suggested_readings: list[dict[str, Any]]
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
-    # Thesis-mode specific fields
     thesis_question: Optional[str]
     pushback_questions: list[str]
     missing_information: list[str]
@@ -155,10 +142,7 @@ class ThesisQueryResult:
             "query": self.query,
             "mode": self.mode,
             "best_passages": self.best_passages,
-            "author_views": self.author_views,
-            "synthesis": self.synthesis,
             "critique": self.critique,
-            "suggested_readings": self.suggested_readings,
             "evidence_sufficient": self.evidence_sufficient,
             "weak_evidence_note": self.weak_evidence_note,
             "thesis_question": self.thesis_question,
@@ -337,7 +321,6 @@ def _parse_json_response(raw: str, fallback: dict) -> dict:
 
 def _llm_thesis_analysis(
     query: str,
-    author_views: list[AuthorView],
     evidence_passages: list[str],
     live_source_snippets: list[str],
 ) -> dict:
@@ -347,10 +330,6 @@ def _llm_thesis_analysis(
     Returns a structured dict with all thesis-mode fields.
     Batches the full analysis into one call to minimize API latency.
     """
-    views_block = "\n\n".join(
-        f"{av.author_name}: {av.view}" for av in author_views
-    ) or "No author views available."
-
     corpus_block = "\n\n---\n\n".join(evidence_passages[:6]) or "No corpus evidence available."
 
     live_block = "\n\n".join(live_source_snippets[:5]) or "No live research available."
@@ -360,11 +339,6 @@ def _llm_thesis_analysis(
 
         The user's input (thesis, question, or concern):
         {query}
-
-        Author perspectives from the thinker corpus:
-        ---
-        {views_block}
-        ---
 
         Supporting corpus evidence:
         ---
@@ -390,7 +364,6 @@ def _llm_thesis_analysis(
           "key_facts": [
             "3-5 specific facts from the live research or corpus that are most relevant to this thesis."
           ],
-          "synthesis": "3-5 sentence synthesis of how the author perspectives relate to this thesis.",
           "critique": "2-4 sentences of genuine critical pushback on the thesis itself.",
           "updated_thesis_view": {{
             "stronger": ["1-3 things that look stronger after this analysis."],
@@ -439,10 +412,6 @@ def _fallback_thesis_analysis(query: str) -> dict:
         "key_facts": [
             "Live research was not available; key facts should be sourced manually.",
         ],
-        "synthesis": (
-            "The author corpus provides relevant mental models for evaluating this thesis. "
-            "Review each author view above for their distinct framing of the key questions."
-        ),
         "critique": (
             "Without live company data, this thesis analysis relies on corpus-grounded principles. "
             "Verify the assumptions above against current filings and earnings transcripts."
@@ -502,58 +471,18 @@ def execute_thesis_query(
     elif not evidence_sufficient:
         weak_evidence_note = (
             "Corpus evidence for this thesis is thin. "
-            "Author perspectives are based on limited passages and should be read cautiously."
+            "The ranked passages below are based on limited evidence and should be read cautiously."
         )
 
     best_passages = [e.as_dict() for e in evidence]
 
-    # 3. Build per-author chunk map
-    author_chunk_map: dict[str, list[str]] = {}
-    for chunk in evidence:
-        author_chunk_map.setdefault(chunk.author_id, []).append(chunk.text)
-
-    # 4. Generate per-author views
-    author_views: list[AuthorView] = []
-    for entry in author_entries:
-        a_id = entry["author_id"]
-        a_name = entry["name"]
-        passages_for_author = author_chunk_map.get(a_id, [])
-
-        if not passages_for_author and not evidence_sufficient:
-            continue
-
-        key_passages = [p[:280] for p in passages_for_author[:2]]
-        worldview = entry.get("worldview", "")
-        key_maxims = entry.get("key_maxims") or []
-
-        if inference_available() and passages_for_author:
-            try:
-                view_text = _llm_author_view(
-                    query, a_name, worldview or "", key_maxims, passages_for_author
-                )
-            except Exception as exc:
-                log.warning("LLM author view failed for %s: %s", a_id, exc)
-                view_text = _template_author_view(a_name, worldview, key_maxims, passages_for_author)
-        else:
-            view_text = _template_author_view(a_name, worldview, key_maxims, passages_for_author)
-
-        author_views.append(
-            AuthorView(
-                author_id=a_id,
-                author_name=a_name,
-                view=view_text,
-                key_passages=key_passages,
-            )
-        )
-
-    # 5. Fetch live company research
+    # 3. Fetch live company research
     live_sources: list[LiveSource] = fetch_company_research(query)
 
-    # 6. Full thesis analysis (LLM or fallback)
+    # 4. Full thesis analysis (LLM or fallback)
     evidence_passages = [chunk.text for chunk in evidence]
     live_snippets = [s.snippet for s in live_sources]
 
-    synthesis: Optional[str] = None
     thesis_question: Optional[str] = None
     pushback_questions: list[str] = []
     missing_information: list[str] = []
@@ -564,7 +493,7 @@ def execute_thesis_query(
 
     if inference_available():
         try:
-            analysis = _llm_thesis_analysis(query, author_views, evidence_passages, live_snippets)
+            analysis = _llm_thesis_analysis(query, evidence_passages, live_snippets)
         except Exception as exc:
             log.warning("LLM thesis analysis failed: %s", exc)
             analysis = _fallback_thesis_analysis(query)
@@ -575,7 +504,6 @@ def execute_thesis_query(
     pushback_questions = analysis.get("pushback_questions") or []
     missing_information = analysis.get("missing_information") or []
     key_facts = analysis.get("key_facts") or []
-    synthesis = analysis.get("synthesis")
     critique = analysis.get("critique")
     follow_up_questions = analysis.get("follow_up_questions") or []
 
@@ -587,37 +515,11 @@ def execute_thesis_query(
             unresolved=raw_utv.get("unresolved") or [],
         ).as_dict()
 
-    # 7. Fallback synthesis when LLM is unavailable
-    if not synthesis and author_views:
-        synthesis = _template_synthesis(author_views)
-
-    # 8. Suggested readings (top corpus passages per author)
-    from app.rag.concept_mode import SuggestedReading
-    suggested_readings: list[SuggestedReading] = []
-    seen_authors: set[str] = set()
-    for chunk in evidence:
-        if chunk.author_id not in seen_authors:
-            seen_authors.add(chunk.author_id)
-            suggested_readings.append(
-                SuggestedReading(
-                    author_id=chunk.author_id,
-                    author_name=chunk.author_name,
-                    passage=chunk.text[:400],
-                    source_url=str(chunk.metadata.get("source_url") or "") or None,
-                    reason=f"Top-matched corpus passage from {chunk.author_name} relevant to this thesis.",
-                )
-            )
-        if len(suggested_readings) >= 3:
-            break
-
     return ThesisQueryResult(
         query=query,
         mode="thesis",
         best_passages=best_passages,
-        author_views=[av.as_dict() for av in author_views],
-        synthesis=synthesis,
         critique=critique,
-        suggested_readings=[sr.as_dict() for sr in suggested_readings],
         evidence_sufficient=evidence_sufficient,
         weak_evidence_note=weak_evidence_note,
         thesis_question=thesis_question,

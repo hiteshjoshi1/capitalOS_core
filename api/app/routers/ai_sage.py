@@ -41,21 +41,6 @@ class ConceptQueryIn(BaseModel):
     top_k: int = Field(12, ge=1, le=30, description="Maximum evidence chunks to retrieve.")
 
 
-class AuthorViewOut(BaseModel):
-    author_id: str
-    author_name: str
-    view: str
-    key_passages: list[str]
-
-
-class SuggestedReadingOut(BaseModel):
-    author_id: str
-    author_name: str
-    passage: str
-    source_url: Optional[str]
-    reason: str
-
-
 class EvidenceChunkOut(BaseModel):
     chunk_id: str
     author_id: str
@@ -63,6 +48,9 @@ class EvidenceChunkOut(BaseModel):
     text: str
     similarity: float
     metadata: dict[str, Any]
+    document_id: Optional[str] = None
+    ranking_score: Optional[float] = None
+    score_type: Optional[str] = None
 
 
 class LiveSourceOut(BaseModel):
@@ -81,10 +69,7 @@ class UpdatedThesisViewOut(BaseModel):
 class ConceptQueryOut(BaseModel):
     query: str
     best_passages: list[EvidenceChunkOut]
-    author_views: list[AuthorViewOut]
-    synthesis: Optional[str]
     critique: Optional[str]
-    suggested_readings: list[SuggestedReadingOut]
     evidence_sufficient: bool
     weak_evidence_note: Optional[str]
     # Thesis mode fields — populated only when mode == "thesis"
@@ -113,8 +98,8 @@ def concept_query(body: ConceptQueryIn, db: Session = Depends(get_db)) -> Concep
 
     Automatically classifies the query and routes to the appropriate mode:
     - Company Thesis Mode: thesis pressure testing, pushback questions, live research,
-      updated thesis view, and structured critique.
-    - Concept Mode: concept question with author perspectives, synthesis, and critique.
+      updated thesis view, and critique.
+    - Concept Mode: concept question with ranked passages and optional critique.
 
     The user never needs to specify a mode, authors, or retrieval settings.
     """

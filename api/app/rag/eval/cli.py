@@ -24,7 +24,7 @@ from typing import Optional
 import click
 
 from app.db.session import SessionLocal
-from app.rag.eval.runner import EvalReport, run_evaluation
+from app.rag.eval.runner import EvalReport, compare_reports, run_evaluation
 
 log = logging.getLogger(__name__)
 
@@ -102,19 +102,7 @@ def compare(label_a: str, label_b: str, top_k: int) -> None:
     finally:
         db.close()
 
-    comparison = {
-        "config_a": report_a.as_dict(),
-        "config_b": report_b.as_dict(),
-        "delta": {
-            "mean_ndcg@10": round(report_b.mean_ndcg_at_10 - report_a.mean_ndcg_at_10, 4),
-            "mean_recall@10": round(report_b.mean_recall_at_10 - report_a.mean_recall_at_10, 4),
-            "mean_precision@10": round(
-                report_b.mean_precision_at_10 - report_a.mean_precision_at_10, 4
-            ),
-            "mean_mrr": round(report_b.mean_mrr - report_a.mean_mrr, 4),
-        },
-    }
-    click.echo(json.dumps(comparison, indent=2))
+    click.echo(json.dumps(compare_reports(report_a, report_b), indent=2))
 
 
 @cli.command()
