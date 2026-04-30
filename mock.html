@@ -1,456 +1,369 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>CapitalOS — Dashboard (Mock)</title>
-  <style>
-    :root{
-      --bg:#0b0f14;
-      --panel:#101826;
-      --panel2:#0f1622;
-      --text:#e8eef6;
-      --muted:#a7b3c4;
-      --line:#22314a;
-      --accent:#6ea8ff;
-      --good:#46d39a;
-      --bad:#ff6b6b;
-      --warn:#f6c177;
-      --radius:16px;
-    }
-    *{box-sizing:border-box}
-    body{
-      margin:0;
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-      background: radial-gradient(1200px 800px at 20% 0%, #132033 0%, var(--bg) 55%);
-      color:var(--text);
-    }
-    .wrap{
-      max-width:1200px;
-      margin:0 auto;
-      padding:24px 18px 60px;
-    }
-    header{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:16px;
-      margin-bottom:18px;
-    }
-    .title{
-      display:flex;flex-direction:column;gap:6px;
-    }
-    .title h1{
-      font-size:20px;margin:0;font-weight:700;letter-spacing:.2px;
-    }
-    .title .sub{
-      color:var(--muted);font-size:13px;line-height:1.3;
-    }
-    .pillrow{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
-    .pill{
-      border:1px solid var(--line);
-      background:rgba(255,255,255,0.03);
-      padding:8px 10px;
-      border-radius:999px;
-      font-size:12px;
-      color:var(--muted);
-    }
-    .grid{
-      display:grid;
-      gap:14px;
-    }
-    .g-top{grid-template-columns: 2.1fr 1.2fr 1.2fr;}
-    .g-mid{grid-template-columns: 1.2fr 1.2fr 1.6fr;}
-    .g-bot{grid-template-columns: 1.6fr 1.4fr;}
-    .card{
-      border:1px solid var(--line);
-      background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(255,255,255,0.015) 100%);
-      border-radius:var(--radius);
-      padding:14px 14px 12px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.25);
-    }
-    .card h2{
-      margin:0 0 10px 0;
-      font-size:13px;
-      color:var(--muted);
-      font-weight:600;
-      letter-spacing:.3px;
-      text-transform:uppercase;
-    }
-    .big{
-      font-size:30px;font-weight:800;margin:4px 0 10px;
-      letter-spacing:.3px;
-    }
-    .kpirow{
-      display:grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap:10px;
-    }
-    .kpi{
-      background:rgba(0,0,0,0.18);
-      border:1px solid rgba(255,255,255,0.05);
-      border-radius:12px;
-      padding:10px;
-      min-height:72px;
-    }
-    .kpi .label{color:var(--muted);font-size:12px;margin-bottom:6px}
-    .kpi .val{font-weight:800;font-size:16px}
-    .kpi .delta{font-size:12px;margin-top:4px;color:var(--muted)}
-    .delta .up{color:var(--good);font-weight:700}
-    .delta .down{color:var(--bad);font-weight:700}
-    .bar{
-      height:10px;border-radius:999px;background:#0a121d;border:1px solid rgba(255,255,255,.06);
-      overflow:hidden;margin-top:10px;
-    }
-    .bar > span{display:block;height:100%}
-    .legend{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-    .dot{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px}
-    .dot i{width:10px;height:10px;border-radius:999px;display:inline-block;background:var(--accent)}
-    .split{
-      display:grid;grid-template-columns: 1fr 1fr;gap:12px;
-    }
-    .mini{
-      border:1px dashed rgba(255,255,255,.10);
-      border-radius:12px;
-      padding:10px;
-      background:rgba(0,0,0,0.10);
-    }
-    .mini h3{margin:0 0 8px 0;font-size:12px;color:var(--muted);font-weight:700}
-    .table{
-      width:100%;
-      border-collapse:collapse;
-      overflow:hidden;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,0.08);
-      background:rgba(0,0,0,0.12);
-    }
-    .table th,.table td{
-      padding:10px 10px;
-      border-bottom:1px solid rgba(255,255,255,0.06);
-      font-size:12.5px;
-    }
-    .table th{color:var(--muted);text-align:left;font-weight:700}
-    .table tr:last-child td{border-bottom:none}
-    .tag{
-      display:inline-block;
-      padding:3px 8px;
-      border-radius:999px;
-      border:1px solid rgba(255,255,255,.12);
-      color:var(--muted);
-      font-size:11px;
-      margin-right:6px;
-    }
-    .right{ text-align:right; }
-    .muted{ color:var(--muted); }
-    .good{ color:var(--good); font-weight:700; }
-    .bad{ color:var(--bad); font-weight:700; }
-    .actions{
-      display:flex;gap:10px;flex-wrap:wrap;margin-top:10px
-    }
-    .btn{
-      cursor:pointer;
-      border-radius:12px;
-      border:1px solid rgba(255,255,255,0.10);
-      background:rgba(255,255,255,0.04);
-      color:var(--text);
-      padding:9px 10px;
-      font-size:12px;
-    }
-    .btn:hover{border-color:rgba(255,255,255,0.22)}
-    footer{margin-top:18px;color:var(--muted);font-size:12px}
-    @media (max-width: 980px){
-      .g-top,.g-mid,.g-bot{grid-template-columns:1fr}
-      .kpirow{grid-template-columns:1fr 1fr}
-      .split{grid-template-columns:1fr}
-      .pillrow{justify-content:flex-start}
-    }
-  </style>
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Editorial Finance | Glacier Dashboard</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&amp;family=Inter:wght@100..900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#7dd3fc", // Ice Blue
+                        "on-primary": "#0c0a09",
+                        "background": "#0c0a09", // Atmospheric dark
+                        "surface": "rgba(23, 23, 23, 0.4)", // Translucent base
+                        "outline-variant": "rgba(125, 211, 252, 0.15)", // Ice blue border
+                        "secondary": "#94a3b8",
+                        "on-surface": "#f8fafc",
+                        "on-surface-variant": "#94a3b8"
+                    },
+                    fontFamily: {
+                        "headline": ["Newsreader", "serif"],
+                        "body": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "3xl": "1.5rem"
+                    },
+                    boxShadow: {
+                        'glacier': '0 0 30px -10px rgba(125, 211, 252, 0.1)'
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top right, #0f172a, #0c0a09);
+            color: #f8fafc;
+        }
+        .serif-display {
+            font-family: 'Newsreader', serif;
+        }
+        .glass {
+            background: rgba(255, 255, 255, 0.03);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-ice {
+            background: rgba(125, 211, 252, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(125, 211, 252, 0.15);
+        }
+    </style>
 </head>
-<body>
-  <div class="wrap">
-    <header>
-      <div class="title">
-        <h1>CapitalOS — Dashboard (Mock)</h1>
-        <div class="sub">Local-first personal finance control plane. Numbers below are placeholders for UI visualization.</div>
-      </div>
-      <div class="pillrow">
-        <div class="pill">As of: 2026-02-12</div>
-        <div class="pill">Base currency: SGD</div>
-        <div class="pill">Monthly snapshot</div>
-      </div>
-    </header>
-
-    <!-- TOP ROW -->
-    <section class="grid g-top">
-      <div class="card">
-        <h2>Net Worth</h2>
-        <div class="big">S$ 742,180</div>
-
-        <div class="kpirow">
-          <div class="kpi">
-            <div class="label">Cash & Cash Eq</div>
-            <div class="val">S$ 118,400</div>
-            <div class="delta">MoM <span class="up">+2.1%</span></div>
-          </div>
-          <div class="kpi">
-            <div class="label">Stocks / Funds</div>
-            <div class="val">S$ 512,300</div>
-            <div class="delta">MoM <span class="up">+1.3%</span></div>
-          </div>
-          <div class="kpi">
-            <div class="label">Crypto</div>
-            <div class="val">S$ 136,900</div>
-            <div class="delta">MoM <span class="down">-4.8%</span></div>
-          </div>
-          <div class="kpi">
-            <div class="label">Debt (Loans)</div>
-            <div class="val">S$ 25,420</div>
-            <div class="delta">MoM <span class="down">+0.6%</span></div>
-          </div>
-        </div>
-
-        <div class="bar" title="Allocation (cash/stocks/crypto)">
-          <span style="width:16%; background:var(--warn)"></span>
-          <span style="width:69%; background:var(--accent)"></span>
-          <span style="width:15%; background:var(--good)"></span>
-        </div>
-
-        <div class="legend">
-          <span class="dot"><i style="background:var(--warn)"></i>Cash 16%</span>
-          <span class="dot"><i style="background:var(--accent)"></i>Stocks 69%</span>
-          <span class="dot"><i style="background:var(--good)"></i>Crypto 15%</span>
-        </div>
-
-        <div class="actions">
-          <button class="btn">View holdings</button>
-          <button class="btn">View trends</button>
-          <button class="btn">Update snapshot</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Credit Cards</h2>
-        <div class="split">
-          <div class="mini">
-            <h3>This month spend</h3>
-            <div class="big" style="font-size:22px;margin:0;">S$ 3,420</div>
-            <div class="muted" style="margin-top:6px;">vs last month: <span class="bad">+12%</span></div>
-          </div>
-          <div class="mini">
-            <h3>Utilization</h3>
-            <div class="big" style="font-size:22px;margin:0;">18%</div>
-            <div class="muted" style="margin-top:6px;">limit: S$ 20,000</div>
-          </div>
-        </div>
-
-        <div style="margin-top:10px;">
-          <div class="muted" style="font-size:12px;margin-bottom:6px;">Cards</div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Card</th>
-                <th class="right">Current bill</th>
-                <th class="right">Due</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>DBS Altitude</td>
-                <td class="right">S$ 1,780</td>
-                <td class="right">25 Feb</td>
-              </tr>
-              <tr>
-                <td>OCBC 365</td>
-                <td class="right">S$ 1,210</td>
-                <td class="right">18 Feb</td>
-              </tr>
-              <tr>
-                <td>UOB One</td>
-                <td class="right">S$ 430</td>
-                <td class="right">02 Mar</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="actions">
-          <button class="btn">Spending details</button>
-          <button class="btn">Category mapping</button>
-        </div>
-      </div>
-
-      <div class="card">
-        <h2>Quick Risk</h2>
-        <div class="kpi">
-          <div class="label">Largest position</div>
-          <div class="val">ETH — 14.2%</div>
-          <div class="delta">Concentration threshold: <span class="warn">15%</span></div>
-        </div>
-        <div style="height:10px"></div>
-        <div class="kpi">
-          <div class="label">Top 5 positions</div>
-          <div class="val">48.6%</div>
-          <div class="delta">Target band: 35–55%</div>
-        </div>
-
-        <div style="margin-top:12px" class="muted">
-          <div style="font-size:12px;margin-bottom:6px;">Notes</div>
-          <div style="font-size:12px;line-height:1.4;">
-            Flag if any single holding crosses a configured threshold.
-            Show exposure across asset classes (e.g., ETH across Coinbase + wallets).
-          </div>
-        </div>
-
-        <div class="actions">
-          <button class="btn">Set thresholds</button>
-          <button class="btn">Risk breakdown</button>
-        </div>
-      </div>
-    </section>
-
-    <div style="height:14px"></div>
-
-    <!-- MIDDLE ROW -->
-    <section class="grid g-mid">
-      <div class="card">
-        <h2>Allocation by Geography</h2>
-        <div class="mini">
-          <div class="muted" style="font-size:12px;margin-bottom:8px;">Country/Region</div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Region</th>
-                <th class="right">Value</th>
-                <th class="right">%</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td>US</td><td class="right">S$ 342,100</td><td class="right">46%</td></tr>
-              <tr><td>SG</td><td class="right">S$ 184,900</td><td class="right">25%</td></tr>
-              <tr><td>India</td><td class="right">S$ 96,800</td><td class="right">13%</td></tr>
-              <tr><td>HK</td><td class="right">S$ 44,200</td><td class="right">6%</td></tr>
-              <tr><td>Other</td><td class="right">S$ 74,180</td><td class="right">10%</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <footer>In v1: geography can be derived from exchange/country tags + manual overrides.</footer>
-      </div>
-
-      <div class="card">
-        <h2>Allocation by Platform</h2>
-        <div class="mini">
-          <div class="muted" style="font-size:12px;margin-bottom:8px;">Broker / Bank / Exchange</div>
-          <table class="table">
-            <thead>
-              <tr>
-                <th>Platform</th>
-                <th class="right">Value</th>
-                <th class="right">%</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td><span class="tag">IBKR</span></td><td class="right">S$ 410,200</td><td class="right">55%</td></tr>
-              <tr><td><span class="tag">DBS</span></td><td class="right">S$ 132,000</td><td class="right">18%</td></tr>
-              <tr><td><span class="tag">Coinbase</span></td><td class="right">S$ 64,400</td><td class="right">9%</td></tr>
-              <tr><td><span class="tag">Wallets</span></td><td class="right">S$ 72,500</td><td class="right">10%</td></tr>
-              <tr><td><span class="tag">Other</span></td><td class="right">S$ 63,080</td><td class="right">8%</td></tr>
-            </tbody>
-          </table>
-        </div>
-        <footer>Platform tags are critical for ingestion and reconciliation.</footer>
-      </div>
-
-      <div class="card">
-        <h2>Trends (Monthly)</h2>
-        <div class="mini" style="height:250px; display:flex; align-items:center; justify-content:center;">
-          <div class="muted" style="text-align:center; line-height:1.4;">
-            Placeholder chart area<br/>
-            Net worth + portfolio value over time (monthly snapshots)
-          </div>
-        </div>
-        <div class="actions">
-          <button class="btn">Net worth trend</button>
-          <button class="btn">Spending trend</button>
-          <button class="btn">Export snapshot CSV</button>
-        </div>
-      </div>
-    </section>
-
-    <div style="height:14px"></div>
-
-    <!-- BOTTOM ROW -->
-    <section class="grid g-bot">
-      <div class="card">
-        <h2>Top Holdings (Overall)</h2>
-        <table class="table">
-          <thead>
-            <tr>
-              <th>Asset</th>
-              <th>Class</th>
-              <th>Geo</th>
-              <th>Platform</th>
-              <th class="right">% NW</th>
-              <th class="right">Value</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr><td>ETH</td><td>Crypto</td><td>Global</td><td>Coinbase + Wallets</td><td class="right">14.2%</td><td class="right">S$ 105,400</td></tr>
-            <tr><td>NVDA</td><td>Stock</td><td>US</td><td>IBKR</td><td class="right">11.0%</td><td class="right">S$ 81,800</td></tr>
-            <tr><td>NFLX</td><td>Stock</td><td>US</td><td>IBKR</td><td class="right">9.4%</td><td class="right">S$ 69,700</td></tr>
-            <tr><td>SPY</td><td>Fund</td><td>US</td><td>IBKR</td><td class="right">7.6%</td><td class="right">S$ 56,300</td></tr>
-            <tr><td>HDFC Bank</td><td>Stock</td><td>India</td><td>Sharekhan</td><td class="right">6.4%</td><td class="right">S$ 47,200</td></tr>
-            <tr><td>DBS Savings</td><td>Cash</td><td>SG</td><td>DBS</td><td class="right">5.8%</td><td class="right">S$ 43,000</td></tr>
-          </tbody>
-        </table>
-        <footer>Top holdings are computed across *all* asset classes to show real concentration risk.</footer>
-      </div>
-<div class="card">
-  <h2>Cash Flow — February 2026</h2>
-
-  <div class="split">
-    <div class="mini">
-      <h3>Income</h3>
-      <div class="big" style="font-size:22px;margin:0;">S$ 12,480</div>
-      <div class="muted" style="margin-top:6px;">
-        Salary — S$ 12,000<br/>
-        Dividends — S$ 480
-      </div>
-    </div>
-
-    <div class="mini">
-      <h3>Expenses</h3>
-      <div class="big" style="font-size:22px;margin:0;">S$ 7,200</div>
-      <div class="muted" style="margin-top:6px;">
-        Housing — S$ 3,200<br/>
-        Education — S$ 800<br/>
-        Food — S$ 1,480<br/>
-        Transport — S$ 620<br/>
-        Others — S$ 1,100
-      </div>
-    </div>
-  </div>
-
-  <div style="margin-top:12px" class="mini">
-    <h3>Net Cash Flow</h3>
-    <div class="big" style="font-size:22px;margin:0;">S$ 5,280</div>
-    <div class="muted" style="margin-top:6px;">
-      Savings rate: <span class="good">42%</span>
-    </div>
-  </div>
-
-  <div class="actions">
-    <button class="btn">View monthly breakdown</button>
-    <button class="btn">View transaction ledger</button>
-    <button class="btn">Category mapping</button>
-  </div>
+<body class="bg-background text-on-surface selection:bg-primary/20 selection:text-primary min-h-screen flex">
+<!-- SideNavBar Component -->
+<aside class="hidden md:flex flex-col h-screen w-64 border-r border-outline-variant bg-black/20 backdrop-blur-xl sticky top-0 z-50 py-10">
+<div class="px-10 mb-12">
+<h1 class="text-2xl font-serif italic text-primary leading-tight tracking-tight">Editorial</h1>
+<p class="text-[10px] font-sans inter uppercase tracking-[0.2em] text-primary/60">Finance Curator</p>
 </div>
-
-   
-    </section>
-
-    <footer style="margin-top:18px;">
-      Next drill-down screens suggested: Holdings (filters by asset class/geo/platform), Spending (merchant-level), Ingestion (per-source parsing + errors), Trends (time-series with snapshot diffs).
-    </footer>
-  </div>
-</body>
-</html>
+<nav class="flex-grow space-y-1">
+<!-- Active State Dashboard -->
+<a class="flex items-center py-3.5 text-primary font-semibold border-r-2 border-primary bg-primary/10 pl-10 pr-4 transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[22px]" data-icon="dashboard">dashboard</span>
+<span class="font-serif newsreader tracking-tight text-lg">Dashboard</span>
+</a>
+<a class="flex items-center py-3.5 text-secondary pl-10 pr-4 hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[22px]" data-icon="account_balance">account_balance</span>
+<span class="font-serif newsreader tracking-tight text-lg">Wealth</span>
+</a>
+<a class="flex items-center py-3.5 text-secondary pl-10 pr-4 hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[22px]" data-icon="trending_down">trending_down</span>
+<span class="font-serif newsreader tracking-tight text-lg">Liabilities</span>
+</a>
+<a class="flex items-center py-3.5 text-secondary pl-10 pr-4 hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[22px]" data-icon="insights">insights</span>
+<span class="font-serif newsreader tracking-tight text-lg">Intelligence</span>
+</a>
+<a class="flex items-center py-3.5 text-secondary pl-10 pr-4 hover:bg-white/5 transition-all group" href="#">
+<span class="material-symbols-outlined mr-3 text-[22px]" data-icon="settings_applications">settings_applications</span>
+<span class="font-serif newsreader tracking-tight text-lg">Operations</span>
+</a>
+</nav>
+<div class="px-8 mb-8">
+<button class="w-full py-3.5 bg-primary text-on-primary rounded-xl font-serif text-sm italic tracking-wide hover:shadow-[0_0_20px_rgba(125,211,252,0.3)] transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-sm" data-icon="add">add</span>
+            Add Asset
+        </button>
+</div>
+<div class="mt-auto space-y-1">
+<a class="flex items-center py-2.5 text-secondary pl-10 text-sm hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined mr-3 text-lg" data-icon="settings">settings</span>
+            Settings
+        </a>
+<a class="flex items-center py-2.5 text-secondary pl-10 text-sm hover:text-primary transition-colors" href="#">
+<span class="material-symbols-outlined mr-3 text-lg" data-icon="person">person</span>
+            User Profile
+        </a>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-grow flex flex-col min-h-screen">
+<!-- TopAppBar Component -->
+<header class="flex justify-between items-center w-full px-10 py-6 sticky top-0 z-50 bg-background/40 backdrop-blur-2xl">
+<div class="flex items-center gap-8">
+<nav class="hidden lg:flex gap-8">
+<a class="text-primary border-b border-primary pb-1 font-sans inter uppercase tracking-[0.15em] text-[10px] font-bold" href="#">Overview</a>
+<a class="text-secondary hover:text-primary transition-all font-sans inter uppercase tracking-[0.15em] text-[10px]" href="#">Stocks</a>
+<a class="text-secondary hover:text-primary transition-all font-sans inter uppercase tracking-[0.15em] text-[10px]" href="#">Dividends</a>
+<a class="text-secondary hover:text-primary transition-all font-sans inter uppercase tracking-[0.15em] text-[10px]" href="#">Crypto</a>
+<a class="text-secondary hover:text-primary transition-all font-sans inter uppercase tracking-[0.15em] text-[10px]" href="#">Cash</a>
+</nav>
+</div>
+<div class="flex items-center gap-8">
+<div class="flex items-center gap-6 text-on-surface-variant">
+<span class="text-[10px] font-sans inter uppercase tracking-[0.15em] font-bold text-primary/80">USD</span>
+<span class="text-[10px] font-sans inter uppercase tracking-[0.15em]">Oct 2023</span>
+<div class="flex gap-2">
+<button class="material-symbols-outlined p-2 hover:bg-white/5 rounded-lg transition-colors text-xl" data-icon="calendar_month">calendar_month</button>
+<button class="material-symbols-outlined p-2 hover:bg-white/5 rounded-lg transition-colors text-xl" data-icon="notifications">notifications</button>
+</div>
+</div>
+<div class="h-10 w-10 rounded-xl bg-white/5 overflow-hidden border border-white/10">
+<img alt="User Avatar" class="w-full h-full object-cover opacity-90" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAzlX5ku8F5X2KPlo79ntQ95Ujg3-LzI7KFxtSiX0sS6X-e5qTI73cG09kSMS_PV0FYJqyv6BzYIAeSM5QN5FSlHSMUWbJ_UUrdPEvKzoRjTq0Kg68oahy1nNdtw8eDHMnp3EoCMljjS6RwQ6Keu5QZhlqVLgFEwomo7Idrt5kHx9BpLhpZMCl9R5rnvbToo_isv9TUyXTaOO8pNkw97C9lsIkMauqGvR81CvcHmlmpjx41JkBHuxuokaMyc5kUsxaE_TVkSyQoz7w"/>
+</div>
+</div>
+</header>
+<!-- Canvas -->
+<div class="p-10 max-w-7xl mx-auto w-full space-y-12">
+<!-- Hero Section: Net Worth -->
+<section class="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+<div class="lg:col-span-7 space-y-6">
+<label class="text-[10px] font-sans inter uppercase tracking-[0.2em] text-primary/60 font-bold">Consolidated Net Worth</label>
+<div class="flex items-baseline gap-6">
+<h2 class="text-7xl serif-display tracking-tight text-on-surface">$2,482,901.42</h2>
+<span class="text-sm font-bold font-body text-primary bg-primary/10 px-3 py-1 rounded-lg border border-primary/20">+12.4%</span>
+</div>
+<p class="font-serif italic text-lg text-on-surface-variant max-w-xl leading-relaxed">Your wealth has seen a significant appreciation this quarter, primarily driven by the late-cycle equity rally and optimized tax-loss harvesting.</p>
+</div>
+<div class="lg:col-span-5">
+<div class="glass-ice p-8 rounded-3xl space-y-6">
+<div class="flex justify-between items-center">
+<span class="text-[10px] font-sans inter uppercase tracking-widest text-primary/80 font-bold">Asset Allocation</span>
+<span class="text-[10px] font-sans inter uppercase tracking-widest text-on-surface-variant">Optimal Range</span>
+</div>
+<div class="h-1.5 w-full flex rounded-full overflow-hidden bg-white/5">
+<div class="h-full bg-primary" style="width: 65%;"></div>
+<div class="h-full bg-primary/40" style="width: 20%;"></div>
+<div class="h-full bg-white/10" style="width: 15%;"></div>
+</div>
+<div class="grid grid-cols-3 gap-4 text-[10px] font-sans inter uppercase tracking-widest font-bold">
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-primary"></div>
+<span>Stocks</span>
+</div>
+<span class="text-lg font-serif italic normal-case font-normal text-on-surface">65%</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-primary/40"></div>
+<span>Cash</span>
+</div>
+<span class="text-lg font-serif italic normal-case font-normal text-on-surface">20%</span>
+</div>
+<div class="flex flex-col gap-1.5">
+<div class="flex items-center gap-2">
+<div class="w-1.5 h-1.5 rounded-full bg-white/10"></div>
+<span>Crypto</span>
+</div>
+<span class="text-lg font-serif italic normal-case font-normal text-on-surface">15%</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+<!-- Bento Grid Assets -->
+<section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+<!-- Stocks/Funds Card -->
+<div class="glass p-8 rounded-3xl group cursor-pointer hover:border-primary/30 transition-all">
+<div class="flex justify-between items-start mb-16">
+<div class="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
+<span class="material-symbols-outlined text-2xl" data-icon="show_chart">show_chart</span>
+</div>
+<span class="material-symbols-outlined opacity-0 group-hover:opacity-100 transition-opacity text-primary" data-icon="arrow_outward">arrow_outward</span>
+</div>
+<div>
+<p class="text-[10px] font-sans inter uppercase tracking-widest text-on-surface-variant font-bold mb-1">Stocks &amp; Funds</p>
+<h3 class="text-3xl serif-display mb-3">$1,613,885</h3>
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-primary">+4.2%</span>
+<div class="h-[1px] flex-grow bg-white/5"></div>
+</div>
+</div>
+</div>
+<!-- Cash Card -->
+<div class="glass p-8 rounded-3xl group cursor-pointer hover:border-primary/30 transition-all">
+<div class="flex justify-between items-start mb-16">
+<div class="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-primary/80">
+<span class="material-symbols-outlined text-2xl" data-icon="account_balance_wallet">account_balance_wallet</span>
+</div>
+<span class="material-symbols-outlined opacity-0 group-hover:opacity-100 transition-opacity text-primary" data-icon="arrow_outward">arrow_outward</span>
+</div>
+<div>
+<p class="text-[10px] font-sans inter uppercase tracking-widest text-on-surface-variant font-bold mb-1">Cash &amp; Savings</p>
+<h3 class="text-3xl serif-display mb-3">$496,580</h3>
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-secondary">Liquid</span>
+<div class="h-[1px] flex-grow bg-white/5"></div>
+</div>
+</div>
+</div>
+<!-- Crypto Card -->
+<div class="glass p-8 rounded-3xl group cursor-pointer hover:border-primary/30 transition-all">
+<div class="flex justify-between items-start mb-16">
+<div class="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-primary/80">
+<span class="material-symbols-outlined text-2xl" data-icon="currency_bitcoin">currency_bitcoin</span>
+</div>
+<span class="material-symbols-outlined opacity-0 group-hover:opacity-100 transition-opacity text-primary" data-icon="arrow_outward">arrow_outward</span>
+</div>
+<div>
+<p class="text-[10px] font-sans inter uppercase tracking-widest text-on-surface-variant font-bold mb-1">Crypto Assets</p>
+<h3 class="text-3xl serif-display mb-3">$372,436</h3>
+<div class="flex items-center gap-2">
+<span class="text-xs font-bold text-rose-400">-2.1%</span>
+<div class="h-[1px] flex-grow bg-white/5"></div>
+</div>
+</div>
+</div>
+<!-- Liabilities Card -->
+<div class="bg-primary/90 text-on-primary p-8 rounded-3xl shadow-[0_0_30px_rgba(125,211,252,0.2)] group cursor-pointer">
+<div class="flex justify-between items-start mb-16">
+<div class="w-12 h-12 rounded-2xl bg-black/10 flex items-center justify-center">
+<span class="material-symbols-outlined text-2xl" data-icon="trending_down">trending_down</span>
+</div>
+<span class="material-symbols-outlined opacity-40 group-hover:opacity-100 transition-opacity" data-icon="arrow_outward">arrow_outward</span>
+</div>
+<div>
+<p class="text-[10px] font-sans inter uppercase tracking-widest text-black/50 font-bold mb-1">Total Liabilities</p>
+<h3 class="text-3xl serif-display mb-3">($124,000)</h3>
+<div class="flex items-center gap-2">
+<span class="text-xs font-medium text-black/70">Secured Loans</span>
+<div class="h-[1px] flex-grow bg-black/10"></div>
+</div>
+</div>
+</div>
+</section>
+<!-- Bottom Content: Cash Flow & Queue -->
+<section class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<!-- Cash Flow Visualization -->
+<div class="lg:col-span-2 glass p-10 rounded-3xl">
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-12 gap-4">
+<div>
+<h4 class="serif-display text-3xl">Flow Narrative</h4>
+<p class="text-[10px] font-sans inter uppercase tracking-widest text-primary/60 font-bold mt-2">Cash Projections Q4 2023</p>
+</div>
+<div class="flex bg-white/5 p-1 rounded-xl">
+<button class="px-5 py-2 rounded-lg text-[10px] font-sans inter uppercase tracking-widest font-bold transition-all text-secondary hover:text-primary">Income</button>
+<button class="px-5 py-2 rounded-lg bg-primary/20 backdrop-blur-md border border-primary/20 text-[10px] font-sans inter uppercase tracking-widest font-bold text-primary">Expenses</button>
+</div>
+</div>
+<div class="h-72 flex items-end justify-between gap-6 px-4">
+<div class="flex flex-col items-center gap-4 w-full">
+<div class="w-full bg-white/5 rounded-xl h-32 group hover:bg-white/10 transition-all relative"></div>
+<span class="text-[10px] font-sans inter uppercase tracking-widest opacity-40 font-bold">Jul</span>
+</div>
+<div class="flex flex-col items-center gap-4 w-full">
+<div class="w-full bg-white/5 rounded-xl h-48 group hover:bg-white/10 transition-all relative"></div>
+<span class="text-[10px] font-sans inter uppercase tracking-widest opacity-40 font-bold">Aug</span>
+</div>
+<div class="flex flex-col items-center gap-4 w-full">
+<div class="w-full bg-white/5 rounded-xl h-36 group hover:bg-white/10 transition-all relative"></div>
+<span class="text-[10px] font-sans inter uppercase tracking-widest opacity-40 font-bold">Sep</span>
+</div>
+<div class="flex flex-col items-center gap-4 w-full">
+<div class="w-full bg-primary/20 border border-primary/30 rounded-xl h-56 group hover:bg-primary/30 transition-all relative">
+<div class="absolute -top-10 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-bold text-primary glass-ice px-2 py-1 rounded-md shadow-glacier">Current: $18.4k</div>
+</div>
+<span class="text-[10px] font-sans inter uppercase tracking-widest font-black text-primary">Oct</span>
+</div>
+<div class="flex flex-col items-center gap-4 w-full">
+<div class="w-full bg-white/5 rounded-xl h-40 border-2 border-dashed border-white/10"></div>
+<span class="text-[10px] font-sans inter uppercase tracking-widest opacity-40 font-bold italic">Nov*</span>
+</div>
+<div class="flex flex-col items-center gap-4 w-full">
+<div class="w-full bg-white/5 rounded-xl h-44 border-2 border-dashed border-white/10"></div>
+<span class="text-[10px] font-sans inter uppercase tracking-widest opacity-40 font-bold italic">Dec*</span>
+</div>
+</div>
+</div>
+<!-- Action Queue / Notifications -->
+<div class="glass-ice p-10 rounded-3xl">
+<div class="flex justify-between items-center mb-10">
+<h4 class="serif-display text-3xl">Action Queue</h4>
+<span class="bg-primary text-on-primary text-[10px] px-2.5 py-1 rounded-lg font-bold">4</span>
+</div>
+<div class="space-y-8">
+<div class="flex gap-5 group cursor-pointer">
+<div class="w-12 h-12 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+<span class="material-symbols-outlined text-primary text-2xl" data-icon="bolt">bolt</span>
+</div>
+<div class="space-y-1.5">
+<p class="text-sm font-bold font-body text-primary">Rebalance Stocks</p>
+<p class="text-[11px] text-on-surface-variant leading-relaxed">Tech exposure is 5% above threshold. Consider rotating.</p>
+</div>
+</div>
+<div class="flex gap-5 group cursor-pointer">
+<div class="w-12 h-12 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+<span class="material-symbols-outlined text-primary text-2xl" data-icon="savings">savings</span>
+</div>
+<div class="space-y-1.5">
+<p class="text-sm font-bold font-body text-primary">Dividend Yield Alert</p>
+<p class="text-[11px] text-on-surface-variant leading-relaxed">$1,240 ready for reinvestment from SCHD.</p>
+</div>
+</div>
+<div class="flex gap-5 group cursor-pointer">
+<div class="w-12 h-12 shrink-0 bg-primary/10 rounded-2xl flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+<span class="material-symbols-outlined text-primary text-2xl" data-icon="verified_user">verified_user</span>
+</div>
+<div class="space-y-1.5">
+<p class="text-sm font-bold font-body text-primary">KYC Renewal</p>
+<p class="text-[11px] text-on-surface-variant leading-relaxed">Status declaration expires in 12 days.</p>
+</div>
+</div>
+<button class="w-full py-5 mt-4 text-[10px] font-sans inter uppercase tracking-widest font-black border-t border-white/10 hover:text-primary transition-all flex justify-center items-center gap-3">
+                        View All Items
+                        <span class="material-symbols-outlined text-base" data-icon="arrow_forward">arrow_forward</span>
+</button>
+</div>
+</div>
+</section>
+</div>
+<!-- Footer -->
+<footer class="mt-auto px-10 py-12 border-t border-white/5 bg-black/20 backdrop-blur-md">
+<div class="flex flex-col md:flex-row justify-between items-center gap-8 opacity-60 hover:opacity-100 transition-opacity">
+<div class="flex items-center gap-6">
+<h5 class="serif-display italic text-xl text-primary">Editorial Finance</h5>
+<span class="h-5 w-[1px] bg-white/10"></span>
+<p class="text-[10px] font-sans inter uppercase tracking-[0.2em] font-medium text-on-surface-variant">Market Data Delayed 15 Minutes</p>
+</div>
+<div class="flex gap-10 text-[10px] font-sans inter uppercase tracking-[0.2em] font-bold text-on-surface-variant">
+<a class="hover:text-primary transition-colors" href="#">Legal Manuscript</a>
+<a class="hover:text-primary transition-colors" href="#">Privacy Protocol</a>
+<a class="hover:text-primary transition-colors" href="#">Institutional API</a>
+</div>
+<p class="text-[10px] font-sans inter tracking-[0.2em] font-medium text-on-surface-variant">© 2023 Digital Curator Ltd.</p>
+</div>
+</footer>
+</main>
+<!-- Mobile Navigation (Floating Bottom Bar) -->
+<nav class="md:hidden fixed bottom-8 left-8 right-8 h-18 glass-ice rounded-2xl flex items-center justify-around px-4 shadow-glacier z-[100]">
+<a class="material-symbols-outlined p-3 text-on-primary bg-primary rounded-xl" data-icon="dashboard" href="#" style="font-variation-settings: 'FILL' 1;">dashboard</a>
+<a class="material-symbols-outlined p-3 text-primary/60 hover:text-primary transition-colors" data-icon="account_balance" href="#">account_balance</a>
+<a class="material-symbols-outlined p-3 text-primary/60 hover:text-primary transition-colors" data-icon="insights" href="#">insights</a>
+<a class="material-symbols-outlined p-3 text-primary/60 hover:text-primary transition-colors" data-icon="person" href="#">person</a>
+</nav>
+</body></html>
