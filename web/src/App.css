@@ -1,52 +1,55 @@
 :root {
-  --bg: #090f19;
-  --bg-soft: #111a29;
-  --panel: #101b2d;
-  --panel2: #0f1727;
-  --text: #ecf2fb;
-  --muted: #9aacbf;
-  --line: #25344d;
-  --accent: #66a3ff;
-  --accent-soft: rgba(102, 163, 255, 0.18);
-  --alloc-cash: #f4b14f;
-  --alloc-stocks: #4b8dff;
-  --alloc-crypto: #8a6dff;
-  --good: #4ecf9f;
-  --bad: #ff6d6d;
-  --warn: #f4c178;
-  --shadow: rgba(4, 9, 16, 0.45);
-  --surface-glow: rgba(255, 255, 255, 0.05);
-  --radius: 16px;
+  --bg: #090a0f;
+  --bg-soft: #162237;
+  --panel: rgba(19, 24, 33, 0.82);
+  --panel2: rgba(10, 13, 19, 0.92);
+  --text: #f4f6fb;
+  --muted: #95a3ba;
+  --line: rgba(125, 211, 252, 0.14);
+  --accent: #7dd3fc;
+  --accent-soft: rgba(125, 211, 252, 0.16);
+  --alloc-cash: #f7c97b;
+  --alloc-stocks: #7dd3fc;
+  --alloc-crypto: #b794f4;
+  --good: #67d6a3;
+  --bad: #ff8d7a;
+  --trend-negative: #7dd3fc;
+  --warn: #f7c97b;
+  --shadow: rgba(0, 0, 0, 0.34);
+  --surface-glow: rgba(255, 255, 255, 0.06);
+  --radius: 24px;
 }
 
 [data-theme="light"] {
-  --bg: #f4efe6;
-  --bg-soft: #e8e0d5;
-  --panel: #fbf7ef;
-  --panel2: #fffdf8;
-  --text: #1f2421;
-  --muted: #6f756d;
-  --line: #d8d1c4;
+  --bg: #f5efe6;
+  --bg-soft: rgba(36, 86, 72, 0.14);
+  --panel: rgba(255, 252, 247, 0.86);
+  --panel2: rgba(248, 241, 231, 0.96);
+  --text: #1e2529;
+  --muted: #66717a;
+  --line: rgba(25, 74, 58, 0.12);
   --accent: #194a3a;
-  --accent-soft: #d8e6df;
+  --accent-soft: rgba(25, 74, 58, 0.1);
   --alloc-cash: #c9802a;
-  --alloc-stocks: #2d63da;
-  --alloc-crypto: #7a42cf;
+  --alloc-stocks: #2b6ddb;
+  --alloc-crypto: #8650d9;
   --good: #1e6b47;
   --bad: #b55d2d;
+  --trend-negative: #2b6ddb;
   --warn: #b55d2d;
   --shadow: rgba(31, 36, 33, 0.08);
-  --surface-glow: rgba(25, 74, 58, 0.06);
+  --surface-glow: rgba(25, 74, 58, 0.05);
   --radius: 22px;
 }
 
 body {
   margin: 0;
   background:
-    radial-gradient(1100px 720px at 18% -10%, var(--bg-soft) 0%, transparent 70%),
+    radial-gradient(1200px 720px at 18% -10%, var(--bg-soft) 0%, transparent 72%),
+    radial-gradient(820px 540px at 92% 0%, rgba(125, 211, 252, 0.14) 0%, transparent 58%),
     var(--bg);
   color: var(--text);
-  font-family: "Avenir Next", "Segoe UI", "Trebuchet MS", sans-serif;
+  font-family: "Inter", "Segoe UI", sans-serif;
   transition: background 0.2s ease, color 0.2s ease;
 }
 
@@ -55,7 +58,6 @@ body {
     radial-gradient(circle at top left, rgba(25, 74, 58, 0.12), transparent 28%),
     radial-gradient(circle at right center, rgba(181, 93, 45, 0.08), transparent 24%),
     var(--bg);
-  font-family: Georgia, "Times New Roman", serif;
 }
 
 a {
@@ -72,7 +74,7 @@ a {
 /* Used by PageShell inside AppShell — no max-width or min-width to avoid
    double-capping when the sidebar already constrains the available space */
 .pageShellWrap {
-  padding: 24px 18px 60px;
+  padding: 30px 28px 72px;
 }
 
 .header {
@@ -91,14 +93,18 @@ a {
 
 .title {
   margin: 0;
-  font-size: 26px;
-  font-weight: 760;
-  letter-spacing: 0.1px;
+  font-size: clamp(32px, 4vw, 48px);
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: var(--text);
 }
 
 .subtitle {
-  font-size: 13px;
+  font-size: 14px;
   color: var(--muted);
+  line-height: 1.6;
+  max-width: 60ch;
 }
 
 .pillRow {
@@ -110,12 +116,17 @@ a {
 
 .pill {
   border: 1px solid var(--line);
-  background: var(--surface-glow);
-  padding: 8px 10px;
+  background: color-mix(in srgb, var(--panel) 74%, transparent 26%);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  padding: 10px 12px;
   border-radius: 999px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--muted);
   text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 700;
 }
 
 .dashboardWrap {
@@ -235,6 +246,36 @@ a {
   text-decoration: none;
 }
 
+.userMenuAction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.userMenuAccountName {
+  display: grid;
+  gap: 4px;
+  color: var(--text);
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 24px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+}
+
+.userMenuAccountName span {
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
 .menuLinkWithBadge {
   display: inline-flex;
   align-items: center;
@@ -313,6 +354,16 @@ a {
     flex-direction: column;
   }
 
+  .appShellTopbar {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .appShellTabs,
+  .appShellTopbarMeta {
+    justify-content: flex-start;
+  }
+
   .dashboardNavArea {
     justify-content: flex-start;
   }
@@ -332,7 +383,12 @@ a {
   .row5,
   .grid.g-top,
   .grid.g-mid,
-  .grid.g-bot {
+  .grid.g-bot,
+  .wealthHeroGrid,
+  .wealthSurfaceGrid,
+  .wealthDetailGrid,
+  .wealthRiskLayout,
+  .sectionOverviewGrid {
     grid-template-columns: 1fr;
   }
 
@@ -347,10 +403,12 @@ a {
 
 .card {
   border: 1px solid var(--line);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 92%, white 8%) 0%, var(--panel2) 100%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255, 255, 255, 0.04) 6%) 0%, var(--panel2) 100%);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
   border-radius: var(--radius);
-  padding: 14px 14px 12px;
-  box-shadow: 0 8px 30px var(--shadow);
+  padding: 18px;
+  box-shadow: 0 22px 48px var(--shadow);
 }
 
 [data-theme="light"] .card {
@@ -362,17 +420,17 @@ a {
 .card h2 {
   margin: 0 0 10px 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
 }
 
 .cardTitle {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.3px;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   margin-bottom: 10px;
 }
@@ -419,8 +477,10 @@ a {
   border: 1px solid var(--line);
   background: color-mix(in srgb, var(--panel) 88%, white 12%);
   color: var(--text);
-  padding: 9px 10px;
+  padding: 10px 12px;
   font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   cursor: pointer;
 }
 
@@ -713,90 +773,114 @@ a.btn {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  margin-bottom: 10px;
+  margin-bottom: 18px;
 }
 
 .stockHoldingsMeta {
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .stockHoldingsTableWrap {
   overflow-x: auto;
   border: 1px solid color-mix(in srgb, var(--line) 72%, transparent 28%);
-  border-radius: 12px;
-  max-height: 520px;
+  border-radius: 18px;
+  max-height: 680px;
+  background: color-mix(in srgb, var(--panel2) 88%, transparent 12%);
+}
+
+.stockHoldingsPrimaryCard {
+  padding: 24px;
 }
 
 .stockHoldingsTable {
-  min-width: 840px;
+  min-width: 980px;
   border: none;
   border-radius: 0;
+  background: transparent;
 }
 
 .stockHoldingsTable th,
 .stockHoldingsTable td {
-  font-size: 11.5px;
-  padding: 7px 8px;
+  font-size: 14px;
+  padding: 14px 16px;
   white-space: nowrap;
+  vertical-align: middle;
 }
 
 .stockHoldingsTable th {
   position: sticky;
   top: 0;
-  background: color-mix(in srgb, var(--panel2) 90%, white 10%);
+  background: color-mix(in srgb, var(--panel2) 84%, white 16%);
   z-index: 1;
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .stockHoldingsTable tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--panel2) 84%, transparent 16%);
+  background: color-mix(in srgb, var(--panel2) 90%, transparent 10%);
 }
 
 .stockHoldingsTable tbody tr:hover {
-  background: color-mix(in srgb, var(--accent) 14%, var(--panel2) 86%);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel2) 88%);
 }
 
 .stockHoldingsSymbol {
-  font-weight: 700;
-  letter-spacing: 0.15px;
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  color: var(--text);
+}
+
+.stockHoldingsAssetCell {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.stockHoldingsAssetMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stockHoldingsPriceCell {
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.stockHoldingsPnlCell {
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.stockHoldingsPnlCell small,
+.stockHoldingsPercentCell small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.stockHoldingsPercentCell {
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
 }
 
 .stockHoldingsControls {
-  margin-top: 12px;
+  margin-top: 18px;
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
+  gap: 10px;
 }
 
 .grid.g-mid.stockHoldingsLayout {
-  grid-template-columns: minmax(0, 2fr) minmax(340px, 1.2fr);
-}
-
-.stockHoldingsDividendsCard {
-  align-self: start;
-  display: grid;
-  gap: 12px;
-  padding: 18px;
-  min-height: 220px;
-}
-
-.stockHoldingsDividendsIntro {
-  display: grid;
-  gap: 8px;
-}
-
-.stockHoldingsDividendsText {
-  margin: 0;
-  color: var(--muted);
-  font-size: 14px;
-  line-height: 1.45;
-}
-
-.stockHoldingsDividendsBtn {
-  justify-self: stretch;
-  justify-content: center;
-  font-weight: 700;
-  padding: 12px 14px;
-  font-size: 13px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .geographyPieCard {
@@ -1380,7 +1464,9 @@ a.btn {
   width: 272px;
   min-width: 272px;
   border-right: 1px solid var(--line);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, black 6%) 0%, var(--panel2) 100%);
+  background: linear-gradient(180deg, rgba(5, 8, 13, 0.92) 0%, rgba(12, 17, 25, 0.98) 100%);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -1391,12 +1477,134 @@ a.btn {
 }
 
 [data-theme="light"] .sidebar {
-  background: linear-gradient(180deg, #f3ebde 0%, #e8dece 100%);
-  border-right-color: #cfc2ac;
+  background: linear-gradient(180deg, rgba(248, 240, 229, 0.96) 0%, rgba(241, 233, 220, 0.98) 100%);
+  border-right-color: rgba(25, 74, 58, 0.14);
   box-shadow: 6px 0 22px rgba(31, 36, 33, 0.14);
 }
 
 .appShellMain {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.appShellTopbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 18px;
+  align-items: end;
+  padding: 28px 28px 18px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--bg) 68%, transparent 32%);
+  backdrop-filter: blur(22px);
+  -webkit-backdrop-filter: blur(22px);
+}
+
+.appShellTopbarIntro {
+  display: grid;
+  gap: 6px;
+}
+
+.appShellEyebrow {
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: color-mix(in srgb, var(--accent) 72%, var(--muted) 28%);
+}
+
+.appShellSectionTitle {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+}
+
+.appShellTabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+  justify-content: center;
+}
+
+.appShellTab {
+  padding: 0 0 6px;
+  border-bottom: 1px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.appShellTab:hover,
+.appShellTabActive {
+  color: var(--accent);
+  border-bottom-color: color-mix(in srgb, var(--accent) 82%, transparent 18%);
+}
+
+.appShellTopbarMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.appShellUserPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid color-mix(in srgb, white 10%, transparent 90%);
+  background: color-mix(in srgb, white 5%, transparent 95%);
+  border-radius: 16px;
+  padding: 6px 10px 6px 6px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.appShellUserAvatarFrame {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  background: color-mix(in srgb, white 5%, transparent 95%);
+  border: 1px solid color-mix(in srgb, white 10%, transparent 90%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.appShellUserIcon {
+  font-size: 22px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--text) 92%, transparent 8%);
+}
+
+.appShellUserLabel {
+  color: var(--text);
+  font-size: 11px;
+}
+
+[data-theme="light"] .appShellUserPill,
+[data-theme="light"] .appShellUserAvatarFrame {
+  border-color: rgba(25, 74, 58, 0.12);
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.appShellContent {
   flex: 1;
   min-width: 0;
   overflow-y: auto;
@@ -1404,16 +1612,43 @@ a.btn {
 
 /* ─── Sidebar Navigation ─────────────────────────────────────────── */
 
+.sidebarBrand {
+  padding: 28px 20px 12px;
+}
+
+.sidebarBrandLink {
+  display: grid;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.sidebarBrandWordmark {
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: -0.04em;
+  color: var(--accent);
+}
+
+.sidebarBrandTag {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: color-mix(in srgb, var(--accent) 62%, var(--muted) 38%);
+  font-weight: 700;
+}
+
 .sidebarNav {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  flex: 1;
-  padding: 20px 12px;
+  gap: 10px;
+  padding: 12px 14px 20px;
 }
 
 .sidebarLink {
   display: flex;
+  flex-direction: row;
   align-items: center;
   gap: 6px;
   text-decoration: none;
@@ -1421,19 +1656,17 @@ a.btn {
   transition: background 0.12s ease, color 0.12s ease;
 }
 
-.sidebarTopLink {
-  padding: 11px 14px;
-  border-radius: 14px;
-  font-size: 16px;
+.sidebarSectionLabel {
+  padding: 0 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: var(--muted);
   font-weight: 700;
 }
 
-.sidebarTopLink:hover {
-  background: var(--surface-glow);
-}
-
 .sidebarLinkActive {
-  background: color-mix(in srgb, var(--accent) 15%, transparent 85%) !important;
+  background: color-mix(in srgb, var(--accent) 12%, transparent 88%) !important;
   color: var(--accent) !important;
 }
 
@@ -1442,76 +1675,57 @@ a.btn {
 }
 
 [data-theme="light"] .sidebarLinkActive {
-  background: #194a3a !important;
+  background: rgba(25, 74, 58, 0.92) !important;
   color: #f8f3ea !important;
 }
 
-.sidebarSection {
-  margin-top: 2px;
+.sidebarPrimaryLink,
+.sidebarUtilityLink {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid transparent;
+  background: transparent;
 }
 
-.sidebarSectionToggle {
-  display: flex;
-  justify-content: space-between;
+.sidebarPrimaryLink:hover,
+.sidebarUtilityLink:hover {
+  background: var(--surface-glow);
+  border-color: var(--line);
+}
+
+.sidebarPrimaryIcon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+  color: inherit;
+}
+
+.sidebarPrimaryLabel {
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+
+.sidebarUtilityArea {
+  display: grid;
+  gap: 10px;
+  padding: 0 14px 18px;
+  margin-top: auto;
+}
+
+.sidebarUtilityLink {
+  flex-direction: row;
   align-items: center;
-  width: 100%;
-  padding: 9px 12px;
-  background: none;
-  border: none;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
+  justify-content: space-between;
+  font-size: 13px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  border-radius: 12px;
-  font-family: inherit;
-}
-
-.sidebarSectionToggle:hover {
-  color: var(--text);
-  background: var(--surface-glow);
-}
-
-.sidebarChevron {
-  font-size: 12px;
-}
-
-.sidebarChildren {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: 4px 0 2px 10px;
-}
-
-.sidebarChildLink {
-  padding: 9px 12px;
-  border-radius: 12px;
+  letter-spacing: 0.14em;
   color: var(--muted);
-  font-size: 15px;
-}
-
-.sidebarChildLink:hover {
-  background: var(--surface-glow);
-  color: var(--text);
+  font-weight: 700;
 }
 
 /* ─── Sidebar User Area ──────────────────────────────────────────── */
-
-.sidebarUserArea {
-  border-top: 1px solid var(--line);
-  padding: 16px 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-.sidebarUserInfo {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 .sidebarAvatar {
   width: 34px;
@@ -1527,15 +1741,14 @@ a.btn {
   flex-shrink: 0;
 }
 
-.sidebarUserName {
-  font-size: 15px;
-  color: var(--text);
-}
-
 .sidebarThemeToggle {
   width: 100%;
   justify-content: center;
   font-size: 13px;
+}
+
+.appShellLogoutButton {
+  width: 100%;
 }
 
 /* ─── Sidebar Badge ──────────────────────────────────────────────── */
@@ -1553,6 +1766,338 @@ a.btn {
   font-weight: 800;
   line-height: 1.4;
   margin-left: auto;
+}
+
+.sectionOverviewGrid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sectionOverviewCard,
+.sectionOverviewLinkCard {
+  min-height: 220px;
+}
+
+.sectionOverviewLinkCard {
+  color: inherit;
+  text-decoration: none;
+}
+
+.sectionOverviewEyebrow,
+.wealthEyebrow {
+  margin: 0 0 10px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.22em;
+  color: color-mix(in srgb, var(--accent) 72%, var(--muted) 28%);
+  font-weight: 700;
+}
+
+.sectionOverviewTitle {
+  margin: 0 0 12px;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 28px;
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  text-transform: none;
+}
+
+.wealthOverviewLayout {
+  display: grid;
+  gap: 18px;
+}
+
+.wealthHeroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.95fr);
+  gap: 18px;
+}
+
+.wealthHeroCard,
+.wealthAllocationCard {
+  min-height: 100%;
+}
+
+.wealthHeroCard,
+.wealthSurfaceCard,
+.wealthDetailCard {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border-color: rgba(255, 255, 255, 0.08) !important;
+  box-shadow: 0 0 30px -10px rgba(125, 211, 252, 0.1);
+}
+
+.wealthAllocationCard {
+  background: rgba(125, 211, 252, 0.05) !important;
+  border-color: rgba(125, 211, 252, 0.15) !important;
+  box-shadow: 0 0 30px -10px rgba(125, 211, 252, 0.1);
+}
+
+[data-theme="light"] .wealthHeroCard,
+[data-theme="light"] .wealthSurfaceCard,
+[data-theme="light"] .wealthDetailCard {
+  background: rgba(255, 255, 255, 0.72) !important;
+  border-color: rgba(25, 74, 58, 0.12) !important;
+  box-shadow: 0 18px 38px rgba(31, 36, 33, 0.08);
+}
+
+[data-theme="light"] .wealthAllocationCard {
+  background: rgba(125, 211, 252, 0.14) !important;
+  border-color: rgba(43, 109, 219, 0.18) !important;
+  box-shadow: 0 18px 38px rgba(31, 36, 33, 0.08);
+}
+
+.wealthHeroValueRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-end;
+}
+
+.card .wealthHeroValue {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 3.75rem !important;
+  font-weight: 400;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  color: #ffffff;
+  text-transform: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+.wealthHeroChip {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.wealthHeroChipPositive {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--good) 28%, transparent 72%);
+}
+
+.wealthHeroChipNegative {
+  color: var(--trend-negative);
+  background: color-mix(in srgb, var(--trend-negative) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--trend-negative) 28%, transparent 72%);
+}
+
+.wealthDeltaRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 28px;
+}
+
+.wealthDeltaPill {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 72%, transparent 28%);
+}
+
+.wealthDeltaLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted);
+}
+
+.wealthTrendPositive {
+  color: var(--good);
+}
+
+.wealthTrendNegative {
+  color: var(--trend-negative);
+}
+
+.wealthAllocationHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.wealthAllocationMeta {
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wealthAllocationRail {
+  display: flex;
+  width: 100%;
+  height: 12px;
+  margin: 20px 0 24px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--text) 8%, transparent 92%);
+}
+
+.wealthAllocationSegment {
+  display: block;
+  height: 100%;
+}
+
+.wealthSliceStocks,
+.wealthCompositionDot.wealthSliceStocks {
+  background: var(--alloc-stocks);
+}
+
+.wealthSliceCrypto,
+.wealthCompositionDot.wealthSliceCrypto {
+  background: var(--alloc-crypto);
+}
+
+.wealthSliceCash,
+.wealthCompositionDot.wealthSliceCash {
+  background: var(--alloc-cash);
+}
+
+.wealthCompositionGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.wealthCompositionItem {
+  display: grid;
+  gap: 6px;
+  color: inherit;
+  text-decoration: none;
+}
+
+.wealthCompositionDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+}
+
+.wealthCompositionLabel {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.wealthSurfaceGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.wealthSurfaceCard {
+  color: inherit;
+  text-decoration: none;
+}
+
+.card .wealthSurfaceValue,
+.card .wealthDetailTitle {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.5rem !important;
+  line-height: 1.9rem;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  color: #ffffff;
+  text-transform: none;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+[data-theme="light"] .card .wealthHeroValue,
+[data-theme="light"] .card .wealthSurfaceValue,
+[data-theme="light"] .card .wealthDetailTitle {
+  color: #1e2529;
+}
+
+.wealthSurfaceFooter {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 22px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.wealthDetailGrid,
+.wealthRiskLayout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.wealthDetailCardWide,
+.wealthRiskLayout > :first-child {
+  grid-column: span 2;
+}
+
+.wealthDetailSplit {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.wealthInlineLink {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.wealthInlineLink:hover {
+  text-decoration: underline;
+}
+
+.settingsCard {
+  display: grid;
+  gap: 16px;
+}
+
+.settingsThemeToggle {
+  width: fit-content;
+}
+
+.wealthHoldingsList {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.wealthHoldingRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.wealthHoldingMeta {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.wealthHoldingValue {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
 }
 
 /* ─── Dashboard exposure row (4-col) ─────────────────────────────── */
@@ -2251,6 +2796,12 @@ a.btn {
 @media (max-width: 768px) {
   .sidebar {
     display: none;
+  }
+
+  .pageShellWrap,
+  .appShellTopbar {
+    padding-left: 18px;
+    padding-right: 18px;
   }
 
   .mobileUserMenu {

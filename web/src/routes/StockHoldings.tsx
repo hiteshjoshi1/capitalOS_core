@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
@@ -53,6 +52,23 @@ export default function StockHoldings() {
     }
     return `${quoteCurrency.toUpperCase()} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
   };
+  const formatPnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
+    if (
+      holding.quantity == null
+      || holding.avg_cost == null
+      || holding.latest_price == null
+      || !holding.quote_currency
+    ) {
+      return { amount: "—", pct: null, positive: true };
+    }
+    const pnl = holding.quantity * (holding.latest_price - holding.avg_cost);
+    const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
+    return {
+      amount: `${pnl >= 0 ? "+" : "-"}${formatNativeMoney(Math.abs(pnl), holding.quote_currency)}`,
+      pct: pnlPct,
+      positive: pnl >= 0,
+    };
+  };
   const holdings = useMemo(
     () => (summary?.top_holdings ?? []).filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO"),
     [summary],
@@ -97,7 +113,7 @@ export default function StockHoldings() {
 
       {state === "ready" && (
         <section className="grid g-mid stockHoldingsLayout">
-          <div className="card">
+          <div className="card stockHoldingsPrimaryCard">
             <div className="stockHoldingsHeader">
               <h2>Top Holdings</h2>
               <div className="muted stockHoldingsMeta">
@@ -108,30 +124,44 @@ export default function StockHoldings() {
               <table className="table stockHoldingsTable">
                 <thead>
                   <tr>
-                    <th>#</th>
                     <th>Asset</th>
-                    <th className="right">% NW</th>
-                    <th className="right">Value</th>
-                    <th className="right">Shares</th>
                     <th className="right">Purchase Price</th>
                     <th className="right">Current Price</th>
+                    <th className="right">Profit &amp; Loss</th>
+                    <th className="right">% NW</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleHoldings.map((h, idx) => (
-                    <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
-                      <td>{idx + 1}</td>
-                      <td className="stockHoldingsSymbol">{h.symbol}</td>
-                      <td className="right">{h.percent_of_networth.toFixed(1)}%</td>
-                      <td className="right">{formatMoney(h.value)}</td>
-                      <td className="right">{formatQuantity(h.quantity)}</td>
-                      <td className="right">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
-                      <td className="right">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
-                    </tr>
-                  ))}
+                  {visibleHoldings.map((h, idx) => {
+                    const pnl = formatPnl(h);
+                    return (
+                      <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
+                        <td>
+                          <div className="stockHoldingsAssetCell">
+                            <div className="stockHoldingsSymbol">{h.symbol}</div>
+                            <div className="stockHoldingsAssetMeta">
+                              <span>{h.platform ?? "—"}</span>
+                              <span>{h.geo ?? "—"}</span>
+                              <span>{formatQuantity(h.quantity)} shares</span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
+                        <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
+                        <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`}>
+                          <div>{pnl.amount}</div>
+                          {pnl.pct == null ? null : <small>{pnl.pct >= 0 ? "+" : ""}{pnl.pct.toFixed(1)}%</small>}
+                        </td>
+                        <td className="right stockHoldingsPercentCell">
+                          <div>{h.percent_of_networth.toFixed(1)}%</div>
+                          <small>{formatMoney(h.value)}</small>
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {summary && holdings.length === 0 && (
                     <tr>
-                      <td className="muted" colSpan={7}>No holdings available.</td>
+                      <td className="muted" colSpan={5}>No holdings available.</td>
                     </tr>
                   )}
                 </tbody>
@@ -157,16 +187,6 @@ export default function StockHoldings() {
                 </button>
               </div>
             ) : null}
-          </div>
-
-          <div className="card stockHoldingsDividendsCard">
-            <div className="stockHoldingsDividendsIntro">
-              <h2>Dividends</h2>
-              <p className="stockHoldingsDividendsText">
-                Track realized payouts and annualized expected dividend income.
-              </p>
-            </div>
-            <Link className="btn stockHoldingsDividendsBtn" to="/dividends">Open full Dividends view</Link>
           </div>
         </section>
       )}

@@ -20,6 +20,7 @@ import CashFlowDetail from "./routes/CashFlowDetail.tsx";
 import CashFlowMapping from "./routes/CashFlowMapping.tsx";
 import Alerts from "./routes/Alerts.tsx";
 import WealthOverview from "./routes/WealthOverview.tsx";
+import WealthRisk from "./routes/WealthRisk.tsx";
 import Dividends from "./routes/Dividends.tsx";
 import Loans from "./routes/Loans.tsx";
 import Companies from "./routes/Companies.tsx";
@@ -28,6 +29,9 @@ import AuthorLibrary from "./routes/AuthorLibrary.tsx";
 import AuthorIngestion from "./routes/AuthorIngestion.tsx";
 import Settings from "./routes/Settings.tsx";
 import Platforms from "./routes/Platforms.tsx";
+import LiabilitiesOverview from "./routes/LiabilitiesOverview.tsx";
+import OperationsOverview from "./routes/OperationsOverview.tsx";
+import IntelligenceOverview from "./routes/IntelligenceOverview.tsx";
 import { ThemeProvider } from "./context/ThemeContext.tsx";
 import { AuthProvider } from "./context/AuthContext.tsx";
 import RequireAuth from "./components/RequireAuth.tsx";
@@ -53,6 +57,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route element={<AppShell />}>
                       <Route path="/" element={<App />} />
                       <Route path="/wealth" element={<WealthOverview />} />
+                      <Route path="/risk" element={<WealthRisk />} />
                       <Route path="/dividends" element={<Dividends />} />
                       <Route path="/holdings" element={<StockHoldings />} />
                       <Route path="/crypto" element={<CryptoWallets />} />
@@ -60,14 +65,17 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/cash" element={<CashOverview />} />
                       <Route path="/cash-flow" element={<CashFlowDetail />} />
                       <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
+                      <Route path="/liabilities" element={<LiabilitiesOverview />} />
                       <Route path="/credit-cards" element={<CreditCards />} />
                       <Route path="/loans" element={<Loans />} />
+                      <Route path="/intelligence" element={<IntelligenceOverview />} />
                       <Route path="/companies" element={<Companies />} />
                       <Route path="/alerts" element={<Alerts />} />
                       <Route path="/ai-sage" element={<AISage />} />
                       <Route path="/author-library" element={<AuthorLibrary />} />
                       <Route path="/author-library/:authorId" element={<AuthorLibrary />} />
                       <Route path="/author-library/:authorId/documents/:documentId" element={<AuthorLibrary />} />
+                      <Route path="/operations" element={<OperationsOverview />} />
                       <Route path="/author-ingestion" element={<AuthorIngestion />} />
                       <Route path="/ingest" element={<Ingest />} />
                       <Route path="/market-data" element={<MarketData />} />

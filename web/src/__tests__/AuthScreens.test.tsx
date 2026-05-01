@@ -24,7 +24,7 @@ function renderLogin(initialPath = "/login") {
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/" element={<div>Home</div>} />
+        <Route path="/wealth" element={<div>Home</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -35,7 +35,7 @@ function renderSignup(initialPath = "/signup") {
     <MemoryRouter initialEntries={[initialPath]}>
       <Routes>
         <Route path="/signup" element={<Signup />} />
-        <Route path="/" element={<div>Home</div>} />
+        <Route path="/wealth" element={<div>Home</div>} />
       </Routes>
     </MemoryRouter>,
   );
@@ -86,4 +86,3 @@ describe("Auth screens", () => {
     expect(mockSignup).not.toHaveBeenCalled();
   });
 });
-

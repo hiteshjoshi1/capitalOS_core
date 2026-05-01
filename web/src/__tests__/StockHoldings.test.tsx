@@ -10,7 +10,6 @@ import type { StockHoldingsSummary } from "../lib/api";
 vi.mock("../lib/api", () => ({
   api: {
     stockHoldingsSummary: vi.fn(),
-    dividendsByCompany: vi.fn(),
   },
 }));
 
@@ -67,15 +66,6 @@ const summaryFixture: StockHoldingsSummary = {
 describe("StockHoldings", () => {
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
-    mockApi.dividendsByCompany.mockResolvedValueOnce({
-      from_month: "2025-03",
-      to_month: "2026-02",
-      base_currency: "SGD",
-      assumed_tax_rate: 0,
-      country_tax_rates: {},
-      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
-      items: [],
-    });
 
     render(
       <ThemeProvider>
@@ -86,30 +76,33 @@ describe("StockHoldings", () => {
     );
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
-    expect(screen.getByText("Dividends")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open full Dividends view" })).toBeInTheDocument();
+    expect(screen.queryByText("Dividends")).not.toBeInTheDocument();
 
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
 
-    expect(screen.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Current Price" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Profit & Loss" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "% NW" })).toBeInTheDocument();
 
     const hkRow = screen.getByText("700").closest("tr");
     expect(hkRow).not.toBeNull();
     if (hkRow) {
       const scoped = within(hkRow);
-      expect(scoped.getByText("10.5")).toBeInTheDocument();
+      expect(scoped.getByText("10.5 shares")).toBeInTheDocument();
       expect(scoped.getByText("HKD 123.45")).toBeInTheDocument();
       expect(scoped.getByText("HKD 150.12")).toBeInTheDocument();
+      expect(scoped.getByText("+HKD 280.04")).toBeInTheDocument();
+      expect(scoped.getByText("+21.6%")).toBeInTheDocument();
+      expect(scoped.getByText("24.0%")).toBeInTheDocument();
     }
 
     const inRow = screen.getByText("INFY").closest("tr");
     expect(inRow).not.toBeNull();
     if (inRow) {
       const scoped = within(inRow);
-      expect(scoped.getByText("20")).toBeInTheDocument();
+      expect(scoped.getByText("20 shares")).toBeInTheDocument();
       expect(scoped.getAllByText("—").length).toBeGreaterThanOrEqual(2);
     }
   });
@@ -133,15 +126,6 @@ describe("StockHoldings", () => {
     };
 
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(manyHoldings);
-    mockApi.dividendsByCompany.mockResolvedValueOnce({
-      from_month: "2025-03",
-      to_month: "2026-02",
-      base_currency: "SGD",
-      assumed_tax_rate: 0,
-      country_tax_rates: {},
-      totals: { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 },
-      items: [],
-    });
 
     render(
       <ThemeProvider>

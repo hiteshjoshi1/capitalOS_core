@@ -160,11 +160,12 @@ test.beforeEach(async ({ page }) => {
 test("loads dashboard shell", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeVisible();
-  // Expand the "Operations" nav section to verify Ingest and Market Data links exist.
-  await page.getByRole("button", { name: /Operations/i }).click();
-  await expect(page.getByRole("link", { name: "Ingest" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Market Data" })).toBeVisible();
+  await expect(page).toHaveURL(/\/wealth$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Wealth Overview" })).toBeVisible();
+  await page.getByRole("link", { name: "Operations" }).click();
+  await expect(page).toHaveURL(/\/operations$/);
+  await expect(page.getByRole("link", { name: /^Ingest$/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Refresh Market Data$/ })).toBeVisible();
 });
 
 test("navigates to cash overview", async ({ page }) => {
@@ -175,8 +176,6 @@ test("navigates to cash overview", async ({ page }) => {
 test("navigates via wealth overview exposure cards", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await page.getByRole("button", { name: /Wealth/i }).click();
-  await page.getByRole("link", { name: "Overview" }).click();
   await expect(page).toHaveURL(/\/wealth$/);
   await expect(page.getByRole("link", { name: "Stocks & Funds details" })).toBeVisible();
 
@@ -197,7 +196,8 @@ test("navigates via wealth overview exposure cards", async ({ page }) => {
 test("persists theme toggle across reload", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Switch to Light Mode" }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect
@@ -212,6 +212,6 @@ test("loads dashboard shell on mobile breakpoint", async ({ page }) => {
   await mockDashboardApis(page);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1, name: "CapitalOS Dashboard" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Wealth Overview" })).toBeVisible();
   await expect(page.getByLabel("Month")).toBeVisible();
 });
