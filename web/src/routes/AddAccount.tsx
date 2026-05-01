@@ -340,7 +340,7 @@ export default function AddAccount() {
               <button className="btn" type="submit" disabled={!canSubmit || saving}>
                 {saving ? "Saving…" : "Create account"}
               </button>
-              <Link className="btn" to="/">Cancel</Link>
+              <Link className="btn" to="/operations">Cancel</Link>
             </div>
 
             {err && (

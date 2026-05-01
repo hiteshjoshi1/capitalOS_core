@@ -7,11 +7,10 @@ import { resolve } from "node:path";
 import { ThemeProvider } from "../context/ThemeContext";
 import AppShell from "../components/AppShell";
 import WealthOverview from "../routes/WealthOverview";
-import Loans from "../routes/Loans";
-import Companies from "../routes/Companies";
-import AISage from "../routes/AISage";
-import Settings from "../routes/Settings";
-import Platforms from "../routes/Platforms";
+import WealthRisk from "../routes/WealthRisk";
+import LiabilitiesOverview from "../routes/LiabilitiesOverview";
+import OperationsOverview from "../routes/OperationsOverview";
+import IntelligenceOverview from "../routes/IntelligenceOverview";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -27,7 +26,7 @@ vi.mock("../lib/api", () => ({
         cash: 25000,
         stocks_funds: 50000,
         crypto: 25000,
-        liabilities: 0,
+        liabilities: -10000,
       },
       geography: [],
       cash_flow: { income: 0, expenses: 0, net: 0, savings_rate: null },
@@ -40,19 +39,22 @@ vi.mock("../lib/api", () => ({
       total: 100000,
       items: [],
     }),
+    spendingSummary: vi.fn().mockResolvedValue({
+      month: "2026-02",
+      base_currency: "SGD",
+      income_total: 0,
+      expense_total: 0,
+      net: 0,
+      savings_rate: null,
+      income_categories: [],
+      expense_categories: [],
+    }),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     alertNotifications: vi.fn().mockResolvedValue({
       upload_reminders: [],
       system_notifications: [],
       total_count: 0,
     }),
-    platforms: vi.fn().mockResolvedValue([]),
-    platformOptions: vi.fn().mockResolvedValue({
-      platform_types: ["BANK", "BROKER"],
-      countries: ["SG", "US"],
-      country_pattern: "^[A-Z]{2,3}$",
-    }),
-    createPlatform: vi.fn(),
   },
 }));
 
@@ -64,40 +66,58 @@ describe("AppShell", () => {
   it("renders sidebar alongside outlet content", () => {
     render(
       <ThemeProvider>
-        <MemoryRouter initialEntries={["/"]}>
+        <MemoryRouter initialEntries={["/wealth"]}>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/" element={<div>Dashboard Content</div>} />
+              <Route path="/wealth" element={<div>Overview Content</div>} />
             </Route>
           </Routes>
         </MemoryRouter>
       </ThemeProvider>,
     );
 
-    // Sidebar present (aside = complementary role)
     expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
-
-    // Outlet content rendered
-    expect(screen.getByText("Dashboard Content")).toBeInTheDocument();
+    expect(screen.getByText("Overview Content")).toBeInTheDocument();
   });
 
-  it("renders sidebar nav with Dashboard link", () => {
+  it("renders shell tabs for the active section", () => {
     render(
       <ThemeProvider>
-        <MemoryRouter initialEntries={["/"]}>
+        <MemoryRouter initialEntries={["/wealth"]}>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/" element={<div>Content</div>} />
+              <Route path="/wealth" element={<div>Overview Content</div>} />
             </Route>
           </Routes>
         </MemoryRouter>
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("link", { name: "Dashboard" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Wealth" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Overview" })).toHaveClass("appShellTabActive");
+    expect(screen.getByRole("link", { name: "Stocks" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Risk" })).toBeInTheDocument();
   });
 
-  it("keeps sidebar width at 272px for dashboard mockup parity", () => {
+  it("renders liabilities tabs on liabilities routes", () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/credit-cards"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/credit-cards" element={<div>Cards</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByRole("heading", { name: "Liabilities" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Credit Cards" })).toHaveClass("appShellTabActive");
+    expect(screen.getByRole("link", { name: "Loans" })).toBeInTheDocument();
+  });
+
+  it("keeps sidebar width at 272px for shell layout stability", () => {
     const appCss = readFileSync(resolve(process.cwd(), "src/App.css"), "utf8");
     expect(appCss).toContain(".sidebar {");
     expect(appCss).toContain("width: 272px;");
@@ -127,11 +147,10 @@ describe("AppShell", () => {
 describe("Placeholder route smoke tests", () => {
   const routes: { path: string; component: ReactElement; heading: string }[] = [
     { path: "/wealth", component: <WealthOverview />, heading: "Wealth Overview" },
-    { path: "/loans", component: <Loans />, heading: "Loans" },
-    { path: "/companies", component: <Companies />, heading: "Companies" },
-    { path: "/ai-sage", component: <AISage />, heading: "Hello there" },
-    { path: "/settings", component: <Settings />, heading: "Settings" },
-    { path: "/platforms", component: <Platforms />, heading: "Platforms" },
+    { path: "/risk", component: <WealthRisk />, heading: "Wealth Risk" },
+    { path: "/liabilities", component: <LiabilitiesOverview />, heading: "Liabilities Overview" },
+    { path: "/operations", component: <OperationsOverview />, heading: "Operations Overview" },
+    { path: "/intelligence", component: <IntelligenceOverview />, heading: "Intelligence Overview" },
   ];
 
   routes.forEach(({ path, component, heading }) => {

@@ -13,10 +13,10 @@ export default function Login() {
   const [error, setError] = useState("");
 
   if (user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/wealth" replace />;
   }
 
-  const from = (location.state as { from?: string } | null)?.from || "/";
+  const from = (location.state as { from?: string } | null)?.from || "/wealth";
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

@@ -14,7 +14,7 @@ export default function Signup() {
   const [error, setError] = useState("");
 
   if (user) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/wealth" replace />;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -27,7 +27,7 @@ export default function Signup() {
     setError("");
     try {
       await signup(username, password, displayName || undefined);
-      navigate("/", { replace: true });
+      navigate("/wealth", { replace: true });
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Signup failed");
     } finally {
