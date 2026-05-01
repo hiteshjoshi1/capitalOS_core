@@ -196,7 +196,8 @@ test("navigates via wealth overview exposure cards", async ({ page }) => {
 test("persists theme toggle across reload", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await page.getByRole("button", { name: "Toggle theme" }).click();
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Switch to Light Mode" }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect
