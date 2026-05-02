@@ -123,16 +123,18 @@ test("Operations nav includes Add Account and Platforms", async ({ page }) => {
   await mockOperationsApis(page);
 
   await page.goto("/");
-  await page.getByRole("link", { name: "Operations" }).click();
+  await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
-  await expect(page.getByRole("link", { name: /^Add Accounts$/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Add Platforms$/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Add Accounts$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Add a Platform$/ }).last()).toBeVisible();
 
-  await page.getByRole("link", { name: /^Add Accounts$/ }).click();
+  await page.getByRole("link", { name: /^Add Accounts$/ }).last().click();
   await expect(page).toHaveURL(/\/accounts\/new$/);
   await expect(page.getByRole("heading", { level: 1, name: "Add Account" })).toBeVisible();
 
-  await page.getByRole("link", { name: /^Add Platforms$/ }).click();
+  await page.getByRole("link", { name: "Data Hub" }).click();
+  await expect(page).toHaveURL(/\/operations$/);
+  await page.getByRole("link", { name: /^Add a Platform$/ }).last().click();
   await expect(page).toHaveURL(/\/platforms$/);
   await expect(page.getByRole("heading", { level: 1, name: "Platforms" })).toBeVisible();
 });

@@ -1,5 +1,4 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -120,6 +119,8 @@ describe("Dividends", () => {
     expect(screen.getByText("Expected Dividends (Holdings-Based)")).toBeInTheDocument();
     expect(screen.getByText("By Company (Expected)")).toBeInTheDocument();
     expect(screen.getAllByText("Apple Inc.").length).toBeGreaterThanOrEqual(1);
+    expect(screen.queryByLabelText("Assumed tax rate percent")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Country tax rates")).not.toBeInTheDocument();
   });
 
   it("renders API error state when loading fails", async () => {
@@ -195,7 +196,6 @@ describe("Dividends", () => {
       companies: [],
     });
 
-    const user = userEvent.setup();
     render(
       <ThemeProvider>
         <MemoryRouter>
@@ -208,21 +208,23 @@ describe("Dividends", () => {
     expect(screen.getByText("No company-level dividend records yet.")).toBeInTheDocument();
     expect(screen.getByText("No expected dividend estimates found for selected range.")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
-    await user.clear(screen.getByLabelText("Assumed tax rate percent"));
-    await user.type(screen.getByLabelText("Assumed tax rate percent"), "12");
-    await user.clear(screen.getByLabelText("Country tax rates"));
-    await user.type(screen.getByLabelText("Country tax rates"), "US:20");
-
     await waitFor(() => {
       expect(mockApi.dividendsSummary).toHaveBeenLastCalledWith(
         expect.any(String),
         expect.any(String),
         "month",
-        "USD",
-        12,
-        "US:20",
+        "SGD",
       );
     });
+    expect(mockApi.dividendsByCompany).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "SGD",
+    );
+    expect(mockApi.expectedDividendsOverview).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.any(String),
+      "SGD",
+    );
   });
 });

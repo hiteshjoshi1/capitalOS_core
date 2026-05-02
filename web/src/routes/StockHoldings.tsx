@@ -82,7 +82,7 @@ export default function StockHoldings() {
       title="Stock Holdings"
       subtitle="Detailed equity and cash holdings snapshot."
       activeRoute="/holdings"
-      secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
+      secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={handleMonthChange} />

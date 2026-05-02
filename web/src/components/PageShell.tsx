@@ -1,4 +1,5 @@
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { useShellHeader } from "../context/ShellHeaderContext";
 
 type PageShellProps = {
   title: string;
@@ -25,6 +26,18 @@ export default function PageShell({
   headerActions,
   children,
 }: PageShellProps) {
+  const { hasProvider, setHeaderActions } = useShellHeader();
+
+  useEffect(() => {
+    if (!hasProvider) {
+      return undefined;
+    }
+    setHeaderActions(headerActions ?? null);
+    return () => {
+      setHeaderActions(null);
+    };
+  }, [hasProvider, headerActions, setHeaderActions]);
+
   return (
     <div className="pageShellWrap">
       {!hideHeader ? (
@@ -33,11 +46,7 @@ export default function PageShell({
             <h1 className="title">{title}</h1>
             {subtitle ? <div className="subtitle">{subtitle}</div> : null}
           </div>
-          {headerActions ? (
-            <div className="dashboardNavArea">
-              <div className="pageHeaderActions">{headerActions}</div>
-            </div>
-          ) : null}
+          {!hasProvider && headerActions ? <div className="dashboardHeaderActions">{headerActions}</div> : null}
         </header>
       ) : null}
 

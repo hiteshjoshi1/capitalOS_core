@@ -5,29 +5,35 @@ import PageShell from "../components/PageShell";
 export default function LiabilitiesOverview() {
   return (
     <PageShell
-      title="Liabilities Overview"
-      subtitle="Organize revolving balances, installment debt, and payoff workflows."
+      title="Liabilities"
+      subtitle="Organize revolving balances and repayment workflows from one section."
     >
       <section className="grid sectionOverviewGrid">
-        <article className="card sectionOverviewCard">
-          <p className="sectionOverviewEyebrow">Overview</p>
-          <h2 className="sectionOverviewTitle">Keep repayment pressure visible.</h2>
-          <p className="muted">
-            Use Credit Cards and Loans to inspect balances, due dates, and liability classes without reworking the detail pages.
-          </p>
-        </article>
-
-        <Link className="card sectionOverviewLinkCard" to="/credit-cards">
+        <article className="card sectionOverviewCard sectionOverviewPrimaryCard">
           <p className="sectionOverviewEyebrow">Credit Cards</p>
           <h2 className="sectionOverviewTitle">Open the current card spend and utilization view.</h2>
-          <p className="muted">Review card breakdowns, top purchases, recurring payments, and transaction detail.</p>
-        </Link>
+          <p className="muted sectionOverviewDescription">
+            Review card breakdowns, top purchases, recurring payments, and transaction detail in the existing credit card workspace.
+          </p>
+          <div className="sectionOverviewActions">
+            <Link className="btn btnLarge sectionOverviewCta" to="/credit-cards">
+              Open Credit Cards
+            </Link>
+          </div>
+        </article>
 
-        <Link className="card sectionOverviewLinkCard" to="/loans">
+        <article className="card sectionOverviewCard">
           <p className="sectionOverviewEyebrow">Loans</p>
           <h2 className="sectionOverviewTitle">Track secured and installment debt.</h2>
-          <p className="muted">Loan tracking remains lightly styled here and can be expanded in a later issue.</p>
-        </Link>
+          <p className="muted sectionOverviewDescription">
+            Loan tracking will stay lightweight for now and can be expanded in a later issue once the surrounding workflows are ready.
+          </p>
+          <div className="sectionOverviewActions">
+            <button className="btn btnLarge sectionOverviewCta" type="button" disabled>
+              Loans Coming Soon
+            </button>
+          </div>
+        </article>
       </section>
     </PageShell>
   );

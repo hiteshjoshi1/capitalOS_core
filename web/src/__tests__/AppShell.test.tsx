@@ -93,7 +93,6 @@ describe("AppShell", () => {
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "Wealth" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Overview" })).toHaveClass("appShellTabActive");
     expect(screen.getByRole("link", { name: "Stocks" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Risk" })).toBeInTheDocument();
@@ -112,9 +111,26 @@ describe("AppShell", () => {
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("heading", { name: "Liabilities" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Credit Cards" })).toHaveClass("appShellTabActive");
     expect(screen.getByRole("link", { name: "Loans" })).toBeInTheDocument();
+  });
+
+  it("renders wealth page controls inside the shell top bar", async () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/wealth"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/wealth" element={<WealthOverview />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByRole("link", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toBeInTheDocument();
+    expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
   });
 
   it("keeps sidebar width at 272px for shell layout stability", () => {
@@ -148,9 +164,9 @@ describe("Placeholder route smoke tests", () => {
   const routes: { path: string; component: ReactElement; heading: string }[] = [
     { path: "/wealth", component: <WealthOverview />, heading: "Wealth Overview" },
     { path: "/risk", component: <WealthRisk />, heading: "Wealth Risk" },
-    { path: "/liabilities", component: <LiabilitiesOverview />, heading: "Liabilities Overview" },
-    { path: "/operations", component: <OperationsOverview />, heading: "Operations Overview" },
-    { path: "/intelligence", component: <IntelligenceOverview />, heading: "Intelligence Overview" },
+    { path: "/liabilities", component: <LiabilitiesOverview />, heading: "Liabilities" },
+    { path: "/operations", component: <OperationsOverview />, heading: "Data Hub" },
+    { path: "/intelligence", component: <IntelligenceOverview />, heading: "Research" },
   ];
 
   routes.forEach(({ path, component, heading }) => {

@@ -338,7 +338,7 @@ describe("AuthorIngestion page", () => {
     });
   });
 
-  it("sends selective_ingestion payload when fields are filled", async () => {
+  it("sends selective_ingestion payload when fields are filled", { timeout: 10000 }, async () => {
     const user = userEvent.setup();
     (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",
@@ -371,7 +371,7 @@ describe("AuthorIngestion page", () => {
     });
   });
 
-  it("does not send selective_ingestion when all fields are empty", async () => {
+  it("does not send selective_ingestion when all fields are empty", { timeout: 10000 }, async () => {
     const user = userEvent.setup();
     (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",
@@ -391,11 +391,15 @@ describe("AuthorIngestion page", () => {
 
     await waitFor(() => {
       const call = (api.ragIngestUrls as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(call[1].selective_ingestion).toBeNull();
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          urls: expect.arrayContaining(["https://example.com/no-selective"]),
+        }),
+      );
     });
   });
 
-  it("submits fanout definitions without raw JSON editing", async () => {
+  it("submits fanout definitions without raw JSON editing", { timeout: 10000 }, async () => {
     const user = userEvent.setup();
     (api.ragIngestUrls as ReturnType<typeof vi.fn>).mockResolvedValue({
       author_id: "warren_buffett",

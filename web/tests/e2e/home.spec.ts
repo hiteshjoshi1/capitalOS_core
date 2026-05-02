@@ -162,10 +162,10 @@ test("loads dashboard shell", async ({ page }) => {
   await page.goto("/");
   await expect(page).toHaveURL(/\/wealth$/);
   await expect(page.getByRole("heading", { level: 1, name: "Wealth Overview" })).toBeVisible();
-  await page.getByRole("link", { name: "Operations" }).click();
+  await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
-  await expect(page.getByRole("link", { name: /^Ingest$/ })).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Refresh Market Data$/ })).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Import Statements$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Refresh Stock Quotes$/ }).last()).toBeVisible();
 });
 
 test("navigates to cash overview", async ({ page }) => {
