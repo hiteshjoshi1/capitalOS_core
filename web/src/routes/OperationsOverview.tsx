@@ -2,50 +2,75 @@ import { Link } from "react-router-dom";
 import "../App.css";
 import PageShell from "../components/PageShell";
 
+const DATA_HUB_ACTIONS = [
+  {
+    label: "Import Statements",
+    title: "Upload statements and inspect import reports.",
+    description: "Bring in new broker, bank, and card statements, then verify what CapitalOS parsed before it lands in the ledger.",
+    to: "/ingest",
+    cta: "Import Statements",
+    primary: true,
+  },
+  {
+    label: "Author Ingestion",
+    title: "Curate source discovery and ingestion for the library.",
+    description: "Add and validate author sources, fan out logical documents, and monitor ingestion jobs for your research corpus.",
+    to: "/author-ingestion",
+    cta: "Ingest Author Writings",
+    primary: true,
+  },
+  {
+    label: "Refresh Market Data",
+    title: "Refresh quotes and portfolio market snapshots.",
+    description: "Pull the latest market data so valuations, positions, and downstream research surfaces stay current.",
+    to: "/market-data",
+    cta: "Refresh Stock Quotes",
+  },
+  {
+    label: "Add Crypto Wallets",
+    title: "Connect chains and verify wallet ownership.",
+    description: "Attach wallet addresses, verify control, and expand on-chain balances and token exposure coverage.",
+    to: "/crypto",
+    cta: "Add Crypto Wallet",
+  },
+  {
+    label: "Add Accounts",
+    title: "Create financial accounts with typed metadata.",
+    description: "Set up banks, brokers, cards, and internal ledgers so new statements have the right destination.",
+    to: "/accounts/new",
+    cta: "Add Accounts",
+  },
+  {
+    label: "Add Platforms",
+    title: "Manage banks, brokers, exchanges, and wallet providers.",
+    description: "Maintain the platform directory that powers imports, holdings attribution, and account metadata.",
+    to: "/platforms",
+    cta: "Add a Platform",
+  },
+] as const;
+
 export default function OperationsOverview() {
   return (
     <PageShell
-      title="Operations Overview"
-      subtitle="Run ingestion, connect accounts, and refresh market data from one operator surface."
+      title="Data Hub"
+      subtitle="Import statements, manage source connections, and run the operational workflows that feed the system."
     >
       <section className="grid sectionOverviewGrid">
-        <article className="card sectionOverviewCard">
-          <p className="sectionOverviewEyebrow">Overview</p>
-          <h2 className="sectionOverviewTitle">Instrumentation first, workflows second.</h2>
-          <p className="muted">
-            Every operational action stays on its existing page while the shell groups them under a single section.
-          </p>
-        </article>
-
-        <Link className="card sectionOverviewLinkCard" to="/ingest">
-          <p className="sectionOverviewEyebrow">Ingest</p>
-          <h2 className="sectionOverviewTitle">Upload statements and inspect import reports.</h2>
-        </Link>
-
-        <Link className="card sectionOverviewLinkCard" to="/accounts/new">
-          <p className="sectionOverviewEyebrow">Add Accounts</p>
-          <h2 className="sectionOverviewTitle">Create financial accounts with typed metadata.</h2>
-        </Link>
-
-        <Link className="card sectionOverviewLinkCard" to="/platforms">
-          <p className="sectionOverviewEyebrow">Add Platforms</p>
-          <h2 className="sectionOverviewTitle">Manage banks, brokers, exchanges, and wallet providers.</h2>
-        </Link>
-
-        <Link className="card sectionOverviewLinkCard" to="/crypto">
-          <p className="sectionOverviewEyebrow">Add Crypto Wallets</p>
-          <h2 className="sectionOverviewTitle">Connect chains and verify wallet ownership.</h2>
-        </Link>
-
-        <Link className="card sectionOverviewLinkCard" to="/market-data">
-          <p className="sectionOverviewEyebrow">Refresh Market Data</p>
-          <h2 className="sectionOverviewTitle">Refresh quotes and portfolio market snapshots.</h2>
-        </Link>
-
-        <Link className="card sectionOverviewLinkCard" to="/author-ingestion">
-          <p className="sectionOverviewEyebrow">Author Ingestion</p>
-          <h2 className="sectionOverviewTitle">Curate source discovery and ingestion for the library.</h2>
-        </Link>
+        {DATA_HUB_ACTIONS.map((action) => (
+          <article
+            key={action.to}
+            className={`card sectionOverviewCard${action.primary ? " sectionOverviewPrimaryCard" : ""}`}
+          >
+            <p className="sectionOverviewEyebrow">{action.label}</p>
+            <h2 className="sectionOverviewTitle">{action.title}</h2>
+            <p className="muted sectionOverviewDescription">{action.description}</p>
+            <div className="sectionOverviewActions">
+              <Link className="btn btnLarge sectionOverviewCta" to={action.to}>
+                {action.cta}
+              </Link>
+            </div>
+          </article>
+        ))}
       </section>
     </PageShell>
   );

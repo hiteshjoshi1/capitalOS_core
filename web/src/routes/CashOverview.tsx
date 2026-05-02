@@ -55,7 +55,7 @@ export default function CashOverview() {
       title="Cash Overview"
       subtitle="Bank cash, broker cash, and stablecoin balances."
       activeRoute="/cash"
-      secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
+      secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />

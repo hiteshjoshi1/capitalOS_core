@@ -109,8 +109,8 @@ export default function Ingest() {
 
   return (
     <PageShell
-      title="CapitalOS — Ingest"
-      subtitle="Upload a statement CSV. We will detect the format and show a report."
+      title="CapitalOS — Import Statements"
+      subtitle="Upload a statement file. We will detect the format and show a report."
       activeRoute="/ingest"
     >
       {state === "loading" && <div className="card">Loading…</div>}

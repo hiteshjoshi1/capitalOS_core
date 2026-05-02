@@ -391,7 +391,11 @@ describe("AuthorIngestion page", () => {
 
     await waitFor(() => {
       const call = (api.ragIngestUrls as ReturnType<typeof vi.fn>).mock.calls[0];
-      expect(call[1].selective_ingestion).toBeNull();
+      expect(call[1]).toEqual(
+        expect.objectContaining({
+          urls: expect.arrayContaining(["https://example.com/no-selective"]),
+        }),
+      );
     });
   });
 

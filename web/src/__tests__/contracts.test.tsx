@@ -135,8 +135,8 @@ describe("frontend contracts", () => {
     expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Operations" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Intelligence" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(screen.getByText("Wealth Content")).toBeInTheDocument();
   });

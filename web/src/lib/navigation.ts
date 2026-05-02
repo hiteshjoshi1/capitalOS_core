@@ -47,12 +47,12 @@ export const APP_SECTIONS: AppSection[] = [
   },
   {
     id: "operations",
-    label: "Operations",
+    label: "Data Hub",
     icon: "settings_applications",
     to: "/operations",
     tabs: [
       { label: "Overview", to: "/operations", exact: true },
-      { label: "Ingest", to: "/ingest" },
+      { label: "Import Statements", to: "/ingest" },
       { label: "Add Accounts", to: "/accounts/new" },
       { label: "Add Platforms", to: "/platforms" },
       { label: "Add Crypto Wallets", to: "/crypto", exact: true },
@@ -62,7 +62,7 @@ export const APP_SECTIONS: AppSection[] = [
   },
   {
     id: "intelligence",
-    label: "Intelligence",
+    label: "Research",
     icon: "insights",
     to: "/intelligence",
     matchPaths: ["/alerts"],

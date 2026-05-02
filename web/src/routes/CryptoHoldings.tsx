@@ -39,7 +39,7 @@ export default function CryptoHoldings() {
       title="Crypto Holdings"
       subtitle="Detailed wallet, token, and chain-level exposure."
       activeRoute="/crypto/holdings"
-      secondaryNavItem={{ label: "Ingest", to: "/ingest" }}
+      secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />

@@ -26,8 +26,6 @@ export default function Dividends() {
   const [expectedOverview, setExpectedOverview] = useState<ExpectedDividendsOverview | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
-  const [assumedTaxRate, setAssumedTaxRate] = useState<string>("10");
-  const [countryRates, setCountryRates] = useState<string>("US:15,IN:10,SG:0,HK:0");
 
   const fromMonth = useMemo(() => shiftMonth(month, -11), [month]);
 
@@ -36,11 +34,10 @@ export default function Dividends() {
       try {
         setState("loading");
         setErr("");
-        const taxRateNumber = Number(assumedTaxRate || "0");
         const [monthData, companyData, expectedData] = await Promise.all([
-          api.dividendsSummary(fromMonth, month, "month", baseCurrency, taxRateNumber, countryRates),
-          api.dividendsByCompany(month, month, baseCurrency, taxRateNumber, countryRates),
-          api.expectedDividendsOverview(fromMonth, month, baseCurrency, taxRateNumber, countryRates),
+          api.dividendsSummary(fromMonth, month, "month", baseCurrency),
+          api.dividendsByCompany(month, month, baseCurrency),
+          api.expectedDividendsOverview(fromMonth, month, baseCurrency),
         ]);
         setMonthSummary(monthData);
         setCompanySummary(companyData);
@@ -51,7 +48,7 @@ export default function Dividends() {
         setState("error");
       }
     })();
-  }, [fromMonth, month, baseCurrency, assumedTaxRate, countryRates]);
+  }, [fromMonth, month, baseCurrency]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
@@ -121,26 +118,6 @@ export default function Dividends() {
               <option value="HKD">HKD</option>
               <option value="INR">INR</option>
             </select>
-          </label>
-          <label className="pill">
-            <span>Tax %</span>
-            <input
-              className="monthInput"
-              aria-label="Assumed tax rate percent"
-              value={assumedTaxRate}
-              onChange={(e) => setAssumedTaxRate(e.target.value)}
-              style={{ width: 64 }}
-            />
-          </label>
-          <label className="pill">
-            <span>Country Rates</span>
-            <input
-              className="monthInput"
-              aria-label="Country tax rates"
-              value={countryRates}
-              onChange={(e) => setCountryRates(e.target.value)}
-              style={{ width: 220 }}
-            />
           </label>
         </>
       )}

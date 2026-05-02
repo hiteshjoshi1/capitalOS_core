@@ -5,32 +5,48 @@ import PageShell from "../components/PageShell";
 export default function IntelligenceOverview() {
   return (
     <PageShell
-      title="Intelligence Overview"
-      subtitle="Move between AI guidance, author research, and company workups from one section."
+      title="Research"
+      subtitle="Move between AI guidance, author research, and future company workups from one section."
     >
       <section className="grid sectionOverviewGrid">
-        <article className="card sectionOverviewCard">
-          <p className="sectionOverviewEyebrow">Overview</p>
-          <h2 className="sectionOverviewTitle">Research and synthesis stay connected.</h2>
-          <p className="muted">
-            The section tabs keep AI Sage, Author Library, and Companies grouped without changing their underlying page logic.
-          </p>
-        </article>
-
-        <Link className="card sectionOverviewLinkCard" to="/ai-sage">
+        <article className="card sectionOverviewCard sectionOverviewPrimaryCard">
           <p className="sectionOverviewEyebrow">AI Sage</p>
           <h2 className="sectionOverviewTitle">Query grounded business and investing context.</h2>
-        </Link>
+          <p className="muted sectionOverviewDescription">
+            Ask questions across your corpus and current research stack, then inspect ranked passages and linked evidence.
+          </p>
+          <div className="sectionOverviewActions">
+            <Link className="btn btnLarge sectionOverviewCta" to="/ai-sage">
+              Open AI Sage
+            </Link>
+          </div>
+        </article>
 
-        <Link className="card sectionOverviewLinkCard" to="/author-library">
+        <article className="card sectionOverviewCard sectionOverviewPrimaryCard">
           <p className="sectionOverviewEyebrow">Author Library</p>
           <h2 className="sectionOverviewTitle">Browse authors, documents, and curated passages.</h2>
-        </Link>
+          <p className="muted sectionOverviewDescription">
+            Navigate the ingested writing corpus by author, collection, and document so you can read the source material directly.
+          </p>
+          <div className="sectionOverviewActions">
+            <Link className="btn btnLarge sectionOverviewCta" to="/author-library">
+              Open Author Library
+            </Link>
+          </div>
+        </article>
 
-        <Link className="card sectionOverviewLinkCard" to="/companies">
+        <article className="card sectionOverviewCard">
           <p className="sectionOverviewEyebrow">Companies</p>
           <h2 className="sectionOverviewTitle">Keep company research accessible as a dedicated tab.</h2>
-        </Link>
+          <p className="muted sectionOverviewDescription">
+            This will become the structured home for company dossiers, snapshots, and long-form research workflows.
+          </p>
+          <div className="sectionOverviewActions">
+            <button className="btn btnLarge sectionOverviewCta" type="button" disabled>
+              Companies Coming Soon
+            </button>
+          </div>
+        </article>
       </section>
     </PageShell>
   );

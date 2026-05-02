@@ -46,20 +46,20 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /CapitalOS/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Operations" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Intelligence" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
   });
 
   it("highlights Wealth as the active primary section on wealth child routes", () => {
     renderSidebar("/holdings");
     expect(screen.getByRole("link", { name: "Wealth" })).toHaveClass("sidebarLinkActive");
-    expect(screen.getByRole("link", { name: "Operations" })).not.toHaveClass("sidebarLinkActive");
+    expect(screen.getByRole("link", { name: "Data Hub" })).not.toHaveClass("sidebarLinkActive");
   });
 
   it("highlights Operations as the active primary section on operational routes", () => {
     renderSidebar("/market-data");
-    expect(screen.getByRole("link", { name: "Operations" })).toHaveClass("sidebarLinkActive");
+    expect(screen.getByRole("link", { name: "Data Hub" })).toHaveClass("sidebarLinkActive");
   });
 
   it("renders Alerts in the utility links and omits Settings", () => {
