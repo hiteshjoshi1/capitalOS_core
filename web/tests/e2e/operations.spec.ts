@@ -132,6 +132,8 @@ test("Operations nav includes Add Account and Platforms", async ({ page }) => {
   await expect(page).toHaveURL(/\/accounts\/new$/);
   await expect(page.getByRole("heading", { level: 1, name: "Add Account" })).toBeVisible();
 
+  await page.getByRole("link", { name: "Data Hub" }).click();
+  await expect(page).toHaveURL(/\/operations$/);
   await page.getByRole("link", { name: /^Add a Platform$/ }).last().click();
   await expect(page).toHaveURL(/\/platforms$/);
   await expect(page.getByRole("heading", { level: 1, name: "Platforms" })).toBeVisible();
