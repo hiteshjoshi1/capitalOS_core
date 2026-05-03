@@ -2140,6 +2140,11 @@ a.btn {
   gap: 18px;
 }
 
+.cashFlowInsightGridTwoUp,
+.cashFlowAnswerGridTwoUp {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .cashFlowInsightGridWide {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -2357,7 +2362,11 @@ a.btn {
 
 @media (max-width: 980px) {
   .cashFlowDonutLayout,
-  .cashFlowWaterfall {
+  .cashFlowWaterfall,
+  .cashFlowInsightGrid,
+  .cashFlowInsightGridTwoUp,
+  .cashFlowAnswerGrid,
+  .cashFlowAnswerGridTwoUp {
     grid-template-columns: 1fr;
   }
 

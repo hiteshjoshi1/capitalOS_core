@@ -208,9 +208,9 @@ export default function WealthOverview() {
               <p className="wealthEyebrow">Cash Flow</p>
               <h2 className="wealthDetailTitle">{formatMoney(spendingSummary?.net)}</h2>
               <p className="muted">
-                Income {formatMoney(spendingSummary?.income_total)} · Expenses {formatMoney(spendingSummary?.expense_total)}
+                Income {formatMoney(spendingSummary?.income_total)} · Expenses {formatMoney(spendingSummary?.expense_total)} · Saved {spendingSummary?.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}
               </p>
-              <Link className="wealthInlineLink" to="/cash-flow">Open cash flow</Link>
+              <Link className="wealthInlineLink" to="/cash-flow">Open cash flow workspace</Link>
             </article>
 
             <article className="card wealthDetailCard">

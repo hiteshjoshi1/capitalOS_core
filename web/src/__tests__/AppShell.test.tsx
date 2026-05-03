@@ -148,7 +148,9 @@ describe("AppShell", () => {
     );
 
     expect(screen.getByRole("link", { name: "Overview" })).toHaveClass("appShellTabActive");
-    expect(screen.getByRole("link", { name: "Mapping" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Income" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Expenses" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Map Transactions" })).toBeInTheDocument();
   });
 
   it("renders liabilities tabs on liabilities routes", () => {
@@ -216,7 +218,7 @@ describe("AppShell", () => {
 describe("Placeholder route smoke tests", () => {
   const routes: { path: string; component: ReactElement; heading: string }[] = [
     { path: "/wealth", component: <WealthOverview />, heading: "Wealth Overview" },
-    { path: "/cash-flow", component: <CashFlowDetail />, heading: "Cash Flow" },
+    { path: "/cash-flow", component: <CashFlowDetail />, heading: "Cash Flow Overview" },
     { path: "/risk", component: <WealthRisk />, heading: "Wealth Risk" },
     { path: "/liabilities", component: <LiabilitiesOverview />, heading: "Liabilities" },
     { path: "/operations", component: <OperationsOverview />, heading: "Data Hub" },

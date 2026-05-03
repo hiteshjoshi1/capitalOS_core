@@ -42,7 +42,9 @@ export const APP_SECTIONS: AppSection[] = [
     matchPaths: ["/wealth/cash-flow"],
     tabs: [
       { label: "Overview", to: "/cash-flow", exact: true, matchPaths: ["/cash-flow", "/wealth/cash-flow"] },
-      { label: "Mapping", to: "/cash-flow/mapping" },
+      { label: "Income", to: "/cash-flow/income" },
+      { label: "Expenses", to: "/cash-flow/expenses" },
+      { label: "Map Transactions", to: "/cash-flow/map-transactions", matchPaths: ["/cash-flow/map-transactions", "/cash-flow/mapping"] },
     ],
   },
   {

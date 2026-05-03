@@ -229,7 +229,7 @@ describe("frontend contracts", () => {
       </ThemeProvider>,
     );
 
-    expect((await screen.findAllByText("Where did my money go this month?")).length).toBeGreaterThan(0);
-    expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
+    expect(await screen.findByText("High-level diagnostics for the selected month")).toBeInTheDocument();
+    expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
   });
 });

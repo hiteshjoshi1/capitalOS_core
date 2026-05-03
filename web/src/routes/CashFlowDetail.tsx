@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import type {
   CashFlowBreakdownItem,
   CashFlowCategoryDeltaItem,
   CashFlowDetail,
+  CashFlowDiagnosticAnswer,
   CashFlowTransaction,
   CategoryTaxonomy,
 } from "../lib/api";
@@ -14,6 +15,7 @@ import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
 
 type CategoryGroup = {
   label: string;
@@ -42,6 +44,17 @@ const CHART_COLORS = [
   "#2ebac6",
   "#f4cf5d",
   "#8f9db2",
+];
+
+const DINING_CATEGORY_KEYWORDS = [
+  "dining",
+  "restaurant",
+  "eat out",
+  "eat-out",
+  "food delivery",
+  "delivery",
+  "cafe",
+  "coffee",
 ];
 
 function asDate(ts: string) {
@@ -114,6 +127,55 @@ function conicGradient(items: CashFlowBreakdownItem[]) {
     parts.push(`color-mix(in srgb, var(--line) 65%, transparent 35%) ${offset.toFixed(2)}% 100%`);
   }
   return `conic-gradient(${parts.join(", ")})`;
+}
+
+function isDiningExpenseTransaction(transaction: CashFlowTransaction) {
+  const categoryText = `${transaction.resolved_category ?? ""} ${transaction.raw_category ?? ""}`.toLowerCase();
+  return DINING_CATEGORY_KEYWORDS.some((keyword) => categoryText.includes(keyword));
+}
+
+function topDiningMerchantItems(transactions: CashFlowTransaction[]): CashFlowBreakdownItem[] {
+  const merchantTotals = new Map<string, number>();
+
+  for (const transaction of transactions) {
+    if (!isDiningExpenseTransaction(transaction)) {
+      continue;
+    }
+    const merchant = (transaction.merchant_counterparty || transaction.resolved_category || "Unknown").trim() || "Unknown";
+    const amount = Math.abs(transaction.base_amount ?? 0);
+    merchantTotals.set(merchant, (merchantTotals.get(merchant) ?? 0) + amount);
+  }
+
+  const total = Array.from(merchantTotals.values()).reduce((sum, value) => sum + value, 0);
+  return _sortedBreakdownItemsFromMap(merchantTotals, total, 5);
+}
+
+function _sortedBreakdownItemsFromMap(
+  items: Map<string, number>,
+  total: number,
+  limit?: number,
+): CashFlowBreakdownItem[] {
+  const ranked = Array.from(items.entries()).sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]));
+  const sliced = limit == null ? ranked : ranked.slice(0, limit);
+  return sliced.map(([label, amount]) => ({
+    label,
+    amount,
+    percent: total > 0 ? amount / total : 0,
+  }));
+}
+
+function resolveWorkspaceTab(pathname: string): CashFlowWorkspaceTab {
+  if (pathname === "/cash-flow/income") {
+    return "income";
+  }
+  if (pathname === "/cash-flow/expenses") {
+    return "expenses";
+  }
+  return "overview";
+}
+
+function findAnswer(answers: CashFlowDiagnosticAnswer[], question: string) {
+  return answers.find((answer) => answer.question === question)?.answer ?? "Not enough data to answer this question for the selected month yet.";
 }
 
 function DistributionCard({
@@ -372,7 +434,7 @@ function TrendCard({
   formatValue: (value: number | null) => string;
   ariaLabel: string;
 }) {
-  const values = points.map((point) => (point[valueKey] ?? 0));
+  const values = points.map((point) => point[valueKey] ?? 0);
   const maxMagnitude = values.reduce((largest, value) => Math.max(largest, Math.abs(value)), 0);
 
   return (
@@ -567,7 +629,329 @@ function TransactionTable({
   );
 }
 
+function HeroSection({
+  detail,
+  formatMoney,
+}: {
+  detail: CashFlowDetail;
+  formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
+}) {
+  return (
+    <section className="cashFlowHeroGrid">
+      <article className="card wealthHeroCard cashFlowHeroCard">
+        <div className="cashFlowCardHeader">
+          <div>
+            <p className="wealthEyebrow">Headline KPIs</p>
+            <h2 className="cashFlowHeroTitle">Net cash flow</h2>
+          </div>
+          {detail.analytics.free_cash_flow_change_vs_prior_month != null ? (
+            <span className={`wealthHeroChip ${detail.analytics.free_cash_flow_change_vs_prior_month >= 0 ? "wealthHeroChipPositive" : "wealthHeroChipNegative"}`}>
+              {detail.analytics.free_cash_flow_change_vs_prior_month >= 0 ? "+" : ""}
+              {formatMoney(detail.analytics.free_cash_flow_change_vs_prior_month)}
+            </span>
+          ) : null}
+        </div>
+        <div className={`wealthHeroValue ${detail.net >= 0 ? "good" : "bad"}`}>{formatMoney(detail.net, 0)}</div>
+        <p className="muted">
+          {detail.analytics.prior_month
+            ? `vs ${detail.analytics.prior_month}: ${formatMoney(detail.analytics.prior_month_net)}`
+            : "Prior-month comparison unavailable."}
+        </p>
+        <div className="cashFlowHeroActions">
+          <Link className="wealthInlineLink" to="/cash-flow/map-transactions">Open Map Transactions</Link>
+          <span className="muted">Saved {formatPercent(detail.savings_rate)} · Burn {formatPercent(detail.analytics.burn_rate)}</span>
+        </div>
+      </article>
+
+      <section className="cashFlowKpiGrid">
+        <article className="card wealthDetailCard cashFlowKpiCard">
+          <p className="wealthEyebrow">Total inflows</p>
+          <h2 className="wealthDetailTitle">{formatMoney(detail.income_total)}</h2>
+        </article>
+        <article className="card wealthDetailCard cashFlowKpiCard">
+          <p className="wealthEyebrow">Total outflows</p>
+          <h2 className="wealthDetailTitle">{formatMoney(detail.expense_total)}</h2>
+        </article>
+        <article className="card wealthDetailCard cashFlowKpiCard">
+          <p className="wealthEyebrow">Savings rate</p>
+          <h2 className="wealthDetailTitle">{formatPercent(detail.savings_rate)}</h2>
+        </article>
+        <article className="card wealthDetailCard cashFlowKpiCard">
+          <p className="wealthEyebrow">Burn rate</p>
+          <h2 className="wealthDetailTitle">{formatPercent(detail.analytics.burn_rate)}</h2>
+        </article>
+      </section>
+    </section>
+  );
+}
+
+function OverviewTab({
+  detail,
+  formatMoney,
+}: {
+  detail: CashFlowDetail;
+  formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
+}) {
+  return (
+    <>
+      <HeroSection detail={detail} formatMoney={formatMoney} />
+
+      <section className="cashFlowSectionGrid">
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">Overview</p>
+          <h2 className="cashFlowSectionTitle">High-level diagnostics for the selected month</h2>
+        </div>
+        <div className="cashFlowInsightGrid cashFlowInsightGridTwoUp">
+          <TrendCard
+            title="Health"
+            subtitle="Net cash flow trend"
+            points={detail.analytics.trend}
+            valueKey="net"
+            formatValue={(value) => formatMoney(value, 0)}
+            ariaLabel="Net cash flow trend by month"
+          />
+          <DistributionCard
+            title="Money in"
+            subtitle="Compact inflow composition"
+            items={detail.analytics.inflow_source_mix}
+            total={detail.income_total}
+            ariaLabel="Compact inflow composition"
+            formatMoney={formatMoney}
+          />
+          <DistributionCard
+            title="Money out"
+            subtitle="Compact outflow composition"
+            items={detail.analytics.outflow_categories}
+            total={detail.expense_total}
+            ariaLabel="Compact outflow composition"
+            formatMoney={formatMoney}
+          />
+        </div>
+      </section>
+
+      <section className="cashFlowSectionGrid">
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">What changed</p>
+          <h2 className="cashFlowSectionTitle">Month-over-month summary and overall health</h2>
+        </div>
+        <div className="cashFlowAnswerGrid cashFlowAnswerGridTwoUp">
+          <article className="card wealthDetailCard cashFlowAnswerCard">
+            <p className="wealthEyebrow">Concise change summary</p>
+            <h2 className="cashFlowCardTitle">What changed versus last month?</h2>
+            <p className="muted">{findAnswer(detail.analytics.answers, "What changed versus last month?")}</p>
+          </article>
+          <article className="card wealthDetailCard cashFlowAnswerCard">
+            <p className="wealthEyebrow">Saved vs spent</p>
+            <h2 className="cashFlowCardTitle">How much of my income was saved vs spent?</h2>
+            <p className="muted">{findAnswer(detail.analytics.answers, "How much of my income was saved vs spent?")}</p>
+          </article>
+          <DeltaTableCard
+            title="Drivers"
+            subtitle="Categories behind free cash flow deterioration"
+            items={detail.analytics.deterioration_drivers}
+            formatMoney={formatMoney}
+          />
+          <TrendCard
+            title="Health"
+            subtitle="Savings rate trend"
+            points={detail.analytics.trend}
+            valueKey="savings_rate"
+            formatValue={formatPercent}
+            ariaLabel="Savings rate trend by month"
+          />
+          <WaterfallCard waterfall={detail.analytics.waterfall} formatMoney={formatMoney} />
+        </div>
+      </section>
+    </>
+  );
+}
+
+function IncomeTab({
+  detail,
+  categoryGroups,
+  overrideSelections,
+  pendingOverrides,
+  overrideErrors,
+  formatMoney,
+  onSelectionChange,
+  onSave,
+}: {
+  detail: CashFlowDetail;
+  categoryGroups: CategoryGroup[];
+  overrideSelections: Record<number, string>;
+  pendingOverrides: Record<number, boolean>;
+  overrideErrors: Record<number, string>;
+  formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
+  onSelectionChange: (transactionId: number, value: string) => void;
+  onSave: (transactionId: number, categoryId: number) => Promise<void>;
+}) {
+  return (
+    <>
+      <section className="cashFlowSectionGrid">
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">Income</p>
+          <h2 className="cashFlowSectionTitle">What funded the month and how concentrated it was</h2>
+        </div>
+        <div className="cashFlowInsightGrid cashFlowInsightGridTwoUp">
+          <article className="card wealthDetailCard cashFlowAnswerCard">
+            <p className="wealthEyebrow">Direct answer</p>
+            <h2 className="cashFlowCardTitle">What percentage of inflows came from salary, dividends, and transfers?</h2>
+            <p className="muted">{findAnswer(detail.analytics.answers, "What percentage of inflows came from salary, dividends, and transfers?")}</p>
+          </article>
+          <DistributionCard
+            title="Money in"
+            subtitle="Income source composition"
+            items={detail.analytics.inflow_source_mix}
+            total={detail.income_total}
+            ariaLabel="Income source donut chart"
+            formatMoney={formatMoney}
+          />
+          <SplitCard
+            title="Money in"
+            subtitle="Recurring vs one-off inflows"
+            items={detail.analytics.inflow_recurring_split}
+            formatMoney={formatMoney}
+          />
+        </div>
+      </section>
+
+      <section className="cashFlowSectionGrid">
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">Income audit trail</p>
+          <h2 className="cashFlowSectionTitle">Income transactions and category evidence</h2>
+        </div>
+        <TransactionTable
+          title={`Income transactions (${detail.income.transaction_count})`}
+          emptyMessage={`No income transactions for ${detail.month}.`}
+          transactions={detail.income.transactions}
+          categoryGroups={categoryGroups}
+          overrideSelections={overrideSelections}
+          pendingOverrides={pendingOverrides}
+          overrideErrors={overrideErrors}
+          formatMoney={formatMoney}
+          onSelectionChange={onSelectionChange}
+          onSave={onSave}
+        />
+      </section>
+    </>
+  );
+}
+
+function ExpensesTab({
+  detail,
+  categoryGroups,
+  overrideSelections,
+  pendingOverrides,
+  overrideErrors,
+  formatMoney,
+  onSelectionChange,
+  onSave,
+}: {
+  detail: CashFlowDetail;
+  categoryGroups: CategoryGroup[];
+  overrideSelections: Record<number, string>;
+  pendingOverrides: Record<number, boolean>;
+  overrideErrors: Record<number, string>;
+  formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
+  onSelectionChange: (transactionId: number, value: string) => void;
+  onSave: (transactionId: number, categoryId: number) => Promise<void>;
+}) {
+  const diningMerchants = topDiningMerchantItems(detail.expenses.transactions);
+
+  return (
+    <>
+      <section className="cashFlowSectionGrid">
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">Expenses</p>
+          <h2 className="cashFlowSectionTitle">Where money went, who captured it, and what deteriorated</h2>
+        </div>
+        <div className="cashFlowAnswerGrid cashFlowAnswerGridTwoUp">
+          <article className="card wealthDetailCard cashFlowAnswerCard">
+            <p className="wealthEyebrow">Direct answer</p>
+            <h2 className="cashFlowCardTitle">Where did my money go this month?</h2>
+            <p className="muted">{findAnswer(detail.analytics.answers, "Where did my money go this month?")}</p>
+          </article>
+          <article className="card wealthDetailCard cashFlowAnswerCard">
+            <p className="wealthEyebrow">Recurring pressure</p>
+            <h2 className="cashFlowCardTitle">Which recurring expenses are driving most of my outflows?</h2>
+            <p className="muted">{findAnswer(detail.analytics.answers, "Which recurring expenses are driving most of my outflows?")}</p>
+          </article>
+        </div>
+        <div className="cashFlowInsightGrid cashFlowInsightGridTwoUp">
+          <DistributionCard
+            title="Money out"
+            subtitle="Top expense categories"
+            items={detail.analytics.outflow_categories}
+            total={detail.expense_total}
+            ariaLabel="Top expense categories donut chart"
+            formatMoney={formatMoney}
+          />
+          <BreakdownBarsCard
+            title="Money out"
+            subtitle="Spend by category"
+            items={detail.analytics.outflow_categories}
+            ariaLabel="Monthly spend by category chart"
+            formatMoney={formatMoney}
+          />
+          <SplitCard
+            title="Money out"
+            subtitle="Recurring vs non-recurring"
+            items={detail.analytics.outflow_recurring_split}
+            formatMoney={formatMoney}
+          />
+          <MerchantTableCard
+            title="Money out"
+            subtitle="Top merchants"
+            items={detail.analytics.top_outflow_merchants}
+            formatMoney={formatMoney}
+          />
+          <BreakdownBarsCard
+            title="Money out"
+            subtitle="Top dining merchants"
+            items={diningMerchants}
+            ariaLabel="Top dining merchants chart"
+            formatMoney={formatMoney}
+          />
+          <SplitCard
+            title="Money out"
+            subtitle="Fixed vs variable expenses"
+            items={detail.analytics.outflow_fixed_variable_split}
+            formatMoney={formatMoney}
+          />
+          <DeltaTableCard
+            title="Money out"
+            subtitle="Largest deteriorating outflow categories"
+            items={detail.analytics.outflow_category_deltas}
+            formatMoney={formatMoney}
+          />
+        </div>
+      </section>
+
+      <section className="cashFlowSectionGrid">
+        <div className="cashFlowSectionHeading">
+          <p className="wealthEyebrow">Expense audit trail</p>
+          <h2 className="cashFlowSectionTitle">Expense transactions and category controls</h2>
+        </div>
+        <TransactionTable
+          title={`Expense transactions (${detail.expenses.transaction_count})`}
+          emptyMessage={`No expense transactions for ${detail.month}.`}
+          transactions={detail.expenses.transactions}
+          categoryGroups={categoryGroups}
+          overrideSelections={overrideSelections}
+          pendingOverrides={pendingOverrides}
+          overrideErrors={overrideErrors}
+          formatMoney={formatMoney}
+          onSelectionChange={onSelectionChange}
+          onSave={onSave}
+        />
+      </section>
+    </>
+  );
+}
+
 export default function CashFlowDetailRoute() {
+  const location = useLocation();
+  const workspaceTab = resolveWorkspaceTab(location.pathname);
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [detail, setDetail] = useState<CashFlowDetail | null>(null);
@@ -614,6 +998,20 @@ export default function CashFlowDetailRoute() {
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
+  const shellTitle =
+    workspaceTab === "income"
+      ? "Income"
+      : workspaceTab === "expenses"
+        ? "Expenses"
+        : "Cash Flow Overview";
+
+  const shellSubtitle =
+    workspaceTab === "income"
+      ? "A deterministic view of where cash came from, how concentrated it was, and the underlying income transactions."
+      : workspaceTab === "expenses"
+        ? "A deterministic view of where cash went, which merchants captured it, and the underlying expense transactions."
+        : "A deterministic diagnostic workspace for where cash came from, where it went, what changed, and what is driving the move.";
+
   async function handleSave(transactionId: number, categoryId: number) {
     setPendingOverrides((current) => ({ ...current, [transactionId]: true }));
     setOverrideErrors((current) => {
@@ -648,8 +1046,8 @@ export default function CashFlowDetailRoute() {
 
   return (
     <PageShell
-      title="Cash Flow"
-      subtitle="A deterministic diagnostic workspace for where cash came from, where it went, what changed, and what is driving the move."
+      title={shellTitle}
+      subtitle={shellSubtitle}
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
@@ -681,235 +1079,35 @@ export default function CashFlowDetailRoute() {
 
       {state === "ready" && detail ? (
         <div className="cashFlowWorkspace">
-          <section className="cashFlowHeroGrid">
-            <article className="card wealthHeroCard cashFlowHeroCard">
-              <div className="cashFlowCardHeader">
-                <div>
-                  <p className="wealthEyebrow">Headline KPIs</p>
-                  <h2 className="cashFlowHeroTitle">Net cash flow</h2>
-                </div>
-                {detail.analytics.free_cash_flow_change_vs_prior_month != null ? (
-                  <span className={`wealthHeroChip ${detail.analytics.free_cash_flow_change_vs_prior_month >= 0 ? "wealthHeroChipPositive" : "wealthHeroChipNegative"}`}>
-                    {detail.analytics.free_cash_flow_change_vs_prior_month >= 0 ? "+" : ""}
-                    {formatMoney(detail.analytics.free_cash_flow_change_vs_prior_month)}
-                  </span>
-                ) : null}
-              </div>
-              <div className={`wealthHeroValue ${detail.net >= 0 ? "good" : "bad"}`}>{formatMoney(detail.net, 0)}</div>
-              <p className="muted">
-                {detail.analytics.prior_month
-                  ? `vs ${detail.analytics.prior_month}: ${formatMoney(detail.analytics.prior_month_net)}`
-                  : "Prior-month comparison unavailable."}
-              </p>
-              <div className="cashFlowHeroActions">
-                <Link className="wealthInlineLink" to="/cash-flow/mapping">Review mapping</Link>
-                <span className="muted">Saved {formatPercent(detail.savings_rate)} · Burn {formatPercent(detail.analytics.burn_rate)}</span>
-              </div>
-            </article>
-
-            <section className="cashFlowKpiGrid">
-              <article className="card wealthDetailCard cashFlowKpiCard">
-                <p className="wealthEyebrow">Total inflows</p>
-                <h2 className="wealthDetailTitle">{formatMoney(detail.income_total)}</h2>
-              </article>
-              <article className="card wealthDetailCard cashFlowKpiCard">
-                <p className="wealthEyebrow">Total outflows</p>
-                <h2 className="wealthDetailTitle">{formatMoney(detail.expense_total)}</h2>
-              </article>
-              <article className="card wealthDetailCard cashFlowKpiCard">
-                <p className="wealthEyebrow">Savings rate</p>
-                <h2 className="wealthDetailTitle">{formatPercent(detail.savings_rate)}</h2>
-              </article>
-              <article className="card wealthDetailCard cashFlowKpiCard">
-                <p className="wealthEyebrow">Burn rate</p>
-                <h2 className="wealthDetailTitle">{formatPercent(detail.analytics.burn_rate)}</h2>
-              </article>
-            </section>
-          </section>
-
-          <section className="cashFlowSectionGrid">
-            <div className="cashFlowSectionHeading">
-              <p className="wealthEyebrow">Money out diagnostics</p>
-              <h2 className="cashFlowSectionTitle">Where did my money go this month?</h2>
-            </div>
-            <div className="cashFlowInsightGrid">
-              <DistributionCard
-                title="Money out"
-                subtitle="Top expense categories"
-                items={detail.analytics.outflow_categories}
-                total={detail.expense_total}
-                ariaLabel="Top expense categories donut chart"
-                formatMoney={formatMoney}
-              />
-              <BreakdownBarsCard
-                title="Money out"
-                subtitle="Spend by category"
-                items={detail.analytics.outflow_categories}
-                ariaLabel="Monthly spend by category chart"
-                formatMoney={formatMoney}
-              />
-              <SplitCard
-                title="Money out"
-                subtitle="Recurring vs non-recurring"
-                items={detail.analytics.outflow_recurring_split}
-                formatMoney={formatMoney}
-              />
-              <SplitCard
-                title="Money out"
-                subtitle="Fixed vs variable expenses"
-                items={detail.analytics.outflow_fixed_variable_split}
-                formatMoney={formatMoney}
-              />
-              <MerchantTableCard
-                title="Money out"
-                subtitle="Top merchants"
-                items={detail.analytics.top_outflow_merchants}
-                formatMoney={formatMoney}
-              />
-              <DeltaTableCard
-                title="Money out"
-                subtitle="Largest deteriorating outflow categories"
-                items={detail.analytics.outflow_category_deltas}
-                formatMoney={formatMoney}
-              />
-            </div>
-          </section>
-
-          <section className="cashFlowSectionGrid">
-            <div className="cashFlowSectionHeading">
-              <p className="wealthEyebrow">Money in diagnostics</p>
-              <h2 className="cashFlowSectionTitle">What funded the month?</h2>
-            </div>
-            <div className="cashFlowInsightGrid">
-              <DistributionCard
-                title="Money in"
-                subtitle="Income source composition"
-                items={detail.analytics.inflow_source_mix}
-                total={detail.income_total}
-                ariaLabel="Income source donut chart"
-                formatMoney={formatMoney}
-              />
-              <BreakdownBarsCard
-                title="Money in"
-                subtitle="Largest inflow drivers"
-                items={detail.analytics.largest_inflow_drivers}
-                ariaLabel="Largest inflow drivers chart"
-                formatMoney={formatMoney}
-              />
-              <SplitCard
-                title="Money in"
-                subtitle="Recurring vs one-off inflows"
-                items={detail.analytics.inflow_recurring_split}
-                formatMoney={formatMoney}
-              />
-              <BreakdownBarsCard
-                title="Money in"
-                subtitle="Salary, business, dividends, interest, transfers"
-                items={detail.analytics.inflow_source_mix}
-                ariaLabel="Inflow composition chart"
-                formatMoney={formatMoney}
-              />
-            </div>
-          </section>
-
-          <section className="cashFlowSectionGrid">
-            <div className="cashFlowSectionHeading">
-              <p className="wealthEyebrow">Overall cash-flow health</p>
-              <h2 className="cashFlowSectionTitle">Trend, savings rate, and cash bridge</h2>
-            </div>
-            <div className="cashFlowInsightGrid cashFlowInsightGridWide">
-              <TrendCard
-                title="Health"
-                subtitle="Net cash flow trend"
-                points={detail.analytics.trend}
-                valueKey="net"
-                formatValue={(value) => formatMoney(value, 0)}
-                ariaLabel="Net cash flow trend by month"
-              />
-              <TrendCard
-                title="Health"
-                subtitle="Savings rate trend"
-                points={detail.analytics.trend}
-                valueKey="savings_rate"
-                formatValue={formatPercent}
-                ariaLabel="Savings rate trend by month"
-              />
-              <WaterfallCard waterfall={detail.analytics.waterfall} formatMoney={formatMoney} />
-            </div>
-          </section>
-
-          <section className="cashFlowSectionGrid">
-            <div className="cashFlowSectionHeading">
-              <p className="wealthEyebrow">Explanatory analysis</p>
-              <h2 className="cashFlowSectionTitle">Direct answers and diagnostic drivers</h2>
-            </div>
-            <div className="cashFlowAnswerGrid">
-              {detail.analytics.answers.map((answer) => (
-                <article key={answer.question} className="card wealthDetailCard cashFlowAnswerCard">
-                  <p className="wealthEyebrow">Diagnostic answer</p>
-                  <h2 className="cashFlowCardTitle">{answer.question}</h2>
-                  <p className="muted">{answer.answer}</p>
-                </article>
-              ))}
-              <DeltaTableCard
-                title="Drivers"
-                subtitle="Categories behind free cash flow deterioration"
-                items={detail.analytics.deterioration_drivers}
-                formatMoney={formatMoney}
-              />
-              <article className="card wealthDetailCard cashFlowAnswerCard">
-                <p className="wealthEyebrow">Methodology</p>
-                <h2 className="cashFlowCardTitle">How the diagnostics were derived</h2>
-                <p className="muted">{detail.calculation}</p>
-                <p className="muted">Net = {formatMoney(detail.income_total, 2)} - {formatMoney(detail.expense_total, 2)} = {formatMoney(detail.net, 2)}</p>
-              </article>
-            </div>
-          </section>
-
-          <section className="cashFlowSectionGrid">
-            <div className="cashFlowSectionHeading">
-              <p className="wealthEyebrow">Audit trail</p>
-              <h2 className="cashFlowSectionTitle">Transaction evidence and category controls</h2>
-            </div>
-            <div className="card wealthDetailCard cashFlowAuditCard">
-              <div className="cashFlowAuditHeader">
-                <div>
-                  <p className="muted">Use this audit layer to verify the diagnostics, inspect rows, or correct category mappings.</p>
-                </div>
-                <Link className="wealthInlineLink" to="/cash-flow/mapping">Open mapping workspace</Link>
-              </div>
-              <div className="cashFlowAuditTables">
-                <TransactionTable
-                  title={`Income transactions (${detail.income.transaction_count})`}
-                  emptyMessage={`No income transactions for ${detail.month}.`}
-                  transactions={detail.income.transactions}
-                  categoryGroups={categoryGroups}
-                  overrideSelections={overrideSelections}
-                  pendingOverrides={pendingOverrides}
-                  overrideErrors={overrideErrors}
-                  formatMoney={formatMoney}
-                  onSelectionChange={(transactionId, value) => {
-                    setOverrideSelections((current) => ({ ...current, [transactionId]: value }));
-                  }}
-                  onSave={handleSave}
-                />
-                <TransactionTable
-                  title={`Expense transactions (${detail.expenses.transaction_count})`}
-                  emptyMessage={`No expense transactions for ${detail.month}.`}
-                  transactions={detail.expenses.transactions}
-                  categoryGroups={categoryGroups}
-                  overrideSelections={overrideSelections}
-                  pendingOverrides={pendingOverrides}
-                  overrideErrors={overrideErrors}
-                  formatMoney={formatMoney}
-                  onSelectionChange={(transactionId, value) => {
-                    setOverrideSelections((current) => ({ ...current, [transactionId]: value }));
-                  }}
-                  onSave={handleSave}
-                />
-              </div>
-            </div>
-          </section>
+          {workspaceTab === "overview" ? <OverviewTab detail={detail} formatMoney={formatMoney} /> : null}
+          {workspaceTab === "income" ? (
+            <IncomeTab
+              detail={detail}
+              categoryGroups={categoryGroups}
+              overrideSelections={overrideSelections}
+              pendingOverrides={pendingOverrides}
+              overrideErrors={overrideErrors}
+              formatMoney={formatMoney}
+              onSelectionChange={(transactionId, value) => {
+                setOverrideSelections((current) => ({ ...current, [transactionId]: value }));
+              }}
+              onSave={handleSave}
+            />
+          ) : null}
+          {workspaceTab === "expenses" ? (
+            <ExpensesTab
+              detail={detail}
+              categoryGroups={categoryGroups}
+              overrideSelections={overrideSelections}
+              pendingOverrides={pendingOverrides}
+              overrideErrors={overrideErrors}
+              formatMoney={formatMoney}
+              onSelectionChange={(transactionId, value) => {
+                setOverrideSelections((current) => ({ ...current, [transactionId]: value }));
+              }}
+              onSave={handleSave}
+            />
+          ) : null}
         </div>
       ) : null}
     </PageShell>

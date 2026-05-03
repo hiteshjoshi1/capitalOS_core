@@ -65,6 +65,7 @@ export default function CashFlowMapping() {
   const [categories, setCategories] = useState<CategoryTaxonomy[]>([]);
   const [transactions, setTransactions] = useState<UnmappedTransaction[]>([]);
   const [month, setMonth] = useSelectedMonth();
+  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [pendingOverrides, setPendingOverrides] = useState<Record<number, boolean>>({});
   const [overrideErrors, setOverrideErrors] = useState<Record<number, string>>({});
   const [overrideSelections, setOverrideSelections] = useState<Record<number, string>>({});
@@ -122,12 +123,30 @@ export default function CashFlowMapping() {
 
   return (
     <PageShell
-      title="Cash Flow Mapping"
-      subtitle="Resolve uncategorized transactions and apply manual overrides."
-      activeRoute="/cash-flow/mapping"
-      secondaryNavItem={{ label: "Cash Flow Mapping", to: "/cash-flow/mapping" }}
+      title="Map Transactions"
+      subtitle="Audit transaction evidence, resolve uncategorized rows, and apply category overrides."
+      activeRoute="/cash-flow/map-transactions"
+      secondaryNavItem={{ label: "Map Transactions", to: "/cash-flow/map-transactions" }}
       unmappedCount={transactions.length}
-      headerActions={<MonthControl month={month} onMonthChange={setMonth} />}
+      headerActions={(
+        <>
+          <MonthControl month={month} onMonthChange={setMonth} />
+          <label className="pill">
+            <span>Base</span>
+            <select
+              className="monthInput"
+              aria-label="Base currency"
+              value={baseCurrency}
+              onChange={(event) => setBaseCurrency(event.target.value)}
+            >
+              <option value="SGD">SGD</option>
+              <option value="USD">USD</option>
+              <option value="HKD">HKD</option>
+              <option value="INR">INR</option>
+            </select>
+          </label>
+        </>
+      )}
     >
       {state === "loading" && <div className="card">Loading…</div>}
 

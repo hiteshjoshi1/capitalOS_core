@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import CashFlowDetail from "../routes/CashFlowDetail";
 import { api } from "../lib/api";
@@ -132,7 +132,7 @@ const detailFixture: CashFlowDetailResponse = {
   },
   expenses: {
     total: 8710,
-    transaction_count: 1,
+    transaction_count: 2,
     included_types: ["EXPENSE", "FEE", "TAX", "INTEREST"],
     transactions: [
       {
@@ -150,6 +150,23 @@ const detailFixture: CashFlowDetailResponse = {
         resolved_category_id: 111,
         category_source: "parser",
         merchant_counterparty: "Landlord",
+        notes: null,
+      },
+      {
+        transaction_id: 4,
+        ts: "2026-02-14T19:30:00+00:00",
+        account_id: 10,
+        account_name: "DBS Savings",
+        account_type: "BANK",
+        amount: -1780,
+        currency: "SGD",
+        base_amount: -1780,
+        type: "EXPENSE",
+        raw_category: "Dining",
+        resolved_category: "Dining",
+        resolved_category_id: null,
+        category_source: "parser",
+        merchant_counterparty: "Hawker Center",
         notes: null,
       },
     ],
@@ -198,11 +215,16 @@ const updatedDetailFixture: CashFlowDetailResponse = {
   },
 };
 
-function renderRoute() {
+function renderRoute(initialPath = "/cash-flow") {
   return render(
     <ThemeProvider>
-      <MemoryRouter>
-        <CashFlowDetail />
+      <MemoryRouter initialEntries={[initialPath]}>
+        <Routes>
+          <Route path="/cash-flow" element={<CashFlowDetail />} />
+          <Route path="/wealth/cash-flow" element={<CashFlowDetail />} />
+          <Route path="/cash-flow/income" element={<CashFlowDetail />} />
+          <Route path="/cash-flow/expenses" element={<CashFlowDetail />} />
+        </Routes>
       </MemoryRouter>
     </ThemeProvider>,
   );
@@ -225,30 +247,50 @@ describe("CashFlowDetail route", () => {
     });
   });
 
-  it("renders wealth-native cash-flow diagnostics and direct answers", async () => {
-    renderRoute();
+  it("renders a high-level overview tab without cramming the audit tables into it", async () => {
+    renderRoute("/cash-flow");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow" })).toBeInTheDocument();
-    expect(screen.getByText("A deterministic diagnostic workspace for where cash came from, where it went, what changed, and what is driving the move.")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "Where did my money go this month?" }).length).toBeGreaterThan(0);
-    expect(screen.getByText("Top expense categories")).toBeInTheDocument();
-    expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
-    expect(screen.getByLabelText("Monthly spend by category chart")).toBeInTheDocument();
-    expect(screen.getByLabelText("Income source donut chart")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
+    expect(screen.getByText("High-level diagnostics for the selected month")).toBeInTheDocument();
     expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
-    expect(screen.getByLabelText("Cash waterfall chart")).toBeInTheDocument();
-    expect(screen.getAllByText("Which categories explain most of the deterioration in free cash flow?").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Landlord").length).toBeGreaterThan(0);
-    expect(screen.getByText("Expense transactions (1)")).toBeInTheDocument();
+    expect(screen.getByLabelText("Compact inflow composition")).toBeInTheDocument();
+    expect(screen.getByLabelText("Compact outflow composition")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "What changed versus last month?" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("heading", { name: "How much of my income was saved vs spent?" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText("Expense transactions (2)")).not.toBeInTheDocument();
   });
 
-  it("posts an override from the audit table and refreshes the diagnostics", async () => {
+  it("renders the income tab with source composition and income transactions", async () => {
+    renderRoute("/cash-flow/income");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "What percentage of inflows came from salary, dividends, and transfers?" }).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Income source donut chart")).toBeInTheDocument();
+    expect(screen.getByText("Income transactions (1)")).toBeInTheDocument();
+    expect(screen.getByText("DBS Savings")).toBeInTheDocument();
+  });
+
+  it("renders the expenses tab with category, merchant, and audit diagnostics", async () => {
+    renderRoute("/cash-flow/expenses");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Expenses" })).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Where did my money go this month?" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("heading", { name: "Which recurring expenses are driving most of my outflows?" }).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Monthly spend by category chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Top dining merchants chart")).toBeInTheDocument();
+    expect(screen.getAllByText("Landlord").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Hawker Center").length).toBeGreaterThan(0);
+    expect(screen.getByText("Expense transactions (2)")).toBeInTheDocument();
+  });
+
+  it("posts an override from the income audit table and refreshes the diagnostics", async () => {
     const user = userEvent.setup();
     mockApi.cashFlowDetail.mockResolvedValueOnce(detailFixture).mockResolvedValueOnce(updatedDetailFixture);
 
-    renderRoute();
+    renderRoute("/cash-flow/income");
 
-    expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Select category for transaction 2"), "151");
     await user.click(screen.getByLabelText("Save category for transaction 2"));
@@ -261,11 +303,5 @@ describe("CashFlowDetail route", () => {
     });
     expect(await screen.findByText("Income transactions (0)")).toBeInTheDocument();
     expect(screen.getByText("No income transactions for 2026-02.")).toBeInTheDocument();
-    expect(screen.getAllByText("S$ -8,710").length).toBeGreaterThan(0);
-    expect(
-      screen.getAllByText(
-        "Saved 0.0% of inflows and spent 100.0% of them. Outflows exceeded inflows by 8710, which had to come from existing cash or other funding sources.",
-      ).length,
-    ).toBeGreaterThan(0);
   });
 });

@@ -1,6 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { ConnectionProvider, WalletProvider } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
@@ -57,7 +57,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route element={<AppShell />}>
                       <Route path="/" element={<App />} />
                       <Route path="/wealth" element={<WealthOverview />} />
-                      <Route path="/wealth/cash-flow" element={<CashFlowDetail />} />
+                      <Route path="/wealth/cash-flow" element={<Navigate to="/cash-flow" replace />} />
                       <Route path="/risk" element={<WealthRisk />} />
                       <Route path="/dividends" element={<Dividends />} />
                       <Route path="/holdings" element={<StockHoldings />} />
@@ -65,7 +65,10 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/crypto/holdings" element={<CryptoHoldings />} />
                       <Route path="/cash" element={<CashOverview />} />
                       <Route path="/cash-flow" element={<CashFlowDetail />} />
-                      <Route path="/cash-flow/mapping" element={<CashFlowMapping />} />
+                      <Route path="/cash-flow/income" element={<CashFlowDetail />} />
+                      <Route path="/cash-flow/expenses" element={<CashFlowDetail />} />
+                      <Route path="/cash-flow/map-transactions" element={<CashFlowMapping />} />
+                      <Route path="/cash-flow/mapping" element={<Navigate to="/cash-flow/map-transactions" replace />} />
                       <Route path="/liabilities" element={<LiabilitiesOverview />} />
                       <Route path="/credit-cards" element={<CreditCards />} />
                       <Route path="/loans" element={<Loans />} />
