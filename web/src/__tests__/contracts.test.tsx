@@ -1,12 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import App from "../App";
 import AppShell from "../components/AppShell";
-import Sidebar from "../components/Sidebar";
 import { ThemeProvider } from "../context/ThemeContext";
 import { api } from "../lib/api";
+import CashFlowDetail from "../routes/CashFlowDetail";
 import WealthOverview from "../routes/WealthOverview";
 import WealthRisk from "../routes/WealthRisk";
 
@@ -15,6 +15,9 @@ vi.mock("../lib/api", () => ({
     dashboardSummary: vi.fn(),
     dashboardGeographyExposure: vi.fn(),
     spendingSummary: vi.fn(),
+    categories: vi.fn(),
+    cashFlowDetail: vi.fn(),
+    categoryOverride: vi.fn(),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     alertNotifications: vi.fn().mockResolvedValue({
       upload_reminders: [],
@@ -27,16 +30,6 @@ vi.mock("../lib/api", () => ({
 vi.mock("../lib/realtime", () => ({
   subscribeToRealtimeTopic: vi.fn().mockReturnValue(() => {}),
 }));
-
-function renderSidebar(initialPath = "/wealth") {
-  return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <Sidebar />
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
-}
 
 function renderRootRedirect() {
   return render(
@@ -105,6 +98,40 @@ function mockWealthApis() {
       { country: "US", stocks_funds: 50000, cash: 0, crypto: 15000, total: 65000, percent: 65 },
     ],
   });
+  vi.mocked(api.categories).mockResolvedValue([
+    { id: 100, code: "income", name: "Income", parent_id: null, display_order: 10 },
+    { id: 101, code: "income_salary", name: "Salary", parent_id: 100, display_order: 11 },
+  ]);
+  vi.mocked(api.cashFlowDetail).mockResolvedValue({
+    month: "2026-02",
+    base_currency: "SGD",
+    income_total: 5000,
+    expense_total: 3000,
+    net: 2000,
+    savings_rate: 0.4,
+    calculation: "Net = income_total - expense_total using deterministic month-scoped transactions.",
+    analytics: {
+      burn_rate: 0.6,
+      prior_month: "2026-01",
+      prior_month_net: 1500,
+      free_cash_flow_change_vs_prior_month: 500,
+      outflow_categories: [{ label: "Rent", amount: 1800, percent: 0.6 }],
+      inflow_categories: [{ label: "Salary", amount: 5000, percent: 1 }],
+      outflow_recurring_split: [{ label: "Recurring", amount: 1800, percent: 0.6 }],
+      inflow_recurring_split: [{ label: "Recurring", amount: 5000, percent: 1 }],
+      outflow_fixed_variable_split: [{ label: "Fixed", amount: 1800, percent: 0.6 }],
+      inflow_source_mix: [{ label: "Salary", amount: 5000, percent: 1 }],
+      top_outflow_merchants: [{ merchant: "Landlord", amount: 1800, percent: 0.6, transaction_count: 1 }],
+      largest_inflow_drivers: [{ label: "Salary", amount: 5000, percent: 1 }],
+      outflow_category_deltas: [{ label: "Rent", current_amount: 1800, prior_amount: 1600, delta_amount: 200, delta_percent: 0.125, direction: "deteriorated" }],
+      deterioration_drivers: [{ label: "Rent", current_amount: -1800, prior_amount: -1600, delta_amount: -200, delta_percent: 0.125, direction: "deteriorated" }],
+      trend: [{ month: "2026-02", inflows: 5000, outflows: 3000, net: 2000, savings_rate: 0.4, burn_rate: 0.6 }],
+      waterfall: { starting_cash: 10000, inflows: 5000, outflows: 3000, ending_cash: 12000 },
+      answers: [{ question: "Where did my money go this month?", answer: "Mostly to Rent." }],
+    },
+    income: { total: 5000, transaction_count: 1, included_types: ["INCOME"], transactions: [] },
+    expenses: { total: 3000, transaction_count: 1, included_types: ["EXPENSE"], transactions: [] },
+  });
 }
 
 describe("frontend contracts", () => {
@@ -119,7 +146,7 @@ describe("frontend contracts", () => {
     expect(await screen.findByText("Wealth landing")).toBeInTheDocument();
   });
 
-  it("renders the app shell with the four primary sections and without Dashboard", () => {
+  it("renders the app shell with the primary sections and without Dashboard", () => {
     render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/wealth"]}>
@@ -134,6 +161,7 @@ describe("frontend contracts", () => {
 
     expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
@@ -141,9 +169,21 @@ describe("frontend contracts", () => {
     expect(screen.getByText("Wealth Content")).toBeInTheDocument();
   });
 
-  it("keeps section tabs visible for Wealth and exposes the Risk tab", () => {
-    renderSidebar("/risk");
+  it("keeps wealth tabs visible without nesting Cash Flow inside Wealth", () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/risk"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/risk" element={<div>Risk page</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
     expect(screen.getByRole("link", { name: "Wealth" })).toHaveClass("sidebarLinkActive");
+    expect(within(screen.getByRole("navigation", { name: "Wealth tabs" })).queryByRole("link", { name: "Cash Flow" })).not.toBeInTheDocument();
   });
 
   it("renders Wealth Overview with composition percentages and without the action queue", async () => {
@@ -176,5 +216,20 @@ describe("frontend contracts", () => {
 
     expect(await screen.findByRole("heading", { name: "Risk" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Geographic Exposure" })).toBeInTheDocument();
+  });
+
+  it("renders Cash Flow as a dedicated workspace route", async () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/cash-flow"]}>
+          <Routes>
+            <Route path="/cash-flow" element={<CashFlowDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect((await screen.findAllByText("Where did my money go this month?")).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
   });
 });

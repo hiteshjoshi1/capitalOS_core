@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -9,17 +10,25 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import get_rates
+from app.routers.dashboard import _anchor_ts, _networth_components
 from app.schemas.spending import (
-    SpendingSummaryOut,
     CategoryAmount,
+    CashFlowAnalyticsOut,
+    CashFlowBreakdownItem,
+    CashFlowCategoryDeltaItem,
+    CashFlowDiagnosticAnswer,
     CashFlowDetailOut,
     CashFlowDetailSection,
+    CashFlowMerchantItem,
+    CashFlowTrendPoint,
     CashFlowTransactionItem,
+    CashFlowWaterfallOut,
     CreditCardSummaryOut,
     CreditCardItem,
     CreditCardDetailOut,
     CreditCardTransactionItem,
     CreditCardRecurringPaymentItem,
+    SpendingSummaryOut,
 )
 
 router = APIRouter(prefix="/spending", tags=["spending"], dependencies=[Depends(require_current_user)])
@@ -44,6 +53,42 @@ LIKELY_INTERNAL_TRANSFER_MARKERS = (
     "SI TO :",
     "REF:SALARY",
 )
+FIXED_EXPENSE_KEYWORDS = (
+    "rent",
+    "mortgage",
+    "utility",
+    "utilities",
+    "subscription",
+    "insurance",
+    "loan",
+    "tax",
+    "interest",
+    "fee",
+    "recurring",
+    "internet",
+    "phone",
+)
+RECURRING_KEYWORDS = (
+    "rent",
+    "mortgage",
+    "utility",
+    "utilities",
+    "subscription",
+    "insurance",
+    "loan",
+    "salary",
+    "dividend",
+    "interest",
+    "recurring",
+    "payroll",
+)
+SOURCE_KEYWORDS = {
+    "salary": ("salary", "payroll", "bonus", "compensation"),
+    "business": ("business", "freelance", "consult", "invoice"),
+    "dividends": ("dividend",),
+    "interest": ("interest",),
+    "transfers": ("transfer",),
+}
 
 
 def _parse_month(month: str) -> datetime:
@@ -171,6 +216,419 @@ def _cash_flow_bucket(row) -> str | None:
             return "expense"
         return None
     return None
+
+
+def _normalize_text(value: str | None) -> str:
+    return " ".join(str(value or "").strip().lower().split())
+
+
+def _build_month_rate_map(rows, base_currency: str) -> dict[str, dict[str, float]]:
+    currencies_by_month: dict[str, set[str]] = defaultdict(set)
+    for row in rows:
+        month_key = _month_key(row["ts"])
+        currency = (row["currency"] or base_currency).upper()
+        currencies_by_month[month_key].add(currency)
+
+    return {
+        month_key: get_rates(_parse_month(month_key), base_currency, currencies)
+        for month_key, currencies in currencies_by_month.items()
+    }
+
+
+def _row_base_amount(row, base_currency: str, month_rates: dict[str, dict[str, float]]) -> float:
+    month_key = _month_key(row["ts"])
+    currency = (row["currency"] or base_currency).upper()
+    rates = month_rates.get(month_key, {})
+    return float(row["amount"]) * rates.get(currency, 1.0)
+
+
+def _row_features(row) -> str:
+    parts = [
+        row.get("resolved_category"),
+        row.get("raw_category"),
+        row.get("resolved_category_code"),
+        row.get("resolved_parent_category_code"),
+        row.get("merchant_counterparty"),
+        row.get("notes"),
+        row.get("type"),
+    ]
+    return " ".join(_normalize_text(part) for part in parts if part)
+
+
+def _bucket_magnitude(row, base_amount: float) -> float:
+    return base_amount if _cash_flow_bucket(row) == "income" else -base_amount
+
+
+def _is_recurring_row(row, merchant_months: dict[tuple[str, str], set[str]]) -> bool:
+    merchant = _normalize_text(row.get("merchant_counterparty"))
+    bucket = _cash_flow_bucket(row)
+    if merchant and bucket and len(merchant_months.get((bucket, merchant), set())) >= 2:
+        return True
+    features = _row_features(row)
+    return any(keyword in features for keyword in RECURRING_KEYWORDS)
+
+
+def _expense_variability_label(row) -> str:
+    features = _row_features(row)
+    if any(keyword in features for keyword in FIXED_EXPENSE_KEYWORDS):
+        return "Fixed"
+    return "Variable"
+
+
+def _inflow_source_label(row) -> str:
+    features = _row_features(row)
+    for label, keywords in SOURCE_KEYWORDS.items():
+        if any(keyword in features for keyword in keywords):
+            return label.title()
+    return "Other"
+
+
+def _sorted_breakdown_items(items: dict[str, float], total: float, limit: int | None = None) -> list[CashFlowBreakdownItem]:
+    ranked = sorted(items.items(), key=lambda entry: (-entry[1], entry[0].lower()))
+    if limit is not None:
+        ranked = ranked[:limit]
+    if total <= 0:
+        return [
+            CashFlowBreakdownItem(label=label, amount=amount, percent=0.0)
+            for label, amount in ranked
+        ]
+    return [
+        CashFlowBreakdownItem(label=label, amount=amount, percent=(amount / total))
+        for label, amount in ranked
+    ]
+
+
+def _category_delta_items(current: dict[str, float], prior: dict[str, float], *, deterioration_only: bool = False) -> list[CashFlowCategoryDeltaItem]:
+    items: list[CashFlowCategoryDeltaItem] = []
+    labels = set(current) | set(prior)
+    for label in labels:
+        current_amount = current.get(label, 0.0)
+        prior_amount = prior.get(label, 0.0)
+        delta_amount = current_amount - prior_amount
+        if deterioration_only and delta_amount <= 0:
+            continue
+        delta_percent = (delta_amount / prior_amount) if prior_amount else None
+        if delta_amount > 0:
+            direction = "deteriorated"
+        elif delta_amount < 0:
+            direction = "improved"
+        else:
+            direction = "flat"
+        items.append(
+            CashFlowCategoryDeltaItem(
+                label=label,
+                current_amount=current_amount,
+                prior_amount=prior_amount,
+                delta_amount=delta_amount,
+                delta_percent=delta_percent,
+                direction=direction,
+            )
+        )
+    return sorted(items, key=lambda item: (-item.delta_amount, item.label.lower()))
+
+
+def _month_metrics(rows, base_currency: str) -> dict[str, dict[str, float | None]]:
+    month_rates = _build_month_rate_map(rows, base_currency)
+    metrics: dict[str, dict[str, float | None]] = defaultdict(
+        lambda: {
+            "inflows": 0.0,
+            "outflows": 0.0,
+            "net": 0.0,
+            "savings_rate": None,
+            "burn_rate": None,
+        }
+    )
+
+    for row in rows:
+        bucket = _cash_flow_bucket(row)
+        if bucket is None:
+            continue
+        month_key = _month_key(row["ts"])
+        base_amount = _row_base_amount(row, base_currency, month_rates)
+        if bucket == "income":
+            metrics[month_key]["inflows"] = float(metrics[month_key]["inflows"] or 0.0) + base_amount
+        else:
+            metrics[month_key]["outflows"] = float(metrics[month_key]["outflows"] or 0.0) + (-base_amount)
+
+    for month_key, values in metrics.items():
+        inflows = float(values["inflows"] or 0.0)
+        outflows = float(values["outflows"] or 0.0)
+        net = inflows - outflows
+        values["net"] = net
+        values["savings_rate"] = (net / inflows) if inflows > 0 else None
+        values["burn_rate"] = (outflows / inflows) if inflows > 0 else None
+
+    return metrics
+
+
+def _merchant_month_sets(rows) -> dict[tuple[str, str], set[str]]:
+    months: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for row in rows:
+        bucket = _cash_flow_bucket(row)
+        merchant = _normalize_text(row.get("merchant_counterparty"))
+        if bucket is None or not merchant:
+            continue
+        months[(bucket, merchant)].add(_month_key(row["ts"]))
+    return months
+
+
+def _analytics_for_month(
+    *,
+    current_rows,
+    lookback_rows,
+    month: str,
+    base_currency: str,
+    current_user_id: int,
+    db: Session,
+    income_total: float,
+    expense_total: float,
+    net: float,
+) -> CashFlowAnalyticsOut:
+    current_month_rates = _build_month_rate_map(current_rows, base_currency)
+    prior_month = _month_key(_add_months(_parse_month(month), -1))
+    prior_rows = [row for row in lookback_rows if _month_key(row["ts"]) == prior_month]
+    prior_month_rates = _build_month_rate_map(prior_rows, base_currency)
+    merchant_months = _merchant_month_sets(lookback_rows)
+
+    outflow_categories: dict[str, float] = defaultdict(float)
+    inflow_categories: dict[str, float] = defaultdict(float)
+    outflow_recurring_split: dict[str, float] = defaultdict(float)
+    inflow_recurring_split: dict[str, float] = defaultdict(float)
+    outflow_fixed_variable_split: dict[str, float] = defaultdict(float)
+    inflow_source_mix: dict[str, float] = defaultdict(float)
+    merchant_totals: dict[str, float] = defaultdict(float)
+    merchant_counts: dict[str, int] = defaultdict(int)
+    recurring_expense_categories: dict[str, float] = defaultdict(float)
+
+    prior_outflow_categories: dict[str, float] = defaultdict(float)
+    category_impacts_current: dict[str, float] = defaultdict(float)
+    category_impacts_prior: dict[str, float] = defaultdict(float)
+
+    for row in current_rows:
+        bucket = _cash_flow_bucket(row)
+        if bucket is None:
+            continue
+        base_amount = _row_base_amount(row, base_currency, current_month_rates)
+        amount = _bucket_magnitude(row, base_amount)
+        category = row["resolved_category"] or "Uncategorized"
+        is_recurring = _is_recurring_row(row, merchant_months)
+        recurring_label = "Recurring" if is_recurring else "One-off"
+
+        if bucket == "income":
+            inflow_categories[category] += amount
+            inflow_recurring_split[recurring_label] += amount
+            inflow_source_mix[_inflow_source_label(row)] += amount
+            category_impacts_current[category] += amount
+        elif bucket == "expense":
+            outflow_categories[category] += amount
+            outflow_recurring_split[recurring_label] += amount
+            if is_recurring:
+                recurring_expense_categories[category] += amount
+            outflow_fixed_variable_split[_expense_variability_label(row)] += amount
+            merchant = (row["merchant_counterparty"] or category or "Unknown").strip() or "Unknown"
+            merchant_totals[merchant] += amount
+            merchant_counts[merchant] += 1
+            category_impacts_current[category] -= amount
+
+    for row in prior_rows:
+        bucket = _cash_flow_bucket(row)
+        if bucket is None:
+            continue
+        base_amount = _row_base_amount(row, base_currency, prior_month_rates)
+        amount = _bucket_magnitude(row, base_amount)
+        category = row["resolved_category"] or "Uncategorized"
+        if bucket == "expense":
+            prior_outflow_categories[category] += amount
+            category_impacts_prior[category] -= amount
+        elif bucket == "income":
+            category_impacts_prior[category] += amount
+
+    trend_start = _add_months(_parse_month(month), -5)
+    trend_end = _month_end(_parse_month(month))
+    trend_rows = [
+        row
+        for row in lookback_rows
+        if trend_start <= _parse_month(_month_key(row["ts"])) < trend_end
+    ]
+    trend_metrics = _month_metrics(trend_rows, base_currency)
+    trend: list[CashFlowTrendPoint] = []
+    for offset in range(6):
+        point_month = _month_key(_add_months(trend_start, offset))
+        values = trend_metrics.get(point_month, {})
+        trend.append(
+            CashFlowTrendPoint(
+                month=point_month,
+                inflows=float(values.get("inflows") or 0.0),
+                outflows=float(values.get("outflows") or 0.0),
+                net=float(values.get("net") or 0.0),
+                savings_rate=values.get("savings_rate"),  # type: ignore[arg-type]
+                burn_rate=values.get("burn_rate"),  # type: ignore[arg-type]
+            )
+        )
+
+    prior_metrics = _month_metrics(prior_rows, base_currency).get(
+        prior_month,
+        {"net": 0.0},
+    )
+    prior_net = float(prior_metrics.get("net") or 0.0)
+    burn_rate = (expense_total / income_total) if income_total > 0 else None
+
+    anchor = _anchor_ts(_parse_month(month))
+    prior_anchor = _anchor_ts(_parse_month(prior_month))
+    ending_cash = _networth_components(db, anchor, base_currency, current_user_id)["cash"]
+    starting_cash = _networth_components(db, prior_anchor, base_currency, current_user_id)["cash"]
+
+    top_outflow_merchants = sorted(
+        merchant_totals.items(),
+        key=lambda entry: (-entry[1], entry[0].lower()),
+    )[:5]
+
+    deterioration_items: list[CashFlowCategoryDeltaItem] = []
+    for label in set(category_impacts_current) | set(category_impacts_prior):
+        current_value = category_impacts_current.get(label, 0.0)
+        prior_value = category_impacts_prior.get(label, 0.0)
+        delta = current_value - prior_value
+        if delta >= 0:
+            continue
+        deterioration_items.append(
+            CashFlowCategoryDeltaItem(
+                label=label,
+                current_amount=current_value,
+                prior_amount=prior_value,
+                delta_amount=delta,
+                delta_percent=(delta / prior_value) if prior_value not in (0, 0.0) else None,
+                direction="deteriorated",
+            )
+        )
+    deterioration_items.sort(key=lambda item: (item.delta_amount, item.label.lower()))
+
+    top_outflows = _sorted_breakdown_items(outflow_categories, expense_total, limit=3)
+    recurring_outflows = _sorted_breakdown_items(recurring_expense_categories, expense_total, limit=3)
+    inflow_mix = {
+        item.label: item.percent
+        for item in _sorted_breakdown_items(inflow_source_mix, income_total)
+    }
+
+    if income_total > 0:
+        if net >= 0:
+            saved_vs_spent_answer = (
+                f"Saved {(net / income_total) * 100:.1f}% and spent {(expense_total / income_total) * 100:.1f}% of inflows."
+            )
+        else:
+            overspend_amount = abs(net)
+            saved_vs_spent_answer = (
+                f"Saved 0.0% of inflows and spent 100.0% of them. "
+                f"Outflows exceeded inflows by {overspend_amount:.0f}, which had to come from existing cash or other funding sources."
+            )
+    else:
+        saved_vs_spent_answer = "No inflows were recorded, so savings and spend shares are unavailable."
+
+    answers = [
+        CashFlowDiagnosticAnswer(
+            question="Where did my money go this month?",
+            answer=(
+                "Most outflows went to "
+                + (
+                    ", ".join(
+                        f"{item.label} ({item.percent * 100:.1f}% / {item.amount:.0f})"
+                        for item in top_outflows
+                    )
+                    if top_outflows
+                    else "no recorded expense categories"
+                )
+                + "."
+            ),
+        ),
+        CashFlowDiagnosticAnswer(
+            question="What were my top spending categories this month?",
+            answer=(
+                ", ".join(
+                    f"{item.label} at {item.amount:.0f}"
+                    for item in top_outflows
+                )
+                if top_outflows
+                else "No spending categories were recorded."
+            ),
+        ),
+        CashFlowDiagnosticAnswer(
+            question="How much of my income was saved vs spent?",
+            answer=saved_vs_spent_answer,
+        ),
+        CashFlowDiagnosticAnswer(
+            question="What changed versus last month?",
+            answer=(
+                f"Net cash flow moved by {net - prior_net:+.0f} versus {prior_month}, with "
+                + (
+                    f"{top_outflows[0].label} remaining the largest outflow."
+                    if top_outflows
+                    else "no outflow categories recorded this month."
+                )
+            ),
+        ),
+        CashFlowDiagnosticAnswer(
+            question="Which recurring expenses are driving most of my outflows?",
+            answer=(
+                ", ".join(
+                    f"{item.label} ({item.amount:.0f})"
+                    for item in recurring_outflows[:3]
+                )
+                if recurring_outflows
+                else "No recurring expense signal was detected."
+            ),
+        ),
+        CashFlowDiagnosticAnswer(
+            question="What percentage of inflows came from salary, dividends, and transfers?",
+            answer=(
+                f"Salary {inflow_mix.get('Salary', 0.0) * 100:.1f}%, "
+                f"dividends {inflow_mix.get('Dividends', 0.0) * 100:.1f}%, "
+                f"transfers {inflow_mix.get('Transfers', 0.0) * 100:.1f}%."
+            ),
+        ),
+        CashFlowDiagnosticAnswer(
+            question="Which categories explain most of the deterioration in free cash flow?",
+            answer=(
+                ", ".join(
+                    f"{item.label} ({item.delta_amount:.0f})"
+                    for item in deterioration_items[:3]
+                )
+                if deterioration_items
+                else "No category-level deterioration versus last month was detected."
+            ),
+        ),
+    ]
+
+    return CashFlowAnalyticsOut(
+        burn_rate=burn_rate,
+        prior_month=prior_month,
+        prior_month_net=prior_net,
+        free_cash_flow_change_vs_prior_month=(net - prior_net),
+        outflow_categories=_sorted_breakdown_items(outflow_categories, expense_total),
+        inflow_categories=_sorted_breakdown_items(inflow_categories, income_total),
+        outflow_recurring_split=_sorted_breakdown_items(outflow_recurring_split, expense_total),
+        inflow_recurring_split=_sorted_breakdown_items(inflow_recurring_split, income_total),
+        outflow_fixed_variable_split=_sorted_breakdown_items(outflow_fixed_variable_split, expense_total),
+        inflow_source_mix=_sorted_breakdown_items(inflow_source_mix, income_total),
+        top_outflow_merchants=[
+            CashFlowMerchantItem(
+                merchant=merchant,
+                amount=amount,
+                percent=(amount / expense_total) if expense_total > 0 else 0.0,
+                transaction_count=merchant_counts[merchant],
+            )
+            for merchant, amount in top_outflow_merchants
+        ],
+        largest_inflow_drivers=_sorted_breakdown_items(inflow_categories, income_total, limit=5),
+        outflow_category_deltas=_category_delta_items(outflow_categories, prior_outflow_categories, deterioration_only=True),
+        deterioration_drivers=deterioration_items[:5],
+        trend=trend,
+        waterfall=CashFlowWaterfallOut(
+            starting_cash=starting_cash,
+            inflows=income_total,
+            outflows=expense_total,
+            ending_cash=ending_cash,
+        ),
+        answers=answers,
+    )
 
 
 def _credit_cards(db: Session, current_user_id: int):
@@ -323,9 +781,10 @@ def cash_flow_detail(
 ):
     start = _parse_month(month)
     end = _month_end(start)
-    rows = _cash_flow_rows(db, start, end, current_user.id)
-    currencies = {r["currency"] for r in rows if r["currency"]}
-    rates = get_rates(start, base_currency, currencies)
+    lookback_start = _add_months(start, -5)
+    lookback_rows = _cash_flow_rows(db, lookback_start, end, current_user.id)
+    rows = [row for row in lookback_rows if _month_key(row["ts"]) == month]
+    rates = _build_month_rate_map(rows, base_currency).get(month, {})
 
     income_total = 0.0
     expense_total = 0.0
@@ -378,6 +837,17 @@ def cash_flow_detail(
             "Net = income_total - expense_total using month-scoped transactions with types "
             "INCOME, EXPENSE, FEE, TAX, INTEREST, TRANSFER. Rows resolved under Transfer "
             "categories or explicit source transfer categories are excluded."
+        ),
+        analytics=_analytics_for_month(
+            current_rows=rows,
+            lookback_rows=lookback_rows,
+            month=month,
+            base_currency=base_currency,
+            current_user_id=current_user.id,
+            db=db,
+            income_total=income_total,
+            expense_total=expense_total,
+            net=net,
         ),
         income=CashFlowDetailSection(
             total=income_total,

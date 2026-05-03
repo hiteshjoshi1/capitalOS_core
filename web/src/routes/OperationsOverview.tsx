@@ -2,7 +2,16 @@ import { Link } from "react-router-dom";
 import "../App.css";
 import PageShell from "../components/PageShell";
 
-const DATA_HUB_ACTIONS = [
+type DataHubAction = {
+  label: string;
+  title: string;
+  description: string;
+  to: string;
+  cta: string;
+  primary?: boolean;
+};
+
+const DATA_HUB_ACTIONS: DataHubAction[] = [
   {
     label: "Import Statements",
     title: "Upload statements and inspect import reports.",
@@ -47,7 +56,7 @@ const DATA_HUB_ACTIONS = [
     to: "/platforms",
     cta: "Add a Platform",
   },
-] as const;
+];
 
 export default function OperationsOverview() {
   return (

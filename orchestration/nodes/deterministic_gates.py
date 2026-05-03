@@ -19,6 +19,20 @@ from orchestration.services.verification import VerificationService
 from orchestration.state import GraphState, dump_pipeline_state, load_pipeline_state
 
 
+def _normalize_high_risk_decision(raw: dict) -> dict:
+    normalized = dict(raw)
+
+    nested = normalized.get("decision")
+    if isinstance(nested, dict):
+        normalized = {**nested, **{k: v for k, v in normalized.items() if k != "decision"}}
+
+    decision_value = normalized.get("decision")
+    normalized["decision"] = str(decision_value).strip() if decision_value is not None else ""
+    normalized["reviewer"] = str(normalized.get("reviewer", "")).strip()
+    normalized["notes"] = str(normalized.get("notes", "")).strip()
+    return normalized
+
+
 def _human_review_gate(pipeline, *, findings: list[str]) -> dict:
     payload = {
         "gate": "v3_high_risk_review",
@@ -40,7 +54,7 @@ def _human_review_gate(pipeline, *, findings: list[str]) -> dict:
     raw = interrupt(payload)
     if not isinstance(raw, dict):
         raise RuntimeError("Invalid resume payload for v3_high_risk_review.")
-    return raw
+    return _normalize_high_risk_decision(raw)
 
 def run(state: GraphState) -> GraphState:
     pipeline = load_pipeline_state(state)
@@ -124,7 +138,10 @@ def run(state: GraphState) -> GraphState:
         if not reviewer:
             raise RuntimeError("v3_high_risk_review requires reviewer.")
         if status not in {"approved", "needs_fixes"}:
-            raise RuntimeError("v3_high_risk_review decision must be approved or needs_fixes.")
+            raise RuntimeError(
+                "v3_high_risk_review decision must be approved or needs_fixes. "
+                f"Raw payload={decision!r} normalized_status={status!r}"
+            )
         if status == "needs_fixes" and not notes:
             raise RuntimeError("v3_high_risk_review notes are required for needs_fixes.")
         if status == "needs_fixes":

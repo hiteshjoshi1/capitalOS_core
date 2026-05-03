@@ -57,6 +57,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route element={<AppShell />}>
                       <Route path="/" element={<App />} />
                       <Route path="/wealth" element={<WealthOverview />} />
+                      <Route path="/wealth/cash-flow" element={<CashFlowDetail />} />
                       <Route path="/risk" element={<WealthRisk />} />
                       <Route path="/dividends" element={<Dividends />} />
                       <Route path="/holdings" element={<StockHoldings />} />

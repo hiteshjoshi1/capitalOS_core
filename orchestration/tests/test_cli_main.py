@@ -110,6 +110,7 @@ def test_prompt_helpers_retry_until_valid(capsys):
     assert "Enter 'y' for approve or 'n' for needs_fixes." in capsys.readouterr().out
 
 
+
 def test_print_result_reports_interrupts_and_blocked_states(capsys):
     pipeline = _pipeline()
     blocked_pipeline = pipeline.model_copy(update={"workflow_status": "blocked"})

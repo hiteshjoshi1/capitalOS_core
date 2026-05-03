@@ -35,7 +35,77 @@ const detailFixture: CashFlowDetailResponse = {
   expense_total: 8710,
   net: 3770,
   savings_rate: 0.3020833333,
-  calculation: "Net = income_total - expense_total using month-scoped transactions with types INCOME, EXPENSE, FEE, TAX, INTEREST, excluding rows resolved under Transfer.",
+  calculation: "Net = income_total - expense_total using month-scoped transactions with types INCOME, EXPENSE, FEE, TAX, INTEREST, TRANSFER. Rows resolved under Transfer categories or explicit source transfer categories are excluded.",
+  analytics: {
+    burn_rate: 0.6979166667,
+    prior_month: "2026-01",
+    prior_month_net: 6182,
+    free_cash_flow_change_vs_prior_month: -2412,
+    outflow_categories: [
+      { label: "Rent", amount: 3200, percent: 3200 / 8710 },
+      { label: "Dining", amount: 1780, percent: 1780 / 8710 },
+      { label: "Groceries", amount: 1210, percent: 1210 / 8710 },
+    ],
+    inflow_categories: [
+      { label: "Salary", amount: 12000, percent: 12000 / 12480 },
+      { label: "Dividends", amount: 480, percent: 480 / 12480 },
+    ],
+    outflow_recurring_split: [
+      { label: "Recurring", amount: 4410, percent: 4410 / 8710 },
+      { label: "One-off", amount: 4300, percent: 4300 / 8710 },
+    ],
+    inflow_recurring_split: [
+      { label: "Recurring", amount: 12480, percent: 1 },
+    ],
+    outflow_fixed_variable_split: [
+      { label: "Fixed", amount: 4310, percent: 4310 / 8710 },
+      { label: "Variable", amount: 4400, percent: 4400 / 8710 },
+    ],
+    inflow_source_mix: [
+      { label: "Salary", amount: 12000, percent: 12000 / 12480 },
+      { label: "Dividends", amount: 480, percent: 480 / 12480 },
+      { label: "Transfers", amount: 0, percent: 0 },
+    ],
+    top_outflow_merchants: [
+      { merchant: "Landlord", amount: 3200, percent: 3200 / 8710, transaction_count: 1 },
+      { merchant: "Hawker Center", amount: 1780, percent: 1780 / 8710, transaction_count: 1 },
+    ],
+    largest_inflow_drivers: [
+      { label: "Salary", amount: 12000, percent: 12000 / 12480 },
+      { label: "Dividends", amount: 480, percent: 480 / 12480 },
+    ],
+    outflow_category_deltas: [
+      { label: "Dining", current_amount: 1780, prior_amount: 0, delta_amount: 1780, delta_percent: null, direction: "deteriorated" },
+      { label: "Rent", current_amount: 3200, prior_amount: 2800, delta_amount: 400, delta_percent: 400 / 2800, direction: "deteriorated" },
+    ],
+    deterioration_drivers: [
+      { label: "Dining", current_amount: -1780, prior_amount: 0, delta_amount: -1780, delta_percent: null, direction: "deteriorated" },
+      { label: "Rent", current_amount: -3200, prior_amount: -2800, delta_amount: -400, delta_percent: 400 / 2800, direction: "deteriorated" },
+    ],
+    trend: [
+      { month: "2025-09", inflows: 0, outflows: 0, net: 0, savings_rate: null, burn_rate: null },
+      { month: "2025-10", inflows: 0, outflows: 0, net: 0, savings_rate: null, burn_rate: null },
+      { month: "2025-11", inflows: 0, outflows: 0, net: 0, savings_rate: null, burn_rate: null },
+      { month: "2025-12", inflows: 0, outflows: 18, net: -18, savings_rate: null, burn_rate: null },
+      { month: "2026-01", inflows: 10300, outflows: 4118, net: 6182, savings_rate: 0.6001941748, burn_rate: 0.3998058252 },
+      { month: "2026-02", inflows: 12480, outflows: 8710, net: 3770, savings_rate: 0.3020833333, burn_rate: 0.6979166667 },
+    ],
+    waterfall: {
+      starting_cash: 11000,
+      inflows: 12480,
+      outflows: 8710,
+      ending_cash: 15000,
+    },
+    answers: [
+      { question: "Where did my money go this month?", answer: "Most outflows went to Rent (36.7% / 3200), Dining (20.4% / 1780), Groceries (13.9% / 1210)." },
+      { question: "What were my top spending categories this month?", answer: "Rent at 3200, Dining at 1780, Groceries at 1210" },
+      { question: "How much of my income was saved vs spent?", answer: "Saved 30.2% and spent 69.8% of inflows." },
+      { question: "What changed versus last month?", answer: "Net cash flow moved by -2412 versus 2026-01, with Rent remaining the largest outflow." },
+      { question: "Which recurring expenses are driving most of my outflows?", answer: "Rent (3200), Groceries (1210)" },
+      { question: "What percentage of inflows came from salary, dividends, and transfers?", answer: "Salary 96.2%, dividends 3.8%, transfers 0.0%." },
+      { question: "Which categories explain most of the deterioration in free cash flow?", answer: "Dining (-1780), Rent (-400)" },
+    ],
+  },
   income: {
     total: 12480,
     transaction_count: 1,
@@ -91,7 +161,35 @@ const updatedDetailFixture: CashFlowDetailResponse = {
   income_total: 0,
   net: -8710,
   savings_rate: null,
-  calculation: "Net = income_total - expense_total using month-scoped transactions with types INCOME, EXPENSE, FEE, TAX, INTEREST, excluding rows resolved under Transfer.",
+  analytics: {
+    ...detailFixture.analytics,
+    burn_rate: null,
+    prior_month_net: 6182,
+    free_cash_flow_change_vs_prior_month: -14892,
+    inflow_categories: [],
+    inflow_recurring_split: [],
+    inflow_source_mix: [{ label: "Transfers", amount: 0, percent: 0 }],
+    largest_inflow_drivers: [],
+    answers: detailFixture.analytics.answers.map((answer) => (
+      answer.question === "How much of my income was saved vs spent?"
+        ? {
+            ...answer,
+            answer: "Saved 0.0% of inflows and spent 100.0% of them. Outflows exceeded inflows by 8710, which had to come from existing cash or other funding sources.",
+          }
+        : answer
+    )),
+    waterfall: {
+      starting_cash: 11000,
+      inflows: 0,
+      outflows: 8710,
+      ending_cash: 15000,
+    },
+    trend: detailFixture.analytics.trend.map((point) => (
+      point.month === "2026-02"
+        ? { ...point, inflows: 0, net: -8710, savings_rate: null, burn_rate: null }
+        : point
+    )),
+  },
   income: {
     ...detailFixture.income,
     total: 0,
@@ -127,23 +225,24 @@ describe("CashFlowDetail route", () => {
     });
   });
 
-  it("renders calculation context, edit steps, and contributing transactions", async () => {
+  it("renders wealth-native cash-flow diagnostics and direct answers", async () => {
     renderRoute();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow" })).toBeInTheDocument();
-    expect(screen.getByText("Verify how income, expenses, and net were derived for the selected month.")).toBeInTheDocument();
-    expect(screen.getByText("Net = income_total - expense_total using month-scoped transactions with types INCOME, EXPENSE, FEE, TAX, INTEREST, excluding rows resolved under Transfer.")).toBeInTheDocument();
-    expect(screen.getByText("To correct a row here: choose a category in the table and click Save.")).toBeInTheDocument();
-    expect(screen.getByText("Rows saved to a Transfer category are excluded from income, expenses, and net as soon as this page refreshes.")).toBeInTheDocument();
-    expect(screen.getByText("Other category edits keep the row in its current income or expense bucket and update the label only.")).toBeInTheDocument();
-    expect(screen.getByText("UOB One")).toBeInTheDocument();
-    expect(screen.getByText("Landlord")).toBeInTheDocument();
-    expect(screen.getByText("Income transactions (1)")).toBeInTheDocument();
+    expect(screen.getByText("A deterministic diagnostic workspace for where cash came from, where it went, what changed, and what is driving the move.")).toBeInTheDocument();
+    expect(screen.getAllByRole("heading", { name: "Where did my money go this month?" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("Top expense categories")).toBeInTheDocument();
+    expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Monthly spend by category chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Income source donut chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
+    expect(screen.getByLabelText("Cash waterfall chart")).toBeInTheDocument();
+    expect(screen.getAllByText("Which categories explain most of the deterioration in free cash flow?").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Landlord").length).toBeGreaterThan(0);
     expect(screen.getByText("Expense transactions (1)")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Salary")).toBeInTheDocument();
   });
 
-  it("posts an override from the detail table and refreshes the row", async () => {
+  it("posts an override from the audit table and refreshes the diagnostics", async () => {
     const user = userEvent.setup();
     mockApi.cashFlowDetail.mockResolvedValueOnce(detailFixture).mockResolvedValueOnce(updatedDetailFixture);
 
@@ -162,6 +261,11 @@ describe("CashFlowDetail route", () => {
     });
     expect(await screen.findByText("Income transactions (0)")).toBeInTheDocument();
     expect(screen.getByText("No income transactions for 2026-02.")).toBeInTheDocument();
-    expect(screen.getByText("S$ -8,710")).toBeInTheDocument();
+    expect(screen.getAllByText("S$ -8,710").length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText(
+        "Saved 0.0% of inflows and spent 100.0% of them. Outflows exceeded inflows by 8710, which had to come from existing cash or other funding sources.",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 });

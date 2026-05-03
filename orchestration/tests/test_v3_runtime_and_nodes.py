@@ -395,6 +395,74 @@ def test_deterministic_gates_high_risk_rejected_blocks(tmp_path, monkeypatch) ->
     assert "High-risk findings rejected" in pipeline.blockers[0]
 
 
+def test_deterministic_gates_high_risk_approved_allows_completion(tmp_path, monkeypatch) -> None:
+    state = _v3_state(tmp_path)
+    output = _agent_output()
+    output.summary = "done"
+    output.risk_flags = ["heuristic-recurring-and-fixed-variable-classification"]
+    state.agent_run_output = output
+
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "get_config",
+        lambda: SimpleNamespace(
+            max_retries=3,
+            require_pre_ship_human_on_high_risk=True,
+        ),
+    )
+    _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "interrupt",
+        lambda payload: {
+            "gate_type": "v3_high_risk_review",
+            "decision": "approved",
+            "reviewer": "Hitesh",
+            "notes": "",
+        },
+    )
+
+    result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+    assert pipeline.workflow_status == "waiting_for_human"
+    assert pipeline.current_stage == "deterministic_gates"
+
+
+def test_deterministic_gates_high_risk_nested_decision_payload_is_normalized(tmp_path, monkeypatch) -> None:
+    state = _v3_state(tmp_path)
+    output = _agent_output()
+    output.summary = "done"
+    output.risk_flags = ["heuristic-recurring-and-fixed-variable-classification"]
+    state.agent_run_output = output
+
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "get_config",
+        lambda: SimpleNamespace(
+            max_retries=3,
+            require_pre_ship_human_on_high_risk=True,
+        ),
+    )
+    _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "interrupt",
+        lambda payload: {
+            "decision": {
+                "decision": "approved",
+                "reviewer": "Hitesh",
+                "notes": "",
+            },
+            "reviewer": "Hitesh",
+            "notes": "",
+        },
+    )
+
+    result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+    assert pipeline.workflow_status == "waiting_for_human"
+
+
 def test_provider_runtime_complete_structured_raises_on_primary_failure(monkeypatch, tmp_path) -> None:
     cfg = SimpleNamespace(
         enable_caffeinate=False,

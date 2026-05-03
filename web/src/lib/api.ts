@@ -335,6 +335,69 @@ export type CashFlowDetailSection = {
   transactions: CashFlowTransaction[];
 };
 
+export type CashFlowBreakdownItem = {
+  label: string;
+  amount: number;
+  percent: number;
+};
+
+export type CashFlowMerchantItem = {
+  merchant: string;
+  amount: number;
+  percent: number;
+  transaction_count: number;
+};
+
+export type CashFlowCategoryDeltaItem = {
+  label: string;
+  current_amount: number;
+  prior_amount: number;
+  delta_amount: number;
+  delta_percent: number | null;
+  direction: string;
+};
+
+export type CashFlowTrendPoint = {
+  month: string;
+  inflows: number;
+  outflows: number;
+  net: number;
+  savings_rate: number | null;
+  burn_rate: number | null;
+};
+
+export type CashFlowWaterfall = {
+  starting_cash: number | null;
+  inflows: number;
+  outflows: number;
+  ending_cash: number | null;
+};
+
+export type CashFlowDiagnosticAnswer = {
+  question: string;
+  answer: string;
+};
+
+export type CashFlowAnalytics = {
+  burn_rate: number | null;
+  prior_month: string | null;
+  prior_month_net: number | null;
+  free_cash_flow_change_vs_prior_month: number | null;
+  outflow_categories: CashFlowBreakdownItem[];
+  inflow_categories: CashFlowBreakdownItem[];
+  outflow_recurring_split: CashFlowBreakdownItem[];
+  inflow_recurring_split: CashFlowBreakdownItem[];
+  outflow_fixed_variable_split: CashFlowBreakdownItem[];
+  inflow_source_mix: CashFlowBreakdownItem[];
+  top_outflow_merchants: CashFlowMerchantItem[];
+  largest_inflow_drivers: CashFlowBreakdownItem[];
+  outflow_category_deltas: CashFlowCategoryDeltaItem[];
+  deterioration_drivers: CashFlowCategoryDeltaItem[];
+  trend: CashFlowTrendPoint[];
+  waterfall: CashFlowWaterfall;
+  answers: CashFlowDiagnosticAnswer[];
+};
+
 export type CashFlowDetail = {
   month: string;
   base_currency: string;
@@ -343,6 +406,7 @@ export type CashFlowDetail = {
   net: number;
   savings_rate: number | null;
   calculation: string;
+  analytics: CashFlowAnalytics;
   income: CashFlowDetailSection;
   expenses: CashFlowDetailSection;
 };
