@@ -50,17 +50,40 @@ class NetWorthChange(BaseModel):
     compare_month: str
 
 
+class TopMover(BaseModel):
+    asset_id: Optional[int] = None
+    symbol: str
+    asset_class: str
+    current_value: float
+    previous_value: float
+    delta_abs: float
+    delta_pct: Optional[float] = None
+    compare_month: str
+
+
+class TopMovers(BaseModel):
+    compare_month: str
+    gainers: List[TopMover]
+    detractors: List[TopMover]
+
+
 class DashboardSummaryResponse(BaseModel):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
     net_worth_as_of: Optional[str] = None
+    net_worth_snapshot_as_of: Optional[str] = None
+    net_worth_boundary_at: Optional[str] = None
+    net_worth_boundary_exact: Optional[bool] = None
+    net_worth_freshness_status: Optional[str] = None
     net_worth: Optional[NetWorth] = None
     geography: List[GeographyItem]
     cash_flow: CashFlow
     top_holdings: List[TopHolding]
     cash_balances: List[CashBalance]
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
+    net_worth_component_change: Optional[Dict[str, NetWorthChange]] = None
+    top_movers: Optional[TopMovers] = None
     cash_percent: float
 
     class Config:
@@ -71,6 +94,10 @@ class NetWorthChangeResponse(BaseModel):
     as_of_month: str
     base_currency: str
     net_worth_as_of: Optional[str] = None
+    net_worth_snapshot_as_of: Optional[str] = None
+    net_worth_boundary_at: Optional[str] = None
+    net_worth_boundary_exact: Optional[bool] = None
+    net_worth_freshness_status: Optional[str] = None
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
 
     class Config:
@@ -82,6 +109,10 @@ class StockHoldingsResponse(BaseModel):
     base_currency: str
     snapshot_day: Optional[int] = None
     net_worth_as_of: Optional[str] = None
+    net_worth_snapshot_as_of: Optional[str] = None
+    net_worth_boundary_at: Optional[str] = None
+    net_worth_boundary_exact: Optional[bool] = None
+    net_worth_freshness_status: Optional[str] = None
     top_holdings: List[TopHolding]
 
 
@@ -145,6 +176,10 @@ class BootstrapResponse(BaseModel):
     base_currency: str
     snapshot_day: Optional[int] = None
     net_worth_as_of: Optional[str] = None
+    net_worth_snapshot_as_of: Optional[str] = None
+    net_worth_boundary_at: Optional[str] = None
+    net_worth_boundary_exact: Optional[bool] = None
+    net_worth_freshness_status: Optional[str] = None
     net_worth: NetWorth
     stock_exposure_total: float
     crypto_exposure_total: float

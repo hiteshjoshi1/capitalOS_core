@@ -1,7 +1,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from app.routers.dashboard import _display_source, _infer_country
+from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
 
 
 def test_dashboard_invalid_month(client: TestClient):
@@ -17,20 +17,32 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
 
     assert data["as_of_month"] == "2026-02"
     assert data["base_currency"] == "SGD"
-    assert data["net_worth"]["total"] == 100000.0
+    assert data["net_worth_as_of"] == "2026-03-01T00:00:00+00:00"
+    assert data["net_worth_snapshot_as_of"] == "2026-02-06T00:00:00+00:00"
+    assert data["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
+    assert data["net_worth_boundary_exact"] is False
+    assert data["net_worth_freshness_status"] == "synthetic"
+    assert data["net_worth"]["total"] == 98899.0
     assert data["cash_flow"]["income"] == 5999.0
     assert data["cash_flow"]["expenses"] == 2100.0
     assert data["cash_flow"]["net"] == 3899.0
     assert data["cash_flow"]["savings_rate"] == pytest.approx(3899.0 / 5999.0, rel=1e-4)
-    assert data["cash_percent"] == pytest.approx(30.0, rel=1e-6)
+    assert data["cash_percent"] == 29.22
 
     top = data["top_holdings"]
     assert len(top) == 2
     assert top[0]["symbol"] == "AAPL"
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == 10000.0
-    assert changes["pct"] == 10000.0 / 90000.0
+    assert changes["abs"] == 8899.0
+    assert changes["pct"] == 8899.0 / 90000.0
+    component_changes = data["net_worth_component_change"]
+    assert component_changes["cash"]["abs"] == -1101.0
+    assert component_changes["stocks_funds"]["abs"] == 5000.0
+    assert component_changes["crypto"]["abs"] == 5000.0
+    assert data["top_movers"]["compare_month"] == "2026-01"
+    assert "gainers" in data["top_movers"]
+    assert "detractors" in data["top_movers"]
 
 
 def test_dashboard_net_worth_change_lightweight(client: TestClient, seed_dashboard_data):
@@ -41,13 +53,72 @@ def test_dashboard_net_worth_change_lightweight(client: TestClient, seed_dashboa
     assert data["as_of_month"] == "2026-02"
     assert data["base_currency"] == "SGD"
     assert "net_worth_as_of" in data
+    assert data["net_worth_as_of"] == "2026-03-01T00:00:00+00:00"
+    assert data["net_worth_snapshot_as_of"] == "2026-02-06T00:00:00+00:00"
+    assert data["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
+    assert data["net_worth_boundary_exact"] is False
+    assert data["net_worth_freshness_status"] == "synthetic"
     assert "net_worth_change" in data
     assert "vs_prev_month" in data["net_worth_change"]
     assert "vs_prev_year" not in data["net_worth_change"]
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == 10000.0
-    assert changes["pct"] == 10000.0 / 90000.0
+    assert changes["abs"] == 8899.0
+    assert changes["pct"] == 8899.0 / 90000.0
+
+
+def test_synthetic_net_worth_ignores_internal_self_transfer_income(db_engine, monkeypatch):
+    from datetime import datetime, timezone
+
+    from sqlalchemy import text
+    from sqlalchemy.orm import Session
+
+    as_of = datetime(2026, 3, 26, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(910, 'DBS', 'DBS Bank', 'BANK', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country, platform_id) VALUES "
+                "(910, 'DBS Multiplier', 'DBS', 2, 'BANK', 'SGD', 'SG', 910)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(910, 'SGD', 'SGD Cash', 'CASH', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(910, 910, 910, :as_of, 400000, 1, 400000)"
+            ),
+            {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions "
+                "(id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(9101, '2026-04-24T00:00:00+00:00', 910, 20000, 'INCOME', 'SGD', 'Bank::ADV', "
+                "'ICT self 20260424UOVBSGSGBRT7617851 OTHR', 'Payments')"
+            )
+        )
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"SGD": 1.0, "USD": 1.0})
+
+    db = Session(bind=db_engine)
+    try:
+        components = _networth_components(db, _anchor_ts(_parse_month("2026-04")), "SGD", 2)
+    finally:
+        db.close()
+
+    assert components["cash"] == 400000.0
+    assert components["total"] == 400000.0
 
 
 def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_dashboard_data):
@@ -378,7 +449,7 @@ def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_das
     assert len(cash_rows) == 0
     # Verify cash_percent is exposed and correctly computed
     assert "cash_percent" in data
-    assert data["cash_percent"] == 30.0
+    assert data["cash_percent"] == 29.22
 
 
 def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient, seed_dashboard_data):
@@ -1102,8 +1173,8 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
     assert isinstance(body["crypto_exposure_total"], (int, float))
     assert "cash_percent" in body, "cash_percent missing"
     assert isinstance(body["cash_percent"], (int, float))
-    # snapshot_day must equal the env default (6), not null
-    assert body["snapshot_day"] == 6, f"snapshot_day expected 6, got {body['snapshot_day']}"
+    # snapshot_day must reflect configured env value
+    assert body["snapshot_day"] == 1, f"snapshot_day expected 1, got {body['snapshot_day']}"
 
     # Secondary fields must NOT be present
     for forbidden in ("geography", "top_holdings", "cashflow", "compare", "net_worth_change"):
@@ -1132,7 +1203,7 @@ def test_dashboard_summary_skip_networth(client: TestClient, seed_dashboard_data
     assert "cash_flow" in body
     assert "cash_balances" in body
     assert "snapshot_day" in body
-    assert body["snapshot_day"] == 6
+    assert body["snapshot_day"] == 1
 
     # Denominator fix: geography and top_holdings must be non-empty when seed data provides positions
     assert len(body["geography"]) > 0, "geography must be non-empty when position data exists"
@@ -1153,4 +1224,4 @@ def test_dashboard_summary_snapshot_day_returned(client: TestClient, seed_dashbo
     resp = client.get("/dashboard/summary?month=2026-02")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["snapshot_day"] == 6, f"snapshot_day expected 6, got {body['snapshot_day']}"
+    assert body["snapshot_day"] == 1, f"snapshot_day expected 1, got {body['snapshot_day']}"

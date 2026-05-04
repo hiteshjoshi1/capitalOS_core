@@ -30,6 +30,32 @@ from app.fx import get_rates
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(require_current_user)])
 
 _UPPERCASE_SOURCE_CODES = {"DBS", "OCBC", "UOB", "IBKR", "POSB", "CITI", "HSBC", "SCB"}
+_SYNTHETIC_TRANSFER_CATEGORIES = {
+    "bank::transfer",
+    "creditcard::payment",
+    "brokerage::transfer",
+}
+_SYNTHETIC_INTERNAL_MARKERS = (
+    "ICT SELF",
+    "OWN ACCOUNT",
+    "INTERACTIVE BROKERS",
+    "IBKR",
+    "PHILLIP SECURITIES",
+    "DBS VICKERS",
+    "VICKERS SECURITIES",
+    "GIRO PAYMENT",
+    "COINBASE",
+)
+_SYNTHETIC_ALLOWED_BANK_INCOME_MARKERS = (
+    "SALARY",
+    "PAYROLL",
+    "INTEREST",
+    "DIVIDEND",
+    "REFUND",
+    "RFD",
+    "REBATE",
+    "BONUS INTEREST",
+)
 
 
 def _summary_top_holdings_limit() -> int:
@@ -89,6 +115,271 @@ def _effective_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> 
     return as_of
 
 
+def _normalize_ts(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _snapshot_freshness(db: Session, anchor_ts: datetime, current_user_id: int) -> tuple[Optional[datetime], bool, str]:
+    as_of = _effective_as_of(db, anchor_ts, current_user_id)
+    if as_of is None:
+        return None, False, "missing"
+    return as_of, as_of == anchor_ts, ("exact" if as_of == anchor_ts else "synthetic")
+
+
+def _latest_price_map(db: Session, anchor_ts: datetime, asset_ids: set[int]) -> Dict[int, Dict[str, Any]]:
+    if not asset_ids:
+        return {}
+    placeholders = ",".join(str(int(asset_id)) for asset_id in sorted(asset_ids))
+    q = text(
+        f"""
+        SELECT p1.asset_id, p1.price, p1.currency
+        FROM prices p1
+        JOIN (
+          SELECT asset_id, MAX(trade_date) AS trade_date
+          FROM prices
+          WHERE trade_date IS NOT NULL
+            AND trade_date <= :anchor_date
+            AND asset_id IN ({placeholders})
+          GROUP BY asset_id
+        ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
+        """
+    )
+    rows = db.execute(q, {"anchor_date": anchor_ts.date()}).mappings().all()
+    return {
+        int(row["asset_id"]): {
+            "price": float(row["price"]) if row["price"] is not None else None,
+            "currency": row["currency"],
+        }
+        for row in rows
+    }
+
+
+def _is_synthetic_internal_cash_movement(row: Dict[str, Any]) -> bool:
+    tx_type = str(row.get("type") or "").upper()
+    if tx_type == "TRANSFER":
+        return True
+    raw_category = str(row.get("category") or "").strip().lower()
+    if raw_category in _SYNTHETIC_TRANSFER_CATEGORIES:
+        return True
+    text = " ".join(
+        [
+            str(row.get("merchant_counterparty") or ""),
+            str(row.get("notes") or ""),
+            str(row.get("category") or ""),
+        ]
+    ).upper()
+    if tx_type == "INCOME" and raw_category.startswith("bank::"):
+        if not any(marker in text for marker in _SYNTHETIC_ALLOWED_BANK_INCOME_MARKERS):
+            return True
+    return any(marker in text for marker in _SYNTHETIC_INTERNAL_MARKERS)
+
+
+def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: int) -> List[Dict[str, Any]]:
+    q = text(
+        """
+        WITH latest AS (
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+        + account_scope_sql("acc")
+        + """
+          GROUP BY p.account_id
+        ),
+        map_exchange AS (
+          SELECT
+            m.asset_id,
+            MIN(UPPER(m.exchange_code)) AS exchange_code
+          FROM market_symbol_map m
+          WHERE m.is_active = TRUE
+          GROUP BY m.asset_id
+        )
+        SELECT
+          p.account_id,
+          p.as_of,
+          acc.account_type,
+          acc.currency AS account_currency,
+          COALESCE(pl.code, acc.platform) AS platform,
+          a.id AS asset_id,
+          a.symbol,
+          a.name,
+          a.asset_class,
+          a.quote_currency,
+          a.home_country,
+          mx.exchange_code,
+          p.quantity,
+          p.avg_cost,
+          p.cost_basis_base
+        FROM positions p
+        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
+        JOIN accounts acc ON acc.id = p.account_id
+        LEFT JOIN platforms pl ON pl.id = acc.platform_id
+        JOIN assets a ON a.id = p.asset_id
+        LEFT JOIN map_exchange mx ON mx.asset_id = a.id
+        WHERE """
+        + account_scope_sql("acc")
+    )
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().all()
+    if not rows:
+        return []
+
+    synthetic_rows: Dict[tuple[int, Optional[int], str], Dict[str, Any]] = {}
+    account_snapshot_as_of: Dict[int, datetime] = {}
+    account_meta: Dict[int, Dict[str, Any]] = {}
+
+    for row in rows:
+        account_id = int(row["account_id"])
+        normalized_as_of = _normalize_ts(row["as_of"])
+        if normalized_as_of is None:
+            continue
+        account_snapshot_as_of[account_id] = normalized_as_of
+        account_meta[account_id] = {
+            "account_type": row["account_type"],
+            "account_currency": row["account_currency"],
+            "platform": row["platform"],
+        }
+        key = (account_id, row["asset_id"], (row["quote_currency"] or row["account_currency"] or "").upper())
+        synthetic_rows[key] = {
+            "account_id": account_id,
+            "asset_id": row["asset_id"],
+            "symbol": row["symbol"],
+            "name": row["name"],
+            "asset_class": row["asset_class"],
+            "quote_currency": row["quote_currency"],
+            "home_country": row["home_country"],
+            "exchange_code": row["exchange_code"],
+            "platform": row["platform"],
+            "quantity": float(row["quantity"]) if row["quantity"] is not None else None,
+            "avg_cost": float(row["avg_cost"]) if row["avg_cost"] is not None else None,
+            "cost_basis_base": float(row["cost_basis_base"]) if row["cost_basis_base"] is not None else 0.0,
+        }
+
+    min_snapshot_as_of = min(account_snapshot_as_of.values())
+    tx_rows = db.execute(
+        text(
+            """
+            SELECT
+              t.account_id,
+              t.ts,
+              t.amount,
+              t.type,
+              t.currency,
+              t.category,
+              t.merchant_counterparty,
+              t.notes,
+              t.asset_id,
+              t.quantity,
+              a.symbol,
+              a.name,
+              a.asset_class,
+              a.quote_currency,
+              a.home_country
+            FROM transactions t
+            JOIN accounts acc ON acc.id = t.account_id
+            LEFT JOIN assets a ON a.id = t.asset_id
+            WHERE t.ts > :min_snapshot_as_of
+              AND t.ts < :anchor_ts
+              AND """
+            + account_scope_sql("acc")
+            + """
+            ORDER BY t.ts ASC, t.id ASC
+            """
+        ),
+        {
+            "min_snapshot_as_of": min_snapshot_as_of,
+            "anchor_ts": anchor_ts,
+            "current_user_id": current_user_id,
+        },
+    ).mappings().all()
+
+    for raw_tx in tx_rows:
+        tx = dict(raw_tx)
+        account_id = int(tx["account_id"])
+        snapshot_as_of = account_snapshot_as_of.get(account_id)
+        tx_ts = _normalize_ts(tx["ts"])
+        if snapshot_as_of is None or tx_ts is None or tx_ts <= snapshot_as_of:
+            continue
+
+        currency = (tx["currency"] or account_meta[account_id]["account_currency"] or "").upper()
+        cash_key = next(
+            (
+                key
+                for key, row in synthetic_rows.items()
+                if row["account_id"] == account_id
+                and row["asset_class"] == "CASH"
+                and (row["quote_currency"] or currency or "").upper() == currency
+            ),
+            None,
+        )
+        if cash_key is None and currency:
+            cash_key = (account_id, None, currency)
+            synthetic_rows[cash_key] = {
+                "account_id": account_id,
+                "asset_id": None,
+                "symbol": currency,
+                "name": f"{currency} Cash",
+                "asset_class": "CASH",
+                "quote_currency": currency,
+                "home_country": None,
+                "exchange_code": None,
+                "platform": account_meta[account_id]["platform"],
+                "quantity": 0.0,
+                "avg_cost": 1.0,
+                "cost_basis_base": 0.0,
+            }
+        if cash_key is not None and not _is_synthetic_internal_cash_movement(tx):
+            synthetic_rows[cash_key]["quantity"] = float(synthetic_rows[cash_key]["quantity"] or 0.0) + float(tx["amount"] or 0.0)
+            synthetic_rows[cash_key]["cost_basis_base"] = float(synthetic_rows[cash_key]["cost_basis_base"] or 0.0) + float(tx["amount"] or 0.0)
+
+        tx_asset_id = tx["asset_id"]
+        tx_type = (tx["type"] or "").upper()
+        tx_quantity = float(tx["quantity"]) if tx["quantity"] is not None else None
+        tx_asset_class = (tx["asset_class"] or "").upper()
+        if not tx_asset_id or tx_quantity is None or tx_type not in {"BUY", "SELL"} or tx_asset_class not in {"STOCK", "FUND"}:
+            continue
+
+        asset_currency = (tx["quote_currency"] or tx["currency"] or "").upper()
+        position_key = (account_id, tx_asset_id, asset_currency)
+        position = synthetic_rows.get(position_key)
+        if position is None:
+            position = {
+                "account_id": account_id,
+                "asset_id": tx_asset_id,
+                "symbol": tx["symbol"],
+                "name": tx["name"] or tx["symbol"],
+                "asset_class": tx_asset_class,
+                "quote_currency": tx["quote_currency"] or tx["currency"],
+                "home_country": tx["home_country"],
+                "exchange_code": None,
+                "platform": account_meta[account_id]["platform"],
+                "quantity": 0.0,
+                "avg_cost": None,
+                "cost_basis_base": 0.0,
+            }
+            synthetic_rows[position_key] = position
+
+        if tx_type == "BUY":
+            position["quantity"] = float(position["quantity"] or 0.0) + tx_quantity
+            position["cost_basis_base"] = float(position["cost_basis_base"] or 0.0) + abs(float(tx["amount"] or 0.0))
+            if tx_quantity > 0:
+                position["avg_cost"] = abs(float(tx["amount"] or 0.0)) / tx_quantity
+        else:
+            position["quantity"] = float(position["quantity"] or 0.0) - tx_quantity
+
+    return list(synthetic_rows.values())
+
+
 def _infer_country(
     symbol: str | None,
     home: str | None,
@@ -130,50 +421,26 @@ def _infer_country(
 
 
 def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, float]:
-    """Compute net worth components using latest snapshot per account up to anchor_ts."""
+    """Compute reporting net worth components, synthesizing month-boundary state from real snapshots + activity."""
     if anchor_ts is None:
         return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
-    q = text("""
-        WITH latest AS (
-          SELECT p.account_id, MAX(p.as_of) AS as_of
-          FROM positions p
-          JOIN accounts acc ON acc.id = p.account_id
-          WHERE p.as_of <= :anchor_ts
-            AND """
-            + account_scope_sql("acc")
-            + """
-          GROUP BY p.account_id
-        ),
-        latest_prices AS (
-          SELECT p1.asset_id, p1.price, p1.currency
-          FROM prices p1
-          JOIN (
-            SELECT asset_id, MAX(trade_date) AS trade_date
-            FROM prices
-            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
-            GROUP BY asset_id
-          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
-        )
-        SELECT
-          a.asset_class,
-          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
-          CASE
-            WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
-              THEN p.quantity * lp.price
-            ELSE p.cost_basis_base
-          END AS value
-        FROM positions p
-        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
-        JOIN assets a ON a.id = p.asset_id
-        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
-    """)
-    rows = db.execute(
-        q,
-        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
-    ).mappings().all()
+    rows = _synthetic_position_rows(db, anchor_ts, current_user_id)
     if not rows:
         rows = []
-    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    price_map = _latest_price_map(
+        db,
+        anchor_ts,
+        {
+            int(r["asset_id"])
+            for r in rows
+            if r.get("asset_id") is not None and str(r.get("asset_class") or "").upper() in {"STOCK", "FUND"}
+        },
+    )
+    currencies = {
+        (price_map[int(r["asset_id"])]["currency"] if r.get("asset_id") in price_map else r["quote_currency"])
+        for r in rows
+        if r["quote_currency"] or r.get("asset_id") in price_map
+    }
     currencies.add("USD")  # Include USD for crypto wallet conversions
     rates = get_rates(anchor_ts, base_currency, currencies)
     cash = 0.0
@@ -182,11 +449,20 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
     # Positions contribute cash and brokerage holdings only.
     # Crypto net worth is sourced from wallet snapshots below.
     for r in rows:
-        cur = (r["quote_currency"] or base_currency).upper()
-        value = float(r["value"]) * rates.get(cur, 1.0)
-        if r["asset_class"] == "CASH":
+        asset_class = str(r["asset_class"] or "").upper()
+        asset_id = r.get("asset_id")
+        latest_price = price_map.get(int(asset_id), {}).get("price") if asset_id is not None else None
+        quote_currency = price_map.get(int(asset_id), {}).get("currency") if asset_id is not None else None
+        cur = (quote_currency or r["quote_currency"] or base_currency).upper()
+        quantity = float(r["quantity"]) if r["quantity"] is not None else None
+        if asset_class in ("STOCK", "FUND") and quantity is not None and latest_price is not None:
+            value_local = quantity * float(latest_price)
+        else:
+            value_local = float(r["cost_basis_base"] or 0.0)
+        value = value_local * rates.get(cur, 1.0)
+        if asset_class == "CASH":
             cash += value
-        elif r["asset_class"] in ("STOCK", "FUND"):
+        elif asset_class in ("STOCK", "FUND"):
             stocks_funds += value
     # Add crypto wallet snapshots (USD -> base_currency), latest per wallet
     as_of_date = anchor_ts.date()
@@ -672,6 +948,61 @@ def _top_holdings(
     return out
 
 
+def _top_movers_from_holdings(
+    current_holdings: List[Dict[str, Any]],
+    prior_holdings: List[Dict[str, Any]],
+    compare_month: str,
+    limit: int = 3,
+) -> Dict[str, Any]:
+    current_by_key = {
+        (row.get("asset_id"), row["symbol"], row["asset_class"]): row
+        for row in current_holdings
+    }
+    prior_by_key = {
+        (row.get("asset_id"), row["symbol"], row["asset_class"]): row
+        for row in prior_holdings
+    }
+    movers: List[Dict[str, Any]] = []
+    for key in sorted(set(current_by_key) | set(prior_by_key), key=lambda item: (str(item[1]).lower(), str(item[2]).lower())):
+        current = current_by_key.get(key)
+        prior = prior_by_key.get(key)
+        current_value = float(current["value"]) if current else 0.0
+        previous_value = float(prior["value"]) if prior else 0.0
+        delta_abs = current_value - previous_value
+        if abs(delta_abs) < 0.005:
+            continue
+        delta_pct = (delta_abs / previous_value) if previous_value else None
+        symbol = current["symbol"] if current else prior["symbol"]
+        asset_class = current["asset_class"] if current else prior["asset_class"]
+        asset_id = current.get("asset_id") if current else prior.get("asset_id")
+        movers.append(
+            {
+                "asset_id": asset_id,
+                "symbol": symbol,
+                "asset_class": asset_class,
+                "current_value": current_value,
+                "previous_value": previous_value,
+                "delta_abs": delta_abs,
+                "delta_pct": delta_pct,
+                "compare_month": compare_month,
+            }
+        )
+
+    gainers = sorted(
+        [row for row in movers if row["delta_abs"] > 0],
+        key=lambda row: (-row["delta_abs"], row["symbol"].lower()),
+    )[:limit]
+    detractors = sorted(
+        [row for row in movers if row["delta_abs"] < 0],
+        key=lambda row: (row["delta_abs"], row["symbol"].lower()),
+    )[:limit]
+    return {
+        "compare_month": compare_month,
+        "gainers": gainers,
+        "detractors": detractors,
+    }
+
+
 def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
     q = text("""
         WITH latest AS (
@@ -883,6 +1214,34 @@ def _compute_net_worth_changes(
     return changes
 
 
+def _compute_component_changes(
+    db: Session,
+    month_start: datetime,
+    as_of: datetime | None,
+    current_components: Dict[str, float],
+    base_currency: str,
+    current_user_id: int,
+) -> Dict[str, Dict[str, Any]]:
+    prior_month_start = _add_months(month_start, -1)
+    prior_anchor = _anchor_ts(prior_month_start)
+    prior_as_of = _effective_as_of(db, prior_anchor, current_user_id)
+    prior_components = _networth_components(db, prior_anchor, base_currency, current_user_id)
+
+    out: Dict[str, Dict[str, Any]] = {}
+    for key in ("cash", "stocks_funds", "crypto"):
+        current_value = current_components[key]
+        prior_value = prior_components[key]
+        abs_change = current_value - prior_value
+        out[key] = {
+            "abs": abs_change,
+            "pct": (abs_change / prior_value) if prior_value > 0 else None,
+            "current_as_of": as_of.isoformat() if as_of else None,
+            "compare_as_of": prior_as_of.isoformat() if prior_as_of else None,
+            "compare_month": prior_month_start.strftime("%Y-%m"),
+        }
+    return out
+
+
 def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> dict:
     q = text("""
         WITH latest AS (
@@ -1051,7 +1410,8 @@ def dashboard_bootstrap(
     """
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    as_of = _effective_as_of(db, anchor, current_user.id)
+    as_of, boundary_exact, freshness_status = _snapshot_freshness(db, anchor, current_user.id)
+    reporting_as_of = anchor if freshness_status in {"exact", "synthetic"} else as_of
 
     nw = _networth_components(db, anchor, base_currency, current_user.id)
     stock_data = _stock_exposure(db, anchor, base_currency, current_user.id)
@@ -1063,7 +1423,11 @@ def dashboard_bootstrap(
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": snapshot_day,
-        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
+        "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_boundary_at": anchor.isoformat(),
+        "net_worth_boundary_exact": boundary_exact,
+        "net_worth_freshness_status": freshness_status,
         "net_worth": {
             "total": nw["total"],
             "cash": nw["cash"],
@@ -1087,7 +1451,8 @@ def dashboard_net_worth_change(
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    as_of = _effective_as_of(db, anchor, current_user.id)
+    as_of, boundary_exact, freshness_status = _snapshot_freshness(db, anchor, current_user.id)
+    reporting_as_of = anchor if freshness_status in {"exact", "synthetic"} else as_of
     nw = _networth_components(db, anchor, base_currency, current_user.id)
     compare_set = {c.strip() for c in compare.split(",") if c.strip()}
     changes = _compute_net_worth_changes(
@@ -1102,7 +1467,11 @@ def dashboard_net_worth_change(
     return {
         "as_of_month": month,
         "base_currency": base_currency,
-        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
+        "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_boundary_at": anchor.isoformat(),
+        "net_worth_boundary_exact": boundary_exact,
+        "net_worth_freshness_status": freshness_status,
         "net_worth_change": changes if changes else None,
     }
 
@@ -1143,7 +1512,8 @@ def dashboard_summary(
             "cash_percent": cash_percent,
         })
 
-    as_of = _effective_as_of(db, anchor, current_user.id)
+    as_of, boundary_exact, freshness_status = _snapshot_freshness(db, anchor, current_user.id)
+    reporting_as_of = anchor if freshness_status in {"exact", "synthetic"} else as_of
 
     nw = _networth_components(db, anchor, base_currency, current_user.id)
     geo = _geography(db, anchor, nw["total"], base_currency, current_user.id)
@@ -1161,6 +1531,32 @@ def dashboard_summary(
         compare_set=compare_set,
         current_user_id=current_user.id,
     )
+    component_changes = (
+        _compute_component_changes(
+            db=db,
+            month_start=month_start,
+            as_of=as_of,
+            current_components=nw,
+            base_currency=base_currency,
+            current_user_id=current_user.id,
+        )
+        if "prev_month" in compare_set
+        else None
+    )
+    top_movers = None
+    if "prev_month" in compare_set:
+        prev_month_start = _add_months(month_start, -1)
+        prev_anchor = _anchor_ts(prev_month_start)
+        prev_components = _networth_components(db, prev_anchor, base_currency, current_user.id)
+        prev_top = _top_holdings(
+            db,
+            prev_anchor,
+            prev_components["total"],
+            base_currency,
+            current_user.id,
+            limit=max(top_holdings_limit, 250),
+        )
+        top_movers = _top_movers_from_holdings(top, prev_top, prev_month_start.strftime("%Y-%m"))
 
     # Compute cash_percent
     cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
@@ -1169,7 +1565,11 @@ def dashboard_summary(
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": snapshot_day,
-        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
+        "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_boundary_at": anchor.isoformat(),
+        "net_worth_boundary_exact": boundary_exact,
+        "net_worth_freshness_status": freshness_status,
         "net_worth": {
             "total": nw["total"],
             "cash": nw["cash"],
@@ -1182,6 +1582,8 @@ def dashboard_summary(
         "top_holdings": top,
         "cash_balances": cash_balances,
         "net_worth_change": changes if changes else None,
+        "net_worth_component_change": component_changes,
+        "top_movers": top_movers,
         "cash_percent": cash_percent,
     }
 
@@ -1198,6 +1600,9 @@ def stock_holdings_summary(
     snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
     top_holdings_limit = _summary_top_holdings_limit()
     as_of = _effective_as_of(db, anchor, current_user.id)
+    reporting_as_of = anchor if as_of is not None else None
+    boundary_exact = as_of == anchor if as_of is not None else False
+    freshness_status = "exact" if boundary_exact else ("synthetic" if as_of is not None else "missing")
     nw = _networth_components(db, anchor, base_currency, current_user.id)
     top = _top_holdings(db, anchor, nw["total"], base_currency, current_user.id, limit=top_holdings_limit)
 
@@ -1205,7 +1610,11 @@ def stock_holdings_summary(
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": snapshot_day,
-        "net_worth_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
+        "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
+        "net_worth_boundary_at": anchor.isoformat(),
+        "net_worth_boundary_exact": boundary_exact,
+        "net_worth_freshness_status": freshness_status,
         "top_holdings": top,
     }
 

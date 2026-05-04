@@ -42,6 +42,78 @@ class CashFlowDetailSection(BaseModel):
     transactions: list[CashFlowTransactionItem]
 
 
+class CashFlowBreakdownItem(BaseModel):
+    label: str
+    amount: float
+    percent: float
+
+
+class CashFlowMerchantItem(BaseModel):
+    merchant: str
+    amount: float
+    percent: float
+    transaction_count: int
+
+
+class CashFlowCategoryDeltaItem(BaseModel):
+    label: str
+    current_amount: float
+    prior_amount: float
+    delta_amount: float
+    delta_percent: float | None
+    direction: str
+
+
+class CashFlowTrendPoint(BaseModel):
+    month: str
+    inflows: float
+    outflows: float
+    net: float
+    savings_rate: float | None
+    burn_rate: float | None
+
+
+class CashFlowWaterfallOut(BaseModel):
+    starting_cash: float | None
+    snapshot_start_as_of: str | None = None
+    snapshot_start_boundary_at: str | None = None
+    inflows: float
+    outflows: float
+    transfers_and_funding: float | None = None
+    investment_and_fx_effects: float | None = None
+    other_cash_movements: float | None = None
+    snapshot_end_as_of: str | None = None
+    snapshot_end_boundary_at: str | None = None
+    boundary_exact: bool = False
+    availability_message: str | None = None
+    ending_cash: float | None
+
+
+class CashFlowDiagnosticAnswer(BaseModel):
+    question: str
+    answer: str
+
+
+class CashFlowAnalyticsOut(BaseModel):
+    burn_rate: float | None
+    prior_month: str | None
+    prior_month_net: float | None
+    free_cash_flow_change_vs_prior_month: float | None
+    outflow_categories: list[CashFlowBreakdownItem]
+    inflow_categories: list[CashFlowBreakdownItem]
+    outflow_recurring_split: list[CashFlowBreakdownItem]
+    inflow_recurring_split: list[CashFlowBreakdownItem]
+    outflow_fixed_variable_split: list[CashFlowBreakdownItem]
+    inflow_source_mix: list[CashFlowBreakdownItem]
+    top_outflow_merchants: list[CashFlowMerchantItem]
+    largest_inflow_drivers: list[CashFlowBreakdownItem]
+    outflow_category_deltas: list[CashFlowCategoryDeltaItem]
+    deterioration_drivers: list[CashFlowCategoryDeltaItem]
+    trend: list[CashFlowTrendPoint]
+    waterfall: CashFlowWaterfallOut
+    answers: list[CashFlowDiagnosticAnswer]
+
+
 class CashFlowDetailOut(BaseModel):
     month: str
     base_currency: str
@@ -50,6 +122,7 @@ class CashFlowDetailOut(BaseModel):
     net: float
     savings_rate: float | None
     calculation: str
+    analytics: CashFlowAnalyticsOut
     income: CashFlowDetailSection
     expenses: CashFlowDetailSection
 

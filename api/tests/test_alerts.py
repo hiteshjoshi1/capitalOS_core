@@ -154,6 +154,24 @@ class TestUploadReminders:
         ids = [a["account_id"] for a in resp.json()]
         assert 904 in ids
 
+    def test_month_context_returns_accounts_missing_selected_month_upload(self, client: TestClient, db_engine):
+        """Month-scoped reminders show accounts with no upload in the selected month, even if they are not >30 days stale."""
+        Session = sessionmaker(bind=db_engine)
+        db = Session()
+        try:
+            _insert_account(db, 901, "March Only")
+            _insert_import_job(db, 9001, 901, "IMPORTED", datetime(2026, 3, 27, tzinfo=timezone.utc))
+            _insert_account(db, 902, "April Uploaded")
+            _insert_import_job(db, 9002, 902, "IMPORTED", datetime(2026, 4, 15, tzinfo=timezone.utc))
+        finally:
+            db.close()
+
+        resp = client.get("/alerts/upload-reminders?month=2026-04")
+        assert resp.status_code == 200
+        ids = [a["account_id"] for a in resp.json()]
+        assert 901 in ids
+        assert 902 not in ids
+
     def test_no_imports_excludes_account(self, client: TestClient, db_engine):
         """Account with no IMPORTED jobs (only FAILED) is never shown."""
         Session = sessionmaker(bind=db_engine)
@@ -454,4 +472,3 @@ class TestAlertsRetentionPruning:
         assert resp.status_code == 200
         data = resp.json()
         assert data["deleted"] == 0
-

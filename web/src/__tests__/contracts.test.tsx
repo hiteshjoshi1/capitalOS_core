@@ -1,12 +1,12 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import App from "../App";
 import AppShell from "../components/AppShell";
-import Sidebar from "../components/Sidebar";
 import { ThemeProvider } from "../context/ThemeContext";
 import { api } from "../lib/api";
+import CashFlowDetail from "../routes/CashFlowDetail";
 import WealthOverview from "../routes/WealthOverview";
 import WealthRisk from "../routes/WealthRisk";
 
@@ -15,6 +15,9 @@ vi.mock("../lib/api", () => ({
     dashboardSummary: vi.fn(),
     dashboardGeographyExposure: vi.fn(),
     spendingSummary: vi.fn(),
+    categories: vi.fn(),
+    cashFlowDetail: vi.fn(),
+    categoryOverride: vi.fn(),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     alertNotifications: vi.fn().mockResolvedValue({
       upload_reminders: [],
@@ -27,16 +30,6 @@ vi.mock("../lib/api", () => ({
 vi.mock("../lib/realtime", () => ({
   subscribeToRealtimeTopic: vi.fn().mockReturnValue(() => {}),
 }));
-
-function renderSidebar(initialPath = "/wealth") {
-  return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[initialPath]}>
-        <Sidebar />
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
-}
 
 function renderRootRedirect() {
   return render(
@@ -56,15 +49,51 @@ function mockWealthApis() {
     as_of_month: "2026-02",
     base_currency: "SGD",
     snapshot_day: null,
-    net_worth_as_of: "2026-02-06",
+    net_worth_as_of: "2026-03-01T00:00:00+00:00",
+    net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
+    net_worth_boundary_at: "2026-03-01T00:00:00+00:00",
+    net_worth_boundary_exact: false,
+    net_worth_freshness_status: "synthetic",
     net_worth_change: {
       vs_prev_month: {
         abs: 1500,
         pct: 0.015,
-        current_as_of: "2026-02-06",
+        current_as_of: "2026-03-01T00:00:00+00:00",
         compare_as_of: "2026-01-06",
         compare_month: "2026-01",
       },
+    },
+    net_worth_component_change: {
+      cash: { abs: 500, pct: 0.02, current_as_of: "2026-03-01T00:00:00+00:00", compare_as_of: "2026-01-06", compare_month: "2026-01" },
+      stocks_funds: { abs: 1000, pct: 0.02, current_as_of: "2026-03-01T00:00:00+00:00", compare_as_of: "2026-01-06", compare_month: "2026-01" },
+      crypto: { abs: 0, pct: 0, current_as_of: "2026-03-01T00:00:00+00:00", compare_as_of: "2026-01-06", compare_month: "2026-01" },
+    },
+    top_movers: {
+      compare_month: "2026-01",
+      gainers: [
+        {
+          asset_id: 1,
+          symbol: "AAPL",
+          asset_class: "STOCK",
+          current_value: 22000,
+          previous_value: 20000,
+          delta_abs: 2000,
+          delta_pct: 0.1,
+          compare_month: "2026-01",
+        },
+      ],
+      detractors: [
+        {
+          asset_id: 2,
+          symbol: "BTC",
+          asset_class: "CRYPTO",
+          current_value: 12000,
+          previous_value: 15000,
+          delta_abs: -3000,
+          delta_pct: -0.2,
+          compare_month: "2026-01",
+        },
+      ],
     },
     cash_percent: 25,
     net_worth: {
@@ -105,6 +134,54 @@ function mockWealthApis() {
       { country: "US", stocks_funds: 50000, cash: 0, crypto: 15000, total: 65000, percent: 65 },
     ],
   });
+  vi.mocked(api.categories).mockResolvedValue([
+    { id: 100, code: "income", name: "Income", parent_id: null, display_order: 10 },
+    { id: 101, code: "income_salary", name: "Salary", parent_id: 100, display_order: 11 },
+  ]);
+  vi.mocked(api.cashFlowDetail).mockResolvedValue({
+    month: "2026-02",
+    base_currency: "SGD",
+    income_total: 5000,
+    expense_total: 3000,
+    net: 2000,
+    savings_rate: 0.4,
+    calculation: "Net = income_total - expense_total using deterministic month-scoped transactions.",
+    analytics: {
+      burn_rate: 0.6,
+      prior_month: "2026-01",
+      prior_month_net: 1500,
+      free_cash_flow_change_vs_prior_month: 500,
+      outflow_categories: [{ label: "Rent", amount: 1800, percent: 0.6 }],
+      inflow_categories: [{ label: "Salary", amount: 5000, percent: 1 }],
+      outflow_recurring_split: [{ label: "Recurring", amount: 1800, percent: 0.6 }],
+      inflow_recurring_split: [{ label: "Recurring", amount: 5000, percent: 1 }],
+      outflow_fixed_variable_split: [{ label: "Fixed", amount: 1800, percent: 0.6 }],
+      inflow_source_mix: [{ label: "Salary", amount: 5000, percent: 1 }],
+      top_outflow_merchants: [{ merchant: "Landlord", amount: 1800, percent: 0.6, transaction_count: 1 }],
+      largest_inflow_drivers: [{ label: "Salary", amount: 5000, percent: 1 }],
+      outflow_category_deltas: [{ label: "Rent", current_amount: 1800, prior_amount: 1600, delta_amount: 200, delta_percent: 0.125, direction: "deteriorated" }],
+      deterioration_drivers: [{ label: "Rent", current_amount: -1800, prior_amount: -1600, delta_amount: -200, delta_percent: 0.125, direction: "deteriorated" }],
+      trend: [{ month: "2026-02", inflows: 5000, outflows: 3000, net: 2000, savings_rate: 0.4, burn_rate: 0.6 }],
+      waterfall: {
+        starting_cash: 10000,
+        snapshot_start_as_of: "2026-01-31T00:00:00+00:00",
+        inflows: 5000,
+        outflows: 3000,
+        transfers_and_funding: 0,
+        investment_and_fx_effects: 0,
+        other_cash_movements: 0,
+        snapshot_end_as_of: "2026-02-28T00:00:00+00:00",
+        snapshot_start_boundary_at: "2026-01-31T00:00:00+00:00",
+        snapshot_end_boundary_at: "2026-02-28T00:00:00+00:00",
+        boundary_exact: true,
+        availability_message: null,
+        ending_cash: 12000,
+      },
+      answers: [{ question: "Where did my money go this month?", answer: "Mostly to Rent." }],
+    },
+    income: { total: 5000, transaction_count: 1, included_types: ["INCOME"], transactions: [] },
+    expenses: { total: 3000, transaction_count: 1, included_types: ["EXPENSE"], transactions: [] },
+  });
 }
 
 describe("frontend contracts", () => {
@@ -119,7 +196,7 @@ describe("frontend contracts", () => {
     expect(await screen.findByText("Wealth landing")).toBeInTheDocument();
   });
 
-  it("renders the app shell with the four primary sections and without Dashboard", () => {
+  it("renders the app shell with the primary sections and without Dashboard", () => {
     render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/wealth"]}>
@@ -134,6 +211,7 @@ describe("frontend contracts", () => {
 
     expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
@@ -141,12 +219,70 @@ describe("frontend contracts", () => {
     expect(screen.getByText("Wealth Content")).toBeInTheDocument();
   });
 
-  it("keeps section tabs visible for Wealth and exposes the Risk tab", () => {
-    renderSidebar("/risk");
+  it("keeps wealth tabs visible without nesting Cash Flow inside Wealth", () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/risk"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/risk" element={<div>Risk page</div>} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
     expect(screen.getByRole("link", { name: "Wealth" })).toHaveClass("sidebarLinkActive");
+    expect(within(screen.getByRole("navigation", { name: "Wealth tabs" })).queryByRole("link", { name: "Cash Flow" })).not.toBeInTheDocument();
   });
 
   it("renders Wealth Overview with composition percentages and without the action queue", async () => {
+    vi.mocked(api.alertNotifications).mockResolvedValueOnce({
+      upload_reminders: [
+        {
+          account_id: 6,
+          account_name: "DBS Multiplier",
+          platform: "DBS",
+          account_type: "BANK",
+          last_upload_date: "2026-01-10",
+          last_transaction_date: "2026-02-05",
+          days_since_upload: 27,
+          message: "Upload reminder",
+        },
+        {
+          account_id: 7,
+          account_name: "IBKR",
+          platform: "IBKR",
+          account_type: "BROKER",
+          last_upload_date: "2026-01-12",
+          last_transaction_date: "2026-02-06",
+          days_since_upload: 25,
+          message: "Upload reminder 2",
+        },
+        {
+          account_id: 8,
+          account_name: "OCBC 360",
+          platform: "OCBC",
+          account_type: "BANK",
+          last_upload_date: "2026-01-14",
+          last_transaction_date: "2026-02-06",
+          days_since_upload: 23,
+          message: "Upload reminder 3",
+        },
+        {
+          account_id: 9,
+          account_name: "UOB One",
+          platform: "UOB",
+          account_type: "BANK",
+          last_upload_date: "2026-01-16",
+          last_transaction_date: "2026-02-06",
+          days_since_upload: 21,
+          message: "Upload reminder 4",
+        },
+      ],
+      system_notifications: [],
+      total_count: 4,
+    });
     render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/wealth"]}>
@@ -158,9 +294,21 @@ describe("frontend contracts", () => {
     );
 
     expect(await screen.findByText("Portfolio Composition")).toBeInTheDocument();
+    expect(screen.getByText("DBS Multiplier")).toBeInTheDocument();
+    expect(screen.getByText("IBKR")).toBeInTheDocument();
+    expect(screen.getByText("OCBC 360")).toBeInTheDocument();
+    expect(screen.queryByText("UOB One")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View all alerts" })).toBeInTheDocument();
+    expect(screen.getAllByText(/\+S\$ 1,000/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Stocks & Funds").length).toBeGreaterThan(0);
+    expect(screen.getByText("Top Movers")).toBeInTheDocument();
+    expect(screen.getAllByText("AAPL").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("BTC").length).toBeGreaterThan(0);
     expect(screen.getByText("50.0%")).toBeInTheDocument();
     expect(screen.getAllByText("25.0%").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Action queue")).not.toBeInTheDocument();
+    expect(vi.mocked(api.alertNotifications)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(api.alertNotifications).mock.calls[0]?.[0]).toEqual(expect.any(String));
   });
 
   it("renders Wealth Risk with risk and geographic exposure together", async () => {
@@ -176,5 +324,20 @@ describe("frontend contracts", () => {
 
     expect(await screen.findByRole("heading", { name: "Risk" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Geographic Exposure" })).toBeInTheDocument();
+  });
+
+  it("renders Cash Flow as a dedicated workspace route", async () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/cash-flow"]}>
+          <Routes>
+            <Route path="/cash-flow" element={<CashFlowDetail />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("High-level diagnostics for the selected month")).toBeInTheDocument();
+    expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
   });
 });

@@ -29,7 +29,8 @@ const summaryFixture: DashboardSummary = {
   as_of_month: "2026-02",
   base_currency: "SGD",
   snapshot_day: 6,
-  net_worth_as_of: "2026-02-06T00:00:00+00:00",
+  net_worth_as_of: "2026-03-01T00:00:00+00:00",
+  net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
   net_worth_change: null,
   net_worth: {
     total: 100000,

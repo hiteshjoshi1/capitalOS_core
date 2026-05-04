@@ -73,7 +73,21 @@ def _days_since(val: object) -> int:
     return 0
 
 
-def _fetch_stale_accounts(db: Session, stale_days: int, current_user_id: int) -> List[UploadReminderAlert]:
+def _parse_month_start(month: str | None) -> datetime | None:
+    if not month:
+        return None
+    try:
+        return datetime.strptime(f"{month}-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _fetch_stale_accounts(
+    db: Session,
+    stale_days: int,
+    current_user_id: int,
+    month: str | None = None,
+) -> List[UploadReminderAlert]:
     sql = text(
         """
         SELECT
@@ -97,10 +111,22 @@ def _fetch_stale_accounts(db: Session, stale_days: int, current_user_id: int) ->
     )
     rows = db.execute(sql, {"current_user_id": current_user_id}).mappings().fetchall()
 
+    month_start = _parse_month_start(month)
     alerts: List[UploadReminderAlert] = []
     for row in rows:
         days = _days_since(row["last_upload_date"])
-        if days < stale_days:
+        if month_start is not None:
+            last_upload_value = row["last_upload_date"]
+            if isinstance(last_upload_value, str):
+                try:
+                    last_upload_value = datetime.fromisoformat(last_upload_value)
+                except ValueError:
+                    last_upload_value = None
+            if isinstance(last_upload_value, datetime) and last_upload_value.tzinfo is None:
+                last_upload_value = last_upload_value.replace(tzinfo=timezone.utc)
+            if isinstance(last_upload_value, datetime) and last_upload_value >= month_start:
+                continue
+        elif days < stale_days:
             continue
 
         last_upload_str = _to_date_str(row["last_upload_date"])
@@ -177,25 +203,28 @@ def _format_system_notification_message(event: RealtimeEvent) -> str:
 
 @router.get("/upload-reminders", response_model=List[UploadReminderAlert])
 def get_upload_reminders(
+    month: str | None = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ) -> List[UploadReminderAlert]:
     """Return accounts whose last successful import is older than UPLOAD_STALE_DAYS."""
-    return _fetch_stale_accounts(db, _stale_days(), current_user.id)
+    return _fetch_stale_accounts(db, _stale_days(), current_user.id, month)
 
 
 @router.get("/upload-reminders/count", response_model=UploadReminderCountResponse)
 def get_upload_reminders_count(
+    month: str | None = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ) -> UploadReminderCountResponse:
     """Return the number of stale-upload alerts (for the nav badge)."""
-    alerts = _fetch_stale_accounts(db, _stale_days(), current_user.id)
+    alerts = _fetch_stale_accounts(db, _stale_days(), current_user.id, month)
     return UploadReminderCountResponse(count=len(alerts))
 
 
 @router.get("/notifications", response_model=UnifiedAlertsResponse)
 def get_notifications(
+    month: str | None = None,
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ) -> UnifiedAlertsResponse:
@@ -205,7 +234,7 @@ def get_notifications(
     Suitable for initial hydration; the frontend should then subscribe to the
     ``author-ingestion`` realtime topic via WebSocket for live updates.
     """
-    reminders = _fetch_stale_accounts(db, _stale_days(), current_user.id)
+    reminders = _fetch_stale_accounts(db, _stale_days(), current_user.id, month)
 
     events = (
         db.query(RealtimeEvent)
@@ -260,4 +289,3 @@ def prune_notifications(
     """
     deleted = prune_old_realtime_events(db)
     return {"deleted": deleted, "retention_days": 180}
-

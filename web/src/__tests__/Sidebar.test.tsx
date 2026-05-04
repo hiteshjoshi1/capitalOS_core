@@ -45,6 +45,7 @@ describe("Sidebar", () => {
     renderSidebar();
     expect(screen.getByRole("link", { name: /CapitalOS/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
@@ -55,6 +56,12 @@ describe("Sidebar", () => {
     renderSidebar("/holdings");
     expect(screen.getByRole("link", { name: "Wealth" })).toHaveClass("sidebarLinkActive");
     expect(screen.getByRole("link", { name: "Data Hub" })).not.toHaveClass("sidebarLinkActive");
+  });
+
+  it("highlights Cash Flow as the active primary section on cash-flow routes", () => {
+    renderSidebar("/cash-flow");
+    expect(screen.getByRole("link", { name: "Cash Flow" })).toHaveClass("sidebarLinkActive");
+    expect(screen.getByRole("link", { name: "Wealth" })).not.toHaveClass("sidebarLinkActive");
   });
 
   it("highlights Operations as the active primary section on operational routes", () => {

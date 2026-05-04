@@ -7,7 +7,7 @@ export type NavItem = {
 };
 
 export type AppSection = {
-  id: "wealth" | "liabilities" | "operations" | "intelligence";
+  id: "wealth" | "cashflow" | "liabilities" | "operations" | "intelligence";
   label: string;
   icon: string;
   to: string;
@@ -32,6 +32,19 @@ export const APP_SECTIONS: AppSection[] = [
       { label: "Crypto", to: "/crypto/holdings" },
       { label: "Cash", to: "/cash" },
       { label: "Risk", to: "/risk" },
+    ],
+  },
+  {
+    id: "cashflow",
+    label: "Cash Flow",
+    icon: "account_balance_wallet",
+    to: "/cash-flow",
+    matchPaths: ["/wealth/cash-flow"],
+    tabs: [
+      { label: "Overview", to: "/cash-flow", exact: true, matchPaths: ["/cash-flow", "/wealth/cash-flow"] },
+      { label: "Income", to: "/cash-flow/income" },
+      { label: "Expenses", to: "/cash-flow/expenses" },
+      { label: "Map Transactions", to: "/cash-flow/map-transactions", matchPaths: ["/cash-flow/map-transactions", "/cash-flow/mapping"] },
     ],
   },
   {

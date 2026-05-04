@@ -71,7 +71,8 @@ describe("CashFlowMapping route", () => {
     renderRoute();
 
     expect(await screen.findByText("Unmapped queue")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Cash Flow Mapping" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 1, name: "Map Transactions" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByText("DBS Savings")).toBeInTheDocument();
     expect(screen.getByText("NTUC FairPrice")).toBeInTheDocument();
   });
