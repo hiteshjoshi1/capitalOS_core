@@ -77,6 +77,7 @@ _DIRECT_TRANSFER_KEYWORDS = (
     "PAYNOW",
     "TOPUP",
     "TOP UP",
+    "ICT SELF",
 )
 
 def _combined_text(description: str, supplementary: str) -> str:

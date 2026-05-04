@@ -482,6 +482,14 @@ function WaterfallCard({
     { label: "Starting cash", value: waterfall.starting_cash },
     { label: "Inflows", value: waterfall.inflows },
     { label: "Outflows", value: -waterfall.outflows },
+    ...(waterfall.transfers_and_funding != null && Math.abs(waterfall.transfers_and_funding) >= 0.01
+      ? [{ label: "Transfers & funding", value: waterfall.transfers_and_funding }]
+      : []),
+    ...(waterfall.investment_and_fx_effects != null && Math.abs(waterfall.investment_and_fx_effects) >= 0.01
+      ? [{ label: "Investment settlements & FX", value: waterfall.investment_and_fx_effects }]
+      : waterfall.other_cash_movements != null && Math.abs(waterfall.other_cash_movements) >= 0.01
+        ? [{ label: "Other cash movements", value: waterfall.other_cash_movements }]
+      : []),
     { label: "Ending cash", value: waterfall.ending_cash },
   ];
 
@@ -492,27 +500,44 @@ function WaterfallCard({
       <div className="cashFlowCardHeader">
         <div>
           <p className="wealthEyebrow">Overall cash-flow health</p>
-          <h2 className="cashFlowCardTitle">Cash bridge</h2>
+          <h2 className="cashFlowCardTitle">Cash reconciliation</h2>
         </div>
       </div>
 
-      <div className="cashFlowWaterfall" aria-label="Cash waterfall chart">
-        {steps.map((step) => {
-          const value = step.value ?? 0;
-          return (
-            <div key={step.label} className="cashFlowWaterfallStep">
-              <span className="cashFlowWaterfallLabel">{step.label}</span>
-              <div className="cashFlowWaterfallTrack">
-                <span
-                  className={`cashFlowWaterfallFill ${value >= 0 ? "positive" : "negative"}`}
-                  style={{ height: `${maxMagnitude > 0 ? (Math.abs(value) / maxMagnitude) * 100 : 0}%` }}
-                />
+      {waterfall.snapshot_start_as_of && waterfall.snapshot_end_as_of ? (
+        <p className="muted">
+          Reconciled across available cash snapshots from {waterfall.snapshot_start_as_of.slice(0, 10)} to {waterfall.snapshot_end_as_of.slice(0, 10)}.
+        </p>
+      ) : null}
+
+      {!waterfall.boundary_exact ? (
+        <div className="cashFlowUnavailableState" aria-label="Cash reconciliation unavailable">
+          <p className="muted">
+            {waterfall.availability_message ?? "Cash reconciliation is unavailable for the full month boundary."}
+          </p>
+          <p className="muted">
+            Upload statements or refresh balances to close the month cleanly before using this reconciliation view.
+          </p>
+        </div>
+      ) : (
+        <div className="cashFlowWaterfall" aria-label="Cash waterfall chart">
+          {steps.map((step) => {
+            const value = step.value ?? 0;
+            return (
+              <div key={step.label} className="cashFlowWaterfallStep">
+                <span className="cashFlowWaterfallLabel">{step.label}</span>
+                <div className="cashFlowWaterfallTrack">
+                  <span
+                    className={`cashFlowWaterfallFill ${value >= 0 ? "positive" : "negative"}`}
+                    style={{ height: `${maxMagnitude > 0 ? (Math.abs(value) / maxMagnitude) * 100 : 0}%` }}
+                  />
+                </div>
+                <strong>{formatMoney(step.value, 0)}</strong>
               </div>
-              <strong>{formatMoney(step.value, 0)}</strong>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </article>
   );
 }

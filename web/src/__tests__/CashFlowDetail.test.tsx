@@ -92,15 +92,24 @@ const detailFixture: CashFlowDetailResponse = {
     ],
     waterfall: {
       starting_cash: 11000,
+      snapshot_start_as_of: "2026-01-31T00:00:00+00:00",
+      snapshot_start_boundary_at: "2026-01-31T00:00:00+00:00",
       inflows: 12480,
       outflows: 8710,
+      transfers_and_funding: 0,
+      investment_and_fx_effects: 230,
+      other_cash_movements: 230,
+      snapshot_end_as_of: "2026-02-28T00:00:00+00:00",
+      snapshot_end_boundary_at: "2026-02-28T00:00:00+00:00",
+      boundary_exact: true,
+      availability_message: null,
       ending_cash: 15000,
     },
     answers: [
       { question: "Where did my money go this month?", answer: "Most outflows went to Rent (36.7% / 3200), Dining (20.4% / 1780), Groceries (13.9% / 1210)." },
       { question: "What were my top spending categories this month?", answer: "Rent at 3200, Dining at 1780, Groceries at 1210" },
       { question: "How much of my income was saved vs spent?", answer: "Saved 30.2% and spent 69.8% of inflows." },
-      { question: "What changed versus last month?", answer: "Net cash flow moved by -2412 versus 2026-01, with Rent remaining the largest outflow." },
+      { question: "What changed versus last month?", answer: "Net cash flow was 3770 this month versus 6182 in 2026-01, a -2412 change. Inflows changed by +2180 and outflows changed by +4592. Savings rate moved from 60.0% to 30.2%." },
       { question: "Which recurring expenses are driving most of my outflows?", answer: "Rent (3200), Groceries (1210)" },
       { question: "What percentage of inflows came from salary, dividends, and transfers?", answer: "Salary 96.2%, dividends 3.8%, transfers 0.0%." },
       { question: "Which categories explain most of the deterioration in free cash flow?", answer: "Dining (-1780), Rent (-400)" },
@@ -197,8 +206,17 @@ const updatedDetailFixture: CashFlowDetailResponse = {
     )),
     waterfall: {
       starting_cash: 11000,
+      snapshot_start_as_of: "2026-01-31T00:00:00+00:00",
+      snapshot_start_boundary_at: "2026-01-31T00:00:00+00:00",
       inflows: 0,
       outflows: 8710,
+      transfers_and_funding: 0,
+      investment_and_fx_effects: 12710,
+      other_cash_movements: 12710,
+      snapshot_end_as_of: "2026-02-28T00:00:00+00:00",
+      snapshot_end_boundary_at: "2026-02-28T00:00:00+00:00",
+      boundary_exact: true,
+      availability_message: null,
       ending_cash: 15000,
     },
     trend: detailFixture.analytics.trend.map((point) => (
@@ -212,6 +230,22 @@ const updatedDetailFixture: CashFlowDetailResponse = {
     total: 0,
     transaction_count: 0,
     transactions: [],
+  },
+};
+
+const staleBoundaryDetailFixture: CashFlowDetailResponse = {
+  ...detailFixture,
+  analytics: {
+    ...detailFixture.analytics,
+    waterfall: {
+      ...detailFixture.analytics.waterfall,
+      snapshot_start_as_of: "2026-01-27T00:00:00+00:00",
+      snapshot_start_boundary_at: "2026-01-31T00:00:00+00:00",
+      snapshot_end_as_of: "2026-02-22T00:00:00+00:00",
+      snapshot_end_boundary_at: "2026-02-28T00:00:00+00:00",
+      boundary_exact: false,
+      availability_message: "Cash reconciliation needs exact cash snapshots on 2026-01-31 and 2026-02-28. Available snapshots are 2026-01-27 and 2026-02-22.",
+    },
   },
 };
 
@@ -282,6 +316,17 @@ describe("CashFlowDetail route", () => {
     expect(screen.getAllByText("Landlord").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Hawker Center").length).toBeGreaterThan(0);
     expect(screen.getByText("Expense transactions (2)")).toBeInTheDocument();
+  });
+
+  it("degrades the reconciliation card when month-boundary snapshots are unavailable", async () => {
+    mockApi.cashFlowDetail.mockResolvedValueOnce(staleBoundaryDetailFixture);
+
+    renderRoute("/cash-flow");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Cash reconciliation unavailable")).toBeInTheDocument();
+    expect(screen.getByText(/needs exact cash snapshots on 2026-01-31 and 2026-02-28/i)).toBeInTheDocument();
+    expect(screen.queryByLabelText("Cash waterfall chart")).not.toBeInTheDocument();
   });
 
   it("posts an override from the income audit table and refreshes the diagnostics", async () => {

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import get_rates
-from app.routers.dashboard import _anchor_ts, _networth_components
+from app.routers.dashboard import _anchor_ts, _effective_as_of, _networth_components
 from app.schemas.spending import (
     CategoryAmount,
     CashFlowAnalyticsOut,
@@ -52,6 +52,15 @@ LIKELY_INTERNAL_TRANSFER_MARKERS = (
     "CREDIT CARD PAYMENT",
     "SI TO :",
     "REF:SALARY",
+)
+NON_OPERATING_COUNTERPARTY_MARKERS = (
+    "PHILLIP SECURITIES",
+    "DBS VICKERS",
+    "VICKERS SECURITIES",
+    "INTERACTIVE BROKERS",
+    "IBKR",
+    "GIRO PAYMENT",
+    "ICT SELF",
 )
 FIXED_EXPENSE_KEYWORDS = (
     "rent",
@@ -121,6 +130,17 @@ def _tx_iso(value: datetime | str) -> str:
             return value.replace(tzinfo=timezone.utc).isoformat()
         return value.astimezone(timezone.utc).isoformat()
     return str(value)
+
+
+def _row_ts(value: datetime | str) -> datetime:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+    parsed = datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def _month_key(value: datetime | str) -> str:
@@ -196,24 +216,27 @@ def _is_explicit_source_transfer(row) -> bool:
             str(row.get("notes") or ""),
         ]
     ).upper()
-    if str(row.get("type") or "").upper() != "TRANSFER":
-        return False
-    return any(marker in text for marker in LIKELY_INTERNAL_TRANSFER_MARKERS)
+    if any(marker in text for marker in LIKELY_INTERNAL_TRANSFER_MARKERS):
+        return True
+    if any(marker in text for marker in NON_OPERATING_COUNTERPARTY_MARKERS):
+        return True
+    return False
+
+
+def _is_non_operating_transfer_like(row) -> bool:
+    if str(row.get("type") or "").upper() == "TRANSFER":
+        return True
+    return _is_explicit_source_transfer(row)
 
 
 def _cash_flow_bucket(row) -> str | None:
-    if _is_transfer_resolved_category(row) or _is_explicit_source_transfer(row):
+    if _is_transfer_resolved_category(row) or _is_non_operating_transfer_like(row):
         return None
     if row["type"] in INCOME_TYPES:
         return "income"
     if row["type"] in EXPENSE_TYPES:
         return "expense"
     if row["type"] in TRANSFER_TYPES:
-        amount = float(row.get("amount") or 0.0)
-        if amount > 0:
-            return "income"
-        if amount < 0:
-            return "expense"
         return None
     return None
 
@@ -470,13 +493,58 @@ def _analytics_for_month(
         prior_month,
         {"net": 0.0},
     )
+    prior_inflows = float(prior_metrics.get("inflows") or 0.0)
+    prior_outflows = float(prior_metrics.get("outflows") or 0.0)
     prior_net = float(prior_metrics.get("net") or 0.0)
+    prior_savings_rate = prior_metrics.get("savings_rate")
     burn_rate = (expense_total / income_total) if income_total > 0 else None
 
     anchor = _anchor_ts(_parse_month(month))
     prior_anchor = _anchor_ts(_parse_month(prior_month))
+    snapshot_start_as_of = _effective_as_of(db, prior_anchor, current_user_id)
+    snapshot_end_as_of = _effective_as_of(db, anchor, current_user_id)
+    boundary_exact = snapshot_start_as_of == prior_anchor and snapshot_end_as_of == anchor
     ending_cash = _networth_components(db, anchor, base_currency, current_user_id)["cash"]
     starting_cash = _networth_components(db, prior_anchor, base_currency, current_user_id)["cash"]
+    transfers_and_funding = 0.0
+    investment_and_fx_effects = None
+    other_cash_movements = None
+    if snapshot_start_as_of is not None and snapshot_end_as_of is not None:
+        reconciliation_rows = [
+            row
+            for row in lookback_rows
+            if snapshot_start_as_of < _row_ts(row["ts"]) <= snapshot_end_as_of
+        ]
+    else:
+        reconciliation_rows = current_rows
+    reconciliation_rates = _build_month_rate_map(reconciliation_rows, base_currency)
+    operating_inflows_for_bridge = 0.0
+    operating_outflows_for_bridge = 0.0
+    for row in reconciliation_rows:
+        base_amount = _row_base_amount(row, base_currency, reconciliation_rates)
+        if _is_transfer_resolved_category(row) or _is_non_operating_transfer_like(row):
+            transfers_and_funding += base_amount
+            continue
+        bucket = _cash_flow_bucket(row)
+        if bucket == "income":
+            operating_inflows_for_bridge += base_amount
+        elif bucket == "expense":
+            operating_outflows_for_bridge += -base_amount
+    if starting_cash is not None and ending_cash is not None:
+        investment_and_fx_effects = ending_cash - (
+            starting_cash
+            + operating_inflows_for_bridge
+            - operating_outflows_for_bridge
+            + transfers_and_funding
+        )
+        other_cash_movements = investment_and_fx_effects
+    availability_message = None
+    if not boundary_exact:
+        availability_message = (
+            f"Cash reconciliation needs exact cash snapshots on {prior_anchor.date().isoformat()} and {anchor.date().isoformat()}. "
+            f"Available snapshots are {(snapshot_start_as_of.date().isoformat() if snapshot_start_as_of is not None else 'missing')} "
+            f"and {(snapshot_end_as_of.date().isoformat() if snapshot_end_as_of is not None else 'missing')}."
+        )
 
     top_outflow_merchants = sorted(
         merchant_totals.items(),
@@ -557,11 +625,13 @@ def _analytics_for_month(
         CashFlowDiagnosticAnswer(
             question="What changed versus last month?",
             answer=(
-                f"Net cash flow moved by {net - prior_net:+.0f} versus {prior_month}, with "
+                f"Net cash flow was {net:.0f} this month versus {prior_net:.0f} in {prior_month}, "
+                f"a {net - prior_net:+.0f} change. "
+                f"Inflows changed by {income_total - prior_inflows:+.0f} and outflows changed by {expense_total - prior_outflows:+.0f}. "
                 + (
-                    f"{top_outflows[0].label} remaining the largest outflow."
-                    if top_outflows
-                    else "no outflow categories recorded this month."
+                    f"Savings rate moved from {(float(prior_savings_rate) * 100):.1f}% to {((net / income_total) * 100):.1f}%."
+                    if income_total > 0 and prior_savings_rate is not None
+                    else "Savings-rate comparison is unavailable because one of the months has no recorded inflows."
                 )
             ),
         ),
@@ -623,8 +693,17 @@ def _analytics_for_month(
         trend=trend,
         waterfall=CashFlowWaterfallOut(
             starting_cash=starting_cash,
-            inflows=income_total,
-            outflows=expense_total,
+            snapshot_start_as_of=_tx_iso(snapshot_start_as_of) if snapshot_start_as_of is not None else None,
+            snapshot_start_boundary_at=_tx_iso(prior_anchor),
+            inflows=operating_inflows_for_bridge,
+            outflows=operating_outflows_for_bridge,
+            transfers_and_funding=transfers_and_funding,
+            investment_and_fx_effects=investment_and_fx_effects,
+            other_cash_movements=other_cash_movements,
+            snapshot_end_as_of=_tx_iso(snapshot_end_as_of) if snapshot_end_as_of is not None else None,
+            snapshot_end_boundary_at=_tx_iso(anchor),
+            boundary_exact=boundary_exact,
+            availability_message=availability_message,
             ending_cash=ending_cash,
         ),
         answers=answers,

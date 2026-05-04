@@ -14,6 +14,10 @@ def test_dashboard_summary_contract_shape(client: TestClient, seed_dashboard_dat
 
     assert body["as_of_month"] == "2026-02"
     assert body["base_currency"] == "SGD"
+    assert "net_worth_snapshot_as_of" in body
+    assert "net_worth_boundary_at" in body
+    assert "net_worth_boundary_exact" in body
+    assert "net_worth_freshness_status" in body
     assert set(body["net_worth"].keys()) == {
         "total",
         "cash",
@@ -24,6 +28,7 @@ def test_dashboard_summary_contract_shape(client: TestClient, seed_dashboard_dat
     assert isinstance(body["cash_percent"], float)
     assert "cash_flow" in body
     assert "top_holdings" in body
+    assert "net_worth_component_change" in body
     assert body["top_holdings"]
     assert {
         "symbol",

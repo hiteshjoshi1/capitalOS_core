@@ -19,7 +19,11 @@ const summaryFixture: StockHoldingsSummary = {
   as_of_month: "2026-02",
   base_currency: "SGD",
   snapshot_day: 6,
-  net_worth_as_of: "2026-02-06T00:00:00+00:00",
+  net_worth_as_of: "2026-03-01T00:00:00+00:00",
+  net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
+  net_worth_boundary_at: "2026-03-01T00:00:00+00:00",
+  net_worth_boundary_exact: false,
+  net_worth_freshness_status: "synthetic",
   top_holdings: [
     {
       asset_id: 1,

@@ -123,6 +123,18 @@ def test_dbs_parser_marks_paynow_transfer(tmp_path: Path):
     assert result.transactions[0]["type"] == "TRANSFER"
 
 
+def test_dbs_parser_marks_self_credit_as_transfer(tmp_path: Path):
+    fixture = _write_dbs_fixture(
+        tmp_path,
+        "dbs_self_credit.csv",
+        "24 Apr 2026,24 Apr 2026,ADV,ICT self 20260424UOVBSGSGBRT7617851 OTHR,IBG,Payments,REF,OTHR,Settled,SGD,,20000",
+    )
+
+    result = parse_dbs_transaction_history_csv(str(fixture))
+
+    assert result.transactions[0]["type"] == "TRANSFER"
+
+
 def test_dbs_parser_giro_rent_debit_is_expense(tmp_path: Path):
     """Non-salary, non-self-transfer GIRO debit (e.g. rent to landlord) must be EXPENSE, not TRANSFER."""
     fixture = _write_dbs_fixture(

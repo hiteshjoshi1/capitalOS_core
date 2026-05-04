@@ -78,6 +78,43 @@ def _snapshot_as_of() -> datetime:
     return now.replace(day=safe_day, hour=0, minute=0, second=0, microsecond=0)
 
 
+def _normalize_datetime(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
+    return None
+
+
+def _latest_transaction_ts(parsed: list[dict[str, Any]]) -> datetime | None:
+    candidates = [_normalize_datetime(tx.get("ts")) for tx in parsed]
+    normalized = [candidate for candidate in candidates if candidate is not None]
+    return max(normalized) if normalized else None
+
+
+def _resolve_position_as_of(pos: Dict[str, Any], parser_meta: Dict[str, Any], parsed: list[dict[str, Any]]) -> datetime:
+    explicit = _normalize_datetime(pos.get("as_of"))
+    if explicit is not None:
+        return explicit
+
+    for key in ("statement_period_end", "report_date", "statement_date", "as_of", "latest_transaction_at"):
+        candidate = _normalize_datetime(parser_meta.get(key))
+        if candidate is not None:
+            return candidate
+
+    latest_tx = _latest_transaction_ts(parsed)
+    if latest_tx is not None:
+        return latest_tx.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    return _snapshot_as_of()
+
+
 def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
     symbol = pos.get("symbol")
     currency = pos.get("currency")
@@ -368,7 +405,7 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
         positions_inserted = 0
         if positions:
             for pos in positions:
-                as_of = pos.get("as_of") or _snapshot_as_of()
+                as_of = _resolve_position_as_of(pos, result.parser_meta or {}, parsed)
                 asset_id = _get_or_create_asset(db, pos)
                 if asset_id is None:
                     continue

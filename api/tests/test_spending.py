@@ -154,8 +154,8 @@ def test_cash_flow_infers_signed_non_internal_transfer_rows(client: TestClient, 
     data = resp.json()
 
     assert data["income_total"] == 5000.0
-    assert data["expense_total"] == 12.0
-    assert data["net"] == 4988.0
+    assert data["expense_total"] == 0.0
+    assert data["net"] == 5000.0
 
 
 def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, db_engine, seed_spending_data):
@@ -195,8 +195,17 @@ def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, d
     assert analytics["burn_rate"] == 8710.0 / 12480.0
     assert analytics["waterfall"] == {
         "starting_cash": 11000.0,
+        "snapshot_start_as_of": "2026-01-31T00:00:00+00:00",
+        "snapshot_start_boundary_at": "2026-02-01T00:00:00+00:00",
         "inflows": 12480.0,
         "outflows": 8710.0,
+        "transfers_and_funding": 0.0,
+        "investment_and_fx_effects": 230.0,
+        "other_cash_movements": 230.0,
+        "snapshot_end_as_of": "2026-02-28T00:00:00+00:00",
+        "snapshot_end_boundary_at": "2026-03-01T00:00:00+00:00",
+        "boundary_exact": False,
+        "availability_message": "Cash reconciliation needs exact cash snapshots on 2026-02-01 and 2026-03-01. Available snapshots are 2026-01-31 and 2026-02-28.",
         "ending_cash": 15000.0,
     }
 
@@ -221,6 +230,11 @@ def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, d
     assert analytics["trend"][-1]["savings_rate"] == 3770.0 / 12480.0
     assert analytics["answers"][0]["question"] == "Where did my money go this month?"
     assert analytics["answers"][2]["answer"] == "Saved 30.2% and spent 69.8% of inflows."
+    assert analytics["answers"][3]["answer"] == (
+        "Net cash flow was 3770 this month versus 6182 in 2026-01, "
+        "a -2412 change. Inflows changed by +2180 and outflows changed by +4592. "
+        "Savings rate moved from 60.0% to 30.2%."
+    )
 
 
 def test_cash_flow_saved_vs_spent_answer_handles_negative_net_without_absurd_percentages(client: TestClient, db_engine):

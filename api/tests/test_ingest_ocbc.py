@@ -209,8 +209,13 @@ def test_ocbc_ingest_upload_and_import(client: TestClient, db_engine):
             text("SELECT COUNT(*) FROM positions WHERE account_id = :account_id"),
             {"account_id": account_id},
         ).scalar()
+        position_as_of = db.execute(
+            text("SELECT as_of FROM positions WHERE account_id = :account_id LIMIT 1"),
+            {"account_id": account_id},
+        ).scalar()
     finally:
         db.close()
 
     assert tx_count == 20
     assert pos_count == 1
+    assert str(position_as_of).startswith("2026-03-10")

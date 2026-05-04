@@ -75,8 +75,17 @@ class CashFlowTrendPoint(BaseModel):
 
 class CashFlowWaterfallOut(BaseModel):
     starting_cash: float | None
+    snapshot_start_as_of: str | None = None
+    snapshot_start_boundary_at: str | None = None
     inflows: float
     outflows: float
+    transfers_and_funding: float | None = None
+    investment_and_fx_effects: float | None = None
+    other_cash_movements: float | None = None
+    snapshot_end_as_of: str | None = None
+    snapshot_end_boundary_at: str | None = None
+    boundary_exact: bool = False
+    availability_message: str | None = None
     ending_cash: float | None
 
 

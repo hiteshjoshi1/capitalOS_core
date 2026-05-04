@@ -224,6 +224,10 @@ export type Account = {
 export type DashboardSummary = {
   as_of_month: string;
   base_currency: string;
+  net_worth_snapshot_as_of?: string | null;
+  net_worth_boundary_at?: string | null;
+  net_worth_boundary_exact?: boolean | null;
+  net_worth_freshness_status?: string | null;
 
   net_worth: {
     total: number;
@@ -264,30 +268,80 @@ export type DashboardSummary = {
     value: number;
   }>;
   snapshot_day: number | null;
-net_worth_as_of: string | null;
-net_worth_change: null | {
-  vs_prev_month?: {
-    abs: number;
-    pct: number | null;
-    current_as_of: string | null;
-    compare_as_of: string | null;
-    compare_month: string;
+  net_worth_as_of: string | null;
+  net_worth_change: null | {
+    vs_prev_month?: {
+      abs: number;
+      pct: number | null;
+      current_as_of: string | null;
+      compare_as_of: string | null;
+      compare_month: string;
+    };
+    vs_prev_year?: {
+      abs: number;
+      pct: number | null;
+      current_as_of: string | null;
+      compare_as_of: string | null;
+      compare_month: string;
+    };
   };
-  vs_prev_year?: {
-    abs: number;
-    pct: number | null;
-    current_as_of: string | null;
-    compare_as_of: string | null;
-    compare_month: string;
+  net_worth_component_change?: null | {
+    cash?: {
+      abs: number;
+      pct: number | null;
+      current_as_of: string | null;
+      compare_as_of: string | null;
+      compare_month: string;
+    };
+    stocks_funds?: {
+      abs: number;
+      pct: number | null;
+      current_as_of: string | null;
+      compare_as_of: string | null;
+      compare_month: string;
+    };
+    crypto?: {
+      abs: number;
+      pct: number | null;
+      current_as_of: string | null;
+      compare_as_of: string | null;
+      compare_month: string;
+    };
   };
-};
-cash_percent: number;
+  top_movers?: null | {
+    compare_month: string;
+    gainers: Array<{
+      asset_id: number | null;
+      symbol: string;
+      asset_class: string;
+      current_value: number;
+      previous_value: number;
+      delta_abs: number;
+      delta_pct: number | null;
+      compare_month: string;
+    }>;
+    detractors: Array<{
+      asset_id: number | null;
+      symbol: string;
+      asset_class: string;
+      current_value: number;
+      previous_value: number;
+      delta_abs: number;
+      delta_pct: number | null;
+      compare_month: string;
+    }>;
+  };
+  cash_percent: number;
 };
 
 export type DashboardNetWorthChange = {
   as_of_month: string;
   base_currency: string;
   net_worth_as_of: string | null;
+  net_worth_snapshot_as_of?: string | null;
+  net_worth_boundary_at?: string | null;
+  net_worth_boundary_exact?: boolean | null;
+  net_worth_freshness_status?: string | null;
   net_worth_change: DashboardSummary["net_worth_change"];
 };
 
@@ -296,6 +350,10 @@ export type StockHoldingsSummary = {
   base_currency: string;
   snapshot_day: number | null;
   net_worth_as_of: string | null;
+  net_worth_snapshot_as_of?: string | null;
+  net_worth_boundary_at?: string | null;
+  net_worth_boundary_exact?: boolean | null;
+  net_worth_freshness_status?: string | null;
   top_holdings: DashboardSummary["top_holdings"];
 };
 
@@ -368,8 +426,17 @@ export type CashFlowTrendPoint = {
 
 export type CashFlowWaterfall = {
   starting_cash: number | null;
+  snapshot_start_as_of: string | null;
+  snapshot_start_boundary_at: string | null;
   inflows: number;
   outflows: number;
+  transfers_and_funding: number | null;
+  investment_and_fx_effects: number | null;
+  other_cash_movements: number | null;
+  snapshot_end_as_of: string | null;
+  snapshot_end_boundary_at: string | null;
+  boundary_exact: boolean;
+  availability_message: string | null;
   ending_cash: number | null;
 };
 
@@ -650,6 +717,10 @@ export type DashboardBootstrap = {
   base_currency: string;
   snapshot_day: number | null;
   net_worth_as_of: string | null;
+  net_worth_snapshot_as_of?: string | null;
+  net_worth_boundary_at?: string | null;
+  net_worth_boundary_exact?: boolean | null;
+  net_worth_freshness_status?: string | null;
   net_worth: {
     total: number;
     cash: number;
@@ -1366,9 +1437,12 @@ export const api = {
       method: "POST",
       headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
     }),
-  uploadReminders: () => req<UploadReminder[]>("/alerts/upload-reminders"),
-  uploadReminderCount: () => req<UploadReminderCount>("/alerts/upload-reminders/count"),
-  alertNotifications: () => req<UnifiedAlertsResponse>("/alerts/notifications"),
+  uploadReminders: (month?: string) =>
+    req<UploadReminder[]>(`/alerts/upload-reminders${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  uploadReminderCount: (month?: string) =>
+    req<UploadReminderCount>(`/alerts/upload-reminders/count${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  alertNotifications: (month?: string) =>
+    req<UnifiedAlertsResponse>(`/alerts/notifications${month ? `?month=${encodeURIComponent(month)}` : ""}`),
   dividendsSummary: (
     fromMonth: string,
     toMonth: string,
