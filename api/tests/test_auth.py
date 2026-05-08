@@ -72,6 +72,7 @@ def test_auth_signup_login_me_logout(client, db_engine, monkeypatch):
     assert login_payload["access_token"]
     assert login_payload["expires_in"] > 0
     assert "capitalos_refresh" in login.headers.get("set-cookie", "")
+    assert "SameSite=Strict" in login.headers.get("set-cookie", "")
 
     me_unauthorized = client.get("/auth/me")
     assert me_unauthorized.status_code == 401
@@ -213,6 +214,18 @@ def test_auth_refresh_requires_cookie(client, monkeypatch):
 
     res = client.post("/auth/refresh")
     assert res.status_code == 401
+
+
+def test_auth_refresh_cookie_samesite_can_be_overridden(client, db_engine, monkeypatch):
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_COOKIE_SAMESITE", "lax")
+
+    _insert_user_with_password(db_engine, user_id=903, username="samesite_user", password="SameSitePass1!")
+    login = client.post("/auth/login", json={"username": "samesite_user", "password": "SameSitePass1!"})
+    assert login.status_code == 200
+    assert "SameSite=Lax" in login.headers.get("set-cookie", "")
 
 
 def test_accounts_are_user_scoped(client, db_engine, monkeypatch):

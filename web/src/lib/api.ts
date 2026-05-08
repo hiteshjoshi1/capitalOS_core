@@ -1,5 +1,24 @@
-const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "http://localhost:8000";
-const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
+export function resolveApiBase(
+  rawApiBase?: string,
+  locationLike?: { protocol?: string; hostname?: string } | null,
+): string {
+  const explicit = rawApiBase?.trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, "");
+  }
+
+  const currentLocation =
+    locationLike ?? (typeof window !== "undefined" ? window.location : null);
+  const hostname = currentLocation?.hostname?.trim();
+  const protocol = currentLocation?.protocol === "https:" ? "https:" : "http:";
+  if (hostname) {
+    return `${protocol}//${hostname}:8000`;
+  }
+  return "http://localhost:8000";
+}
+
+const RAW_API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
+const API_BASE = resolveApiBase(RAW_API_BASE);
 let accessTokenMemory: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
 let authFailureHandler: (() => void) | null = null;
@@ -113,7 +132,7 @@ async function callRefreshEndpoint(): Promise<string | null> {
       headers: buildHeaders(undefined, { includeJsonContentType: false, skipAuth: true }),
     });
     if (!res.ok) {
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         // Definitive auth failure: the session is truly invalid.
         setAccessToken(null);
         notifyAuthFailure();
@@ -1276,7 +1295,143 @@ export type ConceptQueryResult = {
   updated_thesis_view?: UpdatedThesisView | null;
   live_sources?: ThesisLiveSource[];
   follow_up_questions?: string[];
+  intent?: Record<string, unknown> | null;
+  constraints_relaxed?: boolean;
+  constraint_relaxation_reason?: string | null;
 };
+
+export type AISageChatEvidence = {
+  id: string;
+  chunk_id: string | null;
+  document_id: string | null;
+  author_id: string | null;
+  author_name: string | null;
+  source_url: string | null;
+  title: string | null;
+  snippet: string | null;
+  similarity: number | null;
+  ranking_score: number | null;
+  score_type: string | null;
+  metadata_json?: Record<string, unknown> | null;
+};
+
+export type AISageChatMessage = {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  status: string;
+  created_at: string;
+  completed_at?: string | null;
+  error_message?: string | null;
+  metadata_json?: Record<string, unknown> | null;
+  evidence: AISageChatEvidence[];
+};
+
+export type AISageChatSummary = {
+  id: string;
+  title: string;
+  preview?: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  last_activity_at: string;
+  pinned_at?: string | null;
+};
+
+export type AISageChatList = {
+  items: AISageChatSummary[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type AISageChatDetail = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  last_activity_at: string;
+  pinned_at?: string | null;
+  metadata_json?: Record<string, unknown> | null;
+  messages: AISageChatMessage[];
+};
+
+export type AISageChatSearchResult = {
+  chat_id: string;
+  title: string;
+  snippet?: string | null;
+  updated_at: string;
+};
+
+export type AISageChatSearchResults = {
+  items: AISageChatSearchResult[];
+  total: number;
+};
+
+export type AISageChatTurn = {
+  chat: AISageChatDetail;
+  user_message: AISageChatMessage;
+  assistant_message: AISageChatMessage;
+};
+
+export type AISageStreamEvent =
+  | {
+      type: "ack";
+      chat_id: string;
+      user_message: AISageChatMessage;
+      assistant_message_id: string;
+    }
+  | {
+      type: "delta";
+      assistant_message_id: string;
+      delta: string;
+    }
+  | {
+      type: "done";
+      chat: AISageChatDetail;
+      user_message: AISageChatMessage;
+      assistant_message: AISageChatMessage;
+    }
+  | {
+      type: "error";
+      assistant_message: AISageChatMessage;
+      error: string;
+    };
+
+async function rawRequest(path: string, init?: RequestInit, opts: RequestOptions = {}): Promise<Response> {
+  const execute = async (): Promise<Response> => {
+    try {
+      const { headers: initHeaders, ...restInit } = init ?? {};
+      return await fetch(`${API_BASE}${path}`, {
+        credentials: "include",
+        ...restInit,
+        headers: buildHeaders(initHeaders, { includeJsonContentType: true, skipAuth: opts.skipAuth }),
+      });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    }
+  };
+
+  let res = await execute();
+  let sessionExpired = false;
+  if (res.status === 401 && !opts.skipAuth && !opts.skipRefreshRetry) {
+    const refreshed = await refreshAccessToken();
+    if (refreshed) {
+      res = await execute();
+    } else {
+      sessionExpired = true;
+    }
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    if (res.status === 401 && !opts.skipAuth && sessionExpired) {
+      throw new AuthSessionExpiredError("Your session expired. Please sign in again.");
+    }
+    throw new Error(formatHttpError(res.status, text));
+  }
+  return res;
+}
 
 export const api = {
   health: () => req<Health>("/health"),
@@ -1493,6 +1648,30 @@ export const api = {
     req<RagCompanyContextResult>("/rag/analyze/company-context", { method: "POST", body: JSON.stringify(payload) }),
   aiSageQuery: (payload: { query: string; top_k?: number }) =>
     req<ConceptQueryResult>("/ai-sage/query", { method: "POST", body: JSON.stringify(payload) }),
+  aiSageChats: (limit = 30, offset = 0) =>
+    req<AISageChatList>(`/ai-sage/chats?limit=${encodeURIComponent(String(limit))}&offset=${encodeURIComponent(String(offset))}`),
+  aiSageCreateChat: (payload: { title?: string | null } = {}) =>
+    req<AISageChatDetail>("/ai-sage/chats", { method: "POST", body: JSON.stringify(payload) }),
+  aiSageGetChat: (chatId: string) =>
+    req<AISageChatDetail>(`/ai-sage/chats/${encodeURIComponent(chatId)}`),
+  aiSageUpdateChat: (chatId: string, payload: { title?: string; pinned?: boolean }) =>
+    req<AISageChatDetail>(`/ai-sage/chats/${encodeURIComponent(chatId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  aiSageDeleteChat: (chatId: string) =>
+    req<{ status: string }>(`/ai-sage/chats/${encodeURIComponent(chatId)}`, { method: "DELETE" }),
+  aiSageSearchChats: (query: string, limit = 20) =>
+    req<AISageChatSearchResults>(`/ai-sage/chats/search?query=${encodeURIComponent(query)}&limit=${encodeURIComponent(String(limit))}`),
+  aiSageAddMessage: (chatId: string, payload: { content: string }) =>
+    req<AISageChatTurn>(`/ai-sage/chats/${encodeURIComponent(chatId)}/messages`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  aiSageRetryMessage: (chatId: string, messageId: string) =>
+    req<AISageChatTurn>(`/ai-sage/chats/${encodeURIComponent(chatId)}/messages/${encodeURIComponent(messageId)}/retry`, {
+      method: "POST",
+    }),
   ragAuthors: (enabledOnly = false) =>
     req<RagAuthor[]>(`/rag/authors${enabledOnly ? "?enabled_only=true" : ""}`),
   ragCreateAuthor: (payload: RagAuthorCreate) =>
@@ -1552,3 +1731,51 @@ export const api = {
   ragRetryIngestion: (sourceId: string) =>
     req<RagIngestionJobRecord>(`/rag/ingest/retry/${encodeURIComponent(sourceId)}`, { method: "POST" }),
 };
+
+export async function streamAiSageChatMessage(
+  chatId: string,
+  payload: { content: string },
+  onEvent: (event: AISageStreamEvent) => void,
+  options?: { signal?: AbortSignal },
+): Promise<void> {
+  const response = await rawRequest(`/ai-sage/chats/${encodeURIComponent(chatId)}/messages/stream`, {
+    method: "POST",
+    body: JSON.stringify(payload),
+    signal: options?.signal,
+  });
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error("Streaming response body unavailable.");
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const flushFrames = () => {
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      let eventName = "message";
+      const dataLines: string[] = [];
+      for (const line of frame.split("\n")) {
+        if (line.startsWith("event:")) {
+          eventName = line.slice(6).trim();
+        } else if (line.startsWith("data:")) {
+          dataLines.push(line.slice(5).trim());
+        }
+      }
+      if (!dataLines.length) continue;
+      const payload = JSON.parse(dataLines.join("\n")) as Record<string, unknown>;
+      onEvent({ type: eventName as AISageStreamEvent["type"], ...(payload as object) } as AISageStreamEvent);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    flushFrames();
+  }
+  buffer += decoder.decode();
+  flushFrames();
+}

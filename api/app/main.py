@@ -20,6 +20,7 @@ from app.routers.ai_sage import router as ai_sage_router
 from app.routers.realtime import router as realtime_router
 from app.crypto.scheduler import start_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
+from app.services.ai_sage import prune_expired_ai_sage_chats
 
 
 
@@ -102,8 +103,32 @@ def _schedule_alerts_pruning() -> None:
     log.info("Alerts pruning scheduler started (interval=24h, retention_days=180)")
 
 
+def _schedule_ai_sage_pruning() -> None:
+    import logging
+    from apscheduler.schedulers.background import BackgroundScheduler
+    from app.db.session import SessionLocal
+
+    log = logging.getLogger("capitalos.ai_sage.pruning")
+
+    def _run_prune() -> None:
+        db = SessionLocal()
+        try:
+            deleted = prune_expired_ai_sage_chats(db)
+            log.info("Daily AI Sage pruning complete: deleted=%d", deleted)
+        except Exception:
+            log.exception("Daily AI Sage pruning failed")
+        finally:
+            db.close()
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(_run_prune, "interval", hours=24, id="ai_sage_prune_daily")
+    scheduler.start()
+    log.info("AI Sage pruning scheduler started (interval=24h, retention_days=365)")
+
+
 @app.on_event("startup")
 def _start_schedulers():
     start_scheduler()
     start_market_scheduler()
     _schedule_alerts_pruning()
+    _schedule_ai_sage_pruning()

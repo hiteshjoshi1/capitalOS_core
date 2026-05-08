@@ -27,15 +27,25 @@ def _refresh_grace_seconds() -> int:
     return max(int(os.getenv("AUTH_REFRESH_GRACE_SECONDS", "30")), 0)
 
 
+def _cookie_samesite() -> str:
+    raw = os.getenv("AUTH_COOKIE_SAMESITE", "strict").strip().lower()
+    return {
+        "strict": "Strict",
+        "lax": "Lax",
+        "none": "None",
+    }.get(raw, "Strict")
+
+
 def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     ttl = refresh_token_ttl_seconds()
     secure = os.getenv("AUTH_COOKIE_SECURE", "0").strip().lower() in {"1", "true", "yes", "on"}
+    samesite = _cookie_samesite()
     response.set_cookie(
         key=refresh_cookie_name(),
         value=refresh_token,
         httponly=True,
         secure=secure,
-        samesite="lax",
+        samesite=samesite,
         max_age=ttl,
         path="/",
     )

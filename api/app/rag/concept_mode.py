@@ -542,8 +542,28 @@ def _collect_candidate_chunks(
             keyword_query=kw_query,
         )
 
+    topic_focus_query = _topic_focus_query(intent.topic_entities)
+    if topic_focus_query and topic_focus_query.lower() not in {query.lower(), kw_query.lower()}:
+        topic_chunks, topic_relaxed, topic_reason = _retrieve_with_intent_fallback(
+            topic_focus_query,
+            db,
+            top_k=max(_BROAD_RETRIEVAL_MIN_PER_SUB_QUERY, broad_top_k // 2),
+            source_type=None,
+            year_from=intent.date_from,
+            year_to=intent.date_to,
+            author_ids=author_ids if author_ids else None,
+            strict=has_explicit_constraints,
+            keyword_query=topic_focus_query,
+        )
+        candidates.extend(topic_chunks)
+        if topic_relaxed:
+            any_relaxed = True
+            relaxation_reason = topic_reason
+
     deduped = _dedupe_chunks_by_id(candidates)
-    if retrieval_mode == "hybrid":
+    if intent.topic_entities:
+        deduped.sort(key=lambda chunk: _topic_candidate_pool_sort_key(chunk, topic_entities=intent.topic_entities))
+    elif retrieval_mode == "hybrid":
         # Sort by RRF score (descending) when available, else by cosine_distance
         deduped.sort(key=lambda c: -(c.rrf_score or 0.0) if c.rrf_score is not None else c.cosine_distance)
     else:
@@ -577,17 +597,77 @@ _HEURISTIC_STOPWORDS = {
 }
 
 
-def _query_keywords(query: str, *, topic_entities: list[str] | None = None) -> set[str]:
+def _source_author_terms(intent: QueryIntent) -> set[str]:
+    if intent.query_type != "single_author":
+        return set()
+    terms: set[str] = set()
+    for author_name in intent.author_names:
+        for token in re.findall(r"[a-z0-9]+", str(author_name).lower()):
+            if len(token) >= 3:
+                terms.add(token)
+    for author_id in intent.author_ids:
+        for token in re.findall(r"[a-z0-9]+", str(author_id).replace("_", " ").lower()):
+            if len(token) >= 3:
+                terms.add(token)
+    return terms
+
+
+def _topic_focus_query(topic_entities: list[str] | None) -> str:
+    parts = [str(entity).strip() for entity in (topic_entities or []) if isinstance(entity, str) and entity.strip()]
+    return " ".join(parts).strip()
+
+
+def _topic_entity_match_counts(text: str, *, topic_entities: list[str] | None = None) -> tuple[int, int]:
+    normalized_text = str(text or "").lower()
+    phrases = [
+        phrase.strip().lower()
+        for phrase in (topic_entities or [])
+        if isinstance(phrase, str) and phrase.strip()
+    ]
+    phrase_hits = sum(1 for phrase in phrases if phrase in normalized_text)
+    tokens = {
+        token
+        for phrase in phrases
+        for token in re.findall(r"[a-z0-9]+", phrase)
+        if len(token) >= 2
+    }
+    token_hits = sum(1 for token in tokens if token in normalized_text)
+    return phrase_hits, token_hits
+
+
+def _topic_candidate_pool_sort_key(chunk: RetrievedChunk, *, topic_entities: list[str] | None = None) -> tuple[int, int, float]:
+    phrase_hits, token_hits = _topic_entity_match_counts(getattr(chunk, "text", ""), topic_entities=topic_entities)
+    if chunk.rrf_score is not None:
+        retrieval_score = float(chunk.rrf_score)
+    else:
+        retrieval_score = 1.0 - float(getattr(chunk, "cosine_distance", 1.0) or 1.0)
+    return (-phrase_hits, -token_hits, -retrieval_score)
+
+
+def _query_keywords(
+    query: str,
+    *,
+    topic_entities: list[str] | None = None,
+    ignored_terms: set[str] | None = None,
+) -> set[str]:
+    ignored = {token for token in (ignored_terms or set()) if token}
     keywords = {
         w
         for w in re.findall(r"[a-z0-9]+", query.lower())
-        if len(w) >= 3 and w not in _HEURISTIC_STOPWORDS
+        if len(w) >= 3 and w not in _HEURISTIC_STOPWORDS and w not in ignored
     }
     for entity in topic_entities or []:
         for token in re.findall(r"[a-z0-9]+", str(entity).lower()):
-            if len(token) >= 2:
+            if len(token) >= 2 and token not in ignored:
                 keywords.add(token)
     return keywords
+
+
+def _expanded_chunks_for_selection(
+    selected_chunks: list[RetrievedChunk],
+    expanded_by_chunk_id: dict[str, RetrievedChunk],
+) -> list[RetrievedChunk]:
+    return [expanded_by_chunk_id.get(chunk.chunk_id, chunk) for chunk in selected_chunks]
 
 
 def _heuristic_rank_candidates(
@@ -595,28 +675,50 @@ def _heuristic_rank_candidates(
     candidates: list[RetrievedChunk],
     *,
     topic_entities: list[str] | None = None,
+    source_author_terms: set[str] | None = None,
+    expanded_by_chunk_id: dict[str, RetrievedChunk] | None = None,
 ) -> list[RetrievedChunk]:
     """
     Fallback ranking when rerank model is unavailable.
 
     Uses simple lexical overlap over query intent + retrieval similarity.
     """
-    keywords = _query_keywords(query, topic_entities=topic_entities)
+    keywords = _query_keywords(
+        query,
+        topic_entities=topic_entities,
+        ignored_terms=source_author_terms,
+    )
     entity_phrases = [
         phrase.strip().lower()
         for phrase in (topic_entities or [])
         if isinstance(phrase, str) and phrase.strip()
     ]
+    entity_tokens = {
+        token
+        for phrase in entity_phrases
+        for token in re.findall(r"[a-z0-9]+", phrase)
+        if len(token) >= 2
+    }
 
     def score(chunk: RetrievedChunk) -> tuple[int, float]:
-        text = str(getattr(chunk, "text", "") or "").lower()
+        scoring_chunk = (expanded_by_chunk_id or {}).get(chunk.chunk_id, chunk)
+        text = str(getattr(scoring_chunk, "text", "") or "").lower()
         overlap = sum(1 for kw in keywords if kw in text)
         entity_phrase_hits = sum(1 for phrase in entity_phrases if phrase in text)
+        entity_token_hits = sum(1 for token in entity_tokens if token in text)
+        topic_bias = 0
+        if entity_phrases:
+            if entity_phrase_hits > 0:
+                topic_bias += 200 + (entity_phrase_hits * 80)
+            elif entity_token_hits > 0:
+                topic_bias += 80 + (entity_token_hits * 20)
+            else:
+                topic_bias -= 120
         similarity = getattr(chunk, "similarity", None)
         if not isinstance(similarity, (int, float)):
             cosine_distance = getattr(chunk, "cosine_distance", 1.0)
             similarity = 1.0 - float(cosine_distance if isinstance(cosine_distance, (int, float)) else 1.0)
-        return (overlap * 10) + (entity_phrase_hits * 15), float(similarity)
+        return topic_bias + (overlap * 10) + (entity_phrase_hits * 15) + (entity_token_hits * 6), float(similarity)
 
     weighting_active = metadata_weighting_enabled()
     for chunk in candidates:
@@ -722,7 +824,7 @@ def _select_diverse_top_chunks(
             selected.append(chunk)
             by_document[document_id] = count + 1
             if len(selected) >= top_k:
-                return selected
+                return sorted(selected, key=ranking_sort_key)
         else:
             overflow.append(chunk)
 
@@ -737,7 +839,7 @@ def _select_diverse_top_chunks(
             per_document_cap,
             len(overflow),
         )
-    return selected[:top_k]
+    return sorted(selected[:top_k], key=ranking_sort_key)
 
 
 def _rerank_candidate_chunks(
@@ -746,13 +848,21 @@ def _rerank_candidate_chunks(
     *,
     top_k: int,
     topic_entities: list[str] | None = None,
+    source_author_terms: set[str] | None = None,
+    expanded_by_chunk_id: dict[str, RetrievedChunk] | None = None,
 ) -> list[RetrievedChunk]:
     if not candidates:
         return []
     if top_k <= 0:
         return []
 
-    heuristic_ranked = _heuristic_rank_candidates(query, candidates, topic_entities=topic_entities)
+    heuristic_ranked = _heuristic_rank_candidates(
+        query,
+        candidates,
+        topic_entities=topic_entities,
+        source_author_terms=source_author_terms,
+        expanded_by_chunk_id=expanded_by_chunk_id,
+    )
     ranked = heuristic_ranked
 
     # Tier 1: dedicated cross-encoder reranker (preferred — fast, deterministic, no JSON)
@@ -881,20 +991,24 @@ def execute_concept_query(
     else:
         _constraints_relaxed, _relaxation_reason = False, None
     _trace_chunks("candidate_pool", query, candidate_chunks)
-    winning_chunks = _rerank_candidate_chunks(
-        query,
+    expanded_candidate_chunks = expand_chunks_with_context(
         candidate_chunks,
-        top_k=min(top_k_chunks, len(candidate_chunks)),
-        topic_entities=intent.topic_entities,
-    )
-    _trace_chunks("reranked", query, winning_chunks)
-    expanded_chunks = expand_chunks_with_context(
-        winning_chunks,
         db,
         window_size=_CONTEXT_EXPANSION_WINDOW,
         max_chars=_CONTEXT_EXPANSION_MAX_CHARS,
         only_when_needed=False,
     )
+    expanded_candidate_map = {chunk.chunk_id: chunk for chunk in expanded_candidate_chunks}
+    winning_chunks = _rerank_candidate_chunks(
+        query,
+        candidate_chunks,
+        top_k=min(top_k_chunks, len(candidate_chunks)),
+        topic_entities=intent.topic_entities,
+        source_author_terms=_source_author_terms(intent),
+        expanded_by_chunk_id=expanded_candidate_map,
+    )
+    _trace_chunks("reranked", query, winning_chunks)
+    expanded_chunks = _expanded_chunks_for_selection(winning_chunks, expanded_candidate_map)
     _trace_chunks("expanded_for_display", query, expanded_chunks)
     display_chunks = _with_display_context(winning_chunks, expanded_chunks)
     evidence: list[EvidenceChunk] = _enrich_chunks(display_chunks, db, author_map)

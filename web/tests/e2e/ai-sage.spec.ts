@@ -1,77 +1,89 @@
-import { test, expect } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 import { mockAuthenticatedSession } from "./helpers/auth";
 
 test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 
-  await page.route("**/ai-sage/query", async (route) => {
+  await page.route("**/ai-sage/chats?limit=30&offset=0", async (route) => {
     await route.fulfill({
       json: {
-        query: "What matters?",
-        mode: "concept",
-        best_passages: [
-          {
-            chunk_id: "chunk-1",
-            author_id: "warren_buffett",
-            author_name: "Warren Buffett",
-            text: "A wonderful business can compound over time.",
-            similarity: 0.91,
-            metadata: { title: "Letter" },
-          },
-        ],
-        author_views: [
-          {
-            author_id: "warren_buffett",
-            author_name: "Warren Buffett",
-            view: "Focus on business quality.",
-            key_passages: ["A wonderful business can compound over time."],
-          },
-        ],
-        synthesis: "Focus on business quality.",
-        critique: "Durability still needs to be tested against industry change.",
-        suggested_readings: [
-          {
-            author_id: "warren_buffett",
-            author_name: "Warren Buffett",
-            passage: "A wonderful business can compound over time.",
-            source_url: "https://example.com/letter",
-            reason: "Best matched passage for this concept.",
-          },
-        ],
-        evidence_sufficient: true,
-        weak_evidence_note: null,
+        items: [],
+        total: 0,
+        limit: 30,
+        offset: 0,
+      },
+    });
+  });
+
+  await page.route("**/ai-sage/chats", async (route) => {
+    if (route.request().method() !== "POST") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: {
+        id: "chat-new",
+        title: "New chat",
+        created_at: "2026-05-01T10:00:00Z",
+        updated_at: "2026-05-01T10:00:00Z",
+        last_activity_at: "2026-05-01T10:00:00Z",
+        pinned_at: null,
+        metadata_json: null,
+        messages: [],
+      },
+    });
+  });
+
+  await page.route("**/ai-sage/chats/chat-new/messages/stream", async (route) => {
+    const body = [
+      'event: ack',
+      'data: {"chat_id":"chat-new","user_message":{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},"assistant_message_id":"assistant-1"}',
+      "",
+      'event: delta',
+      'data: {"assistant_message_id":"assistant-1","delta":"Grounded "}',
+      "",
+      'event: delta',
+      'data: {"assistant_message_id":"assistant-1","delta":"answer."}',
+      "",
+      'event: done',
+      'data: {"chat":{"id":"chat-new","title":"What matters?","created_at":"2026-05-01T10:00:00Z","updated_at":"2026-05-01T10:00:05Z","last_activity_at":"2026-05-01T10:00:00Z","pinned_at":null,"metadata_json":null,"messages":[{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},{"id":"assistant-1","role":"assistant","content":"Grounded answer.","status":"completed","created_at":"2026-05-01T10:00:05Z","metadata_json":{"mode":"concept","evidence_sufficient":true},"evidence":[]}]},"user_message":{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},"assistant_message":{"id":"assistant-1","role":"assistant","content":"Grounded answer.","status":"completed","created_at":"2026-05-01T10:00:05Z","metadata_json":{"mode":"concept","evidence_sufficient":true},"evidence":[]}}',
+      "",
+    ].join("\n");
+
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body,
+      headers: {
+        "cache-control": "no-cache",
+      },
+    });
+  });
+
+  await page.route("**/ai-sage/chats/chat-new", async (route) => {
+    await route.fulfill({
+      json: {
+        id: "chat-new",
+        title: "New chat",
+        created_at: "2026-05-01T10:00:00Z",
+        updated_at: "2026-05-01T10:00:00Z",
+        last_activity_at: "2026-05-01T10:00:00Z",
+        pinned_at: null,
+        metadata_json: null,
+        messages: [],
       },
     });
   });
 });
 
-test("navigates to AI Sage and renders grounded query results", async ({ page }) => {
+test("creates a persistent AI Sage chat and streams the response", async ({ page }) => {
   await page.goto("/ai-sage");
-  await expect(page.getByRole("heading", { name: "Hello E2E User" })).toBeVisible();
-  await expect(page.getByText("What insights are we discovering today?")).toBeVisible();
-  await page
-    .getByPlaceholder(
-      "Ask AI Sage anything about a business, thesis, risk, or mental model...",
-    )
-    .fill("What matters?");
-  await page
-    .getByPlaceholder(
-      "Ask AI Sage anything about a business, thesis, risk, or mental model...",
-    )
-    .press("Enter");
+  await expect(page.getByText("No chats yet.")).toBeVisible();
+
+  const composer = page.getByPlaceholder("Ask AI Sage anything");
+  await composer.fill("What matters?");
+  await composer.press("Enter");
 
   await expect(page.getByText("What matters?")).toBeVisible();
-  await expect(page.getByText("Review the top ranked passages below.")).toBeVisible();
-  await expect(page.getByText("Top Passages", { exact: true })).toBeVisible();
-  await expect(page.getByText("Warren Buffett").first()).toBeVisible();
-  await expect(page.getByText("Critique", { exact: true })).toBeVisible();
-  await expect(page.getByText("Durability still needs to be tested against industry change.")).toBeVisible();
-  await expect(page.getByText("Passage 1")).toBeVisible();
-  await expect(page.getByText("Rank score 0.91")).toBeVisible();
-  await expect(
-    page
-      .locator("article")
-      .filter({ hasText: "Passage 1" })
-      .getByText(/A wonderful business can compound/i),
-  ).toBeVisible();
+  await expect(page.getByText("Grounded answer.")).toBeVisible();
 });

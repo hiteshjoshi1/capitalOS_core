@@ -1,8 +1,7 @@
-import { getAccessToken, refreshAccessTokenNow } from "./api";
+import { getAccessToken, refreshAccessTokenNow, resolveApiBase } from "./api";
 import type { RealtimeEventEnvelope } from "./api";
 
-const RAW_API_BASE = (import.meta.env.VITE_API_BASE as string | undefined) || "http://localhost:8000";
-const API_BASE = RAW_API_BASE.replace(/\/+$/, "");
+const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE as string | undefined);
 
 type RealtimeStatus = "connecting" | "connected" | "disconnected";
 

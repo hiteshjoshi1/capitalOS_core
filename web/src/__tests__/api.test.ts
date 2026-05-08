@@ -84,6 +84,27 @@ describe("api.dashboardBootstrap – URL correctness", () => {
   });
 });
 
+describe("resolveApiBase", () => {
+  afterEach(() => {
+    vi.resetModules();
+  });
+
+  it("derives the API base from the current hostname when VITE_API_BASE is unset", async () => {
+    const { resolveApiBase } = await import("../lib/api");
+    expect(resolveApiBase(undefined, { protocol: "http:", hostname: "127.0.0.1" })).toBe(
+      "http://127.0.0.1:8000",
+    );
+    expect(resolveApiBase(undefined, { protocol: "https:", hostname: "app.example.com" })).toBe(
+      "https://app.example.com:8000",
+    );
+  });
+
+  it("preserves explicit VITE_API_BASE overrides", async () => {
+    const { resolveApiBase } = await import("../lib/api");
+    expect(resolveApiBase("http://localhost:9000/")).toBe("http://localhost:9000");
+  });
+});
+
 describe("api.authLogin – error formatting", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -176,5 +197,28 @@ describe("callRefreshEndpoint – session reliability", () => {
 
     const err = await api.authRefresh().catch((e: unknown) => e);
     expect(err).not.toBeInstanceOf(AuthSessionExpiredError);
+  });
+
+  it("does NOT clear the session when a background refresh attempt returns 403", async () => {
+    const fetchSpy = vi.fn()
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        text: () => Promise.resolve(JSON.stringify({ detail: "expired" })),
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        text: () => Promise.resolve("Forbidden"),
+      });
+    vi.stubGlobal("fetch", fetchSpy);
+
+    const { api, setAuthFailureHandler, setAccessToken, AuthSessionExpiredError } = await import("../lib/api");
+    const handler = vi.fn();
+    setAuthFailureHandler(handler);
+    setAccessToken("old-token");
+
+    await expect(api.dashboardBootstrap("2026-03", "USD")).rejects.toBeInstanceOf(AuthSessionExpiredError);
+    expect(handler).not.toHaveBeenCalled();
   });
 });

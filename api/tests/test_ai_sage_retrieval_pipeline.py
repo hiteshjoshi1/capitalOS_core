@@ -164,6 +164,78 @@ def test_heuristic_ranking_boosts_explicit_topic_entities_and_ignores_stopword_o
     assert [chunk.chunk_id for chunk in ranked][:2] == ["byd-li-lu", "generic-byd"]
 
 
+def test_heuristic_ranking_ignores_single_author_name_tokens_and_prefers_topic_hits():
+    import app.rag.concept_mode as cm
+
+    candidates = [
+        _mk_chunk(
+            "generic-munger",
+            text="Charlie Munger: The answer is: Of course. I hardly do anything else.",
+            cosine_distance=0.01,
+            author_id="charlie_munger",
+            author_name="Charlie Munger",
+        ),
+        _mk_chunk(
+            "byd-specific",
+            text="BYD last year made more than $2 billion after taxes in the auto business in China.",
+            cosine_distance=0.09,
+            chunk_index=1,
+            author_id="charlie_munger",
+            author_name="Charlie Munger",
+        ),
+    ]
+
+    ranked = cm._rerank_candidate_chunks(
+        "What does Charlie Munger say about BYD?",
+        candidates,
+        top_k=2,
+        topic_entities=["BYD"],
+        source_author_terms={"charlie", "munger"},
+    )
+
+    assert [chunk.chunk_id for chunk in ranked] == ["byd-specific", "generic-munger"]
+
+
+def test_reranking_uses_expanded_context_to_recover_transcript_fragments():
+    import app.rag.concept_mode as cm
+
+    anchor_only = _mk_chunk(
+        "byd-anchor",
+        text="Shareholder question on BYD.",
+        cosine_distance=0.08,
+        author_id="charlie_munger",
+        author_name="Charlie Munger",
+    )
+    unrelated = _mk_chunk(
+        "generic-munger",
+        text="Charlie Munger: The answer is: Of course. I hardly do anything else.",
+        cosine_distance=0.03,
+        chunk_index=1,
+        author_id="charlie_munger",
+        author_name="Charlie Munger",
+    )
+    expanded = RetrievedChunk(
+        chunk_id="byd-anchor",
+        document_id=anchor_only.document_id,
+        chunk_index=anchor_only.chunk_index,
+        text="Shareholder question on BYD. Munger: BYD, Li Lu is in the back standing up. This is the man who got me into BYD.",
+        token_count=anchor_only.token_count,
+        metadata_json=dict(anchor_only.metadata_json),
+        cosine_distance=anchor_only.cosine_distance,
+    )
+
+    ranked = cm._rerank_candidate_chunks(
+        "What does Charlie Munger say about BYD?",
+        [unrelated, anchor_only],
+        top_k=2,
+        topic_entities=["BYD"],
+        source_author_terms={"charlie", "munger"},
+        expanded_by_chunk_id={"byd-anchor": expanded},
+    )
+
+    assert [chunk.chunk_id for chunk in ranked] == ["byd-anchor", "generic-munger"]
+
+
 def test_context_expansion_is_used_for_ranked_passages_and_critique():
     import app.rag.concept_mode as cm
 
@@ -221,6 +293,35 @@ def test_context_expansion_is_used_for_ranked_passages_and_critique():
     assert all("[expanded context]" not in passage["text"] for passage in result.best_passages)
     assert all("[expanded context]" in str(passage["metadata"].get("context_text", "")) for passage in result.best_passages)
     assert result.critique == "critique text"
+
+
+def test_collect_candidate_chunks_adds_topic_focused_retrieval_pass():
+    import app.rag.concept_mode as cm
+
+    call_queries: list[str] = []
+
+    def _retrieve(query: str, *_args, **_kwargs):
+        call_queries.append(query)
+        if query == "BYD":
+            return ([_mk_chunk("byd-topic", text="BYD was a remarkable company.", cosine_distance=0.2)], False, None)
+        return ([_mk_chunk("generic", text="Charlie Munger on markets generally.", cosine_distance=0.01)], False, None)
+
+    with patch("app.rag.concept_mode._retrieve_with_intent_fallback", side_effect=_retrieve):
+        chunks, _relaxed, _reason = cm._collect_candidate_chunks(
+            "What does Charlie Munger say about BYD?",
+            MagicMock(),
+            intent=QueryIntent(
+                author_ids=["charlie_munger"],
+                author_names=["Charlie Munger"],
+                query_type="single_author",
+                topic_entities=["BYD"],
+            ),
+            author_ids=["charlie_munger"],
+            broad_top_k=6,
+        )
+
+    assert call_queries == ["What does Charlie Munger say about BYD?", "BYD"]
+    assert any(chunk.chunk_id == "byd-topic" for chunk in chunks)
 
 
 def test_buffett_query_surfaces_results_by_heuristic_rank():
@@ -324,3 +425,21 @@ def test_nick_sleep_query_surfaces_multiple_distinct_examples():
     assert any("amazon" in t for t in texts)
     assert any("costco" in t for t in texts)
     assert any("long-termism" in t for t in texts)
+
+
+def test_diversity_cap_returns_final_chunks_sorted_by_score():
+    import app.rag.concept_mode as cm
+
+    first = _mk_chunk("doc-1-a", text="First", cosine_distance=0.1, document_id="doc-1")
+    first.base_score = 0.9
+    first.weighted_score = 0.9
+    second = _mk_chunk("doc-2-a", text="Second", cosine_distance=0.2, document_id="doc-2")
+    second.base_score = 0.5
+    second.weighted_score = 0.5
+    overflow = _mk_chunk("doc-1-b", text="Overflow", cosine_distance=0.15, document_id="doc-1", chunk_index=1)
+    overflow.base_score = 0.8
+    overflow.weighted_score = 0.8
+
+    selected = cm._select_diverse_top_chunks([first, overflow, second], top_k=3, per_document_cap=1)
+
+    assert [chunk.chunk_id for chunk in selected] == ["doc-1-a", "doc-1-b", "doc-2-a"]
