@@ -1,509 +1,842 @@
-import { useContext, useState } from "react";
-import type { FormEvent, KeyboardEvent } from "react";
-import { Link } from "react-router-dom";
+import {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+} from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+
 import "../App.css";
 import PageShell from "../components/PageShell";
 import { AuthContext } from "../context/AuthContext";
-import { api } from "../lib/api";
-import type {
-  ConceptQueryResult,
-  RagEvidenceChunk,
-  ThesisLiveSource,
-  UpdatedThesisView,
+import {
+  api,
+  streamAiSageChatMessage,
+  type AISageChatDetail,
+  type AISageChatEvidence,
+  type AISageChatMessage,
+  type AISageChatSearchResult,
+  type AISageChatSummary,
+  type AISageStreamEvent,
 } from "../lib/api";
 
-const EXAMPLE_PROMPTS = [
-  "What makes a good business?",
-  "How should I think about moat, scale economies shared, or network effects?",
-  "If Buffett and Nick Sleep were studying Tencent Music, what questions would they ask first?",
-  "Here is my thesis on Spotify: the platform moat is durable. Pressure test it.",
-  "What would Munger worry about in a streaming business with high content costs?",
-];
-
-type ConversationTurn = {
-  id: string;
-  query: string;
-  loading: boolean;
-  error: string | null;
-  result: ConceptQueryResult | null;
-  showSources: boolean;
-};
-
-function createTurnId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-}
+const EVIDENCE_CONTEXT_TARGET_CHARS = 1200;
+const CHAT_ROW_TITLE_LIMIT = 50;
 
 function readerRoute(authorId: string, documentId: string): string {
   return `/author-library/${encodeURIComponent(authorId)}/documents/${encodeURIComponent(documentId)}`;
 }
 
-function passageSortScore(chunk: RagEvidenceChunk): number {
-  if (typeof chunk.ranking_score === "number") return chunk.ranking_score;
-  if (typeof chunk.metadata.ranking_score === "number") return chunk.metadata.ranking_score;
-  if (typeof chunk.metadata.reranker_score === "number") return chunk.metadata.reranker_score;
-  if (typeof chunk.metadata.rrf_score === "number") return chunk.metadata.rrf_score;
-  if (typeof chunk.metadata.ts_rank === "number") return chunk.metadata.ts_rank;
-  return chunk.similarity;
+function formatTimestamp(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return value;
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(dt);
+}
+
+function normalizeEvidenceText(value: unknown): string {
+  if (typeof value !== "string") return "";
+  return value
+    .replace(/\r/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function compactChatTitle(title: string, maxChars = CHAT_ROW_TITLE_LIMIT): string {
+  const normalized = title.trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(1, maxChars)).trimEnd()}...`;
+}
+
+function trimEvidenceWindow(text: string, start: number, end: number): string {
+  let sliceStart = Math.max(0, start);
+  let sliceEnd = Math.min(text.length, end);
+
+  if (sliceStart > 0) {
+    const sentenceStart = Math.max(
+      text.lastIndexOf("\n\n", sliceStart),
+      text.lastIndexOf(". ", sliceStart),
+      text.lastIndexOf("? ", sliceStart),
+      text.lastIndexOf("! ", sliceStart),
+    );
+    if (sentenceStart >= 0) {
+      sliceStart = sentenceStart + (text.slice(sentenceStart, sentenceStart + 2) === "\n\n" ? 2 : 1);
+    }
+  }
+
+  if (sliceEnd < text.length) {
+    const sentenceEndCandidates = [
+      text.indexOf("\n\n", sliceEnd),
+      text.indexOf(". ", sliceEnd),
+      text.indexOf("? ", sliceEnd),
+      text.indexOf("! ", sliceEnd),
+    ].filter((value) => value >= 0);
+    if (sentenceEndCandidates.length > 0) {
+      sliceEnd = Math.min(...sentenceEndCandidates) + 1;
+    }
+  }
+
+  const excerpt = text.slice(sliceStart, sliceEnd).trim();
+  return `${sliceStart > 0 ? "… " : ""}${excerpt}${sliceEnd < text.length ? " …" : ""}`.trim();
+}
+
+function buildEvidenceContextExcerpt(contextText: string, anchorText: string): string {
+  if (contextText.length <= EVIDENCE_CONTEXT_TARGET_CHARS) {
+    return contextText;
+  }
+
+  const normalizedAnchor = normalizeEvidenceText(anchorText);
+  const lowerContext = contextText.toLowerCase();
+  const lowerAnchor = normalizedAnchor.toLowerCase();
+  const anchorIndex = lowerAnchor ? lowerContext.indexOf(lowerAnchor) : -1;
+
+  if (anchorIndex < 0) {
+    return trimEvidenceWindow(contextText, 0, EVIDENCE_CONTEXT_TARGET_CHARS);
+  }
+
+  const before = Math.max(0, anchorIndex - 420);
+  const after = Math.min(
+    contextText.length,
+    anchorIndex + normalizedAnchor.length + (EVIDENCE_CONTEXT_TARGET_CHARS - 520),
+  );
+  return trimEvidenceWindow(contextText, before, after);
+}
+
+function renderEvidenceText(text: string, highlight: string | null) {
+  const normalizedHighlight = normalizeEvidenceText(highlight);
+  if (!normalizedHighlight || normalizedHighlight.length < 12) {
+    return text;
+  }
+  const lowerText = text.toLowerCase();
+  const lowerHighlight = normalizedHighlight.toLowerCase();
+  const index = lowerText.indexOf(lowerHighlight);
+  if (index < 0) {
+    return text;
+  }
+  const end = index + normalizedHighlight.length;
+  return (
+    <>
+      {text.slice(0, index)}
+      <mark className="aiSageEvidenceMark">{text.slice(index, end)}</mark>
+      {text.slice(end)}
+    </>
+  );
+}
+
+function SidebarActionIcon({ children }: { children: ReactNode }) {
+  return <span className="aiSageSidebarActionIcon" aria-hidden="true">{children}</span>;
 }
 
 export default function AISage() {
+  const navigate = useNavigate();
+  const { chatId } = useParams<{ chatId?: string }>();
   const { user } = useContext(AuthContext);
+  const transcriptRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const stickToBottomRef = useRef(true);
+
   const [query, setQuery] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [turns, setTurns] = useState<ConversationTurn[]>([]);
-  const [showPromptMenu, setShowPromptMenu] = useState(false);
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchResults, setSearchResults] = useState<AISageChatSearchResult[]>([]);
+  const [chatSummaries, setChatSummaries] = useState<AISageChatSummary[]>([]);
+  const [chatsLoading, setChatsLoading] = useState(true);
+  const [chatListError, setChatListError] = useState<string | null>(null);
+  const [activeChat, setActiveChat] = useState<AISageChatDetail | null>(null);
+  const [activeChatLoading, setActiveChatLoading] = useState(false);
+  const [activeChatError, setActiveChatError] = useState<string | null>(null);
+  const [streaming, setStreaming] = useState(false);
+  const [sidebarMenuChatId, setSidebarMenuChatId] = useState<string | null>(null);
+
   const greetingName = user?.display_name?.trim() || user?.username?.trim() || "there";
-  const hasTurns = turns.length > 0;
+  const headerActions = <button className="btn aiSageMobileChatsButton" type="button" onClick={() => setSidebarOpen(true)}>Chats</button>;
 
-  const canSubmit = Boolean(query.trim()) && !loading;
+  const loadChatList = useCallback(async () => {
+    setChatsLoading(true);
+    setChatListError(null);
+    try {
+      const response = await api.aiSageChats();
+      setChatSummaries(response.items);
+    } catch (error) {
+      setChatListError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setChatsLoading(false);
+    }
+  }, []);
 
-  async function submitQuery(submittedQuery: string) {
-    const turnId = createTurnId();
+  const loadChatDetail = useCallback(async (targetChatId: string) => {
+    setActiveChatLoading(true);
+    setActiveChatError(null);
+    try {
+      const response = await api.aiSageGetChat(targetChatId);
+      setActiveChat(response);
+    } catch (error) {
+      setActiveChat(null);
+      setActiveChatError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setActiveChatLoading(false);
+    }
+  }, []);
 
-    setLoading(true);
-    setShowPromptMenu(false);
-    setTurns((current) => [
-      ...current,
-      {
-        id: turnId,
-        query: submittedQuery,
-        loading: true,
-        error: null,
-        result: null,
-        showSources: false,
-      },
-    ]);
+  useEffect(() => {
+    void loadChatList();
+  }, [loadChatList]);
+
+  useEffect(() => {
+    if (!chatId) {
+      setActiveChat(null);
+      setActiveChatError(null);
+      return;
+    }
+    if (activeChat?.id === chatId) {
+      return;
+    }
+    void loadChatDetail(chatId);
+  }, [activeChat?.id, chatId, loadChatDetail]);
+
+  useEffect(() => {
+    const textarea = composerRef.current;
+    if (textarea && !streaming) {
+      textarea.focus();
+    }
+  }, [chatId, streaming]);
+
+  useEffect(() => {
+    const handleShortcut = (event: globalThis.KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener("keydown", handleShortcut);
+    return () => {
+      document.removeEventListener("keydown", handleShortcut);
+    };
+  }, []);
+
+  useEffect(() => {
+    const closeMenus = () => setSidebarMenuChatId(null);
+    document.addEventListener("click", closeMenus);
+    return () => {
+      document.removeEventListener("click", closeMenus);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    let active = true;
+    setSearchLoading(true);
+    void api.aiSageSearchChats(searchQuery)
+      .then((response) => {
+        if (active) setSearchResults(response.items);
+      })
+      .catch(() => {
+        if (active) setSearchResults([]);
+      })
+      .finally(() => {
+        if (active) setSearchLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [searchOpen, searchQuery]);
+
+  useEffect(() => {
+    const container = transcriptRef.current;
+    if (!container) return;
+    if (!stickToBottomRef.current) return;
+    container.scrollTop = container.scrollHeight;
+  }, [activeChat?.messages, streaming]);
+
+  async function handleCreateChat(focusComposer = false): Promise<void> {
+    const created = await api.aiSageCreateChat({});
+    setActiveChat(created);
+    setSidebarOpen(false);
+    setSidebarMenuChatId(null);
+    await loadChatList();
+    navigate(`/ai-sage/chats/${created.id}`);
+    if (focusComposer) {
+      requestAnimationFrame(() => composerRef.current?.focus());
+    }
+  }
+
+  async function handleRenameChat(target: AISageChatSummary | AISageChatDetail): Promise<void> {
+    const nextTitle = window.prompt("Rename chat", target.title);
+    if (!nextTitle || nextTitle.trim() === target.title) return;
+    const updated = await api.aiSageUpdateChat(target.id, { title: nextTitle.trim() });
+    setActiveChat((current) => (current?.id === updated.id ? updated : current));
+    await loadChatList();
+  }
+
+  async function handleDeleteChat(target: AISageChatSummary | AISageChatDetail): Promise<void> {
+    if (!window.confirm(`Delete "${target.title}"? This will permanently remove the chat.`)) return;
+    await api.aiSageDeleteChat(target.id);
+    setSidebarOpen(false);
+    setSidebarMenuChatId(null);
+    if (chatId === target.id) {
+      setActiveChat(null);
+      navigate("/ai-sage");
+    }
+    await loadChatList();
+  }
+
+  async function handleRetry(messageId: string): Promise<void> {
+    if (!activeChat) return;
+    const response = await api.aiSageRetryMessage(activeChat.id, messageId);
+    setActiveChat(response.chat);
+    await loadChatList();
+  }
+
+  function handleTranscriptScroll(): void {
+    const container = transcriptRef.current;
+    if (!container) return;
+    const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+    stickToBottomRef.current = nearBottom;
+  }
+
+  async function handleSendMessage(event?: FormEvent<HTMLFormElement>): Promise<void> {
+    event?.preventDefault();
+    const content = query.trim();
+    if (!content) {
+      setValidationError("Enter a message before sending.");
+      return;
+    }
+
+    setValidationError(null);
+    setStreaming(true);
+    setSidebarOpen(false);
+    let targetChatId = activeChat?.id;
+    if (!targetChatId) {
+      const created = await api.aiSageCreateChat({});
+      setActiveChat(created);
+      targetChatId = created.id;
+      navigate(`/ai-sage/chats/${created.id}`);
+    }
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+    setQuery("");
 
     try {
-      const nextResult = await api.aiSageQuery({
-        query: submittedQuery,
-        top_k: 12,
-      });
-      setTurns((current) =>
-        current.map((turn) =>
-          turn.id === turnId
-            ? { ...turn, loading: false, result: nextResult }
-            : turn,
-        ),
+      await streamAiSageChatMessage(
+        targetChatId,
+        { content },
+        (streamEvent) => {
+          applyStreamEvent(streamEvent, targetChatId!);
+        },
+        { signal: controller.signal },
       );
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      setTurns((current) =>
-        current.map((turn) =>
-          turn.id === turnId
-            ? { ...turn, loading: false, error: message }
-            : turn,
-        ),
-      );
+      await loadChatList();
+    } catch (error) {
+      if (controller.signal.aborted) {
+        setValidationError("Generation cancelled.");
+      } else {
+        setValidationError(error instanceof Error ? error.message : String(error));
+      }
     } finally {
-      setLoading(false);
+      abortRef.current = null;
+      setStreaming(false);
     }
   }
 
-  async function handleSubmit(event?: FormEvent<HTMLFormElement>) {
-    event?.preventDefault();
-    if (!canSubmit) return;
+  function applyStreamEvent(streamEvent: AISageStreamEvent, targetChatId: string): void {
+    if (streamEvent.type === "ack") {
+      setActiveChat((current) => {
+        const base = current && current.id === targetChatId ? current : {
+          id: targetChatId,
+          title: DEFAULT_CHAT_TITLE,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          last_activity_at: new Date().toISOString(),
+          pinned_at: null,
+          metadata_json: null,
+          messages: [],
+        };
+        const assistantPlaceholder: AISageChatMessage = {
+          id: streamEvent.assistant_message_id,
+          role: "assistant",
+          content: "",
+          status: "in_progress",
+          created_at: new Date().toISOString(),
+          evidence: [],
+        };
+        return {
+          ...base,
+          messages: [...base.messages, streamEvent.user_message, assistantPlaceholder],
+        };
+      });
+      return;
+    }
 
-    const submittedQuery = query.trim();
-    setQuery("");
-    await submitQuery(submittedQuery);
+    if (streamEvent.type === "delta") {
+      setActiveChat((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === streamEvent.assistant_message_id
+              ? { ...message, content: `${message.content}${streamEvent.delta}` }
+              : message,
+          ),
+        };
+      });
+      return;
+    }
+
+    if (streamEvent.type === "done") {
+      setActiveChat(streamEvent.chat);
+      setValidationError(null);
+      return;
+    }
+
+    setActiveChat((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        messages: current.messages.map((message) =>
+          message.id === streamEvent.assistant_message.id ? streamEvent.assistant_message : message,
+        ),
+      };
+    });
+    setValidationError(streamEvent.error);
   }
 
-  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+  function abortStreaming(): void {
+    abortRef.current?.abort();
+  }
+
+  function handleComposerKeyDown(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void handleSubmit();
+      void handleSendMessage();
     }
   }
 
-  function applyPrompt(prompt: string) {
-    setQuery(prompt);
-    setShowPromptMenu(false);
-  }
+  const transcriptEmptyState = useMemo(() => {
+    if (activeChatLoading) return <div className="card">Loading chat…</div>;
+    if (activeChatError) return <div className="card aiSageErrorState">{activeChatError}</div>;
+    if (activeChat && activeChat.messages.length > 0) return null;
+    return null;
+  }, [activeChat, activeChatError, activeChatLoading, greetingName]);
 
-  function toggleSources(turnId: string) {
-    setTurns((current) =>
-      current.map((turn) =>
-        turn.id === turnId
-          ? { ...turn, showSources: !turn.showSources }
-          : turn,
-      ),
-    );
-  }
+  const showLanding = !activeChatLoading && !activeChatError && (!activeChat || activeChat.messages.length === 0);
 
   return (
-    <PageShell
-      title=""
-      hideHeader
-    >
-      <div className={`wrap aiSagePage aiSageChatPage ${hasTurns ? "aiSagePageActive" : "aiSagePageEmpty"}`}>
-        {!hasTurns ? (
-          <section className="aiSageHero" aria-label="AI Sage welcome">
-            <h1 className="aiSageHeroTitle">Hello {greetingName}</h1>
-            <p className="aiSageHeroSubtitle">What insights are we discovering today?</p>
-          </section>
-        ) : null}
-
-        <section className="aiSageTimeline" aria-live="polite">
-          {turns.map((turn) => (
-            <section key={turn.id} className="aiSageTurn">
-              <section className="card aiSageBubbleCard aiSageUserBubble">
-                <p className="aiSagePromptEcho">{turn.query}</p>
-              </section>
-
-              {turn.loading ? (
-                <section className="card aiSageBubbleCard aiSageAssistantBubble">
-                  <div className="aiSageThinking" role="status" aria-live="polite">
-                    <div className="aiSageThinkingDots" aria-hidden="true">
-                      <span className="aiSageThinkingDot" />
-                      <span className="aiSageThinkingDot" />
-                      <span className="aiSageThinkingDot" />
-                    </div>
-                    <p className="muted aiSageAnswerText">Working through your question...</p>
-                  </div>
-                </section>
-              ) : null}
-
-              {turn.error ? (
-                <section className="card aiSageBubbleCard aiSageAssistantBubble">
-                  <div className="cardTitle">Request Error</div>
-                  <div className="aiSageError">{turn.error}</div>
-                </section>
-              ) : null}
-
-              {turn.result ? (
-                <AssistantTurn
-                  turn={turn}
-                  onToggleSources={() => toggleSources(turn.id)}
-                />
-              ) : null}
-            </section>
-          ))}
-        </section>
-
-        <section className={`aiSageComposerDock ${hasTurns ? "aiSageComposerDockThread" : "aiSageComposerDockHero"}`}>
-          {showPromptMenu ? (
-            <div className="card aiSagePromptMenu" aria-label="Starter prompts">
-              <div className="cardTitle">Starter Prompts</div>
-              <div className="aiSagePromptMenuList">
-                {EXAMPLE_PROMPTS.map((prompt) => (
+    <PageShell title="" hideHeader headerActions={headerActions}>
+      <div className="aiSageWorkspace">
+        <aside className={`card aiSageSidebar ${sidebarOpen ? "aiSageSidebarOpen" : ""}`}>
+          <div className="aiSageSidebarHeader">
+            <div>
+              <div className="cardTitle">Recents</div>
+            </div>
+            <button className="btn aiSageSidebarClose" type="button" onClick={() => setSidebarOpen(false)}>
+              Close
+            </button>
+          </div>
+          <div className="aiSageSidebarTools">
+            <button className="aiSageSidebarAction aiSageSidebarActionPrimary" type="button" onClick={() => void handleCreateChat(true)}>
+              <SidebarActionIcon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 20h9" />
+                  <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+                </svg>
+              </SidebarActionIcon>
+              <span>New chat</span>
+            </button>
+            <button className="aiSageSidebarAction" type="button" onClick={() => setSearchOpen(true)}>
+              <SidebarActionIcon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <circle cx="11" cy="11" r="7" />
+                  <path d="m20 20-3.5-3.5" />
+                </svg>
+              </SidebarActionIcon>
+              <span>Search chats</span>
+            </button>
+            <button className="aiSageSidebarAction" type="button" title="Coming soon">
+              <SidebarActionIcon>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H11l2 2h5.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19H5.5A2.5 2.5 0 0 1 3 16.5Z" />
+                  <path d="M12 10v6" />
+                  <path d="M9 13h6" />
+                </svg>
+              </SidebarActionIcon>
+              <span>Projects</span>
+            </button>
+          </div>
+          {chatListError ? <div className="aiSageErrorState">{chatListError}</div> : null}
+          {chatsLoading ? <div className="muted">Loading chats…</div> : null}
+          {!chatsLoading && chatSummaries.length === 0 ? <div className="aiSageEmptySidebar">No chats yet.</div> : null}
+          <div className="aiSageSidebarList" aria-label="Saved chats">
+            {chatSummaries.map((chat) => (
+              <article
+                key={chat.id}
+                className={`aiSageChatListItem ${chatId === chat.id ? "aiSageChatListItemActive" : ""}`}
+              >
+                <button
+                  type="button"
+                  className="aiSageChatListButton"
+                  onClick={() => {
+                    setSidebarOpen(false);
+                    setSidebarMenuChatId(null);
+                    navigate(`/ai-sage/chats/${chat.id}`);
+                  }}
+                >
+                  <span className="aiSageChatListTitle" title={chat.title}>
+                    {compactChatTitle(chat.title)}
+                  </span>
+                </button>
+                <div className="aiSageChatRowMenu">
                   <button
-                    key={prompt}
+                    className="aiSageChatMenuButton"
                     type="button"
-                    className="btn aiSageExampleBtn"
-                    onClick={() => applyPrompt(prompt)}
+                    aria-label={`More actions for ${chat.title}`}
+                    aria-expanded={sidebarMenuChatId === chat.id}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setSidebarMenuChatId((current) => (current === chat.id ? null : chat.id));
+                    }}
                   >
-                    {prompt}
+                    ...
                   </button>
-                ))}
+                  {sidebarMenuChatId === chat.id ? (
+                    <div className="aiSageChatMenuPanel" role="menu" onClick={(event) => event.stopPropagation()}>
+                      <button className="aiSageChatMenuItem" type="button" role="menuitem" disabled title="Coming soon">
+                        Share
+                      </button>
+                      <button className="aiSageChatMenuItem" type="button" role="menuitem" disabled title="Coming soon">
+                        Pin
+                      </button>
+                      <button
+                        className="aiSageChatMenuItem aiSageChatMenuItemDanger"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => void handleDeleteChat(chat)}
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </aside>
+
+        <div className="aiSageMainPanel">
+          {showLanding ? (
+            <section className="aiSageLanding">
+              <p className="aiSageLandingGreeting">Hello {greetingName}</p>
+              <form className="aiSageLandingComposer" onSubmit={(event) => void handleSendMessage(event)}>
+                <div className="aiSageLandingBar">
+                  <input
+                    className="aiSageLandingInput"
+                    value={query}
+                    placeholder="Ask AI Sage anything"
+                    onChange={(event) => setQuery(event.target.value)}
+                    disabled={streaming}
+                  />
+                  <button className="btn aiSageLandingSend" type="submit" disabled={streaming}>
+                    {streaming ? "Thinking…" : "Send"}
+                  </button>
+                </div>
+              </form>
+              {validationError ? <div className="aiSageErrorState">{validationError}</div> : null}
+            </section>
+          ) : null}
+
+          {activeChat && !showLanding ? (
+            <div className="aiSageChatToolbar">
+              <div>
+                <h1 className="aiSageChatTitle">{activeChat.title}</h1>
+              </div>
+              <div className="aiSageToolbarActions">
+                <button className="btn" type="button" onClick={() => void handleRenameChat(activeChat)}>
+                  Rename
+                </button>
+                <button className="btn" type="button" onClick={() => void handleDeleteChat(activeChat)}>
+                  Delete
+                </button>
               </div>
             </div>
           ) : null}
 
-          <form className="card aiSageComposerBar" onSubmit={(event) => void handleSubmit(event)}>
-            <button
-              type="button"
-              className="btn aiSageComposerPlus"
-              aria-label="Open starter prompts"
-              aria-expanded={showPromptMenu}
-              onClick={() => setShowPromptMenu((value) => !value)}
-            >
-              +
-            </button>
+          {!showLanding ? (
+            <>
+              <div className="aiSageTranscript card" ref={transcriptRef} onScroll={handleTranscriptScroll}>
+                {transcriptEmptyState}
+                {activeChat?.messages.map((message) => (
+                  <MessageBubble key={message.id} message={message} onRetry={handleRetry} onUseSuggestion={setQuery} />
+                ))}
+              </div>
 
-            <textarea
-              className="formInput aiSagePromptInput aiSagePromptInputCompact"
-              rows={1}
-              value={query}
-              placeholder="Ask AI Sage anything about a business, thesis, risk, or mental model..."
-              onChange={(event) => setQuery(event.target.value)}
-              onKeyDown={handleKeyDown}
-            />
-
-            <button
-              type="submit"
-              className="btn aiSageComposerSend"
-              aria-label="Send query"
-              disabled={!canSubmit}
-            >
-              {loading ? "..." : "Send"}
-            </button>
-          </form>
-
-          <div className="aiSageComposerHint muted">
-            Enter to send. Shift+Enter for a new line.
-          </div>
-        </section>
+              <form className="card aiSageComposer" onSubmit={(event) => void handleSendMessage(event)}>
+                <textarea
+                  ref={composerRef}
+                  className="formInput aiSageComposerInput"
+                  rows={3}
+                  value={query}
+                  placeholder="Ask AI Sage anything"
+                  onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={handleComposerKeyDown}
+                  disabled={streaming}
+                />
+                <div className="aiSageComposerFooter">
+                  <div className="muted">Enter to send. Shift+Enter for newline.</div>
+                  <div className="aiSageComposerButtons">
+                    {streaming ? (
+                      <button className="btn" type="button" onClick={abortStreaming}>
+                        Cancel
+                      </button>
+                    ) : null}
+                    <button className="btn" type="submit" disabled={streaming}>
+                      {streaming ? "Streaming…" : "Send"}
+                    </button>
+                  </div>
+                </div>
+                {validationError ? <div className="aiSageErrorState">{validationError}</div> : null}
+              </form>
+            </>
+          ) : null}
+        </div>
       </div>
+
+      {searchOpen ? (
+        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Search AI Sage chats">
+          <div className="modal aiSageSearchModal">
+            <div className="aiSageSearchHeader">
+              <div>
+                <div className="cardTitle">Search chats</div>
+                <div className="muted">Searches chat titles and message text for your account only.</div>
+              </div>
+              <button className="btn" type="button" onClick={() => setSearchOpen(false)}>
+                Close
+              </button>
+            </div>
+            <input
+              autoFocus
+              className="formInput"
+              placeholder="Search chat history…"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+            <div className="aiSageSearchResults">
+              {searchLoading ? <div className="muted">Searching…</div> : null}
+              {!searchLoading && searchQuery.trim() && searchResults.length === 0 ? (
+                <div className="muted">No matches found.</div>
+              ) : null}
+              {searchResults.map((result) => (
+                <button
+                  key={`${result.chat_id}-${result.updated_at}`}
+                  type="button"
+                  className="aiSageSearchResult"
+                  onClick={() => {
+                    setSearchOpen(false);
+                    setSidebarOpen(false);
+                    navigate(`/ai-sage/chats/${result.chat_id}`);
+                  }}
+                >
+                  <strong>{result.title}</strong>
+                  <span className="muted">{result.snippet || "Open chat"}</span>
+                  <span className="muted">{formatTimestamp(result.updated_at)}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {sidebarOpen ? <button className="aiSageSidebarBackdrop" type="button" onClick={() => setSidebarOpen(false)} aria-label="Close chats drawer" /> : null}
     </PageShell>
   );
 }
 
-function AssistantTurn({
-  turn,
-  onToggleSources,
+const DEFAULT_CHAT_TITLE = "New chat";
+
+function MessageBubble({
+  message,
+  onRetry,
+  onUseSuggestion,
 }: {
-  turn: ConversationTurn;
-  onToggleSources: () => void;
+  message: AISageChatMessage;
+  onRetry: (messageId: string) => Promise<void>;
+  onUseSuggestion: (text: string) => void;
 }) {
-  const [passageLimit, setPassageLimit] = useState(5);
-  const result = turn.result;
-  if (!result) return null;
+  if (message.role === "user") {
+    return (
+      <section className="aiSageMessageRow aiSageMessageRowUser">
+        <article className="card aiSageMessageBubble aiSageMessageBubbleUser">
+          <p className="aiSageMessageText">{message.content}</p>
+        </article>
+      </section>
+    );
+  }
 
-  const isThesisMode = result.mode === "thesis";
-  const bestPassages = result.best_passages ?? [];
-  const sortedPassages = [...bestPassages].sort((a, b) => passageSortScore(b) - passageSortScore(a));
-  const liveSourcesRaw = result.live_sources ?? [];
-  const pushbackQuestions = result.pushback_questions ?? [];
-  const missingInformation = result.missing_information ?? [];
-  const keyFacts = result.key_facts ?? [];
-  const followUpQuestions = result.follow_up_questions ?? [];
-  const updatedThesisView = result.updated_thesis_view ?? null;
-  const visiblePassages = sortedPassages.slice(0, Math.min(passageLimit, sortedPassages.length));
-
-  const answerText =
-    result.weak_evidence_note ??
-    (isThesisMode
-      ? "Review the pressure test, ranked passages, and supporting sources below."
-      : "Review the top ranked passages below.");
+  const metadata = message.metadata_json ?? {};
+  const followUps = Array.isArray(metadata.follow_up_questions)
+    ? metadata.follow_up_questions.filter((value): value is string => typeof value === "string")
+    : [];
+  const pushbackQuestions = Array.isArray(metadata.pushback_questions)
+    ? metadata.pushback_questions.filter((value): value is string => typeof value === "string")
+    : [];
+  const missingInformation = Array.isArray(metadata.missing_information)
+    ? metadata.missing_information.filter((value): value is string => typeof value === "string")
+    : [];
+  const keyFacts = Array.isArray(metadata.key_facts)
+    ? metadata.key_facts.filter((value): value is string => typeof value === "string")
+    : [];
 
   return (
-    <section className="card aiSageBubbleCard aiSageAssistantBubble">
-      {/* Lead answer — weak evidence note or compact guidance */}
-      <p className="aiSageAnswerLead">{answerText}</p>
-
-      {/* ── Thesis mode sections ─────────────────────────────────────── */}
-
-      {isThesisMode && result.thesis_question ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Thesis / Question</div>
-          <p className="aiSageAnswerText">{result.thesis_question}</p>
-        </section>
-      ) : null}
-
-      {isThesisMode && pushbackQuestions.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Key Pushback Questions</div>
-          <ol className="aiSageQuestionList">
-            {pushbackQuestions.map((q, i) => (
-              <li key={i} className="aiSageQuestionItem">{q}</li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
-
-      {isThesisMode && missingInformation.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Missing Information</div>
-          <ul className="aiSageQuestionList">
-            {missingInformation.map((m, i) => (
-              <li key={i} className="aiSageQuestionItem">{m}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {isThesisMode && keyFacts.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Key Facts</div>
-          <ul className="aiSageQuestionList">
-            {keyFacts.map((f, i) => (
-              <li key={i} className="aiSageQuestionItem">{f}</li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {/* ── Critique (shared) ────────────────────────────────────────── */}
-      {result.critique ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Critique</div>
-          <p className="aiSageAnswerText">{result.critique}</p>
-        </section>
-      ) : null}
-
-      {/* ── Updated thesis view (thesis mode only) ───────────────────── */}
-      {isThesisMode && updatedThesisView ? (
-        <section className="aiSageResponseSection" data-testid="updated-thesis-view">
-          <div className="aiSageSectionTitle">Updated Thesis View</div>
-          {updatedThesisView.stronger.length > 0 ? (
-            <div className="aiSageThesisGroup">
-              <div className="aiSageThesisGroupLabel aiSageThesisStronger">Looks Stronger</div>
-              <ul className="aiSageQuestionList">
-                {(updatedThesisView as UpdatedThesisView).stronger.map((s, i) => (
-                  <li key={i} className="aiSageQuestionItem">{s}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {updatedThesisView.weaker.length > 0 ? (
-            <div className="aiSageThesisGroup">
-              <div className="aiSageThesisGroupLabel aiSageThesisWeaker">Looks Weaker</div>
-              <ul className="aiSageQuestionList">
-                {(updatedThesisView as UpdatedThesisView).weaker.map((w, i) => (
-                  <li key={i} className="aiSageQuestionItem">{w}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-          {updatedThesisView.unresolved.length > 0 ? (
-            <div className="aiSageThesisGroup">
-              <div className="aiSageThesisGroupLabel aiSageThesisUnresolved">Still Unresolved</div>
-              <ul className="aiSageQuestionList">
-                {(updatedThesisView as UpdatedThesisView).unresolved.map((u, i) => (
-                  <li key={i} className="aiSageQuestionItem">{u}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      {/* ── Follow-up questions (thesis mode — NOT auto-researched) ──── */}
-      {isThesisMode && followUpQuestions.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSectionTitle">Follow-up Questions to Explore</div>
-          <p className="muted aiSageNote">
-            These questions were surfaced during analysis. Ask AI Sage any of them to continue.
-          </p>
-          <ol className="aiSageQuestionList">
-            {followUpQuestions.map((q, i) => (
-              <li key={i} className="aiSageQuestionItem">{q}</li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
-
-      {/* ── Top passages (shared) ───────────────────────────────────── */}
-      {bestPassages.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSourcesHeader">
-            <div>
-              <div className="aiSageSectionTitle">Top Passages</div>
-              <p className="muted aiSageSourcesHint">
-                Highest-ranked corpus passages for this answer, in ranking order.
-              </p>
-            </div>
-            {sortedPassages.length > 5 ? (
-              <div className="aiSagePassageLimitControls" role="group" aria-label="Passage count">
-                {[5, 10].map((limit) => (
-                  <button
-                    key={limit}
-                    type="button"
-                    className={`btn aiSagePassageLimitBtn ${passageLimit === limit ? "aiSagePassageLimitBtnActive" : ""}`}
-                    onClick={() => setPassageLimit(limit)}
-                  >
-                    Top {Math.min(limit, sortedPassages.length)}
-                  </button>
-                ))}
-              </div>
-            ) : null}
-          </div>
-
-          <div className="aiSageEvidenceList">
-            {visiblePassages.map((chunk: RagEvidenceChunk, index: number) => {
-              const contextText =
-                typeof chunk.metadata.context_text === "string"
-                  ? chunk.metadata.context_text
-                  : null;
-              const rerankerScore =
-                typeof chunk.metadata.reranker_score === "number"
-                  ? chunk.metadata.reranker_score
-                  : null;
-              const documentId = typeof chunk.document_id === "string"
-                ? chunk.document_id
-                : typeof chunk.metadata.document_id === "string"
-                  ? chunk.metadata.document_id
-                  : null;
-              const rankingScore = passageSortScore(chunk);
-              return (
-                <article key={chunk.chunk_id} className="aiSageEvidenceCard">
-                  <div className="aiSageEvidenceHeader">
-                    <div>
-                      <strong>{chunk.author_name}</strong>
-                      <span className="muted aiSageEvidenceRank">Passage {index + 1}</span>
-                      <span className="aiSagePill aiSagePillCorpus">Thinker Corpus</span>
-                      {rerankerScore !== null ? <span className="aiSagePill">Reranked</span> : null}
-                    </div>
-                    <span className="aiSagePill">
-                      Rank score {rankingScore.toFixed(2)}
-                    </span>
-                  </div>
-                  <p className="aiSageEvidenceText">
-                    {chunk.text.length > 520 ? `${chunk.text.slice(0, 520)}...` : chunk.text}
-                  </p>
-                  <div className="muted aiSageEvidenceMeta">
-                    {chunk.metadata.source_url ? String(chunk.metadata.source_url) : "Source unavailable"}
-                    {chunk.metadata.published_at ? ` · ${String(chunk.metadata.published_at)}` : ""}
-                    {` · semantic ${(chunk.similarity * 100).toFixed(1)}%`}
-                  </div>
-                  <div className="aiSageEvidenceActions">
-                    {documentId ? (
-                      <Link
-                        className="btn aiSageEvidenceLink"
-                        to={readerRoute(chunk.author_id, documentId)}
-                      >
-                        Read more
-                      </Link>
-                    ) : null}
-                    {contextText && contextText !== chunk.text ? (
-                      <details>
-                        <summary>Show surrounding context</summary>
-                        <p className="aiSageEvidenceText">
-                          {contextText.length > 1200 ? `${contextText.slice(0, 1200)}...` : contextText}
-                        </p>
-                      </details>
-                    ) : null}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
-      {/* ── Additional sources (collapsible) ─────────────────────────── */}
-      {liveSourcesRaw.length > 0 ? (
-        <section className="aiSageResponseSection">
-          <div className="aiSageSourcesHeader">
-            <div>
-              <div className="aiSageSectionTitle">Additional Sources</div>
-              <p className="muted aiSageSourcesHint">
-                Live research inputs used alongside the ranked corpus passages above.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="btn"
-              onClick={onToggleSources}
-            >
-              {turn.showSources
-                ? "Hide Additional Sources"
-                : `Show Additional Sources (${liveSourcesRaw.length})`}
+    <section className="aiSageMessageRow aiSageMessageRowAssistant">
+      <article className="card aiSageMessageBubble aiSageMessageBubbleAssistant">
+        {message.status === "failed" ? (
+          <div className="aiSageErrorState">
+            <p className="aiSageMessageText">{message.error_message || "This turn failed."}</p>
+            <button className="btn" type="button" onClick={() => void onRetry(message.id)}>
+              Retry turn
             </button>
           </div>
+        ) : (
+          <>
+            <p className="aiSageMessageText">{message.content || "Thinking…"}</p>
+            <details className="aiSageSecondaryPanel" open={message.status === "in_progress"}>
+              <summary>Retrieval details</summary>
+              <div className="aiSageSecondaryPanelBody">
+                {metadata.mode ? <div className="muted">Mode: {String(metadata.mode)}</div> : null}
+                {typeof metadata.evidence_sufficient === "boolean" ? (
+                  <div className="muted">Grounding strength: {metadata.evidence_sufficient ? "sufficient" : "thin"}</div>
+                ) : null}
+                {typeof metadata.weak_evidence_note === "string" && metadata.weak_evidence_note ? (
+                  <div className="muted">{metadata.weak_evidence_note}</div>
+                ) : null}
+                {typeof metadata.thesis_question === "string" && metadata.thesis_question ? (
+                  <div className="muted">Thesis focus: {metadata.thesis_question}</div>
+                ) : null}
+              </div>
+            </details>
 
-          {turn.showSources ? (
-            <div className="aiSageEvidenceList">
-              {/* Live sources — web / filings */}
-              {liveSourcesRaw.map((src: ThesisLiveSource, index: number) => (
-                <article key={index} className="aiSageEvidenceCard">
-                  <div className="aiSageEvidenceHeader">
-                    <div>
-                      <strong>{src.title}</strong>
-                      <span className="aiSagePill aiSagePillLive">
-                        {src.source_type === "filing" ? "SEC Filing" : src.source_type === "transcript" ? "Transcript" : "Web"}
-                      </span>
-                    </div>
-                  </div>
-                  <p className="aiSageEvidenceText">{src.snippet}</p>
-                  <div className="muted aiSageEvidenceMeta">{src.url}</div>
-                </article>
-              ))}
+            {pushbackQuestions.length > 0 ? <SimpleList title="Pushback questions" items={pushbackQuestions} /> : null}
+            {missingInformation.length > 0 ? <SimpleList title="Missing information" items={missingInformation} /> : null}
+            {keyFacts.length > 0 ? <SimpleList title="Key facts" items={keyFacts} /> : null}
+
+            {message.evidence.length > 0 ? (
+              <section className="aiSageEvidenceSection">
+                <div className="aiSageSectionTitle">Evidence</div>
+                <div className="aiSageEvidenceStack">
+                  {message.evidence.map((evidence) => (
+                    <EvidenceCard key={evidence.id} evidence={evidence} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {followUps.length > 0 ? (
+              <section className="aiSageFollowUps">
+                <div className="aiSageSectionTitle">Suggested follow-ups</div>
+                <div className="aiSagePromptChipRow">
+                  {followUps.map((prompt) => (
+                    <button key={prompt} className="btn aiSagePromptChip" type="button" onClick={() => onUseSuggestion(prompt)}>
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+          </>
+        )}
+      </article>
+    </section>
+  );
+}
+
+function SimpleList({ title, items }: { title: string; items: string[] }) {
+  return (
+    <section className="aiSageListSection">
+      <div className="aiSageSectionTitle">{title}</div>
+      <ul className="aiSageBulletList">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function EvidenceCard({ evidence }: { evidence: AISageChatEvidence }) {
+  const canOpenReader = Boolean(evidence.author_id && evidence.document_id);
+  const [expanded, setExpanded] = useState(false);
+  const contextText = normalizeEvidenceText(evidence.metadata_json?.context_text);
+  const anchorText = normalizeEvidenceText(evidence.metadata_json?.anchor_text || evidence.snippet);
+  const expandedContext = contextText ? buildEvidenceContextExcerpt(contextText, anchorText) : "";
+  const previewText = evidence.snippet?.trim() || "Open citation";
+  const canExpand = Boolean(expandedContext);
+
+  return (
+    <article className="aiSageEvidenceCard">
+      <div className="aiSageEvidenceCardHeader">
+        <div>
+          <strong>{evidence.title || evidence.author_name || "Retrieved source"}</strong>
+          <div className="muted">
+            {evidence.author_name ? `${evidence.author_name} · ` : ""}
+            {typeof evidence.ranking_score === "number" ? `Score ${evidence.ranking_score.toFixed(2)}` : evidence.score_type || "Reference"}
+          </div>
+        </div>
+      </div>
+      <button
+        className="aiSageEvidencePreviewButton"
+        type="button"
+        onClick={() => setExpanded((current) => !current)}
+        aria-expanded={expanded}
+      >
+        <p className="aiSageEvidenceText">{previewText}</p>
+        {canExpand ? (
+          <span className="muted aiSageEvidencePreviewHint">
+            {expanded ? "Hide expanded context" : "Show expanded context"}
+          </span>
+        ) : null}
+      </button>
+      {expanded ? (
+        <div className="aiSageEvidenceExpanded">
+          {expandedContext ? (
+            <>
+              <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
+              <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
+            </>
+          ) : null}
+          {canOpenReader ? (
+            <div className="aiSageEvidenceActions">
+              <Link className="btn aiSageEvidenceLink" to={readerRoute(evidence.author_id!, evidence.document_id!)}>
+                Open document
+              </Link>
+            </div>
+          ) : evidence.source_url ? (
+            <div className="aiSageEvidenceActions">
+              <a className="btn aiSageEvidenceLink" href={evidence.source_url} target="_blank" rel="noreferrer">
+                Open source
+              </a>
             </div>
           ) : null}
-        </section>
+        </div>
       ) : null}
-    </section>
+    </article>
   );
 }

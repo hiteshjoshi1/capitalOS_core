@@ -3112,7 +3112,467 @@ a.btn {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
 }
 
-.authorLibraryLibraryPage,
+.authorLibraryLibraryPage {
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+}
+
+.aiSageWorkspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 224px;
+  gap: 18px;
+  min-height: calc(100vh - 160px);
+  overflow-x: clip;
+}
+
+.aiSageSidebar {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  grid-column: 2;
+  width: 100%;
+  min-width: 0;
+  max-height: calc(5 * 86px + 150px);
+  overflow: hidden;
+}
+
+.aiSageSidebarList {
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-width: 0;
+  padding-right: 4px;
+}
+
+.aiSageSidebarHeader,
+.aiSageChatToolbar,
+.aiSageComposerFooter,
+.aiSageEvidenceCardHeader,
+.aiSageSearchHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.aiSageSidebarClose,
+.aiSageMobileChatsButton,
+.aiSageSidebarBackdrop {
+  display: none;
+}
+
+.aiSageMainPanel {
+  display: grid;
+  gap: 16px;
+  grid-column: 1;
+  min-width: 0;
+  align-content: start;
+}
+
+.aiSageChatTitle {
+  margin: 0;
+  font-size: 24px;
+}
+
+.aiSageTranscript {
+  display: grid;
+  gap: 14px;
+  max-height: calc(100vh - 320px);
+  overflow-y: auto;
+  align-content: start;
+}
+
+.aiSageLanding {
+  display: grid;
+  gap: 14px;
+  justify-items: center;
+  align-content: start;
+  min-height: 0;
+  padding: clamp(28px, 5vh, 56px) 0 24px;
+}
+
+.aiSageLandingGreeting {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.aiSageLandingComposer {
+  width: min(880px, 100%);
+}
+
+.aiSageLandingBar,
+.aiSageToolbarActions,
+.aiSageComposerButtons {
+  display: flex;
+  gap: 8px;
+}
+
+.aiSageLandingBar {
+  align-items: center;
+  width: 100%;
+  padding: 12px 12px 12px 18px;
+  border: 1px solid var(--line);
+  border-radius: 28px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent 8%);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.16);
+}
+
+.aiSageLandingInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  outline: 0;
+  font: inherit;
+  font-size: 18px;
+  line-height: 1.5;
+}
+
+.aiSageLandingInput::placeholder {
+  color: var(--muted);
+}
+
+.aiSageLandingSend {
+  flex: 0 0 auto;
+}
+
+.aiSageChatListItem {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 10px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent 12%);
+}
+
+.aiSageChatListItemActive {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent-soft) 65%, transparent 35%);
+}
+
+.aiSageChatListButton {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  padding: 0;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.aiSageChatListTitle {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.aiSageChatRowMenu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.aiSageChatMenuButton {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 4px 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.aiSageChatMenuButton:hover {
+  background: color-mix(in srgb, var(--panel2) 70%, transparent 30%);
+  color: var(--text);
+}
+
+.aiSageChatMenuPanel {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 140px;
+  padding: 6px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel) 94%, transparent 6%);
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.2);
+  z-index: 10;
+}
+
+.aiSageChatMenuItem {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.aiSageChatMenuItem:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--panel2) 72%, transparent 28%);
+}
+
+.aiSageChatMenuItem:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.aiSageChatMenuItemDanger {
+  color: #d15b5b;
+}
+
+.aiSageEmptySidebar,
+.aiSageErrorState {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--panel2) 88%, transparent 12%);
+}
+
+.aiSageMessageRow {
+  display: flex;
+}
+
+.aiSageMessageRowUser {
+  justify-content: flex-end;
+}
+
+.aiSageMessageBubble {
+  max-width: min(900px, 100%);
+  display: grid;
+  gap: 14px;
+}
+
+.aiSageMessageBubbleUser {
+  max-width: min(720px, 88%);
+  background: color-mix(in srgb, var(--accent-soft) 84%, var(--panel2) 16%);
+}
+
+.aiSageMessageText,
+.aiSageEvidenceText {
+  margin: 0;
+  white-space: pre-wrap;
+  line-height: 1.7;
+}
+
+.aiSageSecondaryPanel {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.aiSageSecondaryPanelBody,
+.aiSageListSection,
+.aiSageEvidenceSection {
+  display: grid;
+  gap: 10px;
+}
+
+.aiSageBulletList {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.aiSageEvidenceStack {
+  display: grid;
+  gap: 12px;
+}
+
+.aiSageEvidencePreviewButton {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+  display: grid;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.aiSageEvidencePreviewHint,
+.aiSageEvidenceContextLabel {
+  font-size: 12px;
+}
+
+.aiSageEvidenceExpanded,
+.aiSageEvidenceActions {
+  display: grid;
+  gap: 10px;
+}
+
+.aiSageEvidenceExpanded {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.aiSageEvidenceActions {
+  justify-content: start;
+}
+
+.aiSageEvidenceMark {
+  background: color-mix(in srgb, var(--accent-soft) 70%, transparent 30%);
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
+.aiSageComposer {
+  display: grid;
+  gap: 12px;
+  position: sticky;
+  bottom: 0;
+}
+
+.aiSageComposerInput {
+  min-height: 104px;
+  resize: vertical;
+}
+
+.aiSageSearchModal {
+  width: min(760px, 92vw);
+  display: grid;
+  gap: 14px;
+}
+
+.aiSageSidebarTools {
+  display: grid;
+  gap: 4px;
+}
+
+.aiSageSidebarAction {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  border-radius: 18px;
+  padding: 14px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1.25;
+  cursor: pointer;
+}
+
+.aiSageSidebarAction:hover {
+  background: color-mix(in srgb, var(--panel2) 46%, transparent 54%);
+}
+
+.aiSageSidebarActionPrimary {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.aiSageSidebarActionPrimary:hover {
+  background: rgba(255, 255, 255, 0.22);
+}
+
+.aiSageSidebarActionIcon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text);
+  flex: 0 0 auto;
+}
+
+.aiSageSidebarActionIcon svg {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.aiSageSearchResults {
+  display: grid;
+  gap: 8px;
+  max-height: 52vh;
+  overflow-y: auto;
+}
+
+.aiSageSearchResult {
+  width: 100%;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: transparent;
+  color: inherit;
+  padding: 12px;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+}
+
+@media (max-width: 980px) {
+  .aiSageWorkspace {
+    grid-template-columns: 1fr;
+  }
+
+  .aiSageSidebar {
+    position: fixed;
+    inset: 90px 20px 20px auto;
+    width: min(360px, calc(100vw - 40px));
+    max-height: calc(100vh - 110px);
+    z-index: 60;
+    transform: translateX(120%);
+    transition: transform 0.2s ease;
+  }
+
+  .aiSageSidebarOpen {
+    transform: translateX(0);
+  }
+
+  .aiSageSidebarClose,
+  .aiSageMobileChatsButton,
+  .aiSageSidebarBackdrop {
+    display: inline-flex;
+  }
+
+  .aiSageSidebarBackdrop {
+    position: fixed;
+    inset: 0;
+    border: 0;
+    background: rgba(0, 0, 0, 0.44);
+    z-index: 55;
+  }
+
+  .aiSageTranscript {
+    max-height: none;
+    min-height: calc(100vh - 390px);
+  }
+
+  .aiSageChatToolbar,
+  .aiSageComposerFooter,
+  .aiSageSearchHeader {
+    flex-direction: column;
+  }
+
+  .aiSageLandingBar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
 .authorLibraryReaderPage {
   grid-template-columns: minmax(0, 1fr);
 }

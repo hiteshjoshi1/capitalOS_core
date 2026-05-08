@@ -15,6 +15,7 @@ from .crypto import (
     CryptoUserNetworth,
 )
 from .user import User, UserCredential, AuthSession, OAuthIdentity
+from .ai_sage_chat import AISageChat, AISageMessage, AISageTurnEvidence
 from .rag import (
     RagAuthor,
     RagAuthorCard,
@@ -47,6 +48,9 @@ __all__ = [
     "UserCredential",
     "AuthSession",
     "OAuthIdentity",
+    "AISageChat",
+    "AISageMessage",
+    "AISageTurnEvidence",
     "RagAuthor",
     "RagAuthorCard",
     "RagSource",
