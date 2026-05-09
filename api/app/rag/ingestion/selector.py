@@ -155,7 +155,7 @@ def apply_selective_options(sections: list, options: SelectiveIngestionOptions) 
         for idx, section in enumerate(result):
             heading = getattr(section, "heading", None)
             if heading and any(m in heading.lower() for m in markers):
-                matched_indexes.update(_collect_descendant_indexes(result, idx, include_headingless=False))
+                matched_indexes.update(_collect_descendant_indexes(result, idx, include_headingless=True))
         result = [section for idx, section in enumerate(result) if idx in matched_indexes]
 
     # ── exclude_sections ─────────────────────────────────────────────────────

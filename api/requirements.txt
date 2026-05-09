@@ -31,6 +31,7 @@ openai>=1.0.0
 voyageai>=0.3.2
 brotli>=1.1.0
 tiktoken>=0.7.0
+spacy>=3.8.2,<3.9
 # RAG Phase 2 — structured document parsing (Issue 139)
 # Use strategy="fast" to avoid heavy model downloads; OCR needs strategy="hi_res"
 unstructured[pdf]>=0.11.0

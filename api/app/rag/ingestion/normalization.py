@@ -61,6 +61,8 @@ def synthesize_sections_from_markers(
                 content=body,
                 content_type="text",
                 table_markdown=None,
+                table_rows=None,
+                items=None,
             )
         )
     return sections
@@ -117,6 +119,9 @@ def _split_section_by_markers(
             content=content[: positions[0][0]].strip(),
             content_type=section.content_type,
             table_markdown=section.table_markdown,
+            table_rows=section.table_rows,
+            items=section.items,
+            metadata=dict(section.metadata or {}),
         )
     ]
 
@@ -131,6 +136,9 @@ def _split_section_by_markers(
                 content=body,
                 content_type=section.content_type,
                 table_markdown=None,
+                table_rows=section.table_rows,
+                items=section.items,
+                metadata=dict(section.metadata or {}),
             )
         )
 

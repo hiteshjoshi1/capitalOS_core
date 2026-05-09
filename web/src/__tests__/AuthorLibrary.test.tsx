@@ -166,6 +166,52 @@ const DOCUMENTS: Record<string, RagLibraryDocumentDetail> = {
     source_section: "1987 Letter",
     metadata: { corpus_section: "Letters" },
     clean_text: "Stored logical document text for the 1987 shareholder letter.",
+    content_blocks: [
+      {
+        block_id: "blk-0000",
+        type: "heading",
+        order: 0,
+        level: 2,
+        text: "Capital Allocation Overview",
+        items: null,
+        table_markdown: null,
+        table_rows: null,
+        metadata: {},
+      },
+      {
+        block_id: "blk-0001",
+        type: "paragraph",
+        order: 1,
+        level: null,
+        text: "Stored logical document text for the 1987 shareholder letter.",
+        items: null,
+        table_markdown: null,
+        table_rows: null,
+        metadata: { heading_context: "Capital Allocation Overview" },
+      },
+      {
+        block_id: "blk-0002",
+        type: "list",
+        order: 2,
+        level: null,
+        text: null,
+        items: ["Preserve cash flexibility", "Deploy capital selectively"],
+        table_markdown: null,
+        table_rows: null,
+        metadata: { heading_context: "Capital Allocation Overview" },
+      },
+      {
+        block_id: "blk-0003",
+        type: "table",
+        order: 3,
+        level: null,
+        text: null,
+        items: null,
+        table_markdown: "| Metric | Value |\n| --- | --- |\n| ROE | 15% |",
+        table_rows: [["Metric", "Value"], ["ROE", "15%"]],
+        metadata: { heading_context: "Capital Allocation Overview" },
+      },
+    ],
     char_count: 420,
     parent_document: null,
     child_documents: [
@@ -204,6 +250,7 @@ const DOCUMENTS: Record<string, RagLibraryDocumentDetail> = {
     source_section: "1987 Notes",
     metadata: {},
     clean_text: "Editorial notes linked from the main logical document.",
+    content_blocks: null,
     char_count: 180,
     parent_document: {
       id: "doc-1987",
@@ -264,7 +311,7 @@ describe("AuthorLibrary", () => {
     });
   });
 
-  it("renders an author gallery with metadata-rich cards", async () => {
+  it("renders an author gallery with compact clickable cards", async () => {
     renderAuthorLibrary("/author-library");
 
     expect(await screen.findByRole("heading", { name: "Author Library" })).toBeInTheDocument();
@@ -273,14 +320,14 @@ describe("AuthorLibrary", () => {
       "src",
       "https://example.com/buffett.jpg",
     );
-    expect(screen.getByText(/Berkshire Hathaway/i)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Browse Warren Buffett's library" })).toHaveAttribute(
+    expect(screen.queryByText(/Berkshire Hathaway/i)).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Warren Buffett" })).toHaveAttribute(
       "href",
       "/author-library/warren_buffett",
     );
   });
 
-  it("renders grouped child links and document metadata on the author detail page", async () => {
+  it("renders grouped writings without document metadata on the author detail page", async () => {
     renderAuthorLibrary("/author-library/warren_buffett");
 
     expect((await screen.findAllByRole("heading", { name: "Warren Buffett" })).length).toBeGreaterThan(0);
@@ -288,46 +335,52 @@ describe("AuthorLibrary", () => {
       expect(api.ragAuthorLibrary).toHaveBeenCalledWith("warren_buffett");
     });
 
+    expect(await screen.findByText("Writings")).toBeInTheDocument();
     expect(await screen.findByRole("heading", { name: "Letters" })).toBeInTheDocument();
-    expect(screen.getByText("Publication Year: 1987")).toBeInTheDocument();
+    expect(screen.getByText("1987")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /1987 Shareholder Letter/i })).toHaveAttribute(
       "href",
       "/author-library/warren_buffett/documents/doc-1987",
     );
     expect(screen.getByRole("link", { name: /Owner Earnings/i })).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === "Primary grouping: Collection")).toBeInTheDocument();
-    expect(
-      screen.getByText((_, element) => element?.textContent === "Source: https://example.com/owner-earnings.pdf"),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/Primary grouping/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/owner-earnings\.pdf/i)).not.toBeInTheDocument();
     expect(screen.queryByTestId("author-library-reader-text")).not.toBeInTheDocument();
   });
 
-  it("opens the reader, supports fullscreen mode, and follows related document links", async () => {
+  it("opens the reader with a minimal header and supports fullscreen mode", async () => {
     const user = userEvent.setup();
     renderAuthorLibrary("/author-library/warren_buffett/documents/doc-1987");
 
-    expect(await screen.findByTestId("author-library-reader-text")).toHaveTextContent(
+    expect(await screen.findByTestId("author-library-reader-structured")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Capital Allocation Overview" })).toBeInTheDocument();
+    expect(screen.getByText("Preserve cash flexibility")).toBeInTheDocument();
+    expect(screen.getByTestId("author-library-table")).toBeInTheDocument();
+    expect(screen.getByText("ROE")).toBeInTheDocument();
+    expect(screen.getByText("15%")).toBeInTheDocument();
+    expect(screen.queryByTestId("author-library-reader-text")).not.toBeInTheDocument();
+    expect(screen.getByTestId("author-library-reader-structured")).toHaveTextContent(
       "Stored logical document text for the 1987 shareholder letter.",
     );
-    expect(screen.getByRole("link", { name: /Open provenance link/i })).toHaveAttribute(
+    expect(screen.getAllByText("Warren Buffett").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("1987").length).toBeGreaterThan(0);
+    expect(screen.getByRole("link", { name: /Open source/i })).toHaveAttribute(
       "href",
       "https://example.com/1987-letter",
     );
+    expect(screen.queryByText(/Parent document/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Source provenance/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Stored:/i)).not.toBeInTheDocument();
+
+    const readerSurface = screen.getByTestId("author-library-reader-surface");
+    expect(readerSurface).not.toHaveClass("authorLibraryReaderSurfaceFullscreen");
 
     await user.click(screen.getByRole("button", { name: "Fullscreen" }));
     expect(HTMLDivElement.prototype.requestFullscreen).toHaveBeenCalled();
-
-    await user.click(screen.getByRole("link", { name: /1987 Shareholder Letter Notes/i }));
-    await waitFor(() => {
-      expect(api.ragLibraryDocument).toHaveBeenCalledWith("doc-1987-notes");
-    });
-
-    expect(await screen.findByTestId("author-library-reader-text")).toHaveTextContent(
-      "Editorial notes linked from the main logical document.",
-    );
-    expect(screen.getByText("Parent document")).toBeInTheDocument();
+    expect(readerSurface).toHaveClass("authorLibraryReaderSurfaceFullscreen");
 
     await user.click(screen.getByRole("button", { name: "Exit fullscreen" }));
     expect(document.exitFullscreen).toHaveBeenCalled();
+    expect(readerSurface).not.toHaveClass("authorLibraryReaderSurfaceFullscreen");
   });
 });

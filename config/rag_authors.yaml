@@ -18,6 +18,7 @@
 authors:
   - id: warren_buffett
     name: Warren Buffett
+    photo_url: "https://upload.wikimedia.org/wikipedia/commons/d/d4/Warren_Buffett_at_the_2015_SelectUSA_Investment_Summit_%28cropped%29.jpg"
     enabled: true
     domains: [investing, business]
     expertise_tags:
@@ -55,6 +56,7 @@ authors:
 
   - id: charlie_munger
     name: Charlie Munger
+    photo_url: "https://upload.wikimedia.org/wikipedia/commons/5/56/Charlie_Munger_%28cropped%29.jpg"
     enabled: true
     domains: [investing, psychology, decision_making]
     expertise_tags:

@@ -97,14 +97,37 @@ class TestSplitSentences:
     def test_multiline_text(self):
         text = "First sentence.\nSecond sentence.\nThird sentence."
         result = self._split(text)
-        # Line breaks alone don't split — only punctuation + space + capital
-        assert len(result) >= 1
+        assert len(result) == 3
 
     def test_no_false_split_on_lowercase_after_period(self):
         # "e.g." or periods before lowercase should not split
         result = self._split("This is a list, e.g. apples and oranges. End here.")
         # There should be a split at "End here." but NOT at "e.g."
         assert any("End here." in s for s in result)
+
+    def test_transcript_q_and_a_boundaries(self):
+        result = self._split("Q: What matters most? A: Capital allocation. Q: Why? A: Returns on capital.")
+        assert result == [
+            "Q: What matters most?",
+            "A: Capital allocation.",
+            "Q: Why?",
+            "A: Returns on capital.",
+        ]
+
+    def test_wrapped_prose_keeps_sentence_integrity(self):
+        result = self._split("This paragraph was wrapped\nacross lines before ingestion. Another sentence follows.")
+        assert result == [
+            "This paragraph was wrapped\nacross lines before ingestion.",
+            "Another sentence follows.",
+        ]
+
+    def test_regex_fallback_when_spacy_unavailable(self, monkeypatch):
+        import app.rag.ingestion.chunker as chunker
+
+        monkeypatch.setattr(chunker, "_SPACY_AVAILABLE", False)
+        monkeypatch.setattr(chunker, "_SPACY_SENTENCIZER", None)
+        result = chunker._split_sentences("Mr. Smith is here. He came today.")
+        assert result == ["Mr. Smith is here.", "He came today."]
 
 
 # ── Token counting ────────────────────────────────────────────────────────────

@@ -1,16 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import PageShell from "../components/PageShell";
 import "../App.css";
-import {
-  api,
-  type RagAuthorLibrary,
-  type RagLibraryAuthor,
-  type RagLibraryDocumentDetail,
-  type RagLibraryDocumentSummary,
-  type RagLibraryRelatedDocument,
-} from "../lib/api";
+import { api, type RagAuthorLibrary, type RagLibraryAuthor, type RagLibraryContentBlock, type RagLibraryDocumentDetail, type RagLibraryDocumentSummary } from "../lib/api";
 
 type RouteParams = {
   authorId?: string;
@@ -25,22 +18,6 @@ function documentRoute(authorId: string, documentId: string): string {
   return `${authorRoute(authorId)}/documents/${encodeURIComponent(documentId)}`;
 }
 
-function prettyFieldName(field: string | null | undefined): string {
-  if (!field) return "Documents";
-  return field
-    .split(/[_-]+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
-  const timestamp = Date.parse(value);
-  if (Number.isNaN(timestamp)) return value;
-  return new Date(timestamp).toLocaleString();
-}
-
 function authorInitials(name: string): string {
   const initials = name
     .split(/\s+/)
@@ -49,19 +26,6 @@ function authorInitials(name: string): string {
     .map((part) => part.charAt(0).toUpperCase())
     .join("");
   return initials || "?";
-}
-
-function documentMetaEntries(document: RagLibraryDocumentSummary | RagLibraryDocumentDetail): Array<[string, string]> {
-  const entries: Array<[string, string | null | undefined]> = [
-    ["Author", document.author_name ?? document.author_id],
-    ["Date", document.publication_label],
-    ["Venue", document.venue],
-    ["Collection", document.collection],
-    ["Canonical", document.canonical_status],
-    ["Source type", document.source_type],
-    ["Work type", document.work_type],
-  ];
-  return entries.filter(([, value]) => Boolean(value)) as Array<[string, string]>;
 }
 
 function AuthorPortrait({
@@ -82,50 +46,6 @@ function AuthorPortrait({
   );
 }
 
-function MetadataChips({ entries }: { entries: Array<[string, string]> }) {
-  if (!entries.length) return null;
-  return (
-    <div className="authorLibraryMetaGrid">
-      {entries.map(([label, value]) => (
-        <span key={`${label}:${value}`} className="authorLibraryMetaChip">
-          <strong>{label}:</strong> {value}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function RelatedDocumentLinks({
-  label,
-  authorId,
-  documents,
-}: {
-  label: string;
-  authorId: string;
-  documents: RagLibraryRelatedDocument[];
-}) {
-  if (!documents.length) return null;
-  return (
-    <section className="authorLibraryRelatedGroup">
-      <div className="cardTitle">{label}</div>
-      <div className="authorLibraryRelatedList">
-        {documents.map((document) => (
-          <Link
-            key={document.id}
-            className="authorLibraryRelatedButton"
-            to={documentRoute(authorId, document.id)}
-          >
-            <span className="authorLibraryRelatedTitle">{document.title}</span>
-            <span className="muted">
-              {[document.author_name, document.publication_label, document.work_type].filter(Boolean).join(" • ") || "Open related document"}
-            </span>
-          </Link>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function DocumentLinkCard({
   authorId,
   document,
@@ -134,33 +54,108 @@ function DocumentLinkCard({
   document: RagLibraryDocumentSummary;
 }) {
   return (
-    <Link className="authorLibraryDocumentCard authorLibraryDocumentLink" to={documentRoute(authorId, document.id)}>
-      <div className="authorLibraryDocumentHeader">
-        <div>
-          <div className="authorLibraryDocumentTitle">{document.title}</div>
-          <div className="muted">{document.author_name ?? document.author_id ?? "Unknown author"}</div>
-        </div>
-        <span className="pill">{document.char_count.toLocaleString()} chars</span>
-      </div>
-      <MetadataChips entries={documentMetaEntries(document)} />
-      <div className="authorLibraryMetaGrid">
-        {document.parent_title ? (
-          <span className="authorLibraryMetaChip">
-            <strong>Parent:</strong> {document.parent_title}
-          </span>
-        ) : null}
-        {document.child_count > 0 ? (
-          <span className="authorLibraryMetaChip">
-            <strong>Related:</strong> {document.child_count} linked
-          </span>
-        ) : null}
-      </div>
-      {document.source_url ? (
-        <span className="authorLibraryMetaChip">
-          <strong>Source:</strong> {document.source_url}
-        </span>
-      ) : null}
+    <Link className="authorLibraryDocumentRow authorLibraryDocumentLink" to={documentRoute(authorId, document.id)}>
+      <span className="authorLibraryDocumentGlyph" aria-hidden="true">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7">
+          <path d="M6 3.5h5l3.5 3.5V16a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4.5 16V5A1.5 1.5 0 0 1 6 3.5Z" />
+          <path d="M11 3.5V7h3.5" />
+        </svg>
+      </span>
+      <span className="authorLibraryDocumentTitle">{document.title}</span>
     </Link>
+  );
+}
+
+function renderHeadingBlock(block: RagLibraryContentBlock) {
+  const level = Math.min(Math.max(block.level ?? 2, 1), 6);
+  const tagName = (`h${level}` as const);
+  return createElement(tagName, { className: "authorLibraryBlockHeading" }, block.text);
+}
+
+function StructuredDocumentRenderer({ blocks }: { blocks: RagLibraryContentBlock[] }) {
+  return (
+    <div className="authorLibraryStructuredDocument" data-testid="author-library-reader-structured">
+      {blocks.map((block) => {
+        const key = block.block_id;
+        const headingContext = typeof block.metadata?.heading_context === "string" ? block.metadata.heading_context : null;
+
+        if (block.type === "heading" && block.text) {
+          return (
+            <section key={key} id={key} className="authorLibraryBlock authorLibraryBlockSection">
+              {renderHeadingBlock(block)}
+            </section>
+          );
+        }
+
+        if (block.type === "list" && block.items?.length) {
+          return (
+            <section key={key} id={key} className="authorLibraryBlock">
+              {headingContext ? <div className="authorLibraryBlockContext">{headingContext}</div> : null}
+              <ul className="authorLibraryBlockList">
+                {block.items.map((item) => (
+                  <li key={`${key}:${item}`}>{item}</li>
+                ))}
+              </ul>
+            </section>
+          );
+        }
+
+        if (block.type === "quote" && block.text) {
+          return (
+            <blockquote key={key} id={key} className="authorLibraryBlockQuote">
+              {block.text}
+            </blockquote>
+          );
+        }
+
+        if (block.type === "table") {
+          const rows = block.table_rows ?? [];
+          const header = rows.length > 1 ? rows[0] : [];
+          const bodyRows = rows.length > 1 ? rows.slice(1) : rows;
+          return (
+            <section key={key} id={key} className="authorLibraryBlock authorLibraryBlockTable">
+              {headingContext ? <div className="authorLibraryBlockContext">{headingContext}</div> : null}
+              {rows.length ? (
+                <div className="authorLibraryTableScroller">
+                  <table className="authorLibraryTable" data-testid="author-library-table">
+                    {header.length ? (
+                      <thead>
+                        <tr>
+                          {header.map((cell, index) => (
+                            <th key={`${key}:header:${index}`} scope="col">{cell}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                    ) : null}
+                    <tbody>
+                      {bodyRows.map((row, rowIndex) => (
+                        <tr key={`${key}:row:${rowIndex}`}>
+                          {row.map((cell, cellIndex) => (
+                            <td key={`${key}:cell:${rowIndex}:${cellIndex}`}>{cell}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <pre className="authorLibraryTableFallback">{block.table_markdown ?? block.text ?? ""}</pre>
+              )}
+            </section>
+          );
+        }
+
+        if (block.text) {
+          return (
+            <p key={key} id={key} className="authorLibraryBlockParagraph">
+              {block.text}
+            </p>
+          );
+        }
+
+        return null;
+      })}
+    </div>
   );
 }
 
@@ -286,26 +281,13 @@ export default function AuthorLibrary() {
     : isReader
       ? (documentDetail?.title ?? "Reader")
       : (library?.author.name ?? "Author Library");
-  const subtitle = isGallery
-    ? "Browse available authors as readable corpora, then open any logical document inside a dedicated reader."
-    : isReader
-      ? (library?.author.about_text ?? "Read one logical document with provenance, metadata, and related works.")
-      : (library?.author.about_text ?? "Browse this corpus by collection, section, work type, and date.");
 
   return (
     <PageShell
       title={title}
-      subtitle={subtitle}
       headerActions={(
         <div className="authorLibraryHeaderActions">
           {!isGallery ? <Link className="btn" to="/author-library">All authors</Link> : null}
-          {authorId && !isReader ? (
-            <span className="pill">
-              {library?.grouping.primary_field
-                ? `Grouped by ${prettyFieldName(library.grouping.primary_field)}`
-                : "Flat document list"}
-            </span>
-          ) : null}
           {authorId && isReader ? (
             <>
               <Link className="btn" to={authorRoute(authorId)}>Back to library</Link>
@@ -346,45 +328,19 @@ export default function AuthorLibrary() {
             {authors.length ? (
               <section className="grid authorLibraryGallery" aria-label="Author gallery">
                 {authors.map((author) => (
-                  <article key={author.id} className="card authorLibraryGalleryCard">
+                  <Link
+                    key={author.id}
+                    className="card authorLibraryGalleryCard authorLibraryGalleryCardLink"
+                    aria-label={author.name}
+                    to={authorRoute(author.id)}
+                  >
                     <div className="authorLibraryGalleryHeader">
                       <AuthorPortrait author={author} className="authorLibraryGalleryPortrait" />
                       <div className="authorLibraryGalleryIdentity">
                         <h2>{author.name}</h2>
-                        <div className="muted">
-                          {author.about_text ?? "Open this corpus to browse its logical documents and provenance."}
-                        </div>
                       </div>
                     </div>
-                    <div className="authorLibraryMetaGrid">
-                      <span className="authorLibraryMetaChip">
-                        <strong>Documents:</strong> {author.document_count}
-                      </span>
-                      <span className="authorLibraryMetaChip">
-                        <strong>Sources:</strong> {author.source_count}
-                      </span>
-                      {author.latest_document_at ? (
-                        <span className="authorLibraryMetaChip">
-                          <strong>Updated:</strong> {formatDateTime(author.latest_document_at)}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="authorLibraryMetaGrid">
-                      {author.collections.map((collection) => (
-                        <span key={`${author.id}:${collection}`} className="authorLibraryMetaChip">
-                          <strong>Collection:</strong> {collection}
-                        </span>
-                      ))}
-                      {author.work_types.map((workType) => (
-                        <span key={`${author.id}:${workType}`} className="authorLibraryMetaChip">
-                          <strong>Work type:</strong> {workType}
-                        </span>
-                      ))}
-                    </div>
-                    <Link className="btn authorLibraryBrowseLink" to={authorRoute(author.id)}>
-                      Browse {author.name}'s library
-                    </Link>
-                  </article>
+                  </Link>
                 ))}
               </section>
             ) : null}
@@ -403,74 +359,31 @@ export default function AuthorLibrary() {
             {library ? (
               <>
                 <section className="grid authorLibraryOverview">
-                  <div className="card authorLibraryAuthorCard">
+                  <div className="card authorLibraryAuthorCard authorLibraryAuthorCardMinimal">
                     <div className="authorLibraryGalleryHeader">
                       <AuthorPortrait author={library.author} />
                       <div className="authorLibraryGalleryIdentity">
                         <h2>{library.author.name}</h2>
-                        <div className="muted">
-                          {library.author.about_text ?? "Browse grouped logical documents, provenance, and related works."}
-                        </div>
                       </div>
-                    </div>
-                    <div className="authorLibraryMetaGrid">
-                      <span className="authorLibraryMetaChip">
-                        <strong>Documents:</strong> {library.author.document_count}
-                      </span>
-                      <span className="authorLibraryMetaChip">
-                        <strong>Sources:</strong> {library.author.source_count}
-                      </span>
-                      {library.grouping.primary_field ? (
-                        <span className="authorLibraryMetaChip">
-                          <strong>Primary grouping:</strong> {prettyFieldName(library.grouping.primary_field)}
-                        </span>
-                      ) : null}
-                      {library.grouping.secondary_field ? (
-                        <span className="authorLibraryMetaChip">
-                          <strong>Secondary grouping:</strong> {prettyFieldName(library.grouping.secondary_field)}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="authorLibraryMetaGrid">
-                      {library.author.collections.map((collection) => (
-                        <span key={`${library.author.id}:${collection}`} className="authorLibraryMetaChip">
-                          <strong>Collection:</strong> {collection}
-                        </span>
-                      ))}
-                      {library.author.work_types.map((workType) => (
-                        <span key={`${library.author.id}:${workType}`} className="authorLibraryMetaChip">
-                          <strong>Work type:</strong> {workType}
-                        </span>
-                      ))}
-                      {library.author.latest_document_at ? (
-                        <span className="authorLibraryMetaChip">
-                          <strong>Updated:</strong> {formatDateTime(library.author.latest_document_at)}
-                        </span>
-                      ) : null}
                     </div>
                   </div>
                 </section>
 
                 <section className="grid authorLibraryLibraryPage">
                   <div className="card authorLibraryListPanel">
-                    <div className="cardTitle">Browse logical documents</div>
+                    <div className="cardTitle">Writings</div>
                     {groupedSections.length ? (
                       <div className="authorLibraryGroupStack">
                         {groupedSections.map((group) => (
                           <section key={`${group.field}:${group.value}`} className="authorLibraryGroup">
                             <div className="authorLibraryGroupHeader">
                               <h3>{group.label}</h3>
-                              <span className="pill">
-                                {prettyFieldName(group.field)} • {group.document_count}
-                              </span>
                             </div>
                             {group.secondary_groups.length ? (
                               <div className="authorLibrarySecondaryStack">
                                 {group.secondary_groups.map((secondaryGroup) => (
                                   <div key={`${group.value}:${secondaryGroup.value}`} className="authorLibrarySecondaryGroup">
-                                    <div className="cardTitle">
-                                      {prettyFieldName(secondaryGroup.field)}: {secondaryGroup.label}
-                                    </div>
+                                    <div className="cardTitle">{secondaryGroup.label}</div>
                                     <div className="authorLibraryDocumentStack">
                                       {secondaryGroup.documents.map((document) => (
                                         <DocumentLinkCard key={document.id} authorId={authorId} document={document} />
@@ -516,6 +429,7 @@ export default function AuthorLibrary() {
               <div
                 ref={readerSurfaceRef}
                 className={`card authorLibraryReaderSurface${isFullscreen ? " authorLibraryReaderSurfaceFullscreen" : ""}`}
+                data-testid="author-library-reader-surface"
               >
                 <div className="authorLibraryReaderContent">
                   <div className="authorLibraryReaderHeader">
@@ -528,51 +442,26 @@ export default function AuthorLibrary() {
                         <span>{documentDetail.title}</span>
                       </div>
                       <h2>{documentDetail.title}</h2>
-                      <div className="muted">
-                        {documentDetail.author_name ?? documentDetail.author_id ?? "Unknown author"}
+                      <div className="authorLibraryReaderMeta">
+                        <span>{documentDetail.author_name ?? documentDetail.author_id ?? "Unknown author"}</span>
+                        {documentDetail.publication_label ? <span>{documentDetail.publication_label}</span> : null}
                       </div>
                     </div>
-                    <span className="pill">{documentDetail.char_count.toLocaleString()} chars</span>
-                  </div>
-
-                  <MetadataChips entries={documentMetaEntries(documentDetail)} />
-
-                  <div className="authorLibraryMetaGrid">
-                    {documentDetail.source_section ? (
-                      <span className="authorLibraryMetaChip">
-                        <strong>Section:</strong> {documentDetail.source_section}
-                      </span>
-                    ) : null}
-                    {documentDetail.source_author_name ? (
-                      <span className="authorLibraryMetaChip">
-                        <strong>Source provenance:</strong> {documentDetail.source_author_name}
-                      </span>
-                    ) : null}
-                    <span className="authorLibraryMetaChip">
-                      <strong>Stored:</strong> {formatDateTime(documentDetail.created_at)}
-                    </span>
                   </div>
 
                   {documentDetail.source_url ? (
                     <a className="authorLibrarySourceLink" href={documentDetail.source_url} rel="noreferrer" target="_blank">
-                      Open provenance link
+                      Open source
                     </a>
                   ) : null}
 
-                  <RelatedDocumentLinks
-                    label="Parent document"
-                    authorId={authorId}
-                    documents={documentDetail.parent_document ? [documentDetail.parent_document] : []}
-                  />
-                  <RelatedDocumentLinks
-                    label="Related documents"
-                    authorId={authorId}
-                    documents={documentDetail.child_documents}
-                  />
-
-                  <div className="authorLibraryReaderText" data-testid="author-library-reader-text">
-                    {documentDetail.clean_text}
-                  </div>
+                  {documentDetail.content_blocks?.length ? (
+                    <StructuredDocumentRenderer blocks={documentDetail.content_blocks} />
+                  ) : (
+                    <div className="authorLibraryReaderText" data-testid="author-library-reader-text">
+                      {documentDetail.clean_text}
+                    </div>
+                  )}
                 </div>
               </div>
             ) : null}

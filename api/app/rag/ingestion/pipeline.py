@@ -37,6 +37,7 @@ from app.rag.ingestion.selector import (
     SelectiveIngestionOptions,
     apply_selective_options,
 )
+from app.rag.ingestion.structured_content import build_content_blocks
 from app.rag.ingestion.source_presets import (
     apply_source_preset,
     normalize_source_parse_result,
@@ -150,6 +151,7 @@ def _persist_document_and_chunks(
     """Create RagDocument + RagChunk rows for one logical document."""
     _, raw_chunks, _ = _build_document_chunks_and_validation(source, parse_result, plan)
     publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
+    content_blocks = build_content_blocks(plan.selected_sections, fallback_text=plan.clean_text)
 
     doc = RagDocument(
         source_id=source.id,
@@ -169,6 +171,7 @@ def _persist_document_and_chunks(
         raw_text=plan.raw_text,
         clean_text=plan.clean_text,
         metadata_json=plan.metadata,
+        content_blocks_json=content_blocks or None,
     )
     db.add(doc)
     db.flush()

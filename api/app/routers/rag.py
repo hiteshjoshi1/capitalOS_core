@@ -467,6 +467,18 @@ class RelatedLibraryDocumentOut(BaseModel):
     relationship: str
 
 
+class LibraryContentBlockOut(BaseModel):
+    block_id: str
+    type: str
+    order: int
+    level: Optional[int] = None
+    text: Optional[str] = None
+    items: Optional[list[str]] = None
+    table_markdown: Optional[str] = None
+    table_rows: Optional[list[list[str]]] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class LibraryDocumentDetailOut(BaseModel):
     id: str
     source_id: str
@@ -486,6 +498,7 @@ class LibraryDocumentDetailOut(BaseModel):
     source_section: Optional[str]
     metadata: dict[str, Any]
     clean_text: str
+    content_blocks: Optional[list[LibraryContentBlockOut]] = None
     char_count: int
     parent_document: Optional[RelatedLibraryDocumentOut]
     child_documents: list[RelatedLibraryDocumentOut]
@@ -1120,6 +1133,7 @@ def get_library_document(
         source_section=document.source_section,
         metadata=document.metadata_json or {},
         clean_text=document.clean_text or "",
+        content_blocks=document.content_blocks_json or None,
         char_count=len(document.clean_text or ""),
         parent_document=parent_document,
         child_documents=[

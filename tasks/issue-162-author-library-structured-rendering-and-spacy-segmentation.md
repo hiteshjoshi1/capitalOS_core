@@ -258,3 +258,132 @@ _Human-readable next steps._
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `waiting_for_human`
+
+## Workflow Snapshot
+- latest_outcome: Implemented persisted structured Author Library content blocks, typed reader rendering, and spaCy-first sentence segmentation. The document detail API now returns optional structured reader blocks without dropping `clean_text`, tables are preserved for both retrieval and display, and the full required Makefile verification suite passed.
+- next_action: All deterministic gates passed. Review the changes in the working tree, then run `make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR.
+- pipeline_version: `v3`
+- provider_model: `copilot/gpt-5.4`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: Persist structured document content and expose it in the document detail API without removing `clean_text`.
+- Acceptance criterion: Render Author Library documents from typed content blocks when available, including headings, prose, lists, quotes, and tables.
+- Acceptance criterion: Preserve tables in both retrieval/audit form and display form, with horizontal overflow handling for wide tables.
+- Acceptance criterion: Use spaCy as the default sentence segmentation path for recursive and semantic chunking, leaving regex only as a fallback.
+- Acceptance criterion: Cover sentence segmentation, structured-content persistence/API serialization, and reader rendering with tests.
+- Acceptance criterion: Document the updated parser-to-reader architecture, including diagram, re-ingestion expectations, and verification flow.
+
+## Prepare
+Checked out `feature/issue-162-author-library-structured-rendering-and-spacy-segmentation` from `main` and ensured task file exists.
+
+## Plan Summary
+Persist ordered reader blocks on `rag_documents`, expose them through the library document detail API, render typed blocks in the Author Library with a legacy `clean_text` fallback, and replace regex-first chunk sentence splitting with a deterministic spaCy sentencizer plus regression coverage.
+
+### Architecture Decisions
+- Persist structured reader content on `rag_documents.content_blocks_json` while retaining `clean_text` for backward compatibility.
+- Normalize parsed sections into ordered content blocks with stable `block_id` values so later citation deep-links can target specific passages.
+- Store tables in dual form: `table_markdown` for audit/retrieval fidelity and `table_rows` for display fidelity.
+- Use spaCy `blank("en")` with `sentencizer` as the default sentence segmentation path, keeping regex only as a guarded fallback.
+- Model headings as explicit blocks with headingless descendant body blocks so fanout/selective ingestion can preserve section bodies under chosen headings.
+
+### Acceptance Criteria
+- Persist structured document content and expose it in the document detail API without removing `clean_text`.
+- Render Author Library documents from typed content blocks when available, including headings, prose, lists, quotes, and tables.
+- Preserve tables in both retrieval/audit form and display form, with horizontal overflow handling for wide tables.
+- Use spaCy as the default sentence segmentation path for recursive and semantic chunking, leaving regex only as a fallback.
+- Cover sentence segmentation, structured-content persistence/API serialization, and reader rendering with tests.
+- Document the updated parser-to-reader architecture, including diagram, re-ingestion expectations, and verification flow.
+
+### Planned Paths
+- `api/app`
+- `api/tests`
+- `api/requirements.txt`
+- `web/src`
+- `docs`
+- `migrations`
+
+## Build Summary
+Implemented persisted structured Author Library content blocks, typed reader rendering, and spaCy-first sentence segmentation. The document detail API now returns optional structured reader blocks without dropping `clean_text`, tables are preserved for both retrieval and display, and the full required Makefile verification suite passed.
+
+### Changed Files
+- `api/app/models/rag.py`
+- `api/app/rag/ingestion/chunker.py`
+- `api/app/rag/ingestion/normalization.py`
+- `api/app/rag/ingestion/parser.py`
+- `api/app/rag/ingestion/pipeline.py`
+- `api/app/rag/ingestion/selector.py`
+- `api/app/rag/ingestion/structured_content.py`
+- `api/app/routers/rag.py`
+- `api/requirements.txt`
+- `api/tests/test_rag.py`
+- `api/tests/test_rag_chunker.py`
+- `api/tests/test_rag_discovery.py`
+- `api/tests/test_rag_document_library.py`
+- `api/tests/test_rag_fanout.py`
+- `api/tests/test_rag_parser.py`
+- `api/tests/test_selective_ingestion.py`
+- `docs/rag-structured-reader-architecture.md`
+- `migrations/049_rag_document_content_blocks.sql`
+- `tasks/issue-162-author-library-structured-rendering-and-spacy-segmentation.md`
+- `web/src/App.css`
+- `web/src/__tests__/AuthorLibrary.test.tsx`
+- `web/src/lib/api.ts`
+- `web/src/routes/AuthorLibrary.tsx`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented persisted structured Author Library content blocks, typed reader rendering, and spaCy-first sentence segmentation. The document detail API now returns optional structured reader blocks without dropping `clean_text`, tables are preserved for both retrieval and display, and the full required Makefile verification suite passed.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/gpt-5.4`
+
+### Semantic Checks
+- `pass` Author Library document rendering no longer relies solely on a single plain `clean_text` blob when structured content is available.: `web/src/routes/AuthorLibrary.tsx` now renders `StructuredDocumentRenderer` when `content_blocks` exist, and `web/src/__tests__/AuthorLibrary.test.tsx` asserts structured rendering on the main document while preserving fallback on the legacy note document.
+- `pass` The document detail API returns an optional structured-content payload while keeping `clean_text` for backward compatibility.: `api/app/routers/rag.py` adds `content_blocks` to `LibraryDocumentDetailOut` while still returning `clean_text`; `api/tests/test_rag_document_library.py` asserts both are serialized.
+- `pass` The Author Library reader renders headings, paragraphs, and lists as structured blocks with readable spacing.: Typed block rendering and supporting styles were added in `web/src/routes/AuthorLibrary.tsx` and `web/src/App.css`, with list and prose assertions in `web/src/__tests__/AuthorLibrary.test.tsx`.
+- `pass` The Author Library reader renders supported tables as actual table UI, not raw pipe-table Markdown or collapsed plain text, and long tables remain usable with overflow handling.: Table blocks now render as HTML tables inside `.authorLibraryTableScroller`; the reader test asserts table cells render, and CSS adds horizontal overflow handling.
+- `pass` Documents that lack structured content still render through a clear fallback path.: `AuthorLibrary.tsx` keeps the old `author-library-reader-text` path when `content_blocks` is empty/null; the notes document test exercises that fallback.
+- `pass` Structured parse output is persisted in application data rather than discarded after ingestion.: `api/app/models/rag.py` adds `content_blocks_json`, `api/app/rag/ingestion/pipeline.py` persists normalized blocks, and `api/tests/test_rag_fanout.py` asserts persisted `content_blocks_json` values on ingested documents.
+- `pass` Table content is preserved in both a text-oriented representation for retrieval/auditability and a display-oriented representation for the reader.: `api/app/rag/ingestion/parser.py` now stores both `table_markdown` and `table_rows`; `api/app/rag/ingestion/structured_content.py` carries both into persisted reader blocks, and API tests assert `table_rows` output.
+- `pass` The default sentence segmentation path for chunking uses spaCy rather than the current regex splitter, and recursive plus semantic chunking both use that path when sentence boundaries are needed.: `api/app/rag/ingestion/chunker.py` now builds a spaCy sentencizer and uses it in `_split_sentences()`, which is called by `_recursive_split()` and semantic chunking in `chunk_recursive()`.
+- `pass` Tests cover sentence segmentation edge cases such as abbreviations, decimals, transcript Q&A, and wrapped prose.: `api/tests/test_rag_chunker.py` now covers abbreviations, decimals, multiline/wrapped prose, transcript Q&A, and regex fallback behavior.
+- `pass` Tests cover structured-content persistence, document detail API serialization, and reader rendering for prose sections, lists, and tables.: Persistence/API assertions were added in `api/tests/test_rag_fanout.py` and `api/tests/test_rag_document_library.py`; reader rendering coverage was added in `web/src/__tests__/AuthorLibrary.test.tsx`.
+- `pass` Documentation is added or updated with an architecture explanation and diagram for structured parsing, persistence, chunking, and reader rendering, including re-ingestion expectations.: Added `docs/rag-structured-reader-architecture.md` with as-is/to-be explanation, Mermaid flow diagram, table representation details, spaCy migration notes, verification commands, and re-ingestion guidance.
+- `pass` The structured reader model leaves a clear path for passage-anchor deep links and highlight rendering from AI Sage evidence citations, and the implementation is verifiable through Makefile commands and curl-verifiable APIs.: Persisted blocks now include stable `block_id` values and heading-context metadata; verification was completed with `make api-rebuild`, `make contract-backend`, `make test-backend`, `make api-smoke`, `make lint`, `make typecheck`, `make contract-frontend`, `make test-frontend`, `make e2e`, `make orch-test`, and `make web-rebuild`.
+
+### Risk Flags
+- legacy-documents-need-reingestion
+- complex-pdf-table-normalization-may-fallback
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->

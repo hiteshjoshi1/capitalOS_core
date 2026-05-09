@@ -67,6 +67,8 @@ class TestDataclasses:
         assert s.content == "Some text"
         assert s.content_type == "text"
         assert s.table_markdown is None
+        assert s.table_rows is None
+        assert s.items is None
 
     def test_document_section_table(self):
         from app.rag.ingestion.parser import DocumentSection
@@ -77,9 +79,11 @@ class TestDataclasses:
             content="A B",
             content_type="table",
             table_markdown="| A | B |\n|---|---|\n| 1 | 2 |",
+            table_rows=[["A", "B"], ["1", "2"]],
         )
         assert s.content_type == "table"
         assert "| A | B |" in s.table_markdown
+        assert s.table_rows == [["A", "B"], ["1", "2"]]
 
     def test_structured_parse_result_fields(self):
         from app.rag.ingestion.parser import StructuredParseResult
@@ -175,6 +179,7 @@ class TestHtmlStructuredParser:
         assert "Year" in md
         assert "Value" in md
         assert "|" in md  # markdown table format
+        assert table_sections[0].table_rows == [["Year", "Value"], ["2023", "100"], ["2024", "200"]]
 
     def test_table_markdown_has_separator_row(self):
         from app.rag.ingestion.parser import parse_html_structured
@@ -197,8 +202,24 @@ class TestHtmlStructuredParser:
         html = _html("<h2>Key Points</h2><ul><li>Alpha</li><li>Beta</li></ul>")
         result = parse_html_structured(html)
         list_sections = [s for s in result.sections if "list" in s.content_type]
-        all_content = "\n".join(s.content for s in result.sections)
-        assert "Alpha" in all_content or any("Alpha" in s.content for s in result.sections)
+        assert list_sections[0].items == ["Alpha", "Beta"]
+
+    def test_blockquote_extracted(self):
+        from app.rag.ingestion.parser import parse_html_structured
+
+        html = _html("<h2>Transcript</h2><blockquote>Stay rational under pressure.</blockquote>")
+        result = parse_html_structured(html)
+        quote_sections = [s for s in result.sections if s.content_type == "quote"]
+        assert quote_sections[0].content == "Stay rational under pressure."
+
+    def test_text_manual_sections_preserve_paragraphs_lists_and_quotes(self):
+        from app.rag.ingestion.parser import parse
+
+        payload = b"## Notes\n\nFirst paragraph.\n\n- Alpha\n- Beta\n\n> Stay patient."
+        result = parse(payload, "manual")
+        assert [section.content_type for section in result.sections] == ["heading", "text", "list", "quote"]
+        assert result.sections[2].items == ["Alpha", "Beta"]
+        assert result.sections[3].content == "Stay patient."
 
     def test_clean_text_always_populated(self):
         from app.rag.ingestion.parser import parse_html_structured
@@ -360,6 +381,7 @@ class TestPdfStructuredParser:
         assert table_sections
         assert "Year" in table_sections[0].table_markdown
         assert "|" in table_sections[0].table_markdown
+        assert table_sections[0].table_rows == [["Year", "Value"], ["2023", "100"]]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -514,10 +536,11 @@ class TestPipelineStructuredIntegration:
         assert "Insurance Operations" in headings
 
     def test_parse_text_wraps_to_structured(self):
-        """parse() for 'text' returns StructuredParseResult with empty sections."""
+        """parse() for 'text' returns StructuredParseResult with paragraph sections."""
         from app.rag.ingestion.parser import StructuredParseResult, parse
 
         result = parse(b"Some text content", "text")
         assert isinstance(result, StructuredParseResult)
-        assert result.sections == []
+        assert len(result.sections) == 1
+        assert result.sections[0].content_type == "text"
         assert result.doc_metadata == {}

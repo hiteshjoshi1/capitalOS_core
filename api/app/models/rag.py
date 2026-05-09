@@ -227,6 +227,7 @@ class RagDocument(Base):
     metadata_json = Column(_JsonBlob, nullable=False, default=dict)
     raw_text = Column(Text)
     clean_text = Column(Text)
+    content_blocks_json = Column(_JsonBlob, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     source = relationship("RagSource", back_populates="documents")

@@ -6,6 +6,8 @@ type PageShellProps = {
   subtitle?: string;
   hideHeader?: boolean;
   headerActions?: ReactNode;
+  className?: string;
+  fillHeight?: boolean;
   /** @deprecated Navigation moved to Sidebar; kept for backward compatibility */
   activeRoute?: string;
   /** @deprecated Navigation moved to Sidebar; kept for backward compatibility */
@@ -24,6 +26,8 @@ export default function PageShell({
   subtitle,
   hideHeader = false,
   headerActions,
+  className,
+  fillHeight = false,
   children,
 }: PageShellProps) {
   const { hasProvider, setHeaderActions } = useShellHeader();
@@ -39,7 +43,7 @@ export default function PageShell({
   }, [hasProvider, headerActions, setHeaderActions]);
 
   return (
-    <div className="pageShellWrap">
+    <div className={`pageShellWrap${fillHeight ? " pageShellWrapFillHeight" : ""}${className ? ` ${className}` : ""}`}>
       {!hideHeader ? (
         <header className="header dashboardHeader">
           <div className="titleBlock dashboardTitleBlock">

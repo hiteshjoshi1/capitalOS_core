@@ -26,6 +26,7 @@ import {
 } from "../lib/api";
 
 const EVIDENCE_CONTEXT_TARGET_CHARS = 1200;
+const PRIMARY_PASSAGE_TARGET_CHARS = 420;
 const CHAT_ROW_TITLE_LIMIT = 50;
 
 function readerRoute(authorId: string, documentId: string): string {
@@ -115,6 +116,49 @@ function buildEvidenceContextExcerpt(contextText: string, anchorText: string): s
   return trimEvidenceWindow(contextText, before, after);
 }
 
+function buildPrimaryPassageExcerpt(contextText: string, anchorText: string): string {
+  if (contextText.length <= PRIMARY_PASSAGE_TARGET_CHARS) {
+    return contextText;
+  }
+
+  const normalizedAnchor = normalizeEvidenceText(anchorText);
+  const lowerContext = contextText.toLowerCase();
+  const lowerAnchor = normalizedAnchor.toLowerCase();
+  const anchorIndex = lowerAnchor ? lowerContext.indexOf(lowerAnchor) : -1;
+
+  if (anchorIndex < 0) {
+    return trimEvidenceWindow(contextText, 0, PRIMARY_PASSAGE_TARGET_CHARS);
+  }
+
+  const before = Math.max(0, anchorIndex - 120);
+  const after = Math.min(
+    contextText.length,
+    anchorIndex + normalizedAnchor.length + (PRIMARY_PASSAGE_TARGET_CHARS - 180),
+  );
+  return trimEvidenceWindow(contextText, before, after);
+}
+
+function bestGroundedPassage(evidence: AISageChatEvidence[]): string {
+  const rankedEvidence = [...evidence].sort((left, right) => {
+    const leftScore = typeof left.ranking_score === "number" ? left.ranking_score : Number.NEGATIVE_INFINITY;
+    const rightScore = typeof right.ranking_score === "number" ? right.ranking_score : Number.NEGATIVE_INFINITY;
+    return rightScore - leftScore;
+  });
+
+  for (const item of rankedEvidence) {
+    const contextText = normalizeEvidenceText(item.metadata_json?.context_text);
+    const anchorText = normalizeEvidenceText(item.metadata_json?.anchor_text || item.snippet);
+    if (contextText) {
+      return buildPrimaryPassageExcerpt(contextText, anchorText);
+    }
+    if (anchorText) {
+      return anchorText;
+    }
+  }
+
+  return "";
+}
+
 function renderEvidenceText(text: string, highlight: string | null) {
   const normalizedHighlight = normalizeEvidenceText(highlight);
   if (!normalizedHighlight || normalizedHighlight.length < 12) {
@@ -145,7 +189,6 @@ export default function AISage() {
   const { chatId } = useParams<{ chatId?: string }>();
   const { user } = useContext(AuthContext);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
-  const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const stickToBottomRef = useRef(true);
 
@@ -212,11 +255,8 @@ export default function AISage() {
   }, [activeChat?.id, chatId, loadChatDetail]);
 
   useEffect(() => {
-    const textarea = composerRef.current;
-    if (textarea && !streaming) {
-      textarea.focus();
-    }
-  }, [chatId, streaming]);
+    stickToBottomRef.current = false;
+  }, [chatId]);
 
   useEffect(() => {
     const handleShortcut = (event: globalThis.KeyboardEvent) => {
@@ -268,16 +308,13 @@ export default function AISage() {
     container.scrollTop = container.scrollHeight;
   }, [activeChat?.messages, streaming]);
 
-  async function handleCreateChat(focusComposer = false): Promise<void> {
+  async function handleCreateChat(): Promise<void> {
     const created = await api.aiSageCreateChat({});
     setActiveChat(created);
     setSidebarOpen(false);
     setSidebarMenuChatId(null);
     await loadChatList();
     navigate(`/ai-sage/chats/${created.id}`);
-    if (focusComposer) {
-      requestAnimationFrame(() => composerRef.current?.focus());
-    }
   }
 
   async function handleRenameChat(target: AISageChatSummary | AISageChatDetail): Promise<void> {
@@ -302,6 +339,7 @@ export default function AISage() {
 
   async function handleRetry(messageId: string): Promise<void> {
     if (!activeChat) return;
+    stickToBottomRef.current = true;
     const response = await api.aiSageRetryMessage(activeChat.id, messageId);
     setActiveChat(response.chat);
     await loadChatList();
@@ -325,6 +363,7 @@ export default function AISage() {
     setValidationError(null);
     setStreaming(true);
     setSidebarOpen(false);
+    stickToBottomRef.current = true;
     let targetChatId = activeChat?.id;
     if (!targetChatId) {
       const created = await api.aiSageCreateChat({});
@@ -440,9 +479,10 @@ export default function AISage() {
   }, [activeChat, activeChatError, activeChatLoading, greetingName]);
 
   const showLanding = !activeChatLoading && !activeChatError && (!activeChat || activeChat.messages.length === 0);
+  const mainPanelClassName = `aiSageMainPanel ${showLanding ? "aiSageMainPanelLanding" : "aiSageMainPanelThread"}`;
 
   return (
-    <PageShell title="" hideHeader headerActions={headerActions}>
+    <PageShell title="" hideHeader headerActions={headerActions} className="aiSagePageShell" fillHeight>
       <div className="aiSageWorkspace">
         <aside className={`card aiSageSidebar ${sidebarOpen ? "aiSageSidebarOpen" : ""}`}>
           <div className="aiSageSidebarHeader">
@@ -454,7 +494,7 @@ export default function AISage() {
             </button>
           </div>
           <div className="aiSageSidebarTools">
-            <button className="aiSageSidebarAction aiSageSidebarActionPrimary" type="button" onClick={() => void handleCreateChat(true)}>
+            <button className="aiSageSidebarAction aiSageSidebarActionPrimary" type="button" onClick={() => void handleCreateChat()}>
               <SidebarActionIcon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M12 20h9" />
@@ -471,16 +511,6 @@ export default function AISage() {
                 </svg>
               </SidebarActionIcon>
               <span>Search chats</span>
-            </button>
-            <button className="aiSageSidebarAction" type="button" title="Coming soon">
-              <SidebarActionIcon>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H11l2 2h5.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19H5.5A2.5 2.5 0 0 1 3 16.5Z" />
-                  <path d="M12 10v6" />
-                  <path d="M9 13h6" />
-                </svg>
-              </SidebarActionIcon>
-              <span>Projects</span>
             </button>
           </div>
           {chatListError ? <div className="aiSageErrorState">{chatListError}</div> : null}
@@ -542,7 +572,7 @@ export default function AISage() {
           </div>
         </aside>
 
-        <div className="aiSageMainPanel">
+        <div className={mainPanelClassName}>
           {showLanding ? (
             <section className="aiSageLanding">
               <p className="aiSageLandingGreeting">Hello {greetingName}</p>
@@ -582,7 +612,13 @@ export default function AISage() {
 
           {!showLanding ? (
             <>
-              <div className="aiSageTranscript card" ref={transcriptRef} onScroll={handleTranscriptScroll}>
+              <div
+                key={activeChat?.id ?? "ai-sage-transcript"}
+                className="aiSageTranscript card"
+                data-testid="ai-sage-transcript"
+                ref={transcriptRef}
+                onScroll={handleTranscriptScroll}
+              >
                 {transcriptEmptyState}
                 {activeChat?.messages.map((message) => (
                   <MessageBubble key={message.id} message={message} onRetry={handleRetry} onUseSuggestion={setQuery} />
@@ -591,7 +627,6 @@ export default function AISage() {
 
               <form className="card aiSageComposer" onSubmit={(event) => void handleSendMessage(event)}>
                 <textarea
-                  ref={composerRef}
                   className="formInput aiSageComposerInput"
                   rows={3}
                   value={query}
@@ -704,6 +739,10 @@ function MessageBubble({
   const keyFacts = Array.isArray(metadata.key_facts)
     ? metadata.key_facts.filter((value): value is string => typeof value === "string")
     : [];
+  const resolvedPrimaryPassage = message.status === "completed" && message.evidence.length > 0
+    ? bestGroundedPassage(message.evidence)
+    : "";
+  const visibleAssistantText = resolvedPrimaryPassage || message.content || "Thinking…";
 
   return (
     <section className="aiSageMessageRow aiSageMessageRowAssistant">
@@ -717,7 +756,7 @@ function MessageBubble({
           </div>
         ) : (
           <>
-            <p className="aiSageMessageText">{message.content || "Thinking…"}</p>
+            <p className="aiSageMessageText">{visibleAssistantText}</p>
             <details className="aiSageSecondaryPanel" open={message.status === "in_progress"}>
               <summary>Retrieval details</summary>
               <div className="aiSageSecondaryPanelBody">

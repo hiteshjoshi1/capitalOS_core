@@ -152,6 +152,7 @@ def sqlite_rag_db():
             metadata_json TEXT NOT NULL DEFAULT '{}',
             raw_text TEXT,
             clean_text TEXT,
+            content_blocks_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,

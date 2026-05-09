@@ -39,6 +39,18 @@ except Exception:
     _enc = None
     _TIKTOKEN_AVAILABLE = False
 
+try:
+    import spacy
+
+    _SPACY_SENTENCIZER = spacy.blank("en")
+    if "sentencizer" not in _SPACY_SENTENCIZER.pipe_names:
+        _SPACY_SENTENCIZER.add_pipe("sentencizer")
+    _SPACY_AVAILABLE = True
+except Exception:
+    spacy = None  # type: ignore[assignment]
+    _SPACY_SENTENCIZER = None
+    _SPACY_AVAILABLE = False
+
 
 def _count_tokens(text: str) -> int:
     """Count tokens accurately via tiktoken, falling back to word-count estimate."""
@@ -99,8 +111,6 @@ class DocumentSection:
 
 # ── Sentence splitting ─────────────────────────────────────────────────────────
 
-# Matches sentence boundaries: end punctuation followed by whitespace + capital letter.
-# Negative lookbehind prevents splitting on abbreviations like Mr., Dr., U.S., 1.5, etc.
 _SENTENCE_PATTERN = re.compile(
     r"(?<!\w\.\w.)(?<![A-Z][a-z]\.)(?<=\.|\!|\?)\s+(?=[A-Z])"
 )
@@ -108,13 +118,21 @@ _SENTENCE_PATTERN = re.compile(
 
 def _split_sentences(text: str) -> list[str]:
     """
-    Split text into sentences using regex-based boundary detection.
+    Split text into sentences using spaCy sentencizer when available.
 
-    Handles common abbreviations (Mr., Dr., U.S.) and decimal numbers.
-    Returns list of non-empty sentence strings.
+    The regex path remains as a guarded fallback for environments where spaCy is
+    unavailable, but Dockerized app runs should use the deterministic spaCy path.
     """
-    parts = _SENTENCE_PATTERN.split(text)
-    return [s.strip() for s in parts if s.strip()]
+    stripped = text.strip()
+    if not stripped:
+        return []
+    if _SPACY_AVAILABLE and _SPACY_SENTENCIZER is not None:
+        doc = _SPACY_SENTENCIZER(stripped)
+        sentences = [span.text.strip() for span in doc.sents if span.text.strip()]
+        if sentences:
+            return sentences
+    parts = _SENTENCE_PATTERN.split(stripped)
+    return [sentence.strip() for sentence in parts if sentence.strip()]
 
 
 def _split_paragraphs(text: str) -> list[str]:
