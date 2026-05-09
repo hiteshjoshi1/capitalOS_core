@@ -50,8 +50,16 @@ class TestRagFanoutPipeline:
             <html><body>
               <h1>Compounders</h1>
               <p>Great businesses can keep compounding for long periods when capital allocation remains disciplined.</p>
+              <ul>
+                <li>Focus on ROIC</li>
+                <li>Reinvest with discipline</li>
+              </ul>
               <h1>Temperament</h1>
               <p>Investors should welcome volatility when the underlying business quality remains intact.</p>
+              <table>
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>ROE</td><td>15%</td></tr>
+              </table>
             </body></html>
             """
 
@@ -68,6 +76,16 @@ class TestRagFanoutPipeline:
             assert "Temperament" in (source.clean_text or "")
             assert "Compounders" in (documents[0].clean_text or "")
             assert "Temperament" in (documents[0].clean_text or "")
+            assert documents[0].content_blocks_json is not None
+            assert [block["type"] for block in documents[0].content_blocks_json] == [
+                "heading",
+                "paragraph",
+                "list",
+                "heading",
+                "paragraph",
+                "table",
+            ]
+            assert documents[0].content_blocks_json[-1]["table_rows"] == [["Metric", "Value"], ["ROE", "15%"]]
         finally:
             db.close()
 

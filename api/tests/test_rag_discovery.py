@@ -144,7 +144,7 @@ def sqlite_session():
             title TEXT, published_at TEXT, publication_year INTEGER,
             venue TEXT, collection TEXT, canonical_work_id TEXT, canonical_status TEXT,
             dedupe_priority INTEGER, source_section TEXT, note_taker TEXT, work_type TEXT,
-            metadata_json TEXT NOT NULL DEFAULT '{}', raw_text TEXT, clean_text TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}', raw_text TEXT, clean_text TEXT, content_blocks_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         """CREATE TABLE IF NOT EXISTS rag_chunks (

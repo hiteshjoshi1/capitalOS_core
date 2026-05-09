@@ -29,6 +29,15 @@ RESTART_AT?=
 STATE_FILE?=
 RESUME_JSON?=
 CAFFEINATE?=$(shell command -v caffeinate 2>/dev/null)
+COMMIT_MSG?=
+
+ifneq ($(filter commit,$(MAKECMDGOALS)),)
+  ifeq ($(strip $(COMMIT_MSG)),)
+    COMMIT_MSG:=$(wordlist 2,$(words $(MAKECMDGOALS)),$(MAKECMDGOALS))
+  endif
+  .DEFAULT:
+	@:
+endif
 
 # ---- Helpers ----
 define require_task
@@ -68,7 +77,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead
+.PHONY: up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit
 
 up:
 	docker compose up -d
@@ -114,6 +123,17 @@ pr-open-if-ahead:
 		git push -u $(GIT_REMOTE) "$$branch"; \
 		gh pr create --base "$(BASE_BRANCH)" --head "$$branch" --fill; \
 	fi
+
+commit:
+	@test -n "$(strip $(COMMIT_MSG))" || (echo 'Usage: make commit "<commit message>"' && exit 2)
+	@branch=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$branch" = "$(BASE_BRANCH)" ]; then \
+		echo "Refusing to commit and push from base branch '$(BASE_BRANCH)'."; \
+		exit 2; \
+	fi
+	git add .
+	git commit -m "$(COMMIT_MSG)"
+	git push
 
 $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 	cd $(WEB_DIR) && npm ci

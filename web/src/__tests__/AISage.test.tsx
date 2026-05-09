@@ -89,6 +89,26 @@ const CHAT_DETAIL: AISageChatDetail = {
   ] satisfies AISageChatMessage[],
 };
 
+const CHAT_DETAIL_TWO: AISageChatDetail = {
+  id: "chat-2",
+  title: "Second thread",
+  created_at: "2026-05-02T10:00:00Z",
+  updated_at: "2026-05-02T10:05:00Z",
+  last_activity_at: "2026-05-02T10:04:00Z",
+  pinned_at: null,
+  metadata_json: null,
+  messages: [
+    {
+      id: "user-2",
+      role: "user",
+      content: "Second prompt",
+      status: "completed",
+      created_at: "2026-05-02T10:00:00Z",
+      evidence: [],
+    },
+  ] satisfies AISageChatMessage[],
+};
+
 function renderAISage(initialEntries = ["/ai-sage"]) {
   return render(
     <AuthContext.Provider
@@ -154,8 +174,10 @@ describe("AISage workspace", () => {
     renderAISage();
     expect(await screen.findByText("No chats yet.")).toBeInTheDocument();
     expect(screen.getByText("Hello Hitesh")).toBeInTheDocument();
+    expect(document.querySelector(".aiSageMainPanelLanding")).not.toBeNull();
     expect(screen.getByRole("button", { name: "New chat" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Search chats" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Projects" })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Ask AI Sage anything")).toBeInTheDocument();
     expect(screen.queryByText("Saved for one year from your last user message.")).not.toBeInTheDocument();
     expect(screen.queryByText("Build a persistent research thread and keep every answer grounded to evidence.")).not.toBeInTheDocument();
@@ -169,13 +191,50 @@ describe("AISage workspace", () => {
     renderAISage(["/ai-sage/chats/chat-1"]);
 
     expect(await screen.findByRole("heading", { name: "Moat review" })).toBeInTheDocument();
+    expect(document.querySelector(".aiSageMainPanelThread")).not.toBeNull();
     expect(screen.getByText("Explain moat")).toBeInTheDocument();
-    expect(screen.getByText(/Durable competitive advantages compound over time\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Grounded passages from Warren Buffett:/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Durable competitive advantages compound over time\./).length).toBeGreaterThan(0);
     expect(screen.queryByRole("link", { name: "Open document" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /A wonderful business can compound\./i }));
     expect(screen.getByText(/^Expanded context$/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute("href", "/author-library/warren_buffett/documents/doc-1");
     expect(screen.getByRole("button", { name: "Compare that with Nick Sleep" })).toBeInTheDocument();
+  });
+
+  it("remounts the transcript when switching saved chats so the next thread opens from the top", async () => {
+    vi.mocked(api.aiSageChats).mockResolvedValue({
+      items: [
+        CHAT_SUMMARY,
+        {
+          ...CHAT_SUMMARY,
+          id: "chat-2",
+          title: "Second thread",
+          updated_at: "2026-05-02T10:05:00Z",
+          last_activity_at: "2026-05-02T10:04:00Z",
+        },
+      ],
+      total: 2,
+      limit: 30,
+      offset: 0,
+    });
+    vi.mocked(api.aiSageGetChat).mockImplementation(async (chatId: string) => (
+      chatId === "chat-2" ? CHAT_DETAIL_TWO : CHAT_DETAIL
+    ));
+    const user = userEvent.setup();
+
+    renderAISage(["/ai-sage/chats/chat-1"]);
+
+    await screen.findByRole("heading", { name: "Moat review" });
+    const firstTranscript = screen.getByTestId("ai-sage-transcript");
+    firstTranscript.scrollTop = 240;
+
+    await user.click(screen.getByRole("button", { name: "Second thread" }));
+
+    expect(await screen.findByRole("heading", { name: "Second thread" })).toBeInTheDocument();
+    const secondTranscript = screen.getByTestId("ai-sage-transcript");
+    expect(secondTranscript).not.toBe(firstTranscript);
+    expect(screen.getByText("Second prompt")).toBeInTheDocument();
   });
 
   it("creates a new chat and streams the assistant response incrementally", async () => {

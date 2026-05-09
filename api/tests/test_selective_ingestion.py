@@ -184,11 +184,11 @@ class TestApplySelectiveOptions:
         result = apply_selective_options(sections, opts)
         assert [s.heading for s in result] == ["Part 1", "Part 2"]
 
-    def test_none_heading_sections_not_matched_by_include(self):
+    def test_include_headings_keeps_headingless_descendants_after_matched_heading(self):
         sections = _make_sections([None, "Intro", None, "Methods"])
         opts = SelectiveIngestionOptions(include_headings=["Intro"])
         result = apply_selective_options(sections, opts)
-        assert [s.heading for s in result] == ["Intro"]
+        assert [s.heading for s in result] == ["Intro", None]
 
     def test_none_heading_sections_not_excluded(self):
         sections = _make_sections([None, "Appendix", "Intro"])

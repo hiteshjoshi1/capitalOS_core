@@ -68,7 +68,7 @@ export default function AppShell() {
             </header>
           ) : null}
 
-          <div className="appShellContent">
+          <div key={location.pathname} className="appShellContent">
             <Outlet />
           </div>
         </ShellHeaderProvider>

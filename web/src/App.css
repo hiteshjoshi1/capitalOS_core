@@ -77,6 +77,15 @@ a {
   padding: 30px 28px 72px;
 }
 
+.pageShellWrapFillHeight {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .header {
   display: flex;
   justify-content: space-between;
@@ -3109,37 +3118,50 @@ a.btn {
 }
 
 .authorLibraryGallery {
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .authorLibraryLibraryPage {
-  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .aiSageWorkspace {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 224px;
+  grid-template-columns: minmax(0, 1fr) 296px;
+  flex: 1 1 auto;
   gap: 18px;
-  min-height: calc(100vh - 160px);
+  min-height: 0;
+  height: 100%;
   overflow-x: clip;
+  align-items: stretch;
+}
+
+.aiSagePageShell {
+  min-height: 0;
 }
 
 .aiSageSidebar {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   gap: 14px;
-  align-content: start;
   grid-column: 2;
+  grid-row: 1;
   width: 100%;
   min-width: 0;
-  max-height: calc(5 * 86px + 150px);
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
 }
 
 .aiSageSidebarList {
   display: grid;
+  flex: 1 1 auto;
   gap: 10px;
+  align-content: start;
+  grid-auto-rows: max-content;
   overflow-y: auto;
   overflow-x: hidden;
+  min-height: 0;
   min-width: 0;
   padding-right: 4px;
 }
@@ -3162,11 +3184,23 @@ a.btn {
 }
 
 .aiSageMainPanel {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  align-self: start;
+}
+
+.aiSageMainPanelLanding,
+.aiSageMainPanelThread {
   display: grid;
   gap: 16px;
-  grid-column: 1;
-  min-width: 0;
+  min-height: 0;
   align-content: start;
+}
+
+.aiSageMainPanelThread {
+  grid-template-rows: auto minmax(0, 1fr) auto;
 }
 
 .aiSageChatTitle {
@@ -3177,7 +3211,7 @@ a.btn {
 .aiSageTranscript {
   display: grid;
   gap: 14px;
-  max-height: calc(100vh - 320px);
+  min-height: 0;
   overflow-y: auto;
   align-content: start;
 }
@@ -3439,8 +3473,6 @@ a.btn {
 .aiSageComposer {
   display: grid;
   gap: 12px;
-  position: sticky;
-  bottom: 0;
 }
 
 .aiSageComposerInput {
@@ -3534,6 +3566,7 @@ a.btn {
     inset: 90px 20px 20px auto;
     width: min(360px, calc(100vw - 40px));
     max-height: calc(100vh - 110px);
+    height: auto;
     z-index: 60;
     transform: translateX(120%);
     transition: transform 0.2s ease;
@@ -3558,7 +3591,6 @@ a.btn {
   }
 
   .aiSageTranscript {
-    max-height: none;
     min-height: calc(100vh - 390px);
   }
 
@@ -3587,11 +3619,18 @@ a.btn {
 .authorLibraryReaderContent,
 .authorLibraryGalleryCard,
 .authorLibraryAuthorCard,
-.authorLibraryHeaderActions,
 .authorLibraryGalleryIdentity,
 .authorLibraryRelatedGroup {
   display: grid;
   gap: 14px;
+}
+
+.authorLibraryHeaderActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
 }
 
 .authorLibraryGalleryHeader {
@@ -3623,6 +3662,16 @@ a.btn {
   cursor: pointer;
 }
 
+.authorLibraryGalleryCardLink {
+  text-decoration: none;
+  color: inherit;
+}
+
+.authorLibraryGalleryCardLink:hover {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--line) 44%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent 82%);
+}
+
 .authorLibraryDocumentLink,
 .authorLibraryRelatedButton,
 .authorLibraryBrowseLink,
@@ -3636,9 +3685,20 @@ a.btn {
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent 82%);
 }
 
+.authorLibraryDocumentRow:hover {
+  background: color-mix(in srgb, var(--surface-glow) 74%, transparent 26%);
+}
+
 .authorLibraryDocumentTitle,
 .authorLibraryRelatedTitle {
   font-weight: 700;
+}
+
+.authorLibraryDocumentTitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .authorLibraryPortrait {
@@ -3653,6 +3713,12 @@ a.btn {
 .authorLibraryGalleryPortrait {
   width: 88px;
   height: 88px;
+}
+
+.authorLibraryGalleryIdentity h2,
+.authorLibraryGroupHeader h3,
+.authorLibraryReaderHeader h2 {
+  margin: 0;
 }
 
 .authorLibraryPortraitFallback {
@@ -3686,6 +3752,51 @@ a.btn {
   width: fit-content;
 }
 
+.authorLibraryAuthorCardMinimal {
+  gap: 0;
+}
+
+.authorLibraryDocumentStack {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--panel2) 88%, transparent 12%);
+}
+
+.authorLibraryDocumentRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  color: var(--text);
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+
+.authorLibraryDocumentStack .authorLibraryDocumentRow:last-child {
+  border-bottom: none;
+}
+
+.authorLibraryDocumentGlyph {
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--surface-glow) 82%, transparent 18%);
+}
+
+.authorLibraryDocumentGlyph svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+}
+
 .authorLibraryReaderSurface {
   width: min(100%, 1180px);
   justify-self: center;
@@ -3693,8 +3804,19 @@ a.btn {
 
 .authorLibraryReaderSurfaceFullscreen {
   width: 100%;
+  height: 100vh;
   min-height: 100vh;
   border-radius: 0;
+  box-sizing: border-box;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable both-edges;
+  padding: clamp(28px, 4vw, 56px) clamp(24px, 6vw, 72px) 48px;
+}
+
+.authorLibraryReaderContent {
+  width: min(100%, 920px);
+  margin: 0 auto;
 }
 
 .authorLibraryBreadcrumbs {
@@ -3711,6 +3833,120 @@ a.btn {
   border-top: 1px solid var(--line);
   padding-top: 16px;
   font-size: 16px;
+  max-width: 74ch;
+}
+
+.authorLibraryReaderMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.authorLibraryReaderMeta span + span::before {
+  content: "•";
+  margin-right: 10px;
+}
+
+.authorLibraryStructuredDocument {
+  display: grid;
+  gap: 18px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.authorLibraryBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.authorLibraryBlockSection {
+  gap: 8px;
+}
+
+.authorLibraryBlockHeading {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.authorLibraryBlockParagraph {
+  margin: 0;
+  max-width: 74ch;
+  font-size: 17px;
+  line-height: 1.8;
+  color: color-mix(in srgb, var(--text) 92%, var(--muted) 8%);
+}
+
+.authorLibraryBlockList {
+  margin: 0;
+  padding-left: 22px;
+  display: grid;
+  gap: 8px;
+  max-width: 74ch;
+  font-size: 16px;
+  line-height: 1.7;
+}
+
+.authorLibraryBlockQuote {
+  margin: 0;
+  padding: 16px 18px;
+  border-left: 3px solid color-mix(in srgb, var(--accent) 60%, var(--line) 40%);
+  background: color-mix(in srgb, var(--surface-glow) 82%, transparent 18%);
+  border-radius: 0 14px 14px 0;
+  max-width: 74ch;
+  font-size: 16px;
+  line-height: 1.8;
+  color: color-mix(in srgb, var(--text) 90%, var(--muted) 10%);
+}
+
+.authorLibraryBlockContext {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.authorLibraryTableScroller {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel2) 90%, transparent 10%);
+}
+
+.authorLibraryTable {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+}
+
+.authorLibraryTable th,
+.authorLibraryTable td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 14px;
+  vertical-align: top;
+}
+
+.authorLibraryTable th {
+  background: color-mix(in srgb, var(--surface-glow) 88%, transparent 12%);
+  color: var(--text);
+}
+
+.authorLibraryTable tr:last-child td {
+  border-bottom: none;
+}
+
+.authorLibraryTableFallback {
+  margin: 0;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.6;
 }
 
 .authorLibraryBrowseLink {

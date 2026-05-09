@@ -74,8 +74,11 @@ class DocumentSection:
     heading: Optional[str]          # Section heading text (None if before any heading)
     level: int                       # Heading level: 1=top, 2=sub, etc.
     content: str                     # Section body text (flat string)
-    content_type: str                # "text" | "table" | "list"
+    content_type: str                # "heading" | "text" | "table" | "list" | "quote"
     table_markdown: Optional[str] = None  # Markdown table when content_type=="table"
+    table_rows: Optional[list[list[str]]] = None
+    items: Optional[list[str]] = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -127,26 +130,55 @@ def _remove_boilerplate(text: str) -> str:
 
 # ── Table conversion helpers ──────────────────────────────────────────────────
 
-def _bs4_table_to_markdown(table_tag: Any) -> str:
-    """Convert a BeautifulSoup <table> element to a markdown table string."""
-    rows = []
+def _table_tag_to_rows(table_tag: Any) -> list[list[str]]:
+    rows: list[list[str]] = []
     for tr in table_tag.find_all("tr"):
         cells = [td.get_text(separator=" ", strip=True) for td in tr.find_all(["th", "td"])]
         if cells:
             rows.append(cells)
+    return rows
 
+
+def _rows_to_markdown(rows: list[list[str]]) -> str:
     if not rows:
-        return table_tag.get_text(separator=" ", strip=True)
-
-    # Normalise column count
-    max_cols = max(len(r) for r in rows)
-    padded = [r + [""] * (max_cols - len(r)) for r in rows]
-
+        return ""
+    max_cols = max(len(row) for row in rows)
+    padded = [row + [""] * (max_cols - len(row)) for row in rows]
     lines = ["| " + " | ".join(padded[0]) + " |"]
     lines.append("| " + " | ".join(["---"] * max_cols) + " |")
     for row in padded[1:]:
         lines.append("| " + " | ".join(row) + " |")
     return "\n".join(lines)
+
+
+def _bs4_table_to_markdown(table_tag: Any) -> str:
+    """Convert a BeautifulSoup <table> element to a markdown table string."""
+    rows = _table_tag_to_rows(table_tag)
+    if not rows:
+        return table_tag.get_text(separator=" ", strip=True)
+    return _rows_to_markdown(rows)
+
+
+def _bs4_table_to_rows(table_tag: Any) -> list[list[str]]:
+    return _table_tag_to_rows(table_tag)
+
+
+def _markdown_table_to_rows(markdown: str) -> list[list[str]]:
+    lines = [line.strip() for line in markdown.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return []
+    rows = []
+    for index, line in enumerate(lines):
+        if not line.startswith("|") or not line.endswith("|"):
+            return []
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if index == 1 and all(re.fullmatch(r":?-{3,}:?", cell or "---") for cell in cells):
+            continue
+        rows.append(cells)
+    if not rows:
+        return []
+    max_cols = max(len(row) for row in rows)
+    return [row + [""] * (max_cols - len(row)) for row in rows]
 
 
 def _html_table_to_markdown(table_html: str) -> str:
@@ -161,6 +193,19 @@ def _html_table_to_markdown(table_html: str) -> str:
     except Exception:
         pass
     return table_html
+
+
+def _html_table_to_rows(table_html: str) -> list[list[str]]:
+    if not _BS4_AVAILABLE or not table_html:
+        return []
+    try:
+        soup = BeautifulSoup(table_html, "html.parser")
+        table = soup.find("table")
+        if table:
+            return _bs4_table_to_rows(table)
+    except Exception:
+        pass
+    return _markdown_table_to_rows(table_html)
 
 
 # ── PDF metadata extraction ───────────────────────────────────────────────────
@@ -258,35 +303,22 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
 
     sections: list[DocumentSection] = []
     current_heading: Optional[str] = None
-    current_level: int = 1
-    current_parts: list[str] = []
-    current_type: str = "text"
-
-    def _flush() -> None:
-        nonlocal current_heading, current_level, current_parts, current_type
-        if current_parts or current_heading is not None:
-            sections.append(
-                DocumentSection(
-                    heading=current_heading,
-                    level=current_level,
-                    content="\n".join(current_parts).strip(),
-                    content_type=current_type,
-                    table_markdown=None,
-                )
-            )
-        current_heading = None
-        current_level = 1
-        current_parts = []
-        current_type = "text"
+    current_level = 1
 
     body = soup.find("body") or soup
     for tag_name, el in _walk_html_blocks(body):
         if tag_name in _HEADING_TAGS:
-            _flush()
             current_heading = el.get_text(strip=True)
             current_level = int(tag_name[1])
+            sections.append(
+                DocumentSection(
+                    heading=current_heading,
+                    level=current_level,
+                    content="",
+                    content_type="heading",
+                )
+            )
         elif tag_name == "table":
-            _flush()
             table_md = _bs4_table_to_markdown(el)
             sections.append(
                 DocumentSection(
@@ -295,21 +327,47 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                     content=el.get_text(separator=" ", strip=True),
                     content_type="table",
                     table_markdown=table_md,
+                    table_rows=_bs4_table_to_rows(el),
+                    metadata={"heading_context": current_heading} if current_heading else {},
                 )
             )
         elif tag_name in ("ul", "ol"):
-            for li in el.find_all("li", recursive=False):
-                current_parts.append(f"- {li.get_text(strip=True)}")
-            current_type = "list"
-        elif tag_name == "li":
-            current_parts.append(f"- {el.get_text(strip=True)}")
-            current_type = "list"
+            items = [li.get_text(separator=" ", strip=True) for li in el.find_all("li", recursive=False)]
+            if items:
+                sections.append(
+                    DocumentSection(
+                        heading=None,
+                        level=current_level + 1,
+                        content="\n".join(f"- {item}" for item in items),
+                        content_type="list",
+                        items=items,
+                        metadata={"heading_context": current_heading} if current_heading else {},
+                    )
+                )
+        elif tag_name == "blockquote":
+            text = el.get_text(separator=" ", strip=True)
+            if text:
+                sections.append(
+                    DocumentSection(
+                        heading=None,
+                        level=current_level + 1,
+                        content=text,
+                        content_type="quote",
+                        metadata={"heading_context": current_heading} if current_heading else {},
+                    )
+                )
         else:
             text = el.get_text(separator=" ", strip=True)
             if text:
-                current_parts.append(text)
-
-    _flush()
+                sections.append(
+                    DocumentSection(
+                        heading=None,
+                        level=current_level + 1,
+                        content=text,
+                        content_type="text",
+                        metadata={"heading_context": current_heading} if current_heading else {},
+                    )
+                )
 
     raw_text = soup.get_text(separator="\n")
     clean_text = _remove_boilerplate(_clean_whitespace(raw_text))
@@ -332,24 +390,24 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
     """Group unstructured elements into DocumentSection objects."""
     sections: list[DocumentSection] = []
     current_heading: Optional[str] = None
-    current_level: int = 1
-    current_parts: list[str] = []
+    current_level = 1
+    pending_list_items: list[str] = []
 
-    def _flush() -> None:
-        nonlocal current_heading, current_level, current_parts
-        if current_parts or current_heading is not None:
-            sections.append(
-                DocumentSection(
-                    heading=current_heading,
-                    level=current_level,
-                    content="\n".join(current_parts).strip(),
-                    content_type="text",
-                    table_markdown=None,
-                )
+    def _flush_list() -> None:
+        nonlocal pending_list_items
+        if not pending_list_items:
+            return
+        sections.append(
+            DocumentSection(
+                heading=None,
+                level=current_level + 1,
+                content="\n".join(f"- {item}" for item in pending_list_items),
+                content_type="list",
+                items=list(pending_list_items),
+                metadata={"heading_context": current_heading} if current_heading else {},
             )
-        current_heading = None
-        current_level = 1
-        current_parts = []
+        )
+        pending_list_items = []
 
     for el in elements:
         el_type = type(el).__name__
@@ -357,10 +415,19 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
             continue
 
         if el_type == "Title":
-            _flush()
+            _flush_list()
             current_heading = el.text.strip()
+            current_level = 1
+            sections.append(
+                DocumentSection(
+                    heading=current_heading,
+                    level=current_level,
+                    content="",
+                    content_type="heading",
+                )
+            )
         elif el_type == "Table":
-            _flush()
+            _flush_list()
             table_html = getattr(getattr(el, "metadata", None), "text_as_html", None)
             table_md = _html_table_to_markdown(table_html) if table_html else (el.text or "")
             sections.append(
@@ -370,16 +437,125 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
                     content=el.text or "",
                     content_type="table",
                     table_markdown=table_md,
+                    table_rows=_html_table_to_rows(table_html) if table_html else _markdown_table_to_rows(table_md),
+                    metadata={"heading_context": current_heading} if current_heading else {},
                 )
             )
         elif el_type == "ListItem":
-            current_parts.append(f"- {el.text}")
-        else:
             if el.text:
-                current_parts.append(el.text)
+                pending_list_items.append(el.text.strip())
+        elif "Quote" in el_type:
+            _flush_list()
+            if el.text:
+                sections.append(
+                    DocumentSection(
+                        heading=None,
+                        level=current_level + 1,
+                        content=el.text.strip(),
+                        content_type="quote",
+                        metadata={"heading_context": current_heading} if current_heading else {},
+                    )
+                )
+        else:
+            _flush_list()
+            if el.text:
+                sections.append(
+                    DocumentSection(
+                        heading=None,
+                        level=current_level + 1,
+                        content=el.text.strip(),
+                        content_type="text",
+                        metadata={"heading_context": current_heading} if current_heading else {},
+                    )
+                )
 
-    _flush()
+    _flush_list()
     return sections
+
+
+def _text_block_to_section(block: str, current_heading: Optional[str], current_level: int) -> tuple[DocumentSection | None, Optional[str], int]:
+    stripped = block.strip()
+    if not stripped:
+        return None, current_heading, current_level
+
+    heading_match = re.fullmatch(r"(#{1,6})\s+(.+)", stripped)
+    if heading_match:
+        level = len(heading_match.group(1))
+        heading = heading_match.group(2).strip()
+        return (
+            DocumentSection(
+                heading=heading,
+                level=level,
+                content="",
+                content_type="heading",
+            ),
+            heading,
+            level,
+        )
+
+    lines = [line.strip() for line in stripped.splitlines() if line.strip()]
+    metadata = {"heading_context": current_heading} if current_heading else {}
+
+    list_pattern = re.compile(r"^([-*+]\s+|\d+[.)]\s+)")
+    if lines and all(list_pattern.match(line) for line in lines):
+        items = [list_pattern.sub("", line, count=1).strip() for line in lines]
+        return (
+            DocumentSection(
+                heading=None,
+                level=current_level + 1,
+                content="\n".join(f"- {item}" for item in items),
+                content_type="list",
+                items=items,
+                metadata=metadata,
+            ),
+            current_heading,
+            current_level,
+        )
+
+    if lines and all(line.startswith(">") for line in lines):
+        quote = " ".join(line.lstrip(">").strip() for line in lines).strip()
+        return (
+            DocumentSection(
+                heading=None,
+                level=current_level + 1,
+                content=quote,
+                content_type="quote",
+                metadata=metadata,
+            ),
+            current_heading,
+            current_level,
+        )
+
+    paragraph = re.sub(r"\s+", " ", stripped).strip()
+    return (
+        DocumentSection(
+            heading=None,
+            level=current_level + 1,
+            content=paragraph,
+            content_type="text",
+            metadata=metadata,
+        ),
+        current_heading,
+        current_level,
+    )
+
+
+def parse_text_structured(raw_bytes_or_str: Any, *, source_type: str = "text") -> StructuredParseResult:
+    flat = parse_text(raw_bytes_or_str)
+    current_heading: Optional[str] = None
+    current_level = 1
+    sections: list[DocumentSection] = []
+    for block in re.split(r"\n{2,}", flat.clean_text):
+        section, current_heading, current_level = _text_block_to_section(block, current_heading, current_level)
+        if section is not None:
+            sections.append(section)
+    return StructuredParseResult(
+        raw_text=flat.raw_text,
+        clean_text=flat.clean_text,
+        source_type=source_type,
+        sections=sections,
+        doc_metadata={},
+    )
 
 
 def parse_pdf_structured(raw_bytes: bytes) -> StructuredParseResult:
@@ -481,12 +657,5 @@ def parse(raw_bytes: bytes, source_type: str) -> StructuredParseResult:
         return parse_pdf_structured(raw_bytes)
     if source_type == "html":
         return parse_html_structured(raw_bytes)
-    # text, manual, or unknown → plain text pass-through wrapped in StructuredParseResult
-    flat = parse_text(raw_bytes)
-    return StructuredParseResult(
-        raw_text=flat.raw_text,
-        clean_text=flat.clean_text,
-        source_type=flat.source_type,
-        sections=[],
-        doc_metadata={},
-    )
+    # text, manual, or unknown → structured text parsing with paragraph/list/quote support
+    return parse_text_structured(raw_bytes, source_type="manual" if source_type == "manual" else "text")

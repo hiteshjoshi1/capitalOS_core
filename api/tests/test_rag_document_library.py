@@ -56,6 +56,7 @@ def _add_document(
     source_id: str,
     title: str,
     clean_text: str,
+    content_blocks_json: list[dict] | None = None,
     author_id: str | None = None,
     publication_year: int | None = None,
     venue: str | None = None,
@@ -82,6 +83,7 @@ def _add_document(
         metadata_json=metadata_json or {},
         raw_text=clean_text,
         clean_text=clean_text,
+        content_blocks_json=content_blocks_json,
     )
     db.add(document)
     db.flush()
@@ -250,6 +252,52 @@ def test_library_document_detail_returns_clean_text_and_parent_child_navigation(
             source_id=str(source.id),
             title="Capital Allocation",
             clean_text="This is the stored logical-document text for the main capital allocation essay.",
+            content_blocks_json=[
+                {
+                    "block_id": "blk-0000",
+                    "type": "heading",
+                    "order": 0,
+                    "level": 2,
+                    "text": "Capital Allocation",
+                    "items": None,
+                    "table_markdown": None,
+                    "table_rows": None,
+                    "metadata": {},
+                },
+                {
+                    "block_id": "blk-0001",
+                    "type": "paragraph",
+                    "order": 1,
+                    "level": None,
+                    "text": "This is the stored logical-document text for the main capital allocation essay.",
+                    "items": None,
+                    "table_markdown": None,
+                    "table_rows": None,
+                    "metadata": {"heading_context": "Capital Allocation"},
+                },
+                {
+                    "block_id": "blk-0002",
+                    "type": "list",
+                    "order": 2,
+                    "level": None,
+                    "text": None,
+                    "items": ["Retain earnings carefully", "Avoid diworsification"],
+                    "table_markdown": None,
+                    "table_rows": None,
+                    "metadata": {"heading_context": "Capital Allocation"},
+                },
+                {
+                    "block_id": "blk-0003",
+                    "type": "table",
+                    "order": 3,
+                    "level": None,
+                    "text": None,
+                    "items": None,
+                    "table_markdown": "| Metric | Value |\n| --- | --- |\n| ROE | 15% |",
+                    "table_rows": [["Metric", "Value"], ["ROE", "15%"]],
+                    "metadata": {"heading_context": "Capital Allocation"},
+                },
+            ],
             author_id=buffett.id,
             publication_year=1994,
             venue="Annual Letter",
@@ -281,6 +329,10 @@ def test_library_document_detail_returns_clean_text_and_parent_child_navigation(
     assert parent_response.status_code == 200, parent_response.text
     parent_body = parent_response.json()
     assert parent_body["clean_text"] == "This is the stored logical-document text for the main capital allocation essay."
+    assert parent_body["content_blocks"][0]["type"] == "heading"
+    assert parent_body["content_blocks"][1]["type"] == "paragraph"
+    assert parent_body["content_blocks"][2]["items"] == ["Retain earnings carefully", "Avoid diworsification"]
+    assert parent_body["content_blocks"][3]["table_rows"] == [["Metric", "Value"], ["ROE", "15%"]]
     assert parent_body["source_url"] == "https://example.com/capital-allocation"
     assert parent_body["source_type"] == "html"
     assert parent_body["parent_document"] is None
