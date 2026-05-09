@@ -27,6 +27,11 @@ Current limitations:
 4. Existing stored documents are already degraded.
    - Even with a better reader, old persisted `content_blocks_json` payloads will not improve unless the parser and persistence model improve and affected documents are re-ingested.
 
+5. The current embedding path is text-only and global.
+   - `api/app/rag/ingestion/embedder.py` uses one embedding provider/model path for both ingestion and query-time retrieval, with `voyage-4` as the default.
+   - There is no implemented branch today that uses `voyage-multimodal-3.5` for layout-heavy or visually rich source material.
+   - This means complex tables, figures, scanned layouts, and image-bearing source sections are currently reduced to text/HTML-derived artifacts before embedding.
+
 ### Why this matters
 
 1. Users cannot reliably inspect financial tables in source documents.
@@ -42,6 +47,9 @@ Current limitations:
 - Decision 5: The reader must distinguish `caption`, `header_rows`, `body_rows`, and optional `footer_rows` instead of inferring table semantics from the first row.
 - Decision 6: Re-ingestion is an expected part of this issue for documents whose stored table payloads were already flattened.
 - Decision 7: This issue is about deterministic structure preservation and rendering, not LLM summarization or rewriting.
+- Decision 8: If multimodal embeddings are introduced, they must be treated as an explicit retrieval-architecture decision, not just a parser tweak, because query embeddings and stored document embeddings must remain in compatible vector spaces.
+- Decision 9: The first acceptable multimodal scope is targeted and opt-in for layout/scan/table-heavy documents, not a silent corpus-wide model switch.
+- Decision 10: No ingestion-path change in this issue may ship if representative retrieval quality is worse than the current baseline on the affected corpus.
 
 ## Current State Summary
 - `api/app/rag/ingestion/parser.py` currently extracts:
@@ -156,6 +164,42 @@ Required outcomes:
 - existing documents can be re-ingested to populate the richer structure
 - fallback remains available for old documents not yet re-ingested
 
+### 7. Evaluate and, if approved, add a multimodal embedding path
+
+The current codebase does **not** use `voyage-multimodal-3.5` in ingestion today, despite documentation that suggests multimodal embeddings should be used for visually rich documents.
+
+Relevant current state:
+- `api/app/rag/ingestion/embedder.py` uses:
+  - `RAG_EMBEDDING_PROVIDER`
+  - `RAG_EMBEDDING_MODEL`
+  - default model `voyage-4`
+- `embed_batch()` and `embed_query()` both use the same active model family.
+- There is no document-classification or source-type switch that routes certain documents into a multimodal embedding/index path.
+
+If this issue includes multimodal embedding support, it must define:
+
+1. **Routing rule**
+   - which source types/documents use `voyage-4`
+   - which use `voyage-multimodal-3.5`
+   - likely candidates: scanned PDFs, image-heavy reports, layout-critical annual-letter tables, and sources where extracted text/HTML is materially lossy
+
+2. **Indexing rule**
+   - whether multimodal documents live in a separate embedding index/corpus slice
+   - or whether retrieval is partitioned by embedding model family
+
+3. **Query rule**
+   - how query embeddings are generated against multimodal-ingested documents
+   - avoid mixing incompatible embedding spaces in the same nearest-neighbor search
+
+4. **Persistence / metadata**
+   - persist per-document embedding model metadata
+   - persist parse-time modality indicators so re-ingestion is deterministic and auditable
+
+5. **Verification**
+   - demonstrate that a representative Buffett table/document retrieves more relevant evidence after the multimodal path is introduced
+
+The intent here is not to force multimodal everywhere. It is to make multimodal ingestion a concrete, testable option for the subset of documents where pure text flattening is structurally inadequate.
+
 ## Proposed API Surface Changes
 - Extend `LibraryContentBlockOut` for table blocks to include richer optional fields such as:
   - `table_html`
@@ -180,6 +224,9 @@ Required outcomes:
 - [ ] Wide tables remain horizontally scrollable without destroying column alignment.
 - [ ] Markdown/text fallback remains available for tables that still cannot be normalized cleanly.
 - [ ] Re-ingesting an affected Warren Buffett document materially improves its table rendering.
+- [ ] The implementation explicitly documents whether `voyage-multimodal-3.5` is adopted in scope, and if adopted, how documents and queries are routed without mixing incompatible embedding spaces.
+- [ ] If multimodal embedding support is included, at least one representative layout-sensitive document demonstrates better retrieval or evidence fidelity after re-ingestion.
+- [ ] Representative retrieval checks on the affected corpus are run before and after re-ingestion, and the new ingestion path does not ship unless retrieval quality is at least as good as the baseline and preferably better.
 - [ ] Tests cover simple tables, grouped-header tables, and degraded/fallback cases.
 - [ ] Documentation explains the richer table model, fallback order, and re-ingestion workflow.
 - [ ] The change is verifiable through Makefile commands and curl-verifiable APIs.
