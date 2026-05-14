@@ -1,9 +1,15 @@
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import PageShell from "../components/PageShell";
 import "../App.css";
-import { api, type RagAuthorLibrary, type RagLibraryAuthor, type RagLibraryContentBlock, type RagLibraryDocumentDetail, type RagLibraryDocumentSummary } from "../lib/api";
+import {
+  api,
+  type RagAuthorLibrary,
+  type RagLibraryAuthor,
+  type RagLibraryDocumentDetail,
+  type RagLibraryDocumentSummary,
+} from "../lib/api";
 
 type RouteParams = {
   authorId?: string;
@@ -53,8 +59,8 @@ function DocumentLinkCard({
   authorId: string;
   document: RagLibraryDocumentSummary;
 }) {
-  return (
-    <Link className="authorLibraryDocumentRow authorLibraryDocumentLink" to={documentRoute(authorId, document.id)}>
+  const content = (
+    <>
       <span className="authorLibraryDocumentGlyph" aria-hidden="true">
         <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7">
           <path d="M6 3.5h5l3.5 3.5V16a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 4.5 16V5A1.5 1.5 0 0 1 6 3.5Z" />
@@ -62,100 +68,26 @@ function DocumentLinkCard({
         </svg>
       </span>
       <span className="authorLibraryDocumentTitle">{document.title}</span>
-    </Link>
+    </>
   );
-}
 
-function renderHeadingBlock(block: RagLibraryContentBlock) {
-  const level = Math.min(Math.max(block.level ?? 2, 1), 6);
-  const tagName = (`h${level}` as const);
-  return createElement(tagName, { className: "authorLibraryBlockHeading" }, block.text);
-}
+  if (document.source_url) {
+    return (
+      <a
+        className="authorLibraryDocumentRow authorLibraryDocumentLink"
+        href={document.source_url}
+        rel="noreferrer"
+        target="_blank"
+      >
+        {content}
+      </a>
+    );
+  }
 
-function StructuredDocumentRenderer({ blocks }: { blocks: RagLibraryContentBlock[] }) {
   return (
-    <div className="authorLibraryStructuredDocument" data-testid="author-library-reader-structured">
-      {blocks.map((block) => {
-        const key = block.block_id;
-        const headingContext = typeof block.metadata?.heading_context === "string" ? block.metadata.heading_context : null;
-
-        if (block.type === "heading" && block.text) {
-          return (
-            <section key={key} id={key} className="authorLibraryBlock authorLibraryBlockSection">
-              {renderHeadingBlock(block)}
-            </section>
-          );
-        }
-
-        if (block.type === "list" && block.items?.length) {
-          return (
-            <section key={key} id={key} className="authorLibraryBlock">
-              {headingContext ? <div className="authorLibraryBlockContext">{headingContext}</div> : null}
-              <ul className="authorLibraryBlockList">
-                {block.items.map((item) => (
-                  <li key={`${key}:${item}`}>{item}</li>
-                ))}
-              </ul>
-            </section>
-          );
-        }
-
-        if (block.type === "quote" && block.text) {
-          return (
-            <blockquote key={key} id={key} className="authorLibraryBlockQuote">
-              {block.text}
-            </blockquote>
-          );
-        }
-
-        if (block.type === "table") {
-          const rows = block.table_rows ?? [];
-          const header = rows.length > 1 ? rows[0] : [];
-          const bodyRows = rows.length > 1 ? rows.slice(1) : rows;
-          return (
-            <section key={key} id={key} className="authorLibraryBlock authorLibraryBlockTable">
-              {headingContext ? <div className="authorLibraryBlockContext">{headingContext}</div> : null}
-              {rows.length ? (
-                <div className="authorLibraryTableScroller">
-                  <table className="authorLibraryTable" data-testid="author-library-table">
-                    {header.length ? (
-                      <thead>
-                        <tr>
-                          {header.map((cell, index) => (
-                            <th key={`${key}:header:${index}`} scope="col">{cell}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                    ) : null}
-                    <tbody>
-                      {bodyRows.map((row, rowIndex) => (
-                        <tr key={`${key}:row:${rowIndex}`}>
-                          {row.map((cell, cellIndex) => (
-                            <td key={`${key}:cell:${rowIndex}:${cellIndex}`}>{cell}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ) : (
-                <pre className="authorLibraryTableFallback">{block.table_markdown ?? block.text ?? ""}</pre>
-              )}
-            </section>
-          );
-        }
-
-        if (block.text) {
-          return (
-            <p key={key} id={key} className="authorLibraryBlockParagraph">
-              {block.text}
-            </p>
-          );
-        }
-
-        return null;
-      })}
-    </div>
+    <Link className="authorLibraryDocumentRow authorLibraryDocumentLink" to={documentRoute(authorId, document.id)}>
+      {content}
+    </Link>
   );
 }
 
@@ -163,7 +95,6 @@ export default function AuthorLibrary() {
   const { authorId = "", documentId = "" } = useParams<RouteParams>();
   const isGallery = !authorId;
   const isReader = Boolean(authorId && documentId);
-  const readerSurfaceRef = useRef<HTMLDivElement | null>(null);
 
   const [authors, setAuthors] = useState<RagLibraryAuthor[]>([]);
   const [authorsLoading, setAuthorsLoading] = useState(false);
@@ -171,7 +102,6 @@ export default function AuthorLibrary() {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [documentDetail, setDocumentDetail] = useState<RagLibraryDocumentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -198,7 +128,10 @@ export default function AuthorLibrary() {
   }, [isGallery]);
 
   useEffect(() => {
-    if (!authorId) return;
+    if (!authorId || isReader) {
+      setLibrary(null);
+      return;
+    }
     let cancelled = false;
     const loadLibrary = async () => {
       setLibraryLoading(true);
@@ -219,10 +152,13 @@ export default function AuthorLibrary() {
     return () => {
       cancelled = true;
     };
-  }, [authorId]);
+  }, [authorId, isReader]);
 
   useEffect(() => {
-    if (!documentId) return;
+    if (!isReader || !documentId) {
+      setDocumentDetail(null);
+      return;
+    }
     let cancelled = false;
     const loadDocument = async () => {
       setDetailLoading(true);
@@ -243,44 +179,15 @@ export default function AuthorLibrary() {
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+  }, [documentId, isReader]);
 
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(document.fullscreenElement === readerSurfaceRef.current);
-    };
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => {
-      document.removeEventListener("fullscreenchange", handleFullscreenChange);
-    };
-  }, []);
-
-  const toggleFullscreen = async () => {
-    if (!readerSurfaceRef.current) return;
-
-    if (document.fullscreenElement === readerSurfaceRef.current) {
-      if (document.exitFullscreen) {
-        await document.exitFullscreen();
-      }
-      setIsFullscreen(false);
-      return;
-    }
-
-    if (readerSurfaceRef.current.requestFullscreen) {
-      await readerSurfaceRef.current.requestFullscreen();
-      setIsFullscreen(true);
-      return;
-    }
-
-    setIsFullscreen((current) => !current);
-  };
-
-  const groupedSections = useMemo(() => library?.groups ?? [], [library]);
+  const groupedSections = library?.groups ?? [];
+  const authorName = library?.author.name ?? documentDetail?.author_name ?? "Author Library";
   const title = isGallery
     ? "Author Library"
     : isReader
-      ? (documentDetail?.title ?? "Reader")
-      : (library?.author.name ?? "Author Library");
+      ? (documentDetail?.title ?? "Original source")
+      : authorName;
 
   return (
     <PageShell
@@ -289,12 +196,7 @@ export default function AuthorLibrary() {
         <div className="authorLibraryHeaderActions">
           {!isGallery ? <Link className="btn" to="/author-library">All authors</Link> : null}
           {authorId && isReader ? (
-            <>
-              <Link className="btn" to={authorRoute(authorId)}>Back to library</Link>
-              <button className="btn" type="button" onClick={() => void toggleFullscreen()}>
-                {isFullscreen ? "Exit fullscreen" : "Fullscreen"}
-              </button>
-            </>
+            <Link className="btn" to={authorRoute(authorId)}>Back to library</Link>
           ) : null}
         </div>
       )}
@@ -372,6 +274,9 @@ export default function AuthorLibrary() {
                 <section className="grid authorLibraryLibraryPage">
                   <div className="card authorLibraryListPanel">
                     <div className="cardTitle">Writings</div>
+                    <div className="muted">
+                      Each title opens the original letter or article source. CapitalOS no longer renders ingested content inside the library.
+                    </div>
                     {groupedSections.length ? (
                       <div className="authorLibraryGroupStack">
                         {groupedSections.map((group) => (
@@ -420,24 +325,20 @@ export default function AuthorLibrary() {
           <section className="grid authorLibraryReaderPage">
             {(libraryLoading || detailLoading) ? (
               <div className="card">
-                <div className="cardTitle">Loading reader</div>
-                <div className="muted">Fetching the logical document and its related metadata...</div>
+                <div className="cardTitle">Loading source</div>
+                <div className="muted">Fetching the source handoff for this document...</div>
               </div>
             ) : null}
 
             {documentDetail ? (
-              <div
-                ref={readerSurfaceRef}
-                className={`card authorLibraryReaderSurface${isFullscreen ? " authorLibraryReaderSurfaceFullscreen" : ""}`}
-                data-testid="author-library-reader-surface"
-              >
+              <div className="card authorLibraryReaderSurface" data-testid="author-library-source-card">
                 <div className="authorLibraryReaderContent">
                   <div className="authorLibraryReaderHeader">
                     <div>
                       <div className="authorLibraryBreadcrumbs">
                         <Link to="/author-library">Authors</Link>
                         <span aria-hidden="true">/</span>
-                        <Link to={authorRoute(authorId)}>{library?.author.name ?? "Library"}</Link>
+                        <Link to={authorRoute(authorId)}>{documentDetail.author_name ?? authorId}</Link>
                         <span aria-hidden="true">/</span>
                         <span>{documentDetail.title}</span>
                       </div>
@@ -449,19 +350,19 @@ export default function AuthorLibrary() {
                     </div>
                   </div>
 
-                  {documentDetail.source_url ? (
-                    <a className="authorLibrarySourceLink" href={documentDetail.source_url} rel="noreferrer" target="_blank">
-                      Open source
-                    </a>
-                  ) : null}
-
-                  {documentDetail.content_blocks?.length ? (
-                    <StructuredDocumentRenderer blocks={documentDetail.content_blocks} />
-                  ) : (
-                    <div className="authorLibraryReaderText" data-testid="author-library-reader-text">
-                      {documentDetail.clean_text}
+                  <div className="authorLibrarySourceFallback" data-testid="author-library-source-only">
+                    <div className="cardTitle">Open original source</div>
+                    <div className="muted">
+                      Author Library now hands this document off to its original source instead of rendering extracted content inside CapitalOS.
                     </div>
-                  )}
+                    {documentDetail.source_url ? (
+                      <a className="authorLibrarySourceLink" href={documentDetail.source_url} rel="noreferrer" target="_blank">
+                        Open source
+                      </a>
+                    ) : (
+                      <div className="muted">No source URL is stored for this document yet.</div>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : null}

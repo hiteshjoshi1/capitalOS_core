@@ -11,7 +11,7 @@ type Platform = {
 };
 
 async function mockDashboardApis(page: Page) {
-  await page.route("http://localhost:8000/dashboard/bootstrap**", async (route) => {
+  await page.route("**/dashboard/bootstrap**", async (route) => {
     await route.fulfill({
       json: {
         as_of_month: "2026-02",
@@ -31,7 +31,7 @@ async function mockDashboardApis(page: Page) {
       },
     });
   });
-  await page.route("http://localhost:8000/spending/summary**", async (route) => {
+  await page.route("**/spending/summary**", async (route) => {
     await route.fulfill({
       json: {
         month: "2026-02",
@@ -59,10 +59,10 @@ async function mockOperationsApis(page: Page) {
     },
   ];
 
-  await page.route("http://localhost:8000/alerts/upload-reminders/count", async (route) => {
+  await page.route("**/alerts/upload-reminders/count", async (route) => {
     await route.fulfill({ json: { count: 0 } });
   });
-  await page.route("http://localhost:8000/accounts/options", async (route) => {
+  await page.route("**/accounts/options", async (route) => {
     await route.fulfill({
       json: {
         account_types: ["BANK", "BROKER"],
@@ -72,7 +72,7 @@ async function mockOperationsApis(page: Page) {
       },
     });
   });
-  await page.route("http://localhost:8000/currencies", async (route) => {
+  await page.route("**/currencies", async (route) => {
     await route.fulfill({
       json: [
         { id: 1, code: "SGD", name: "Singapore Dollar", country: "Singapore" },
@@ -80,7 +80,7 @@ async function mockOperationsApis(page: Page) {
       ],
     });
   });
-  await page.route("http://localhost:8000/platforms/options", async (route) => {
+  await page.route("**/platforms/options", async (route) => {
     await route.fulfill({
       json: {
         platform_types: ["BANK", "BROKER"],
@@ -89,7 +89,11 @@ async function mockOperationsApis(page: Page) {
       },
     });
   });
-  await page.route("http://localhost:8000/platforms", async (route) => {
+  await page.route("**/platforms", async (route) => {
+    if (route.request().resourceType() === "document") {
+      await route.continue();
+      return;
+    }
     if (route.request().method().toUpperCase() === "POST") {
       const payload = route.request().postDataJSON() as {
         code: string;

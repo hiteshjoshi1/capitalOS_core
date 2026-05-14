@@ -107,7 +107,7 @@ Each run creates a `rag_ingestion_jobs` record with status, stats, and failure_c
 
 ### 3e. Persistence
 
-- `rag_documents` stores raw_text + clean_text.
+- `rag_documents` stores document metadata only, including `char_count` in `metadata_json`.
 - `rag_chunks` stores chunk text + token count + `metadata_json` (JSONB).
 - `rag_embeddings` stores 1024-dim vectors with IVFFlat cosine index (lists=50).
 - Content-hash deduplication prevents re-ingesting identical content.
@@ -209,7 +209,7 @@ rag_author_cards       — Reasoning lens config (focus, avoid, biases)
 rag_author_profiles    — Generated wisdom artifacts (worldview, maxims, strengths, weaknesses)
   rag_author_profile_citations — Citations backing profile claims
 rag_sources            — Source inventory (author_id, url, type, status, hash)
-rag_documents          — Normalized text (source_id, title, raw_text, clean_text)
+rag_documents          — Logical-document metadata (source_id, title, publication fields, metadata_json)
 rag_chunks             — Chunked passages (document_id, chunk_index, text, token_count, metadata_json)
 rag_embeddings         — Vector index (chunk_id, embedding Vector(1024), model)
 rag_ingestion_jobs     — Ingestion execution history (source_id, status, failure_category, stats)

@@ -195,8 +195,6 @@ class RagSource(Base):
     hash = Column(String)
     selective_options = Column(_JsonBlob, nullable=True)  # optional selective ingestion rules
     ingestion_config = Column(_JsonBlob, nullable=True)  # optional deterministic fanout config
-    raw_text = Column(Text)
-    clean_text = Column(Text)
     last_ingested_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -225,9 +223,6 @@ class RagDocument(Base):
     note_taker = Column(Text)
     work_type = Column(String)
     metadata_json = Column(_JsonBlob, nullable=False, default=dict)
-    raw_text = Column(Text)
-    clean_text = Column(Text)
-    content_blocks_json = Column(_JsonBlob, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     source = relationship("RagSource", back_populates="documents")

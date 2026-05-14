@@ -1197,18 +1197,6 @@ export type RagLibraryRelatedDocument = {
   relationship: string;
 };
 
-export type RagLibraryContentBlock = {
-  block_id: string;
-  type: "paragraph" | "heading" | "list" | "quote" | "table" | string;
-  order: number;
-  level: number | null;
-  text: string | null;
-  items: string[] | null;
-  table_markdown: string | null;
-  table_rows: string[][] | null;
-  metadata: Record<string, unknown>;
-};
-
 export type RagLibraryDocumentDetail = {
   id: string;
   source_id: string;
@@ -1227,8 +1215,6 @@ export type RagLibraryDocumentDetail = {
   work_type: string | null;
   source_section: string | null;
   metadata: Record<string, unknown>;
-  clean_text: string;
-  content_blocks: RagLibraryContentBlock[] | null;
   char_count: number;
   parent_document: RagLibraryRelatedDocument | null;
   child_documents: RagLibraryRelatedDocument[];

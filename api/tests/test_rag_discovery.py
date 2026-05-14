@@ -127,7 +127,7 @@ def sqlite_session():
             id TEXT PRIMARY KEY, user_id INTEGER, author_id TEXT NOT NULL, url TEXT,
             source_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
             hash TEXT, selective_options TEXT, ingestion_config TEXT,
-            raw_text TEXT, clean_text TEXT, last_ingested_at TIMESTAMP,
+            last_ingested_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         """CREATE TABLE IF NOT EXISTS rag_ingestion_jobs (
@@ -144,7 +144,7 @@ def sqlite_session():
             title TEXT, published_at TEXT, publication_year INTEGER,
             venue TEXT, collection TEXT, canonical_work_id TEXT, canonical_status TEXT,
             dedupe_priority INTEGER, source_section TEXT, note_taker TEXT, work_type TEXT,
-            metadata_json TEXT NOT NULL DEFAULT '{}', raw_text TEXT, clean_text TEXT, content_blocks_json TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )""",
         """CREATE TABLE IF NOT EXISTS rag_chunks (

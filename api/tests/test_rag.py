@@ -125,8 +125,6 @@ def sqlite_rag_db():
             status TEXT NOT NULL DEFAULT 'pending',
             hash TEXT,
             ingestion_config TEXT,
-            raw_text TEXT,
-            clean_text TEXT,
             last_ingested_at TIMESTAMP,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -150,9 +148,6 @@ def sqlite_rag_db():
             note_taker TEXT,
             work_type TEXT,
             metadata_json TEXT NOT NULL DEFAULT '{}',
-            raw_text TEXT,
-            clean_text TEXT,
-            content_blocks_json TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         """,

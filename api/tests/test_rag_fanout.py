@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import date
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("RAG_EMBEDDING_MOCK", "1")
@@ -29,6 +30,11 @@ def _add_author(db, author_id: str, name: str) -> RagAuthor:
 
 def _mock_fetch(raw_html: str, sha256: str = "fanout-sha") -> MagicMock:
     return MagicMock(raw_bytes=raw_html.encode("utf-8"), sha256=sha256, content_type="text/html")
+
+
+def _document_text(document: RagDocument) -> str:
+    ordered_chunks = sorted(document.chunks, key=lambda chunk: chunk.chunk_index)
+    return "\n".join(chunk.text for chunk in ordered_chunks)
 
 
 class TestRagFanoutPipeline:
@@ -72,20 +78,10 @@ class TestRagFanoutPipeline:
             assert job.stats_json["ingestion_mode"] == "single_work"
             assert len(documents) == 1
             assert documents[0].author_id == author.id
-            assert "Compounders" in (source.clean_text or "")
-            assert "Temperament" in (source.clean_text or "")
-            assert "Compounders" in (documents[0].clean_text or "")
-            assert "Temperament" in (documents[0].clean_text or "")
-            assert documents[0].content_blocks_json is not None
-            assert [block["type"] for block in documents[0].content_blocks_json] == [
-                "heading",
-                "paragraph",
-                "list",
-                "heading",
-                "paragraph",
-                "table",
-            ]
-            assert documents[0].content_blocks_json[-1]["table_rows"] == [["Metric", "Value"], ["ROE", "15%"]]
+            document_text = _document_text(documents[0])
+            assert "capital allocation remains disciplined" in document_text
+            assert "underlying business quality remains intact" in document_text
+            assert not hasattr(documents[0], "content_blocks_json")
         finally:
             db.close()
 
@@ -176,11 +172,12 @@ class TestRagFanoutPipeline:
             assert companion.note_taker == "Editorial Team"
             assert companion.work_type == "editorial_companion"
 
-            assert "Revisited" not in (primary.clean_text or "")
-            assert "patient capital" in (primary.clean_text or "")
-            assert "patient capital" not in (companion.clean_text or "")
-            assert "changed later" in (companion.clean_text or "")
-            assert "Talk X Revisited" in (source.clean_text or "")
+            primary_text = _document_text(primary)
+            companion_text = _document_text(companion)
+            assert "Revisited" not in primary_text
+            assert "patient capital" in primary_text
+            assert "patient capital" not in companion_text
+            assert "changed later" in companion_text
 
             created = {entry["key"]: entry for entry in job.stats_json["documents"] if entry["status"] == "created"}
             assert created["talk-x"]["author_id"] == talk_author.id
@@ -288,7 +285,7 @@ class TestRagFanoutPipeline:
             assert job.status == "done"
             assert len(documents) == 1
             assert documents[0].title == "Brief Note"
-            assert "usable because it explains" in (documents[0].clean_text or "")
+            assert "usable because it explains" in _document_text(documents[0])
 
             outcomes = {entry["key"]: entry for entry in job.stats_json["documents"]}
             assert job.stats_json["documents_created"] == 1
@@ -328,7 +325,7 @@ class TestRagFanoutPipeline:
             legacy_documents = db.query(RagDocument).filter(RagDocument.source_id == source.id).all()
             assert first_job.status == "done"
             assert len(legacy_documents) == 1
-            assert "single giant work" in (legacy_documents[0].clean_text or "")
+            assert "single giant work" in _document_text(legacy_documents[0])
 
             source.ingestion_config = {
                 "mode": "fanout",
@@ -396,7 +393,76 @@ class TestRagFanoutPipeline:
             assert len(documents) == 2
             assert [document.title for document in documents] == ["Nomad Letter 2008", "Nomad Letter 2009"]
             assert all(document.author_id == author.id for document in documents)
-            assert not any("single giant work" in (document.clean_text or "") for document in documents)
+            assert not any("single giant work" in _document_text(document) for document in documents)
+        finally:
+            db.close()
+
+    def test_single_work_reingestion_preserves_existing_document_identity(self):
+        db = TestingSessionLocal()
+        try:
+            author = _add_author(db, _uid("buffett"), "Warren Buffett")
+            source = RagSource(
+                user_id=1,
+                author_id=author.id,
+                url="https://example.com/buffett-2005.pdf",
+                source_type="pdf",
+                status="ingested",
+            )
+            db.add(source)
+            db.flush()
+
+            legacy = RagDocument(
+                source_id=source.id,
+                author_id=author.id,
+                source_document_index=0,
+                title="Berkshire Hathaway Shareholder Letter 2005",
+                published_at=date(2005, 12, 31),
+                publication_year=2005,
+                venue="Berkshire Hathaway",
+                collection="Shareholder Letters",
+                canonical_work_id="buffett-2005",
+                canonical_status="canonical",
+                dedupe_priority=100,
+                source_section="2005 Letter",
+                work_type="letter",
+                metadata_json={
+                    "corpus_section": "Letters",
+                    "source_label": "Canonical Buffett PDF",
+                    "char_count": len("legacy clean text"),
+                },
+            )
+            db.add(legacy)
+            db.flush()
+
+            parsed = StructuredParseResult(
+                raw_text="BERKSHIRE HATHAWAY INC\nCorporate Performance vs. the S&P 500",
+                clean_text="BERKSHIRE HATHAWAY INC\nCorporate Performance vs. the S&P 500",
+                source_type="pdf",
+                sections=[],
+                doc_metadata={"title": "BERKSHIRE HATHAWAY INC"},
+            )
+
+            with patch("app.rag.ingestion.pipeline.fetch_url", return_value=MagicMock(raw_bytes=b"%PDF-1.4", sha256="buffett-2005", content_type="application/pdf")):
+                with patch("app.rag.ingestion.pipeline.parse", return_value=parsed):
+                    job = run_url_ingestion(source, db)
+                    db.commit()
+
+            documents = db.query(RagDocument).filter(RagDocument.source_id == source.id).all()
+            assert job.status == "done"
+            assert len(documents) == 1
+            document = documents[0]
+            assert document.title == "Berkshire Hathaway Shareholder Letter 2005"
+            assert document.published_at == date(2005, 12, 31)
+            assert document.publication_year == 2005
+            assert document.venue == "Berkshire Hathaway"
+            assert document.collection == "Shareholder Letters"
+            assert document.canonical_work_id == "buffett-2005"
+            assert document.canonical_status == "canonical"
+            assert document.dedupe_priority == 100
+            assert document.source_section == "2005 Letter"
+            assert document.work_type == "letter"
+            assert document.metadata_json["corpus_section"] == "Letters"
+            assert document.metadata_json["source_label"] == "Canonical Buffett PDF"
         finally:
             db.close()
 
@@ -497,9 +563,11 @@ class TestRagFanoutPipeline:
                 "Nomad Investment Partnership Letter — 18 January 2002",
                 "Nomad Investment Partnership Interim Report — June 2002",
             ]
-            assert "Skip this opening material" not in (documents[0].clean_text or "")
-            assert "Skip this ending material" not in (documents[1].clean_text or "")
-            assert "To the Partners of the Nomad Investment Partnership." in (documents[0].clean_text or "")
-            assert "Interim Report" in (documents[1].clean_text or "")
+            first_text = _document_text(documents[0])
+            second_text = _document_text(documents[1])
+            assert "Skip this opening material" not in first_text
+            assert "Skip this ending material" not in second_text
+            assert "To the Partners of the Nomad Investment Partnership." in first_text
+            assert "Interim Report" in second_text
         finally:
             db.close()
