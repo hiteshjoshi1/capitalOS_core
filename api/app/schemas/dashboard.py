@@ -10,6 +10,12 @@ class NetWorth(BaseModel):
     liabilities: float
 
 
+class NetWorthFreshness(BaseModel):
+    positions_as_of: Optional[str] = None
+    market_data_as_of: Optional[str] = None
+    crypto_as_of: Optional[str] = None
+
+
 class GeographyItem(BaseModel):
     country: str
     value: float
@@ -71,6 +77,9 @@ class DashboardSummaryResponse(BaseModel):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    current_net_worth_as_of: Optional[str] = None
+    current_net_worth: Optional[NetWorth] = None
+    current_net_worth_freshness: Optional[NetWorthFreshness] = None
     net_worth_as_of: Optional[str] = None
     net_worth_snapshot_as_of: Optional[str] = None
     net_worth_boundary_at: Optional[str] = None
@@ -175,12 +184,18 @@ class BootstrapResponse(BaseModel):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    current_net_worth_as_of: Optional[str] = None
+    current_net_worth: Optional[NetWorth] = None
+    current_net_worth_freshness: Optional[NetWorthFreshness] = None
     net_worth_as_of: Optional[str] = None
     net_worth_snapshot_as_of: Optional[str] = None
     net_worth_boundary_at: Optional[str] = None
     net_worth_boundary_exact: Optional[bool] = None
     net_worth_freshness_status: Optional[str] = None
     net_worth: NetWorth
+    current_stock_exposure_total: Optional[float] = None
+    current_crypto_exposure_total: Optional[float] = None
+    current_cash_percent: Optional[float] = None
     stock_exposure_total: float
     crypto_exposure_total: float
     cash_percent: float

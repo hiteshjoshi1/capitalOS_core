@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 
 from eth_account import Account
@@ -8,8 +9,10 @@ import base58
 import base64
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 import app.routers.crypto as crypto_router
+from app.crypto.refresh import refresh_wallet_snapshot
 
 
 def test_crypto_wallet_init_and_verify(client: TestClient, monkeypatch):
@@ -151,3 +154,45 @@ def test_crypto_summary_does_not_trigger_refresh(client: TestClient, db_engine):
     assert row is not None
     assert not row[0], "refresh_in_progress must remain FALSE after /crypto/summary"
     assert row[1] is None, "refresh_started_at must remain NULL after /crypto/summary"
+
+
+def test_refresh_wallet_snapshot_publishes_portfolio_refresh(db_engine, monkeypatch):
+    published_events = []
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, status, created_at) "
+                "VALUES ('wallet-refresh', 1, 'evm', 'ethereum', '0xrefresh', 'active', :now)"
+            ),
+            {"now": datetime.now(tz=timezone.utc)},
+        )
+
+    monkeypatch.setattr("app.crypto.refresh.acquire_refresh_lock", lambda db, wallet_id: True)
+    monkeypatch.setattr("app.crypto.refresh.release_refresh_lock", lambda db, wallet_id: None)
+    monkeypatch.setattr(
+        "app.crypto.refresh.ingest_wallet",
+        lambda db, wallet_id: SimpleNamespace(items=[object(), object()], total_usd=321.0),
+    )
+    monkeypatch.setattr("app.crypto.refresh.upsert_snapshot", lambda db, wallet_id, result: None)
+    monkeypatch.setattr(
+        "app.crypto.refresh.publish_portfolio_refresh",
+        lambda user_id, **kwargs: published_events.append({"user_id": user_id, **kwargs}),
+    )
+
+    with Session(db_engine) as db:
+        refreshed = refresh_wallet_snapshot(db, "wallet-refresh", user_id=1, automatic=True)
+
+    assert refreshed is True
+    assert published_events == [
+        {
+            "user_id": 1,
+            "event_name": "crypto_refresh_completed",
+            "source": "crypto",
+            "payload": {
+                "wallet_id": "wallet-refresh",
+                "automatic": True,
+                "total_usd": 321.0,
+            },
+        }
+    ]

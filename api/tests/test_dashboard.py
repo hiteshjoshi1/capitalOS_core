@@ -1,5 +1,8 @@
+from datetime import datetime, timezone
+
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
 
@@ -17,6 +20,9 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
 
     assert data["as_of_month"] == "2026-02"
     assert data["base_currency"] == "SGD"
+    assert data["current_net_worth_as_of"] is not None
+    assert data["current_net_worth"]["total"] >= data["net_worth"]["total"]
+    assert "current_net_worth_freshness" in data
     assert data["net_worth_as_of"] == "2026-03-01T00:00:00+00:00"
     assert data["net_worth_snapshot_as_of"] == "2026-02-06T00:00:00+00:00"
     assert data["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
@@ -1225,3 +1231,47 @@ def test_dashboard_summary_snapshot_day_returned(client: TestClient, seed_dashbo
     assert resp.status_code == 200
     body = resp.json()
     assert body["snapshot_day"] == 1, f"snapshot_day expected 1, got {body['snapshot_day']}"
+
+
+def test_dashboard_summary_snapshot_day_drives_next_month_anchor(client: TestClient, seed_dashboard_data, monkeypatch):
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setenv("SNAPSHOT_DAY", "6")
+
+    resp = client.get("/dashboard/summary?month=2026-02")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["snapshot_day"] == 6
+    assert body["net_worth_as_of"] == "2026-03-06T00:00:00+00:00"
+    assert body["net_worth_boundary_at"] == "2026-03-06T00:00:00+00:00"
+
+
+def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(client: TestClient, db_engine, seed_dashboard_data, monkeypatch):
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(1, '2026-02-28T00:00:00+00:00', 5500, 'USD', 'finnhub_market', '2026-02-28', 'US', 'AAPL'),"
+                "(1, '2026-03-09T00:00:00+00:00', 6000, 'USD', 'finnhub_market', '2026-03-09', 'US', 'AAPL')"
+            )
+        )
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 3, 10, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/summary?month=2026-02&compare=prev_month")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["net_worth_as_of"] == "2026-03-01T00:00:00+00:00"
+    assert body["current_net_worth_as_of"] == "2026-03-10T00:00:00+00:00"
+    assert body["current_net_worth"]["stocks_funds"] == body["net_worth"]["stocks_funds"] + 5000.0
+    assert body["current_net_worth_freshness"]["market_data_as_of"] == "2026-03-09"

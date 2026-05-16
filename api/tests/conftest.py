@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 # Ensure test DB URL is set before importing app modules that read env vars.
 os.environ["DATABASE_URL"] = "sqlite+pysqlite:////tmp/capitalos_test.db"
 os.environ.setdefault("DATA_DIR", "/tmp/capitalos_test_data")
-os.environ.setdefault("SNAPSHOT_DAY", "6")
+os.environ.setdefault("SNAPSHOT_DAY", "1")
 os.environ.setdefault("CRYPTO_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")

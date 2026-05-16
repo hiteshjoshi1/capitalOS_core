@@ -1931,6 +1931,98 @@ a.btn {
   margin: 10px 0 0;
 }
 
+.wealthFreshnessRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.wealthFreshnessPill {
+  display: grid;
+  gap: 4px;
+  min-width: 112px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 72%, transparent 28%);
+}
+
+.wealthFreshnessLabel,
+.wealthSnapshotLabel {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wealthSnapshotPanel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(125, 211, 252, 0.08);
+}
+
+.wealthSnapshotPanelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.wealthSnapshotValue {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.wealthSnapshotMeta {
+  margin: 0;
+}
+
+.wealthSnapshotBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.wealthSnapshotBadgeExact {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--good) 28%, transparent 72%);
+}
+
+.wealthSnapshotBadgeSynthetic {
+  color: #f6c177;
+  background: color-mix(in srgb, #f6c177 16%, transparent 84%);
+  border-color: color-mix(in srgb, #f6c177 30%, transparent 70%);
+}
+
+.wealthSnapshotBadgeMissing {
+  color: var(--trend-negative);
+  background: color-mix(in srgb, var(--trend-negative) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--trend-negative) 28%, transparent 72%);
+}
+
+[data-theme="light"] .wealthSnapshotPanel {
+  background: rgba(43, 109, 219, 0.08);
+  border-color: rgba(43, 109, 219, 0.18);
+}
+
+[data-theme="light"] .wealthSnapshotValue {
+  color: #15352d;
+}
+
 .wealthDeltaPill {
   display: grid;
   gap: 4px;
