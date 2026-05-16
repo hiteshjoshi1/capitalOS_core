@@ -51,6 +51,7 @@ describe("AuthProvider", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
   });
 
@@ -68,6 +69,30 @@ describe("AuthProvider", () => {
     await waitFor(() => {
       expect(screen.getByTestId("loading").textContent).toBe("false");
       expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+    expect(mockSetAccessToken).toHaveBeenCalledWith("t");
+  });
+
+  it("refreshes an active session when the tab becomes visible", async () => {
+    mockApi.authRefresh
+      .mockResolvedValueOnce({ access_token: "initial", token_type: "bearer", expires_in: 3600 })
+      .mockResolvedValueOnce({ access_token: "rotated", token_type: "bearer", expires_in: 3600 });
+    mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
+
+    render(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => {
+      expect(mockSetAccessToken).toHaveBeenCalledWith("rotated");
     });
   });
 

@@ -18,6 +18,8 @@ const AuthContext = createContext<AuthContextValue>({
   logout: async () => {},
 });
 
+const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthMe | null>(null);
   const [loading, setLoading] = useState(true);
@@ -37,7 +39,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     let cancelled = false;
     (async () => {
       try {
-        await api.authRefresh();
+        const refreshed = await api.authRefresh();
+        setAccessToken(refreshed.access_token);
         const me = await api.authMe();
         if (cancelled) return;
         setUser(me);
@@ -59,6 +62,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let stopped = false;
+
+    const refreshSession = async () => {
+      try {
+        const refreshed = await api.authRefresh();
+        if (!stopped) {
+          setAccessToken(refreshed.access_token);
+        }
+      } catch (err) {
+        if (!stopped && err instanceof AuthSessionExpiredError) {
+          setAccessToken(null);
+          setUser(null);
+        }
+      }
+    };
+
+    const intervalId = window.setInterval(() => {
+      void refreshSession();
+    }, SESSION_REFRESH_INTERVAL_MS);
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void refreshSession();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(intervalId);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [user]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

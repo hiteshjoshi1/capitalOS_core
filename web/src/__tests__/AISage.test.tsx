@@ -109,6 +109,18 @@ const CHAT_DETAIL_TWO: AISageChatDetail = {
   ] satisfies AISageChatMessage[],
 };
 
+let clipboardWriteText: ReturnType<typeof vi.fn>;
+
+function installClipboardMock() {
+  clipboardWriteText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: {
+      writeText: clipboardWriteText,
+    },
+  });
+}
+
 function renderAISage(initialEntries = ["/ai-sage"]) {
   return render(
     <AuthContext.Provider
@@ -139,6 +151,7 @@ function renderAISage(initialEntries = ["/ai-sage"]) {
 describe("AISage workspace", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    installClipboardMock();
     vi.mocked(api.aiSageChats).mockResolvedValue({ items: [], total: 0, limit: 30, offset: 0 });
     vi.mocked(api.aiSageCreateChat).mockResolvedValue({
       id: "chat-new",
@@ -187,6 +200,7 @@ describe("AISage workspace", () => {
     vi.mocked(api.aiSageChats).mockResolvedValue({ items: [CHAT_SUMMARY], total: 1, limit: 30, offset: 0 });
     vi.mocked(api.aiSageGetChat).mockResolvedValue(CHAT_DETAIL);
     const user = userEvent.setup();
+    installClipboardMock();
 
     renderAISage(["/ai-sage/chats/chat-1"]);
 
@@ -194,12 +208,20 @@ describe("AISage workspace", () => {
     expect(document.querySelector(".aiSageMainPanelThread")).not.toBeNull();
     expect(screen.getByText("Explain moat")).toBeInTheDocument();
     expect(screen.queryByText(/Grounded passages from Warren Buffett:/)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/Durable competitive advantages compound over time\./).length).toBeGreaterThan(0);
+    expect(screen.queryByText("1996 Letter")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Warren Buffett ·/)).not.toBeInTheDocument();
+    expect(screen.getByText("Score 0.91")).toBeInTheDocument();
+    expect(screen.getByText("A wonderful business can compound.")).toBeInTheDocument();
+    expect(screen.queryByText(/^Expanded context$/)).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Open source" })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /A wonderful business can compound\./i }));
+    await user.click(screen.getByText("A wonderful business can compound."));
+    expect(screen.queryByText(/^Expanded context$/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Show expanded context" }));
     expect(screen.getByText(/^Expanded context$/)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute("href", "https://example.com");
-    expect(screen.getByTestId("ai-sage-evidence-expanded-link")).toHaveAttribute("href", "https://example.com");
+    expect(screen.queryByTestId("ai-sage-evidence-expanded-link")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy chunk content" }));
+    expect(clipboardWriteText).toHaveBeenCalledWith("A wonderful business can compound.");
     expect(screen.getByRole("button", { name: "Compare that with Nick Sleep" })).toBeInTheDocument();
   });
 
