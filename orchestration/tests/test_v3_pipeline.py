@@ -137,10 +137,13 @@ def test_model_routing_config_supports_v3_fields() -> None:
     cfg = ModelRoutingConfig(
         provider="codex",
         model="gpt-5.3-codex",
+        reasoning_effort="xhigh",
     )
     assert cfg.pipeline_version == "v3"
     assert cfg.provider == "codex"
     assert cfg.model == "gpt-5.3-codex"
+    assert cfg.reasoning_effort == "xhigh"
     # backward-compat aliases
     assert cfg.v3_provider == "codex"
     assert cfg.v3_model == "gpt-5.3-codex"
+    assert cfg.v3_reasoning_effort == "xhigh"

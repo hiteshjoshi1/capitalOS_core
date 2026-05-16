@@ -566,12 +566,15 @@ def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, caps
         repair_enabled=False,
         provider="copilot",
         model="claude-sonnet-4.6",
+        reasoning_effort="xhigh",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
+    captured_args: dict[str, list[str]] = {}
 
     class FakePopen:
         def __init__(self, args, cwd, stdout, stderr, text, bufsize):
             _ = (args, cwd, stdout, stderr, text, bufsize)
+            captured_args["args"] = args
             self.returncode = 0
             self.stdout = StringIO('{"ok": true}\n')
             self.stderr = StringIO("thinking...\n")
@@ -594,6 +597,8 @@ def test_provider_runtime_run_copilot_streams_stdout(monkeypatch, tmp_path, caps
     assert '{"ok": true}' in captured.out
     assert "thinking..." in captured.err
     assert result.output == '{"ok": true}'
+    assert "--reasoning-effort" in captured_args["args"]
+    assert captured_args["args"][captured_args["args"].index("--reasoning-effort") + 1] == "xhigh"
 
 
 def test_provider_runtime_complete_structured_uses_copilot_session_fallback(monkeypatch, tmp_path) -> None:

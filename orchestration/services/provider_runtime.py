@@ -149,6 +149,9 @@ class ProviderRuntimeService:
             "-p",
             prompt,
         ]
+        reasoning_effort = getattr(self.cfg, "reasoning_effort", None)
+        if reasoning_effort:
+            args[3:3] = ["--reasoning-effort", reasoning_effort]
         final_args = self._prefix_with_caffeinate(args)
         returncode, output, error = self._run_streaming_command(final_args)
         if returncode != 0:
@@ -225,6 +228,9 @@ class ProviderRuntimeService:
             "--no-color",
             "--no-ask-user",
         ]
+        reasoning_effort = getattr(self.cfg, "reasoning_effort", None)
+        if reasoning_effort:
+            args[3:3] = ["--reasoning-effort", reasoning_effort]
         final_args = self._prefix_with_caffeinate(args)
         returncode, output, error = self._run_streaming_command(
             final_args,

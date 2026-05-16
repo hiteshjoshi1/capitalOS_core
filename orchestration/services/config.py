@@ -21,6 +21,7 @@ class ModelRoutingConfig(BaseModel):
     # --- Unified pipeline provider config ---
     provider: Literal["copilot", "codex"] = "copilot"
     model: str = Field(default="gpt-5.3-codex")
+    reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
     longrun_timeout_minutes: int = Field(default=120, ge=1)
     enable_post_pr_human_review: bool = True
     require_pre_ship_human_on_high_risk: bool = True
@@ -57,6 +58,10 @@ class ModelRoutingConfig(BaseModel):
         return self.model
 
     @property
+    def v3_reasoning_effort(self) -> str | None:
+        return self.reasoning_effort
+
+    @property
     def v3_longrun_timeout_minutes(self) -> int:
         return self.longrun_timeout_minutes
 
@@ -91,6 +96,7 @@ class ModelRoutingConfig(BaseModel):
         return cls(
             provider=os.getenv("PROVIDER", os.getenv("V3_PROVIDER", "copilot")),
             model=os.getenv("MODEL", os.getenv("V3_MODEL", os.getenv("BUILD_MODEL", "gpt-5.3-codex"))),
+            reasoning_effort=os.getenv("REASONING_EFFORT", os.getenv("V3_REASONING_EFFORT")),
             longrun_timeout_minutes=int(os.getenv("LONGRUN_TIMEOUT_MINUTES", os.getenv("V3_LONGRUN_TIMEOUT_MINUTES", "120"))),
             enable_post_pr_human_review=os.getenv("ENABLE_POST_PR_HUMAN_REVIEW", os.getenv("V3_ENABLE_POST_PR_HUMAN_REVIEW", "1")) == "1",
             require_pre_ship_human_on_high_risk=os.getenv("REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", os.getenv("V3_REQUIRE_PRE_SHIP_HUMAN_ON_HIGH_RISK", "1")) == "1",
