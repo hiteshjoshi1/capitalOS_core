@@ -632,22 +632,58 @@ class TestPdfStructuredParser:
         result = parser_mod.parse_pdf_structured(_MINIMAL_PDF)
         assert isinstance(result, parser_mod.StructuredParseResult)
         assert result.sections == []  # pdfminer path has no sections
+        assert result.doc_metadata["pdf_parser_backend_requested"] == "pdfminer"
+        assert result.doc_metadata["pdf_parser_backend_used"] == "pdfminer"
+        assert result.doc_metadata["pdf_parser_fallback_used"] is False
 
-    def test_unstructured_fallback_on_error(self, monkeypatch):
+    def test_unstructured_fallback_on_error(self, monkeypatch, caplog):
         """If unstructured raises, fall back to pdfminer gracefully."""
         import app.rag.ingestion.parser as parser_mod
 
         monkeypatch.setenv("RAG_PARSER_BACKEND", "unstructured")
         monkeypatch.setattr(parser_mod, "_UNSTRUCTURED_AVAILABLE", True)
-        monkeypatch.setattr(
-            parser_mod,
-            "_unstructured_partition_pdf",
-            MagicMock(side_effect=RuntimeError("boom")),
-        )
-        result = parser_mod.parse_pdf_structured(_MINIMAL_PDF)
+        with caplog.at_level("WARNING"):
+            monkeypatch.setattr(
+                parser_mod,
+                "_unstructured_partition_pdf",
+                MagicMock(side_effect=RuntimeError("boom")),
+            )
+            result = parser_mod.parse_pdf_structured(_MINIMAL_PDF)
+
         assert isinstance(result, parser_mod.StructuredParseResult)
         # Falls back cleanly — no exception raised
         assert result.source_type == "pdf"
+        assert result.doc_metadata["pdf_parser_backend_requested"] == "unstructured"
+        assert result.doc_metadata["pdf_parser_backend_used"] == "pdfminer"
+        assert result.doc_metadata["pdf_parser_fallback_used"] is True
+        assert result.doc_metadata["pdf_parser_fallback_from"] == "unstructured"
+        assert "RuntimeError: boom" in result.doc_metadata["pdf_parser_fallback_reason"]
+        assert "fell back to pdfminer" in caplog.text
+
+    def test_unstructured_metadata_set_on_success(self, monkeypatch):
+        import app.rag.ingestion.parser as parser_mod
+
+        class _FakeTitle:
+            text = "Investment Philosophy"
+
+            class metadata:
+                pass
+
+        _FakeTitle.__name__ = "Title"
+
+        monkeypatch.delenv("RAG_PARSER_BACKEND", raising=False)
+        monkeypatch.setattr(parser_mod, "_UNSTRUCTURED_AVAILABLE", True)
+        monkeypatch.setattr(
+            parser_mod,
+            "_unstructured_partition_pdf",
+            MagicMock(return_value=[_FakeTitle()]),
+        )
+        result = parser_mod.parse_pdf_structured(_MINIMAL_PDF)
+        assert isinstance(result, parser_mod.StructuredParseResult)
+        assert result.doc_metadata["pdf_parser_policy"] == "unstructured_first"
+        assert result.doc_metadata["pdf_parser_backend_requested"] == "unstructured"
+        assert result.doc_metadata["pdf_parser_backend_used"] == "unstructured"
+        assert result.doc_metadata["pdf_parser_fallback_used"] is False
 
     def test_unstructured_sections_extracted(self, monkeypatch):
         """When unstructured returns elements, sections are created."""
@@ -808,8 +844,9 @@ class TestParserBackendConfig:
         monkeypatch.setattr(parser_mod, "_UNSTRUCTURED_AVAILABLE", True)
         monkeypatch.setattr(parser_mod, "_unstructured_partition_pdf", fake_partition)
 
-        parser_mod.parse_pdf_structured(_MINIMAL_PDF)
+        result = parser_mod.parse_pdf_structured(_MINIMAL_PDF)
         assert calls == [{"strategy": "fast"}]
+        assert result.doc_metadata["pdf_parser_backend_used"] == "unstructured"
 
     def test_default_backend_retries_hi_res_when_fast_finds_no_tables(self, monkeypatch):
         import app.rag.ingestion.parser as parser_mod
@@ -914,6 +951,31 @@ class TestParserBackendConfig:
 
         parser_mod.parse_pdf_structured(_MINIMAL_PDF)
         assert not partition_called  # unstructured must NOT be called
+
+    def test_unknown_backend_defaults_to_unstructured(self, monkeypatch, caplog):
+        import app.rag.ingestion.parser as parser_mod
+
+        class _FakeNarrative:
+            text = "Narrative only"
+
+            class metadata:
+                pass
+
+        _FakeNarrative.__name__ = "NarrativeText"
+
+        monkeypatch.setenv("RAG_PARSER_BACKEND", "mystery")
+        monkeypatch.setattr(parser_mod, "_UNSTRUCTURED_AVAILABLE", True)
+        monkeypatch.setattr(
+            parser_mod,
+            "_unstructured_partition_pdf",
+            MagicMock(return_value=[_FakeNarrative()]),
+        )
+        with caplog.at_level("WARNING"):
+            result = parser_mod.parse_pdf_structured(_MINIMAL_PDF)
+
+        assert result.doc_metadata["pdf_parser_backend_requested"] == "unstructured"
+        assert result.doc_metadata["pdf_parser_backend_used"] == "unstructured"
+        assert "Unknown RAG_PARSER_BACKEND" in caplog.text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

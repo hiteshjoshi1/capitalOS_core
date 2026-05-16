@@ -408,7 +408,7 @@ orch-clean:
 	rm -rf .task-flow/
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
-.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test rag-eval rag-eval-compare rag-eval-seed
+.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test rag-eval rag-eval-compare rag-eval-seed rag-eval-pdf rag-eval-pdf-gate
 
 api-rebuild:
 	docker compose build api
@@ -461,3 +461,10 @@ rag-eval-compare:
 
 rag-eval-seed:
 	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/data/fixtures/rag_golden_queries.yaml
+
+rag-eval-pdf:
+	docker compose exec -T api python -m app.rag.eval.cli run --label $(if $(LABEL),$(LABEL),pdf-eval) --source-type pdf $(if $(OUTPUT),--output $(OUTPUT),)
+
+rag-eval-pdf-gate:
+	@test -n "$(BASELINE_REPORT)" || (echo "Usage: make rag-eval-pdf-gate BASELINE_REPORT=data/<baseline-report>.json [LABEL=pdf-candidate]" && exit 2)
+	docker compose exec -T api python -m app.rag.eval.cli gate --baseline-report $(BASELINE_REPORT) --label $(if $(LABEL),$(LABEL),pdf-candidate) --source-type pdf

@@ -52,6 +52,15 @@ FAILURE_OCR_REQUIRED = "ocr_required"
 FAILURE_MANUAL_REVIEW_REQUIRED = "manual_review_required"
 FAILURE_NO_CONTENT_SELECTED = "no_content_selected"
 FAILURE_LOW_QUALITY_EXTRACTION = LOW_QUALITY_FAILURE
+_PDF_PARSER_METADATA_KEYS = (
+    "pdf_parser_policy",
+    "pdf_parser_backend_requested",
+    "pdf_parser_backend_used",
+    "pdf_parser_unstructured_available",
+    "pdf_parser_fallback_used",
+    "pdf_parser_fallback_from",
+    "pdf_parser_fallback_reason",
+)
 
 
 class EmptyTextExtractionError(RuntimeError):
@@ -119,6 +128,31 @@ def _build_base_metadata(
     return base
 
 
+def _pdf_parser_metadata(parse_result: ParseResult) -> dict[str, Any]:
+    if getattr(parse_result, "source_type", None) != "pdf":
+        return {}
+    doc_metadata = getattr(parse_result, "doc_metadata", None) or {}
+    return {
+        key: doc_metadata[key]
+        for key in _PDF_PARSER_METADATA_KEYS
+        if key in doc_metadata
+    }
+
+
+def _log_pdf_parser_path(source: RagSource, parse_result: ParseResult) -> None:
+    parser_metadata = _pdf_parser_metadata(parse_result)
+    if not parser_metadata:
+        return
+    log.info(
+        "PDF parser path source=%s requested=%s used=%s fallback=%s policy=%s",
+        source.url or source.id,
+        parser_metadata.get("pdf_parser_backend_requested"),
+        parser_metadata.get("pdf_parser_backend_used"),
+        parser_metadata.get("pdf_parser_fallback_used"),
+        parser_metadata.get("pdf_parser_policy"),
+    )
+
+
 def _parser_sections_to_chunker(parser_sections: list) -> list[ChunkerSection]:
     """Convert parser DocumentSection objects to chunker DocumentSection format."""
     result: list[ChunkerSection] = []
@@ -151,7 +185,8 @@ def _persist_document_and_chunks(
     """Create RagDocument + RagChunk rows for one logical document."""
     _, raw_chunks, _ = _build_document_chunks_and_validation(source, parse_result, plan)
     publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
-    document_metadata = dict(plan.metadata or {})
+    source_document_metadata = dict(getattr(parse_result, "doc_metadata", None) or {})
+    document_metadata = {**source_document_metadata, **dict(plan.metadata or {})}
     document_metadata["char_count"] = len(plan.clean_text or "")
 
     doc = RagDocument(
@@ -612,6 +647,9 @@ def _persist_logical_documents(
         "rejected_count": len([artifact for artifact in validation_artifacts if artifact["status"] != "accepted"]),
         "model": embedding_model_name(),
     }
+    parser_metadata = _pdf_parser_metadata(parsed)
+    if parser_metadata:
+        stats["pdf_parser"] = parser_metadata
     if effective_options and not effective_options.is_empty():
         stats["selective_options"] = effective_options.to_dict()
         stats["sections_selected"] = len(plan.shared_sections)
@@ -711,6 +749,7 @@ def run_url_ingestion(
         parsed: ParseResult = parse(fetch.raw_bytes, source.source_type)
         _ensure_clean_text(parsed, source.source_type)
         structured = _prepare_parse_result(source, parsed)
+        _log_pdf_parser_path(source, structured)
 
         success, stats, error, failure_category = _persist_logical_documents(
             db,
@@ -863,6 +902,7 @@ def run_manual_ingestion(
         parsed = parse(text.encode("utf-8"), source.source_type)
         _ensure_clean_text(parsed, source.source_type)
         structured = _prepare_parse_result(source, parsed)
+        _log_pdf_parser_path(source, structured)
 
         success, stats, error, failure_category = _persist_logical_documents(
             db,

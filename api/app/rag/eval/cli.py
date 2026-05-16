@@ -56,6 +56,11 @@ def _check_thresholds(report: EvalReport) -> bool:
     return True
 
 
+def _load_report(path: str) -> EvalReport:
+    payload = json.loads(Path(path).read_text())
+    return EvalReport.from_dict(payload)
+
+
 @click.group()
 def cli() -> None:
     """RAG retrieval evaluation harness."""
@@ -65,17 +70,27 @@ def cli() -> None:
 @cli.command()
 @click.option("--label", default="current", show_default=True, help="Config label for this run.")
 @click.option("--top-k", default=10, show_default=True, help="Number of chunks to retrieve per query.")
+@click.option(
+    "--source-type",
+    type=click.Choice(["html", "pdf", "text", "manual"], case_sensitive=False),
+    default=None,
+    help="Restrict evaluation to golden evidence backed by this source type.",
+)
 @click.option("--output", type=click.Path(), default=None, help="Write JSON report to this file.")
-def run(label: str, top_k: int, output: Optional[str]) -> None:
+def run(label: str, top_k: int, source_type: Optional[str], output: Optional[str]) -> None:
     """Run offline evaluation against the golden dataset."""
     db = SessionLocal()
     try:
-        report = run_evaluation(db, config_label=label, top_k=top_k)
+        report = run_evaluation(db, config_label=label, top_k=top_k, source_type=source_type)
     finally:
         db.close()
 
     if report.num_queries == 0:
-        click.echo("No golden queries found. Seed the dataset with: make rag-eval-seed", err=True)
+        scope_note = f" for source_type={source_type}" if source_type else ""
+        click.echo(
+            f"No golden queries found{scope_note}. Seed the dataset with: make rag-eval-seed",
+            err=True,
+        )
         sys.exit(2)
 
     payload = json.dumps(report.as_dict(), indent=2)
@@ -93,16 +108,68 @@ def run(label: str, top_k: int, output: Optional[str]) -> None:
 @click.option("--a", "label_a", required=True, help="Label for configuration A.")
 @click.option("--b", "label_b", required=True, help="Label for configuration B.")
 @click.option("--top-k", default=10, show_default=True)
-def compare(label_a: str, label_b: str, top_k: int) -> None:
+@click.option(
+    "--source-type",
+    type=click.Choice(["html", "pdf", "text", "manual"], case_sensitive=False),
+    default=None,
+    help="Restrict both evaluation runs to golden evidence backed by this source type.",
+)
+@click.option(
+    "--fail-on-regression/--no-fail-on-regression",
+    default=False,
+    show_default=True,
+    help="Exit non-zero when the no-regression bar is not met.",
+)
+def compare(label_a: str, label_b: str, top_k: int, source_type: Optional[str], fail_on_regression: bool) -> None:
     """Compare two retrieval configurations on the golden dataset."""
     db = SessionLocal()
     try:
-        report_a = run_evaluation(db, config_label=label_a, top_k=top_k)
-        report_b = run_evaluation(db, config_label=label_b, top_k=top_k)
+        report_a = run_evaluation(db, config_label=label_a, top_k=top_k, source_type=source_type)
+        report_b = run_evaluation(db, config_label=label_b, top_k=top_k, source_type=source_type)
     finally:
         db.close()
 
-    click.echo(json.dumps(compare_reports(report_a, report_b), indent=2))
+    comparison = compare_reports(report_a, report_b)
+    click.echo(json.dumps(comparison, indent=2))
+    if fail_on_regression and not comparison["passes_no_regression_bar"]:
+        sys.exit(1)
+
+
+@cli.command()
+@click.option("--baseline-report", required=True, type=click.Path(exists=True), help="Path to a saved baseline JSON report.")
+@click.option("--label", default="current", show_default=True, help="Config label for the current run.")
+@click.option("--top-k", default=10, show_default=True, help="Number of chunks to retrieve per query.")
+@click.option(
+    "--source-type",
+    type=click.Choice(["html", "pdf", "text", "manual"], case_sensitive=False),
+    default=None,
+    help="Restrict the candidate evaluation to golden evidence backed by this source type.",
+)
+def gate(baseline_report: str, label: str, top_k: int, source_type: Optional[str]) -> None:
+    """Compare the current corpus against a saved baseline and fail on regression."""
+    baseline = _load_report(baseline_report)
+    db = SessionLocal()
+    try:
+        current = run_evaluation(db, config_label=label, top_k=top_k, source_type=source_type)
+    finally:
+        db.close()
+
+    if baseline.num_queries == 0 or current.num_queries == 0:
+        click.echo("Baseline or current evaluation report has no golden queries.", err=True)
+        sys.exit(2)
+
+    if baseline.scope and current.scope and baseline.scope != current.scope:
+        click.echo(
+            f"Baseline scope {baseline.scope} does not match current scope {current.scope}.",
+            err=True,
+        )
+        sys.exit(1)
+
+    comparison = compare_reports(baseline, current)
+    comparison["baseline_report"] = baseline_report
+    click.echo(json.dumps(comparison, indent=2))
+    if not comparison["passes_no_regression_bar"]:
+        sys.exit(1)
 
 
 @cli.command()

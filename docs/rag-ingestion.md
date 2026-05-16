@@ -412,6 +412,42 @@ That means the shipped change improves parser fidelity and Author Library render
 
 ---
 
+## PDF parser policy
+
+Production PDF ingestion is **Unstructured-first**.
+
+- default PDF parser path: `unstructured`
+- emergency override only: `RAG_PARSER_BACKEND=pdfminer`
+- resilience fallback: if Unstructured fails or is unavailable, ingestion falls back to `pdfminer`
+
+The parser path is now recorded on ingested PDF documents in `metadata` with fields such as:
+
+- `pdf_parser_policy`
+- `pdf_parser_backend_requested`
+- `pdf_parser_backend_used`
+- `pdf_parser_fallback_used`
+- `pdf_parser_fallback_reason`
+
+Fallback and override paths are also emitted in backend logs so degraded ingestion is visible instead of silent.
+
+### Required regression gate for PDF parser-path changes
+
+Before rolling out a PDF parser-path change on production corpus documents:
+
+```bash
+# 1. Capture a PDF-only baseline report from the current corpus
+make rag-eval-pdf LABEL=pdf-baseline OUTPUT=data/rag_eval_pdf_baseline.json
+
+# 2. Re-ingest the affected PDF documents with the candidate parser path
+
+# 3. Fail the rollout if PDF retrieval quality regresses
+make rag-eval-pdf-gate BASELINE_REPORT=data/rag_eval_pdf_baseline.json LABEL=pdf-candidate
+```
+
+The gate evaluates only golden queries backed by PDF sources and fails if the candidate corpus drops below the existing no-regression bar.
+
+---
+
 ## Environment Variables
 
 | Variable | Default | Purpose |
@@ -420,6 +456,7 @@ That means the shipped change improves parser fidelity and Author Library render
 | `RAG_EMBEDDING_MODEL` | `voyage-4` | Default embedding model for text-first documents |
 | `RAG_MULTIMODAL_EMBEDDING_MODEL` | `voyage-multimodal-3.5` | Embedding model for multimodal documents |
 | `RAG_EMBEDDING_PROVIDER` | `voyage` | Embedding provider selector |
+| `RAG_PARSER_BACKEND` | `unstructured` | PDF parser policy selector. Keep default for normal operation; set to `pdfminer` only as an emergency override. |
 | `RAG_EMBEDDING_MOCK` | `0` | Set to `1` to use deterministic mock embeddings (for tests/dev) |
 | `VOYAGE_API_KEY` | — | Required for real Voyage embeddings; if absent, mock/dev fallback should be used |
 
@@ -430,7 +467,7 @@ That means the shipped change improves parser fidelity and Author Library render
 | Format | Source type | Notes |
 |--------|-------------|-------|
 | HTML article / blog post | `html` | JavaScript-heavy pages may need manual fallback |
-| PDF (direct URL) | `pdf` | Requires `pdfminer.six` |
+| PDF (direct URL) | `pdf` | Uses Unstructured first. Falls back to `pdfminer.six`; `RAG_PARSER_BACKEND=pdfminer` is emergency override only. |
 | PDF (local) | `manual` | Extract with pdftotext, then upload |
 | Plain text | `text` | Direct URL or manual upload |
 | Annual letters | `pdf` or `manual` | |
