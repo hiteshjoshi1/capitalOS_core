@@ -72,7 +72,7 @@ def _compose_notes(fp: str, parser_notes: Any) -> str:
 
 
 def _snapshot_as_of() -> datetime:
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "1"))
     now = datetime.now(tz=timezone.utc)
     safe_day = min(snapshot_day, 28)
     return now.replace(day=safe_day, hour=0, minute=0, second=0, microsecond=0)

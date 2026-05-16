@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_current_user
+from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
 from app.crypto.verify import (
     verify_evm_signature,
@@ -23,7 +24,7 @@ from app.crypto.verify import (
     verify_solana_signature_debug,
     verify_solana_signature_bytes_debug,
 )
-from app.crypto.ingest import ingest_wallet, upsert_snapshot, acquire_refresh_lock, release_refresh_lock
+from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refresh_lock, upsert_snapshot
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.fx import get_rates
 
@@ -489,27 +490,13 @@ def wallet_verify_onchain(
 def _refresh_wallet(wallet_id: str):
     db = next(get_db())
     try:
-        if not acquire_refresh_lock(db, wallet_id):
-            return
-        started = datetime.utcnow()
-        result = ingest_wallet(db, wallet_id)
-        upsert_snapshot(db, wallet_id, result)
-        db.commit()
-        logger.info(
-            "crypto_refresh_success",
-            extra={
-                "wallet_id": wallet_id,
-                "items": len(result.items),
-                "total_usd": result.total_usd,
-                "duration_ms": int((datetime.utcnow() - started).total_seconds() * 1000),
-            },
-        )
-    except Exception as exc:
-        db.rollback()
-        logger.exception("crypto_refresh_failed", extra={"wallet_id": wallet_id, "error": str(exc)})
+        wallet = db.execute(
+            text("SELECT user_id FROM crypto_wallets WHERE id = :wallet_id"),
+            {"wallet_id": wallet_id},
+        ).mappings().one_or_none()
+        user_id = int(wallet["user_id"]) if wallet and wallet["user_id"] is not None else None
+        refresh_wallet_snapshot(db, wallet_id, user_id=user_id, automatic=False)
     finally:
-        release_refresh_lock(db, wallet_id)
-        db.commit()
         db.close()
 
 

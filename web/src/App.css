@@ -1931,6 +1931,98 @@ a.btn {
   margin: 10px 0 0;
 }
 
+.wealthFreshnessRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.wealthFreshnessPill {
+  display: grid;
+  gap: 4px;
+  min-width: 112px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--panel) 72%, transparent 28%);
+}
+
+.wealthFreshnessLabel,
+.wealthSnapshotLabel {
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.wealthSnapshotPanel {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(125, 211, 252, 0.16);
+  background: rgba(125, 211, 252, 0.08);
+}
+
+.wealthSnapshotPanelHeader {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.wealthSnapshotValue {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.45rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.wealthSnapshotMeta {
+  margin: 0;
+}
+
+.wealthSnapshotBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid transparent;
+}
+
+.wealthSnapshotBadgeExact {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--good) 28%, transparent 72%);
+}
+
+.wealthSnapshotBadgeSynthetic {
+  color: #f6c177;
+  background: color-mix(in srgb, #f6c177 16%, transparent 84%);
+  border-color: color-mix(in srgb, #f6c177 30%, transparent 70%);
+}
+
+.wealthSnapshotBadgeMissing {
+  color: var(--trend-negative);
+  background: color-mix(in srgb, var(--trend-negative) 14%, transparent 86%);
+  border-color: color-mix(in srgb, var(--trend-negative) 28%, transparent 72%);
+}
+
+[data-theme="light"] .wealthSnapshotPanel {
+  background: rgba(43, 109, 219, 0.08);
+  border-color: rgba(43, 109, 219, 0.18);
+}
+
+[data-theme="light"] .wealthSnapshotValue {
+  color: #15352d;
+}
+
 .wealthDeltaPill {
   display: grid;
   gap: 4px;
@@ -3454,9 +3546,20 @@ a.btn {
   gap: 10px;
 }
 
+.aiSageEvidenceExpandedLink {
+  display: grid;
+  gap: 8px;
+  color: inherit;
+  text-decoration: none;
+}
+
 .aiSageEvidenceExpanded {
   border-top: 1px solid var(--line);
   padding-top: 12px;
+}
+
+.aiSageEvidenceExpandedLink:hover .aiSageEvidenceText {
+  text-decoration: underline;
 }
 
 .aiSageEvidenceActions {
@@ -3752,6 +3855,29 @@ a.btn {
   width: fit-content;
 }
 
+.authorLibrarySourceActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.authorLibrarySourceFallback {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel2) 86%, transparent 14%);
+}
+
+.authorLibrarySourceFallbackReasons {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 .authorLibraryAuthorCardMinimal {
   gap: 0;
 }
@@ -3924,6 +4050,14 @@ a.btn {
   border-collapse: collapse;
 }
 
+.authorLibraryTableCaption {
+  padding: 14px;
+  caption-side: top;
+  text-align: left;
+  font-weight: 700;
+  color: var(--text);
+}
+
 .authorLibraryTable th,
 .authorLibraryTable td {
   padding: 12px 14px;
@@ -3940,6 +4074,52 @@ a.btn {
 
 .authorLibraryTable tr:last-child td {
   border-bottom: none;
+}
+
+.authorLibraryTableHtml table {
+  width: 100%;
+  min-width: 520px;
+  border-collapse: collapse;
+}
+
+.authorLibraryTableHtml caption {
+  padding: 14px;
+  caption-side: top;
+  text-align: left;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.authorLibraryTableHtml th,
+.authorLibraryTableHtml td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 14px;
+  vertical-align: top;
+}
+
+.authorLibraryTableHtml th {
+  background: color-mix(in srgb, var(--surface-glow) 88%, transparent 12%);
+  color: var(--text);
+}
+
+.authorLibraryTableHtml tr:last-child td {
+  border-bottom: none;
+}
+
+.authorLibraryTableNotes {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.5;
+  color: var(--muted);
+}
+
+.authorLibraryTableNotes p {
+  margin: 0;
 }
 
 .authorLibraryTableFallback {

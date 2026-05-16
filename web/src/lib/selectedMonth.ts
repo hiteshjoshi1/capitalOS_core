@@ -14,21 +14,21 @@ function isValidMonth(value: string | null): value is string {
   return value != null && MONTH_PATTERN.test(value);
 }
 
-export function readSelectedMonth() {
+export function readSelectedMonth(storageKey = SELECTED_MONTH_STORAGE_KEY) {
   if (typeof window === "undefined") {
     return currentMonthYYYYMM();
   }
 
-  const storedMonth = window.localStorage.getItem(SELECTED_MONTH_STORAGE_KEY);
+  const storedMonth = window.localStorage.getItem(storageKey);
   return isValidMonth(storedMonth) ? storedMonth : currentMonthYYYYMM();
 }
 
-export function useSelectedMonth() {
-  const [month, setMonth] = useState<string>(() => readSelectedMonth());
+export function useSelectedMonth(storageKey = SELECTED_MONTH_STORAGE_KEY) {
+  const [month, setMonth] = useState<string>(() => readSelectedMonth(storageKey));
 
   useEffect(() => {
-    window.localStorage.setItem(SELECTED_MONTH_STORAGE_KEY, month);
-  }, [month]);
+    window.localStorage.setItem(storageKey, month);
+  }, [month, storageKey]);
 
   return [month, setMonth] as const;
 }

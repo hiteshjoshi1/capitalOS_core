@@ -62,6 +62,10 @@ def synthesize_sections_from_markers(
                 content_type="text",
                 table_markdown=None,
                 table_rows=None,
+                table_html=None,
+                table=None,
+                caption=None,
+                notes=None,
                 items=None,
             )
         )
@@ -120,6 +124,10 @@ def _split_section_by_markers(
             content_type=section.content_type,
             table_markdown=section.table_markdown,
             table_rows=section.table_rows,
+            table_html=section.table_html,
+            table=deepcopy(section.table) if section.table else None,
+            caption=section.caption,
+            notes=list(section.notes) if section.notes else None,
             items=section.items,
             metadata=dict(section.metadata or {}),
         )
@@ -137,6 +145,10 @@ def _split_section_by_markers(
                 content_type=section.content_type,
                 table_markdown=None,
                 table_rows=section.table_rows,
+                table_html=section.table_html,
+                table=deepcopy(section.table) if section.table else None,
+                caption=section.caption,
+                notes=list(section.notes) if section.notes else None,
                 items=section.items,
                 metadata=dict(section.metadata or {}),
             )

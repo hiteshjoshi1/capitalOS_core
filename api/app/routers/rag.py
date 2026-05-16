@@ -467,18 +467,6 @@ class RelatedLibraryDocumentOut(BaseModel):
     relationship: str
 
 
-class LibraryContentBlockOut(BaseModel):
-    block_id: str
-    type: str
-    order: int
-    level: Optional[int] = None
-    text: Optional[str] = None
-    items: Optional[list[str]] = None
-    table_markdown: Optional[str] = None
-    table_rows: Optional[list[list[str]]] = None
-    metadata: dict[str, Any] = Field(default_factory=dict)
-
-
 class LibraryDocumentDetailOut(BaseModel):
     id: str
     source_id: str
@@ -497,8 +485,6 @@ class LibraryDocumentDetailOut(BaseModel):
     work_type: Optional[str]
     source_section: Optional[str]
     metadata: dict[str, Any]
-    clean_text: str
-    content_blocks: Optional[list[LibraryContentBlockOut]] = None
     char_count: int
     parent_document: Optional[RelatedLibraryDocumentOut]
     child_documents: list[RelatedLibraryDocumentOut]
@@ -725,6 +711,20 @@ def _publication_label(doc: RagDocument) -> Optional[str]:
     return None
 
 
+def _publication_group_label(doc: RagDocument) -> str:
+    year = doc.publication_year or (doc.published_at.year if doc.published_at else None)
+    return str(year) if year is not None else "Unknown"
+
+
+def _publication_group_sort_key(label: str) -> tuple[int, int, str]:
+    if label == "Unknown":
+        return (1, 0, label)
+    try:
+        return (0, -int(label), label)
+    except ValueError:
+        return (0, 0, label)
+
+
 def _source_type_label(doc: RagDocument) -> str:
     return doc.source.source_type if doc.source else "unknown"
 
@@ -849,21 +849,30 @@ def _meaningful_group_fields(documents: list[RagDocument]) -> list[str]:
     ]
     for doc in documents:
         for field, value in _group_candidate_values(doc).items():
-            entry = stats.setdefault(field, {"coverage": 0, "values": set()})
+            entry = stats.setdefault(field, {"coverage": 0, "values": set(), "counts": defaultdict(int)})
             entry["coverage"] += 1
             entry["values"].add(value)
+            entry["counts"][value] += 1
 
     ordered_fields: list[str] = []
     for field in preferred_order:
         entry = stats.get(field)
-        if entry and entry["coverage"] >= 2:
+        if (
+            entry
+            and entry["coverage"] >= 2
+            and len(entry["values"]) >= 2
+            and max(entry["counts"].values(), default=0) >= 2
+        ):
             ordered_fields.append(field)
 
     dynamic_fields = sorted(
         (
             field
             for field, entry in stats.items()
-            if field not in preferred_order and entry["coverage"] >= 2
+            if field not in preferred_order
+            and entry["coverage"] >= 2
+            and len(entry["values"]) >= 2
+            and max(entry["counts"].values(), default=0) >= 2
         ),
         key=lambda field: (-int(stats[field]["coverage"]), field),
     )
@@ -872,6 +881,9 @@ def _meaningful_group_fields(documents: list[RagDocument]) -> list[str]:
 
 
 def _select_primary_group_field(documents: list[RagDocument]) -> Optional[str]:
+    labels = {_publication_label(doc) for doc in documents if _publication_label(doc)}
+    if len(labels) >= 2:
+        return "publication_year"
     fields = _meaningful_group_fields(documents)
     return fields[0] if fields else None
 
@@ -888,6 +900,18 @@ def _document_sort_key(doc: RagDocument) -> tuple[int, str, str]:
     date_value = doc.published_at.isoformat() if doc.published_at else ""
     title = (doc.title or "").lower()
     return (-year, date_value, title)
+
+
+def _document_char_count(doc: RagDocument) -> int:
+    metadata = doc.metadata_json or {}
+    value = metadata.get("char_count")
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return 0
 
 
 def _document_summary_out(doc: RagDocument) -> LibraryDocumentSummaryOut:
@@ -912,7 +936,7 @@ def _document_summary_out(doc: RagDocument) -> LibraryDocumentSummaryOut:
         work_type=doc.work_type,
         source_section=doc.source_section,
         metadata=doc.metadata_json or {},
-        char_count=len(doc.clean_text or ""),
+        char_count=_document_char_count(doc),
         parent_document_id=str(doc.parent_document_id) if doc.parent_document_id else None,
         parent_title=parent_title,
         child_count=len(doc.child_documents),
@@ -935,19 +959,28 @@ def _related_document_out(doc: RagDocument, *, relationship: str) -> RelatedLibr
 def _build_library_groups(documents: list[RagDocument]) -> tuple[list[LibraryGroupOut], LibraryGroupingOut]:
     primary_field = _select_primary_group_field(documents)
     available_fields = _meaningful_group_fields(documents)
+    if primary_field == "publication_year" and "publication_year" not in available_fields:
+        available_fields = ["publication_year", *available_fields]
     if primary_field is None:
         return [], LibraryGroupingOut(primary_field=None, secondary_field=None, available_fields=available_fields)
 
     grouped: dict[str, list[RagDocument]] = defaultdict(list)
     for doc in documents:
-        label = _group_candidate_values(doc).get(primary_field) or "Other"
+        if primary_field == "publication_year":
+            label = _publication_group_label(doc)
+        else:
+            label = _group_candidate_values(doc).get(primary_field) or "Other"
         grouped[label].append(doc)
 
     groups: list[LibraryGroupOut] = []
     secondary_field_used: Optional[str] = None
-    for label in sorted(grouped.keys(), key=lambda value: (value == "Other", value.lower())):
+    if primary_field == "publication_year":
+        ordered_labels = sorted(grouped.keys(), key=_publication_group_sort_key)
+    else:
+        ordered_labels = sorted(grouped.keys(), key=lambda value: (value == "Other", value.lower()))
+    for label in ordered_labels:
         docs_in_group = sorted(grouped[label], key=_document_sort_key)
-        secondary_field = _select_secondary_group_field(docs_in_group)
+        secondary_field = None if primary_field == "publication_year" else _select_secondary_group_field(docs_in_group)
         secondary_groups: list[LibrarySecondaryGroupOut] = []
         if secondary_field:
             secondary_field_used = secondary_field
@@ -1132,9 +1165,7 @@ def get_library_document(
         work_type=document.work_type,
         source_section=document.source_section,
         metadata=document.metadata_json or {},
-        clean_text=document.clean_text or "",
-        content_blocks=document.content_blocks_json or None,
-        char_count=len(document.clean_text or ""),
+        char_count=_document_char_count(document),
         parent_document=parent_document,
         child_documents=[
             _related_document_out(child, relationship="child")
@@ -2047,7 +2078,7 @@ def get_document(document_id: str, db: Session = Depends(get_db)):
         "note_taker": doc.note_taker,
         "work_type": doc.work_type,
         "metadata_json": doc.metadata_json or {},
-        "char_count": len(doc.clean_text or ""),
+        "char_count": _document_char_count(doc),
         "chunk_count": len(doc.chunks),
         "created_at": doc.created_at.isoformat() if doc.created_at else None,
     }

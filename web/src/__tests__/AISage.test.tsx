@@ -195,10 +195,11 @@ describe("AISage workspace", () => {
     expect(screen.getByText("Explain moat")).toBeInTheDocument();
     expect(screen.queryByText(/Grounded passages from Warren Buffett:/)).not.toBeInTheDocument();
     expect(screen.getAllByText(/Durable competitive advantages compound over time\./).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Open document" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Open source" })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: /A wonderful business can compound\./i }));
     expect(screen.getByText(/^Expanded context$/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open document" })).toHaveAttribute("href", "/author-library/warren_buffett/documents/doc-1");
+    expect(screen.getByRole("link", { name: "Open source" })).toHaveAttribute("href", "https://example.com");
+    expect(screen.getByTestId("ai-sage-evidence-expanded-link")).toHaveAttribute("href", "https://example.com");
     expect(screen.getByRole("button", { name: "Compare that with Nick Sleep" })).toBeInTheDocument();
   });
 

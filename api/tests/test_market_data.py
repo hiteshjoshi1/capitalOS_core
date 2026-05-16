@@ -37,6 +37,8 @@ def test_yfinance_dividend_yield_subunit_uses_implied_anchor():
 
 
 def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
+    published_events = []
+
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -83,6 +85,10 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
     monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
     monkeypatch.setattr("app.market_data.providers.EODHDProvider.fetch_eod_single", fake_eod)
     monkeypatch.setattr("app.market_data.providers.YahooProvider.fetch_prices", fake_yahoo)
+    monkeypatch.setattr(
+        "app.routers.market_data.publish_portfolio_refresh",
+        lambda user_id, **kwargs: published_events.append({"user_id": user_id, **kwargs}),
+    )
 
     resp = client.post("/market-data/refresh-now")
     assert resp.status_code == 200
@@ -90,6 +96,12 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
     assert body["status"] == "ok"
     assert body["exchanges"][0]["exchange_code"] == "US"
     assert body["exchanges"][0]["upserted_rows"] == 1
+    assert len(published_events) == 1
+    assert published_events[0]["user_id"] == 1
+    assert published_events[0]["event_name"] == "market_data_refresh_completed"
+    assert published_events[0]["source"] == "market-data"
+    assert published_events[0]["status"] == "completed"
+    assert published_events[0]["payload"]["exchange_count"] >= 1
 
     status = client.get("/market-data/status")
     assert status.status_code == 200

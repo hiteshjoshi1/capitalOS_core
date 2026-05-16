@@ -383,6 +383,33 @@ A successful response confirms:
 3. Semantic retrieval returns relevant passages
 4. Citation metadata is intact
 
+### Source-link verification
+
+Author Library is now source-first. When you inspect a document-detail payload, verify that it points back to the original source rather than serving stored reader content:
+
+```bash
+curl http://localhost:8000/rag/library/documents/<document-id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+For a correctly ingested source-backed document, verify:
+
+1. `source_url` is present and opens the original source
+2. `source_type`, `title`, and publication metadata are intact
+3. `parent_document` and `child_documents` still provide navigation metadata when applicable
+
+### Multimodal status for Issue 163
+
+`voyage-multimodal-3.5` is **not adopted in this implementation**.
+
+The codebase still embeds documents and queries with one active model family at a time, and this issue does not introduce:
+
+- document routing between text and multimodal embedding spaces
+- partitioned ANN retrieval by embedding-model family
+- query-time dual routing across separate indexes
+
+That means the shipped change improves parser fidelity and Author Library rendering without silently changing retrieval-space compatibility or the default `voyage-4` ingestion path.
+
 ---
 
 ## Environment Variables

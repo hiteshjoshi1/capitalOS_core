@@ -24,6 +24,7 @@ from app.rag.ingestion.chunker import Chunk, DocumentSection as ChunkerSection, 
 from app.rag.ingestion.embedder import embed_batch, embedding_model_name
 from app.rag.ingestion.fanout import (
     FanoutPlan,
+    INGESTION_MODE_SINGLE_WORK,
     LogicalDocumentPlan,
     build_selected_text,
     build_fanout_plan,
@@ -37,7 +38,6 @@ from app.rag.ingestion.selector import (
     SelectiveIngestionOptions,
     apply_selective_options,
 )
-from app.rag.ingestion.structured_content import build_content_blocks
 from app.rag.ingestion.source_presets import (
     apply_source_preset,
     normalize_source_parse_result,
@@ -151,7 +151,8 @@ def _persist_document_and_chunks(
     """Create RagDocument + RagChunk rows for one logical document."""
     _, raw_chunks, _ = _build_document_chunks_and_validation(source, parse_result, plan)
     publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
-    content_blocks = build_content_blocks(plan.selected_sections, fallback_text=plan.clean_text)
+    document_metadata = dict(plan.metadata or {})
+    document_metadata["char_count"] = len(plan.clean_text or "")
 
     doc = RagDocument(
         source_id=source.id,
@@ -168,10 +169,7 @@ def _persist_document_and_chunks(
         note_taker=plan.note_taker,
         work_type=plan.work_type,
         source_document_index=plan.index,
-        raw_text=plan.raw_text,
-        clean_text=plan.clean_text,
-        metadata_json=plan.metadata,
-        content_blocks_json=content_blocks or None,
+        metadata_json=document_metadata,
     )
     db.add(doc)
     db.flush()
@@ -319,6 +317,47 @@ def _link_parent_documents(
     db.flush()
 
 
+def _preserve_existing_single_work_identity(
+    plan: LogicalDocumentPlan,
+    existing_document: RagDocument | None,
+) -> LogicalDocumentPlan:
+    if existing_document is None:
+        return plan
+
+    if existing_document.title:
+        plan.title = existing_document.title
+    if existing_document.author_id:
+        plan.author_id = existing_document.author_id
+    if existing_document.published_at is not None:
+        plan.published_at = existing_document.published_at
+    if existing_document.publication_year is not None:
+        plan.publication_year = existing_document.publication_year
+    if existing_document.venue:
+        plan.venue = existing_document.venue
+    if existing_document.collection:
+        plan.collection = existing_document.collection
+    if existing_document.canonical_work_id:
+        plan.canonical_work_id = existing_document.canonical_work_id
+    if existing_document.canonical_status:
+        plan.canonical_status = existing_document.canonical_status
+    if existing_document.dedupe_priority is not None:
+        plan.dedupe_priority = existing_document.dedupe_priority
+    if existing_document.source_section:
+        plan.source_section = existing_document.source_section
+    if existing_document.note_taker:
+        plan.note_taker = existing_document.note_taker
+    if existing_document.work_type:
+        plan.work_type = existing_document.work_type
+
+    existing_metadata = dict(existing_document.metadata_json or {})
+    if existing_metadata:
+        merged_metadata = dict(existing_metadata)
+        merged_metadata.update(plan.metadata or {})
+        plan.metadata = merged_metadata
+
+    return plan
+
+
 def _build_document_chunks_and_validation(
     source: RagSource,
     parse_result: ParseResult,
@@ -327,6 +366,7 @@ def _build_document_chunks_and_validation(
     doc_hash = _sha256(plan.clean_text)
     doc_metadata: Optional[dict] = getattr(parse_result, "doc_metadata", None)
     publication_year = plan.publication_year or (plan.published_at.year if plan.published_at else None)
+    document_char_count = len(plan.clean_text or "")
     base_meta = _build_base_metadata(
         source,
         doc_hash,
@@ -344,6 +384,7 @@ def _build_document_chunks_and_validation(
             "dedupe_priority": plan.dedupe_priority,
             "note_taker": plan.note_taker,
             "work_type": plan.work_type,
+            "document_char_count": document_char_count,
             **plan.metadata,
         },
     )
@@ -405,6 +446,16 @@ def _preview_logical_documents(
 ) -> tuple[FanoutPlan, list[dict[str, Any]], list[tuple[LogicalDocumentPlan, list[Chunk], QualityValidationResult]], list[str], Optional[SelectiveIngestionOptions]]:
     effective_options = _effective_selective_options(source, selective_options)
     ingestion_config = _effective_ingestion_config(source)
+    existing_documents = (
+        db.query(RagDocument)
+        .filter(RagDocument.source_id == source.id)
+        .order_by(RagDocument.source_document_index.asc())
+        .all()
+    )
+    existing_documents_by_index = {
+        int(document.source_document_index): document
+        for document in existing_documents
+    }
     plan: FanoutPlan = build_fanout_plan(
         parsed,
         source_author_id=source.author_id,
@@ -413,6 +464,11 @@ def _preview_logical_documents(
         source_selective_options=effective_options,
         ingestion_config=ingestion_config,
     )
+    if plan.mode == INGESTION_MODE_SINGLE_WORK and title is None and published_at is None and plan.documents:
+        plan.documents[0] = _preserve_existing_single_work_identity(
+            plan.documents[0],
+            existing_documents_by_index.get(plan.documents[0].index),
+        )
 
     artifacts: list[dict[str, Any]] = []
     prepared_documents: list[tuple[LogicalDocumentPlan, list[Chunk], QualityValidationResult]] = []
@@ -475,8 +531,6 @@ def _persist_logical_documents(
     published_at=None,
     selective_options: Optional[SelectiveIngestionOptions] = None,
 ) -> tuple[bool, dict[str, Any], Optional[str], Optional[str]]:
-    source.raw_text = parsed.raw_text
-    source.clean_text = parsed.clean_text
     plan, validation_artifacts, prepared_documents, rejected_categories, effective_options = _preview_logical_documents(
         source,
         db,

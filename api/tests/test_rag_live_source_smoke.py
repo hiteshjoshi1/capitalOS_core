@@ -27,6 +27,22 @@ def _add_author(db, author_id: str, name: str) -> RagAuthor:
     return author
 
 
+def _document_text(document: RagDocument) -> str:
+    ordered_chunks = sorted(document.chunks, key=lambda chunk: chunk.chunk_index)
+    return "\n".join(chunk.text for chunk in ordered_chunks)
+
+
+def _document_char_count(document: RagDocument) -> int:
+    value = (document.metadata_json or {}).get("char_count")
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return 0
+
+
 @pytest.mark.skipif(
     not RUN_LIVE_SOURCE_SMOKE,
     reason="set RUN_LIVE_SOURCE_SMOKE=1 to run live external-source ingestion smoke checks",
@@ -54,9 +70,10 @@ class TestRagLiveSourceSmoke:
             assert job.status == "done"
             assert job.failure_category in (None, "")
             assert len(documents) == 1
-            assert len(documents[0].clean_text or "") > 50000
-            assert "Chapter Four: Eleven Talks" in (source.clean_text or "")
-            assert "The Psychology of Human Misjudgment" in (documents[0].clean_text or "")
+            assert _document_char_count(documents[0]) > 50000
+            document_text = _document_text(documents[0])
+            assert "Chapter Four: Eleven Talks" in document_text
+            assert "The Psychology of Human Misjudgment" in document_text
         finally:
             db.close()
 
@@ -139,7 +156,7 @@ class TestRagLiveSourceSmoke:
             assert job.failure_category in (None, "")
             assert job.stats_json["ingestion_mode"] == "fanout"
             assert job.stats_json["documents_created"] == 2
-            assert len(source.clean_text or "") > 50000
+            assert job.stats_json["char_count"] > 50000
             assert len(documents) == 2
 
             foreword, reading = documents
@@ -148,15 +165,17 @@ class TestRagLiveSourceSmoke:
             assert foreword.collection == "Poor Charlie's Almanack"
             assert foreword.work_type == "foreword"
             assert foreword.source_section == "Foreword: Collison on Munger"
-            assert "John Collison" in (foreword.clean_text or "")
-            assert "Recommended reading" not in (foreword.clean_text or "")
+            foreword_text = _document_text(foreword)
+            assert "John Collison" in foreword_text
+            assert "Recommended reading" not in foreword_text
 
             assert reading.title == "Recommended reading"
             assert reading.author_id == munger.id
             assert reading.collection == "Poor Charlie's Almanack"
             assert reading.work_type == "reference"
             assert reading.source_section == "Recommended reading"
-            assert "Titan: The Life of John D. Rockefeller" in (reading.clean_text or "")
-            assert "Foreword: Collison on Munger" not in (reading.clean_text or "")
+            reading_text = _document_text(reading)
+            assert "Titan: The Life of John D. Rockefeller" in reading_text
+            assert "Foreword: Collison on Munger" not in reading_text
         finally:
             db.close()

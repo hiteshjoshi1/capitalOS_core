@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { DashboardSummary, SpendingSummary, UploadReminder } from "../lib/api";
+import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
@@ -20,30 +21,44 @@ type CompositionSlice = {
   compareMonth?: string | null;
 };
 
+const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
+const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
+const WEALTH_OVERVIEW_MONTH_STORAGE_KEY = "capitalos.selectedMonth.wealth";
+
 export default function WealthOverview() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
   const [uploadReminders, setUploadReminders] = useState<UploadReminder[]>([]);
-  const [month, setMonth] = useSelectedMonth();
+  const [month, setMonth] = useSelectedMonth(WEALTH_OVERVIEW_MONTH_STORAGE_KEY);
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
+
+  const fetchDashboardData = useCallback(async () => {
+    const [summaryData, spendingData, alertsData] = await Promise.all([
+      api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+      api.spendingSummary(month, baseCurrency),
+      api.alertNotifications(month).catch(() => null),
+    ]);
+    return {
+      summaryData,
+      spendingData,
+      uploadReminders: alertsData?.upload_reminders ?? [],
+    };
+  }, [baseCurrency, month]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setState("loading");
-        const [summaryData, spendingData, alertsData] = await Promise.all([
-          api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
-          api.spendingSummary(month, baseCurrency),
-          api.alertNotifications(month).catch(() => null),
-        ]);
+        setErr("");
+        const data = await fetchDashboardData();
         if (cancelled) return;
-        setSummary(summaryData);
-        setSpendingSummary(spendingData);
-        setUploadReminders(alertsData?.upload_reminders ?? []);
+        setSummary(data.summaryData);
+        setSpendingSummary(data.spendingData);
+        setUploadReminders(data.uploadReminders);
         setState("ready");
       } catch (error: unknown) {
         if (cancelled) return;
@@ -54,17 +69,68 @@ export default function WealthOverview() {
     return () => {
       cancelled = true;
     };
-  }, [month, baseCurrency]);
+  }, [fetchDashboardData]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let refreshTimer: number | null = null;
+
+    const refreshSummary = async () => {
+      try {
+        const data = await fetchDashboardData();
+        if (cancelled) return;
+        setSummary(data.summaryData);
+        setSpendingSummary(data.spendingData);
+        setUploadReminders(data.uploadReminders);
+        setErr("");
+        setState("ready");
+      } catch (error: unknown) {
+        if (cancelled) return;
+        setErr(error instanceof Error ? error.message : String(error));
+        setState("error");
+      }
+    };
+
+    const unsubscribe = subscribeToRealtimeTopic(PORTFOLIO_REFRESH_TOPIC, {
+      onEvent: () => {
+        if (refreshTimer != null) {
+          window.clearTimeout(refreshTimer);
+        }
+        refreshTimer = window.setTimeout(() => {
+          void refreshSummary();
+        }, PORTFOLIO_REFRESH_DEBOUNCE_MS);
+      },
+    });
+
+    return () => {
+      cancelled = true;
+      if (refreshTimer != null) {
+        window.clearTimeout(refreshTimer);
+      }
+      unsubscribe();
+    };
+  }, [fetchDashboardData]);
 
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
   const formatShortDate = (value?: string | null) => (value ? value.slice(0, 10) : "—");
 
+  const currentNetWorth = summary?.current_net_worth ?? summary?.net_worth ?? null;
+  const currentNetWorthAsOf = summary?.current_net_worth_as_of ?? summary?.net_worth_as_of ?? null;
+  const currentFreshness = summary?.current_net_worth_freshness ?? null;
   const netWorthTotal = summary?.net_worth.total ?? 0;
   const stocksPct = netWorthTotal ? ((summary?.net_worth.stocks_funds ?? 0) / netWorthTotal) * 100 : 0;
   const cryptoPct = netWorthTotal ? ((summary?.net_worth.crypto ?? 0) / netWorthTotal) * 100 : 0;
   const cashPct = netWorthTotal ? ((summary?.net_worth.cash ?? 0) / netWorthTotal) * 100 : 0;
+  const currentFreshnessItems = useMemo(
+    () => [
+      { label: "Positions", value: currentFreshness?.positions_as_of ?? null },
+      { label: "Prices", value: currentFreshness?.market_data_as_of ?? null },
+      { label: "Crypto", value: currentFreshness?.crypto_as_of ?? null },
+    ].filter((item): item is { label: string; value: string } => item.value != null),
+    [currentFreshness],
+  );
 
   const composition = useMemo<CompositionSlice[]>(
     () => [
@@ -107,7 +173,21 @@ export default function WealthOverview() {
   const prevMonthChange = summary?.net_worth_change?.vs_prev_month;
   const prevYearChange = summary?.net_worth_change?.vs_prev_year;
   const netWorthAsOf = summary?.net_worth_as_of ?? null;
+  const snapshotCapturedAt = summary?.net_worth_snapshot_as_of ?? null;
+  const snapshotFreshnessStatus = summary?.net_worth_freshness_status ?? "missing";
   const topUploadReminders = uploadReminders.slice(0, 3);
+  const snapshotStatusLabel =
+    snapshotFreshnessStatus === "exact"
+      ? "Exact snapshot"
+      : snapshotFreshnessStatus === "synthetic"
+        ? "Synthetic snapshot"
+        : "Snapshot missing";
+  const snapshotStatusClass =
+    snapshotFreshnessStatus === "exact"
+      ? "wealthSnapshotBadgeExact"
+      : snapshotFreshnessStatus === "synthetic"
+        ? "wealthSnapshotBadgeSynthetic"
+        : "wealthSnapshotBadgeMissing";
 
   const renderDelta = (label: string, abs: number, pct: number | null) => (
     <div className="wealthDeltaPill">
@@ -174,9 +254,9 @@ export default function WealthOverview() {
         <div className="wealthOverviewLayout">
           <section className="wealthHeroGrid">
             <article className="card wealthHeroCard">
-              <p className="wealthEyebrow">Consolidated Net Worth</p>
+              <p className="wealthEyebrow">Current Net Worth</p>
               <div className="wealthHeroValueRow">
-                <h2 className="wealthHeroValue">{formatMoney(summary.net_worth.total, 2)}</h2>
+                <h2 className="wealthHeroValue">{formatMoney(currentNetWorth?.total, 2)}</h2>
                 {prevMonthChange ? (
                   <span className={`wealthHeroChip ${prevMonthChange.abs >= 0 ? "wealthHeroChipPositive" : "wealthHeroChipNegative"}`}>
                     {prevMonthChange.abs >= 0 ? "+" : "-"}
@@ -185,8 +265,30 @@ export default function WealthOverview() {
                 ) : null}
               </div>
               <p className="muted wealthAsOfLine">
-                Net worth as of {formatShortDate(netWorthAsOf)}
+                Current net worth as of {formatShortDate(currentNetWorthAsOf)}
               </p>
+              {currentFreshnessItems.length > 0 ? (
+                <div className="wealthFreshnessRow" aria-label="Current data freshness">
+                  {currentFreshnessItems.map((item) => (
+                    <div key={item.label} className="wealthFreshnessPill">
+                      <span className="wealthFreshnessLabel">{item.label}</span>
+                      <strong>{formatShortDate(item.value)}</strong>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              <div className="wealthSnapshotPanel">
+                <div className="wealthSnapshotPanelHeader">
+                  <div>
+                    <p className="wealthSnapshotLabel">Snapshot net worth for {month}</p>
+                    <strong className="wealthSnapshotValue">{formatMoney(summary.net_worth.total, 2)}</strong>
+                  </div>
+                  <span className={`wealthSnapshotBadge ${snapshotStatusClass}`}>{snapshotStatusLabel}</span>
+                </div>
+                <p className="muted wealthSnapshotMeta">
+                  {`Snapshot day ${summary.snapshot_day ?? "—"} · Captured ${formatShortDate(snapshotCapturedAt)} · Boundary ${formatShortDate(netWorthAsOf)}`}
+                </p>
+              </div>
               <div className="wealthDeltaRow" aria-label="Net worth changes">
                 {prevMonthChange ? renderDelta(`vs ${prevMonthChange.compare_month}`, prevMonthChange.abs, prevMonthChange.pct) : null}
                 {prevYearChange ? renderDelta(`vs ${prevYearChange.compare_month}`, prevYearChange.abs, prevYearChange.pct) : null}
@@ -196,9 +298,9 @@ export default function WealthOverview() {
             <article className="card wealthAllocationCard">
               <div className="wealthAllocationHeader">
                 <p className="wealthEyebrow">Portfolio Composition</p>
-                <span className="wealthAllocationMeta">Percent of net worth</span>
+                <span className="wealthAllocationMeta">Percent of snapshot net worth</span>
               </div>
-              <div className="wealthAllocationRail" aria-label="Net worth composition">
+              <div className="wealthAllocationRail" aria-label="Snapshot net worth composition">
                 {composition.map((slice) => (
                   <span
                     key={slice.label}
@@ -246,7 +348,7 @@ export default function WealthOverview() {
                   </p>
                 ) : null}
                 <div className="wealthSurfaceFooter">
-                  <span>{slice.percent.toFixed(1)}% of net worth</span>
+                  <span>{slice.percent.toFixed(1)}% of snapshot net worth</span>
                   <span>Open details</span>
                 </div>
               </Link>

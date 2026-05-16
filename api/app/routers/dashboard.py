@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Callable
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -83,9 +83,30 @@ def _add_months(dt: datetime, months: int) -> datetime:
     return dt.replace(year=y, month=m)
 
 
+def _configured_snapshot_day() -> int:
+    raw = os.getenv("SNAPSHOT_DAY", "1")
+    try:
+        snapshot_day = int(raw)
+    except ValueError:
+        snapshot_day = 1
+    return max(1, min(snapshot_day, 31))
+
+
+def _clamp_day(dt: datetime, day: int) -> datetime:
+    month_end = _add_months(dt, 1)
+    last_day = (month_end - timedelta(days=1)).day
+    safe_day = min(day, last_day)
+    return dt.replace(day=safe_day)
+
+
 def _anchor_ts(month_start: datetime) -> datetime:
-    """Anchor timestamp: end of month (00:00Z on next month start)."""
-    return _add_months(month_start, 1).replace(hour=0, minute=0, second=0, microsecond=0)
+    """Snapshot anchor timestamp: configured day in the next month (00:00Z)."""
+    next_month_start = _add_months(month_start, 1).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return _clamp_day(next_month_start, _configured_snapshot_day()).replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _current_anchor_ts() -> datetime:
+    return datetime.now(tz=timezone.utc).replace(microsecond=0)
 
 
 def _effective_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> Optional[datetime]:
@@ -129,6 +150,18 @@ def _normalize_ts(value: Any) -> Optional[datetime]:
     return None
 
 
+def _iso_value(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        normalized = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+        return normalized.isoformat()
+    iso = getattr(value, "isoformat", None)
+    if callable(iso):
+        return iso()
+    return str(value)
+
+
 def _snapshot_freshness(db: Session, anchor_ts: datetime, current_user_id: int) -> tuple[Optional[datetime], bool, str]:
     as_of = _effective_as_of(db, anchor_ts, current_user_id)
     if as_of is None:
@@ -142,7 +175,7 @@ def _latest_price_map(db: Session, anchor_ts: datetime, asset_ids: set[int]) -> 
     placeholders = ",".join(str(int(asset_id)) for asset_id in sorted(asset_ids))
     q = text(
         f"""
-        SELECT p1.asset_id, p1.price, p1.currency
+                SELECT p1.asset_id, p1.price, p1.currency, p1.trade_date
         FROM prices p1
         JOIN (
           SELECT asset_id, MAX(trade_date) AS trade_date
@@ -159,8 +192,90 @@ def _latest_price_map(db: Session, anchor_ts: datetime, asset_ids: set[int]) -> 
         int(row["asset_id"]): {
             "price": float(row["price"]) if row["price"] is not None else None,
             "currency": row["currency"],
+            "trade_date": row["trade_date"],
         }
         for row in rows
+    }
+
+
+def _positions_coverage_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> Optional[datetime]:
+    q = text(
+        """
+        WITH latest AS (
+          SELECT p.account_id, MAX(p.as_of) AS as_of
+          FROM positions p
+          JOIN accounts acc ON acc.id = p.account_id
+          WHERE p.as_of <= :anchor_ts
+            AND """
+        + account_scope_sql("acc")
+        + """
+          GROUP BY p.account_id
+        )
+        SELECT MIN(as_of) AS as_of FROM latest
+        """
+    )
+    row = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().one()
+    return _normalize_ts(row["as_of"])
+
+
+def _crypto_snapshot_coverage_as_of(db: Session, anchor_date: Any, current_user_id: int) -> Any:
+    q = text(
+        """
+        WITH latest AS (
+          SELECT s.wallet_id, MAX(s.as_of_date) AS as_of_date
+          FROM crypto_wallet_snapshots s
+          JOIN crypto_wallets w ON w.id = s.wallet_id
+          WHERE s.as_of_date <= :anchor_date
+            AND w.status = 'active'
+            AND """
+        + account_scope_sql("w")
+        + """
+          GROUP BY s.wallet_id
+        )
+        SELECT MIN(as_of_date) AS as_of_date FROM latest
+        """
+    )
+    row = db.execute(q, {"anchor_date": anchor_date, "current_user_id": current_user_id}).mappings().one()
+    return row["as_of_date"]
+
+
+def _serialize_net_worth(components: Dict[str, float]) -> Dict[str, float]:
+    return {
+        "total": components["total"],
+        "cash": components["cash"],
+        "stocks_funds": components["stocks_funds"],
+        "crypto": components["crypto"],
+        "liabilities": components["liabilities"],
+    }
+
+
+def _current_networth_state(db: Session, base_currency: str, current_user_id: int) -> Dict[str, Any]:
+    anchor = _current_anchor_ts()
+    components = _networth_components(db, anchor, base_currency, current_user_id)
+    rows = _synthetic_position_rows(db, anchor, current_user_id)
+    price_map = _latest_price_map(
+        db,
+        anchor,
+        {
+            int(row["asset_id"])
+            for row in rows
+            if row.get("asset_id") is not None and str(row.get("asset_class") or "").upper() in {"STOCK", "FUND"}
+        },
+    )
+    trade_dates = [row.get("trade_date") for row in price_map.values() if row.get("trade_date") is not None]
+    market_data_as_of = min(trade_dates) if trade_dates else None
+    positions_as_of = _positions_coverage_as_of(db, anchor, current_user_id)
+    crypto_as_of = _crypto_snapshot_coverage_as_of(db, anchor.date(), current_user_id)
+    cash_percent = round((components["cash"] / components["total"]) * 100, 2) if components["total"] > 0 else 0.0
+    return {
+        "anchor": anchor,
+        "net_worth": _serialize_net_worth(components),
+        "cash_percent": cash_percent,
+        "freshness": {
+            "positions_as_of": _iso_value(positions_as_of),
+            "market_data_as_of": _iso_value(market_data_as_of),
+            "crypto_as_of": _iso_value(crypto_as_of),
+        },
     }
 
 
@@ -1410,6 +1525,8 @@ def dashboard_bootstrap(
     """
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
+    current_state = _current_networth_state(db, base_currency, current_user.id)
+    current_stock_data = _stock_exposure(db, current_state["anchor"], base_currency, current_user.id)
     as_of, boundary_exact, freshness_status = _snapshot_freshness(db, anchor, current_user.id)
     reporting_as_of = anchor if freshness_status in {"exact", "synthetic"} else as_of
 
@@ -1417,24 +1534,24 @@ def dashboard_bootstrap(
     stock_data = _stock_exposure(db, anchor, base_currency, current_user.id)
 
     cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    snapshot_day = _configured_snapshot_day()
 
     return {
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": snapshot_day,
+        "current_net_worth_as_of": current_state["anchor"].isoformat(),
+        "current_net_worth": current_state["net_worth"],
+        "current_net_worth_freshness": current_state["freshness"],
         "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
         "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
         "net_worth_boundary_at": anchor.isoformat(),
         "net_worth_boundary_exact": boundary_exact,
         "net_worth_freshness_status": freshness_status,
-        "net_worth": {
-            "total": nw["total"],
-            "cash": nw["cash"],
-            "stocks_funds": nw["stocks_funds"],
-            "crypto": nw["crypto"],
-            "liabilities": nw["liabilities"],
-        },
+        "net_worth": _serialize_net_worth(nw),
+        "current_stock_exposure_total": current_stock_data["total"],
+        "current_crypto_exposure_total": current_state["net_worth"]["crypto"],
+        "current_cash_percent": current_state["cash_percent"],
         "stock_exposure_total": stock_data["total"],
         "crypto_exposure_total": nw["crypto"],
         "cash_percent": cash_percent,
@@ -1491,7 +1608,7 @@ def dashboard_summary(
 
     # Snapshot anchor + effective snapshot timestamp
     anchor = _anchor_ts(month_start)
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    snapshot_day = _configured_snapshot_day()
     top_holdings_limit = _summary_top_holdings_limit()
 
     if skip_networth:
@@ -1513,6 +1630,7 @@ def dashboard_summary(
         })
 
     as_of, boundary_exact, freshness_status = _snapshot_freshness(db, anchor, current_user.id)
+    current_state = _current_networth_state(db, base_currency, current_user.id)
     reporting_as_of = anchor if freshness_status in {"exact", "synthetic"} else as_of
 
     nw = _networth_components(db, anchor, base_currency, current_user.id)
@@ -1565,18 +1683,15 @@ def dashboard_summary(
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": snapshot_day,
+        "current_net_worth_as_of": current_state["anchor"].isoformat(),
+        "current_net_worth": current_state["net_worth"],
+        "current_net_worth_freshness": current_state["freshness"],
         "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
         "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
         "net_worth_boundary_at": anchor.isoformat(),
         "net_worth_boundary_exact": boundary_exact,
         "net_worth_freshness_status": freshness_status,
-        "net_worth": {
-            "total": nw["total"],
-            "cash": nw["cash"],
-            "stocks_funds": nw["stocks_funds"],
-            "crypto": nw["crypto"],
-            "liabilities": nw["liabilities"],
-        },
+        "net_worth": _serialize_net_worth(nw),
         "geography": geo,
         "cash_flow": cf,
         "top_holdings": top,
@@ -1597,7 +1712,7 @@ def stock_holdings_summary(
 ):
     month_start = _parse_month(month)
     anchor = _anchor_ts(month_start)
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "6"))
+    snapshot_day = _configured_snapshot_day()
     top_holdings_limit = _summary_top_holdings_limit()
     as_of = _effective_as_of(db, anchor, current_user.id)
     reporting_as_of = anchor if as_of is not None else None

@@ -731,22 +731,36 @@ export type CategoryResolution = {
 
 export type Health = { status: string };
 
+export type NetWorthBreakdown = {
+  total: number;
+  cash: number;
+  stocks_funds: number;
+  crypto: number;
+  liabilities: number;
+};
+
+export type NetWorthFreshness = {
+  positions_as_of?: string | null;
+  market_data_as_of?: string | null;
+  crypto_as_of?: string | null;
+};
+
 export type DashboardBootstrap = {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
+  current_net_worth_as_of?: string | null;
+  current_net_worth?: NetWorthBreakdown | null;
+  current_net_worth_freshness?: NetWorthFreshness | null;
   net_worth_as_of: string | null;
   net_worth_snapshot_as_of?: string | null;
   net_worth_boundary_at?: string | null;
   net_worth_boundary_exact?: boolean | null;
   net_worth_freshness_status?: string | null;
-  net_worth: {
-    total: number;
-    cash: number;
-    stocks_funds: number;
-    crypto: number;
-    liabilities: number;
-  };
+  net_worth: NetWorthBreakdown;
+  current_stock_exposure_total?: number | null;
+  current_crypto_exposure_total?: number | null;
+  current_cash_percent?: number | null;
   stock_exposure_total: number;
   crypto_exposure_total: number;
   cash_percent: number;
@@ -875,18 +889,15 @@ export type DividendSummaryBucket = DividendTotals & {
 export type DividendsSummary = {
   from_month: string;
   to_month: string;
+  current_net_worth_as_of?: string | null;
+  current_net_worth?: NetWorthBreakdown | null;
+  current_net_worth_freshness?: NetWorthFreshness | null;
   period: "month" | "quarter" | "year";
   base_currency: string;
   assumed_tax_rate: number;
   country_tax_rates: Record<string, number>;
   buckets: DividendSummaryBucket[];
-  totals: DividendTotals;
-};
-
-export type DividendCompanyItem = DividendTotals & {
-  asset_id: number | null;
-  symbol: string;
-  company: string;
+  net_worth: NetWorthBreakdown;
   country: string | null;
   yield_pct: number | null;
 };
@@ -1197,18 +1208,6 @@ export type RagLibraryRelatedDocument = {
   relationship: string;
 };
 
-export type RagLibraryContentBlock = {
-  block_id: string;
-  type: "paragraph" | "heading" | "list" | "quote" | "table" | string;
-  order: number;
-  level: number | null;
-  text: string | null;
-  items: string[] | null;
-  table_markdown: string | null;
-  table_rows: string[][] | null;
-  metadata: Record<string, unknown>;
-};
-
 export type RagLibraryDocumentDetail = {
   id: string;
   source_id: string;
@@ -1227,8 +1226,6 @@ export type RagLibraryDocumentDetail = {
   work_type: string | null;
   source_section: string | null;
   metadata: Record<string, unknown>;
-  clean_text: string;
-  content_blocks: RagLibraryContentBlock[] | null;
   char_count: number;
   parent_document: RagLibraryRelatedDocument | null;
   child_documents: RagLibraryRelatedDocument[];

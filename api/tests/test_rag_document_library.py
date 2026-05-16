@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import date
 from unittest.mock import patch
 
 os.environ.setdefault("RAG_EMBEDDING_MOCK", "1")
@@ -56,7 +57,6 @@ def _add_document(
     source_id: str,
     title: str,
     clean_text: str,
-    content_blocks_json: list[dict] | None = None,
     author_id: str | None = None,
     publication_year: int | None = None,
     venue: str | None = None,
@@ -68,6 +68,8 @@ def _add_document(
     parent_document_id: str | None = None,
     source_document_index: int = 0,
 ) -> RagDocument:
+    document_metadata = dict(metadata_json or {})
+    document_metadata.setdefault("char_count", len(clean_text))
     document = RagDocument(
         source_id=source_id,
         author_id=author_id,
@@ -80,10 +82,7 @@ def _add_document(
         canonical_status=canonical_status,
         work_type=work_type,
         source_section=source_section,
-        metadata_json=metadata_json or {},
-        raw_text=clean_text,
-        clean_text=clean_text,
-        content_blocks_json=content_blocks_json,
+        metadata_json=document_metadata,
     )
     db.add(document)
     db.flush()
@@ -223,13 +222,11 @@ def test_library_lists_effective_authors_grouped_documents_and_fallbacks(client)
     assert library["author"]["about_text"] == (
         "Builder of Berkshire Hathaway and steward of the shareholder letters."
     )
-    assert library["grouping"]["primary_field"] == "collection"
-    assert "collection" in library["grouping"]["available_fields"]
+    assert library["grouping"]["primary_field"] == "publication_year"
+    assert "publication_year" in library["grouping"]["available_fields"]
 
-    groups = {group["label"]: group for group in library["groups"]}
-    assert set(groups) == {"Letters", "Essays"}
-    assert groups["Letters"]["secondary_field"] == "publication_year"
-    assert [group["label"] for group in groups["Letters"]["secondary_groups"]] == ["1987", "1988"]
+    assert [group["label"] for group in library["groups"]] == ["1988", "1987", "1986"]
+    assert all(group["secondary_field"] is None for group in library["groups"])
 
     legacy_document = next(document for document in library["documents"] if document["title"] == "Owner Earnings")
     assert legacy_document["author_id"] == buffett_id
@@ -240,7 +237,7 @@ def test_library_lists_effective_authors_grouped_documents_and_fallbacks(client)
     assert legacy_document["work_type"] == "essay"
 
 
-def test_library_document_detail_returns_clean_text_and_parent_child_navigation(client):
+def test_library_document_detail_returns_source_handoff_metadata_and_parent_child_navigation(client):
     db = TestingSessionLocal()
     parent_id = ""
     child_id = ""
@@ -252,52 +249,6 @@ def test_library_document_detail_returns_clean_text_and_parent_child_navigation(
             source_id=str(source.id),
             title="Capital Allocation",
             clean_text="This is the stored logical-document text for the main capital allocation essay.",
-            content_blocks_json=[
-                {
-                    "block_id": "blk-0000",
-                    "type": "heading",
-                    "order": 0,
-                    "level": 2,
-                    "text": "Capital Allocation",
-                    "items": None,
-                    "table_markdown": None,
-                    "table_rows": None,
-                    "metadata": {},
-                },
-                {
-                    "block_id": "blk-0001",
-                    "type": "paragraph",
-                    "order": 1,
-                    "level": None,
-                    "text": "This is the stored logical-document text for the main capital allocation essay.",
-                    "items": None,
-                    "table_markdown": None,
-                    "table_rows": None,
-                    "metadata": {"heading_context": "Capital Allocation"},
-                },
-                {
-                    "block_id": "blk-0002",
-                    "type": "list",
-                    "order": 2,
-                    "level": None,
-                    "text": None,
-                    "items": ["Retain earnings carefully", "Avoid diworsification"],
-                    "table_markdown": None,
-                    "table_rows": None,
-                    "metadata": {"heading_context": "Capital Allocation"},
-                },
-                {
-                    "block_id": "blk-0003",
-                    "type": "table",
-                    "order": 3,
-                    "level": None,
-                    "text": None,
-                    "items": None,
-                    "table_markdown": "| Metric | Value |\n| --- | --- |\n| ROE | 15% |",
-                    "table_rows": [["Metric", "Value"], ["ROE", "15%"]],
-                    "metadata": {"heading_context": "Capital Allocation"},
-                },
-            ],
             author_id=buffett.id,
             publication_year=1994,
             venue="Annual Letter",
@@ -328,11 +279,9 @@ def test_library_document_detail_returns_clean_text_and_parent_child_navigation(
     parent_response = client.get(f"/rag/library/documents/{parent_id}")
     assert parent_response.status_code == 200, parent_response.text
     parent_body = parent_response.json()
-    assert parent_body["clean_text"] == "This is the stored logical-document text for the main capital allocation essay."
-    assert parent_body["content_blocks"][0]["type"] == "heading"
-    assert parent_body["content_blocks"][1]["type"] == "paragraph"
-    assert parent_body["content_blocks"][2]["items"] == ["Retain earnings carefully", "Avoid diworsification"]
-    assert parent_body["content_blocks"][3]["table_rows"] == [["Metric", "Value"], ["ROE", "15%"]]
+    assert "clean_text" not in parent_body
+    assert "content_blocks" not in parent_body
+    assert parent_body["title"] == "Capital Allocation"
     assert parent_body["source_url"] == "https://example.com/capital-allocation"
     assert parent_body["source_type"] == "html"
     assert parent_body["parent_document"] is None
@@ -342,7 +291,150 @@ def test_library_document_detail_returns_clean_text_and_parent_child_navigation(
     child_response = client.get(f"/rag/library/documents/{child_id}")
     assert child_response.status_code == 200, child_response.text
     child_body = child_response.json()
-    assert child_body["clean_text"] == "Editorial notes that should be linked from the main essay."
+    assert "clean_text" not in child_body
+    assert "content_blocks" not in child_body
     assert child_body["parent_document"]["id"] == parent_id
     assert child_body["parent_document"]["title"] == "Capital Allocation"
     assert child_body["child_documents"] == []
+
+
+def test_library_author_page_keeps_canonical_pdf_letter_visible_with_year_grouping(client):
+    db = TestingSessionLocal()
+    buffett_id = ""
+    document_id = ""
+    try:
+        buffett = _add_author(db, _uid("buffett"), "Warren Buffett")
+        buffett_id = buffett.id
+        source = _add_source(
+            db,
+            author_id=buffett.id,
+            url="https://www.berkshirehathaway.com/letters/2005ltr.pdf",
+            source_type="pdf",
+        )
+        document = RagDocument(
+            source_id=source.id,
+            author_id=buffett.id,
+            source_document_index=0,
+            title="Berkshire Hathaway Shareholder Letter 2005",
+            published_at=date(2005, 12, 31),
+            publication_year=2005,
+            venue="Berkshire Hathaway",
+            collection="Letters",
+            canonical_work_id="buffett-2005",
+            canonical_status="canonical",
+            work_type="letter",
+            source_section="2005 Letter",
+            metadata_json={
+                "corpus_section": "Letters",
+                "source_label": "Canonical Buffett PDF",
+                "char_count": len("Berkshire Hathaway Shareholder Letter 2005"),
+            },
+        )
+        db.add(document)
+        db.flush()
+        document_id = str(document.id)
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/rag/library/authors/{buffett_id}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["author"]["name"] == "Warren Buffett"
+    assert any(document["id"] == document_id for document in body["documents"])
+    assert body["grouping"]["primary_field"] is None
+    assert body["documents"][0]["title"] == "Berkshire Hathaway Shareholder Letter 2005"
+    assert body["documents"][0]["source_type"] == "pdf"
+    assert body["documents"][0]["source_url"] == "https://www.berkshirehathaway.com/letters/2005ltr.pdf"
+
+    detail_response = client.get(f"/rag/library/documents/{document_id}")
+    assert detail_response.status_code == 200, detail_response.text
+    detail = detail_response.json()
+    assert detail["title"] == "Berkshire Hathaway Shareholder Letter 2005"
+    assert detail["publication_year"] == 2005
+    assert detail["source_url"] == "https://www.berkshirehathaway.com/letters/2005ltr.pdf"
+    assert "clean_text" not in detail
+    assert "content_blocks" not in detail
+
+
+def test_library_ignores_sparse_single_value_group_field_for_canonical_pdf_reingest(client):
+    db = TestingSessionLocal()
+    buffett_id = ""
+    try:
+        buffett = _add_author(db, _uid("buffett"), "Warren Buffett")
+        buffett_id = buffett.id
+        base_source = _add_source(db, author_id=buffett.id, url="https://example.com/buffett-index")
+        _add_document(
+            db,
+            source_id=str(base_source.id),
+            title="Berkshire Hathaway Shareholder Letter 2004",
+            clean_text="2004 letter",
+            author_id=buffett.id,
+            publication_year=2004,
+            canonical_status="canonical",
+            work_type="letter",
+        )
+        _add_document(
+            db,
+            source_id=str(base_source.id),
+            title="Berkshire Hathaway Shareholder Letter 2006",
+            clean_text="2006 letter",
+            author_id=buffett.id,
+            publication_year=2006,
+            canonical_status="canonical",
+            work_type="letter",
+        )
+
+        repaired_pdf_source = _add_source(
+            db,
+            author_id=buffett.id,
+            url="https://www.berkshirehathaway.com/letters/2005ltr.pdf",
+            source_type="pdf",
+        )
+        _add_document(
+            db,
+            source_id=str(repaired_pdf_source.id),
+            title="Berkshire Hathaway Shareholder Letter 2005",
+            clean_text="2005 letter",
+            author_id=buffett.id,
+            publication_year=2005,
+            collection="Letters",
+            canonical_status="canonical",
+            work_type="letter",
+            metadata_json={"source_label": "Canonical Buffett PDF"},
+        )
+        supporting_source = _add_source(
+            db,
+            author_id=buffett.id,
+            url="https://example.com/foreword",
+            source_type="pdf",
+        )
+        _add_document(
+            db,
+            source_id=str(supporting_source.id),
+            title="Foreword: Buffett on Munger",
+            clean_text="foreword",
+            author_id=buffett.id,
+            publication_year=2023,
+            collection="munger_pca_supporting",
+            canonical_status="supporting",
+            work_type="foreword",
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    response = client.get(f"/rag/library/authors/{buffett_id}")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    assert body["grouping"]["primary_field"] == "publication_year"
+    assert [group["label"] for group in body["groups"]] == ["2023", "2006", "2005", "2004"]
+    ordered_titles = [document["title"] for document in body["documents"]]
+    assert ordered_titles == [
+        "Foreword: Buffett on Munger",
+        "Berkshire Hathaway Shareholder Letter 2006",
+        "Berkshire Hathaway Shareholder Letter 2005",
+        "Berkshire Hathaway Shareholder Letter 2004",
+    ]

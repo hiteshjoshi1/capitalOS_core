@@ -4,6 +4,17 @@ import { mockAuthenticatedSession } from "./helpers/auth";
 test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 
+  let chatNew = {
+    id: "chat-new",
+    title: "New chat",
+    created_at: "2026-05-01T10:00:00Z",
+    updated_at: "2026-05-01T10:00:00Z",
+    last_activity_at: "2026-05-01T10:00:00Z",
+    pinned_at: null,
+    metadata_json: null,
+    messages: [] as Array<Record<string, unknown>>,
+  };
+
   await page.route("**/ai-sage/chats?limit=30&offset=0", async (route) => {
     await route.fulfill({
       json: {
@@ -21,16 +32,7 @@ test.beforeEach(async ({ page }) => {
       return;
     }
     await route.fulfill({
-      json: {
-        id: "chat-new",
-        title: "New chat",
-        created_at: "2026-05-01T10:00:00Z",
-        updated_at: "2026-05-01T10:00:00Z",
-        last_activity_at: "2026-05-01T10:00:00Z",
-        pinned_at: null,
-        metadata_json: null,
-        messages: [],
-      },
+      json: chatNew,
     });
   });
 
@@ -50,6 +52,31 @@ test.beforeEach(async ({ page }) => {
       "",
     ].join("\n");
 
+    chatNew = {
+      ...chatNew,
+      title: "What matters?",
+      updated_at: "2026-05-01T10:00:05Z",
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          content: "What matters?",
+          status: "completed",
+          created_at: "2026-05-01T10:00:00Z",
+          evidence: [],
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          content: "Grounded answer.",
+          status: "completed",
+          created_at: "2026-05-01T10:00:05Z",
+          metadata_json: { mode: "concept", evidence_sufficient: true },
+          evidence: [],
+        },
+      ],
+    };
+
     await route.fulfill({
       status: 200,
       contentType: "text/event-stream",
@@ -62,16 +89,7 @@ test.beforeEach(async ({ page }) => {
 
   await page.route("**/ai-sage/chats/chat-new", async (route) => {
     await route.fulfill({
-      json: {
-        id: "chat-new",
-        title: "New chat",
-        created_at: "2026-05-01T10:00:00Z",
-        updated_at: "2026-05-01T10:00:00Z",
-        last_activity_at: "2026-05-01T10:00:00Z",
-        pinned_at: null,
-        metadata_json: null,
-        messages: [],
-      },
+      json: chatNew,
     });
   });
 
@@ -121,7 +139,8 @@ test("creates a persistent AI Sage chat and streams the response", async ({ page
   await composer.fill("What matters?");
   await composer.press("Enter");
 
-  await expect(page.getByText("What matters?")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What matters?" })).toBeVisible();
+  await expect(page.getByTestId("ai-sage-transcript").getByText("What matters?")).toBeVisible();
   await expect(page.getByText("Grounded answer.")).toBeVisible();
 });
 

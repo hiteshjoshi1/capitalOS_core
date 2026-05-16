@@ -821,13 +821,14 @@ function SimpleList({ title, items }: { title: string; items: string[] }) {
 }
 
 function EvidenceCard({ evidence }: { evidence: AISageChatEvidence }) {
-  const canOpenReader = Boolean(evidence.author_id && evidence.document_id);
   const [expanded, setExpanded] = useState(false);
   const contextText = normalizeEvidenceText(evidence.metadata_json?.context_text);
   const anchorText = normalizeEvidenceText(evidence.metadata_json?.anchor_text || evidence.snippet);
   const expandedContext = contextText ? buildEvidenceContextExcerpt(contextText, anchorText) : "";
   const previewText = evidence.snippet?.trim() || "Open citation";
   const canExpand = Boolean(expandedContext);
+  const sourceUrl = normalizeEvidenceText(evidence.source_url);
+  const readerUrl = evidence.author_id && evidence.document_id ? readerRoute(evidence.author_id, evidence.document_id) : null;
 
   return (
     <article className="aiSageEvidenceCard">
@@ -856,22 +857,35 @@ function EvidenceCard({ evidence }: { evidence: AISageChatEvidence }) {
       {expanded ? (
         <div className="aiSageEvidenceExpanded">
           {expandedContext ? (
-            <>
-              <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
-              <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
-            </>
+            sourceUrl ? (
+              <a
+                className="aiSageEvidenceExpandedLink"
+                data-testid="ai-sage-evidence-expanded-link"
+                aria-label="Expanded context source link"
+                href={sourceUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
+                <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
+                <span className="muted aiSageEvidencePreviewHint">Open original source</span>
+              </a>
+            ) : (
+              <>
+                <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
+                <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
+              </>
+            )
           ) : null}
-          {canOpenReader ? (
+          {sourceUrl ? (
             <div className="aiSageEvidenceActions">
-              <Link className="btn aiSageEvidenceLink" to={readerRoute(evidence.author_id!, evidence.document_id!)}>
-                Open document
-              </Link>
-            </div>
-          ) : evidence.source_url ? (
-            <div className="aiSageEvidenceActions">
-              <a className="btn aiSageEvidenceLink" href={evidence.source_url} target="_blank" rel="noreferrer">
+              <a className="btn aiSageEvidenceLink" href={sourceUrl} target="_blank" rel="noreferrer">
                 Open source
               </a>
+            </div>
+          ) : readerUrl ? (
+            <div className="aiSageEvidenceActions">
+              <Link className="btn aiSageEvidenceLink" to={readerUrl}>Open document</Link>
             </div>
           ) : null}
         </div>
