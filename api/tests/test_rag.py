@@ -624,6 +624,45 @@ class TestManualPipeline:
         assert source.status == "failed"
         assert job.failure_category == "ocr_required"
 
+    def test_pdf_parser_metadata_is_persisted_to_document_and_job_stats(self):
+        from app.models.rag import RagDocument, RagIngestionJob
+        from app.rag.ingestion.parser import StructuredParseResult
+        from app.rag.ingestion.pipeline import run_manual_ingestion
+
+        source = self._make_mock_source()
+        source.source_type = "pdf"
+        db = MagicMock()
+        added: list[object] = []
+        db.add.side_effect = added.append
+
+        with patch("app.rag.ingestion.pipeline.parse") as mock_parse:
+            mock_parse.return_value = StructuredParseResult(
+                raw_text=SAMPLE_TEXT,
+                clean_text=SAMPLE_TEXT,
+                source_type="pdf",
+                sections=[],
+                doc_metadata={
+                    "pdf_parser_policy": "unstructured_first",
+                    "pdf_parser_backend_requested": "unstructured",
+                    "pdf_parser_backend_used": "pdfminer",
+                    "pdf_parser_fallback_used": True,
+                    "pdf_parser_fallback_from": "unstructured",
+                    "pdf_parser_fallback_reason": "RuntimeError: boom",
+                },
+            )
+
+            job = run_manual_ingestion(source, SAMPLE_TEXT, db)
+
+        documents = [item for item in added if isinstance(item, RagDocument)]
+        jobs = [item for item in added if isinstance(item, RagIngestionJob)]
+
+        assert documents
+        assert jobs
+        assert documents[0].metadata_json["pdf_parser_backend_used"] == "pdfminer"
+        assert documents[0].metadata_json["pdf_parser_fallback_used"] is True
+        assert job.stats_json["pdf_parser"]["pdf_parser_backend_used"] == "pdfminer"
+        assert job.stats_json["pdf_parser"]["pdf_parser_fallback_reason"] == "RuntimeError: boom"
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 6. API endpoint tests (via FastAPI TestClient + existing SQLite fixture)

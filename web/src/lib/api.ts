@@ -243,6 +243,9 @@ export type Account = {
 export type DashboardSummary = {
   as_of_month: string;
   base_currency: string;
+  current_net_worth_as_of?: string | null;
+  current_net_worth?: NetWorthBreakdown | null;
+  current_net_worth_freshness?: NetWorthFreshness | null;
   net_worth_snapshot_as_of?: string | null;
   net_worth_boundary_at?: string | null;
   net_worth_boundary_exact?: boolean | null;
@@ -897,8 +900,22 @@ export type DividendsSummary = {
   assumed_tax_rate: number;
   country_tax_rates: Record<string, number>;
   buckets: DividendSummaryBucket[];
-  net_worth: NetWorthBreakdown;
+  totals?: DividendTotals;
+  net_worth?: NetWorthBreakdown;
+  country?: string | null;
+  yield_pct?: number | null;
+};
+
+export type DividendCompanyItem = {
+  asset_id: number | null;
+  symbol: string | null;
+  company: string;
   country: string | null;
+  gross: number;
+  withholding: number;
+  net_received: number;
+  estimated_tax: number;
+  payout_minus_tax: number;
   yield_pct: number | null;
 };
 

@@ -15,11 +15,52 @@ Backend selection:
 """
 
 import io
+import logging
 import os
 import re
 from dataclasses import dataclass, field
 from html import escape
 from typing import Any, Optional
+
+log = logging.getLogger(__name__)
+_PDF_PARSER_POLICY = "unstructured_first"
+_DEFAULT_PDF_PARSER_BACKEND = "unstructured"
+_SUPPORTED_PDF_PARSER_BACKENDS = {"unstructured", "pdfminer"}
+
+
+def _configured_pdf_parser_backend() -> str:
+    backend = os.environ.get("RAG_PARSER_BACKEND", _DEFAULT_PDF_PARSER_BACKEND).strip().lower()
+    if backend not in _SUPPORTED_PDF_PARSER_BACKENDS:
+        log.warning(
+            "Unknown RAG_PARSER_BACKEND=%r; defaulting to %s under %s policy",
+            backend,
+            _DEFAULT_PDF_PARSER_BACKEND,
+            _PDF_PARSER_POLICY,
+        )
+        return _DEFAULT_PDF_PARSER_BACKEND
+    return backend
+
+
+def _pdf_parser_metadata(
+    *,
+    requested_backend: str,
+    used_backend: str,
+    fallback_from: str | None = None,
+    fallback_reason: str | None = None,
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "pdf_parser_policy": _PDF_PARSER_POLICY,
+        "pdf_parser_backend_requested": requested_backend,
+        "pdf_parser_backend_used": used_backend,
+        "pdf_parser_unstructured_available": _UNSTRUCTURED_AVAILABLE,
+        "pdf_parser_fallback_used": fallback_from is not None,
+    }
+    if fallback_from is not None:
+        metadata["pdf_parser_fallback_from"] = fallback_from
+    if fallback_reason:
+        metadata["pdf_parser_fallback_reason"] = fallback_reason
+    return metadata
+
 
 # ── Optional dependency guards ────────────────────────────────────────────────
 try:
@@ -1514,10 +1555,11 @@ def parse_pdf_structured(raw_bytes: bytes) -> StructuredParseResult:
     """
     Parse PDF preserving section headings and extracting tables as markdown.
 
-    Uses unstructured.io when available (RAG_PARSER_BACKEND != 'pdfminer').
-    Falls back to pdfminer flat extraction with empty sections.
+    Uses Unstructured first by default for normal operation.
+    Falls back to pdfminer flat extraction with empty sections when needed, and
+    supports an explicit pdfminer override for emergency use.
     """
-    backend = os.environ.get("RAG_PARSER_BACKEND", "unstructured").lower()
+    backend = _configured_pdf_parser_backend()
     doc_metadata = _extract_pdf_metadata(raw_bytes)
 
     if _UNSTRUCTURED_AVAILABLE and backend != "pdfminer":
@@ -1526,6 +1568,12 @@ def parse_pdf_structured(raw_bytes: bytes) -> StructuredParseResult:
             sections = _unstructured_elements_to_sections(elements)
             raw_text = "\n".join(el.text for el in elements if el.text)
             clean_text = _clean_whitespace(raw_text)
+            doc_metadata.update(
+                _pdf_parser_metadata(
+                    requested_backend=backend,
+                    used_backend="unstructured",
+                )
+            )
             return StructuredParseResult(
                 raw_text=raw_text,
                 clean_text=clean_text,
@@ -1533,8 +1581,53 @@ def parse_pdf_structured(raw_bytes: bytes) -> StructuredParseResult:
                 sections=sections,
                 doc_metadata=doc_metadata,
             )
-        except Exception:
-            pass  # fall through to pdfminer
+        except Exception as exc:
+            fallback_reason = f"{type(exc).__name__}: {exc}"
+            log.warning(
+                "PDF parsing fell back to pdfminer after unstructured failure: %s",
+                fallback_reason,
+            )
+            doc_metadata.update(
+                _pdf_parser_metadata(
+                    requested_backend=backend,
+                    used_backend="pdfminer",
+                    fallback_from="unstructured",
+                    fallback_reason=fallback_reason,
+                )
+            )
+            result = parse_pdf(raw_bytes)
+            return StructuredParseResult(
+                raw_text=result.raw_text,
+                clean_text=result.clean_text,
+                source_type="pdf",
+                sections=[],
+                doc_metadata=doc_metadata,
+            )
+
+    if backend == "pdfminer":
+        log.warning(
+            "PDF parser override active: using pdfminer instead of the default %s policy",
+            _PDF_PARSER_POLICY,
+        )
+        doc_metadata.update(
+            _pdf_parser_metadata(
+                requested_backend=backend,
+                used_backend="pdfminer",
+            )
+        )
+    else:
+        log.warning(
+            "Unstructured PDF parser unavailable; falling back to pdfminer under %s policy",
+            _PDF_PARSER_POLICY,
+        )
+        doc_metadata.update(
+            _pdf_parser_metadata(
+                requested_backend=backend,
+                used_backend="pdfminer",
+                fallback_from="unstructured",
+                fallback_reason="unstructured_not_installed",
+            )
+        )
 
     # Fallback: pdfminer flat extraction
     result = parse_pdf(raw_bytes)

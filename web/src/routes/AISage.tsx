@@ -26,7 +26,6 @@ import {
 } from "../lib/api";
 
 const EVIDENCE_CONTEXT_TARGET_CHARS = 1200;
-const PRIMARY_PASSAGE_TARGET_CHARS = 420;
 const CHAT_ROW_TITLE_LIMIT = 50;
 
 function readerRoute(authorId: string, documentId: string): string {
@@ -114,49 +113,6 @@ function buildEvidenceContextExcerpt(contextText: string, anchorText: string): s
     anchorIndex + normalizedAnchor.length + (EVIDENCE_CONTEXT_TARGET_CHARS - 520),
   );
   return trimEvidenceWindow(contextText, before, after);
-}
-
-function buildPrimaryPassageExcerpt(contextText: string, anchorText: string): string {
-  if (contextText.length <= PRIMARY_PASSAGE_TARGET_CHARS) {
-    return contextText;
-  }
-
-  const normalizedAnchor = normalizeEvidenceText(anchorText);
-  const lowerContext = contextText.toLowerCase();
-  const lowerAnchor = normalizedAnchor.toLowerCase();
-  const anchorIndex = lowerAnchor ? lowerContext.indexOf(lowerAnchor) : -1;
-
-  if (anchorIndex < 0) {
-    return trimEvidenceWindow(contextText, 0, PRIMARY_PASSAGE_TARGET_CHARS);
-  }
-
-  const before = Math.max(0, anchorIndex - 120);
-  const after = Math.min(
-    contextText.length,
-    anchorIndex + normalizedAnchor.length + (PRIMARY_PASSAGE_TARGET_CHARS - 180),
-  );
-  return trimEvidenceWindow(contextText, before, after);
-}
-
-function bestGroundedPassage(evidence: AISageChatEvidence[]): string {
-  const rankedEvidence = [...evidence].sort((left, right) => {
-    const leftScore = typeof left.ranking_score === "number" ? left.ranking_score : Number.NEGATIVE_INFINITY;
-    const rightScore = typeof right.ranking_score === "number" ? right.ranking_score : Number.NEGATIVE_INFINITY;
-    return rightScore - leftScore;
-  });
-
-  for (const item of rankedEvidence) {
-    const contextText = normalizeEvidenceText(item.metadata_json?.context_text);
-    const anchorText = normalizeEvidenceText(item.metadata_json?.anchor_text || item.snippet);
-    if (contextText) {
-      return buildPrimaryPassageExcerpt(contextText, anchorText);
-    }
-    if (anchorText) {
-      return anchorText;
-    }
-  }
-
-  return "";
 }
 
 function renderEvidenceText(text: string, highlight: string | null) {
@@ -739,10 +695,8 @@ function MessageBubble({
   const keyFacts = Array.isArray(metadata.key_facts)
     ? metadata.key_facts.filter((value): value is string => typeof value === "string")
     : [];
-  const resolvedPrimaryPassage = message.status === "completed" && message.evidence.length > 0
-    ? bestGroundedPassage(message.evidence)
-    : "";
-  const visibleAssistantText = resolvedPrimaryPassage || message.content || "Thinking…";
+  const visibleAssistantText = message.content || "Thinking…";
+  const showAssistantText = message.evidence.length === 0 || message.status !== "completed";
 
   return (
     <section className="aiSageMessageRow aiSageMessageRowAssistant">
@@ -756,7 +710,7 @@ function MessageBubble({
           </div>
         ) : (
           <>
-            <p className="aiSageMessageText">{visibleAssistantText}</p>
+            {showAssistantText ? <p className="aiSageMessageText">{visibleAssistantText}</p> : null}
             <details className="aiSageSecondaryPanel" open={message.status === "in_progress"}>
               <summary>Retrieval details</summary>
               <div className="aiSageSecondaryPanelBody">
@@ -822,6 +776,7 @@ function SimpleList({ title, items }: { title: string; items: string[] }) {
 
 function EvidenceCard({ evidence }: { evidence: AISageChatEvidence }) {
   const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const contextText = normalizeEvidenceText(evidence.metadata_json?.context_text);
   const anchorText = normalizeEvidenceText(evidence.metadata_json?.anchor_text || evidence.snippet);
   const expandedContext = contextText ? buildEvidenceContextExcerpt(contextText, anchorText) : "";
@@ -829,54 +784,46 @@ function EvidenceCard({ evidence }: { evidence: AISageChatEvidence }) {
   const canExpand = Boolean(expandedContext);
   const sourceUrl = normalizeEvidenceText(evidence.source_url);
   const readerUrl = evidence.author_id && evidence.document_id ? readerRoute(evidence.author_id, evidence.document_id) : null;
+  const copyText = previewText;
+  const scoreText = typeof evidence.ranking_score === "number"
+    ? `Score ${evidence.ranking_score.toFixed(2)}`
+    : evidence.score_type || "Reference";
+
+  async function copyChunk() {
+    if (!copyText) return;
+    await navigator.clipboard?.writeText(copyText);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1400);
+  }
 
   return (
     <article className="aiSageEvidenceCard">
-      <div className="aiSageEvidenceCardHeader">
-        <div>
-          <strong>{evidence.title || evidence.author_name || "Retrieved source"}</strong>
-          <div className="muted">
-            {evidence.author_name ? `${evidence.author_name} · ` : ""}
-            {typeof evidence.ranking_score === "number" ? `Score ${evidence.ranking_score.toFixed(2)}` : evidence.score_type || "Reference"}
+      <div className="aiSageEvidenceChunk">
+        <div className="aiSageEvidenceCardHeader">
+          <div className="muted aiSageEvidenceContextLabel">Chunk</div>
+          <div className="aiSageEvidenceInlineActions">
+            <div className="muted aiSageEvidenceScore">{scoreText}</div>
+            <button className="btn aiSageEvidenceCopyButton" type="button" onClick={() => void copyChunk()} aria-label="Copy chunk content">
+              {copied ? "Copied" : "Copy"}
+            </button>
           </div>
         </div>
-      </div>
-      <button
-        className="aiSageEvidencePreviewButton"
-        type="button"
-        onClick={() => setExpanded((current) => !current)}
-        aria-expanded={expanded}
-      >
         <p className="aiSageEvidenceText">{previewText}</p>
         {canExpand ? (
-          <span className="muted aiSageEvidencePreviewHint">
+          <button
+            className="aiSageEvidenceExpandButton"
+            type="button"
+            onClick={() => setExpanded((current) => !current)}
+            aria-expanded={expanded}
+          >
             {expanded ? "Hide expanded context" : "Show expanded context"}
-          </span>
+          </button>
         ) : null}
-      </button>
+      </div>
       {expanded ? (
         <div className="aiSageEvidenceExpanded">
-          {expandedContext ? (
-            sourceUrl ? (
-              <a
-                className="aiSageEvidenceExpandedLink"
-                data-testid="ai-sage-evidence-expanded-link"
-                aria-label="Expanded context source link"
-                href={sourceUrl}
-                target="_blank"
-                rel="noreferrer"
-              >
-                <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
-                <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
-                <span className="muted aiSageEvidencePreviewHint">Open original source</span>
-              </a>
-            ) : (
-              <>
-                <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
-                <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
-              </>
-            )
-          ) : null}
+          <div className="muted aiSageEvidenceContextLabel">Expanded context</div>
+          <p className="aiSageEvidenceText">{renderEvidenceText(expandedContext, anchorText || previewText)}</p>
           {sourceUrl ? (
             <div className="aiSageEvidenceActions">
               <a className="btn aiSageEvidenceLink" href={sourceUrl} target="_blank" rel="noreferrer">

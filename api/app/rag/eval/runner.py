@@ -69,6 +69,7 @@ class EvalReport:
     mean_precision_at_5: float
     mean_precision_at_10: float
     mean_mrr: float
+    scope: dict[str, Any] = field(default_factory=dict)
     per_query: list[dict[str, Any]] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -82,8 +83,25 @@ class EvalReport:
             "mean_precision@5": round(self.mean_precision_at_5, 4),
             "mean_precision@10": round(self.mean_precision_at_10, 4),
             "mean_mrr": round(self.mean_mrr, 4),
+            "scope": self.scope,
             "per_query": self.per_query,
         }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> "EvalReport":
+        return cls(
+            config_label=payload["config_label"],
+            num_queries=payload["num_queries"],
+            mean_ndcg_at_5=payload["mean_ndcg@5"],
+            mean_ndcg_at_10=payload["mean_ndcg@10"],
+            mean_recall_at_5=payload["mean_recall@5"],
+            mean_recall_at_10=payload["mean_recall@10"],
+            mean_precision_at_5=payload["mean_precision@5"],
+            mean_precision_at_10=payload["mean_precision@10"],
+            mean_mrr=payload["mean_mrr"],
+            scope=payload.get("scope", {}),
+            per_query=payload.get("per_query", []),
+        )
 
 
 @dataclass(frozen=True)
@@ -146,11 +164,19 @@ def compare_reports(report_a: EvalReport, report_b: EvalReport) -> dict[str, Any
     }
 
 
-def load_golden_queries(db: Session) -> list[GoldenQuery]:
+def load_golden_queries(db: Session, *, source_type: Optional[str] = None) -> list[GoldenQuery]:
     """Load all golden queries from rag_eval_golden, grouped by query_text."""
-    from app.models.rag import RagEvalGolden
+    from app.models.rag import RagChunk, RagDocument, RagEvalGolden, RagSource
 
-    rows = db.query(RagEvalGolden).all()
+    query = db.query(RagEvalGolden)
+    if source_type:
+        query = (
+            query.join(RagChunk, RagEvalGolden.chunk_id == RagChunk.id)
+            .join(RagDocument, RagChunk.document_id == RagDocument.id)
+            .join(RagSource, RagDocument.source_id == RagSource.id)
+            .filter(RagSource.source_type == source_type)
+        )
+    rows = query.all()
     groups: dict[str, dict[str, int]] = {}
     for row in rows:
         text = row.query_text
@@ -188,6 +214,7 @@ def run_evaluation(
     config_label: str = "current",
     retrieval_fn: Optional[Callable] = None,
     top_k: int = 10,
+    source_type: Optional[str] = None,
 ) -> EvalReport:
     """
     Run all golden queries through *retrieval_fn* and return aggregate metrics.
@@ -210,9 +237,10 @@ def run_evaluation(
                 weighting_enabled=config.weighting_enabled,
             )
 
-    golden_queries = load_golden_queries(db)
+    golden_queries = load_golden_queries(db, source_type=source_type)
     if not golden_queries:
-        log.warning("No golden queries found in rag_eval_golden; returning empty report.")
+        scope_note = f" for source_type={source_type}" if source_type else ""
+        log.warning("No golden queries found in rag_eval_golden%s; returning empty report.", scope_note)
         return EvalReport(
             config_label=config_label,
             num_queries=0,
@@ -223,6 +251,7 @@ def run_evaluation(
             mean_precision_at_5=0.0,
             mean_precision_at_10=0.0,
             mean_mrr=0.0,
+            scope={"source_type": source_type} if source_type else {},
             per_query=[],
         )
 
@@ -251,5 +280,6 @@ def run_evaluation(
         mean_precision_at_5=_safe_mean([m.precision_at_5 for m in per_query_metrics]),
         mean_precision_at_10=_safe_mean([m.precision_at_10 for m in per_query_metrics]),
         mean_mrr=_safe_mean([m.mrr_score for m in per_query_metrics]),
+        scope={"source_type": source_type} if source_type else {},
         per_query=[m.as_dict() for m in per_query_metrics],
     )
