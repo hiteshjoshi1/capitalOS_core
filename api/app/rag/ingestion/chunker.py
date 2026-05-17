@@ -107,6 +107,52 @@ class DocumentSection:
     content: str
     is_table: bool = False
     is_list: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def _content_type_aware_section_text(section: DocumentSection) -> str:
+    metadata = dict(section.metadata or {})
+    modality = str(metadata.get("modality") or "").strip().lower()
+    if modality != "figure":
+        return section.content
+
+    content = (section.content or "").strip()
+    caption = str(metadata.get("caption") or "").strip()
+    explanatory_text = str(metadata.get("explanatory_text") or "").strip()
+    parts: list[str] = []
+    for candidate in (caption, content, explanatory_text):
+        if candidate and candidate not in parts:
+            parts.append(candidate)
+    return "\n\n".join(parts)
+
+
+def _section_metadata(base_metadata: dict[str, Any], section: DocumentSection) -> dict[str, Any]:
+    section_metadata = dict(section.metadata or {})
+    combined = {
+        **base_metadata,
+        "section_heading": section.heading,
+        "content_type": section_metadata.get("content_type") or ("table" if section.is_table else "list" if section.is_list else "text"),
+        "modality": section_metadata.get("modality") or ("table" if section.is_table else "list" if section.is_list else "prose"),
+    }
+    for key in (
+        "caption",
+        "content_type",
+        "explanatory_text",
+        "layout_sensitive",
+        "media_refs",
+        "modality",
+        "notes",
+        "section_path",
+        "source_ref",
+    ):
+        value = section_metadata.get(key)
+        if value not in (None, "", [], {}):
+            combined[key] = value
+    if section.is_table:
+        combined["is_table"] = True
+    if section.is_list:
+        combined["is_list"] = True
+    return combined
 
 
 # ── Sentence splitting ─────────────────────────────────────────────────────────
@@ -466,21 +512,25 @@ def chunk_structured(
     all_chunks: list[Chunk] = []
 
     for section in sections:
-        section_meta = {**base_metadata, "section_heading": section.heading}
+        section_meta = _section_metadata(base_metadata, section)
+        rendered_content = _content_type_aware_section_text(section).strip()
+        if not rendered_content:
+            continue
 
-        if section.is_table:
-            # Tables are single chunks regardless of size
-            tok = _count_tokens(section.content)
+        modality = str(section_meta.get("modality") or "").strip().lower()
+        is_atomic = section.is_table or section.is_list or modality in {"figure", "layout-sensitive", "quote"}
+
+        if is_atomic:
+            tok = _count_tokens(rendered_content)
             meta = {
                 **section_meta,
                 "chunk_index": len(all_chunks),
                 "overlap_tokens": 0,
-                "is_table": True,
             }
             all_chunks.append(
                 Chunk(
                     index=len(all_chunks),
-                    text=section.content,
+                    text=rendered_content,
                     token_count=tok,
                     metadata_json=meta,
                 )
@@ -488,7 +538,7 @@ def chunk_structured(
             continue
 
         section_chunks = chunk_recursive(
-            section.content,
+            rendered_content,
             base_metadata=section_meta,
             target_tokens=target_tokens,
             overlap_pct=overlap_pct,

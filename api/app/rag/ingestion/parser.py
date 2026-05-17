@@ -116,7 +116,7 @@ class DocumentSection:
     heading: Optional[str]          # Section heading text (None if before any heading)
     level: int                       # Heading level: 1=top, 2=sub, etc.
     content: str                     # Section body text (flat string)
-    content_type: str                # "heading" | "text" | "table" | "list" | "quote"
+    content_type: str                # "heading" | "text" | "table" | "figure" | "list" | "quote"
     table_markdown: Optional[str] = None  # Markdown table when content_type=="table"
     table_rows: Optional[list[list[str]]] = None
     table_html: Optional[str] = None
@@ -232,11 +232,76 @@ def _normalize_inline_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
+def _update_section_path(current_path: list[str], level: int, heading: str) -> list[str]:
+    normalized_heading = _normalize_inline_text(heading)
+    if not normalized_heading:
+        return list(current_path)
+    if level <= 1:
+        return [normalized_heading]
+    return [*list(current_path[: max(level - 1, 0)]), normalized_heading]
+
+
+def _content_type_to_modality(content_type: str, *, layout_sensitive: bool = False) -> str:
+    if layout_sensitive:
+        return "layout-sensitive"
+    return {
+        "figure": "figure",
+        "list": "list",
+        "quote": "quote",
+        "table": "table",
+    }.get(content_type, "prose")
+
+
+def _block_source_ref(
+    source_type: str,
+    block_index: int,
+    *,
+    page_number: Any = None,
+    element_index: Any = None,
+) -> str:
+    parts = [source_type]
+    if page_number not in (None, ""):
+        parts.append(f"page:{page_number}")
+    if element_index not in (None, ""):
+        parts.append(f"element:{element_index}")
+    parts.append(f"block:{block_index}")
+    return ":".join(parts)
+
+
+def _section_metadata(
+    *,
+    current_heading: Optional[str],
+    section_path: list[str],
+    parser_source: str,
+    source_ref: str,
+    content_type: str,
+    layout_sensitive: bool = False,
+    existing: Optional[dict[str, Any]] = None,
+    extra: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    metadata = dict(existing or {})
+    if current_heading:
+        metadata["heading_context"] = current_heading
+    if section_path:
+        metadata["section_path"] = list(section_path)
+    metadata["content_type"] = content_type
+    metadata["modality"] = _content_type_to_modality(content_type, layout_sensitive=layout_sensitive)
+    metadata["source_ref"] = source_ref
+    metadata["_parser_source"] = parser_source
+    if layout_sensitive:
+        metadata["layout_sensitive"] = True
+    for key, value in (extra or {}).items():
+        if value not in (None, "", [], {}):
+            metadata[key] = value
+    return metadata
+
+
 _ALLOWED_INLINE_HTML_TAGS = {"a", "b", "br", "em", "i", "span", "strong", "sub", "sup", "u"}
 _ALLOWED_INLINE_HTML_ATTRS = {
     "a": {"href", "title"},
 }
 _NUMERICISH_TEXT_RE = re.compile(r"^[\s$€£¥(+-]*\d[\d,]*(?:\.\d+)?%?\)?$")
+_FIGURE_MEDIA_TAGS = {"img", "svg", "canvas"}
 
 
 def _sanitize_inline_html(fragment_html: str | None) -> str | None:
@@ -262,6 +327,10 @@ def _sanitize_inline_html(fragment_html: str | None) -> str | None:
 
 def _tag_inner_html(tag: Any) -> str | None:
     return _sanitize_inline_html("".join(str(child) for child in tag.contents))
+
+
+def _tag_outer_html(tag: Any) -> str | None:
+    return _sanitize_inline_html(str(tag))
 
 
 def _tag_is_centered(tag: Any) -> bool:
@@ -761,6 +830,8 @@ def _preformatted_tag_to_sections(
     *,
     current_heading: Optional[str],
     current_level: int,
+    current_section_path: list[str],
+    block_ref: str,
 ) -> list[DocumentSection]:
     chunks = _merge_preformatted_table_chunks(_split_preformatted_chunks(pre_tag.get_text("\n", strip=False)))
     if not chunks:
@@ -778,7 +849,14 @@ def _preformatted_tag_to_sections(
                 content=text,
                 content_type="text",
                 html=_tag_inner_html(pre_tag),
-                metadata={"heading_context": current_heading} if current_heading else {},
+                metadata=_section_metadata(
+                    current_heading=current_heading,
+                    section_path=current_section_path,
+                    parser_source="html",
+                    source_ref=f"{block_ref}:0",
+                    content_type="text",
+                    layout_sensitive=True,
+                ),
             )
         ]
 
@@ -801,10 +879,14 @@ def _preformatted_tag_to_sections(
                     table=structured_table,
                     caption=caption,
                     notes=notes,
-                    metadata={
-                        **({"heading_context": current_heading} if current_heading else {}),
-                        "_parser_source": "html",
-                    },
+                    metadata=_section_metadata(
+                        current_heading=current_heading,
+                        section_path=current_section_path,
+                        parser_source="html",
+                        source_ref=f"{block_ref}:{len(sections)}",
+                        content_type="table",
+                        extra={"caption": caption, "notes": notes},
+                    ),
                 )
             )
             continue
@@ -818,7 +900,14 @@ def _preformatted_tag_to_sections(
                 level=current_level + 1,
                 content=text,
                 content_type="text",
-                metadata={"heading_context": current_heading} if current_heading else {},
+                metadata=_section_metadata(
+                    current_heading=current_heading,
+                    section_path=current_section_path,
+                    parser_source="html",
+                    source_ref=f"{block_ref}:{len(sections)}",
+                    content_type="text",
+                    layout_sensitive=True,
+                ),
             )
         )
     return sections
@@ -1146,7 +1235,7 @@ def _extract_pdf_metadata(raw_bytes: bytes) -> dict[str, Any]:
 # ── Structured HTML parser ────────────────────────────────────────────────────
 
 _HEADING_TAGS = {"h1", "h2", "h3", "h4", "h5", "h6"}
-_BLOCK_TAGS = _HEADING_TAGS | {"blockquote", "center", "div", "ol", "p", "pre", "table", "ul"}
+_BLOCK_TAGS = _HEADING_TAGS | {"blockquote", "center", "div", "figure", "img", "ol", "p", "pre", "svg", "table", "ul"}
 _NOISE_TAGS = ["script", "style", "nav", "footer", "header", "aside", "form"]
 
 
@@ -1171,7 +1260,7 @@ def _walk_html_blocks(soup_root: Any) -> list[tuple[str, Any]]:
             else:
                 visited.add(id(node))
                 results.append((name, node))
-        elif name in _HEADING_TAGS | {"p", "pre", "ul", "ol", "blockquote"}:
+        elif name in _HEADING_TAGS | {"blockquote", "figure", "img", "ol", "p", "pre", "svg", "ul"}:
             visited.add(id(node))
             results.append((name, node))
         elif name in {"div", "center"}:
@@ -1195,6 +1284,97 @@ def _walk_html_blocks(soup_root: Any) -> list[tuple[str, Any]]:
         _visit(child)
 
     return results
+
+
+def _html_figure_to_section(
+    element: Any,
+    *,
+    current_heading: Optional[str],
+    current_level: int,
+    current_section_path: list[str],
+    source_ref: str,
+) -> DocumentSection | None:
+    name = str(getattr(element, "name", "") or "").lower()
+    if name not in {"figure", *sorted(_FIGURE_MEDIA_TAGS)}:
+        return None
+
+    media_nodes = [element] if name in _FIGURE_MEDIA_TAGS else element.find_all(list(_FIGURE_MEDIA_TAGS), recursive=True)
+    if not media_nodes:
+        return None
+
+    caption_tag = element.find("figcaption", recursive=False) if name == "figure" else None
+    caption = _normalize_inline_text(caption_tag.get_text(separator=" ", strip=True)) if caption_tag else None
+    media_refs: list[str] = []
+    alt_texts: list[str] = []
+    for media in media_nodes:
+        for attr_name in ("src", "data-src", "data-original"):
+            ref = _normalize_inline_text(str(media.get(attr_name) or ""))
+            if ref and ref not in media_refs:
+                media_refs.append(ref)
+                break
+        alt_text = _normalize_inline_text(
+            str(media.get("alt") or media.get("aria-label") or media.get("title") or "")
+        )
+        if alt_text and alt_text not in alt_texts:
+            alt_texts.append(alt_text)
+
+    descriptive_parts: list[str] = []
+    if name == "figure":
+        for child in element.find_all(recursive=False):
+            child_name = str(getattr(child, "name", "") or "").lower()
+            if child_name in {"figcaption", *sorted(_FIGURE_MEDIA_TAGS)}:
+                continue
+            child_text = _normalize_inline_text(child.get_text(separator=" ", strip=True))
+            if child_text and child_text not in descriptive_parts:
+                descriptive_parts.append(child_text)
+
+    fallback_text = _normalize_inline_text(element.get_text(separator=" ", strip=True))
+    content_parts: list[str] = []
+    for candidate in [caption, *alt_texts, *descriptive_parts]:
+        if candidate and candidate not in content_parts:
+            content_parts.append(candidate)
+    if not content_parts and fallback_text:
+        content_parts.append(fallback_text)
+    if not content_parts:
+        content_parts.append("Figure")
+
+    return DocumentSection(
+        heading=None,
+        level=current_level + 1,
+        content="\n\n".join(content_parts),
+        content_type="figure",
+        caption=caption,
+        html=_tag_outer_html(element),
+        metadata=_section_metadata(
+            current_heading=current_heading,
+            section_path=current_section_path,
+            parser_source="html",
+            source_ref=source_ref,
+            content_type="figure",
+            extra={"media_refs": media_refs},
+        ),
+    )
+
+
+def _attach_local_figure_context(sections: list[DocumentSection]) -> list[DocumentSection]:
+    for index, section in enumerate(sections[:-1]):
+        if section.content_type != "figure":
+            continue
+        next_section = sections[index + 1]
+        if next_section.content_type not in {"text", "quote"}:
+            continue
+        section_path = list((section.metadata or {}).get("section_path") or [])
+        next_section_path = list((next_section.metadata or {}).get("section_path") or [])
+        if section_path != next_section_path:
+            continue
+        explanatory_text = _normalize_inline_text(next_section.content)
+        if not explanatory_text:
+            continue
+        section.metadata = {
+            **dict(section.metadata or {}),
+            "explanatory_text": explanatory_text,
+        }
+    return sections
 
 
 def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
@@ -1223,11 +1403,13 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
     sections: list[DocumentSection] = []
     current_heading: Optional[str] = None
     current_level = 1
+    current_section_path: list[str] = []
 
     body = soup.find("body") or soup
-    for tag_name, el in _walk_html_blocks(body):
+    for block_index, (tag_name, el) in enumerate(_walk_html_blocks(body)):
         text = el.get_text(separator=" ", strip=True)
         html = _tag_inner_html(el)
+        source_ref = _block_source_ref("html", block_index)
         if tag_name == "table":
             table_md, table_rows, table_html, table, caption, notes = _table_payload_from_structured(
                 _table_tag_to_structured(el),
@@ -1245,15 +1427,30 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                     table=table,
                     caption=caption,
                     notes=notes,
-                    metadata={
-                        **({"heading_context": current_heading} if current_heading else {}),
-                        "_parser_source": "html",
-                    },
+                    metadata=_section_metadata(
+                        current_heading=current_heading,
+                        section_path=current_section_path,
+                        parser_source="html",
+                        source_ref=source_ref,
+                        content_type="table",
+                        extra={"caption": caption, "notes": notes},
+                    ),
                 )
             )
+        elif tag_name in {"figure", "img", "svg"}:
+            figure_section = _html_figure_to_section(
+                el,
+                current_heading=current_heading,
+                current_level=current_level,
+                current_section_path=current_section_path,
+                source_ref=source_ref,
+            )
+            if figure_section is not None:
+                sections.append(figure_section)
         elif tag_name in _HEADING_TAGS or _is_semantic_heading_block(el, text):
             current_heading = _normalize_inline_text(text)
             current_level = int(tag_name[1]) if tag_name in _HEADING_TAGS else _infer_html_heading_level(el, text)
+            current_section_path = _update_section_path(current_section_path, current_level, current_heading)
             sections.append(
                 DocumentSection(
                     heading=current_heading,
@@ -1261,6 +1458,13 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                     content="",
                     content_type="heading",
                     html=html,
+                    metadata=_section_metadata(
+                        current_heading=current_heading,
+                        section_path=current_section_path,
+                        parser_source="html",
+                        source_ref=source_ref,
+                        content_type="heading",
+                    ),
                 )
             )
         elif tag_name == "pre":
@@ -1269,6 +1473,8 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                     el,
                     current_heading=current_heading,
                     current_level=current_level,
+                    current_section_path=current_section_path,
+                    block_ref=source_ref,
                 )
             )
         elif tag_name in ("ul", "ol"):
@@ -1281,7 +1487,14 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                         content="\n".join(f"- {item}" for item in items),
                         content_type="list",
                         items=items,
-                        metadata={"heading_context": current_heading} if current_heading else {},
+                        metadata=_section_metadata(
+                            current_heading=current_heading,
+                            section_path=current_section_path,
+                            parser_source="html",
+                            source_ref=source_ref,
+                            content_type="list",
+                            extra={"items": items},
+                        ),
                     )
                 )
         elif tag_name == "blockquote":
@@ -1293,7 +1506,13 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                         content=text,
                         content_type="quote",
                         html=html,
-                        metadata={"heading_context": current_heading} if current_heading else {},
+                        metadata=_section_metadata(
+                            current_heading=current_heading,
+                            section_path=current_section_path,
+                            parser_source="html",
+                            source_ref=source_ref,
+                            content_type="quote",
+                        ),
                     )
                 )
         else:
@@ -1305,7 +1524,13 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
                         content=text,
                         content_type="text",
                         html=html,
-                        metadata={"heading_context": current_heading} if current_heading else {},
+                        metadata=_section_metadata(
+                            current_heading=current_heading,
+                            section_path=current_section_path,
+                            parser_source="html",
+                            source_ref=source_ref,
+                            content_type="text",
+                        ),
                     )
                 )
 
@@ -1316,7 +1541,7 @@ def parse_html_structured(raw_bytes: bytes) -> StructuredParseResult:
         raw_text=raw_text,
         clean_text=clean_text,
         source_type="html",
-        sections=sections,
+        sections=_attach_local_figure_context(sections),
         doc_metadata={"title": _normalize_inline_text(soup.title.get_text(" ", strip=True))} if soup.title else {},
     )
 
@@ -1331,7 +1556,10 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
     sections: list[DocumentSection] = []
     current_heading: Optional[str] = None
     current_level = 1
+    current_section_path: list[str] = []
     pending_list_items: list[str] = []
+    caption_types = {"Caption", "FigureCaption"}
+    figure_types = {"Chart", "Figure", "Image", "Picture"}
 
     def _flush_list() -> None:
         nonlocal pending_list_items
@@ -1344,26 +1572,47 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
                 content="\n".join(f"- {item}" for item in pending_list_items),
                 content_type="list",
                 items=list(pending_list_items),
-                metadata={"heading_context": current_heading} if current_heading else {},
+                metadata=_section_metadata(
+                    current_heading=current_heading,
+                    section_path=current_section_path,
+                    parser_source="pdf",
+                    source_ref=_block_source_ref("pdf", len(sections)),
+                    content_type="list",
+                    extra={"items": list(pending_list_items)},
+                ),
             )
         )
         pending_list_items = []
 
-    for el in elements:
+    index = 0
+    while index < len(elements):
+        el = elements[index]
         el_type = type(el).__name__
         if el_type in _UNSTRUCTURED_SKIP_TYPES:
+            index += 1
             continue
+        page_number = getattr(getattr(el, "metadata", None), "page_number", None)
+        source_ref = _block_source_ref("pdf", index, page_number=page_number, element_index=index)
 
         if el_type == "Title":
             _flush_list()
             current_heading = el.text.strip()
             current_level = 1
+            current_section_path = _update_section_path(current_section_path, current_level, current_heading)
             sections.append(
                 DocumentSection(
                     heading=current_heading,
                     level=current_level,
                     content="",
                     content_type="heading",
+                    metadata=_section_metadata(
+                        current_heading=current_heading,
+                        section_path=current_section_path,
+                        parser_source="pdf",
+                        source_ref=source_ref,
+                        content_type="heading",
+                        extra={"page_number": page_number},
+                    ),
                 )
             )
         elif el_type == "Table":
@@ -1388,10 +1637,48 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
                     table=table,
                     caption=caption,
                     notes=notes,
-                    metadata={
-                        **({"heading_context": current_heading} if current_heading else {}),
-                        "_parser_source": "pdf",
-                    },
+                    metadata=_section_metadata(
+                        current_heading=current_heading,
+                        section_path=current_section_path,
+                        parser_source="pdf",
+                        source_ref=source_ref,
+                        content_type="table",
+                        extra={"caption": caption, "notes": notes, "page_number": page_number},
+                    ),
+                )
+            )
+        elif el_type in figure_types:
+            _flush_list()
+            caption = None
+            if index + 1 < len(elements) and type(elements[index + 1]).__name__ in caption_types:
+                caption = _normalize_inline_text(getattr(elements[index + 1], "text", "") or "")
+                if caption:
+                    index += 1
+            figure_text = _normalize_inline_text(getattr(el, "text", "") or "")
+            content_parts: list[str] = []
+            for candidate in [caption, figure_text]:
+                if candidate and candidate not in content_parts:
+                    content_parts.append(candidate)
+            if not content_parts:
+                content_parts.append(el_type)
+            sections.append(
+                DocumentSection(
+                    heading=None,
+                    level=current_level + 1,
+                    content="\n\n".join(content_parts),
+                    content_type="figure",
+                    caption=caption,
+                    metadata=_section_metadata(
+                        current_heading=current_heading,
+                        section_path=current_section_path,
+                        parser_source="pdf",
+                        source_ref=source_ref,
+                        content_type="figure",
+                        extra={
+                            "element_type": el_type,
+                            "page_number": page_number,
+                        },
+                    ),
                 )
             )
         elif el_type == "ListItem":
@@ -1406,7 +1693,33 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
                         level=current_level + 1,
                         content=el.text.strip(),
                         content_type="quote",
-                        metadata={"heading_context": current_heading} if current_heading else {},
+                        metadata=_section_metadata(
+                            current_heading=current_heading,
+                            section_path=current_section_path,
+                            parser_source="pdf",
+                            source_ref=source_ref,
+                            content_type="quote",
+                            extra={"page_number": page_number},
+                        ),
+                    )
+                )
+        elif el_type in caption_types:
+            _flush_list()
+            if el.text:
+                sections.append(
+                    DocumentSection(
+                        heading=None,
+                        level=current_level + 1,
+                        content=el.text.strip(),
+                        content_type="text",
+                        metadata=_section_metadata(
+                            current_heading=current_heading,
+                            section_path=current_section_path,
+                            parser_source="pdf",
+                            source_ref=source_ref,
+                            content_type="text",
+                            extra={"page_number": page_number},
+                        ),
                     )
                 )
         else:
@@ -1418,12 +1731,20 @@ def _unstructured_elements_to_sections(elements: list) -> list[DocumentSection]:
                         level=current_level + 1,
                         content=el.text.strip(),
                         content_type="text",
-                        metadata={"heading_context": current_heading} if current_heading else {},
+                        metadata=_section_metadata(
+                            current_heading=current_heading,
+                            section_path=current_section_path,
+                            parser_source="pdf",
+                            source_ref=source_ref,
+                            content_type="text",
+                            extra={"page_number": page_number},
+                        ),
                     )
                 )
+        index += 1
 
     _flush_list()
-    return sections
+    return _attach_local_figure_context(sections)
 
 
 def _has_unstructured_table_elements(elements: list) -> bool:
@@ -1466,28 +1787,45 @@ def _partition_pdf_with_unstructured(raw_bytes: bytes) -> list:
     return []
 
 
-def _text_block_to_section(block: str, current_heading: Optional[str], current_level: int) -> tuple[DocumentSection | None, Optional[str], int]:
+def _text_block_to_section(
+    block: str,
+    current_heading: Optional[str],
+    current_level: int,
+    current_section_path: list[str],
+    *,
+    block_index: int,
+    source_type: str,
+) -> tuple[DocumentSection | None, Optional[str], int, list[str]]:
     stripped = block.strip()
     if not stripped:
-        return None, current_heading, current_level
+        return None, current_heading, current_level, current_section_path
 
     heading_match = re.fullmatch(r"(#{1,6})\s+(.+)", stripped)
     if heading_match:
         level = len(heading_match.group(1))
         heading = heading_match.group(2).strip()
+        section_path = _update_section_path(current_section_path, level, heading)
         return (
             DocumentSection(
                 heading=heading,
                 level=level,
                 content="",
                 content_type="heading",
+                metadata=_section_metadata(
+                    current_heading=heading,
+                    section_path=section_path,
+                    parser_source=source_type,
+                    source_ref=_block_source_ref(source_type, block_index),
+                    content_type="heading",
+                ),
             ),
             heading,
             level,
+            section_path,
         )
 
     lines = [line.strip() for line in stripped.splitlines() if line.strip()]
-    metadata = {"heading_context": current_heading} if current_heading else {}
+    source_ref = _block_source_ref(source_type, block_index)
 
     list_pattern = re.compile(r"^([-*+]\s+|\d+[.)]\s+)")
     if lines and all(list_pattern.match(line) for line in lines):
@@ -1499,10 +1837,18 @@ def _text_block_to_section(block: str, current_heading: Optional[str], current_l
                 content="\n".join(f"- {item}" for item in items),
                 content_type="list",
                 items=items,
-                metadata=metadata,
+                metadata=_section_metadata(
+                    current_heading=current_heading,
+                    section_path=current_section_path,
+                    parser_source=source_type,
+                    source_ref=source_ref,
+                    content_type="list",
+                    extra={"items": items},
+                ),
             ),
             current_heading,
             current_level,
+            current_section_path,
         )
 
     if lines and all(line.startswith(">") for line in lines):
@@ -1513,10 +1859,17 @@ def _text_block_to_section(block: str, current_heading: Optional[str], current_l
                 level=current_level + 1,
                 content=quote,
                 content_type="quote",
-                metadata=metadata,
+                metadata=_section_metadata(
+                    current_heading=current_heading,
+                    section_path=current_section_path,
+                    parser_source=source_type,
+                    source_ref=source_ref,
+                    content_type="quote",
+                ),
             ),
             current_heading,
             current_level,
+            current_section_path,
         )
 
     paragraph = re.sub(r"\s+", " ", stripped).strip()
@@ -1526,10 +1879,17 @@ def _text_block_to_section(block: str, current_heading: Optional[str], current_l
             level=current_level + 1,
             content=paragraph,
             content_type="text",
-            metadata=metadata,
+            metadata=_section_metadata(
+                current_heading=current_heading,
+                section_path=current_section_path,
+                parser_source=source_type,
+                source_ref=source_ref,
+                content_type="text",
+            ),
         ),
         current_heading,
         current_level,
+        current_section_path,
     )
 
 
@@ -1537,16 +1897,24 @@ def parse_text_structured(raw_bytes_or_str: Any, *, source_type: str = "text") -
     flat = parse_text(raw_bytes_or_str)
     current_heading: Optional[str] = None
     current_level = 1
+    current_section_path: list[str] = []
     sections: list[DocumentSection] = []
-    for block in re.split(r"\n{2,}", flat.clean_text):
-        section, current_heading, current_level = _text_block_to_section(block, current_heading, current_level)
+    for block_index, block in enumerate(re.split(r"\n{2,}", flat.clean_text)):
+        section, current_heading, current_level, current_section_path = _text_block_to_section(
+            block,
+            current_heading,
+            current_level,
+            current_section_path,
+            block_index=block_index,
+            source_type=source_type,
+        )
         if section is not None:
             sections.append(section)
     return StructuredParseResult(
         raw_text=flat.raw_text,
         clean_text=flat.clean_text,
         source_type=source_type,
-        sections=sections,
+        sections=_attach_local_figure_context(sections),
         doc_metadata={},
     )
 
