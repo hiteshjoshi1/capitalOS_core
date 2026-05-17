@@ -98,4 +98,5 @@ Rules:
 9) If semantic intent is achieved, unresolved_failures must be empty.
 10) Do not include markdown fences or prose outside JSON.
 11) If semantic intent is not achieved, set semantic_intent_achieved=false and explain exactly why in checks/evidence.
+12) Do not treat legacy "Human Approval Gate" or "Approved for implementation" checkboxes as required gates or risk flags.
 """.strip()

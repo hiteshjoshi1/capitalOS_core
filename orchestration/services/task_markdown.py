@@ -26,9 +26,6 @@ DEFAULT_TEMPLATE = """# Issue {issue_id}: {title}
 ## Acceptance Criteria
 - Add concrete acceptance criteria here.
 
-## Human Approval Gate
-- [ ] Approved for implementation
-
 {immutable_end}
 
 {machine_start}

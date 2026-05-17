@@ -428,6 +428,33 @@ def test_deterministic_gates_high_risk_approved_allows_completion(tmp_path, monk
     assert pipeline.current_stage == "deterministic_gates"
 
 
+def test_deterministic_gates_ignores_legacy_human_approval_flag(tmp_path, monkeypatch) -> None:
+    state = _v3_state(tmp_path)
+    output = _agent_output()
+    output.risk_flags = ["human-approval-gate-unchecked"]
+    state.agent_run_output = output
+
+    monkeypatch.setattr(
+        deterministic_gates_node,
+        "get_config",
+        lambda: SimpleNamespace(
+            max_retries=3,
+            require_pre_ship_human_on_high_risk=True,
+        ),
+    )
+    _patch_deterministic_deps(monkeypatch, verification=_verification_pass(), policy=V3PolicyResult(blocked=False))
+
+    def unexpected_interrupt(payload):
+        raise AssertionError(f"Legacy approval flag should not interrupt: {payload!r}")
+
+    monkeypatch.setattr(deterministic_gates_node, "interrupt", unexpected_interrupt)
+
+    result = deterministic_gates_node.run({"pipeline": state.model_dump(mode="json")})
+    pipeline = PipelineState.model_validate(result["pipeline"])
+    assert pipeline.workflow_status == "waiting_for_human"
+    assert pipeline.blockers == []
+
+
 def test_deterministic_gates_high_risk_nested_decision_payload_is_normalized(tmp_path, monkeypatch) -> None:
     state = _v3_state(tmp_path)
     output = _agent_output()
