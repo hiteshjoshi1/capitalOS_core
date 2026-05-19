@@ -105,6 +105,42 @@ describe("resolveApiBase", () => {
   });
 });
 
+describe("streamAiSageChatMessage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("parses the final SSE frame even when the stream closes without a trailing separator", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: done\ndata: {"chat":{"id":"chat-1","title":"Done","messages":[]},"user_message":{"id":"user-1","role":"user","content":"Q","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},"assistant_message":{"id":"assistant-1","role":"assistant","content":"A","status":"completed","created_at":"2026-05-01T10:00:01Z","evidence":[]}}',
+          ),
+        );
+        controller.close();
+      },
+    });
+    const fetchSpy = vi.fn().mockResolvedValue({ ok: true, body });
+    vi.stubGlobal("fetch", fetchSpy);
+    const { streamAiSageChatMessage } = await import("../lib/api");
+    const events: unknown[] = [];
+
+    await streamAiSageChatMessage("chat-1", { content: "Q" }, (event) => {
+      events.push(event);
+    });
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "done",
+      chat: { id: "chat-1", title: "Done" },
+      assistant_message: { id: "assistant-1", content: "A" },
+    });
+  });
+});
+
 describe("api.authLogin – error formatting", () => {
   afterEach(() => {
     vi.unstubAllGlobals();

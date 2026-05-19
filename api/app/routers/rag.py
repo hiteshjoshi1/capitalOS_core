@@ -2288,6 +2288,46 @@ class RetrieveOut(BaseModel):
     diagnostics: Optional[dict] = None
 
 
+class QueryAuditListItemOut(BaseModel):
+    id: str
+    query_text: str
+    mode: Optional[str]
+    latency_ms: Optional[int]
+    created_at: Any
+    evidence_count: int
+    retrieval_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class QueryAuditEvidenceOut(BaseModel):
+    id: str
+    rank: int
+    chunk_id: str
+    cosine_distance: Optional[float] = None
+    reranker_score: Optional[float] = None
+    rrf_score: Optional[float] = None
+    ts_rank: Optional[float] = None
+    is_golden: bool
+    document_id: Optional[str] = None
+    parent_document_id: Optional[str] = None
+    source_type: Optional[str] = None
+    source_section: Optional[str] = None
+    title: Optional[str] = None
+    text: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class QueryAuditDetailOut(BaseModel):
+    id: str
+    query_text: str
+    mode: Optional[str]
+    intent: dict[str, Any] = Field(default_factory=dict)
+    retrieval_config: dict[str, Any] = Field(default_factory=dict)
+    answer_text: Optional[str] = None
+    latency_ms: Optional[int] = None
+    created_at: Any
+    evidence: list[QueryAuditEvidenceOut]
+
+
 @router.post("/retrieve", response_model=RetrieveOut)
 def retrieve(body: RetrieveIn, db: Session = Depends(get_db)):
     """
@@ -2368,6 +2408,89 @@ def retrieve(body: RetrieveIn, db: Session = Depends(get_db)):
         "diagnostics": None,
     })
     return out
+
+
+@router.get("/query-audit", response_model=list[QueryAuditListItemOut])
+def list_query_audit(
+    limit: int = Query(20, ge=1, le=100),
+    mode: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+):
+    from app.models.rag import RagQuery
+
+    query = db.query(RagQuery).options(selectinload(RagQuery.evidence)).order_by(RagQuery.created_at.desc())
+    if mode:
+        query = query.filter(RagQuery.mode == mode)
+    rows = query.limit(limit).all()
+    return [
+        QueryAuditListItemOut(
+            id=str(row.id),
+            query_text=row.query_text,
+            mode=row.mode,
+            latency_ms=row.latency_ms,
+            created_at=row.created_at,
+            evidence_count=len(row.evidence or []),
+            retrieval_config=row.retrieval_config or {},
+        )
+        for row in rows
+    ]
+
+
+@router.get("/query-audit/{query_id}", response_model=QueryAuditDetailOut)
+def get_query_audit(query_id: str, db: Session = Depends(get_db)):
+    from app.models.rag import RagChunk, RagQuery, RagQueryEvidence
+
+    row = (
+        db.query(RagQuery)
+        .options(
+            selectinload(RagQuery.evidence)
+            .selectinload(RagQueryEvidence.chunk)
+            .selectinload(RagChunk.document)
+            .selectinload(RagDocument.source)
+        )
+        .filter(RagQuery.id == query_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Query audit '{query_id}' not found")
+
+    evidence_rows = sorted(row.evidence or [], key=lambda evidence: evidence.rank)
+    evidence = []
+    for item in evidence_rows:
+        chunk = item.chunk
+        document = chunk.document if chunk is not None else None
+        source = document.source if document is not None else None
+        evidence.append(
+            QueryAuditEvidenceOut(
+                id=str(item.id),
+                rank=item.rank,
+                chunk_id=str(item.chunk_id),
+                cosine_distance=item.cosine_distance,
+                reranker_score=item.reranker_score,
+                rrf_score=item.rrf_score,
+                ts_rank=item.ts_rank,
+                is_golden=item.is_golden,
+                document_id=str(document.id) if document is not None else None,
+                parent_document_id=str(document.parent_document_id) if document is not None and document.parent_document_id else None,
+                source_type=source.source_type if source is not None else None,
+                source_section=document.source_section if document is not None else None,
+                title=document.title if document is not None else None,
+                text=chunk.text if chunk is not None else None,
+                metadata=(chunk.metadata_json or {}) if chunk is not None else {},
+            )
+        )
+
+    return QueryAuditDetailOut(
+        id=str(row.id),
+        query_text=row.query_text,
+        mode=row.mode,
+        intent=row.intent_json or {},
+        retrieval_config=row.retrieval_config or {},
+        answer_text=row.answer_text,
+        latency_ms=row.latency_ms,
+        created_at=row.created_at,
+        evidence=evidence,
+    )
 
 
 # ── Phase 2: Grounded query ────────────────────────────────────────────────────

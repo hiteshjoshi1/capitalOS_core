@@ -225,6 +225,44 @@ describe("AISage workspace", () => {
     expect(screen.getByRole("button", { name: "Compare that with Nick Sleep" })).toBeInTheDocument();
   });
 
+  it("hides duplicate evidence rows when rendering a saved chat", async () => {
+    vi.mocked(api.aiSageChats).mockResolvedValue({ items: [CHAT_SUMMARY], total: 1, limit: 30, offset: 0 });
+    vi.mocked(api.aiSageGetChat).mockResolvedValue({
+      ...CHAT_DETAIL,
+      messages: [
+        CHAT_DETAIL.messages[0],
+        {
+          ...CHAT_DETAIL.messages[1],
+          evidence: [
+            CHAT_DETAIL.messages[1].evidence[0],
+            {
+              ...CHAT_DETAIL.messages[1].evidence[0],
+              id: "evidence-duplicate",
+              chunk_id: "chunk-duplicate",
+              snippet: "A wonderful business can compound.",
+            },
+            {
+              ...CHAT_DETAIL.messages[1].evidence[0],
+              id: "evidence-distinct",
+              chunk_id: "chunk-distinct",
+              snippet: "Inversion helps investors reason backward from what can go wrong.",
+              metadata_json: {
+                context_text: "Inversion helps investors reason backward from what can go wrong.",
+                anchor_text: "Inversion helps investors reason backward from what can go wrong.",
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    renderAISage(["/ai-sage/chats/chat-1"]);
+
+    expect(await screen.findByRole("heading", { name: "Moat review" })).toBeInTheDocument();
+    expect(screen.getAllByText("A wonderful business can compound.")).toHaveLength(1);
+    expect(screen.getByText("Inversion helps investors reason backward from what can go wrong.")).toBeInTheDocument();
+  });
+
   it("remounts the transcript when switching saved chats so the next thread opens from the top", async () => {
     vi.mocked(api.aiSageChats).mockResolvedValue({
       items: [
@@ -261,30 +299,31 @@ describe("AISage workspace", () => {
   });
 
   it("creates a new chat and streams the assistant response incrementally", async () => {
+    const streamedUser: AISageChatMessage = {
+      id: "user-2",
+      role: "user",
+      content: "What matters?",
+      status: "completed",
+      created_at: "2026-05-01T10:00:00Z",
+      evidence: [],
+    };
+    const streamedAssistant: AISageChatMessage = {
+      id: "assistant-2",
+      role: "assistant",
+      content: "Grounded answer.",
+      status: "completed",
+      created_at: "2026-05-01T10:00:05Z",
+      metadata_json: { mode: "concept", evidence_sufficient: true },
+      evidence: [],
+    };
+    const streamedChat: AISageChatDetail = {
+      ...CHAT_DETAIL,
+      id: "chat-new",
+      title: "What matters?",
+      messages: [streamedUser, streamedAssistant],
+    };
+    vi.mocked(api.aiSageGetChat).mockResolvedValue(streamedChat);
     vi.mocked(streamAiSageChatMessage).mockImplementation(async (_chatId, _payload, onEvent) => {
-      const streamedUser: AISageChatMessage = {
-        id: "user-2",
-        role: "user",
-        content: "What matters?",
-        status: "completed",
-        created_at: "2026-05-01T10:00:00Z",
-        evidence: [],
-      };
-      const streamedAssistant: AISageChatMessage = {
-        id: "assistant-2",
-        role: "assistant",
-        content: "Grounded answer.",
-        status: "completed",
-        created_at: "2026-05-01T10:00:05Z",
-        metadata_json: { mode: "concept", evidence_sufficient: true },
-        evidence: [],
-      };
-      const streamedChat: AISageChatDetail = {
-        ...CHAT_DETAIL,
-        id: "chat-new",
-        title: "What matters?",
-        messages: [streamedUser, streamedAssistant],
-      };
       onEvent({
         type: "ack",
         chat_id: "chat-new",
@@ -307,7 +346,72 @@ describe("AISage workspace", () => {
     await user.type(screen.getByPlaceholderText("Ask AI Sage anything"), "What matters?{Enter}");
 
     expect(api.aiSageCreateChat).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(api.aiSageGetChat).toHaveBeenCalledWith("chat-new");
+    });
     expect(await screen.findByText("Grounded answer.")).toBeInTheDocument();
+  });
+
+  it("shows the first submitted turn immediately while the initial stream is still pending", async () => {
+    let releaseStream = () => {};
+    vi.mocked(streamAiSageChatMessage).mockImplementation(
+      () => new Promise<void>((resolve) => {
+        releaseStream = resolve;
+      }),
+    );
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(screen.getByPlaceholderText("Ask AI Sage anything"), "What matters?{Enter}");
+
+    expect(await screen.findByText("What matters?")).toBeInTheDocument();
+    expect(screen.getByText("Thinking…")).toBeInTheDocument();
+    expect(screen.queryByText("Hello Hitesh")).not.toBeInTheDocument();
+
+    releaseStream();
+  });
+
+  it("refreshes the persisted chat after a first streamed turn even without a done event", async () => {
+    const streamedUser: AISageChatMessage = {
+      id: "user-2",
+      role: "user",
+      content: "What matters?",
+      status: "completed",
+      created_at: "2026-05-01T10:00:00Z",
+      evidence: [],
+    };
+    const persistedAssistant: AISageChatMessage = {
+      id: "assistant-2",
+      role: "assistant",
+      content: "Persisted answer.",
+      status: "completed",
+      created_at: "2026-05-01T10:00:05Z",
+      metadata_json: { mode: "concept", evidence_sufficient: true },
+      evidence: [],
+    };
+    vi.mocked(api.aiSageGetChat).mockResolvedValue({
+      ...CHAT_DETAIL,
+      id: "chat-new",
+      title: "What matters?",
+      messages: [streamedUser, persistedAssistant],
+    });
+    vi.mocked(streamAiSageChatMessage).mockImplementation(async (_chatId, _payload, onEvent) => {
+      onEvent({
+        type: "ack",
+        chat_id: "chat-new",
+        user_message: streamedUser,
+        assistant_message_id: "assistant-2",
+      });
+    });
+
+    const user = userEvent.setup();
+    renderAISage();
+
+    await user.type(screen.getByPlaceholderText("Ask AI Sage anything"), "What matters?{Enter}");
+
+    expect(await screen.findByText("Persisted answer.")).toBeInTheDocument();
+    expect(api.aiSageGetChat).toHaveBeenCalledWith("chat-new");
   });
 
   it("supports renaming from the toolbar and deleting from the compact sidebar row", async () => {

@@ -144,6 +144,51 @@ test("creates a persistent AI Sage chat and streams the response", async ({ page
   await expect(page.getByText("Grounded answer.")).toBeVisible();
 });
 
+test("shows the first submitted AI Sage turn before the stream returns", async ({ page }) => {
+  const seenRequests: string[] = [];
+  page.on("request", (request) => {
+    seenRequests.push(`${request.method()} ${request.url()}`);
+  });
+  let streamRouteHits = 0;
+  let releaseStream: (() => void) | null = null;
+  const streamReleased = new Promise<void>((resolve) => {
+    releaseStream = resolve;
+  });
+  await page.unroute("**/ai-sage/chats/chat-new/messages/stream");
+  await page.route("**/ai-sage/chats/chat-new/messages/stream", async (route) => {
+    streamRouteHits += 1;
+    await streamReleased;
+    await route.fulfill({
+      status: 200,
+      contentType: "text/event-stream",
+      body: [
+        "event: done",
+        'data: {"chat":{"id":"chat-new","title":"What matters?","created_at":"2026-05-01T10:00:00Z","updated_at":"2026-05-01T10:00:05Z","last_activity_at":"2026-05-01T10:00:00Z","pinned_at":null,"metadata_json":null,"messages":[{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},{"id":"assistant-1","role":"assistant","content":"Grounded answer.","status":"completed","created_at":"2026-05-01T10:00:05Z","metadata_json":{"mode":"concept","evidence_sufficient":true},"evidence":[]}]},"user_message":{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},"assistant_message":{"id":"assistant-1","role":"assistant","content":"Grounded answer.","status":"completed","created_at":"2026-05-01T10:00:05Z","metadata_json":{"mode":"concept","evidence_sufficient":true},"evidence":[]}}',
+        "",
+      ].join("\n"),
+      headers: {
+        "cache-control": "no-cache",
+      },
+    });
+  });
+
+  await page.goto("/ai-sage");
+  const composer = page.getByPlaceholder("Ask AI Sage anything");
+  await composer.fill("What matters?");
+  await composer.press("Enter");
+
+  await expect.poll(() => seenRequests.join("\n")).toContain("/ai-sage/chats");
+  await expect.poll(() => seenRequests.join("\n")).toContain("/ai-sage/chats/chat-new/messages/stream");
+  await expect.poll(() => streamRouteHits).toBe(1);
+  await expect.poll(() => seenRequests.filter((request) => request.includes("GET") && request.includes("/ai-sage/chats/chat-new")).length).toBe(0);
+  await expect(page.getByTestId("ai-sage-transcript").getByText("What matters?")).toBeVisible();
+  await expect(page.getByTestId("ai-sage-transcript").getByText("Thinking…")).toBeVisible();
+  await expect(page.getByText("Hello E2E User")).not.toBeVisible();
+
+  releaseStream?.();
+  await expect(page.getByText("Grounded answer.")).toBeVisible();
+});
+
 test("opens a saved AI Sage chat with the thread anchored at the top of the pane", async ({ page }) => {
   await page.route("**/ai-sage/chats?limit=30&offset=0", async (route) => {
     await route.fulfill({

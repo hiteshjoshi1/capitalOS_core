@@ -37,10 +37,16 @@ from app.rag.reranker import rerank as _cross_encoder_rerank
 from app.rag.reranker import reranker_available
 from app.rag.retrieval import (
     RetrievedChunk,
+    build_retrieval_query_plan,
+    deliver_parent_sections,
     expand_chunks_with_context,
     reciprocal_rank_fusion,
+    retrieval_hardening_enabled,
     retrieve_keyword_chunks,
     retrieve_similar_chunks,
+    suppress_near_duplicates,
+    trace_retrieval_chunks,
+    trace_retrieval_payload,
 )
 from app.rag.retrieval_weighting import (
     apply_weight_to_score,
@@ -69,55 +75,7 @@ def _critique_enabled() -> bool:
 
 
 def _trace_chunks(stage: str, query: str, chunks: list[RetrievedChunk], *, limit: int = 8) -> None:
-    def _safe_number(value: Any) -> Any:
-        if isinstance(value, (int, float)):
-            return value
-        try:
-            return float(value)
-        except Exception:
-            return None
-
-    def _safe_text(value: Any) -> str:
-        if value is None:
-            return ""
-        if isinstance(value, str):
-            return value
-        return str(value)
-
-    def _safe_similarity_for_chunk(chunk: RetrievedChunk) -> Any:
-        cosine_distance = _safe_number(getattr(chunk, "cosine_distance", None))
-        if cosine_distance is not None and cosine_distance < 1.0:
-            return round(1.0 - cosine_distance, 6)
-        rrf_score = _safe_number(getattr(chunk, "rrf_score", None))
-        if rrf_score is not None:
-            return round(min(rrf_score * 30, 1.0), 6)
-        ts_rank = _safe_number(getattr(chunk, "ts_rank", None))
-        if ts_rank is not None:
-            return round(min(ts_rank, 1.0), 6)
-        return None
-
-    preview = [
-        {
-            "chunk_id": _safe_text(getattr(chunk, "chunk_id", "")),
-            "document_id": _safe_text(getattr(chunk, "document_id", "")),
-            "chunk_index": _safe_number(getattr(chunk, "chunk_index", None)),
-            "similarity": _safe_similarity_for_chunk(chunk),
-            "reranker_score": _safe_number(getattr(chunk, "reranker_score", None)),
-            "rrf_score": _safe_number(getattr(chunk, "rrf_score", None)),
-            "ts_rank": _safe_number(getattr(chunk, "ts_rank", None)),
-            "source_url": _safe_text(((getattr(chunk, "metadata_json", None) or {}).get("source_url"))),
-            "published_at": _safe_text(((getattr(chunk, "metadata_json", None) or {}).get("published_at"))),
-            "text": _safe_text(getattr(chunk, "text", ""))[:180],
-        }
-        for chunk in chunks[:limit]
-    ]
-    log.info(
-        "ai_sage_trace stage=%s query=%r chunk_count=%d preview=%s",
-        stage,
-        query[:120],
-        len(chunks),
-        json.dumps(preview, ensure_ascii=False),
-    )
+    trace_retrieval_chunks(f"ai_sage_{stage}", query, chunks, limit=limit)
 
 
 def _with_display_context(
@@ -188,31 +146,30 @@ def _clean_query_for_keyword_search(
     Instead, extract the *semantic core* of the question and append any
     topic_entities so keyword search is focused on the subject matter.
     """
-    from app.rag.intent_router import _KNOWN_AUTHORS
+    source_author_names: list[str] = []
+    if author_ids:
+        try:
+            from app.rag.intent_router import _KNOWN_AUTHORS
 
+            source_author_names = [
+                name.title()
+                for name, aid in _KNOWN_AUTHORS.items()
+                if aid in set(author_ids)
+            ]
+        except Exception:
+            source_author_names = []
     q = query
-    # Remove known author names (case-insensitive)
-    for name in sorted(_KNOWN_AUTHORS.keys(), key=len, reverse=True):
-        q = re.sub(r"\b" + re.escape(name) + r"\b", " ", q, flags=re.IGNORECASE)
-    # Remove year numbers that are used as date filters
+    # Remove year numbers that are used as date filters before planner cleanup.
     for yr in [year_from, year_to]:
         if yr:
             q = re.sub(r"\b" + re.escape(str(yr)) + r"\b", " ", q)
-    # Remove source-indicator words (user means them as source type, not topic)
-    q = re.sub(
-        r"\b(?:letters?|essays?|memos?|reports?|transcripts?|speeches?|pdfs?|writings?|articles?|annual\s+reports?)\b",
-        " ", q, flags=re.IGNORECASE,
+    plan = build_retrieval_query_plan(
+        q,
+        source_author_ids=author_ids,
+        source_author_names=source_author_names,
+        topic_entities=topic_entities,
     )
-    # Remove common question scaffolding
-    q = re.sub(
-        r"\b(?:what|did|does|how|say|said|from|to|about|in|his|her|their|the|and|of|is|are|was|were)\b",
-        " ", q, flags=re.IGNORECASE,
-    )
-    q = re.sub(r"\s+", " ", q).strip()
-    # Append topic entities so keyword search targets the subject
-    if topic_entities:
-        q = q + " " + " ".join(topic_entities) if q else " ".join(topic_entities)
-    return q.strip() or query  # fall back to original if nothing left
+    return plan.content_query or query  # fall back to original if nothing left
 
 _CONCEPT_TOP_K_AUTHORS = 5
 _CONCEPT_TOP_K_CHUNKS = 12
@@ -324,6 +281,7 @@ def _retrieve_with_intent_fallback(
     import os as _os
 
     retrieval_mode = _os.getenv("RAG_RETRIEVAL_MODE", "hybrid")
+    hardening_active = retrieval_hardening_enabled()
 
     # Convert year strings to int for the new retrieval signature
     year_from_int: Optional[int] = int(year_from) if year_from is not None else None
@@ -331,11 +289,12 @@ def _retrieve_with_intent_fallback(
 
     # Use cleaned keyword query for sparse search to avoid AND-conjunction mismatches
     kw_q = keyword_query or query
+    dense_q = kw_q if hardening_active else query
 
     if strict:
         # Strict mode: execute once with full constraints, no fallback
         chunks = retrieve_similar_chunks(
-            query,
+            dense_q,
             db,
             top_k=top_k,
             author_ids=author_ids if author_ids else None,
@@ -352,6 +311,7 @@ def _retrieve_with_intent_fallback(
                 source_type=source_type,
                 year_from=year_from_int,
                 year_to=year_to_int,
+                hardening_enabled=hardening_active,
             )
             if sparse:
                 chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
@@ -404,7 +364,7 @@ def _retrieve_with_intent_fallback(
 
     for attempt in attempts:
         chunks = retrieve_similar_chunks(
-            query,
+            dense_q,
             db,
             top_k=top_k,
             author_ids=author_ids if author_ids else None,
@@ -440,6 +400,7 @@ def _retrieve_with_intent_fallback(
                     source_type=attempt["source_type"],
                     year_from=attempt["year_from"],
                     year_to=attempt["year_to"],
+                    hardening_enabled=hardening_active,
                 )
                 if sparse:
                     chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
@@ -500,11 +461,35 @@ def _collect_candidate_chunks(
         year_from=intent.date_from,
         year_to=intent.date_to,
     )
+    retrieval_plan = build_retrieval_query_plan(
+        query,
+        source_author_ids=author_ids,
+        source_author_names=intent.author_names,
+        topic_entities=intent.topic_entities if intent.topic_entities else None,
+    )
+    trace_retrieval_payload(
+        "ai_sage_retrieval_query_plan",
+        {
+            **retrieval_plan.as_dict(),
+            "keyword_query_used": kw_query,
+            "author_ids_filter": author_ids,
+            "broad_top_k": broad_top_k,
+            "has_explicit_constraints": has_explicit_constraints,
+        },
+    )
 
     if intent.sub_queries:
         per_sub_k = max(
             broad_top_k // len(intent.sub_queries),
             _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY,
+        )
+        trace_retrieval_payload(
+            "ai_sage_sub_query_plan",
+            {
+                "query": query,
+                "sub_queries": intent.sub_queries,
+                "per_sub_k": per_sub_k,
+            },
         )
         for sub_query in intent.sub_queries:
             sub_kw = _clean_query_for_keyword_search(
@@ -526,6 +511,12 @@ def _collect_candidate_chunks(
                 keyword_query=sub_kw,
             )
             candidates.extend(sub_chunks)
+            trace_retrieval_chunks(
+                "ai_sage_sub_query_candidates",
+                sub_query,
+                sub_chunks,
+                extra={"keyword_query": sub_kw, "constraints_relaxed": sub_relaxed, "relaxation_reason": sub_reason},
+            )
             if sub_relaxed:
                 any_relaxed = True
                 relaxation_reason = sub_reason
@@ -540,6 +531,16 @@ def _collect_candidate_chunks(
             author_ids=author_ids if author_ids else None,
             strict=has_explicit_constraints,
             keyword_query=kw_query,
+        )
+        trace_retrieval_chunks(
+            "ai_sage_initial_candidate_pool",
+            query,
+            candidates,
+            extra={
+                "keyword_query": kw_query,
+                "constraints_relaxed": any_relaxed,
+                "relaxation_reason": relaxation_reason,
+            },
         )
 
     topic_focus_query = _topic_focus_query(intent.topic_entities)
@@ -556,6 +557,12 @@ def _collect_candidate_chunks(
             keyword_query=topic_focus_query,
         )
         candidates.extend(topic_chunks)
+        trace_retrieval_chunks(
+            "ai_sage_topic_focus_candidates",
+            topic_focus_query,
+            topic_chunks,
+            extra={"constraints_relaxed": topic_relaxed, "relaxation_reason": topic_reason},
+        )
         if topic_relaxed:
             any_relaxed = True
             relaxation_reason = topic_reason
@@ -568,7 +575,20 @@ def _collect_candidate_chunks(
         deduped.sort(key=lambda c: -(c.rrf_score or 0.0) if c.rrf_score is not None else c.cosine_distance)
     else:
         deduped.sort(key=lambda c: c.cosine_distance)
-    return deduped[:broad_top_k], any_relaxed, relaxation_reason
+    final_candidates = deduped[:broad_top_k]
+    trace_retrieval_chunks(
+        "ai_sage_deduped_candidate_pool",
+        query,
+        final_candidates,
+        extra={
+            "raw_candidate_count": len(candidates),
+            "deduped_count": len(deduped),
+            "returned_count": len(final_candidates),
+            "constraints_relaxed": any_relaxed,
+            "relaxation_reason": relaxation_reason,
+        },
+    )
+    return final_candidates, any_relaxed, relaxation_reason
 
 
 _HEURISTIC_STOPWORDS = {
@@ -864,13 +884,34 @@ def _rerank_candidate_chunks(
         expanded_by_chunk_id=expanded_by_chunk_id,
     )
     ranked = heuristic_ranked
+    trace_retrieval_chunks(
+        "ai_sage_heuristic_rerank",
+        query,
+        heuristic_ranked,
+        extra={
+            "candidate_count": len(candidates),
+            "topic_entities": topic_entities,
+            "source_author_terms_removed_from_keywords": sorted(source_author_terms or set()),
+        },
+    )
 
     # Tier 1: dedicated cross-encoder reranker (preferred — fast, deterministic, no JSON)
     if reranker_available():
         try:
             passages = [str(getattr(c, "text", "") or "") for c in candidates]
+            trace_retrieval_chunks("ai_sage_cross_encoder_reranker_input", query, candidates)
             results = _cross_encoder_rerank(query, passages, top_k=len(candidates))
             if results:
+                trace_retrieval_payload(
+                    "ai_sage_cross_encoder_scores",
+                    {
+                        "query": query,
+                        "scores": [
+                            {"input_rank": r.index + 1, "score": round(float(r.relevance_score), 6)}
+                            for r in results[:20]
+                        ],
+                    },
+                )
                 log.info(
                     "ai_sage_trace stage=jina_rerank query=%r top_scores=%s",
                     query[:120],
@@ -903,16 +944,34 @@ def _rerank_candidate_chunks(
                     if chunk.chunk_id not in seen_ids:
                         ce_ranked.append(chunk)
                 ranked = sorted(ce_ranked, key=ranking_sort_key)
+                trace_retrieval_chunks("ai_sage_cross_encoder_reranked", query, ranked)
                 log.debug("cross-encoder reranked %d candidates", len(candidates))
         except Exception as exc:
             log.warning("cross-encoder reranking failed; falling back: %s", exc)
+            trace_retrieval_payload(
+                "ai_sage_cross_encoder_reranker_failed",
+                {"query": query, "error": str(exc), "fallback": "heuristic"},
+            )
+    else:
+        trace_retrieval_payload(
+            "ai_sage_reranker_skipped",
+            {"query": query, "reason": "cross_encoder_not_configured", "fallback": "heuristic"},
+        )
 
     # Tier 2: LLM-prompt reranking — DISABLED (issue-146: reshuffles results poorly)
     # Falls through to Tier 3 heuristic when no cross-encoder is available.
 
     # Tier 3: heuristic (keyword overlap + cosine similarity) — already set as default above
 
-    return _select_diverse_top_chunks(ranked, top_k=min(top_k, len(candidates)))
+    selected = _select_diverse_top_chunks(ranked, top_k=min(top_k, len(candidates)))
+    trace_retrieval_chunks(
+        "ai_sage_reranked_selected",
+        query,
+        selected,
+        limit=top_k,
+        extra={"input_count": len(candidates), "selected_count": len(selected)},
+    )
+    return selected
 
 
 # ── Core function ─────────────────────────────────────────────────────────────
@@ -947,6 +1006,20 @@ def execute_concept_query(
         intent.date_to,
         len(intent.sub_queries),
     )
+    trace_retrieval_payload(
+        "ai_sage_intent",
+        {
+            "query": query,
+            "query_type": intent.query_type,
+            "author_ids": intent.author_ids,
+            "author_names": intent.author_names,
+            "source_types": intent.source_types,
+            "date_from": intent.date_from,
+            "date_to": intent.date_to,
+            "topic_entities": intent.topic_entities,
+            "sub_queries": intent.sub_queries,
+        },
+    )
 
     # 1. Author selection — constrained by intent
     if intent.query_type == "single_author" and intent.author_ids:
@@ -971,6 +1044,13 @@ def execute_concept_query(
 
     author_entries = _author_entries(selected, db)
     author_map = {e["author_id"]: e["name"] for e in author_entries}
+    trace_retrieval_payload(
+        "ai_sage_selected_authors",
+        {
+            "query": query,
+            "selected_authors": author_entries,
+        },
+    )
 
     # 2. Retrieve broad candidate evidence before reranking/context expansion
     selected_ids = [a.author_id for a in selected]
@@ -990,6 +1070,7 @@ def execute_concept_query(
         candidate_chunks, _constraints_relaxed, _relaxation_reason = candidate_chunks
     else:
         _constraints_relaxed, _relaxation_reason = False, None
+    hardening_active = retrieval_hardening_enabled()
     _trace_chunks("candidate_pool", query, candidate_chunks)
     expanded_candidate_chunks = expand_chunks_with_context(
         candidate_chunks,
@@ -1009,6 +1090,22 @@ def execute_concept_query(
     )
     _trace_chunks("reranked", query, winning_chunks)
     expanded_chunks = _expanded_chunks_for_selection(winning_chunks, expanded_candidate_map)
+    duplicates_suppressed: list[dict[str, Any]] = []
+    if hardening_active:
+        expanded_chunks = deliver_parent_sections(expanded_chunks, db, only_when_needed=False)
+        _trace_chunks("parent_child_delivery", query, expanded_chunks)
+        expanded_chunks, duplicates_suppressed = suppress_near_duplicates(expanded_chunks)
+        trace_retrieval_payload(
+            "ai_sage_duplicate_suppression",
+            {
+                "query": query,
+                "kept_count": len(expanded_chunks),
+                "duplicates_suppressed_count": len(duplicates_suppressed),
+                "duplicates_suppressed": duplicates_suppressed,
+            },
+        )
+        kept_chunk_ids = {chunk.chunk_id for chunk in expanded_chunks}
+        winning_chunks = [chunk for chunk in winning_chunks if chunk.chunk_id in kept_chunk_ids]
     _trace_chunks("expanded_for_display", query, expanded_chunks)
     display_chunks = _with_display_context(winning_chunks, expanded_chunks)
     evidence: list[EvidenceChunk] = _enrich_chunks(display_chunks, db, author_map)
@@ -1077,7 +1174,14 @@ def execute_concept_query(
             evidence_chunks=evidence_dicts,
             answer_text=(best_passages[0].get("text") if best_passages else weak_evidence_note),
             latency_ms=int((time.monotonic() - _t0) * 1000),
-            retrieval_config={"top_k_chunks": top_k_chunks, "top_k_authors": top_k_authors},
+            retrieval_config={
+                "top_k_chunks": top_k_chunks,
+                "top_k_authors": top_k_authors,
+                "retrieval_hardening_enabled": hardening_active,
+                "parent_child_delivery_enabled": hardening_active,
+                "duplicates_suppressed": duplicates_suppressed,
+                "duplicates_suppressed_count": len(duplicates_suppressed),
+            },
         )
     except Exception as _exc:
         log.debug("concept audit log skipped: %s", _exc)

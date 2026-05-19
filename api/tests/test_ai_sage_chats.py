@@ -207,6 +207,133 @@ def test_ai_sage_evidence_payload_uses_topic_focused_snippet():
     assert evidence[0]["snippet"].startswith("Q: What are your thoughts on BYD?")
 
 
+def test_ai_sage_local_answer_suppresses_near_duplicate_passages():
+    result = ConceptQueryOut(
+        query="What are Charlie Munger's main mental models?",
+        mode="concept",
+        best_passages=[
+            {
+                "chunk_id": "chunk-1",
+                "author_id": "charlie_munger",
+                "author_name": "Charlie Munger",
+                "text": "Mental models form a latticework of big ideas across disciplines.",
+                "similarity": 0.92,
+                "metadata": {
+                    "context_text": "Mental models form a latticework of big ideas across disciplines.",
+                    "anchor_text": "Mental models form a latticework of big ideas across disciplines.",
+                },
+                "document_id": "doc-1",
+                "ranking_score": 0.92,
+                "score_type": "retrieved",
+            },
+            {
+                "chunk_id": "chunk-2",
+                "author_id": "charlie_munger",
+                "author_name": "Charlie Munger",
+                "text": "Mental models form a latticework of big ideas across many disciplines.",
+                "similarity": 0.9,
+                "metadata": {
+                    "context_text": "Mental models form a latticework of big ideas across many disciplines.",
+                    "anchor_text": "Mental models form a latticework of big ideas across many disciplines.",
+                },
+                "document_id": "doc-1",
+                "ranking_score": 0.9,
+                "score_type": "retrieved",
+            },
+            {
+                "chunk_id": "chunk-3",
+                "author_id": "charlie_munger",
+                "author_name": "Charlie Munger",
+                "text": "The mental model of inversion means solving problems by working backward.",
+                "similarity": 0.88,
+                "metadata": {
+                    "context_text": "The mental model of inversion means solving problems by working backward.",
+                    "anchor_text": "The mental model of inversion means solving problems by working backward.",
+                },
+                "document_id": "doc-2",
+                "ranking_score": 0.88,
+                "score_type": "retrieved",
+            },
+        ],
+        critique=None,
+        evidence_sufficient=True,
+        weak_evidence_note=None,
+        intent={
+            "query_type": "single_author",
+            "author_ids": ["charlie_munger"],
+            "author_names": ["Charlie Munger"],
+            "topic_entities": ["mental models"],
+        },
+    )
+
+    answer = _assistant_text_for_result(result)
+    assert answer.count("latticework") == 1
+    assert "inversion means solving problems by working backward" in answer
+
+
+def test_ai_sage_evidence_payload_suppresses_near_duplicate_passages():
+    result = ConceptQueryOut(
+        query="What are Charlie Munger's main mental models?",
+        mode="concept",
+        best_passages=[
+            {
+                "chunk_id": "chunk-1",
+                "author_id": "charlie_munger",
+                "author_name": "Charlie Munger",
+                "text": "Mental models form a latticework of big ideas across disciplines.",
+                "similarity": 0.92,
+                "metadata": {
+                    "context_text": "Mental models form a latticework of big ideas across disciplines.",
+                    "anchor_text": "Mental models form a latticework of big ideas across disciplines.",
+                },
+                "document_id": "doc-1",
+                "ranking_score": 0.92,
+                "score_type": "retrieved",
+            },
+            {
+                "chunk_id": "chunk-2",
+                "author_id": "charlie_munger",
+                "author_name": "Charlie Munger",
+                "text": "Mental models form a latticework of big ideas across many disciplines.",
+                "similarity": 0.9,
+                "metadata": {
+                    "context_text": "Mental models form a latticework of big ideas across many disciplines.",
+                    "anchor_text": "Mental models form a latticework of big ideas across many disciplines.",
+                },
+                "document_id": "doc-1",
+                "ranking_score": 0.9,
+                "score_type": "retrieved",
+            },
+            {
+                "chunk_id": "chunk-3",
+                "author_id": "charlie_munger",
+                "author_name": "Charlie Munger",
+                "text": "The mental model of inversion means solving problems by working backward.",
+                "similarity": 0.88,
+                "metadata": {
+                    "context_text": "The mental model of inversion means solving problems by working backward.",
+                    "anchor_text": "The mental model of inversion means solving problems by working backward.",
+                },
+                "document_id": "doc-2",
+                "ranking_score": 0.88,
+                "score_type": "retrieved",
+            },
+        ],
+        critique=None,
+        evidence_sufficient=True,
+        weak_evidence_note=None,
+        intent={
+            "query_type": "single_author",
+            "author_ids": ["charlie_munger"],
+            "author_names": ["Charlie Munger"],
+            "topic_entities": ["mental models"],
+        },
+    )
+
+    evidence = _evidence_payload_for_result(result)
+    assert [row["chunk_id"] for row in evidence] == ["chunk-1", "chunk-3"]
+
+
 def test_ai_sage_chat_crud_and_message_persistence(client, monkeypatch):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     headers = _auth_headers(client, "sage_owner", "SageOwnerPass1!")

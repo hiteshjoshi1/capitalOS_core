@@ -460,7 +460,7 @@ rag-eval-compare:
 	docker compose exec -T api python -m app.rag.eval.cli compare --a $(CONFIG_A) --b $(CONFIG_B)
 
 rag-eval-seed:
-	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/data/fixtures/rag_golden_queries.yaml
+	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/app/rag/eval/fixtures/rag_golden_queries.yaml
 
 rag-eval-pdf:
 	docker compose exec -T api python -m app.rag.eval.cli run --label $(if $(LABEL),$(LABEL),pdf-eval) --source-type pdf $(if $(OUTPUT),--output $(OUTPUT),)
