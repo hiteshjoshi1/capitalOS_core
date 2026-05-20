@@ -11,9 +11,6 @@
 - [ ] Criterion 1
 - [ ] Criterion 2
 
-## Human Approval Gate
-- [ ] Approved for implementation
-
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist

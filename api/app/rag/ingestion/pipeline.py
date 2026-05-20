@@ -165,15 +165,52 @@ def _parser_sections_to_chunker(parser_sections: list) -> list[ChunkerSection]:
         )
         if not content:
             continue
+        metadata = dict(getattr(s, "metadata", None) or {})
+        if s.caption:
+            metadata["caption"] = s.caption
+        if s.notes:
+            metadata["notes"] = list(s.notes)
+        if s.items:
+            metadata["items"] = list(s.items)
         result.append(
             ChunkerSection(
-                heading=s.heading or "",
+                heading=(metadata.get("section_path") or [s.heading] or [""])[-1] if (metadata.get("section_path") or s.heading) else "",
                 content=content,
                 is_table=(s.content_type == "table"),
                 is_list=(s.content_type == "list"),
+                metadata=metadata,
             )
         )
     return result
+
+
+def _serialize_content_blocks(sections: list[DocumentSection]) -> list[dict[str, Any]]:
+    blocks: list[dict[str, Any]] = []
+    for index, section in enumerate(sections):
+        metadata = dict(section.metadata or {})
+        content = (
+            section.table_markdown
+            if section.content_type == "table" and section.table_markdown
+            else section.content
+        )
+        block = {
+            "index": index,
+            "heading": section.heading,
+            "level": section.level,
+            "content_type": section.content_type,
+            "modality": metadata.get("modality"),
+            "section_path": metadata.get("section_path"),
+            "source_ref": metadata.get("source_ref"),
+            "content": content,
+            "caption": section.caption,
+            "notes": list(section.notes) if section.notes else None,
+            "items": list(section.items) if section.items else None,
+            "explanatory_text": metadata.get("explanatory_text"),
+            "media_refs": metadata.get("media_refs"),
+            "layout_sensitive": metadata.get("layout_sensitive"),
+        }
+        blocks.append({key: value for key, value in block.items() if value not in (None, "", [], {})})
+    return blocks
 
 
 def _persist_document_and_chunks(
@@ -188,6 +225,13 @@ def _persist_document_and_chunks(
     source_document_metadata = dict(getattr(parse_result, "doc_metadata", None) or {})
     document_metadata = {**source_document_metadata, **dict(plan.metadata or {})}
     document_metadata["char_count"] = len(plan.clean_text or "")
+    if plan.selected_sections:
+        content_blocks = _serialize_content_blocks(plan.selected_sections)
+        if content_blocks:
+            document_metadata["content_blocks"] = content_blocks
+            document_metadata["content_modalities"] = sorted(
+                {block["modality"] for block in content_blocks if block.get("modality")}
+            )
 
     doc = RagDocument(
         source_id=source.id,

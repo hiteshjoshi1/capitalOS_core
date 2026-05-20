@@ -286,6 +286,8 @@ class TestHtmlStructuredParser:
         result = parse_html_structured(html)
         list_sections = [s for s in result.sections if "list" in s.content_type]
         assert list_sections[0].items == ["Alpha", "Beta"]
+        assert list_sections[0].metadata["modality"] == "list"
+        assert list_sections[0].metadata["section_path"] == ["Key Points"]
 
     def test_blockquote_extracted(self):
         from app.rag.ingestion.parser import parse_html_structured
@@ -294,6 +296,40 @@ class TestHtmlStructuredParser:
         result = parse_html_structured(html)
         quote_sections = [s for s in result.sections if s.content_type == "quote"]
         assert quote_sections[0].content == "Stay rational under pressure."
+        assert quote_sections[0].metadata["modality"] == "quote"
+        assert quote_sections[0].metadata["section_path"] == ["Transcript"]
+
+    def test_figure_block_preserves_caption_source_ref_and_local_explanation(self):
+        from app.rag.ingestion.parser import parse_html_structured
+
+        html = _html(
+            "<h2>Portfolio Review</h2>"
+            "<figure>"
+            "<img src='/figures/returns.png' alt='Five year total return chart' />"
+            "<figcaption>Total return compared with the benchmark.</figcaption>"
+            "</figure>"
+            "<p>The chart shows a widening performance gap after 2021.</p>"
+        )
+        result = parse_html_structured(html)
+        figure_section = next(s for s in result.sections if s.content_type == "figure")
+        assert figure_section.caption == "Total return compared with the benchmark."
+        assert figure_section.metadata["modality"] == "figure"
+        assert figure_section.metadata["section_path"] == ["Portfolio Review"]
+        assert figure_section.metadata["source_ref"].startswith("html:block:")
+        assert figure_section.metadata["media_refs"] == ["/figures/returns.png"]
+        assert figure_section.metadata["explanatory_text"] == (
+            "The chart shows a widening performance gap after 2021."
+        )
+
+    def test_preformatted_text_is_marked_layout_sensitive(self):
+        from app.rag.ingestion.parser import parse_html_structured
+
+        html = _html("<h2>Appendix</h2><pre>Column A    Column B\nValue 1     Value 2</pre>")
+        result = parse_html_structured(html)
+        text_section = next(s for s in result.sections if s.content_type == "text")
+        assert text_section.metadata["modality"] == "layout-sensitive"
+        assert text_section.metadata["layout_sensitive"] is True
+        assert text_section.metadata["section_path"] == ["Appendix"]
 
     def test_text_manual_sections_preserve_paragraphs_lists_and_quotes(self):
         from app.rag.ingestion.parser import parse
@@ -303,6 +339,9 @@ class TestHtmlStructuredParser:
         assert [section.content_type for section in result.sections] == ["heading", "text", "list", "quote"]
         assert result.sections[2].items == ["Alpha", "Beta"]
         assert result.sections[3].content == "Stay patient."
+        assert result.sections[1].metadata["section_path"] == ["Notes"]
+        assert result.sections[2].metadata["modality"] == "list"
+        assert result.sections[3].metadata["source_ref"].startswith("manual:block:")
 
     def test_clean_text_always_populated(self):
         from app.rag.ingestion.parser import parse_html_structured
@@ -781,6 +820,41 @@ class TestPdfStructuredParser:
         assert len(table_section.table["header_rows"]) == 2
         assert table_section.table["header_rows"][0][1]["colspan"] == 2
 
+    def test_unstructured_figure_and_caption_become_figure_section(self):
+        from app.rag.ingestion.parser import _unstructured_elements_to_sections
+
+        class _FakeImage:
+            text = ""
+
+            class metadata:
+                page_number = 3
+
+        class _FakeCaption:
+            text = "Figure 2: Intrinsic value rose steadily."
+
+            class metadata:
+                page_number = 3
+
+        class _FakeNarrative:
+            text = "The image highlights the widening discount to intrinsic value."
+
+            class metadata:
+                page_number = 3
+
+        _FakeImage.__name__ = "Image"
+        _FakeCaption.__name__ = "FigureCaption"
+        _FakeNarrative.__name__ = "NarrativeText"
+
+        sections = _unstructured_elements_to_sections([_FakeImage(), _FakeCaption(), _FakeNarrative()])
+        figure = next(section for section in sections if section.content_type == "figure")
+        assert figure.caption == "Figure 2: Intrinsic value rose steadily."
+        assert figure.metadata["modality"] == "figure"
+        assert figure.metadata["page_number"] == 3
+        assert figure.metadata["source_ref"].startswith("pdf:page:3:element:0:block:0")
+        assert figure.metadata["explanatory_text"] == (
+            "The image highlights the widening discount to intrinsic value."
+        )
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. PDF metadata extraction
@@ -1054,6 +1128,27 @@ class TestPipelineStructuredIntegration:
         headings = {c.metadata_json.get("section_heading") for c in chunks}
         assert "Capital Allocation" in headings
         assert "Insurance Operations" in headings
+
+    def test_sections_produce_section_path_and_modality_in_chunk_metadata(self):
+        from app.rag.ingestion.chunker import DocumentSection as CS, chunk_structured
+
+        sections = [
+            CS(
+                heading="Portfolio Review",
+                content="Five year total return chart",
+                metadata={
+                    "content_type": "figure",
+                    "modality": "figure",
+                    "section_path": ["Portfolio Review"],
+                    "source_ref": "html:block:1",
+                    "caption": "Total return compared with the benchmark.",
+                },
+            )
+        ]
+        chunks = chunk_structured(sections)
+        assert chunks[0].metadata_json["modality"] == "figure"
+        assert chunks[0].metadata_json["section_path"] == ["Portfolio Review"]
+        assert chunks[0].metadata_json["source_ref"] == "html:block:1"
 
     def test_parse_text_wraps_to_structured(self):
         """parse() for 'text' returns StructuredParseResult with paragraph sections."""

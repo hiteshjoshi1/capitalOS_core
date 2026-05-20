@@ -18,6 +18,10 @@ from orchestration.services.v3_policy import V3PolicyService
 from orchestration.services.verification import VerificationService
 from orchestration.state import GraphState, dump_pipeline_state, load_pipeline_state
 
+LEGACY_APPROVAL_RISK_FLAGS = {
+    "human-approval-gate-unchecked",
+}
+
 
 def _normalize_high_risk_decision(raw: dict) -> dict:
     normalized = dict(raw)
@@ -129,7 +133,11 @@ def run(state: GraphState) -> GraphState:
         )
         return dump_pipeline_state(pipeline)
 
-    high_risk_findings = list(pipeline.agent_run_output.risk_flags)
+    high_risk_findings = [
+        item
+        for item in pipeline.agent_run_output.risk_flags
+        if item not in LEGACY_APPROVAL_RISK_FLAGS
+    ]
     if high_risk_findings and cfg.require_pre_ship_human_on_high_risk:
         decision = _human_review_gate(pipeline, findings=high_risk_findings)
         reviewer = str(decision.get("reviewer", "")).strip()

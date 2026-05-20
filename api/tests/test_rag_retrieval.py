@@ -33,13 +33,15 @@ def _make_chunk(
     rrf_score: Optional[float] = None,
     reranker_score: Optional[float] = None,
     metadata: Optional[dict[str, Any]] = None,
+    document_id: str = "doc-1",
+    chunk_index: int = 0,
 ) -> Any:
     from app.rag.retrieval import RetrievedChunk
 
     return RetrievedChunk(
         chunk_id=chunk_id,
-        document_id="doc-1",
-        chunk_index=0,
+        document_id=document_id,
+        chunk_index=chunk_index,
         text=text,
         token_count=10,
         metadata_json=metadata or {},
@@ -48,6 +50,53 @@ def _make_chunk(
         rrf_score=rrf_score,
         reranker_score=reranker_score,
     )
+
+
+@pytest.fixture
+def sqlite_parent_child_session(tmp_path):
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+
+    from app.models.rag import RagAuthor, RagChunk, RagDocument, RagSource
+
+    db_path = tmp_path / "retrieval_parent_child.db"
+    engine = create_engine(
+        f"sqlite+pysqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+    )
+    RagAuthor.__table__.create(bind=engine, checkfirst=True)
+    RagSource.__table__.create(bind=engine, checkfirst=True)
+    RagDocument.__table__.create(bind=engine, checkfirst=True)
+    RagChunk.__table__.create(bind=engine, checkfirst=True)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    try:
+        author = RagAuthor(id="author-1", name="Author One", enabled=True, domains=["investing"], expertise_tags=[])
+        source = RagSource(id="source-1", author_id="author-1", source_type="manual", status="ingested")
+        parent = RagDocument(id="parent-doc", source_id="source-1", author_id="author-1", title="Parent")
+        child = RagDocument(
+            id="child-doc",
+            source_id="source-1",
+            author_id="author-1",
+            title="Child",
+            parent_document_id="parent-doc",
+        )
+        session.add_all(
+            [
+                author,
+                source,
+                parent,
+                child,
+                RagChunk(id="p0", document_id="parent-doc", chunk_index=0, text="Parent intro", token_count=5, metadata_json={}),
+                RagChunk(id="p1", document_id="parent-doc", chunk_index=1, text="Parent detail on See's Candies 2003 Q&A.", token_count=9, metadata_json={}),
+                RagChunk(id="p2", document_id="parent-doc", chunk_index=2, text="Parent closing thought", token_count=4, metadata_json={}),
+            ]
+        )
+        session.commit()
+        yield session
+    finally:
+        session.close()
+        engine.dispose()
 
 
 # ── RRF tests (pure Python, no DB) ───────────────────────────────────────────
@@ -307,9 +356,15 @@ class TestRetrieveHybrid:
 
         with patch("app.rag.retrieval._RETRIEVAL_MODE", "hybrid"), \
              patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[notes, canonical]), \
-             patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[notes, canonical]):
+            patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[notes, canonical]):
             db = MagicMock()
-            result = retrieve_hybrid("capital allocation", db, top_k=2, weighting_enabled=True)
+            result = retrieve_hybrid(
+                "capital allocation",
+                db,
+                top_k=2,
+                weighting_enabled=True,
+                hardening_enabled=False,
+            )
 
         assert [chunk.chunk_id for chunk in result] == ["canonical", "notes"]
         assert result[0].metadata_weight > 1.0
@@ -367,6 +422,237 @@ class TestMetadataWeightingHelpers:
         assert decision.corpus_class == "reference_material"
         assert decision.weight < 1.0
         assert decision.weighted_score < decision.base_score
+
+
+class TestRetrievalHardeningHelpers:
+    def test_trace_payload_prints_separator_when_enabled(self, capsys):
+        from app.rag.retrieval import trace_retrieval_payload
+
+        with patch.dict(os.environ, {"RAG_RETRIEVAL_TRACE": "1"}):
+            trace_retrieval_payload("unit_stage", {"content_query": "main mental models"})
+
+        output = capsys.readouterr().out
+        assert "-------------- RAG RETRIEVAL TRACE: unit_stage --------------" in output
+        assert '"content_query": "main mental models"' in output
+        assert "-------------- END RAG RETRIEVAL TRACE --------------" in output
+
+    def test_trace_payload_can_be_disabled(self, capsys):
+        from app.rag.retrieval import trace_retrieval_payload
+
+        with patch.dict(os.environ, {"RAG_RETRIEVAL_TRACE": "0"}):
+            trace_retrieval_payload("unit_stage", {"content_query": "main mental models"})
+
+        assert capsys.readouterr().out == ""
+
+    def test_retrieval_query_plan_strips_source_author_and_keeps_concept(self):
+        from app.rag.retrieval import build_retrieval_query_plan
+
+        plan = build_retrieval_query_plan("What are Charlie Munger's main mental models?")
+
+        assert plan.source_author_ids == ["charlie_munger"]
+        assert plan.content_query == "main mental models"
+        assert "Charlie Munger" in plan.removed_source_author_terms
+        assert "mental models" in plan.required_phrases
+        assert '"mental models"' in plan.sparse_query
+        assert "Charlie" not in plan.content_query
+        assert "Munger" not in plan.content_query
+
+    def test_retrieval_query_plan_cleans_possessive_and_scaffolding(self):
+        from app.rag.retrieval import build_retrieval_query_plan
+
+        plan = build_retrieval_query_plan(
+            "What are some of the best mental models that Charlie Munger lives by?"
+        )
+
+        assert plan.content_query == "best mental models"
+        assert "mental models" in plan.required_phrases
+
+    def test_sparse_query_plan_extracts_entity_year_and_transcript_hints(self):
+        from app.rag.retrieval import build_sparse_query_plan
+
+        plan = build_sparse_query_plan('What did Charlie Munger say about See\'s Candies in 2003 transcript Q&A?')
+
+        assert "2003" in plan.year_terms
+        assert any(term.lower() == "see's candies" for term in plan.entity_terms)
+        assert plan.transcript_sensitive is True
+
+    def test_hardened_retrieval_uses_content_query_inside_author_space(self):
+        from app.rag.retrieval import retrieve_hybrid
+
+        dense_hit = _make_chunk("dense", text="A latticework of mental models matters.")
+
+        with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[dense_hit]) as mock_dense, \
+             patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[]):
+            db = MagicMock()
+            result = retrieve_hybrid(
+                "What are Charlie Munger's main mental models?",
+                db,
+                top_k=3,
+                hardening_enabled=True,
+            )
+
+        first_query, _db = mock_dense.call_args_list[0].args
+        _, first_kwargs = mock_dense.call_args_list[0]
+        assert first_query == "main mental models"
+        assert first_kwargs["author_ids"] == ["charlie_munger"]
+        assert result[0].metadata_json["retrieval_query_plan"]["content_query"] == "main mental models"
+
+    def test_explainable_fusion_boosts_exact_phrase_and_concept_hits(self):
+        from app.rag.retrieval import build_retrieval_query_plan, fuse_hardened_candidates
+
+        plan = build_retrieval_query_plan("What are Charlie Munger's main mental models?")
+        generic = _make_chunk("generic", text="Charlie Munger answered a question about children.")
+        exact = _make_chunk("exact", text="The latticework of mental models is the main idea.")
+
+        result = fuse_hardened_candidates(
+            plan=plan,
+            pools={"dense_content": [generic, exact], "sparse_required_phrase": [exact]},
+            top_k=2,
+        )
+
+        assert [chunk.chunk_id for chunk in result] == ["exact", "generic"]
+        diagnostics = result[0].metadata_json["retrieval_diagnostics"]
+        assert "mental models" in diagnostics["phrase_hits"]
+        assert diagnostics["score_components"]["required_phrase_score"] > 0
+
+    def test_explainable_fusion_downranks_shallow_question_prompt(self):
+        from app.rag.retrieval import build_retrieval_query_plan, fuse_hardened_candidates
+
+        plan = build_retrieval_query_plan("What are Charlie Munger's main mental models?")
+        prompt_only = _make_chunk(
+            "prompt",
+            text="Questioner: Mental models [which are your favorites]?",
+        )
+        actual_model = _make_chunk(
+            "actual",
+            text=(
+                "Munger emphasizes inversion, incentives, social proof, "
+                "authority, envy, and lollapalooza effects as practical models."
+            ),
+        )
+
+        result = fuse_hardened_candidates(
+            plan=plan,
+            pools={"dense_content": [prompt_only, actual_model], "sparse_required_phrase": [prompt_only]},
+            top_k=2,
+        )
+
+        assert [chunk.chunk_id for chunk in result] == ["actual", "prompt"]
+        diagnostics = result[1].metadata_json["retrieval_diagnostics"]
+        assert diagnostics["score_components"]["shallow_prompt_penalty"] < 0
+
+    def test_hardened_fusion_promotes_aspect_coverage_and_diversity(self):
+        from app.rag.retrieval import build_retrieval_query_plan, fuse_hardened_candidates
+
+        plan = build_retrieval_query_plan("What are Charlie Munger's main mental models?")
+        shallow_one = _make_chunk(
+            "shallow-1",
+            text="The main mental models are important.",
+            document_id="doc-shallow",
+            chunk_index=1,
+        )
+        shallow_two = _make_chunk(
+            "shallow-2",
+            text="Questioner: what mental models are the best mental models?",
+            document_id="doc-shallow",
+            chunk_index=2,
+        )
+        aspect_rich = _make_chunk(
+            "aspect-rich",
+            text=(
+                "Munger uses inversion, incentives, social proof, authority bias, "
+                "operant conditioning, critical mass, and margin of safety."
+            ),
+            document_id="doc-models",
+            chunk_index=1,
+        )
+
+        result = fuse_hardened_candidates(
+            plan=plan,
+            pools={
+                "dense_content": [shallow_one, shallow_two, aspect_rich],
+                "sparse_required_phrase": [shallow_one, shallow_two],
+            },
+            top_k=3,
+        )
+
+        assert result[0].chunk_id == "aspect-rich"
+        ranks = {chunk.chunk_id: index for index, chunk in enumerate(result)}
+        assert ranks["aspect-rich"] < ranks["shallow-2"]
+        diagnostics = result[0].metadata_json["retrieval_diagnostics"]
+        assert set(diagnostics["aspect_hits"]) >= {"inversion", "incentives", "biases"}
+        assert diagnostics["score_components"]["aspect_coverage_score"] > 0
+        assert diagnostics["diversity"]["new_aspects"]
+
+    def test_feedback_terms_are_domain_controlled_not_title_noise(self):
+        from app.rag.retrieval import _extract_salient_feedback_terms, build_retrieval_query_plan
+
+        plan = build_retrieval_query_plan("What does Charlie Munger say about decision making?")
+        chunk = _make_chunk(
+            "feedback",
+            text=(
+                "Wesco Financial lesson wisdom revisited. "
+                "The useful psychology includes social proof and authority."
+            ),
+            metadata={
+                "document_title": "A Lesson on Elementary, Worldly Wisdom, Revisited",
+                "source_section": "Wesco Financial meeting notes",
+            },
+        )
+
+        terms = _extract_salient_feedback_terms(plan, {"dense_content": [chunk]}, max_terms=8)
+
+        assert "social proof" in terms
+        assert "authority" in terms
+        assert "wesco financial" not in terms
+        assert "lesson wisdom" not in terms
+
+    def test_hardened_retrieval_does_not_rank_neighbor_context_as_candidate_pool(self):
+        from app.rag.retrieval import retrieve_hybrid
+
+        dense_hit = _make_chunk("dense", text="Inversion and incentives are useful mental models.")
+
+        with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[dense_hit]), \
+             patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[]), \
+             patch("app.rag.retrieval._neighbor_candidate_pool") as mock_neighbor:
+            db = MagicMock()
+            retrieve_hybrid(
+                "What are Charlie Munger's main mental models?",
+                db,
+                top_k=3,
+                hardening_enabled=True,
+            )
+
+        mock_neighbor.assert_not_called()
+
+    def test_parent_child_delivery_prefers_parent_document_context(self, sqlite_parent_child_session):
+        from app.rag.retrieval import deliver_parent_sections
+
+        anchor = _make_chunk(
+            "child-anchor",
+            text="Short child anchor",
+            document_id="child-doc",
+            chunk_index=1,
+            metadata={"author_id": "author-1"},
+        )
+
+        delivered = deliver_parent_sections([anchor], sqlite_parent_child_session, window_size=1, max_chars=500)
+
+        assert len(delivered) == 1
+        assert delivered[0].metadata_json["delivery_mode"] == "parent_document"
+        assert delivered[0].metadata_json["parent_document_id"] == "parent-doc"
+        assert "Parent detail on See's Candies 2003 Q&A." in delivered[0].text
+
+    def test_near_duplicate_suppression_is_deterministic(self):
+        from app.rag.retrieval import suppress_near_duplicates
+
+        left = _make_chunk("left", text="Capital allocation means disciplined reinvestment over time.")
+        right = _make_chunk("right", text="Capital allocation means disciplined reinvestment over time!")
+
+        kept, suppressed = suppress_near_duplicates([left, right], threshold=0.9)
+
+        assert [chunk.chunk_id for chunk in kept] == ["left"]
+        assert suppressed == [{"chunk_id": "right", "matched_chunk_id": "left", "similarity": 1.0}]
 
 
 # ── Filter compatibility tests ────────────────────────────────────────────────

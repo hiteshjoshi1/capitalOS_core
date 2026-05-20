@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,8 @@ DEFAULT_CHAT_TITLE = "New chat"
 _DISPLAY_SENTENCE_MAX_CHARS = 280
 _DISPLAY_FALLBACK_MAX_CHARS = 240
 _DISPLAY_EVIDENCE_LIMIT = 8
+_DISPLAY_DUPLICATE_THRESHOLD = 0.86
+_DISPLAY_DUPLICATE_MIN_CHARS = 48
 _DISPLAY_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _DISPLAY_TOKEN_RE = re.compile(r"[a-z0-9]+")
 _DISPLAY_WHITESPACE_RE = re.compile(r"\s+")
@@ -421,7 +424,7 @@ def _assistant_text_for_result(result: ConceptQueryOut) -> str:
         return "I could not ground a strong answer in the author corpus for this question."
 
     snippets: list[str] = []
-    seen_snippets: set[str] = set()
+    seen_snippets: list[str] = []
     ignored_terms = _display_source_author_terms(result.intent)
     topic_entities = _display_topic_entities(result.intent)
     for passage in passages:
@@ -433,10 +436,11 @@ def _assistant_text_for_result(result: ConceptQueryOut) -> str:
         )
         if not summary:
             continue
-        normalized_summary = summary.strip().lower()
-        if normalized_summary in seen_snippets:
+        normalized_summary = _display_duplicate_fingerprint(summary)
+        if _is_duplicate_display_text(normalized_summary, seen_snippets):
             continue
-        seen_snippets.add(normalized_summary)
+        if normalized_summary:
+            seen_snippets.append(normalized_summary)
         snippets.append(summary)
     if not snippets:
         return "I could not ground a strong answer in the author corpus for this question."
@@ -482,9 +486,57 @@ def _top_passages_for_display(
     )
     if focused:
         if prefer_focused_only:
-            return focused[:limit]
+            return _dedupe_display_passages(
+                focused,
+                query=query,
+                limit=limit,
+                topic_entities=topic_entities,
+                ignored_terms=ignored_terms,
+            )
         ranked = focused + [passage for passage in ranked if passage not in focused]
-    return ranked[:limit]
+    return _dedupe_display_passages(
+        ranked,
+        query=query,
+        limit=limit,
+        topic_entities=topic_entities,
+        ignored_terms=ignored_terms,
+    )
+
+
+def _dedupe_display_passages(
+    passages: list[Any],
+    *,
+    query: str,
+    limit: int,
+    topic_entities: list[str] | None = None,
+    ignored_terms: set[str] | None = None,
+) -> list[Any]:
+    selected: list[Any] = []
+    seen_chunk_ids: set[str] = set()
+    seen_fingerprints: list[str] = []
+
+    for passage in passages:
+        chunk_id = str(getattr(passage, "chunk_id", "") or "")
+        if chunk_id and chunk_id in seen_chunk_ids:
+            continue
+        summary = _summarize_passage_for_display(
+            passage,
+            query=query,
+            ignored_terms=ignored_terms,
+            topic_entities=topic_entities,
+        )
+        fingerprint = _display_duplicate_fingerprint(summary or _display_passage_text(passage))
+        if _is_duplicate_display_text(fingerprint, seen_fingerprints):
+            continue
+        selected.append(passage)
+        if chunk_id:
+            seen_chunk_ids.add(chunk_id)
+        if fingerprint:
+            seen_fingerprints.append(fingerprint)
+        if len(selected) >= limit:
+            break
+
+    return selected
 
 
 def _focused_display_passages(
@@ -687,6 +739,37 @@ def _normalize_display_text(text: str | None) -> str:
     return _DISPLAY_WHITESPACE_RE.sub(" ", cleaned).strip()
 
 
+def _display_passage_text(passage: Any) -> str:
+    metadata = passage.metadata if isinstance(getattr(passage, "metadata", None), dict) else {}
+    context_text = metadata.get("context_text") if isinstance(metadata.get("context_text"), str) else None
+    return _normalize_display_text(context_text or getattr(passage, "text", "") or "")
+
+
+def _display_duplicate_fingerprint(text: str | None) -> str:
+    normalized = _normalize_display_text(text).lower()
+    if not normalized:
+        return ""
+    return re.sub(r"[^a-z0-9\s]", " ", normalized).strip()
+
+
+def _is_duplicate_display_text(candidate: str, existing_values: list[str]) -> bool:
+    if not candidate:
+        return False
+    for existing in existing_values:
+        if not existing:
+            continue
+        if candidate == existing:
+            return True
+        shorter, longer = sorted((candidate, existing), key=len)
+        if len(shorter) >= _DISPLAY_DUPLICATE_MIN_CHARS and shorter in longer:
+            return True
+        if min(len(candidate), len(existing)) >= _DISPLAY_DUPLICATE_MIN_CHARS:
+            similarity = difflib.SequenceMatcher(a=candidate, b=existing).ratio()
+            if similarity >= _DISPLAY_DUPLICATE_THRESHOLD:
+                return True
+    return False
+
+
 def _display_query_terms(query: str, *, ignored_terms: set[str] | None = None) -> set[str]:
     ignored = {token for token in (ignored_terms or set()) if token}
     return {
@@ -822,7 +905,37 @@ def _evidence_payload_for_result(result: ConceptQueryOut) -> list[dict[str, Any]
                 "metadata_json": {"source_type": source.source_type, "kind": "live_source"},
             }
         )
-    return evidence_rows
+    return _dedupe_evidence_payloads(evidence_rows)
+
+
+def _dedupe_evidence_payloads(evidence_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen_chunk_ids: set[str] = set()
+    seen_live_sources: set[str] = set()
+    seen_snippets: list[str] = []
+
+    for row in evidence_rows:
+        chunk_id = str(row.get("chunk_id") or "")
+        if chunk_id:
+            if chunk_id in seen_chunk_ids:
+                continue
+            seen_chunk_ids.add(chunk_id)
+
+        source_url = str(row.get("source_url") or "").strip().lower()
+        if not chunk_id and source_url:
+            if source_url in seen_live_sources:
+                continue
+            seen_live_sources.add(source_url)
+
+        snippet = str(row.get("snippet") or "")
+        fingerprint = _display_duplicate_fingerprint(snippet)
+        if _is_duplicate_display_text(fingerprint, seen_snippets):
+            continue
+        if fingerprint:
+            seen_snippets.append(fingerprint)
+        deduped.append(row)
+
+    return deduped
 
 
 def _title_from_prompt(prompt: str) -> str:

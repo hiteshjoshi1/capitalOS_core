@@ -466,6 +466,67 @@ class TestRagFanoutPipeline:
         finally:
             db.close()
 
+    def test_figure_blocks_and_modality_metadata_persist_through_ingestion(self):
+        db = TestingSessionLocal()
+        try:
+            author = _add_author(db, _uid("figure"), "Figure Author")
+            source = RagSource(
+                user_id=1,
+                author_id=author.id,
+                url="https://example.com/figure-note",
+                source_type="html",
+                status="pending",
+            )
+            db.add(source)
+            db.flush()
+
+            html = """
+            <html><body>
+              <h1>Portfolio Review</h1>
+              <figure>
+                <img src="/figures/returns.png" alt="Five year total return chart" />
+                <figcaption>Total return compared with the benchmark.</figcaption>
+              </figure>
+              <p>The chart shows a widening performance gap after 2021.</p>
+              <ul>
+                <li>Hold quality compounders</li>
+                <li>Trim cyclicals</li>
+              </ul>
+            </body></html>
+            """
+
+            with patch("app.rag.ingestion.pipeline.fetch_url", return_value=_mock_fetch(html, sha256="figure-1")):
+                job = run_url_ingestion(source, db)
+                db.commit()
+
+            document = db.query(RagDocument).filter(RagDocument.source_id == source.id).one()
+            ordered_chunks = sorted(document.chunks, key=lambda chunk: chunk.chunk_index)
+
+            assert job.status == "done"
+            assert document.metadata_json["content_modalities"] == ["figure", "list", "prose"]
+            figure_block = next(
+                block for block in document.metadata_json["content_blocks"] if block["content_type"] == "figure"
+            )
+            assert figure_block["caption"] == "Total return compared with the benchmark."
+            assert figure_block["explanatory_text"] == "The chart shows a widening performance gap after 2021."
+            assert figure_block["modality"] == "figure"
+            assert figure_block["section_path"] == ["Portfolio Review"]
+            assert figure_block["source_ref"].startswith("html:block:")
+
+            figure_chunk = next(chunk for chunk in ordered_chunks if chunk.metadata_json.get("modality") == "figure")
+            assert figure_chunk.metadata_json["section_path"] == ["Portfolio Review"]
+            assert figure_chunk.metadata_json["source_ref"] == figure_block["source_ref"]
+            assert figure_chunk.metadata_json["caption"] == "Total return compared with the benchmark."
+            assert figure_chunk.metadata_json["explanatory_text"] == (
+                "The chart shows a widening performance gap after 2021."
+            )
+
+            list_chunk = next(chunk for chunk in ordered_chunks if chunk.metadata_json.get("modality") == "list")
+            assert list_chunk.metadata_json["is_list"] is True
+            assert list_chunk.metadata_json["section_path"] == ["Portfolio Review"]
+        finally:
+            db.close()
+
     def test_fanout_can_split_flat_pdf_text_with_source_level_markers(self):
         db = TestingSessionLocal()
         try:

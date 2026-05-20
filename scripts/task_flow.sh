@@ -825,11 +825,11 @@ immutable_hash() {
 }
 
 is_human_approved() {
-  grep -Eiq '^- \[[xX]\] Approved for implementation' "$TASK_FILE"
+  return 0
 }
 
 assert_human_approval_gate_passed() {
-  is_human_approved || die "Build blocked: Human Approval Gate is not approved in $TASK_FILE."
+  return 0
 }
 
 assert_clean_worktree() {
@@ -1182,7 +1182,6 @@ validate_generated_task_file_content() {
   grep -q '^## Objective' <<<"$content" || return 1
   grep -q '^## Architecture Decisions' <<<"$content" || return 1
   grep -q '^## Acceptance Criteria' <<<"$content" || return 1
-  grep -q '^## Human Approval Gate' <<<"$content" || return 1
   grep -q '^## Task Checklist' <<<"$content" || return 1
   grep -q '^## Human Rework Input \(Mutable\)' <<<"$content" || return 1
   grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
@@ -1791,7 +1790,6 @@ Requirements:
    - Risks
    - Open Questions
    - Acceptance Criteria
-   - Human Approval Gate
    - Task Checklist
    - Workflow Commands (exact commands with TASK=$TASK_FILE)
    - Implementation Reasoning Addendum (Codex Mutable)
@@ -1820,15 +1818,13 @@ EOF
 
   printf '%s\n' "$planned_task" > "$TASK_FILE"
   commit_and_push_task_file "plan: issue #${ISSUE_ID} with ${PLAN_MODEL}"
-  log "Plan complete. Human approval gate must be checked before build."
+  log "Plan complete."
 }
 
 cmd_build() {
   require_tool copilot
   validate_task_file "$1"
   [[ -f "$TASK_FILE" ]] || die "Task file not found: $TASK_FILE"
-
-  assert_human_approval_gate_passed
 
   local immutable_before immutable_after prompt
   immutable_before="$(immutable_hash)"

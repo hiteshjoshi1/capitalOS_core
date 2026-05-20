@@ -23,7 +23,16 @@ from sqlalchemy.orm import Session
 from app.models.rag import RagAuthorProfile
 from app.rag.author_selection import SelectedAuthor, select_authors
 from app.rag.inference import create_inference_client, inference_available, inference_model
-from app.rag.retrieval import RetrievedChunk, retrieve_similar_chunks
+from app.rag.retrieval import (
+    RetrievedChunk,
+    deliver_parent_sections,
+    retrieval_hardening_enabled,
+    retrieve_hybrid,
+    retrieve_similar_chunks,
+    suppress_near_duplicates,
+    trace_retrieval_chunks,
+    trace_retrieval_payload,
+)
 
 log = logging.getLogger(__name__)
 
@@ -162,20 +171,51 @@ def execute_retrieve(
         top_k=4,
     )
     selected_author_ids = [author.author_id for author in selected]
-
-    chunks = retrieve_similar_chunks(
-        query,
-        db,
-        top_k=top_k,
-        author_id=author_id,
-        author_ids=None if author_id else selected_author_ids,
-        domains=domains,
-        expertise_tags=expertise_tags,
+    selected_author_names = [author.name for author in selected]
+    hardening_active = retrieval_hardening_enabled()
+    trace_retrieval_payload(
+        "query_selected_authors",
+        {
+            "query": query,
+            "mode": "retrieve",
+            "selected_author_ids": selected_author_ids,
+            "selected_author_names": selected_author_names,
+            "hardening_enabled": hardening_active,
+        },
     )
+
+    if hardening_active:
+        chunks = retrieve_hybrid(
+            query,
+            db,
+            top_k=top_k,
+            author_id=author_id,
+            author_ids=None if author_id else selected_author_ids,
+            source_author_names=selected_author_names,
+            domains=domains,
+            expertise_tags=expertise_tags,
+            hardening_enabled=True,
+        )
+    else:
+        chunks = retrieve_similar_chunks(
+            query,
+            db,
+            top_k=top_k,
+            author_id=author_id,
+            author_ids=None if author_id else selected_author_ids,
+            domains=domains,
+            expertise_tags=expertise_tags,
+        )
 
     author_entries = _author_entries(selected, db)
     author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
-    evidence = _enrich_chunks(chunks, db, author_map)
+    evidence, evidence_audit = _prepare_evidence_pack(
+        chunks,
+        db,
+        author_map,
+        query_text=query,
+        hardening_enabled=hardening_active,
+    )
 
     result = QueryResult(
         query=query,
@@ -190,7 +230,12 @@ def execute_retrieve(
         db, query, "retrieve",
         evidence=evidence,
         latency_ms=int((time.monotonic() - _t0) * 1000),
-        retrieval_config={"top_k": top_k},
+        retrieval_config={
+            "top_k": top_k,
+            "retrieval_hardening_enabled": hardening_active,
+            "retrieval_path": "hybrid_parent_child" if hardening_active else "dense_legacy",
+            **evidence_audit,
+        },
     )
     return result
 
@@ -219,20 +264,51 @@ def execute_ask(
         top_k=4,
     )
     selected_author_ids = [author.author_id for author in selected]
-
-    chunks = retrieve_similar_chunks(
-        query,
-        db,
-        top_k=top_k,
-        author_id=author_id,
-        author_ids=None if author_id else selected_author_ids,
-        domains=domains,
-        expertise_tags=expertise_tags,
+    selected_author_names = [author.name for author in selected]
+    hardening_active = retrieval_hardening_enabled()
+    trace_retrieval_payload(
+        "query_selected_authors",
+        {
+            "query": query,
+            "mode": "ask",
+            "selected_author_ids": selected_author_ids,
+            "selected_author_names": selected_author_names,
+            "hardening_enabled": hardening_active,
+        },
     )
+
+    if hardening_active:
+        chunks = retrieve_hybrid(
+            query,
+            db,
+            top_k=top_k,
+            author_id=author_id,
+            author_ids=None if author_id else selected_author_ids,
+            source_author_names=selected_author_names,
+            domains=domains,
+            expertise_tags=expertise_tags,
+            hardening_enabled=True,
+        )
+    else:
+        chunks = retrieve_similar_chunks(
+            query,
+            db,
+            top_k=top_k,
+            author_id=author_id,
+            author_ids=None if author_id else selected_author_ids,
+            domains=domains,
+            expertise_tags=expertise_tags,
+        )
 
     author_entries = _author_entries(selected, db)
     author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
-    evidence = _enrich_chunks(chunks, db, author_map)
+    evidence, evidence_audit = _prepare_evidence_pack(
+        chunks,
+        db,
+        author_map,
+        query_text=query,
+        hardening_enabled=hardening_active,
+    )
     author_names = [a.name for a in selected]
 
     answer: Optional[str] = None
@@ -242,7 +318,7 @@ def execute_ask(
         missing = "No corpus evidence found. Cannot provide a grounded answer."
     elif inference_available():
         try:
-            answer = _synthesize_answer(query, [c.text for c in chunks], author_names)
+            answer = _synthesize_answer(query, [e.text for e in evidence], author_names)
         except Exception as exc:
             log.warning("LLM synthesis failed: %s", exc)
             answer = _evidence_summary(evidence)
@@ -263,7 +339,12 @@ def execute_ask(
         evidence=evidence,
         answer_text=answer,
         latency_ms=int((time.monotonic() - _t0) * 1000),
-        retrieval_config={"top_k": top_k},
+        retrieval_config={
+            "top_k": top_k,
+            "retrieval_hardening_enabled": hardening_active,
+            "retrieval_path": "hybrid_parent_child" if hardening_active else "dense_legacy",
+            **evidence_audit,
+        },
     )
     return result
 
@@ -285,17 +366,45 @@ def execute_company_context(
 
     selected = select_authors(combined_query, db, top_k=5)
     selected_author_ids = [author.author_id for author in selected]
+    selected_author_names = [author.name for author in selected]
 
-    chunks = retrieve_similar_chunks(
-        combined_query,
-        db,
-        top_k=top_k,
-        author_ids=selected_author_ids,
+    hardening_active = retrieval_hardening_enabled()
+    trace_retrieval_payload(
+        "query_selected_authors",
+        {
+            "query": combined_query,
+            "mode": "company_context",
+            "selected_author_ids": selected_author_ids,
+            "selected_author_names": selected_author_names,
+            "hardening_enabled": hardening_active,
+        },
     )
+    if hardening_active:
+        chunks = retrieve_hybrid(
+            combined_query,
+            db,
+            top_k=top_k,
+            author_ids=selected_author_ids,
+            source_author_names=selected_author_names,
+            hardening_enabled=True,
+        )
+    else:
+        chunks = retrieve_similar_chunks(
+            combined_query,
+            db,
+            top_k=top_k,
+            author_ids=selected_author_ids,
+        )
 
     author_entries = _author_entries(selected, db)
     author_map = {entry["author_id"]: entry["name"] for entry in author_entries}
-    evidence = _enrich_chunks(chunks, db, author_map)
+    evidence, _evidence_audit = _prepare_evidence_pack(
+        chunks,
+        db,
+        author_map,
+        query_text=combined_query,
+        hardening_enabled=hardening_active,
+    )
 
     return CompanyContextResult(
         company=company,
@@ -335,6 +444,51 @@ def _author_entries(selected: list[SelectedAuthor], db: Session) -> list[dict]:
             )
         entries.append(entry)
     return entries
+
+
+def _prepare_evidence_pack(
+    chunks: list[RetrievedChunk],
+    db: Session,
+    author_map: dict[str, str],
+    *,
+    query_text: str = "",
+    hardening_enabled: bool,
+) -> tuple[list[EvidenceChunk], dict[str, Any]]:
+    delivered_chunks = chunks
+    duplicates_suppressed: list[dict[str, Any]] = []
+
+    if hardening_enabled:
+        delivered_chunks = deliver_parent_sections(chunks, db, only_when_needed=False)
+        trace_retrieval_chunks("delivery_parent_child", query_text, delivered_chunks, extra={"input_count": len(chunks)})
+        delivered_chunks, duplicates_suppressed = suppress_near_duplicates(delivered_chunks)
+        trace_retrieval_chunks(
+            "delivery_after_duplicate_suppression",
+            query_text,
+            delivered_chunks,
+            extra={
+                "input_count": len(chunks),
+                "duplicates_suppressed_count": len(duplicates_suppressed),
+                "duplicates_suppressed": duplicates_suppressed,
+            },
+        )
+        trace_retrieval_payload(
+            "delivery_summary",
+            {
+                "query": query_text,
+                "retrieved_child_count": len(chunks),
+                "delivered_evidence_count": len(delivered_chunks),
+                "duplicates_suppressed_count": len(duplicates_suppressed),
+            },
+        )
+
+    evidence = _enrich_chunks(delivered_chunks, db, author_map)
+    return evidence, {
+        "retrieved_child_count": len(chunks),
+        "delivered_evidence_count": len(evidence),
+        "parent_child_delivery_enabled": hardening_enabled,
+        "duplicates_suppressed": duplicates_suppressed,
+        "duplicates_suppressed_count": len(duplicates_suppressed),
+    }
 
 
 def _enrich_chunks(

@@ -698,6 +698,8 @@ def setup_rag_tables_in_test_db():
 
     with engine.begin() as conn:
         for table in [
+            "rag_query_evidence",
+            "rag_queries",
             "rag_author_profile_citations",
             "rag_author_profiles",
             "rag_embeddings",
@@ -928,6 +930,91 @@ class TestRagRetrieveCompareAPI:
         with patch.dict(os.environ, {"RAG_AUTHORS_CONFIG": rag_yaml_file}):
             client.post("/rag/authors/sync-config")
 
+
+class TestRagQueryAuditAPI:
+    def _seed_query_audit(self):
+        from app.db.session import SessionLocal
+        from app.models.rag import RagAuthor, RagChunk, RagDocument, RagQuery, RagQueryEvidence, RagSource
+
+        db = SessionLocal()
+        try:
+            author = db.get(RagAuthor, "audit-author")
+            if author is None:
+                db.add(RagAuthor(id="audit-author", name="Audit Author", enabled=True, domains=["investing"], expertise_tags=[]))
+            source = db.get(RagSource, "audit-source")
+            if source is None:
+                db.add(RagSource(id="audit-source", author_id="audit-author", source_type="manual", status="ingested"))
+            document = db.get(RagDocument, "audit-document")
+            if document is None:
+                db.add(
+                    RagDocument(
+                        id="audit-document",
+                        source_id="audit-source",
+                        author_id="audit-author",
+                        title="Audit document",
+                        source_section="Q&A",
+                    )
+                )
+            chunk = db.get(RagChunk, "audit-chunk")
+            if chunk is None:
+                db.add(
+                    RagChunk(
+                        id="audit-chunk",
+                        document_id="audit-document",
+                        chunk_index=0,
+                        text="Audit trail passage",
+                        token_count=4,
+                        metadata_json={"author_id": "audit-author"},
+                    )
+                )
+            query = RagQuery(
+                id="audit-query",
+                query_text="See's Candies 2003",
+                mode="retrieve",
+                intent_json={"topic_entities": ["See's Candies"]},
+                retrieval_config={"retrieval_hardening_enabled": True, "duplicates_suppressed_count": 1},
+                answer_text=None,
+                latency_ms=12,
+            )
+            db.merge(query)
+            db.flush()
+            db.query(RagQueryEvidence).filter(RagQueryEvidence.query_id == "audit-query").delete()
+            db.add(
+                RagQueryEvidence(
+                    id="audit-evidence",
+                    query_id="audit-query",
+                    chunk_id="audit-chunk",
+                    rank=1,
+                    cosine_distance=0.1,
+                    ts_rank=0.7,
+                    is_golden=False,
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+    def test_list_query_audit_returns_recent_runs(self, client):
+        self._seed_query_audit()
+
+        resp = client.get("/rag/query-audit?limit=5")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert any(item["id"] == "audit-query" for item in body)
+
+    def test_get_query_audit_returns_joined_evidence_context(self, client):
+        self._seed_query_audit()
+
+        resp = client.get("/rag/query-audit/audit-query")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["id"] == "audit-query"
+        assert body["retrieval_config"]["retrieval_hardening_enabled"] is True
+        assert body["evidence"][0]["chunk_id"] == "audit-chunk"
+        assert body["evidence"][0]["source_section"] == "Q&A"
+        assert body["evidence"][0]["text"] == "Audit trail passage"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 7. Retrieval unit (no DB required — tests the RetrievedChunk helper)
@@ -1249,7 +1336,7 @@ class TestQueryResultUnit:
         ]
 
         original_select_authors = query_module.select_authors
-        original_retrieve = query_module.retrieve_similar_chunks
+        original_retrieve = query_module.retrieve_hybrid
         try:
             query_module.select_authors = lambda *args, **kwargs: selected
 
@@ -1259,13 +1346,14 @@ class TestQueryResultUnit:
                 captured.update(kwargs)
                 return []
 
-            query_module.retrieve_similar_chunks = fake_retrieve
+            query_module.retrieve_hybrid = fake_retrieve
             query_module.execute_retrieve("capital allocation", db, top_k=5)
         finally:
             query_module.select_authors = original_select_authors
-            query_module.retrieve_similar_chunks = original_retrieve
+            query_module.retrieve_hybrid = original_retrieve
 
         assert captured["author_ids"] == ["warren_buffett", "nick_sleep"]
+        assert captured["source_author_names"] == ["Warren Buffett", "Nick Sleep"]
 
 
 class TestRagPhase2API:

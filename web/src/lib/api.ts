@@ -1778,9 +1778,14 @@ export async function streamAiSageChatMessage(
   const decoder = new TextDecoder();
   let buffer = "";
 
-  const flushFrames = () => {
-    const frames = buffer.split("\n\n");
+  const flushFrames = (final = false) => {
+    const normalized = buffer.replace(/\r\n/g, "\n");
+    const frames = normalized.split("\n\n");
     buffer = frames.pop() ?? "";
+    if (final && buffer.trim()) {
+      frames.push(buffer);
+      buffer = "";
+    }
     for (const frame of frames) {
       let eventName = "message";
       const dataLines: string[] = [];
@@ -1804,5 +1809,5 @@ export async function streamAiSageChatMessage(
     flushFrames();
   }
   buffer += decoder.decode();
-  flushFrames();
+  flushFrames(true);
 }

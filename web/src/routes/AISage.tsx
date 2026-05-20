@@ -28,6 +28,11 @@ import {
 const EVIDENCE_CONTEXT_TARGET_CHARS = 1200;
 const CHAT_ROW_TITLE_LIMIT = 50;
 
+type PendingTurnIds = {
+  userMessageId: string;
+  assistantMessageId: string;
+};
+
 function readerRoute(authorId: string, documentId: string): string {
   return `/author-library/${encodeURIComponent(authorId)}/documents/${encodeURIComponent(documentId)}`;
 }
@@ -147,6 +152,7 @@ export default function AISage() {
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const stickToBottomRef = useRef(true);
+  const locallyCreatedChatIdRef = useRef<string | null>(null);
 
   const [query, setQuery] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -200,11 +206,15 @@ export default function AISage() {
 
   useEffect(() => {
     if (!chatId) {
+      if (locallyCreatedChatIdRef.current) {
+        return;
+      }
+      locallyCreatedChatIdRef.current = null;
       setActiveChat(null);
       setActiveChatError(null);
       return;
     }
-    if (activeChat?.id === chatId) {
+    if (activeChat?.id === chatId || locallyCreatedChatIdRef.current === chatId) {
       return;
     }
     void loadChatDetail(chatId);
@@ -266,6 +276,7 @@ export default function AISage() {
 
   async function handleCreateChat(): Promise<void> {
     const created = await api.aiSageCreateChat({});
+    locallyCreatedChatIdRef.current = created.id;
     setActiveChat(created);
     setSidebarOpen(false);
     setSidebarMenuChatId(null);
@@ -287,6 +298,7 @@ export default function AISage() {
     setSidebarOpen(false);
     setSidebarMenuChatId(null);
     if (chatId === target.id) {
+      locallyCreatedChatIdRef.current = null;
       setActiveChat(null);
       navigate("/ai-sage");
     }
@@ -321,27 +333,59 @@ export default function AISage() {
     setSidebarOpen(false);
     stickToBottomRef.current = true;
     let targetChatId = activeChat?.id;
+    let targetChat = activeChat;
+    let shouldNavigateAfterTurn = false;
     if (!targetChatId) {
       const created = await api.aiSageCreateChat({});
+      locallyCreatedChatIdRef.current = created.id;
+      targetChat = created;
       setActiveChat(created);
       targetChatId = created.id;
-      navigate(`/ai-sage/chats/${created.id}`);
+      shouldNavigateAfterTurn = true;
     }
 
     const controller = new AbortController();
     abortRef.current = controller;
     setQuery("");
+    const pendingIds: PendingTurnIds = {
+      userMessageId: `pending-user-${Date.now()}`,
+      assistantMessageId: `pending-assistant-${Date.now()}`,
+    };
+    const pendingCreatedAt = new Date().toISOString();
+    const pendingUserMessage: AISageChatMessage = {
+      id: pendingIds.userMessageId,
+      role: "user",
+      content,
+      status: "completed",
+      created_at: pendingCreatedAt,
+      evidence: [],
+    };
+    const pendingAssistantMessage: AISageChatMessage = {
+      id: pendingIds.assistantMessageId,
+      role: "assistant",
+      content: "",
+      status: "in_progress",
+      created_at: pendingCreatedAt,
+      evidence: [],
+    };
+    setActiveChat((current) => {
+      const base = current ?? targetChat;
+      if (!base || base.id !== targetChatId) return current;
+      return {
+        ...base,
+        messages: [...base.messages, pendingUserMessage, pendingAssistantMessage],
+      };
+    });
 
     try {
       await streamAiSageChatMessage(
         targetChatId,
         { content },
         (streamEvent) => {
-          applyStreamEvent(streamEvent, targetChatId!);
+          applyStreamEvent(streamEvent, targetChatId!, pendingIds);
         },
         { signal: controller.signal },
       );
-      await loadChatList();
     } catch (error) {
       if (controller.signal.aborted) {
         setValidationError("Generation cancelled.");
@@ -349,15 +393,43 @@ export default function AISage() {
         setValidationError(error instanceof Error ? error.message : String(error));
       }
     } finally {
+      if (!controller.signal.aborted) {
+        const refreshed = await refreshChatAfterTurn(targetChatId);
+        if (refreshed) {
+          const latestAssistant = [...refreshed.messages].reverse().find((message) => message.role === "assistant");
+          if (latestAssistant?.status === "completed") {
+            setValidationError(null);
+          }
+        }
+        locallyCreatedChatIdRef.current = null;
+        await loadChatList();
+        if (shouldNavigateAfterTurn) {
+          navigate(`/ai-sage/chats/${targetChatId}`);
+        }
+      }
       abortRef.current = null;
       setStreaming(false);
     }
   }
 
-  function applyStreamEvent(streamEvent: AISageStreamEvent, targetChatId: string): void {
+  async function refreshChatAfterTurn(targetChatId: string): Promise<AISageChatDetail | null> {
+    try {
+      const refreshed = await api.aiSageGetChat(targetChatId);
+      setActiveChat((current) => {
+        if (current && current.id !== targetChatId) return current;
+        return refreshed;
+      });
+      return refreshed;
+    } catch {
+      return null;
+    }
+  }
+
+  function applyStreamEvent(streamEvent: AISageStreamEvent, targetChatId: string, pendingIds?: PendingTurnIds): void {
     if (streamEvent.type === "ack") {
       setActiveChat((current) => {
-        const base = current && current.id === targetChatId ? current : {
+        if (current && current.id !== targetChatId) return current;
+        const base = current ?? {
           id: targetChatId,
           title: DEFAULT_CHAT_TITLE,
           created_at: new Date().toISOString(),
@@ -375,6 +447,24 @@ export default function AISage() {
           created_at: new Date().toISOString(),
           evidence: [],
         };
+        const hasPersistedUser = base.messages.some((message) => message.id === streamEvent.user_message.id);
+        const hasPersistedAssistant = base.messages.some((message) => message.id === streamEvent.assistant_message_id);
+        if (hasPersistedUser && hasPersistedAssistant) {
+          return base;
+        }
+        const hasPendingTurn = Boolean(pendingIds) && base.messages.some((message) => (
+          message.id === pendingIds?.userMessageId || message.id === pendingIds?.assistantMessageId
+        ));
+        if (hasPendingTurn && pendingIds) {
+          return {
+            ...base,
+            messages: base.messages.map((message) => {
+              if (message.id === pendingIds.userMessageId) return streamEvent.user_message;
+              if (message.id === pendingIds.assistantMessageId) return assistantPlaceholder;
+              return message;
+            }),
+          };
+        }
         return {
           ...base,
           messages: [...base.messages, streamEvent.user_message, assistantPlaceholder],
@@ -386,6 +476,7 @@ export default function AISage() {
     if (streamEvent.type === "delta") {
       setActiveChat((current) => {
         if (!current) return current;
+        if (current.id !== targetChatId) return current;
         return {
           ...current,
           messages: current.messages.map((message) =>
@@ -399,13 +490,17 @@ export default function AISage() {
     }
 
     if (streamEvent.type === "done") {
-      setActiveChat(streamEvent.chat);
+      setActiveChat((current) => {
+        if (current && current.id !== targetChatId) return current;
+        return streamEvent.chat;
+      });
       setValidationError(null);
       return;
     }
 
     setActiveChat((current) => {
       if (!current) return current;
+      if (current.id !== targetChatId) return current;
       return {
         ...current,
         messages: current.messages.map((message) =>
@@ -432,7 +527,7 @@ export default function AISage() {
     if (activeChatError) return <div className="card aiSageErrorState">{activeChatError}</div>;
     if (activeChat && activeChat.messages.length > 0) return null;
     return null;
-  }, [activeChat, activeChatError, activeChatLoading, greetingName]);
+  }, [activeChat, activeChatError, activeChatLoading]);
 
   const showLanding = !activeChatLoading && !activeChatError && (!activeChat || activeChat.messages.length === 0);
   const mainPanelClassName = `aiSageMainPanel ${showLanding ? "aiSageMainPanelLanding" : "aiSageMainPanelThread"}`;
@@ -482,6 +577,7 @@ export default function AISage() {
                   type="button"
                   className="aiSageChatListButton"
                   onClick={() => {
+                    locallyCreatedChatIdRef.current = null;
                     setSidebarOpen(false);
                     setSidebarMenuChatId(null);
                     navigate(`/ai-sage/chats/${chat.id}`);
@@ -641,6 +737,7 @@ export default function AISage() {
                   type="button"
                   className="aiSageSearchResult"
                   onClick={() => {
+                    locallyCreatedChatIdRef.current = null;
                     setSearchOpen(false);
                     setSidebarOpen(false);
                     navigate(`/ai-sage/chats/${result.chat_id}`);
@@ -695,8 +792,9 @@ function MessageBubble({
   const keyFacts = Array.isArray(metadata.key_facts)
     ? metadata.key_facts.filter((value): value is string => typeof value === "string")
     : [];
+  const visibleEvidence = dedupeEvidenceForDisplay(message.evidence);
   const visibleAssistantText = message.content || "Thinking…";
-  const showAssistantText = message.evidence.length === 0 || message.status !== "completed";
+  const showAssistantText = visibleEvidence.length === 0 || message.status !== "completed";
 
   return (
     <section className="aiSageMessageRow aiSageMessageRowAssistant">
@@ -731,11 +829,11 @@ function MessageBubble({
             {missingInformation.length > 0 ? <SimpleList title="Missing information" items={missingInformation} /> : null}
             {keyFacts.length > 0 ? <SimpleList title="Key facts" items={keyFacts} /> : null}
 
-            {message.evidence.length > 0 ? (
+            {visibleEvidence.length > 0 ? (
               <section className="aiSageEvidenceSection">
                 <div className="aiSageSectionTitle">Evidence</div>
                 <div className="aiSageEvidenceStack">
-                  {message.evidence.map((evidence) => (
+                  {visibleEvidence.map((evidence) => (
                     <EvidenceCard key={evidence.id} evidence={evidence} />
                   ))}
                 </div>
@@ -759,6 +857,64 @@ function MessageBubble({
       </article>
     </section>
   );
+}
+
+function dedupeEvidenceForDisplay(evidenceRows: AISageChatEvidence[]): AISageChatEvidence[] {
+  const deduped: AISageChatEvidence[] = [];
+  const seenChunkIds = new Set<string>();
+  const seenFingerprints: string[] = [];
+
+  for (const evidence of evidenceRows) {
+    if (evidence.chunk_id && seenChunkIds.has(evidence.chunk_id)) {
+      continue;
+    }
+    const fingerprint = evidenceFingerprint(evidence);
+    if (isDuplicateEvidenceFingerprint(fingerprint, seenFingerprints)) {
+      continue;
+    }
+    deduped.push(evidence);
+    if (evidence.chunk_id) {
+      seenChunkIds.add(evidence.chunk_id);
+    }
+    if (fingerprint) {
+      seenFingerprints.push(fingerprint);
+    }
+  }
+
+  return deduped;
+}
+
+function evidenceFingerprint(evidence: AISageChatEvidence): string {
+  return normalizeEvidenceText(
+    evidence.snippet || evidence.metadata_json?.anchor_text || evidence.metadata_json?.context_text,
+  )
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isDuplicateEvidenceFingerprint(candidate: string, existingValues: string[]): boolean {
+  if (!candidate) return false;
+  const candidateTokens = evidenceFingerprintTokens(candidate);
+  for (const existing of existingValues) {
+    if (!existing) continue;
+    if (candidate === existing) return true;
+    const [shorter, longer] = [candidate, existing].sort((left, right) => left.length - right.length);
+    if (shorter.length >= 48 && longer.includes(shorter)) return true;
+    if (candidateTokens.size < 5) continue;
+    const existingTokens = evidenceFingerprintTokens(existing);
+    const intersection = [...candidateTokens].filter((token) => existingTokens.has(token)).length;
+    const containment = intersection / Math.max(1, Math.min(candidateTokens.size, existingTokens.size));
+    const union = new Set([...candidateTokens, ...existingTokens]).size;
+    const jaccard = intersection / Math.max(1, union);
+    if (containment >= 0.92 && jaccard >= 0.78) return true;
+  }
+  return false;
+}
+
+function evidenceFingerprintTokens(value: string): Set<string> {
+  return new Set(value.split(/\s+/).filter((token) => token.length >= 3));
 }
 
 function SimpleList({ title, items }: { title: string; items: string[] }) {

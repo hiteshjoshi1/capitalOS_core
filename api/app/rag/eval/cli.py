@@ -4,7 +4,7 @@ CLI entry point for the RAG evaluation harness.
 Usage (via make targets):
   python -m app.rag.eval.cli run
   python -m app.rag.eval.cli compare --a dense_only --b hybrid
-  python -m app.rag.eval.cli seed --file data/fixtures/rag_golden_queries.yaml
+  python -m app.rag.eval.cli seed --file app/rag/eval/fixtures/rag_golden_queries.yaml
 
 Exit codes:
   0  — evaluation passed thresholds (or no thresholds configured)
@@ -27,6 +27,7 @@ from app.db.session import SessionLocal
 from app.rag.eval.runner import EvalReport, compare_reports, run_evaluation
 
 log = logging.getLogger(__name__)
+_DEFAULT_GOLDEN_FIXTURE = str(Path(__file__).with_name("fixtures") / "rag_golden_queries.yaml")
 
 
 def _ndcg_threshold() -> float:
@@ -176,7 +177,7 @@ def gate(baseline_report: str, label: str, top_k: int, source_type: Optional[str
 @click.option(
     "--file",
     "fixture_file",
-    default="data/fixtures/rag_golden_queries.yaml",
+    default=_DEFAULT_GOLDEN_FIXTURE,
     show_default=True,
     help="Path to YAML fixture file.",
 )
@@ -209,6 +210,9 @@ def seed(fixture_file: str, dry_run: bool) -> None:
             query_text = entry["query"]
             for passage in entry.get("relevant_chunks", []):
                 doc_external_id = passage.get("doc_external_id", "")
+                document_title = passage.get("document_title")
+                document_title_contains = passage.get("document_title_contains")
+                source_section_contains = passage.get("source_section_contains")
                 chunk_indices = passage.get("chunk_index", [])
                 if isinstance(chunk_indices, int):
                     chunk_indices = [chunk_indices]
@@ -217,19 +221,31 @@ def seed(fixture_file: str, dry_run: bool) -> None:
                 # Resolve chunk IDs via doc_external_id (stored in source URL or hash field)
                 # and chunk_index. Gracefully skip entries when chunks don't exist yet.
                 for idx in chunk_indices:
+                    filters = [
+                        RagSource.url.contains(doc_external_id),
+                        RagChunk.chunk_index == idx,
+                    ]
+                    if document_title:
+                        filters.append(RagDocument.title == document_title)
+                    elif document_title_contains:
+                        filters.append(RagDocument.title.ilike(f"%{document_title_contains}%"))
+                    if source_section_contains:
+                        filters.append(RagDocument.source_section.ilike(f"%{source_section_contains}%"))
+
                     chunk = (
                         db.query(RagChunk)
                         .join(RagDocument, RagChunk.document_id == RagDocument.id)
                         .join(RagSource, RagDocument.source_id == RagSource.id)
-                        .filter(
-                            RagSource.url.contains(doc_external_id),
-                            RagChunk.chunk_index == idx,
-                        )
+                        .filter(*filters)
                         .first()
                     )
                     if chunk is None:
                         log.warning(
-                            "Chunk not found: doc=%s index=%d — skipping", doc_external_id, idx
+                            "Chunk not found: doc=%s title=%s title_contains=%s index=%d — skipping",
+                            doc_external_id,
+                            document_title,
+                            document_title_contains,
+                            idx,
                         )
                         skipped += 1
                         continue

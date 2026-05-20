@@ -363,6 +363,73 @@ class TestChunkStructured:
         for c in chunks:
             assert c.metadata_json["doc_hash"] == "abc123"
 
+    def test_figure_chunk_is_atomic_and_carries_lineage(self):
+        from app.rag.ingestion.chunker import DocumentSection, chunk_structured
+
+        sections = [
+            DocumentSection(
+                heading="Portfolio Review",
+                content="Five year total return chart",
+                metadata={
+                    "content_type": "figure",
+                    "modality": "figure",
+                    "caption": "Total return compared with the benchmark.",
+                    "explanatory_text": "The performance gap widened after 2021.",
+                    "section_path": ["Portfolio Review"],
+                    "source_ref": "html:block:1",
+                },
+            )
+        ]
+        chunks = chunk_structured(sections, target_tokens=5)
+        assert len(chunks) == 1
+        assert "Total return compared with the benchmark." in chunks[0].text
+        assert "The performance gap widened after 2021." in chunks[0].text
+        assert chunks[0].metadata_json["modality"] == "figure"
+        assert chunks[0].metadata_json["section_path"] == ["Portfolio Review"]
+        assert chunks[0].metadata_json["source_ref"] == "html:block:1"
+
+    def test_layout_sensitive_chunk_stays_atomic(self):
+        from app.rag.ingestion.chunker import DocumentSection, chunk_structured
+
+        sections = [
+            DocumentSection(
+                heading="Appendix",
+                content="Col A    Col B\n1        2\n3        4",
+                metadata={
+                    "content_type": "text",
+                    "modality": "layout-sensitive",
+                    "layout_sensitive": True,
+                    "section_path": ["Appendix"],
+                    "source_ref": "html:block:5",
+                },
+            )
+        ]
+        chunks = chunk_structured(sections, target_tokens=3)
+        assert len(chunks) == 1
+        assert chunks[0].metadata_json["modality"] == "layout-sensitive"
+        assert chunks[0].metadata_json["layout_sensitive"] is True
+
+    def test_list_chunk_stays_atomic_under_small_target(self):
+        from app.rag.ingestion.chunker import DocumentSection, chunk_structured
+
+        sections = [
+            DocumentSection(
+                heading="Checklist",
+                content="- Alpha\n- Beta\n- Gamma\n- Delta",
+                is_list=True,
+                metadata={
+                    "content_type": "list",
+                    "modality": "list",
+                    "section_path": ["Checklist"],
+                    "source_ref": "manual:block:2",
+                },
+            )
+        ]
+        chunks = chunk_structured(sections, target_tokens=2)
+        assert len(chunks) == 1
+        assert chunks[0].metadata_json["is_list"] is True
+        assert chunks[0].metadata_json["modality"] == "list"
+
 
 # ── Semantic boundary detection ───────────────────────────────────────────────
 
