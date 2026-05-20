@@ -541,6 +541,49 @@ class TestRetrievalHardeningHelpers:
         diagnostics = result[1].metadata_json["retrieval_diagnostics"]
         assert diagnostics["score_components"]["shallow_prompt_penalty"] < 0
 
+    def test_hardened_fusion_promotes_aspect_coverage_and_diversity(self):
+        from app.rag.retrieval import build_retrieval_query_plan, fuse_hardened_candidates
+
+        plan = build_retrieval_query_plan("What are Charlie Munger's main mental models?")
+        shallow_one = _make_chunk(
+            "shallow-1",
+            text="The main mental models are important.",
+            document_id="doc-shallow",
+            chunk_index=1,
+        )
+        shallow_two = _make_chunk(
+            "shallow-2",
+            text="Questioner: what mental models are the best mental models?",
+            document_id="doc-shallow",
+            chunk_index=2,
+        )
+        aspect_rich = _make_chunk(
+            "aspect-rich",
+            text=(
+                "Munger uses inversion, incentives, social proof, authority bias, "
+                "operant conditioning, critical mass, and margin of safety."
+            ),
+            document_id="doc-models",
+            chunk_index=1,
+        )
+
+        result = fuse_hardened_candidates(
+            plan=plan,
+            pools={
+                "dense_content": [shallow_one, shallow_two, aspect_rich],
+                "sparse_required_phrase": [shallow_one, shallow_two],
+            },
+            top_k=3,
+        )
+
+        assert result[0].chunk_id == "aspect-rich"
+        ranks = {chunk.chunk_id: index for index, chunk in enumerate(result)}
+        assert ranks["aspect-rich"] < ranks["shallow-2"]
+        diagnostics = result[0].metadata_json["retrieval_diagnostics"]
+        assert set(diagnostics["aspect_hits"]) >= {"inversion", "incentives", "biases"}
+        assert diagnostics["score_components"]["aspect_coverage_score"] > 0
+        assert diagnostics["diversity"]["new_aspects"]
+
     def test_feedback_terms_are_domain_controlled_not_title_noise(self):
         from app.rag.retrieval import _extract_salient_feedback_terms, build_retrieval_query_plan
 

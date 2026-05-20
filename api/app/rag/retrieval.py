@@ -184,6 +184,48 @@ _CONCEPT_EXPANSIONS = {
         "models",
     ],
 }
+_CONCEPT_ASPECTS = {
+    "mental models": {
+        "latticework": ["latticework", "multidisciplinary", "disciplines"],
+        "inversion": ["inversion", "invert", "backward", "mental trick"],
+        "incentives": [
+            "incentives",
+            "disincentives",
+            "incentive-caused",
+            "reward and punishment",
+            "reward superresponse",
+        ],
+        "conditioning": [
+            "operant conditioning",
+            "conditioning",
+            "conditioned reflex",
+            "pavlovian",
+            "classical conditioning",
+        ],
+        "biases": [
+            "social proof",
+            "authority",
+            "authority bias",
+            "availability",
+            "availability bias",
+            "envy",
+            "jealousy",
+            "reciprocation",
+            "deprival superreaction",
+            "misweighing",
+            "milgram",
+        ],
+        "economics_and_science": [
+            "microeconomics",
+            "physiology",
+            "mathematics",
+            "hard science",
+            "engineering",
+        ],
+        "critical_mass": ["critical mass", "lollapalooza"],
+        "risk_safety": ["margin of safety", "checklist"],
+    },
+}
 _DOMAIN_FEEDBACK_TERMS = {
     "authority",
     "availability",
@@ -369,7 +411,9 @@ def _trace_chunk_item(rank: int, chunk: "RetrievedChunk") -> dict[str, Any]:
         "pool_memberships": diagnostics.get("pool_memberships"),
         "phrase_hits": diagnostics.get("phrase_hits"),
         "concept_term_hits": diagnostics.get("concept_term_hits"),
+        "aspect_hits": diagnostics.get("aspect_hits"),
         "score_components": diagnostics.get("score_components"),
+        "diversity": diagnostics.get("diversity"),
         "content_query": plan.get("content_query"),
         "sparse_query": plan.get("sparse_query"),
         "text": str(chunk.text or "").replace("\n", " ")[:_TRACE_TEXT_LIMIT],
@@ -1194,6 +1238,13 @@ def _normalize_duplicate_text(text: str) -> str:
     return normalized[:1800]
 
 
+def _duplicate_token_signature(normalized_text: str) -> frozenset[str]:
+    tokens = normalized_text.split()
+    if not tokens:
+        return frozenset()
+    return frozenset(tokens[:220])
+
+
 def suppress_near_duplicates(
     chunks: list[RetrievedChunk],
     *,
@@ -1497,6 +1548,25 @@ def _count_term_hits(text: str, terms: list[str]) -> list[str]:
     return _dedupe_preserve_order(hits)
 
 
+def _aspect_hits_for_plan(plan: RetrievalQueryPlan, text: str, metadata_text: str = "") -> dict[str, list[str]]:
+    aspect_hits: dict[str, list[str]] = {}
+    active_aspects: dict[str, list[str]] = {}
+    required = {phrase.lower() for phrase in plan.required_phrases}
+    concepts = {term.lower() for term in plan.concept_terms}
+    for concept_phrase, aspects in _CONCEPT_ASPECTS.items():
+        if concept_phrase in required or concept_phrase in concepts:
+            active_aspects.update(aspects)
+    if not active_aspects:
+        return aspect_hits
+
+    haystack = f"{text} {metadata_text}".lower()
+    for aspect, terms in active_aspects.items():
+        hits = _count_term_hits(haystack, terms)
+        if hits:
+            aspect_hits[aspect] = hits
+    return aspect_hits
+
+
 def _concept_hit_score(hits: list[str]) -> float:
     weights = {
         "mental models": 0.65,
@@ -1536,6 +1606,14 @@ def _concept_hit_score(hits: list[str]) -> float:
         "models": 0.25,
     }
     return sum(weights.get(hit.lower(), 0.55) for hit in hits)
+
+
+def _aspect_coverage_score(aspect_hits: dict[str, list[str]]) -> float:
+    if not aspect_hits:
+        return 0.0
+    aspect_count = len(aspect_hits)
+    term_count = sum(len(hits) for hits in aspect_hits.values())
+    return min(aspect_count, 5) * 0.85 + min(term_count, 8) * 0.12
 
 
 def _feedback_seed_tokens(plan: RetrievalQueryPlan) -> set[str]:
@@ -1636,6 +1714,8 @@ def _copy_chunk_with_retrieval_diagnostics(
     concept_term_hits: list[str],
     metadata_hits: list[str],
     final_score: float,
+    aspect_hits: Optional[dict[str, list[str]]] = None,
+    diversity_diagnostics: Optional[dict[str, Any]] = None,
 ) -> RetrievedChunk:
     metadata = dict(chunk.metadata_json or {})
     metadata["retrieval_query_plan"] = plan.as_dict()
@@ -1644,12 +1724,155 @@ def _copy_chunk_with_retrieval_diagnostics(
         "phrase_hits": phrase_hits,
         "concept_term_hits": concept_term_hits,
         "metadata_hits": metadata_hits,
+        "aspect_hits": aspect_hits or {},
+        "diversity": diversity_diagnostics or {},
         "score_components": score_components,
         "final_score": round(final_score, 6),
     }
     copied = _copy_chunk_with_metadata(chunk, metadata)
     copied.rrf_score = final_score
     return copied
+
+
+def _update_hardened_diagnostics(
+    chunk: RetrievedChunk,
+    *,
+    score_components: Optional[dict[str, float]] = None,
+    final_score: Optional[float] = None,
+    diversity_diagnostics: Optional[dict[str, Any]] = None,
+) -> RetrievedChunk:
+    metadata = dict(chunk.metadata_json or {})
+    diagnostics = dict(metadata.get("retrieval_diagnostics") or {})
+    if score_components is not None:
+        diagnostics["score_components"] = score_components
+    if final_score is not None:
+        diagnostics["final_score"] = round(final_score, 6)
+    if diversity_diagnostics is not None:
+        diagnostics["diversity"] = diversity_diagnostics
+    metadata["retrieval_diagnostics"] = diagnostics
+    copied = _copy_chunk_with_metadata(chunk, metadata)
+    copied.rrf_score = final_score if final_score is not None else chunk.rrf_score
+    return copied
+
+
+def _chunk_aspect_names(chunk: RetrievedChunk) -> set[str]:
+    metadata = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+    raw_diagnostics = metadata.get("retrieval_diagnostics")
+    diagnostics = raw_diagnostics if isinstance(raw_diagnostics, dict) else {}
+    aspect_hits = diagnostics.get("aspect_hits")
+    if not isinstance(aspect_hits, dict):
+        return set()
+    return {str(key) for key, value in aspect_hits.items() if value}
+
+
+def _diversify_hardened_candidates(
+    scored: list[tuple[float, str, RetrievedChunk]],
+    *,
+    top_k: int,
+) -> list[RetrievedChunk]:
+    if top_k <= 0 or not scored:
+        return []
+
+    remaining: list[dict[str, Any]] = []
+    for base_score, chunk_id, chunk in scored:
+        fingerprint = _normalize_duplicate_text(_duplicate_comparison_text(chunk))
+        remaining.append(
+            {
+                "base_score": base_score,
+                "chunk_id": chunk_id,
+                "chunk": chunk,
+                "fingerprint": fingerprint,
+                "signature": _duplicate_token_signature(fingerprint),
+                "aspects": _chunk_aspect_names(chunk),
+            }
+        )
+    selected: list[tuple[float, float, str, RetrievedChunk, dict[str, Any]]] = []
+    selected_fingerprints: list[tuple[str, str, frozenset[str]]] = []
+    selected_aspects: set[str] = set()
+    selected_document_counts: Counter[str] = Counter()
+
+    while remaining and len(selected) < top_k:
+        best_index = 0
+        best_tuple: Optional[tuple[float, float, str, RetrievedChunk, dict[str, Any]]] = None
+        for index, item in enumerate(remaining):
+            base_score = float(item["base_score"])
+            chunk_id = str(item["chunk_id"])
+            chunk = item["chunk"]
+            fingerprint = str(item["fingerprint"])
+            signature = item["signature"]
+            duplicate_penalty = 0.0
+            matched_duplicate: Optional[str] = None
+            if fingerprint:
+                for selected_id, selected_fingerprint, selected_signature in selected_fingerprints:
+                    if not selected_fingerprint:
+                        continue
+                    if fingerprint == selected_fingerprint:
+                        duplicate_penalty = max(duplicate_penalty, 4.0)
+                        matched_duplicate = selected_id
+                        break
+                    if signature and selected_signature:
+                        overlap_ratio = len(signature & selected_signature) / max(1, min(len(signature), len(selected_signature)))
+                    else:
+                        overlap_ratio = 0.0
+                    if overlap_ratio >= 0.9:
+                        duplicate_penalty = max(duplicate_penalty, 2.5)
+                        matched_duplicate = selected_id
+                        break
+
+            same_document_count = selected_document_counts.get(chunk.document_id, 0)
+            same_document_penalty = 0.85 * same_document_count
+            aspect_names = item["aspects"]
+            new_aspects = sorted(aspect_names - selected_aspects)
+            repeated_aspects = sorted(aspect_names & selected_aspects)
+            new_aspect_bonus = min(len(new_aspects), 3) * 0.7
+            repeated_aspect_penalty = min(len(repeated_aspects), 4) * 0.12
+            adjusted_score = (
+                base_score
+                + new_aspect_bonus
+                - repeated_aspect_penalty
+                - same_document_penalty
+                - duplicate_penalty
+            )
+            diversity = {
+                "base_score": round(base_score, 6),
+                "adjusted_score": round(adjusted_score, 6),
+                "new_aspects": new_aspects,
+                "repeated_aspects": repeated_aspects,
+                "same_document_count_before": same_document_count,
+                "same_document_penalty": round(same_document_penalty, 6),
+                "duplicate_penalty": round(duplicate_penalty, 6),
+            }
+            if matched_duplicate:
+                diversity["matched_duplicate_chunk_id"] = matched_duplicate
+            candidate = (adjusted_score, base_score, chunk_id, chunk, diversity)
+            if best_tuple is None or (adjusted_score, base_score, chunk_id) > (
+                best_tuple[0],
+                best_tuple[1],
+                best_tuple[2],
+            ):
+                best_tuple = candidate
+                best_index = index
+
+        assert best_tuple is not None
+        adjusted_score, _base_score, chunk_id, chunk, diversity = best_tuple
+        selected_item = remaining.pop(best_index)
+        selected_document_counts[chunk.document_id] += 1
+        selected_aspects.update(selected_item["aspects"])
+        selected_fingerprints.append(
+            (chunk_id, str(selected_item["fingerprint"]), selected_item["signature"])
+        )
+        selected.append((adjusted_score, _base_score, chunk_id, chunk, diversity))
+
+    diversified: list[RetrievedChunk] = []
+    for adjusted_score, _base_score, _chunk_id, chunk, diversity in selected:
+        diversified.append(
+            _update_hardened_diagnostics(
+                chunk,
+                final_score=adjusted_score,
+                diversity_diagnostics=diversity,
+            )
+        )
+    return diversified
 
 
 def fuse_hardened_candidates(
@@ -1694,6 +1917,7 @@ def fuse_hardened_candidates(
         phrase_hits = _count_term_hits(text, plan.required_phrases)
         concept_hits = _count_term_hits(text, plan.concept_terms)
         metadata_hits = _count_term_hits(metadata_text, [*plan.required_phrases, *plan.concept_terms])
+        aspect_hits = _aspect_hits_for_plan(plan, text, metadata_text)
         generic_concept_hits = {phrase.lower() for phrase in plan.required_phrases} | {"model", "models"}
         specific_concept_hits = [
             hit for hit in concept_hits if hit.lower().strip() not in generic_concept_hits
@@ -1713,6 +1937,7 @@ def fuse_hardened_candidates(
             else 0.0
         )
         specific_concept_coverage_score = min(len(specific_concept_hits), 6) * 0.65
+        aspect_coverage_score = _aspect_coverage_score(aspect_hits)
         word_count = len(re.findall(r"\b\w+\b", text))
         shallow_prompt_penalty = 0.0
         if phrase_hits and not specific_concept_hits and word_count <= 40:
@@ -1725,6 +1950,7 @@ def fuse_hardened_candidates(
             "required_phrase_score": round(phrase_score, 6),
             "concept_term_score": round(concept_score, 6),
             "specific_concept_coverage_score": round(specific_concept_coverage_score, 6),
+            "aspect_coverage_score": round(aspect_coverage_score, 6),
             "metadata_hit_score": round(metadata_score, 6),
             "required_phrase_pool_score": exact_phrase_pool_score,
             "neighbor_context_score": neighbor_context_score,
@@ -1744,13 +1970,15 @@ def fuse_hardened_candidates(
                     phrase_hits=phrase_hits,
                     concept_term_hits=concept_hits,
                     metadata_hits=metadata_hits,
+                    aspect_hits=aspect_hits,
                     final_score=final_score,
                 ),
             )
         )
 
     scored.sort(key=lambda item: (-item[0], item[1]))
-    ranked = [chunk for _score, _chunk_id, chunk in scored]
+    diversity_window = max(top_k * 8, 200)
+    ranked = _diversify_hardened_candidates(scored[:diversity_window], top_k=top_k)
     return _rank_chunks(ranked, top_k=top_k, stage="hardened_fusion", weighting_enabled=weighting_active)
 
 

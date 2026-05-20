@@ -150,6 +150,67 @@ def test_compare_reports_passes_per_query_gate_when_targets_are_hit():
     assert comparison["passes_no_regression_bar"] is True
 
 
+def test_compare_reports_fails_candidate_recall_gate_when_top50_misses_targets():
+    report_a = EvalReport(
+        config_label="baseline",
+        num_queries=1,
+        mean_ndcg_at_5=0.1,
+        mean_ndcg_at_10=0.1,
+        mean_recall_at_5=0.1,
+        mean_recall_at_10=0.2,
+        mean_precision_at_5=0.1,
+        mean_precision_at_10=0.1,
+        mean_mrr=0.1,
+        per_query=[
+            {
+                "query": "What are Charlie Munger's main mental models?",
+                "ndcg@10": 0.1,
+                "recall@10": 0.2,
+                "recall@50": 0.5,
+                "retrieved_count": 50,
+                "high_relevance_hits@5": 1,
+                "relevant_hits@10": 3,
+                "high_relevance_hits@50": 3,
+                "relevant_hits@50": 8,
+                "golden_relevant_count": 14,
+                "golden_high_relevance_count": 4,
+            }
+        ],
+    )
+    report_b = EvalReport(
+        config_label="candidate",
+        num_queries=1,
+        mean_ndcg_at_5=0.2,
+        mean_ndcg_at_10=0.2,
+        mean_recall_at_5=0.2,
+        mean_recall_at_10=0.3,
+        mean_precision_at_5=0.2,
+        mean_precision_at_10=0.2,
+        mean_mrr=0.2,
+        per_query=[
+            {
+                "query": "What are Charlie Munger's main mental models?",
+                "ndcg@10": 0.2,
+                "recall@10": 0.3,
+                "recall@50": 0.35,
+                "retrieved_count": 50,
+                "high_relevance_hits@5": 1,
+                "relevant_hits@10": 3,
+                "high_relevance_hits@50": 1,
+                "relevant_hits@50": 5,
+                "golden_relevant_count": 14,
+                "golden_high_relevance_count": 4,
+            }
+        ],
+    )
+
+    comparison = compare_reports(report_a, report_b)
+
+    assert comparison["passes_per_query_gates"] is False
+    assert comparison["passes_no_regression_bar"] is False
+    assert any("high_relevance_hits@50" in failure for failure in comparison["per_query_gates"][0]["failures"])
+
+
 def test_run_evaluation_uses_hybrid_with_config_overrides():
     db = MagicMock()
     with (

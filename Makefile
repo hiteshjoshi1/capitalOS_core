@@ -454,10 +454,10 @@ crypto-smoke:
 # ── RAG evaluation harness ────────────────────────────────────────────────────
 
 rag-eval:
-	docker compose exec -T api python -m app.rag.eval.cli run
+	docker compose exec -T api python -m app.rag.eval.cli run --top-k $(or $(TOP_K),10)
 
 rag-eval-compare:
-	docker compose exec -T api python -m app.rag.eval.cli compare --a $(CONFIG_A) --b $(CONFIG_B)
+	docker compose exec -T api python -m app.rag.eval.cli compare --a $(CONFIG_A) --b $(CONFIG_B) --top-k $(or $(TOP_K),10)
 
 rag-eval-seed:
 	docker compose exec -T api python -m app.rag.eval.cli seed --file /app/app/rag/eval/fixtures/rag_golden_queries.yaml
