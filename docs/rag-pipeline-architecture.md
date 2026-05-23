@@ -1,6 +1,6 @@
 # AI Sage RAG Pipeline Architecture
 
-Last audited: 2026-04-15
+Last audited: 2026-05-20
 
 This document contains two clearly separated sections:
 
@@ -157,7 +157,8 @@ This is the main retrieval orchestration for AI Sage. Steps:
 4. **Intent-aware fallback** — `_retrieve_with_intent_fallback()` progressively relaxes source/date filters if initial constrained query returns nothing
 5. **Reranking** — `_rerank_candidate_chunks()`:
    - Heuristic fallback: keyword overlap + cosine similarity sort
-   - LLM reranking (when routing model available): Sends candidate passages to cheap routing model, asks for JSON array of top indices ranked by semantic relevance
+   - Dedicated cross-encoder reranking (`api/app/rag/reranker.py`) when a provider is explicitly enabled
+   - Reranker input is now configurable as raw anchor chunks vs expanded local context via `RAG_RERANKER_INPUT_MODE`
 6. **Diversity selection** — `_select_diverse_top_chunks()` caps hits per document (default 2) to prevent motif collapse
 7. **Context expansion** — `expand_chunks_with_context()` fetches ±2 neighboring chunks per winner, merges text, caps at 1800 chars
 8. **Evidence enrichment** — `_enrich_chunks()` maps author metadata onto evidence chunks
@@ -165,10 +166,33 @@ This is the main retrieval orchestration for AI Sage. Steps:
 **Implementation status:** Implemented as of issue 138. This is the strongest part of the retrieval pipeline.
 
 **Weaknesses in this stage:**
-- Reranking uses an LLM prompt, not a dedicated cross-encoder or reranking model (e.g., Cohere rerank, Jina reranker, or BAAI/bge-reranker). LLM reranking is slower, more expensive per-call, and less reliable at fine-grained passage relevance scoring than purpose-built rerankers.
+- The dedicated reranker path must still earn its place by golden-set evaluation; the default remains heuristic unless a provider clears the rollout gate.
 - Heuristic fallback is very basic (keyword overlap).
 - No BM25 or sparse retrieval component — the broad candidate pool is still 100% vector-based, which means lexically relevant passages that are semantically distant may never enter the candidate pool.
 - Context expansion is document-local only (neighboring chunks by index). It cannot pull related passages from other documents.
+
+### 4f. Cross-Encoder Calibration Gate (Issue 167)
+
+- `python -m app.rag.eval.cli diagnose-reranker` benchmarks:
+  - heuristic baseline
+  - Jina on raw anchor chunks
+  - Jina on expanded local context
+  - local cross-encoder variants when installed
+  - Cohere when explicitly requested and credentials are present
+- The diagnosis report records candidate-pool recall, per-query regressions, and whether expanded context materially improves reranker quality.
+- Historical Jina failures should be treated as a three-part diagnosis, not a provider anecdote:
+  1. raw-anchor reranking can regress when chunk text is too thin for a cross-encoder;
+  2. rerankers cannot recover golden evidence that never entered the broad candidate pool;
+  3. the configured Jina multilingual base model is only a default candidate, not the chosen winner.
+- Default rollout policy is intentionally conservative:
+  - a reranker must improve both `mean_ndcg@10` and `mean_recall@10` by at least `+0.02` over the heuristic baseline and still pass the no-regression/per-query gates;
+  - if no candidate clears that bar, the dedicated reranker remains disabled.
+- Latest issue 167 diagnosis on the refreshed 15-query golden set:
+  - baseline: `mean_ndcg@10=0.3882`, `mean_recall@10=0.4556`;
+  - adaptive `jina/raw`: `mean_ndcg@10=0.4680`, `mean_recall@10=0.4838`;
+  - adaptive `jina/raw` passed every configured per-query rollout gate and is the code default when Jina credentials are present;
+  - compact context remains available as `RAG_RERANKER_INPUT_MODE=compact_context`, but raw anchor chunks are the selected default because compact context did not beat the gate in the live diagnosis;
+  - local cross-encoder support remains provider-swappable but optional because the API image does not install `sentence-transformers` by default.
 
 ### 4e. Company Thesis Mode (`api/app/rag/company_thesis_mode.py`)
 

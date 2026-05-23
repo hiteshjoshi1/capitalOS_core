@@ -34,7 +34,7 @@ from app.rag.inference import (
 from app.rag.intent_router import QueryIntent, parse_intent
 from app.rag.query import EvidenceChunk, _author_entries, _enrich_chunks
 from app.rag.reranker import rerank as _cross_encoder_rerank
-from app.rag.reranker import reranker_available
+from app.rag.reranker import reranker_available, reranker_input_mode, reranker_provider_name
 from app.rag.retrieval import (
     RetrievedChunk,
     build_retrieval_query_plan,
@@ -182,6 +182,8 @@ _BROAD_RETRIEVAL_MIN_PER_SUB_QUERY = 8
 _RERANK_PER_DOCUMENT_CAP = 2
 _CONTEXT_EXPANSION_WINDOW = 2
 _CONTEXT_EXPANSION_MAX_CHARS = 1800
+_RERANKER_COMPACT_CONTEXT_MAX_CHARS = 900
+_RERANKER_BLEND_ALPHA = 0.45
 
 
 # ── Data shapes ───────────────────────────────────────────────────────────────
@@ -567,6 +569,34 @@ def _collect_candidate_chunks(
             any_relaxed = True
             relaxation_reason = topic_reason
 
+    if not candidates and author_ids and not _query_mentions_author_alias(query, intent.author_ids):
+        open_chunks, _open_relaxed, _open_reason = _retrieve_with_intent_fallback(
+            query,
+            db,
+            top_k=broad_top_k,
+            source_type=None,
+            year_from=intent.date_from,
+            year_to=intent.date_to,
+            author_ids=None,
+            strict=has_explicit_constraints,
+            keyword_query=kw_query,
+        )
+        candidates.extend(open_chunks)
+        if open_chunks:
+            any_relaxed = True
+            relaxation_reason = "No results under selected-author candidates; selected author filter removed."
+        trace_retrieval_chunks(
+            "ai_sage_open_corpus_fallback_candidates",
+            query,
+            open_chunks,
+            extra={
+                "keyword_query": kw_query,
+                "removed_author_ids_filter": author_ids,
+                "constraints_relaxed": bool(open_chunks),
+                "relaxation_reason": relaxation_reason,
+            },
+        )
+
     deduped = _dedupe_chunks_by_id(candidates)
     if intent.topic_entities:
         deduped.sort(key=lambda chunk: _topic_candidate_pool_sort_key(chunk, topic_entities=intent.topic_entities))
@@ -589,6 +619,24 @@ def _collect_candidate_chunks(
         },
     )
     return final_candidates, any_relaxed, relaxation_reason
+
+
+def _query_mentions_author_alias(query: str, author_ids: list[str] | None) -> bool:
+    if not author_ids:
+        return False
+    try:
+        from app.rag.intent_router import _KNOWN_AUTHORS
+    except Exception:
+        return False
+
+    author_id_set = set(author_ids)
+    lowered = query.lower()
+    for alias, author_id in _KNOWN_AUTHORS.items():
+        if author_id not in author_id_set:
+            continue
+        if re.search(r"\b" + re.escape(alias.lower()) + r"\b", lowered):
+            return True
+    return False
 
 
 _HEURISTIC_STOPWORDS = {
@@ -862,6 +910,195 @@ def _select_diverse_top_chunks(
     return sorted(selected[:top_k], key=ranking_sort_key)
 
 
+def _compact_reranker_text(anchor: RetrievedChunk, expanded: RetrievedChunk | None = None) -> str:
+    metadata = _chunk_meta(anchor)
+    header_parts = [
+        str(metadata.get(key) or "").strip()
+        for key in ("document_title", "title", "section_path", "section_heading", "heading")
+        if str(metadata.get(key) or "").strip()
+    ]
+    header = " | ".join(dict.fromkeys(header_parts))
+    body = str(getattr(expanded or anchor, "text", "") or "")
+    max_chars = _RERANKER_COMPACT_CONTEXT_MAX_CHARS
+    try:
+        import os
+
+        max_chars = max(300, int(os.getenv("RAG_RERANKER_COMPACT_CONTEXT_MAX_CHARS", str(max_chars))))
+    except Exception:
+        max_chars = _RERANKER_COMPACT_CONTEXT_MAX_CHARS
+    body = body[:max_chars].strip()
+    if header:
+        return f"{header}\n\n{body}".strip()
+    return body
+
+
+def _reranker_passages_for_mode(
+    candidates: list[RetrievedChunk],
+    *,
+    input_mode: str,
+    expanded_by_chunk_id: dict[str, RetrievedChunk] | None = None,
+) -> tuple[list[RetrievedChunk], list[str]]:
+    expanded_lookup = expanded_by_chunk_id or {}
+    if input_mode == "expanded_context":
+        inputs = [expanded_lookup.get(candidate.chunk_id, candidate) for candidate in candidates]
+        return inputs, [str(getattr(chunk, "text", "") or "") for chunk in inputs]
+    if input_mode == "compact_context":
+        inputs = [expanded_lookup.get(candidate.chunk_id, candidate) for candidate in candidates]
+        passages = [
+            _compact_reranker_text(candidate, expanded_lookup.get(candidate.chunk_id))
+            for candidate in candidates
+        ]
+        return inputs, passages
+    return candidates, [str(getattr(chunk, "text", "") or "") for chunk in candidates]
+
+
+def _cross_encoder_fusion_mode() -> str:
+    try:
+        import os
+
+        raw = os.getenv("RAG_RERANKER_FUSION_MODE", "adaptive").strip().lower()
+    except Exception:
+        raw = "adaptive"
+    aliases = {
+        "adaptive": "adaptive",
+        "adaptive_blend": "adaptive",
+        "pure": "pure",
+        "replace": "pure",
+        "reranker": "pure",
+        "blend": "conditional_blend",
+        "blended": "conditional_blend",
+        "conditional": "conditional_blend",
+        "conditional_blend": "conditional_blend",
+    }
+    return aliases.get(raw, "adaptive")
+
+
+def _query_allows_aggressive_rerank(query: str) -> bool:
+    normalized = re.sub(r"\s+", " ", query.lower()).strip()
+    if not normalized:
+        return False
+    if re.search(r"\bviews?\s+on\b", normalized):
+        return False
+    if re.search(r"\brelat(?:e|es|ed|ing)?\s+to\b|\brelationship\s+between\b", normalized):
+        return True
+    has_list_shape = bool(re.search(r"\b(what are|what were|list|highlight|summari[sz]e)\b", normalized))
+    has_broad_concept = bool(
+        re.search(
+            r"\b(main|best|major|key|important|mental\s+models?|principles|lessons|ideas|frameworks|examples)\b",
+            normalized,
+        )
+    )
+    if has_list_shape and has_broad_concept:
+        return True
+    return False
+
+
+def _apply_cross_encoder_scores(
+    candidates: list[RetrievedChunk],
+    heuristic_ranked: list[RetrievedChunk],
+    results: list[Any],
+    *,
+    query: str = "",
+) -> list[RetrievedChunk]:
+    result_by_index = {
+        int(getattr(result, "index")): float(getattr(result, "relevance_score", 0.0) or 0.0)
+        for result in results
+        if 0 <= int(getattr(result, "index", -1)) < len(candidates)
+    }
+    if not result_by_index:
+        return heuristic_ranked
+
+    requested_fusion_mode = _cross_encoder_fusion_mode()
+    fusion_mode = requested_fusion_mode
+    if requested_fusion_mode == "adaptive":
+        fusion_mode = "pure" if _query_allows_aggressive_rerank(query) else "conditional_blend"
+    heuristic_rank_by_id = {chunk.chunk_id: rank for rank, chunk in enumerate(heuristic_ranked)}
+    candidate_count = max(len(candidates), 1)
+    weighting_active = metadata_weighting_enabled()
+
+    if fusion_mode == "pure":
+        ce_ordered_indices = sorted(result_by_index, key=lambda idx: -result_by_index[idx])
+        ranked: list[RetrievedChunk] = []
+        seen_ids: set[str] = set()
+        for idx in ce_ordered_indices:
+            chunk = candidates[idx]
+            chunk.reranker_score = result_by_index[idx]
+            decision = apply_weight_to_score(
+                getattr(chunk, "metadata_json", None),
+                base_score=chunk.reranker_score,
+                enabled=weighting_active,
+            )
+            chunk.base_score = decision.base_score
+            chunk.metadata_weight = decision.weight
+            chunk.weighted_score = decision.weighted_score
+            chunk.corpus_class = decision.corpus_class
+            chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
+            diagnostics = dict(getattr(chunk, "metadata_json", None) or {})
+            diagnostics["reranker_fusion"] = {
+                "mode": "pure",
+                "requested_mode": requested_fusion_mode,
+                "reranker_score": round(chunk.reranker_score, 6),
+                "aggressive_query": _query_allows_aggressive_rerank(query),
+            }
+            chunk.metadata_json = diagnostics
+            if chunk.chunk_id not in seen_ids:
+                seen_ids.add(chunk.chunk_id)
+                ranked.append(chunk)
+        for chunk in heuristic_ranked:
+            if chunk.chunk_id not in seen_ids:
+                ranked.append(chunk)
+        return sorted(ranked, key=ranking_sort_key)
+
+    alpha = _RERANKER_BLEND_ALPHA
+    try:
+        import os
+
+        alpha = min(0.8, max(0.0, float(os.getenv("RAG_RERANKER_BLEND_ALPHA", str(alpha)))))
+    except Exception:
+        alpha = _RERANKER_BLEND_ALPHA
+
+    ranked = list(heuristic_ranked)
+    reranker_rank_by_index = {
+        int(getattr(result, "index")): rank
+        for rank, result in enumerate(results)
+        if 0 <= int(getattr(result, "index", -1)) < len(candidates)
+    }
+    for idx, chunk in enumerate(candidates):
+        heuristic_rank = heuristic_rank_by_id.get(chunk.chunk_id, candidate_count - 1)
+        heuristic_component = 1.0 - (heuristic_rank / candidate_count)
+        reranker_rank = reranker_rank_by_index.get(idx, candidate_count - 1)
+        reranker_component = 1.0 - (reranker_rank / candidate_count)
+        reranker_score = result_by_index.get(idx, 0.0)
+        blended = ((1.0 - alpha) * heuristic_component) + (alpha * reranker_component)
+        final_score = max(heuristic_component, blended)
+        chunk.reranker_score = reranker_score
+        chunk.base_score = final_score
+        decision = apply_weight_to_score(
+            getattr(chunk, "metadata_json", None),
+            base_score=final_score,
+            enabled=weighting_active,
+        )
+        chunk.metadata_weight = decision.weight
+        chunk.weighted_score = decision.weighted_score
+        chunk.corpus_class = decision.corpus_class
+        chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
+        diagnostics = dict(getattr(chunk, "metadata_json", None) or {})
+        diagnostics["reranker_fusion"] = {
+            "mode": "conditional_blend",
+            "requested_mode": requested_fusion_mode,
+            "heuristic_rank": heuristic_rank + 1,
+            "heuristic_component": round(heuristic_component, 6),
+            "reranker_rank": reranker_rank + 1,
+            "reranker_component": round(reranker_component, 6),
+            "reranker_score": round(reranker_score, 6),
+            "blend_alpha": round(alpha, 4),
+            "final_score": round(final_score, 6),
+            "aggressive_query": _query_allows_aggressive_rerank(query),
+        }
+        chunk.metadata_json = diagnostics
+    return sorted(ranked, key=ranking_sort_key)
+
+
 def _rerank_candidate_chunks(
     query: str,
     candidates: list[RetrievedChunk],
@@ -898,8 +1135,23 @@ def _rerank_candidate_chunks(
     # Tier 1: dedicated cross-encoder reranker (preferred — fast, deterministic, no JSON)
     if reranker_available():
         try:
-            passages = [str(getattr(c, "text", "") or "") for c in candidates]
-            trace_retrieval_chunks("ai_sage_cross_encoder_reranker_input", query, candidates)
+            input_mode = reranker_input_mode()
+            provider_name = reranker_provider_name()
+            reranker_inputs, passages = _reranker_passages_for_mode(
+                candidates,
+                input_mode=input_mode,
+                expanded_by_chunk_id=expanded_by_chunk_id,
+            )
+            trace_retrieval_chunks("ai_sage_cross_encoder_reranker_input", query, reranker_inputs)
+            trace_retrieval_payload(
+                "ai_sage_cross_encoder_reranker_config",
+                {
+                    "query": query,
+                    "provider": provider_name,
+                    "input_mode": input_mode,
+                    "candidate_count": len(candidates),
+                },
+            )
             results = _cross_encoder_rerank(query, passages, top_k=len(candidates))
             if results:
                 trace_retrieval_payload(
@@ -913,7 +1165,9 @@ def _rerank_candidate_chunks(
                     },
                 )
                 log.info(
-                    "ai_sage_trace stage=jina_rerank query=%r top_scores=%s",
+                    "ai_sage_trace stage=cross_encoder_rerank provider=%s input_mode=%s query=%r top_scores=%s",
+                    provider_name,
+                    input_mode,
                     query[:120],
                     json.dumps(
                         [
@@ -922,28 +1176,7 @@ def _rerank_candidate_chunks(
                         ]
                     ),
                 )
-                ce_ranked: list[RetrievedChunk] = []
-                seen_ids: set[str] = set()
-                for r in results:
-                    chunk = candidates[r.index]
-                    chunk.reranker_score = float(getattr(r, "relevance_score", 0.0))
-                    decision = apply_weight_to_score(
-                        getattr(chunk, "metadata_json", None),
-                        base_score=chunk.reranker_score,
-                        enabled=metadata_weighting_enabled(),
-                    )
-                    chunk.base_score = decision.base_score
-                    chunk.metadata_weight = decision.weight
-                    chunk.weighted_score = decision.weighted_score
-                    chunk.corpus_class = decision.corpus_class
-                    chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
-                    if chunk.chunk_id not in seen_ids:
-                        seen_ids.add(chunk.chunk_id)
-                        ce_ranked.append(chunk)
-                for chunk in heuristic_ranked:
-                    if chunk.chunk_id not in seen_ids:
-                        ce_ranked.append(chunk)
-                ranked = sorted(ce_ranked, key=ranking_sort_key)
+                ranked = _apply_cross_encoder_scores(candidates, heuristic_ranked, results, query=query)
                 trace_retrieval_chunks("ai_sage_cross_encoder_reranked", query, ranked)
                 log.debug("cross-encoder reranked %d candidates", len(candidates))
         except Exception as exc:

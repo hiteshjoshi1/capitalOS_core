@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -28,34 +29,63 @@ log = logging.getLogger(__name__)
 _DEFAULT_COHERE_MODEL = "rerank-english-v3.0"
 _DEFAULT_JINA_MODEL = "jina-reranker-v2-base-multilingual"
 _DEFAULT_LOCAL_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+_DEFAULT_INPUT_MODE = "raw"
 _JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
 
 
-def _reranker_provider() -> str:
-    return os.getenv("RAG_RERANKER_PROVIDER", "none").strip().lower()
+def _reranker_provider(provider: str | None = None) -> str:
+    raw = provider if provider is not None else os.getenv("RAG_RERANKER_PROVIDER", "jina")
+    return raw.strip().lower()
 
 
-def _reranker_model() -> str:
-    provider = _reranker_provider()
-    if provider == "cohere":
+def reranker_provider_name(provider: str | None = None) -> str:
+    return _reranker_provider(provider)
+
+
+def reranker_model(provider: str | None = None, model: str | None = None) -> str:
+    if model is not None and model.strip():
+        return model.strip()
+    effective_provider = _reranker_provider(provider)
+    if effective_provider == "cohere":
         return os.getenv("RAG_RERANKER_MODEL", _DEFAULT_COHERE_MODEL).strip()
-    if provider == "jina":
+    if effective_provider == "jina":
         return os.getenv("RAG_RERANKER_MODEL", _DEFAULT_JINA_MODEL).strip()
-    if provider == "local":
+    if effective_provider == "local":
         return os.getenv("RAG_RERANKER_LOCAL_MODEL", _DEFAULT_LOCAL_MODEL).strip()
     return os.getenv("RAG_RERANKER_MODEL", "").strip()
 
 
-def reranker_available() -> bool:
+def reranker_input_mode(input_mode: str | None = None) -> str:
+    raw = input_mode if input_mode is not None else os.getenv("RAG_RERANKER_INPUT_MODE", _DEFAULT_INPUT_MODE)
+    normalized = raw.strip().lower()
+    aliases = {
+        "raw": "raw",
+        "anchor": "raw",
+        "anchor_chunk": "raw",
+        "anchor_chunks": "raw",
+        "expanded": "expanded_context",
+        "expanded_context": "expanded_context",
+        "local_context": "expanded_context",
+        "context": "expanded_context",
+        "compact": "compact_context",
+        "compact_context": "compact_context",
+        "short_context": "compact_context",
+        "enriched": "compact_context",
+        "enriched_context": "compact_context",
+    }
+    return aliases.get(normalized, _DEFAULT_INPUT_MODE)
+
+
+def reranker_available(provider: str | None = None) -> bool:
     """Return True if a dedicated cross-encoder reranker is configured and usable."""
-    provider = _reranker_provider()
-    if provider in ("none", "llm", ""):
+    effective_provider = _reranker_provider(provider)
+    if effective_provider in ("none", "llm", ""):
         return False
-    if provider == "cohere":
+    if effective_provider == "cohere":
         return bool(os.getenv("COHERE_API_KEY", "").strip())
-    if provider == "jina":
+    if effective_provider == "jina":
         return bool(os.getenv("JINA_API_KEY", "").strip())
-    if provider == "local":
+    if effective_provider == "local":
         try:
             import sentence_transformers  # noqa: F401
             return True
@@ -83,11 +113,12 @@ def _rerank_cohere(
     passages: list[str],
     *,
     top_k: int,
+    model: str | None = None,
 ) -> list[RerankedResult]:
     import cohere  # type: ignore[import]
 
     api_key = os.getenv("COHERE_API_KEY", "").strip()
-    model = _reranker_model()
+    model = reranker_model("cohere", model)
     co = cohere.Client(api_key)
     response = co.rerank(
         model=model,
@@ -108,9 +139,10 @@ def _rerank_jina(
     passages: list[str],
     *,
     top_k: int,
+    model: str | None = None,
 ) -> list[RerankedResult]:
     api_key = os.getenv("JINA_API_KEY", "").strip()
-    model = _reranker_model()
+    model = reranker_model("jina", model)
     payload: dict[str, Any] = {
         "model": model,
         "query": query,
@@ -124,6 +156,15 @@ def _rerank_jina(
     }
     with httpx.Client(timeout=30.0) as client:
         resp = client.post(_JINA_RERANK_URL, json=payload, headers=headers)
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After", "").strip()
+            try:
+                delay = min(float(retry_after), 10.0) if retry_after else 2.0
+            except ValueError:
+                delay = 2.0
+            log.warning("Jina reranker rate limited; retrying once after %.1fs", delay)
+            time.sleep(delay)
+            resp = client.post(_JINA_RERANK_URL, json=payload, headers=headers)
     resp.raise_for_status()
     data = resp.json()
     results: list[RerankedResult] = []
@@ -143,10 +184,11 @@ def _rerank_local(
     passages: list[str],
     *,
     top_k: int,
+    model: str | None = None,
 ) -> list[RerankedResult]:
     from sentence_transformers import CrossEncoder  # type: ignore[import]
 
-    model_name = _reranker_model()
+    model_name = reranker_model("local", model)
     if model_name not in _local_model_cache:
         log.info("Loading local cross-encoder model: %s", model_name)
         _local_model_cache[model_name] = CrossEncoder(model_name)
@@ -181,6 +223,7 @@ def rerank(
     *,
     top_k: int = 12,
     provider: str | None = None,
+    model: str | None = None,
 ) -> list[RerankedResult]:
     """
     Score and rerank passages against query.
@@ -190,14 +233,14 @@ def rerank(
     """
     if not passages:
         return []
-    effective_provider = (provider or _reranker_provider()).strip().lower()
+    effective_provider = _reranker_provider(provider)
     top_k = min(top_k, len(passages))
 
     if effective_provider == "cohere":
-        return _rerank_cohere(query, passages, top_k=top_k)
+        return _rerank_cohere(query, passages, top_k=top_k, model=model)
     if effective_provider == "jina":
-        return _rerank_jina(query, passages, top_k=top_k)
+        return _rerank_jina(query, passages, top_k=top_k, model=model)
     if effective_provider == "local":
-        return _rerank_local(query, passages, top_k=top_k)
+        return _rerank_local(query, passages, top_k=top_k, model=model)
 
     raise ValueError(f"Unknown or unsupported reranker provider: {effective_provider!r}")

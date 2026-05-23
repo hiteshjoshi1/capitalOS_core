@@ -37,4 +37,4 @@ spacy>=3.8.2,<3.9
 unstructured[pdf]>=0.11.0
 # RAG Issue 141 — cross-encoder reranking (optional; install as needed)
 # cohere>=5.0.0           # Cohere Rerank API provider
-# sentence-transformers>=3.0  # Local cross-encoder provider (downloads ~100MB model)
+# sentence-transformers>=3.0  # Local cross-encoder provider; do not install in base API image
