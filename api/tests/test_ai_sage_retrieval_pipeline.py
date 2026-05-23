@@ -324,6 +324,37 @@ def test_collect_candidate_chunks_adds_topic_focused_retrieval_pass():
     assert any(chunk.chunk_id == "byd-topic" for chunk in chunks)
 
 
+def test_collect_candidate_chunks_retries_open_corpus_when_selected_authors_are_empty():
+    import app.rag.concept_mode as cm
+
+    calls: list[list[str] | None] = []
+
+    def _retrieve(_query: str, *_args, **kwargs):
+        calls.append(kwargs["author_ids"])
+        if kwargs["author_ids"] is None:
+            return ([_mk_chunk("mr-market", text="Mr Market is there to serve you.", cosine_distance=0.2)], False, None)
+        return ([], False, None)
+
+    with patch("app.rag.concept_mode._retrieve_with_intent_fallback", side_effect=_retrieve):
+        chunks, relaxed, reason = cm._collect_candidate_chunks(
+            "How should investors think about Mr Market?",
+            MagicMock(),
+            intent=QueryIntent(
+                query_type="single_author",
+                author_ids=["ben_graham"],
+                author_names=["Benjamin Graham"],
+                topic_entities=["Mr Market"],
+            ),
+            author_ids=["ben_graham"],
+            broad_top_k=6,
+        )
+
+    assert calls == [["ben_graham"], ["ben_graham"], None]
+    assert [chunk.chunk_id for chunk in chunks] == ["mr-market"]
+    assert relaxed is True
+    assert reason == "No results under selected-author candidates; selected author filter removed."
+
+
 def test_buffett_query_surfaces_results_by_heuristic_rank():
     """Without cross-encoder, heuristic ranking uses keyword overlap + cosine distance."""
     import app.rag.concept_mode as cm

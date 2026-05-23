@@ -75,6 +75,14 @@ def test_reranker_available_returns_true_for_jina_with_key():
         assert reranker.reranker_available() is True
 
 
+def test_reranker_input_mode_normalizes_aliases():
+    with _set_env(RAG_RERANKER_INPUT_MODE="expanded"):
+        from app.rag import reranker
+
+        assert reranker.reranker_input_mode() == "expanded_context"
+        assert reranker.reranker_input_mode("anchor") == "raw"
+
+
 def test_reranker_available_local_requires_sentence_transformers():
     with _set_env(RAG_RERANKER_PROVIDER="local"):
         with patch.dict("sys.modules", {"sentence_transformers": None}):
@@ -250,6 +258,13 @@ def test_jina_reranker_http_error_propagates():
             _rerank_jina("q", passages, top_k=2)
 
 
+def test_rerank_provider_override_uses_provider_specific_model():
+    with _set_env(RAG_RERANKER_PROVIDER="none", RAG_RERANKER_LOCAL_MODEL="cross-encoder/test-model"):
+        from app.rag.reranker import reranker_model
+
+        assert reranker_model("local") == "cross-encoder/test-model"
+
+
 # ── Local cross-encoder provider ──────────────────────────────────────────────
 
 
@@ -392,6 +407,7 @@ def test_cross_encoder_reranking_overrides_cosine_order():
     import app.rag.concept_mode as cm
 
     with (
+        _set_env(RAG_RERANKER_FUSION_MODE="pure"),
         patch("app.rag.concept_mode.reranker_available", return_value=True),
         patch("app.rag.concept_mode._cross_encoder_rerank", return_value=ce_results),
     ):
@@ -400,6 +416,163 @@ def test_cross_encoder_reranking_overrides_cosine_order():
     assert result[0].chunk_id == "c3"
     assert result[1].chunk_id == "c2"
     assert result[2].chunk_id == "c1"
+
+
+def test_cross_encoder_conditional_blend_keeps_strong_heuristic_signal():
+    from app.rag.retrieval import RetrievedChunk
+
+    from app.rag.reranker import RerankedResult
+
+    def _mk_chunk(cid, text, dist):
+        return RetrievedChunk(
+            chunk_id=cid,
+            document_id="doc-1",
+            chunk_index=0,
+            text=text,
+            token_count=50,
+            metadata_json={},
+            cosine_distance=dist,
+        )
+
+    candidates = [
+        _mk_chunk("c1", "moat durability exact concept", 0.20),
+        _mk_chunk("c2", "less direct passage", 0.10),
+        _mk_chunk("c3", "unrelated noise", 0.01),
+    ]
+    ce_results = [
+        RerankedResult(index=2, relevance_score=0.99, text=candidates[2].text),
+        RerankedResult(index=1, relevance_score=0.20, text=candidates[1].text),
+        RerankedResult(index=0, relevance_score=0.10, text=candidates[0].text),
+    ]
+
+    import app.rag.concept_mode as cm
+
+    with (
+        _set_env(RAG_RERANKER_FUSION_MODE="conditional_blend"),
+        patch("app.rag.concept_mode.reranker_available", return_value=True),
+        patch("app.rag.concept_mode._cross_encoder_rerank", return_value=ce_results),
+    ):
+        result = cm._rerank_candidate_chunks("moat durability", candidates, top_k=3)
+
+    assert result[0].chunk_id == "c1"
+    assert result[0].metadata_json["reranker_fusion"]["mode"] == "conditional_blend"
+
+
+def test_cross_encoder_adaptive_fusion_allows_aggressive_broad_synthesis_queries():
+    from app.rag.retrieval import RetrievedChunk
+
+    from app.rag.reranker import RerankedResult
+
+    def _mk_chunk(cid, text, dist):
+        return RetrievedChunk(
+            chunk_id=cid,
+            document_id="doc-1",
+            chunk_index=0,
+            text=text,
+            token_count=50,
+            metadata_json={},
+            cosine_distance=dist,
+        )
+
+    candidates = [
+        _mk_chunk("c1", "mentions mental models but shallow", 0.10),
+        _mk_chunk("c2", "inversion incentives psychology and margin of safety", 0.30),
+    ]
+    ce_results = [
+        RerankedResult(index=1, relevance_score=0.95, text=candidates[1].text),
+        RerankedResult(index=0, relevance_score=0.05, text=candidates[0].text),
+    ]
+
+    import app.rag.concept_mode as cm
+
+    with (
+        _set_env(RAG_RERANKER_FUSION_MODE="adaptive"),
+        patch("app.rag.concept_mode.reranker_available", return_value=True),
+        patch("app.rag.concept_mode._cross_encoder_rerank", return_value=ce_results),
+    ):
+        result = cm._rerank_candidate_chunks("What are the main mental models?", candidates, top_k=2)
+
+    assert result[0].chunk_id == "c2"
+    assert result[0].metadata_json["reranker_fusion"]["requested_mode"] == "adaptive"
+    assert result[0].metadata_json["reranker_fusion"]["mode"] == "pure"
+    assert result[0].metadata_json["reranker_fusion"]["aggressive_query"] is True
+
+
+def test_cross_encoder_reranker_can_use_expanded_context_inputs():
+    from app.rag.retrieval import RetrievedChunk
+
+    def _mk_chunk(cid: str, text: str):
+        return RetrievedChunk(
+            chunk_id=cid,
+            document_id="doc-1",
+            chunk_index=0,
+            text=text,
+            token_count=50,
+            metadata_json={},
+            cosine_distance=0.2,
+        )
+
+    candidates = [_mk_chunk("c1", "raw anchor"), _mk_chunk("c2", "other raw anchor")]
+    expanded = {
+        "c1": _mk_chunk("c1", "expanded context for chunk one"),
+        "c2": _mk_chunk("c2", "expanded context for chunk two"),
+    }
+
+    import app.rag.concept_mode as cm
+
+    with (
+        _set_env(RAG_RERANKER_PROVIDER="jina", JINA_API_KEY="jina-key", RAG_RERANKER_INPUT_MODE="expanded_context"),
+        patch("app.rag.concept_mode.reranker_available", return_value=True),
+        patch("app.rag.concept_mode._cross_encoder_rerank", return_value=[]) as mock_rerank,
+    ):
+        cm._rerank_candidate_chunks(
+            "moat durability",
+            candidates,
+            top_k=2,
+            expanded_by_chunk_id=expanded,
+        )
+
+    rerank_args = mock_rerank.call_args.args
+    assert rerank_args[1] == [
+        "expanded context for chunk one",
+        "expanded context for chunk two",
+    ]
+
+
+def test_cross_encoder_reranker_can_use_compact_context_inputs():
+    from app.rag.retrieval import RetrievedChunk
+
+    def _mk_chunk(cid: str, text: str):
+        return RetrievedChunk(
+            chunk_id=cid,
+            document_id="doc-1",
+            chunk_index=0,
+            text=text,
+            token_count=50,
+            metadata_json={"document_title": "Annual Letter", "section_heading": "Buybacks"},
+            cosine_distance=0.2,
+        )
+
+    candidates = [_mk_chunk("c1", "raw anchor")]
+    expanded = {"c1": _mk_chunk("c1", "expanded context for chunk one " * 80)}
+
+    import app.rag.concept_mode as cm
+
+    with (
+        _set_env(RAG_RERANKER_PROVIDER="jina", JINA_API_KEY="jina-key", RAG_RERANKER_INPUT_MODE="compact_context"),
+        patch("app.rag.concept_mode.reranker_available", return_value=True),
+        patch("app.rag.concept_mode._cross_encoder_rerank", return_value=[]) as mock_rerank,
+    ):
+        cm._rerank_candidate_chunks(
+            "buybacks",
+            candidates,
+            top_k=1,
+            expanded_by_chunk_id=expanded,
+        )
+
+    rerank_args = mock_rerank.call_args.args
+    assert rerank_args[1][0].startswith("Annual Letter | Buybacks")
+    assert len(rerank_args[1][0]) < len(expanded["c1"].text) + 30
 
 
 def test_diversity_cap_still_applied_after_cross_encoder():
@@ -442,6 +615,7 @@ def test_diversity_cap_still_applied_after_cross_encoder():
     import app.rag.concept_mode as cm
 
     with (
+        _set_env(RAG_RERANKER_FUSION_MODE="pure"),
         patch("app.rag.concept_mode.reranker_available", return_value=True),
         patch("app.rag.concept_mode._cross_encoder_rerank", return_value=ce_results),
     ):

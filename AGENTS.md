@@ -14,6 +14,7 @@ Mode: Deterministic, verifiable, reproducible
 4. No hardcoded IDs.
 5. All logic must be testable via curl.
 6. Every change must be verifiable via a Makefile command.
+7. Code external/model/vendor integrations to a narrow interface with provider selection via config; keep provider-specific logic isolated so providers can be swapped or disabled without changing callers.
 8. Never modify main branch
 9. Never delete unrelated files
 10. Do not refactor outside scope

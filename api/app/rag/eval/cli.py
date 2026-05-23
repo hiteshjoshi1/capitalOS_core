@@ -24,7 +24,7 @@ from typing import Optional
 import click
 
 from app.db.session import SessionLocal
-from app.rag.eval.runner import EvalReport, compare_reports, run_evaluation
+from app.rag.eval.runner import EvalReport, compare_reports, run_evaluation, run_reranker_diagnosis
 
 log = logging.getLogger(__name__)
 _DEFAULT_GOLDEN_FIXTURE = str(Path(__file__).with_name("fixtures") / "rag_golden_queries.yaml")
@@ -174,6 +174,83 @@ def gate(baseline_report: str, label: str, top_k: int, source_type: Optional[str
 
 
 @cli.command()
+@click.option("--top-k", default=10, show_default=True, help="Number of final chunks to score per query.")
+@click.option(
+    "--candidate-pool-size",
+    default=40,
+    show_default=True,
+    help="Broad retrieval pool size before heuristic/reranker selection.",
+)
+@click.option(
+    "--source-type",
+    type=click.Choice(["html", "pdf", "text", "manual"], case_sensitive=False),
+    default=None,
+    help="Restrict evaluation to golden evidence backed by this source type.",
+)
+@click.option(
+    "--include-cohere/--no-include-cohere",
+    default=False,
+    show_default=True,
+    help="Benchmark Cohere too when credentials are available.",
+)
+@click.option(
+    "--provider",
+    "providers",
+    multiple=True,
+    type=click.Choice(["jina", "local", "cohere"], case_sensitive=False),
+    help="Limit diagnosis to one or more reranker providers.",
+)
+@click.option(
+    "--input-mode",
+    "input_modes",
+    multiple=True,
+    type=click.Choice(["raw", "compact_context", "compact", "short_context", "expanded_context", "expanded"], case_sensitive=False),
+    help="Limit diagnosis to one or more reranker input modes.",
+)
+@click.option("--query-contains", default=None, help="Only run golden queries containing this text.")
+@click.option(
+    "--cache-path",
+    default="/tmp/rag_reranker_diagnosis_cache.json",
+    show_default=True,
+    help="Cache provider rerank results by query and passage hashes.",
+)
+@click.option("--output", type=click.Path(), default=None, help="Write JSON diagnosis to this file.")
+def diagnose_reranker(
+    top_k: int,
+    candidate_pool_size: int,
+    source_type: Optional[str],
+    include_cohere: bool,
+    providers: tuple[str, ...],
+    input_modes: tuple[str, ...],
+    query_contains: Optional[str],
+    cache_path: str,
+    output: Optional[str],
+) -> None:
+    """Benchmark heuristic vs dedicated rerankers and decide whether default rollout is justified."""
+    db = SessionLocal()
+    try:
+        payload = run_reranker_diagnosis(
+            db,
+            top_k=top_k,
+            candidate_pool_size=candidate_pool_size,
+            source_type=source_type,
+            include_cohere=include_cohere,
+            providers=list(providers),
+            input_modes=list(input_modes),
+            query_contains=query_contains,
+            cache_path=cache_path,
+        )
+    finally:
+        db.close()
+
+    rendered = json.dumps(payload, indent=2)
+    click.echo(rendered)
+    if output:
+        Path(output).write_text(rendered)
+        click.echo(f"Diagnosis written to {output}", err=True)
+
+
+@cli.command()
 @click.option(
     "--file",
     "fixture_file",
@@ -182,7 +259,13 @@ def gate(baseline_report: str, label: str, top_k: int, source_type: Optional[str
     help="Path to YAML fixture file.",
 )
 @click.option("--dry-run", is_flag=True, default=False, help="Validate fixture without writing to DB.")
-def seed(fixture_file: str, dry_run: bool) -> None:
+@click.option(
+    "--replace",
+    is_flag=True,
+    default=False,
+    help="Delete existing golden rows before seeding this fixture.",
+)
+def seed(fixture_file: str, dry_run: bool, replace: bool) -> None:
     """Seed the golden dataset from a YAML fixture file."""
     import yaml
 
@@ -206,6 +289,9 @@ def seed(fixture_file: str, dry_run: bool) -> None:
     inserted = 0
     skipped = 0
     try:
+        if replace:
+            deleted = db.query(RagEvalGolden).delete()
+            click.echo(f"Deleted {deleted} existing golden pairs before seeding.")
         for entry in entries:
             query_text = entry["query"]
             for passage in entry.get("relevant_chunks", []):

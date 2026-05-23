@@ -6,7 +6,16 @@ from unittest.mock import MagicMock, patch
 from click.testing import CliRunner
 
 from app.rag.eval.cli import cli
-from app.rag.eval.runner import EvalReport, GoldenQuery, compare_reports, parse_eval_config, run_evaluation
+from app.rag.eval.runner import (
+    EvalReport,
+    GoldenQuery,
+    compare_reports,
+    default_reranker_experiments,
+    diagnose_jina_failure_mode,
+    parse_eval_config,
+    recommend_reranker_rollout,
+    run_evaluation,
+)
 
 
 def test_parse_eval_config_supports_weighting_and_mode_tokens():
@@ -43,6 +52,41 @@ def test_compare_reports_includes_no_regression_bar():
     assert comparison["no_regression_bar"]["mean_ndcg@10_min_delta"] == -0.02
     assert comparison["no_regression_bar"]["mean_recall@10_min_delta"] == -0.02
     assert comparison["passes_no_regression_bar"] is True
+
+
+def test_default_reranker_experiments_include_available_variants():
+    with (
+        patch("app.rag.reranker.reranker_available") as mock_available,
+        patch("app.rag.reranker.reranker_model") as mock_model,
+    ):
+        mock_available.side_effect = lambda provider=None: provider in {"jina", "local"}
+        mock_model.side_effect = lambda provider=None, model=None: f"{provider}-model"
+        experiments = default_reranker_experiments()
+
+    assert [experiment.label for experiment in experiments] == [
+        "baseline/heuristic",
+        "jina/raw",
+        "jina/compact_context",
+        "jina/expanded_context",
+        "local/raw",
+        "local/compact_context",
+        "local/expanded_context",
+    ]
+
+
+def test_default_reranker_experiments_can_limit_provider_and_input_mode():
+    with (
+        patch("app.rag.reranker.reranker_available") as mock_available,
+        patch("app.rag.reranker.reranker_model") as mock_model,
+    ):
+        mock_available.side_effect = lambda provider=None: provider in {"jina", "local"}
+        mock_model.side_effect = lambda provider=None, model=None: f"{provider}-model"
+        experiments = default_reranker_experiments(providers=["jina"], input_modes=["raw"])
+
+    assert [experiment.label for experiment in experiments] == [
+        "baseline/heuristic",
+        "jina/raw",
+    ]
 
 
 def test_compare_reports_fails_per_query_gate_when_labeled_query_misses_targets():
@@ -150,6 +194,70 @@ def test_compare_reports_passes_per_query_gate_when_targets_are_hit():
     assert comparison["passes_no_regression_bar"] is True
 
 
+def test_recommend_reranker_rollout_keeps_default_disabled_without_clear_win():
+    baseline = EvalReport(
+        config_label="baseline/heuristic",
+        num_queries=1,
+        mean_ndcg_at_5=0.5,
+        mean_ndcg_at_10=0.5,
+        mean_recall_at_5=0.5,
+        mean_recall_at_10=0.5,
+        mean_precision_at_5=0.5,
+        mean_precision_at_10=0.5,
+        mean_mrr=0.5,
+        per_query=[],
+    )
+    candidate = EvalReport(
+        config_label="jina/expanded_context",
+        num_queries=1,
+        mean_ndcg_at_5=0.51,
+        mean_ndcg_at_10=0.51,
+        mean_recall_at_5=0.51,
+        mean_recall_at_10=0.51,
+        mean_precision_at_5=0.51,
+        mean_precision_at_10=0.51,
+        mean_mrr=0.52,
+        per_query=[],
+    )
+
+    recommendation = recommend_reranker_rollout(baseline, [candidate])
+
+    assert recommendation["recommended_default_provider"] == "none"
+    assert recommendation["keep_default_disabled"] is True
+
+
+def test_recommend_reranker_rollout_selects_clear_winner():
+    baseline = EvalReport(
+        config_label="baseline/heuristic",
+        num_queries=1,
+        mean_ndcg_at_5=0.4,
+        mean_ndcg_at_10=0.4,
+        mean_recall_at_5=0.4,
+        mean_recall_at_10=0.4,
+        mean_precision_at_5=0.4,
+        mean_precision_at_10=0.4,
+        mean_mrr=0.4,
+        per_query=[],
+    )
+    candidate = EvalReport(
+        config_label="local/expanded_context",
+        num_queries=1,
+        mean_ndcg_at_5=0.45,
+        mean_ndcg_at_10=0.44,
+        mean_recall_at_5=0.45,
+        mean_recall_at_10=0.43,
+        mean_precision_at_5=0.45,
+        mean_precision_at_10=0.44,
+        mean_mrr=0.46,
+        per_query=[],
+    )
+
+    recommendation = recommend_reranker_rollout(baseline, [candidate])
+
+    assert recommendation["recommended_default_label"] == "local/expanded_context"
+    assert recommendation["keep_default_disabled"] is False
+
+
 def test_compare_reports_fails_candidate_recall_gate_when_top50_misses_targets():
     report_a = EvalReport(
         config_label="baseline",
@@ -209,6 +317,79 @@ def test_compare_reports_fails_candidate_recall_gate_when_top50_misses_targets()
     assert comparison["passes_per_query_gates"] is False
     assert comparison["passes_no_regression_bar"] is False
     assert any("high_relevance_hits@50" in failure for failure in comparison["per_query_gates"][0]["failures"])
+
+
+def test_diagnose_jina_failure_mode_flags_raw_regression_and_pool_gaps():
+    baseline = EvalReport(
+        config_label="baseline/heuristic",
+        num_queries=1,
+        mean_ndcg_at_5=0.5,
+        mean_ndcg_at_10=0.5,
+        mean_recall_at_5=0.5,
+        mean_recall_at_10=0.5,
+        mean_precision_at_5=0.5,
+        mean_precision_at_10=0.5,
+        mean_mrr=0.5,
+        per_query=[{"query": "moat", "ndcg@10": 0.5, "recall@10": 0.5}],
+    )
+    jina_raw = EvalReport(
+        config_label="jina/raw",
+        num_queries=1,
+        mean_ndcg_at_5=0.3,
+        mean_ndcg_at_10=0.3,
+        mean_recall_at_5=0.3,
+        mean_recall_at_10=0.3,
+        mean_precision_at_5=0.3,
+        mean_precision_at_10=0.3,
+        mean_mrr=0.3,
+        per_query=[
+            {
+                "query": "moat",
+                "ndcg@10": 0.3,
+                "recall@10": 0.3,
+                "candidate_pool_recall": 0.25,
+                "top_results": [],
+            }
+        ],
+    )
+    jina_expanded = EvalReport(
+        config_label="jina/expanded_context",
+        num_queries=1,
+        mean_ndcg_at_5=0.35,
+        mean_ndcg_at_10=0.35,
+        mean_recall_at_5=0.35,
+        mean_recall_at_10=0.35,
+        mean_precision_at_5=0.35,
+        mean_precision_at_10=0.35,
+        mean_mrr=0.35,
+        per_query=[{"query": "moat", "ndcg@10": 0.35, "recall@10": 0.35}],
+    )
+    local_report = EvalReport(
+        config_label="local/expanded_context",
+        num_queries=1,
+        mean_ndcg_at_5=0.55,
+        mean_ndcg_at_10=0.55,
+        mean_recall_at_5=0.55,
+        mean_recall_at_10=0.55,
+        mean_precision_at_5=0.55,
+        mean_precision_at_10=0.55,
+        mean_mrr=0.55,
+        per_query=[{"query": "moat", "ndcg@10": 0.55, "recall@10": 0.55}],
+    )
+
+    diagnosis = diagnose_jina_failure_mode(
+        baseline,
+        {
+            "baseline/heuristic": baseline,
+            "jina/raw": jina_raw,
+            "jina/expanded_context": jina_expanded,
+            "local/expanded_context": local_report,
+        },
+        [{"query": "moat", "candidate_pool_recall": 0.25}],
+    )
+
+    assert "Raw-anchor Jina reranking regressed" in diagnosis["summary"]
+    assert any("Expanded local context improved Jina" in finding for finding in diagnosis["findings"])
 
 
 def test_run_evaluation_uses_hybrid_with_config_overrides():
@@ -308,3 +489,64 @@ def test_eval_cli_gate_fails_on_pdf_regression(tmp_path):
 
     assert result.exit_code == 1
     assert '"passes_no_regression_bar": false' in result.output
+
+
+def test_eval_cli_diagnose_reranker_writes_report(tmp_path):
+    runner = CliRunner()
+    output_path = tmp_path / "reranker-report.json"
+
+    with patch("app.rag.eval.cli.SessionLocal") as mock_session_local, patch(
+        "app.rag.eval.cli.run_reranker_diagnosis",
+        return_value={"rollout_policy": {"recommended_default_provider": "none"}},
+    ) as mock_diagnosis:
+        mock_session_local.return_value = MagicMock(close=MagicMock())
+        result = runner.invoke(
+            cli,
+            [
+                "diagnose-reranker",
+                "--provider",
+                "jina",
+                "--input-mode",
+                "raw",
+                "--query-contains",
+                "Munger",
+                "--cache-path",
+                str(tmp_path / "cache.json"),
+                "--output",
+                str(output_path),
+            ],
+        )
+
+    assert result.exit_code == 0
+    _, kwargs = mock_diagnosis.call_args
+    assert kwargs["providers"] == ["jina"]
+    assert kwargs["input_modes"] == ["raw"]
+    assert kwargs["query_contains"] == "Munger"
+    assert output_path.exists()
+    assert '"recommended_default_provider": "none"' in output_path.read_text()
+
+
+def test_eval_cli_seed_replace_deletes_existing_rows(tmp_path):
+    fixture_path = tmp_path / "golden.yaml"
+    fixture_path.write_text("golden_queries: []\n")
+    query = MagicMock()
+    query.delete.return_value = 7
+    db = MagicMock()
+    db.query.return_value = query
+
+    runner = CliRunner()
+    with patch("app.db.session.SessionLocal", return_value=db):
+        result = runner.invoke(
+            cli,
+            [
+                "seed",
+                "--replace",
+                "--file",
+                str(fixture_path),
+            ],
+        )
+
+    assert result.exit_code == 0
+    query.delete.assert_called_once()
+    db.commit.assert_called_once()
+    assert "Deleted 7 existing golden pairs before seeding." in result.output
