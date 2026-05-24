@@ -57,6 +57,24 @@ def _daily_limit() -> int:
     return int(os.getenv("STOCK_DAILY_SYMBOL_LIMIT", "20"))
 
 
+def _refresh_batch_size() -> int:
+    raw = os.getenv("STOCK_REFRESH_BATCH_SIZE", "25")
+    try:
+        size = int(raw)
+    except ValueError:
+        size = 25
+    return max(1, size)
+
+
+def _quote_stale_days() -> int:
+    raw = os.getenv("QUOTE_STALE_DAYS", "3")
+    try:
+        days = int(raw)
+    except ValueError:
+        days = 3
+    return max(1, days)
+
+
 
 def _provider_chain(exchange_code: str) -> list[str]:
     exchange_code = exchange_code.upper()
@@ -150,7 +168,9 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
         mapped_symbol = str(row["exchange_symbol"] or "").strip().upper()
         asset_symbol = str(row.get("asset_symbol") or "").strip().upper()
         # US maps can drift to company-name-like symbols; prefer canonical asset symbol when present.
-        sym = asset_symbol if ex == "US" and asset_symbol else mapped_symbol
+        asset_candidate = _ticker_candidate(asset_symbol)
+        mapped_candidate = _ticker_candidate(mapped_symbol)
+        sym = asset_candidate if ex == "US" and asset_candidate else mapped_candidate
         ex = str(row["exchange_code"]).strip().upper()
         if not sym:
             continue
@@ -175,6 +195,8 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
 
 def _ticker_candidate(value: str | None) -> str | None:
     raw = (value or "").strip().upper()
+    if re.fullmatch(r"[A-Z]{1,5}\s+[A-Z0-9]{1,2}", raw):
+        raw = re.sub(r"\s+", ".", raw)
     if not raw or " " in raw or len(raw) > 24:
         return None
     if not re.fullmatch(r"[A-Z0-9&.\-]+", raw):
@@ -620,6 +642,196 @@ def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> di
     return out
 
 
+def _batched(values: list[str], size: int) -> list[list[str]]:
+    return [values[idx : idx + size] for idx in range(0, len(values), size)]
+
+
+def _latest_price_details(db: Session, asset_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not asset_ids:
+        return {}
+    placeholders = ",".join(str(int(asset_id)) for asset_id in sorted(asset_ids))
+    rows = db.execute(
+        text(
+            f"""
+            SELECT p.asset_id, p.price, p.currency, p.trade_date, p.source, p.provider_symbol, p.exchange_code
+            FROM prices p
+            JOIN (
+              SELECT asset_id, MAX(trade_date) AS trade_date
+              FROM prices
+              WHERE asset_id IN ({placeholders}) AND trade_date IS NOT NULL
+              GROUP BY asset_id
+            ) latest ON latest.asset_id = p.asset_id AND latest.trade_date = p.trade_date
+            """
+        )
+    ).mappings().all()
+    return {
+        int(row["asset_id"]): {
+            "price": float(row["price"]) if row["price"] is not None else None,
+            "currency": row["currency"],
+            "trade_date": row["trade_date"],
+            "source": row["source"],
+            "provider_symbol": row["provider_symbol"],
+            "exchange_code": row["exchange_code"],
+        }
+        for row in rows
+    }
+
+
+def _latest_run_items(db: Session, exchange_code: str, asset_ids: set[int]) -> dict[int, dict[str, Any]]:
+    if not asset_ids:
+        return {}
+    placeholders = ",".join(str(int(asset_id)) for asset_id in sorted(asset_ids))
+    rows = db.execute(
+        text(
+            f"""
+            SELECT i.asset_id, i.provider, i.symbol, i.status, i.trade_date, i.source_note, i.created_at
+            FROM market_data_run_items i
+            JOIN (
+              SELECT asset_id, MAX(id) AS id
+              FROM market_data_run_items
+              WHERE exchange_code = :exchange_code AND asset_id IN ({placeholders})
+              GROUP BY asset_id
+            ) latest ON latest.id = i.id
+            """
+        ),
+        {"exchange_code": exchange_code},
+    ).mappings().all()
+    return {int(row["asset_id"]): dict(row) for row in rows}
+
+
+def _latest_exchange_run_summary(db: Session, exchange_code: str) -> dict[str, Any] | None:
+    row = db.execute(
+        text(
+            """
+            SELECT id, provider, exchange_code, trade_date, status,
+                   requested_symbols, received_rows, upserted_rows, missing_symbols,
+                   started_at, finished_at, error_summary
+            FROM market_data_runs
+            WHERE exchange_code = :exchange_code
+            ORDER BY started_at DESC, id DESC
+            LIMIT 1
+            """
+        ),
+        {"exchange_code": exchange_code},
+    ).mappings().one_or_none()
+    return dict(row) if row else None
+
+
+def _normalize_trade_date(value: Any) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, date):
+        return value
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value).date()
+        except ValueError:
+            try:
+                return date.fromisoformat(value)
+            except ValueError:
+                return None
+    return None
+
+
+def _freshness_status(trade_date_value: Any) -> tuple[str, int | None]:
+    trade_date = _normalize_trade_date(trade_date_value)
+    if trade_date is None:
+        return "missing", None
+    age_days = max(0, (datetime.now(tz=timezone.utc).date() - trade_date).days)
+    return ("stale" if age_days > _quote_stale_days() else "fresh"), age_days
+
+
+def _provider_from_source(source: str | None) -> str | None:
+    if not source:
+        return None
+    provider = source.split("_", 1)[0].strip()
+    return provider or None
+
+
+def _exchange_diagnostics(
+    db: Session,
+    exchange_code: str,
+    *,
+    attempted_asset_ids: set[int] | None = None,
+    deferred_asset_ids: set[int] | None = None,
+) -> dict[str, Any]:
+    symbols = _load_symbols(db, exchange_code, daily_limit=0)
+    asset_ids = {row.asset_id for row in symbols}
+    latest_prices = _latest_price_details(db, asset_ids)
+    latest_items = _latest_run_items(db, exchange_code, asset_ids)
+    latest_run = _latest_exchange_run_summary(db, exchange_code)
+    latest_run_started_at = latest_run.get("started_at") if latest_run else None
+    deferred_lookup = deferred_asset_ids or set()
+
+    summary = {
+        "active_symbols": len(symbols),
+        "refreshed": 0,
+        "failed": 0,
+        "deferred": 0,
+        "fresh": 0,
+        "stale": 0,
+        "missing": 0,
+    }
+    items: list[dict[str, Any]] = []
+    for row in symbols:
+        latest_price = latest_prices.get(row.asset_id, {})
+        latest_item = latest_items.get(row.asset_id, {})
+        freshness_status, age_days = _freshness_status(latest_price.get("trade_date"))
+        summary[freshness_status] += 1
+
+        attempt_status = str(latest_item.get("status") or "").lower()
+        refresh_status = freshness_status
+        if attempted_asset_ids is not None:
+            if row.asset_id in deferred_lookup:
+                refresh_status = "deferred"
+            elif attempt_status in {"upserted", "fallback_upserted"}:
+                refresh_status = "refreshed"
+            elif attempt_status in {"missing", "invalid"}:
+                refresh_status = "failed"
+        else:
+            if attempt_status in {"upserted", "fallback_upserted"}:
+                refresh_status = "refreshed"
+            elif attempt_status in {"missing", "invalid"}:
+                refresh_status = "failed"
+            elif latest_run_started_at is not None and not latest_item:
+                refresh_status = "deferred"
+
+        if refresh_status in {"refreshed", "failed", "deferred"}:
+            summary[refresh_status] += 1
+
+        items.append(
+            {
+                "asset_id": row.asset_id,
+                "symbol": row.exchange_symbol,
+                "mapped_symbol": row.exchange_symbol,
+                "provider_symbol": latest_item.get("symbol") or latest_price.get("provider_symbol"),
+                "provider": latest_item.get("provider") or _provider_from_source(latest_price.get("source")),
+                "source": latest_price.get("source"),
+                "currency": latest_price.get("currency") or row.quote_currency,
+                "latest_price": latest_price.get("price"),
+                "latest_trade_date": (
+                    _normalize_trade_date(latest_price.get("trade_date")).isoformat()
+                    if _normalize_trade_date(latest_price.get("trade_date"))
+                    else None
+                ),
+                "age_days": age_days,
+                "freshness_status": freshness_status,
+                "refresh_status": refresh_status,
+                "failure_reason": latest_item.get("source_note"),
+                "attempt_status": attempt_status or None,
+            }
+        )
+
+    items.sort(key=lambda item: ((item["refresh_status"] != "failed"), (item["freshness_status"] == "fresh"), item["symbol"]))
+    return {
+        "exchange_code": exchange_code,
+        "latest_run": latest_run,
+        "diagnostics_summary": summary,
+        "symbols": items,
+    }
+
 
 def _fetch_quotes(
     provider_name: str,
@@ -650,6 +862,8 @@ def run_exchange_refresh(
     exchange_code: str,
     *,
     trade_date: date | None = None,
+    full_coverage: bool = False,
+    batch_size: int | None = None,
     eodhd: EODHDProvider | None = None,
     finnhub: FinnhubProvider | None = None,
     eoddata: EODDataProvider | None = None,
@@ -666,19 +880,33 @@ def run_exchange_refresh(
 
     backfilled_symbols = _backfill_symbol_map_for_exchange(db, exchange_code)
     daily_limit = _daily_limit()
-    symbols = _load_symbols(db, exchange_code, daily_limit=daily_limit)
+    batch_size = batch_size or _refresh_batch_size()
+    all_symbols = _load_symbols(db, exchange_code, daily_limit=0)
+    symbols = all_symbols if full_coverage else all_symbols[:daily_limit]
+    deferred_symbols = all_symbols[len(symbols) :] if not full_coverage else []
     if not symbols:
+        diagnostics = _exchange_diagnostics(
+            db,
+            exchange_code,
+            attempted_asset_ids=set(),
+            deferred_asset_ids={row.asset_id for row in deferred_symbols},
+        )
         return {
             "exchange_code": exchange_code,
             "trade_date": trade_date.isoformat(),
             "requested_symbols": 0,
+            "total_active_symbols": len(all_symbols),
             "upserted_rows": 0,
             "dividend_rows_upserted": 0,
             "missing_symbols": 0,
             "backfilled_symbols": backfilled_symbols,
-            "status": "success",
+            "status": "partial" if deferred_symbols else "success",
             "providers": [],
             "daily_limit": daily_limit,
+            "full_coverage": full_coverage,
+            "batch_size": batch_size,
+            "deferred_symbols": len(deferred_symbols),
+            "diagnostics": diagnostics,
         }
 
     unresolved = list(symbols)
@@ -687,6 +915,7 @@ def run_exchange_refresh(
     total_invalid = 0
     providers_used: list[str] = []
     run_ids: dict[str, int] = {}
+    attempted_asset_ids: set[int] = set()
 
     for step_idx, provider_name in enumerate(_provider_chain(exchange_code)):
         if not unresolved:
@@ -703,25 +932,29 @@ def run_exchange_refresh(
 
         provider_error: str | None = None
         quotes: dict[str, EodQuote] = {}
-        try:
-            quotes = _fetch_quotes(
-                provider_name,
-                exchange_code=exchange_code,
-                symbols=provider_symbols,
-                trade_date=trade_date,
-                eodhd=eodhd,
-                finnhub=finnhub,
-                eoddata=eoddata,
-                yfinance=yfinance,
-                yahoo=yahoo,
-            )
-        except Exception as exc:  # noqa: BLE001
-            provider_error = str(exc)
+        for batch_symbols in _batched(provider_symbols, batch_size):
+            try:
+                quotes.update(
+                    _fetch_quotes(
+                        provider_name,
+                        exchange_code=exchange_code,
+                        symbols=batch_symbols,
+                        trade_date=trade_date,
+                        eodhd=eodhd,
+                        finnhub=finnhub,
+                        eoddata=eoddata,
+                        yfinance=yfinance,
+                        yahoo=yahoo,
+                    )
+                )
+            except Exception as exc:  # noqa: BLE001
+                provider_error = str(exc)
 
         upserted_rows = 0
         invalid_rows = 0
         next_unresolved: list[SymbolMapRow] = []
         for provider_symbol, row in by_symbol.items():
+            attempted_asset_ids.add(row.asset_id)
             quote = quotes.get(provider_symbol.upper())
             if quote is None:
                 next_unresolved.append(row)
@@ -824,52 +1057,67 @@ def run_exchange_refresh(
         db,
         exchange_code=exchange_code,
         trade_date=trade_date,
-        symbols=_load_symbols(db, exchange_code, daily_limit=0),
+        symbols=all_symbols,
         yfinance=yfinance,
     )
 
+    diagnostics = _exchange_diagnostics(
+        db,
+        exchange_code,
+        attempted_asset_ids=attempted_asset_ids,
+        deferred_asset_ids={row.asset_id for row in deferred_symbols},
+    )
     db.commit()
     return {
         "exchange_code": exchange_code,
         "trade_date": trade_date.isoformat(),
         "requested_symbols": requested_symbols,
+        "total_active_symbols": len(all_symbols),
         "upserted_rows": total_upserted,
         "dividend_rows_upserted": dividend_rows_upserted,
         "missing_symbols": len(unresolved) + total_invalid,
         "backfilled_symbols": backfilled_symbols,
-        "status": "success" if (not unresolved and total_invalid == 0) else "partial",
+        "status": "success" if (not unresolved and total_invalid == 0 and not deferred_symbols) else "partial",
         "providers": providers_used,
         "run_ids": run_ids,
         "daily_limit": daily_limit,
+        "full_coverage": full_coverage,
+        "batch_size": batch_size,
+        "deferred_symbols": len(deferred_symbols),
+        "diagnostics": diagnostics,
     }
 
 
 
-def run_all_exchanges(db: Session, exchanges: list[str] | None = None) -> dict[str, Any]:
+def run_all_exchanges(
+    db: Session,
+    exchanges: list[str] | None = None,
+    *,
+    full_coverage: bool = True,
+    batch_size: int | None = None,
+) -> dict[str, Any]:
     exchanges = exchanges or configured_exchanges()
-    results = [run_exchange_refresh(db, ex) for ex in exchanges]
+    results = [
+        run_exchange_refresh(db, ex, full_coverage=full_coverage, batch_size=batch_size)
+        for ex in exchanges
+    ]
     return {"exchanges": results}
 
 
 
 def latest_status_by_exchange(db: Session) -> list[dict[str, Any]]:
-    rows = db.execute(
-        text(
-            """
-            SELECT r.id, r.provider, r.exchange_code, r.trade_date, r.status,
-                   r.requested_symbols, r.received_rows, r.upserted_rows, r.missing_symbols,
-                   r.started_at, r.finished_at, r.error_summary
-            FROM market_data_runs r
-            JOIN (
-              SELECT exchange_code, MAX(started_at) AS max_started
-              FROM market_data_runs
-              GROUP BY exchange_code
-            ) x ON x.exchange_code = r.exchange_code AND x.max_started = r.started_at
-            ORDER BY r.exchange_code
-            """
+    payload: list[dict[str, Any]] = []
+    for exchange_code in configured_exchanges():
+        diagnostics = _exchange_diagnostics(db, exchange_code)
+        latest_run = diagnostics.pop("latest_run", None) or {}
+        payload.append(
+            {
+                **latest_run,
+                "exchange_code": exchange_code,
+                **diagnostics,
+            }
         )
-    ).mappings().all()
-    return [dict(r) for r in rows]
+    return payload
 
 
 

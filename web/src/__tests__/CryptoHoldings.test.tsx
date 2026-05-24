@@ -17,8 +17,15 @@ vi.mock("../lib/api", () => ({
 const mockApi = vi.mocked(api, true);
 
 const cryptoSummaryFixture: CryptoSummary = {
+  month: "2026-02",
+  snapshot_day: 6,
+  snapshot_as_of: "2026-02-06",
   total_crypto_usd: 8400,
   total_crypto_base: 11200,
+  snapshot_total_base: 10400,
+  snapshot_total_usd: 7800,
+  snapshot_delta_base: 800,
+  snapshot_delta_pct: 800 / 10400,
   base_currency: "SGD",
   eth_exposure_usd: 8000,
   eth_exposure_base: 10667,
@@ -26,6 +33,14 @@ const cryptoSummaryFixture: CryptoSummary = {
   token_exposure_base: 533,
   token_count: 2,
   priced_token_count: 2,
+  trend: [
+    { month: "2025-09", value: null },
+    { month: "2025-10", value: null },
+    { month: "2025-11", value: 9000 },
+    { month: "2025-12", value: 9500 },
+    { month: "2026-01", value: 10000 },
+    { month: "2026-02", value: 10400 },
+  ],
   eth: { balance: 1.2345, value_usd: 8000, value_base: 10667 },
   sol: { balance: 10, value_usd: 400, value_base: 533 },
   top5_holdings: [
@@ -33,8 +48,32 @@ const cryptoSummaryFixture: CryptoSummary = {
     { symbol: "SOL", chain: "solana", amount: 10, value_usd: 400, value_base: 533 },
   ],
   top_holdings: [
-    { symbol: "ETH", chain: "ethereum", amount: 1.2345, value_usd: 8000, value_base: 10667, asset_class: "CRYPTO" },
-    { symbol: "SOL", chain: "solana", amount: 10, value_usd: 400, value_base: 533, asset_class: "CRYPTO" },
+    {
+      symbol: "ETH",
+      chain: "ethereum",
+      amount: 1.2345,
+      value_usd: 8000,
+      value_base: 10667,
+      asset_class: "CRYPTO",
+      price_change_usd: 50,
+      value_change_base: 267,
+      value_change_pct: 0.025,
+      snapshot_delta_base: 600,
+      snapshot_delta_pct: 0.06,
+    },
+    {
+      symbol: "SOL",
+      chain: "solana",
+      amount: 10,
+      value_usd: 400,
+      value_base: 533,
+      asset_class: "CRYPTO",
+      price_change_usd: -2,
+      value_change_base: -20,
+      value_change_pct: -0.04,
+      snapshot_delta_base: 200,
+      snapshot_delta_pct: 0.1,
+    },
   ],
   wallet_exposure: [
     {
@@ -45,7 +84,12 @@ const cryptoSummaryFixture: CryptoSummary = {
       label: "Main Wallet",
       total_usd: 8400,
       total_base: 11200,
+      percent: 100,
     },
+  ],
+  chain_exposure: [
+    { chain: "ethereum", total_usd: 8000, total_base: 10667, percent: 95.2 },
+    { chain: "solana", total_usd: 400, total_base: 533, percent: 4.8 },
   ],
   wallet_chain_exposure: [
     {
@@ -85,7 +129,9 @@ describe("CryptoHoldings route", () => {
     expect(await screen.findByText("Overview")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toHaveValue("2026-02");
     expect(screen.getByLabelText("Base currency")).toHaveValue("SGD");
-    expect(mockApi.cryptoSummary).toHaveBeenCalledWith("SGD");
+    expect(mockApi.cryptoSummary).toHaveBeenCalledWith("2026-02", "SGD");
+    expect(screen.getByText("Exposure by Chain")).toBeInTheDocument();
+    expect(screen.getByText("Exposure by Wallet")).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {
@@ -110,6 +156,7 @@ describe("CryptoHoldings route", () => {
         { symbol: "ETH", chain: "ethereum", amount: 1.1, value_usd: 3500, value_base: 4700, asset_class: "CRYPTO" },
         { symbol: "DUST", chain: "ethereum", amount: 10, value_usd: 5, value_base: 7, asset_class: "CRYPTO" },
       ],
+      chain_exposure: [],
       wallet_exposure: [],
       wallet_chain_exposure: [],
       refresh_triggered: true,
@@ -141,6 +188,7 @@ describe("CryptoHoldings route", () => {
     mockApi.cryptoSummary.mockResolvedValueOnce({
       ...cryptoSummaryFixture,
       top_holdings: [],
+      chain_exposure: [],
       wallet_exposure: [],
       wallet_chain_exposure: [],
       last_refreshed_at: null,
@@ -160,7 +208,7 @@ describe("CryptoHoldings route", () => {
 
     expect(await screen.findByText("No crypto holdings yet.")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-    expect(screen.queryByText("Exposure by Wallet")).not.toBeInTheDocument();
-    expect(screen.queryByText("Exposure by Wallet + Chain")).not.toBeInTheDocument();
+    expect(screen.getByText("Exposure by Wallet")).toBeInTheDocument();
+    expect(screen.getAllByText("No exposure data yet.").length).toBeGreaterThan(0);
   });
 });

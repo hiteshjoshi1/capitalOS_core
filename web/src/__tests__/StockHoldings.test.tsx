@@ -19,11 +19,21 @@ const summaryFixture: StockHoldingsSummary = {
   as_of_month: "2026-02",
   base_currency: "SGD",
   snapshot_day: 6,
+  current_holdings_as_of: "2026-03-01T00:00:00+00:00",
   net_worth_as_of: "2026-03-01T00:00:00+00:00",
   net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
   net_worth_boundary_at: "2026-03-01T00:00:00+00:00",
   net_worth_boundary_exact: false,
   net_worth_freshness_status: "synthetic",
+  quote_freshness_summary: {
+    fresh: 1,
+    stale: 1,
+    missing: 0,
+  },
+  geography_breakdown: [
+    { geography: "HK", current_value: 120000, snapshot_value: 100000, delta_abs: 20000, delta_pct: 0.2 },
+    { geography: "IN", current_value: 90000, snapshot_value: 85000, delta_abs: 5000, delta_pct: 5000 / 85000 },
+  ],
   top_holdings: [
     {
       asset_id: 1,
@@ -37,6 +47,9 @@ const summaryFixture: StockHoldingsSummary = {
       quote_currency: "HKD",
       geo: "HK",
       platform: "IBKR",
+      latest_trade_date: "2026-03-01",
+      quote_freshness_status: "fresh",
+      price_provider: "eodhd",
     },
     {
       asset_id: 2,
@@ -50,6 +63,9 @@ const summaryFixture: StockHoldingsSummary = {
       quote_currency: "INR",
       geo: "IN",
       platform: "IBKR",
+      latest_trade_date: "2026-02-27",
+      quote_freshness_status: "stale",
+      price_provider: "yahoo_finance",
     },
     {
       asset_id: 3,
@@ -80,6 +96,8 @@ describe("StockHoldings", () => {
     );
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+    expect(screen.getByText("Quote Freshness")).toBeInTheDocument();
+    expect(screen.getByText("Geography Breakdown")).toBeInTheDocument();
     expect(screen.queryByText("Dividends")).not.toBeInTheDocument();
 
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
@@ -88,7 +106,10 @@ describe("StockHoldings", () => {
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Current Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Profit & Loss" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Quote freshness" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "% NW" })).toBeInTheDocument();
+    expect(screen.getByText("Fresh")).toBeInTheDocument();
+    expect(screen.getByText("Stale")).toBeInTheDocument();
 
     const hkRow = screen.getByText("700").closest("tr");
     expect(hkRow).not.toBeNull();
@@ -99,6 +120,8 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("HKD 150.12")).toBeInTheDocument();
       expect(scoped.getByText("+HKD 280.04")).toBeInTheDocument();
       expect(scoped.getByText("+21.6%")).toBeInTheDocument();
+      expect(scoped.getByText("fresh")).toBeInTheDocument();
+      expect(scoped.getByText(/2026-03-01 · eodhd/)).toBeInTheDocument();
       expect(scoped.getByText("24.0%")).toBeInTheDocument();
     }
 
@@ -108,7 +131,11 @@ describe("StockHoldings", () => {
       const scoped = within(inRow);
       expect(scoped.getByText("20 shares")).toBeInTheDocument();
       expect(scoped.getAllByText("—").length).toBeGreaterThanOrEqual(2);
+      expect(scoped.getByText("stale")).toBeInTheDocument();
     }
+
+    expect(screen.getAllByText("HK").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("IN").length).toBeGreaterThan(0);
   });
 
   it("shows top 20 positions first and reveals more on Next", async () => {

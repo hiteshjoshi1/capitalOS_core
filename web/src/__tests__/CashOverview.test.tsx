@@ -6,12 +6,11 @@ import { MemoryRouter } from "react-router-dom";
 import CashOverview from "../routes/CashOverview";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { CashDeposits, DashboardSummary, CryptoSummary } from "../lib/api";
+import type { CashDeposits, CryptoSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     cashDeposits: vi.fn(),
-    dashboardSummary: vi.fn(),
     cryptoSummary: vi.fn(),
   },
 }));
@@ -25,40 +24,23 @@ function currentMonthYYYYMM() {
   return `${y}-${m}`;
 }
 
-const summaryFixture: DashboardSummary = {
-  as_of_month: "2026-02",
-  base_currency: "SGD",
-  snapshot_day: 6,
-  net_worth_as_of: "2026-03-01T00:00:00+00:00",
-  net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
-  net_worth_change: null,
-  net_worth: {
-    total: 100000,
-    cash: 40000,
-    stocks_funds: 60000,
-    crypto: 0,
-    liabilities: 0,
-  },
-  geography: [],
-  cash_flow: {
-    income: 0,
-    expenses: 0,
-    net: 0,
-    savings_rate: null,
-  },
-  top_holdings: [],
-  cash_balances: [{ currency: "SGD", value: 25000 }],
-  cash_percent: 40.0,
-};
-
 const cryptoSummaryFixture: CryptoSummary = {
+  month: "2026-02",
+  snapshot_day: 6,
+  snapshot_as_of: "2026-02-06",
   total_crypto_usd: 0,
   total_crypto_base: 0,
+  snapshot_total_base: 0,
+  snapshot_total_usd: 0,
+  snapshot_delta_base: 0,
+  snapshot_delta_pct: 0,
   base_currency: "SGD",
+  trend: [],
   eth: { balance: 0, value_usd: 0, value_base: 0 },
   sol: { balance: 0, value_usd: 0, value_base: 0 },
   top5_holdings: [],
   top_holdings: [],
+  chain_exposure: [],
   last_refreshed_at: "2026-02-06T00:00:00+00:00",
   is_stale: false,
   refresh_triggered: false,
@@ -66,6 +48,25 @@ const cryptoSummaryFixture: CryptoSummary = {
 
 const cashDepositsFixture: CashDeposits = {
   total: 40000,
+  as_of_month: "2026-02",
+  base_currency: "SGD",
+  snapshot_day: 6,
+  current_cash_as_of: "2026-02-21T00:00:00+00:00",
+  snapshot_cash_as_of: "2026-02-06T00:00:00+00:00",
+  current_total: 40000,
+  snapshot_total: 36000,
+  delta_abs: 4000,
+  delta_pct: 4000 / 36000,
+  trend: [
+    { month: "2025-11", value: null },
+    { month: "2025-12", value: null },
+    { month: "2026-01", value: 35000 },
+    { month: "2026-02", value: 36000 },
+  ],
+  currency_breakdown: [
+    { currency: "SGD", current_value: 25000, snapshot_value: 22000, delta_abs: 3000, delta_pct: 3000 / 22000 },
+    { currency: "USD", current_value: 15000, snapshot_value: 14000, delta_abs: 1000, delta_pct: 1000 / 14000 },
+  ],
   items: [
     { source: "DBS", value: 25000, percent: 62.5 },
     { source: "OCBC", value: 15000, percent: 37.5 },
@@ -75,7 +76,6 @@ const cashDepositsFixture: CashDeposits = {
 describe("CashOverview route", () => {
   beforeEach(() => {
     mockApi.cashDeposits.mockResolvedValue(cashDepositsFixture);
-    mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
     mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
   });
 
@@ -90,18 +90,19 @@ describe("CashOverview route", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("Cash Deposits")).toBeInTheDocument();
-    expect(screen.getByText("Cash Balances")).toBeInTheDocument();
+    expect(await screen.findByText("Cash Snapshot")).toBeInTheDocument();
+    expect(screen.getByText("Currency Breakdown")).toBeInTheDocument();
     expect(screen.getByText("DBS")).toBeInTheDocument();
     expect(screen.getByText("62.5%")).toBeInTheDocument();
+    expect(screen.getByText("Six-Month Cash Trend")).toBeInTheDocument();
 
-    expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "SGD");
     expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
+    expect(mockApi.cryptoSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
     expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
 
     await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
 
-    expect(mockApi.dashboardSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "prev_month,prev_year", "USD");
     expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
+    expect(mockApi.cryptoSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
   });
 });

@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import text
 
 from app.market_data import providers
+import app.market_data.scheduler as market_scheduler
 
 
 @pytest.fixture(autouse=True)
@@ -20,6 +21,7 @@ def test_yfinance_nse_symbol_normalization():
     assert provider._normalize_symbol("RELIANCE.NSE", "NSE") == "RELIANCE.NS"
     assert provider._normalize_symbol("M&M", "NSE") == "M&M.NS"
     assert provider._normalize_symbol("BRK.B", "US") == "BRK-B"
+    assert provider._normalize_symbol("BRK B", "US") == "BRK-B"
 
 
 def test_yfinance_dividend_yield_subunit_percent_hint_for_non_us():
@@ -96,6 +98,8 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
     assert body["status"] == "ok"
     assert body["exchanges"][0]["exchange_code"] == "US"
     assert body["exchanges"][0]["upserted_rows"] == 1
+    assert body["exchanges"][0]["full_coverage"] is True
+    assert body["exchanges"][0]["diagnostics"]["diagnostics_summary"]["refreshed"] >= 1
     assert len(published_events) == 1
     assert published_events[0]["user_id"] == 1
     assert published_events[0]["event_name"] == "market_data_refresh_completed"
@@ -107,12 +111,69 @@ def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
     assert status.status_code == 200
     rows = status.json()["status"]
     assert len(rows) >= 1
-    assert rows[0]["exchange_code"] == "US"
+    us_row = next(row for row in rows if row["exchange_code"] == "US")
+    assert us_row["diagnostics_summary"]["active_symbols"] >= 1
+    assert any(item["symbol"] == "AAPL" for item in us_row["symbols"])
 
     runs = client.get("/market-data/runs?limit=5")
     assert runs.status_code == 200
     run_rows = runs.json()["runs"]
     assert len(run_rows) >= 1
+
+
+def test_market_data_backfills_class_share_symbols_with_spaces(client, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(131, 'BRK B', 'Berkshire Hathaway Inc. Class B', 'STOCK', 'USD', 'US')"
+            )
+        )
+
+    def fake_finnhub(self, symbols, exchange_code=None, trade_date=None):
+        assert "BRK.B" in symbols
+        return {
+            "BRK.B": providers.EodQuote(
+                provider="finnhub",
+                symbol="BRK.B",
+                trade_date=datetime(2026, 5, 22, tzinfo=timezone.utc).date(),
+                close=486.38,
+                currency="USD",
+            )
+        }
+
+    monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
+    monkeypatch.setattr("app.market_data.providers.EODHDProvider.fetch_eod_single", lambda self, symbols, trade_date=None: {})
+    monkeypatch.setattr(
+        "app.market_data.providers.YahooProvider.fetch_prices",
+        lambda self, symbols, exchange_code=None, trade_date=None: {},
+    )
+
+    resp = client.post("/market-data/refresh-now")
+    assert resp.status_code == 200
+
+    with db_engine.begin() as conn:
+        mapped = conn.execute(
+            text(
+                """
+                SELECT exchange_symbol
+                FROM market_symbol_map
+                WHERE asset_id = 131 AND exchange_code = 'US'
+                """
+            )
+        ).scalar_one()
+        price = conn.execute(
+            text(
+                """
+                SELECT price
+                FROM prices
+                WHERE asset_id = 131 AND provider_symbol = 'BRK.B'
+                """
+            )
+        ).scalar_one()
+
+    assert mapped == "BRK.B"
+    assert float(price) == 486.38
 
 
 def test_market_data_fallback_to_yahoo(client, db_engine, monkeypatch):
@@ -159,7 +220,7 @@ def test_market_data_fallback_to_yahoo(client, db_engine, monkeypatch):
     assert nse["missing_symbols"] == 0
 
 
-def test_market_data_daily_limit_rotates_symbols(client, db_engine, monkeypatch):
+def test_market_data_refresh_now_covers_all_active_symbols(client, db_engine, monkeypatch):
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -196,13 +257,13 @@ def test_market_data_daily_limit_rotates_symbols(client, db_engine, monkeypatch)
 
     monkeypatch.setattr("app.market_data.providers.FinnhubProvider.fetch_prices", fake_finnhub)
 
-    first = client.post("/market-data/refresh-now")
-    assert first.status_code == 200
-    assert first.json()["exchanges"][0]["requested_symbols"] == 1
-
-    second = client.post("/market-data/refresh-now")
-    assert second.status_code == 200
-    assert second.json()["exchanges"][0]["requested_symbols"] == 1
+    response = client.post("/market-data/refresh-now")
+    assert response.status_code == 200
+    us_exchange = next(item for item in response.json()["exchanges"] if item["exchange_code"] == "US")
+    assert us_exchange["requested_symbols"] == 2
+    assert us_exchange["total_active_symbols"] == 2
+    assert us_exchange["deferred_symbols"] == 0
+    assert us_exchange["diagnostics"]["diagnostics_summary"]["refreshed"] == 2
 
     with db_engine.begin() as conn:
         rows = conn.execute(
@@ -215,6 +276,94 @@ def test_market_data_daily_limit_rotates_symbols(client, db_engine, monkeypatch)
             )
         ).fetchone()
     assert int(rows[0]) == 2
+
+
+def test_market_data_status_surfaces_stale_and_failed_symbol_diagnostics(client, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(150, 'REGN', 'Regeneron', 'STOCK', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_symbol_map
+                  (asset_id, exchange_code, exchange_symbol, quote_currency, is_active, yahoo_symbol_override)
+                VALUES
+                  (150, 'US', 'REGN', 'USD', 1, 'REGN')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol)
+                VALUES (150, :ts, 500, 'USD', 'finnhub_market', '2026-02-01', 'US', 'REGN')
+                """
+            ),
+            {"ts": datetime(2026, 2, 1, tzinfo=timezone.utc)},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_data_runs
+                  (id, provider, exchange_code, trade_date, status, requested_symbols, received_rows, upserted_rows, missing_symbols, started_at, finished_at, error_summary)
+                VALUES
+                  (150, 'finnhub', 'US', '2026-02-06', 'partial', 1, 0, 0, 1, :ts, :ts, 'provider timeout')
+                """
+            ),
+            {"ts": datetime(2026, 2, 6, tzinfo=timezone.utc)},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_data_run_items
+                  (run_id, asset_id, provider, exchange_code, symbol, trade_date, status, price, currency, source_note, created_at)
+                VALUES
+                  (150, 150, 'finnhub', 'US', 'REGN', '2026-02-06', 'missing', NULL, 'USD', 'provider timeout', :ts)
+                """
+            ),
+            {"ts": datetime(2026, 2, 6, tzinfo=timezone.utc)},
+        )
+
+    status = client.get("/market-data/status")
+    assert status.status_code == 200
+    us_row = next(row for row in status.json()["status"] if row["exchange_code"] == "US")
+    regn = next(item for item in us_row["symbols"] if item["symbol"] == "REGN")
+    assert regn["freshness_status"] == "stale"
+    assert regn["refresh_status"] == "failed"
+    assert regn["failure_reason"] == "provider timeout"
+    assert regn["latest_trade_date"] == "2026-02-01"
+
+
+def test_market_data_scheduler_uses_grouped_refresh_windows(monkeypatch):
+    added_jobs = []
+
+    class DummyScheduler:
+        def __init__(self, timezone=None):
+            self.timezone = timezone
+
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None):
+            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(market_scheduler, "_scheduler", None)
+    monkeypatch.setattr(market_scheduler, "BackgroundScheduler", DummyScheduler)
+    monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["US", "SGX", "HKEX", "NSE"])
+    monkeypatch.setenv("STOCK_PRICE_SCHEDULER_ENABLED", "1")
+
+    scheduler = market_scheduler.start_scheduler()
+
+    assert scheduler is not None
+    job_ids = {job["id"] for job in added_jobs}
+    assert "stock_refresh_asia_close" in job_ids
+    assert "stock_refresh_us_close" in job_ids
+    asia_job = next(job for job in added_jobs if job["id"] == "stock_refresh_asia_close")
+    assert asia_job["kwargs"]["exchanges"] == ["SGX", "HKEX", "NSE"]
 
 
 def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, monkeypatch):

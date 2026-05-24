@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
-import type { MarketDataRun } from "../lib/api";
+import type { MarketDataExchangeStatus, MarketDataRun } from "../lib/api";
 import PageShell from "../components/PageShell";
 import "../App.css";
 
 export default function MarketData() {
-  const [status, setStatus] = useState<MarketDataRun[]>([]);
+  const [status, setStatus] = useState<MarketDataExchangeStatus[]>([]);
   const [runs, setRuns] = useState<MarketDataRun[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
@@ -66,35 +66,62 @@ export default function MarketData() {
         <>
           <div className="card">
             <div className="cardTitle">Latest by Exchange</div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Exchange</th>
-                  <th>Provider</th>
-                  <th>Status</th>
-                  <th className="right">Requested</th>
-                  <th className="right">Upserted</th>
-                  <th className="right">Missing</th>
-                </tr>
-              </thead>
-              <tbody>
-                {status.map((r) => (
-                  <tr key={`${r.exchange_code}-${r.id}`}>
-                    <td>{r.exchange_code}</td>
-                    <td>{r.provider}</td>
-                    <td>{r.status}</td>
-                    <td className="right">{r.requested_symbols}</td>
-                    <td className="right">{r.upserted_rows}</td>
-                    <td className="right">{r.missing_symbols}</td>
-                  </tr>
+            {status.length === 0 ? (
+              <div className="muted">No runs yet.</div>
+            ) : (
+              <div className="grid g-mid">
+                {status.map((exchange) => (
+                  <div className="card" key={exchange.exchange_code}>
+                    <div className="stockHoldingsHeader">
+                      <h2>{exchange.exchange_code}</h2>
+                      <div className="muted stockHoldingsMeta">
+                        {exchange.provider ?? "—"} · {exchange.status ?? "idle"}
+                      </div>
+                    </div>
+                    <div className="split">
+                      <div className="mini">
+                        <h3>Fresh</h3>
+                        <div className="big small">{exchange.diagnostics_summary.fresh}</div>
+                      </div>
+                      <div className="mini">
+                        <h3>Stale</h3>
+                        <div className="big small">{exchange.diagnostics_summary.stale}</div>
+                      </div>
+                      <div className="mini">
+                        <h3>Failed</h3>
+                        <div className="big small">{exchange.diagnostics_summary.failed}</div>
+                      </div>
+                      <div className="mini">
+                        <h3>Deferred</h3>
+                        <div className="big small">{exchange.diagnostics_summary.deferred}</div>
+                      </div>
+                    </div>
+                    <table className="table" style={{ marginTop: 12 }}>
+                      <thead>
+                        <tr>
+                          <th>Symbol</th>
+                          <th>Status</th>
+                          <th>Trade date</th>
+                          <th>Source</th>
+                          <th>Reason</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {exchange.symbols.slice(0, 8).map((item) => (
+                          <tr key={`${exchange.exchange_code}-${item.asset_id}`}>
+                            <td>{item.symbol}</td>
+                            <td>{item.refresh_status} / {item.freshness_status}</td>
+                            <td>{item.latest_trade_date?.slice(0, 10) ?? "—"}</td>
+                            <td>{item.provider ?? item.source ?? "—"}</td>
+                            <td>{item.failure_reason ?? "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ))}
-                {status.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="muted">No runs yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+              </div>
+            )}
           </div>
 
           <div className="card">

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from datetime import date, datetime, timedelta, timezone
 from typing import Protocol
@@ -436,6 +437,8 @@ class YFinanceProvider(GenericMarketDataProvider):
         upper = (symbol or "").strip().upper()
         if not upper:
             return upper
+        if re.fullmatch(r"[A-Z]{1,5}\s+[A-Z0-9]{1,2}", upper):
+            upper = re.sub(r"\s+", ".", upper)
         if exchange_code and upper.startswith(f"{exchange_code.strip().upper()}:"):
             upper = upper.split(":", 1)[1].strip().upper()
         if upper.endswith(".NSE"):
