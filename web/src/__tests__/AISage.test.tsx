@@ -346,10 +346,8 @@ describe("AISage workspace", () => {
     await user.type(screen.getByPlaceholderText("Ask AI Sage anything"), "What matters?{Enter}");
 
     expect(api.aiSageCreateChat).toHaveBeenCalledTimes(1);
-    await waitFor(() => {
-      expect(api.aiSageGetChat).toHaveBeenCalledWith("chat-new");
-    });
     expect(await screen.findByText("Grounded answer.")).toBeInTheDocument();
+    expect(api.aiSageGetChat).not.toHaveBeenCalledWith("chat-new");
   });
 
   it("shows the first submitted turn immediately while the initial stream is still pending", async () => {
