@@ -284,6 +284,11 @@ export type DashboardSummary = {
     quote_currency?: string;
     geo?: string;
     platform?: string;
+    latest_trade_date?: string | null;
+    quote_age_days?: number | null;
+    price_source?: string | null;
+    price_provider?: string | null;
+    quote_freshness_status?: string | null;
   }>;
   cash_balances?: Array<{
     currency: string;
@@ -371,12 +376,25 @@ export type StockHoldingsSummary = {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
+  current_holdings_as_of?: string | null;
   net_worth_as_of: string | null;
   net_worth_snapshot_as_of?: string | null;
   net_worth_boundary_at?: string | null;
   net_worth_boundary_exact?: boolean | null;
   net_worth_freshness_status?: string | null;
   top_holdings: DashboardSummary["top_holdings"];
+  geography_breakdown?: Array<{
+    geography: string;
+    current_value: number;
+    snapshot_value: number;
+    delta_abs: number;
+    delta_pct?: number | null;
+  }>;
+  quote_freshness_summary?: {
+    fresh: number;
+    stale: number;
+    missing: number;
+  } | null;
 };
 
 export type SpendingSummary = {
@@ -613,6 +631,26 @@ export type CashDeposits = {
     value: number;
     percent: number;
   }>;
+  as_of_month?: string | null;
+  base_currency?: string | null;
+  snapshot_day?: number | null;
+  current_cash_as_of?: string | null;
+  snapshot_cash_as_of?: string | null;
+  current_total?: number | null;
+  snapshot_total?: number | null;
+  delta_abs?: number | null;
+  delta_pct?: number | null;
+  trend?: Array<{
+    month: string;
+    value?: number | null;
+  }>;
+  currency_breakdown?: Array<{
+    currency: string;
+    current_value: number;
+    snapshot_value: number;
+    delta_abs: number;
+    delta_pct?: number | null;
+  }>;
 };
 
 export type CryptoWallet = {
@@ -639,8 +677,15 @@ export type CryptoWalletInitResponse = {
 };
 
 export type CryptoSummary = {
+  month?: string;
+  snapshot_day?: number | null;
+  snapshot_as_of?: string | null;
   total_crypto_usd: number;
   total_crypto_base: number;
+  snapshot_total_base?: number;
+  snapshot_total_usd?: number;
+  snapshot_delta_base?: number;
+  snapshot_delta_pct?: number | null;
   base_currency: string;
   eth_exposure_usd?: number;
   eth_exposure_base?: number;
@@ -648,6 +693,10 @@ export type CryptoSummary = {
   token_exposure_base?: number;
   token_count?: number;
   priced_token_count?: number;
+  trend?: Array<{
+    month: string;
+    value?: number | null;
+  }>;
   eth: { balance: number; value_usd: number; value_base: number };
   sol: { balance: number; value_usd: number; value_base: number };
   top5_holdings: Array<{
@@ -666,6 +715,16 @@ export type CryptoSummary = {
     value_base: number;
     asset_class: string;
     wallet_id?: string;
+    wallet_label?: string | null;
+    wallet_address?: string | null;
+    price_usd?: number | null;
+    price_change_usd?: number | null;
+    price_change_pct?: number | null;
+    value_change_base?: number | null;
+    value_change_pct?: number | null;
+    snapshot_value_base?: number | null;
+    snapshot_delta_base?: number | null;
+    snapshot_delta_pct?: number | null;
   }>;
   wallet_exposure?: Array<{
     wallet_id: string;
@@ -675,6 +734,13 @@ export type CryptoSummary = {
     chain: string;
     total_usd: number;
     total_base: number;
+    percent?: number;
+  }>;
+  chain_exposure?: Array<{
+    chain: string;
+    total_usd: number;
+    total_base: number;
+    percent: number;
   }>;
   wallet_chain_exposure?: Array<{
     wallet_id: string;
@@ -839,6 +905,37 @@ export type MarketDataRun = {
   started_at?: string | null;
   finished_at?: string | null;
   error_summary?: string | null;
+};
+
+export type MarketDataSymbolDiagnostic = {
+  asset_id: number;
+  symbol: string;
+  mapped_symbol: string;
+  provider_symbol?: string | null;
+  provider?: string | null;
+  source?: string | null;
+  currency?: string | null;
+  latest_price?: number | null;
+  latest_trade_date?: string | null;
+  age_days?: number | null;
+  freshness_status: string;
+  refresh_status: string;
+  failure_reason?: string | null;
+  attempt_status?: string | null;
+};
+
+export type MarketDataExchangeStatus = Partial<MarketDataRun> & {
+  exchange_code: string;
+  diagnostics_summary: {
+    active_symbols: number;
+    refreshed: number;
+    failed: number;
+    deferred: number;
+    fresh: number;
+    stale: number;
+    missing: number;
+  };
+  symbols: MarketDataSymbolDiagnostic[];
 };
 
 export type UploadReminder = {
@@ -1598,8 +1695,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  cryptoSummary: (baseCurrency = "USD") =>
-    req<CryptoSummary>(`/crypto/summary?base_currency=${encodeURIComponent(baseCurrency)}`),
+  cryptoSummary: (month?: string, baseCurrency = "USD") =>
+    req<CryptoSummary>(`/crypto/summary?base_currency=${encodeURIComponent(baseCurrency)}${month ? `&month=${encodeURIComponent(month)}` : ""}`),
   cryptoRefreshNow: (adminKey?: string) =>
     req<Record<string, unknown>>("/crypto/refresh-now", {
       method: "POST",
@@ -1611,7 +1708,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  marketDataStatus: () => req<{ status: MarketDataRun[] }>("/market-data/status"),
+  marketDataStatus: () => req<{ status: MarketDataExchangeStatus[] }>("/market-data/status"),
   marketDataRuns: (limit = 50) =>
     req<{ runs: MarketDataRun[] }>(`/market-data/runs?limit=${encodeURIComponent(String(limit))}`),
   marketDataRefreshNow: (adminKey?: string) =>

@@ -143,6 +143,77 @@ def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_
     assert "cash_balances" not in data
     assert "net_worth" not in data
     assert "net_worth_change" not in data
+    assert "geography_breakdown" in data
+    assert "quote_freshness_summary" in data
+
+
+def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(client: TestClient, db_engine, monkeypatch):
+    as_of_snapshot = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    as_of_current = datetime(2026, 5, 20, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(210, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(210, 'IBKR US', 'IBKR', 'BROKER', 'USD', 'US', 210), "
+                "(211, 'IBKR HK', 'IBKR', 'BROKER', 'HKD', 'HK', 210)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(210, 'AAPL', 'Apple', 'STOCK', 'USD', 'US'), "
+                "(211, '700', 'Tencent', 'STOCK', 'HKD', 'HK')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO market_symbol_map (asset_id, exchange_code, exchange_symbol, quote_currency, is_active) VALUES "
+                "(210, 'US', 'AAPL', 'USD', TRUE), "
+                "(211, 'HKEX', '700', 'HKD', TRUE)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(2100, 210, 210, :snapshot, 10, 90, 900), "
+                "(2101, 211, 211, :snapshot, 10, 45, 450), "
+                "(2102, 210, 210, :current, 20, 95, 1900), "
+                "(2103, 211, 211, :current, 5, 50, 250)"
+            ),
+            {"snapshot": as_of_snapshot, "current": as_of_current},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(210, :snapshot, 110, 'USD', 'finnhub_market', '2026-04-06', 'US', 'AAPL'), "
+                "(211, :snapshot, 60, 'HKD', 'yfinance_market', '2026-04-06', 'HKEX', '0700.HK'), "
+                "(210, :current, 110, 'USD', 'finnhub_market', '2026-05-23', 'US', 'AAPL'), "
+                "(211, :current, 60, 'HKD', 'yfinance_market', '2026-05-23', 'HKEX', '0700.HK')"
+            ),
+            {"snapshot": as_of_snapshot, "current": as_of_current},
+        )
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})
+
+    resp = client.get("/dashboard/stock-holdings?month=2026-04&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    geography = {item["geography"]: item for item in data["geography_breakdown"]}
+    assert data["current_holdings_as_of"] == "2026-05-20T00:00:00+00:00"
+    assert geography["US"]["current_value"] == 2200.0
+    assert geography["US"]["snapshot_value"] == 1100.0
+    assert geography["US"]["delta_abs"] == 1100.0
+    assert geography["HK"]["current_value"] == 300.0
+    assert geography["HK"]["snapshot_value"] == 600.0
+    assert geography["HK"]["delta_abs"] == -300.0
+    assert data["quote_freshness_summary"]["fresh"] == 2
 
 
 def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, db_engine, monkeypatch):
@@ -589,6 +660,8 @@ def test_dashboard_cash_deposits_matches_cash_total(client: TestClient, seed_das
     data = resp.json()
 
     assert data["total"] == 30000.0
+    assert data["current_total"] == 30000.0
+    assert data["snapshot_total"] == 30000.0
     assert data["items"] == [
         {
             "source": "DBS",
@@ -596,6 +669,59 @@ def test_dashboard_cash_deposits_matches_cash_total(client: TestClient, seed_das
             "percent": 100.0,
         }
     ]
+
+
+def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestClient, db_engine, monkeypatch):
+    snapshot_as_of = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    current_as_of = datetime(2026, 5, 20, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(310, 'DBS', 'DBS Bank', 'BANK', 'SG'), "
+                "(311, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(310, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 310), "
+                "(311, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 311)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(310, 'SGD', 'SGD Cash', 'CASH', 'SGD', 'SG'), "
+                "(311, 'USD', 'USD Cash', 'CASH', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(3100, 310, 310, :snapshot, 1, 1000, 1000), "
+                "(3101, 311, 311, :snapshot, 1, 200, 200), "
+                "(3102, 310, 310, :current, 1, 1200, 1200), "
+                "(3103, 311, 311, :current, 1, 300, 300)"
+            ),
+            {"snapshot": snapshot_as_of, "current": current_as_of},
+        )
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _date, _base, symbols: {"SGD": 1.0, "USD": 1.5})
+
+    resp = client.get("/dashboard/cash-deposits?month=2026-04&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["current_total"] == 1650.0
+    assert data["snapshot_total"] == 1300.0
+    assert data["delta_abs"] == 350.0
+    assert data["trend"][-1] == {"month": "2026-04", "value": 1300.0}
+    currency_breakdown = {item["currency"]: item for item in data["currency_breakdown"]}
+    assert currency_breakdown["SGD"]["current_value"] == 1200.0
+    assert currency_breakdown["SGD"]["snapshot_value"] == 1000.0
+    assert currency_breakdown["USD"]["current_value"] == 450.0
+    assert currency_breakdown["USD"]["snapshot_value"] == 300.0
 
 
 def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClient, db_engine, monkeypatch):
@@ -971,6 +1097,9 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
     assert row["avg_cost"] == pytest.approx((100.0 * 10.0 + 200.0 * 20.0) / 30.0)
     assert row["latest_price"] == 150.0
     assert row["quote_currency"] == "HKD"
+    assert row["latest_trade_date"] == "2026-02-06"
+    assert row["price_source"] == "eodhd_bulk"
+    assert row["price_provider"] == "eodhd"
 
 
 def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client: TestClient, db_engine, monkeypatch):
@@ -1275,3 +1404,63 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
     assert body["current_net_worth_as_of"] == "2026-03-10T00:00:00+00:00"
     assert body["current_net_worth"]["stocks_funds"] == body["net_worth"]["stocks_funds"] + 5000.0
     assert body["current_net_worth_freshness"]["market_data_as_of"] == "2026-03-09"
+
+
+def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(client: TestClient, db_engine, monkeypatch):
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(610, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country, platform_id) VALUES "
+                "(610, 'IBKR Main', 'IBKR', 1, 'BROKER', 'USD', 'US', 610)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(610, 'AAPL', 'Apple Inc.', 'STOCK', 'USD', 'US')"
+            )
+        )
+        snapshot_as_of = datetime(2026, 5, 1, tzinfo=timezone.utc)
+        current_as_of = datetime(2026, 5, 15, tzinfo=timezone.utc)
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(6100, 610, 610, :snapshot_as_of, 10, 100, 1000), "
+                "(6101, 610, 610, :current_as_of, 20, 100, 2000)"
+            ),
+            {"snapshot_as_of": snapshot_as_of, "current_as_of": current_as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(610, :snapshot_as_of, 100, 'USD', 'finnhub_market', '2026-05-01', 'US', 'AAPL'), "
+                "(610, :current_as_of, 120, 'USD', 'finnhub_market', '2026-05-15', 'US', 'AAPL')"
+            ),
+            {"snapshot_as_of": snapshot_as_of, "current_as_of": current_as_of},
+        )
+
+    monkeypatch.setenv("SNAPSHOT_DAY", "1")
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 5, 24, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/summary?month=2026-05&base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["net_worth_boundary_at"] == "2026-05-01T00:00:00+00:00"
+    assert body["net_worth_snapshot_as_of"] == "2026-05-01T00:00:00+00:00"
+    assert body["net_worth"]["stocks_funds"] == 1000.0
+    assert body["current_net_worth_as_of"] == "2026-05-24T00:00:00+00:00"
+    assert body["current_net_worth"]["stocks_funds"] == 2400.0

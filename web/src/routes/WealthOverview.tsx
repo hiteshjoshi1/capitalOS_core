@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { DashboardSummary, SpendingSummary, UploadReminder } from "../lib/api";
+import type { DashboardSummary, SpendingSummary } from "../lib/api";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
@@ -30,21 +30,18 @@ export default function WealthOverview() {
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
-  const [uploadReminders, setUploadReminders] = useState<UploadReminder[]>([]);
   const [month, setMonth] = useSelectedMonth(WEALTH_OVERVIEW_MONTH_STORAGE_KEY);
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
 
   const fetchDashboardData = useCallback(async () => {
-    const [summaryData, spendingData, alertsData] = await Promise.all([
+    const [summaryData, spendingData] = await Promise.all([
       api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
       api.spendingSummary(month, baseCurrency),
-      api.alertNotifications(month).catch(() => null),
     ]);
     return {
       summaryData,
       spendingData,
-      uploadReminders: alertsData?.upload_reminders ?? [],
     };
   }, [baseCurrency, month]);
 
@@ -58,7 +55,6 @@ export default function WealthOverview() {
         if (cancelled) return;
         setSummary(data.summaryData);
         setSpendingSummary(data.spendingData);
-        setUploadReminders(data.uploadReminders);
         setState("ready");
       } catch (error: unknown) {
         if (cancelled) return;
@@ -81,7 +77,6 @@ export default function WealthOverview() {
         if (cancelled) return;
         setSummary(data.summaryData);
         setSpendingSummary(data.spendingData);
-        setUploadReminders(data.uploadReminders);
         setErr("");
         setState("ready");
       } catch (error: unknown) {
@@ -175,7 +170,6 @@ export default function WealthOverview() {
   const netWorthAsOf = summary?.net_worth_as_of ?? null;
   const snapshotCapturedAt = summary?.net_worth_snapshot_as_of ?? null;
   const snapshotFreshnessStatus = summary?.net_worth_freshness_status ?? "missing";
-  const topUploadReminders = uploadReminders.slice(0, 3);
   const snapshotStatusLabel =
     snapshotFreshnessStatus === "exact"
       ? "Exact snapshot"
@@ -430,37 +424,6 @@ export default function WealthOverview() {
               </div>
             </article>
 
-            <article className="card wealthDetailCard">
-              <div className="wealthSignalHeader">
-                <div>
-                  <p className="wealthEyebrow">Upload reminders</p>
-                  <h2 className="wealthDetailTitle">Statement coverage</h2>
-                </div>
-                <span className={`wealthSignalBadge ${uploadReminders.length > 0 ? "wealthSignalBadgeStale" : "wealthSignalBadgeExact"}`}>
-                  {uploadReminders.length > 0 ? `${uploadReminders.length} pending` : "Up to date"}
-                </span>
-              </div>
-              {topUploadReminders.length > 0 ? (
-                <>
-                  <div className="wealthSignalList">
-                    {topUploadReminders.map((reminder) => (
-                      <div key={reminder.account_id} className="wealthSignalRow">
-                        <strong>{reminder.account_name}</strong>
-                        <span className="muted">{reminder.days_since_upload}d since upload</span>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="wealthSignalList">
-                    <Link className="wealthInlineLink" to="/ingest">Import statements</Link>
-                    {uploadReminders.length > topUploadReminders.length ? (
-                      <Link className="wealthInlineLink" to="/alerts">View all alerts</Link>
-                    ) : null}
-                  </div>
-                </>
-              ) : (
-                <p className="muted">All tracked accounts have at least one upload in or after {month}.</p>
-              )}
-            </article>
           </section>
         </div>
       ) : null}

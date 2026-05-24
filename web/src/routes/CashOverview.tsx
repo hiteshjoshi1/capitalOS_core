@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { CashDeposits, DashboardSummary, CryptoSummary } from "../lib/api";
+import type { CashDeposits, CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
+import MiniTrend from "../components/MiniTrend";
 import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -13,7 +14,6 @@ const STABLECOINS = new Set(["USDC", "USDT"]);
 export default function CashOverview() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
   const [cashDeposits, setCashDeposits] = useState<CashDeposits | null>(null);
   const [month, setMonth] = useSelectedMonth();
@@ -23,12 +23,10 @@ export default function CashOverview() {
     (async () => {
       try {
         setState("loading");
-        const [dash, crypto, deposits] = await Promise.all([
-          api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
-          api.cryptoSummary(baseCurrency),
+        const [crypto, deposits] = await Promise.all([
+          api.cryptoSummary(month, baseCurrency),
           api.cashDeposits(month, baseCurrency),
         ]);
-        setSummary(dash);
         setCryptoSummary(crypto);
         setCashDeposits(deposits);
         setState("ready");
@@ -40,7 +38,7 @@ export default function CashOverview() {
   }, [month, baseCurrency]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = (value?: number, maximumFractionDigits = 0) =>
+  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
   const stablecoins = useMemo(() => {
@@ -88,6 +86,41 @@ export default function CashOverview() {
         <>
           <section className="grid" style={{ marginBottom: 16 }}>
             <div className="card">
+              <div className="stockHoldingsHeader">
+                <h2>Cash Snapshot</h2>
+                <div className="muted stockHoldingsMeta">
+                  Current as of {cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}
+                </div>
+              </div>
+              <div className="split">
+                <div className="mini">
+                  <h3>Current total</h3>
+                  <div className="big small">{formatMoney(cashDeposits?.current_total)}</div>
+                </div>
+                <div className="mini">
+                  <h3>Snapshot total</h3>
+                  <div className="big small">{formatMoney(cashDeposits?.snapshot_total)}</div>
+                </div>
+                <div className="mini">
+                  <h3>Delta</h3>
+                  <div className={`big small ${(cashDeposits?.delta_abs ?? 0) >= 0 ? "good" : "bad"}`}>
+                    {cashDeposits?.delta_abs == null
+                      ? "—"
+                      : `${cashDeposits.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(cashDeposits.delta_abs))}`}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="stockHoldingsHeader">
+                <h2>Six-Month Cash Trend</h2>
+                <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
+              </div>
+              <MiniTrend points={cashDeposits?.trend ?? []} ariaLabel="Six-month cash trend" />
+            </div>
+
+            <div className="card">
               <h2>Cash Deposits</h2>
               <div className="mini">
                 <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Grouped by bank, broker, or wallet source</div>
@@ -127,26 +160,33 @@ export default function CashOverview() {
 
           <section className="grid g-mid">
             <div className="card">
-              <h2>Cash Balances</h2>
+              <h2>Currency Breakdown</h2>
               <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>By currency (base converted)</div>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Current vs selected snapshot</div>
                 <table className="table">
                   <thead>
                     <tr>
                       <th>Currency</th>
-                      <th className="right">Value</th>
+                      <th className="right">Current</th>
+                      <th className="right">Snapshot</th>
+                      <th className="right">Delta</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {summary?.cash_balances?.map((c) => (
+                    {cashDeposits?.currency_breakdown?.map((c) => (
                       <tr key={c.currency}>
                         <td>{c.currency}</td>
-                        <td className="right">{formatMoney(c.value)}</td>
+                        <td className="right">{formatMoney(c.current_value)}</td>
+                        <td className="right">{formatMoney(c.snapshot_value)}</td>
+                        <td className={`right ${c.delta_abs >= 0 ? "good" : "bad"}`}>
+                          {c.delta_abs >= 0 ? "+" : "-"}
+                          {formatMoney(Math.abs(c.delta_abs))}
+                        </td>
                       </tr>
                     ))}
-                    {summary?.cash_balances && summary.cash_balances.length === 0 && (
+                    {cashDeposits?.currency_breakdown && cashDeposits.currency_breakdown.length === 0 && (
                       <tr>
-                        <td className="muted" colSpan={2}>No cash balances yet.</td>
+                        <td className="muted" colSpan={4}>No cash balances yet.</td>
                       </tr>
                     )}
                   </tbody>

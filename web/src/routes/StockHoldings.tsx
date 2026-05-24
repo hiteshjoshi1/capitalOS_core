@@ -52,6 +52,14 @@ export default function StockHoldings() {
     }
     return `${quoteCurrency.toUpperCase()} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
   };
+  const formatDelta = (value?: number | null, pct?: number | null) => {
+    if (value == null) {
+      return "—";
+    }
+    const sign = value >= 0 ? "+" : "-";
+    const pctSuffix = pct == null ? "" : ` (${pct >= 0 ? "+" : "-"}${Math.abs(pct * 100).toFixed(1)}%)`;
+    return `${sign}${formatMoney(Math.abs(value))}${pctSuffix}`;
+  };
   const formatPnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
     if (
       holding.quantity == null
@@ -69,10 +77,7 @@ export default function StockHoldings() {
       positive: pnl >= 0,
     };
   };
-  const holdings = useMemo(
-    () => (summary?.top_holdings ?? []).filter((h) => h.asset_class !== "CASH" && h.asset_class !== "CRYPTO"),
-    [summary],
-  );
+  const holdings = useMemo(() => summary?.top_holdings ?? [], [summary]);
   const visibleHoldings = holdings.slice(0, visibleCount);
   const hasMore = visibleCount < holdings.length;
   const hasPrevious = visibleCount > PAGE_SIZE;
@@ -80,7 +85,7 @@ export default function StockHoldings() {
   return (
     <PageShell
       title="Stock Holdings"
-      subtitle="Detailed equity and cash holdings snapshot."
+      subtitle="Current equity holdings with quote freshness and snapshot geography comparisons."
       activeRoute="/holdings"
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
@@ -113,6 +118,58 @@ export default function StockHoldings() {
 
       {state === "ready" && (
         <section className="grid g-mid stockHoldingsLayout">
+          <div className="card">
+            <div className="stockHoldingsHeader">
+              <h2>Quote Freshness</h2>
+              <div className="muted stockHoldingsMeta">
+                Current holdings as of {summary?.current_holdings_as_of?.slice(0, 10) ?? "—"}
+              </div>
+            </div>
+            <div className="split">
+              <div className="mini">
+                <h3>Fresh</h3>
+                <div className="big small">{summary?.quote_freshness_summary?.fresh ?? 0}</div>
+              </div>
+              <div className="mini">
+                <h3>Stale</h3>
+                <div className="big small">{summary?.quote_freshness_summary?.stale ?? 0}</div>
+              </div>
+              <div className="mini">
+                <h3>Missing</h3>
+                <div className="big small">{summary?.quote_freshness_summary?.missing ?? 0}</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="stockHoldingsHeader">
+              <h2>Geography Breakdown</h2>
+              <div className="muted stockHoldingsMeta">
+                Current vs snapshot captured {summary?.net_worth_snapshot_as_of?.slice(0, 10) ?? "—"}
+              </div>
+            </div>
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Geography</th>
+                  <th className="right">Current</th>
+                  <th className="right">Snapshot</th>
+                  <th className="right">Delta</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(summary?.geography_breakdown ?? []).map((item) => (
+                  <tr key={item.geography}>
+                    <td>{item.geography}</td>
+                    <td className="right">{formatMoney(item.current_value)}</td>
+                    <td className="right">{formatMoney(item.snapshot_value)}</td>
+                    <td className={`right ${item.delta_abs >= 0 ? "good" : "bad"}`}>{formatDelta(item.delta_abs, item.delta_pct)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
           <div className="card stockHoldingsPrimaryCard">
             <div className="stockHoldingsHeader">
               <h2>Top Holdings</h2>
@@ -128,6 +185,7 @@ export default function StockHoldings() {
                     <th className="right">Purchase Price</th>
                     <th className="right">Current Price</th>
                     <th className="right">Profit &amp; Loss</th>
+                    <th>Quote freshness</th>
                     <th className="right">% NW</th>
                   </tr>
                 </thead>
@@ -152,6 +210,13 @@ export default function StockHoldings() {
                           <div>{pnl.amount}</div>
                           {pnl.pct == null ? null : <small>{pnl.pct >= 0 ? "+" : ""}{pnl.pct.toFixed(1)}%</small>}
                         </td>
+                        <td>
+                          <div>{h.quote_freshness_status ?? "missing"}</div>
+                          <small className="muted">
+                            {h.latest_trade_date?.slice(0, 10) ?? "—"}
+                            {h.price_provider ? ` · ${h.price_provider}` : ""}
+                          </small>
+                        </td>
                         <td className="right stockHoldingsPercentCell">
                           <div>{h.percent_of_networth.toFixed(1)}%</div>
                           <small>{formatMoney(h.value)}</small>
@@ -161,7 +226,7 @@ export default function StockHoldings() {
                   })}
                   {summary && holdings.length === 0 && (
                     <tr>
-                      <td className="muted" colSpan={5}>No holdings available.</td>
+                      <td className="muted" colSpan={6}>No holdings available.</td>
                     </tr>
                   )}
                 </tbody>

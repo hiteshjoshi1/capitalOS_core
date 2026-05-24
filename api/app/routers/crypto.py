@@ -6,7 +6,7 @@ import hashlib
 import base64
 import secrets
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 import time
 import httpx
 
@@ -500,6 +500,223 @@ def _refresh_wallet(wallet_id: str):
         db.close()
 
 
+def _parse_month_start(month: str | None) -> datetime:
+    if not month:
+        now = datetime.now(tz=timezone.utc)
+        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    try:
+        return datetime.strptime(f"{month}-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM.") from exc
+
+
+def _add_months(dt: datetime, months: int) -> datetime:
+    year = dt.year + (dt.month - 1 + months) // 12
+    month = (dt.month - 1 + months) % 12 + 1
+    return dt.replace(year=year, month=month)
+
+
+def _snapshot_day() -> int:
+    raw = os.getenv("SNAPSHOT_DAY", "1")
+    try:
+        day = int(raw)
+    except ValueError:
+        day = 1
+    return max(1, min(day, 31))
+
+
+def _anchor_date(month_start: datetime) -> datetime:
+    next_month_start = _add_months(month_start, 1).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    last_day = (_add_months(next_month_start, 1) - timedelta(days=1)).day
+    return next_month_start.replace(day=min(_snapshot_day(), last_day))
+
+
+def _month_window(end_month_start: datetime, months: int = 6) -> list[datetime]:
+    return [_add_months(end_month_start, offset) for offset in range(-(months - 1), 1)]
+
+
+def _iso_date_value(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if hasattr(value, "isoformat"):
+        return value.isoformat()
+    return str(value)
+
+
+def _latest_wallet_rows(
+    db: Session,
+    current_user_id: int,
+    *,
+    as_of_date: datetime | None = None,
+) -> list[dict[str, Any]]:
+    date_filter = "WHERE s.as_of_date <= :as_of_date" if as_of_date else ""
+    rows = db.execute(
+        text(
+            f"""
+            WITH latest AS (
+              SELECT s.wallet_id, MAX(s.as_of_date) AS as_of_date
+              FROM crypto_wallet_snapshots s
+              JOIN crypto_wallets w ON w.id = s.wallet_id
+              {date_filter}
+              {"AND" if as_of_date else "WHERE"} w.status = 'active'
+                AND """
+            + _wallet_scope_sql("w")
+            + """
+              GROUP BY s.wallet_id
+            )
+            SELECT w.id, w.chain_type, w.chain, w.address, w.label, s.total_usd, s.fetched_at, s.as_of_date
+            FROM crypto_wallets w
+            LEFT JOIN latest l ON l.wallet_id = w.id
+            LEFT JOIN crypto_wallet_snapshots s
+              ON s.wallet_id = w.id AND s.as_of_date = l.as_of_date
+            WHERE w.status = 'active'
+              AND """
+            + _wallet_scope_sql("w")
+            + """
+            """
+        ),
+        {
+            "current_user_id": current_user_id,
+            **({"as_of_date": as_of_date.date()} if as_of_date else {}),
+        },
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _latest_wallet_items(
+    db: Session,
+    current_user_id: int,
+    *,
+    as_of_date: datetime | None = None,
+) -> list[dict[str, Any]]:
+    date_filter = "WHERE s.as_of_date <= :as_of_date" if as_of_date else ""
+    rows = db.execute(
+        text(
+            f"""
+            WITH latest AS (
+              SELECT s.wallet_id, MAX(s.as_of_date) AS as_of_date
+              FROM crypto_wallet_snapshots s
+              JOIN crypto_wallets w ON w.id = s.wallet_id
+              {date_filter}
+              {"AND" if as_of_date else "WHERE"} w.status = 'active'
+                AND """
+            + _wallet_scope_sql("w")
+            + """
+              GROUP BY s.wallet_id
+            )
+            SELECT
+              s.wallet_id,
+              s.as_of_date,
+              w.address,
+              w.label,
+              w.chain_type AS wallet_chain_type,
+              w.chain AS wallet_chain,
+              i.symbol,
+              i.chain,
+              i.chain_type,
+              i.normalized_amount,
+              i.price_usd,
+              i.value_usd
+            FROM crypto_wallet_snapshot_items i
+            JOIN crypto_wallet_snapshots s ON s.id = i.snapshot_id
+            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            WHERE """
+            + _wallet_scope_sql("w")
+            + """
+            ORDER BY i.value_usd DESC NULLS LAST
+            """
+        ),
+        {
+            "current_user_id": current_user_id,
+            **({"as_of_date": as_of_date.date()} if as_of_date else {}),
+        },
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def _latest_and_previous_wallet_items(db: Session, current_user_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    rows = db.execute(
+        text(
+            """
+            WITH ranked AS (
+              SELECT
+                s.id,
+                s.wallet_id,
+                s.as_of_date,
+                ROW_NUMBER() OVER (
+                  PARTITION BY s.wallet_id
+                  ORDER BY s.as_of_date DESC, s.fetched_at DESC NULLS LAST, s.id DESC
+                ) AS rn
+              FROM crypto_wallet_snapshots s
+              JOIN crypto_wallets w ON w.id = s.wallet_id
+              WHERE w.status = 'active'
+                AND """
+            + _wallet_scope_sql("w")
+            + """
+            )
+            SELECT
+              r.wallet_id,
+              r.as_of_date,
+              r.rn,
+              w.address,
+              w.label,
+              w.chain_type AS wallet_chain_type,
+              w.chain AS wallet_chain,
+              i.symbol,
+              i.chain,
+              i.chain_type,
+              i.normalized_amount,
+              i.price_usd,
+              i.value_usd
+            FROM ranked r
+            JOIN crypto_wallets w ON w.id = r.wallet_id
+            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = r.id
+            WHERE r.rn <= 2
+              AND """
+            + _wallet_scope_sql("w")
+            + """
+            """
+        ),
+        {"current_user_id": current_user_id},
+    ).mappings().all()
+    current_items: list[dict[str, Any]] = []
+    previous_items: list[dict[str, Any]] = []
+    for row in rows:
+        record = dict(row)
+        if int(record["rn"]) == 1:
+            current_items.append(record)
+        elif int(record["rn"]) == 2:
+            previous_items.append(record)
+    return current_items, previous_items
+
+
+def _crypto_total_and_freshness(wallet_rows: list[dict[str, Any]]) -> tuple[float, datetime | None, bool]:
+    total_usd = 0.0
+    last_refreshed = None
+    is_stale = False
+    for row in wallet_rows:
+        if row.get("total_usd") is not None:
+            total_usd += float(row["total_usd"])
+        fetched_at = row.get("fetched_at")
+        if isinstance(fetched_at, str):
+            try:
+                fetched_at = datetime.fromisoformat(fetched_at)
+            except ValueError:
+                fetched_at = None
+        if isinstance(fetched_at, datetime) and fetched_at.tzinfo is None:
+            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
+        if fetched_at and (last_refreshed is None or fetched_at > last_refreshed):
+            last_refreshed = fetched_at
+        is_stale = is_stale or (
+            fetched_at is None
+            or (datetime.now(tz=timezone.utc) - fetched_at).total_seconds() > _STALE_THRESHOLD_SECONDS
+        )
+    return total_usd, last_refreshed, is_stale
+
+
 @router.get("/wallets")
 def list_wallets(
     db: Session = Depends(get_db),
@@ -518,137 +735,161 @@ def list_wallets(
 
 @router.get("/summary")
 def crypto_summary(
+    month: str | None = None,
     base_currency: str = "USD",
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
-    rows = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT wallet_id, MAX(as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots
-              GROUP BY wallet_id
-            )
-            SELECT w.id, w.chain_type, w.chain, w.address, w.label, s.total_usd, s.fetched_at
-            FROM crypto_wallets w
-            LEFT JOIN latest l ON l.wallet_id = w.id
-            LEFT JOIN crypto_wallet_snapshots s
-              ON s.wallet_id = w.id AND s.as_of_date = l.as_of_date
-            WHERE w.status = 'active'
-              AND """
-            + _wallet_scope_sql("w")
-            + """
-            """
-        ),
-        {"current_user_id": current_user.id},
-    ).mappings().all()
-    last_refreshed = None
-    total_usd = 0.0
-    refresh_triggered = False
-    is_stale = False
+    selected_month_start = _parse_month_start(month)
+    snapshot_anchor = _anchor_date(selected_month_start)
 
-    wallet_exposure = []
-    for r in rows:
-        if r["total_usd"]:
-            total_usd += float(r["total_usd"])
-            wallet_exposure.append(
-                {
-                    "wallet_id": str(r["id"]),
-                    "label": r["label"],
-                    "address": r["address"],
-                    "chain_type": r["chain_type"],
-                    "chain": r["chain"],
-                    "total_usd": float(r["total_usd"]),
-                }
-            )
-        fetched_at = r["fetched_at"]
-        if isinstance(fetched_at, str):
-            try:
-                fetched_at = datetime.fromisoformat(fetched_at)
-            except ValueError:
-                fetched_at = None
-        if isinstance(fetched_at, datetime) and fetched_at.tzinfo is None:
-            fetched_at = fetched_at.replace(tzinfo=timezone.utc)
-        if fetched_at and (last_refreshed is None or fetched_at > last_refreshed):
-            last_refreshed = fetched_at
-        is_stale = is_stale or (
-            fetched_at is None
-            or (datetime.now(tz=timezone.utc) - fetched_at).total_seconds() > _STALE_THRESHOLD_SECONDS
-        )
+    wallet_rows = _latest_wallet_rows(db, current_user.id)
+    snapshot_wallet_rows = _latest_wallet_rows(db, current_user.id, as_of_date=snapshot_anchor)
+    current_items, previous_items = _latest_and_previous_wallet_items(db, current_user.id)
+    snapshot_items = _latest_wallet_items(db, current_user.id, as_of_date=snapshot_anchor)
 
-    items = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT wallet_id, MAX(as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots
-              GROUP BY wallet_id
-            )
-            SELECT i.symbol, i.chain, i.chain_type, i.normalized_amount, i.value_usd, s.wallet_id
-            FROM crypto_wallet_snapshot_items i
-            JOIN crypto_wallet_snapshots s ON s.id = i.snapshot_id
-            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
-            JOIN crypto_wallets w ON w.id = s.wallet_id
-            WHERE """
-            + _wallet_scope_sql("w")
-            + """
-            ORDER BY i.value_usd DESC NULLS LAST
-            LIMIT 50
-            """
-        ),
-        {"current_user_id": current_user.id},
-    ).mappings().all()
-
-    chain_breakdown = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT wallet_id, MAX(as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots
-              GROUP BY wallet_id
-            )
-            SELECT s.wallet_id, i.chain, SUM(i.value_usd) AS total_usd
-            FROM crypto_wallet_snapshot_items i
-            JOIN crypto_wallet_snapshots s ON s.id = i.snapshot_id
-            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
-            JOIN crypto_wallets w ON w.id = s.wallet_id
-            WHERE """
-            + _wallet_scope_sql("w")
-            + """
-            GROUP BY s.wallet_id, i.chain
-            ORDER BY total_usd DESC NULLS LAST
-            """
-        ),
-        {"current_user_id": current_user.id},
-    ).mappings().all()
-
+    total_usd, last_refreshed, is_stale = _crypto_total_and_freshness(wallet_rows)
+    snapshot_total_usd, _, _ = _crypto_total_and_freshness(snapshot_wallet_rows)
     rate = get_rates(datetime.now(tz=timezone.utc), base_currency, {"USD"}).get("USD", 1.0)
     total_base = total_usd * rate
+    snapshot_total_base = snapshot_total_usd * rate
+    snapshot_delta_base = total_base - snapshot_total_base
 
-    eth = next((i for i in items if i["symbol"] == "ETH"), None)
-    sol = next((i for i in items if i["symbol"] == "SOL"), None)
+    previous_lookup = {
+        (str(item["wallet_id"]), str(item.get("symbol") or "").upper(), str(item.get("chain") or "").lower()): item
+        for item in previous_items
+    }
+    snapshot_lookup = {
+        (str(item["wallet_id"]), str(item.get("symbol") or "").upper(), str(item.get("chain") or "").lower()): item
+        for item in snapshot_items
+    }
 
+    holdings: list[dict[str, Any]] = []
     eth_group = {"eth", "weth", "steth", "wsteth", "eeth", "weeth"}
     eth_usd = 0.0
     other_usd = 0.0
     token_count = 0
     priced_count = 0
-    for r in items:
+    chain_totals: dict[str, float] = {}
+
+    for row in sorted(current_items, key=lambda item: float(item.get("value_usd") or 0.0), reverse=True):
+        wallet_id = str(row["wallet_id"])
+        symbol = str(row.get("symbol") or "").upper()
+        chain = str(row.get("chain") or "").lower()
+        key = (wallet_id, symbol, chain)
+        previous = previous_lookup.get(key)
+        snapshot_item = snapshot_lookup.get(key)
+        current_amount = float(row["normalized_amount"]) if row.get("normalized_amount") is not None else 0.0
+        current_price_usd = float(row["price_usd"]) if row.get("price_usd") is not None else None
+        current_value_usd = float(row["value_usd"]) if row.get("value_usd") is not None else 0.0
+        previous_price_usd = float(previous["price_usd"]) if previous and previous.get("price_usd") is not None else None
+        previous_value_usd = float(previous["value_usd"]) if previous and previous.get("value_usd") is not None else None
+        snapshot_value_usd = float(snapshot_item["value_usd"]) if snapshot_item and snapshot_item.get("value_usd") is not None else 0.0
         token_count += 1
-        if r["value_usd"] is None:
-            continue
-        if r["value_usd"] > 0:
+        if current_value_usd > 0:
             priced_count += 1
-        symbol = (r["symbol"] or "").lower()
-        if symbol in eth_group:
-            eth_usd += float(r["value_usd"])
+        if symbol.lower() in eth_group:
+            eth_usd += current_value_usd
         else:
-            other_usd += float(r["value_usd"])
+            other_usd += current_value_usd
+        chain_totals[chain or "unknown"] = chain_totals.get(chain or "unknown", 0.0) + current_value_usd
+        holdings.append(
+            {
+                "symbol": symbol,
+                "chain": chain,
+                "amount": current_amount,
+                "value_usd": current_value_usd,
+                "value_base": current_value_usd * rate,
+                "asset_class": "CRYPTO",
+                "wallet_id": wallet_id,
+                "wallet_label": row.get("label"),
+                "wallet_address": row.get("address"),
+                "price_usd": current_price_usd,
+                "price_change_usd": (current_price_usd - previous_price_usd)
+                if current_price_usd is not None and previous_price_usd is not None
+                else None,
+                "price_change_pct": ((current_price_usd - previous_price_usd) / previous_price_usd)
+                if current_price_usd is not None and previous_price_usd not in (None, 0)
+                else None,
+                "value_change_base": (current_value_usd - previous_value_usd) * rate
+                if previous_value_usd is not None
+                else None,
+                "value_change_pct": ((current_value_usd - previous_value_usd) / previous_value_usd)
+                if previous_value_usd not in (None, 0)
+                else None,
+                "snapshot_value_base": snapshot_value_usd * rate,
+                "snapshot_delta_base": (current_value_usd - snapshot_value_usd) * rate,
+                "snapshot_delta_pct": ((current_value_usd - snapshot_value_usd) / snapshot_value_usd)
+                if snapshot_value_usd > 0
+                else None,
+            }
+        )
+
+    eth = next((item for item in holdings if item["symbol"] == "ETH"), None)
+    sol = next((item for item in holdings if item["symbol"] == "SOL"), None)
+    wallet_total = sum(float(row.get("total_usd") or 0.0) for row in wallet_rows)
+    wallet_exposure = [
+        {
+            "wallet_id": str(row["id"]),
+            "label": row.get("label"),
+            "address": row.get("address"),
+            "chain_type": row.get("chain_type"),
+            "chain": row.get("chain"),
+            "total_usd": float(row["total_usd"]) if row.get("total_usd") is not None else 0.0,
+            "total_base": (float(row["total_usd"]) if row.get("total_usd") is not None else 0.0) * rate,
+            "percent": (
+                (float(row["total_usd"]) / wallet_total) * 100
+                if wallet_total > 0 and row.get("total_usd") is not None
+                else 0.0
+            ),
+        }
+        for row in wallet_rows
+        if row.get("total_usd") is not None
+    ]
+    chain_exposure = [
+        {
+            "chain": chain,
+            "total_usd": total_chain_usd,
+            "total_base": total_chain_usd * rate,
+            "percent": (total_chain_usd / total_usd) * 100 if total_usd > 0 else 0.0,
+        }
+        for chain, total_chain_usd in sorted(chain_totals.items(), key=lambda item: item[1], reverse=True)
+    ]
+    wallet_chain_exposure = [
+        {
+            "wallet_id": item["wallet_id"],
+            "chain": item["chain"],
+            "total_usd": item["value_usd"],
+            "total_base": item["value_base"],
+        }
+        for item in holdings
+    ]
+
+    trend = []
+    for candidate_month in _month_window(selected_month_start, months=6):
+        candidate_anchor = _anchor_date(candidate_month)
+        candidate_wallet_rows = _latest_wallet_rows(db, current_user.id, as_of_date=candidate_anchor)
+        candidate_total_usd, _, _ = _crypto_total_and_freshness(candidate_wallet_rows)
+        trend.append(
+            {
+                "month": candidate_month.strftime("%Y-%m"),
+                "value": candidate_total_usd * rate if candidate_wallet_rows else None,
+            }
+        )
+
+    snapshot_dates = [row.get("as_of_date") for row in snapshot_wallet_rows if row.get("as_of_date") is not None]
+    snapshot_as_of = _iso_date_value(min(snapshot_dates)) if snapshot_dates else None
 
     return {
+        "month": selected_month_start.strftime("%Y-%m"),
+        "snapshot_day": _snapshot_day(),
+        "snapshot_as_of": snapshot_as_of,
         "total_crypto_usd": total_usd,
         "total_crypto_base": total_base,
+        "snapshot_total_base": snapshot_total_base,
+        "snapshot_total_usd": snapshot_total_usd,
+        "snapshot_delta_base": snapshot_delta_base,
+        "snapshot_delta_pct": (snapshot_delta_base / snapshot_total_base) if snapshot_total_base > 0 else None,
         "base_currency": base_currency,
         "eth_exposure_usd": eth_usd,
         "eth_exposure_base": eth_usd * rate,
@@ -656,58 +897,25 @@ def crypto_summary(
         "token_exposure_base": other_usd * rate,
         "token_count": token_count,
         "priced_token_count": priced_count,
+        "trend": trend,
         "eth": {
-            "balance": float(eth["normalized_amount"]) if eth and eth["normalized_amount"] is not None else 0,
-            "value_usd": float(eth["value_usd"]) if eth and eth["value_usd"] is not None else 0,
-            "value_base": float(eth["value_usd"]) * rate if eth and eth["value_usd"] is not None else 0,
+            "balance": float(eth["amount"]) if eth is not None else 0,
+            "value_usd": float(eth["value_usd"]) if eth is not None else 0,
+            "value_base": float(eth["value_base"]) if eth is not None else 0,
         },
         "sol": {
-            "balance": float(sol["normalized_amount"]) if sol and sol["normalized_amount"] is not None else 0,
-            "value_usd": float(sol["value_usd"]) if sol and sol["value_usd"] is not None else 0,
-            "value_base": float(sol["value_usd"]) * rate if sol and sol["value_usd"] is not None else 0,
+            "balance": float(sol["amount"]) if sol is not None else 0,
+            "value_usd": float(sol["value_usd"]) if sol is not None else 0,
+            "value_base": float(sol["value_base"]) if sol is not None else 0,
         },
-        "top5_holdings": [
-            {
-                "symbol": r["symbol"],
-                "chain": r["chain"],
-                "amount": float(r["normalized_amount"]) if r["normalized_amount"] is not None else 0,
-                "value_usd": float(r["value_usd"]) if r["value_usd"] is not None else 0,
-                "value_base": float(r["value_usd"]) * rate if r["value_usd"] is not None else 0,
-                "wallet_id": str(r["wallet_id"]),
-            }
-            for r in items[:5]
-        ],
-        "top_holdings": [
-            {
-                "symbol": r["symbol"],
-                "chain": r["chain"],
-                "amount": float(r["normalized_amount"]) if r["normalized_amount"] is not None else 0,
-                "value_usd": float(r["value_usd"]) if r["value_usd"] is not None else 0,
-                "value_base": float(r["value_usd"]) * rate if r["value_usd"] is not None else 0,
-                "asset_class": "CRYPTO",
-                "wallet_id": str(r["wallet_id"]),
-            }
-            for r in items
-        ],
-        "wallet_exposure": [
-            {
-                **w,
-                "total_base": w["total_usd"] * rate,
-            }
-            for w in wallet_exposure
-        ],
-        "wallet_chain_exposure": [
-            {
-                "wallet_id": str(r["wallet_id"]),
-                "chain": r["chain"],
-                "total_usd": float(r["total_usd"]) if r["total_usd"] is not None else 0,
-                "total_base": (float(r["total_usd"]) if r["total_usd"] is not None else 0) * rate,
-            }
-            for r in chain_breakdown
-        ],
+        "top5_holdings": holdings[:5],
+        "top_holdings": holdings,
+        "wallet_exposure": wallet_exposure,
+        "chain_exposure": chain_exposure,
+        "wallet_chain_exposure": wallet_chain_exposure,
         "last_refreshed_at": last_refreshed.isoformat() if last_refreshed else None,
         "is_stale": is_stale,
-        "refresh_triggered": refresh_triggered,
+        "refresh_triggered": False,
     }
 
 

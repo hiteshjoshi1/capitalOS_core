@@ -11,7 +11,6 @@ vi.mock("../lib/api", () => ({
   api: {
     dashboardSummary: vi.fn(),
     spendingSummary: vi.fn(),
-    alertNotifications: vi.fn(),
   },
 }));
 
@@ -73,7 +72,6 @@ describe("WealthOverview", () => {
       net: 0,
       savings_rate: null,
     } as never);
-    mockApi.alertNotifications.mockResolvedValue({ upload_reminders: [] } as never);
   });
 
   it("uses the wealth-specific current month instead of a stale global month", async () => {
@@ -125,5 +123,20 @@ describe("WealthOverview", () => {
       expect(mockApi.dashboardSummary).toHaveBeenCalledTimes(2);
     }, { timeout: 2000 });
     expect(await screen.findByText("S$ 225")).toBeInTheDocument();
+  });
+
+  it("does not render upload reminders on the wealth overview", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Portfolio Composition")).toBeInTheDocument();
+    expect(screen.queryByText("Upload reminders")).not.toBeInTheDocument();
+    expect(screen.queryByText("Statement coverage")).not.toBeInTheDocument();
   });
 });

@@ -83,6 +83,59 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
     assert body["top5_holdings"][0]["symbol"] == "ETH"
 
 
+def test_crypto_summary_exposes_snapshot_delta_and_refresh_movements(client: TestClient, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at)
+                VALUES ('w-delta', 'evm', 'ethereum', '0xdelta', 'active', :now)
+                """
+            ),
+            {"now": datetime(2026, 5, 23, tzinfo=timezone.utc)},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd)
+                VALUES
+                  (9101, 'w-delta', '2026-05-01', '2026-05-01T00:00:00+00:00', 3000),
+                  (9102, 'w-delta', '2026-05-22', '2026-05-22T00:00:00+00:00', 3400),
+                  (9103, 'w-delta', '2026-05-23', '2026-05-23T00:00:00+00:00', 3600)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallet_snapshot_items
+                  (snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, price_usd, value_usd)
+                VALUES
+                  (9101, 'evm', 'ethereum', 'native', 'ETH', 2, 1500, 3000),
+                  (9102, 'evm', 'ethereum', 'native', 'ETH', 2, 1700, 3400),
+                  (9103, 'evm', 'ethereum', 'native', 'ETH', 2, 1800, 3600)
+                """
+            )
+        )
+
+    monkeypatch.setattr("app.routers.crypto.get_rates", lambda *_args, **_kwargs: {"USD": 1.0})
+
+    resp = client.get("/crypto/summary?month=2026-04&base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["month"] == "2026-04"
+    assert body["snapshot_as_of"] == "2026-05-01"
+    assert body["snapshot_total_base"] == 3000.0
+    assert body["snapshot_delta_base"] == 600.0
+    assert body["trend"][-1] == {"month": "2026-04", "value": 3000.0}
+    assert body["chain_exposure"][0]["chain"] == "ethereum"
+    holding = body["top_holdings"][0]
+    assert holding["price_change_usd"] == 100.0
+    assert holding["value_change_base"] == 200.0
+    assert holding["snapshot_delta_base"] == 600.0
+
+
 def test_verify_solana_signature_unit():
     sk = SigningKey.generate()
     vk = sk.verify_key

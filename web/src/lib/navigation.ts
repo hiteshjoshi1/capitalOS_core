@@ -70,7 +70,6 @@ export const APP_SECTIONS: AppSection[] = [
       { label: "Add Platforms", to: "/platforms" },
       { label: "Add Crypto Wallets", to: "/crypto", exact: true },
       { label: "Refresh Market Data", to: "/market-data" },
-      { label: "Author Ingestion", to: "/author-ingestion" },
     ],
   },
   {
@@ -83,6 +82,7 @@ export const APP_SECTIONS: AppSection[] = [
       { label: "Overview", to: "/intelligence", exact: true },
       { label: "AI Sage", to: "/ai-sage" },
       { label: "Author Library", to: "/author-library" },
+      { label: "Author Ingestion", to: "/author-ingestion" },
       { label: "Companies", to: "/companies" },
       { label: "Alerts", to: "/alerts", hidden: true },
     ],

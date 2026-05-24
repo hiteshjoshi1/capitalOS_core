@@ -106,7 +106,7 @@ describe("api client coverage", () => {
     await api.solanaBlockhash();
     await api.solanaSubmit({ tx_b64: "Zm9v" });
     await api.solanaPreflight({ tx_b64: "YmFy" });
-    await api.cryptoSummary("USD");
+    await api.cryptoSummary(undefined, "USD");
     await api.cryptoRefreshNow("admin-key");
     await api.cryptoAllowlist();
     await api.cryptoAllowlistAdd({ chain: "ethereum", contract_address: "0xabc" });

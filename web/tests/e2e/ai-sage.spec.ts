@@ -151,19 +151,66 @@ test("shows the first submitted AI Sage turn before the stream returns", async (
   });
   let streamRouteHits = 0;
   let releaseStream: (() => void) | null = null;
+  let delayedStreamCompleted = false;
+  const completedChat = {
+    id: "chat-new",
+    title: "What matters?",
+    created_at: "2026-05-01T10:00:00Z",
+    updated_at: "2026-05-01T10:00:05Z",
+    last_activity_at: "2026-05-01T10:00:00Z",
+    pinned_at: null,
+    metadata_json: null,
+    messages: [
+      {
+        id: "user-1",
+        role: "user",
+        content: "What matters?",
+        status: "completed",
+        created_at: "2026-05-01T10:00:00Z",
+        evidence: [],
+      },
+      {
+        id: "assistant-1",
+        role: "assistant",
+        content: "Grounded answer.",
+        status: "completed",
+        created_at: "2026-05-01T10:00:05Z",
+        metadata_json: { mode: "concept", evidence_sufficient: true },
+        evidence: [],
+      },
+    ],
+  };
   const streamReleased = new Promise<void>((resolve) => {
     releaseStream = resolve;
+  });
+  await page.route("**/ai-sage/chats/chat-new", async (route) => {
+    if (route.request().resourceType() === "document") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      json: delayedStreamCompleted
+        ? completedChat
+        : {
+          ...completedChat,
+          title: "New chat",
+          updated_at: "2026-05-01T10:00:00Z",
+          messages: [],
+        },
+    });
   });
   await page.unroute("**/ai-sage/chats/chat-new/messages/stream");
   await page.route("**/ai-sage/chats/chat-new/messages/stream", async (route) => {
     streamRouteHits += 1;
     await streamReleased;
+    delayedStreamCompleted = true;
     await route.fulfill({
       status: 200,
       contentType: "text/event-stream",
       body: [
         "event: done",
         'data: {"chat":{"id":"chat-new","title":"What matters?","created_at":"2026-05-01T10:00:00Z","updated_at":"2026-05-01T10:00:05Z","last_activity_at":"2026-05-01T10:00:00Z","pinned_at":null,"metadata_json":null,"messages":[{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},{"id":"assistant-1","role":"assistant","content":"Grounded answer.","status":"completed","created_at":"2026-05-01T10:00:05Z","metadata_json":{"mode":"concept","evidence_sufficient":true},"evidence":[]}]},"user_message":{"id":"user-1","role":"user","content":"What matters?","status":"completed","created_at":"2026-05-01T10:00:00Z","evidence":[]},"assistant_message":{"id":"assistant-1","role":"assistant","content":"Grounded answer.","status":"completed","created_at":"2026-05-01T10:00:05Z","metadata_json":{"mode":"concept","evidence_sufficient":true},"evidence":[]}}',
+        "",
         "",
       ].join("\n"),
       headers: {

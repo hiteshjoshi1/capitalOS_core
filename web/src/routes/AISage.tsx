@@ -215,6 +215,9 @@ export default function AISage() {
       return;
     }
     if (activeChat?.id === chatId || locallyCreatedChatIdRef.current === chatId) {
+      if (locallyCreatedChatIdRef.current === chatId) {
+        locallyCreatedChatIdRef.current = null;
+      }
       return;
     }
     void loadChatDetail(chatId);
@@ -407,7 +410,6 @@ export default function AISage() {
             }
           }
         }
-        locallyCreatedChatIdRef.current = null;
         await loadChatList();
         if (shouldNavigateAfterTurn) {
           navigate(`/ai-sage/chats/${targetChatId}`);

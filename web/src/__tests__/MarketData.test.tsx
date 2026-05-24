@@ -21,15 +21,42 @@ describe("MarketData", () => {
     mockApi.marketDataStatus.mockResolvedValueOnce({
       status: [
         {
-          id: 1,
           provider: "eodhd",
           exchange_code: "US",
-          trade_date: "2026-03-04",
           status: "success",
-          requested_symbols: 10,
-          received_rows: 10,
-          upserted_rows: 10,
-          missing_symbols: 0,
+          diagnostics_summary: {
+            active_symbols: 2,
+            refreshed: 1,
+            fresh: 1,
+            stale: 1,
+            failed: 1,
+            deferred: 0,
+            missing: 0,
+          },
+          symbols: [
+            {
+              asset_id: 1,
+              symbol: "ADBE",
+              mapped_symbol: "ADBE.US",
+              latest_trade_date: "2026-03-04",
+              freshness_status: "fresh",
+              refresh_status: "refreshed",
+              provider: "eodhd",
+              source: "close",
+              failure_reason: null,
+            },
+            {
+              asset_id: 2,
+              symbol: "REGN",
+              mapped_symbol: "REGN.US",
+              latest_trade_date: "2026-02-28",
+              freshness_status: "stale",
+              refresh_status: "failed",
+              provider: "eodhd",
+              source: "close",
+              failure_reason: "rate limited",
+            },
+          ],
         },
       ],
     });
@@ -62,5 +89,8 @@ describe("MarketData", () => {
 
     expect(screen.getByText("Recent Runs")).toBeInTheDocument();
     expect(screen.getAllByText("US").length).toBeGreaterThan(0);
+    expect(screen.getByText("ADBE")).toBeInTheDocument();
+    expect(screen.getByText("REGN")).toBeInTheDocument();
+    expect(screen.getByText("rate limited")).toBeInTheDocument();
   });
 });

@@ -35,6 +35,19 @@ export default function IntelligenceOverview() {
           </div>
         </article>
 
+        <article className="card sectionOverviewCard sectionOverviewPrimaryCard">
+          <p className="sectionOverviewEyebrow">Author Ingestion</p>
+          <h2 className="sectionOverviewTitle">Curate source discovery and ingestion for the library.</h2>
+          <p className="muted sectionOverviewDescription">
+            Add and validate author sources, fan out logical documents, and monitor ingestion jobs for your research corpus.
+          </p>
+          <div className="sectionOverviewActions">
+            <Link className="btn btnLarge sectionOverviewCta" to="/author-ingestion">
+              Ingest Author Writings
+            </Link>
+          </div>
+        </article>
+
         <article className="card sectionOverviewCard">
           <p className="sectionOverviewEyebrow">Companies</p>
           <h2 className="sectionOverviewTitle">Keep company research accessible as a dedicated tab.</h2>

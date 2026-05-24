@@ -41,6 +41,11 @@ class TopHolding(BaseModel):
     quote_currency: Optional[str] = None
     geo: Optional[str] = None
     platform: Optional[str] = None
+    latest_trade_date: Optional[str] = None
+    quote_age_days: Optional[int] = None
+    price_source: Optional[str] = None
+    price_provider: Optional[str] = None
+    quote_freshness_status: Optional[str] = None
 
 
 class CashBalance(BaseModel):
@@ -117,12 +122,15 @@ class StockHoldingsResponse(BaseModel):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    current_holdings_as_of: Optional[str] = None
     net_worth_as_of: Optional[str] = None
     net_worth_snapshot_as_of: Optional[str] = None
     net_worth_boundary_at: Optional[str] = None
     net_worth_boundary_exact: Optional[bool] = None
     net_worth_freshness_status: Optional[str] = None
     top_holdings: List[TopHolding]
+    geography_breakdown: list["StockGeographyBreakdownItem"] = []
+    quote_freshness_summary: Optional["QuoteFreshnessSummary"] = None
 
 
 class PlatformAllocationItem(BaseModel):
@@ -148,6 +156,17 @@ class CashDepositsItem(BaseModel):
 class CashDepositsOut(BaseModel):
     total: float
     items: list[CashDepositsItem]
+    as_of_month: Optional[str] = None
+    base_currency: Optional[str] = None
+    snapshot_day: Optional[int] = None
+    current_cash_as_of: Optional[str] = None
+    snapshot_cash_as_of: Optional[str] = None
+    current_total: Optional[float] = None
+    snapshot_total: Optional[float] = None
+    delta_abs: Optional[float] = None
+    delta_pct: Optional[float] = None
+    trend: list["MiniTrendPoint"] = []
+    currency_breakdown: list["CashCurrencyBreakdownItem"] = []
 
 
 class StockExposureItem(BaseModel):
@@ -178,6 +197,33 @@ class GeographyExposureOut(BaseModel):
     base_currency: str
     total: float
     items: list[GeographyExposureItem]
+
+
+class QuoteFreshnessSummary(BaseModel):
+    fresh: int
+    stale: int
+    missing: int
+
+
+class StockGeographyBreakdownItem(BaseModel):
+    geography: str
+    current_value: float
+    snapshot_value: float
+    delta_abs: float
+    delta_pct: Optional[float] = None
+
+
+class MiniTrendPoint(BaseModel):
+    month: str
+    value: Optional[float] = None
+
+
+class CashCurrencyBreakdownItem(BaseModel):
+    currency: str
+    current_value: float
+    snapshot_value: float
+    delta_abs: float
+    delta_pct: Optional[float] = None
 
 
 class BootstrapResponse(BaseModel):

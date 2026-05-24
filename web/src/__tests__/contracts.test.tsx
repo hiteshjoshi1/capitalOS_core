@@ -237,52 +237,6 @@ describe("frontend contracts", () => {
   });
 
   it("renders Wealth Overview with composition percentages and without the action queue", async () => {
-    vi.mocked(api.alertNotifications).mockResolvedValueOnce({
-      upload_reminders: [
-        {
-          account_id: 6,
-          account_name: "DBS Multiplier",
-          platform: "DBS",
-          account_type: "BANK",
-          last_upload_date: "2026-01-10",
-          last_transaction_date: "2026-02-05",
-          days_since_upload: 27,
-          message: "Upload reminder",
-        },
-        {
-          account_id: 7,
-          account_name: "IBKR",
-          platform: "IBKR",
-          account_type: "BROKER",
-          last_upload_date: "2026-01-12",
-          last_transaction_date: "2026-02-06",
-          days_since_upload: 25,
-          message: "Upload reminder 2",
-        },
-        {
-          account_id: 8,
-          account_name: "OCBC 360",
-          platform: "OCBC",
-          account_type: "BANK",
-          last_upload_date: "2026-01-14",
-          last_transaction_date: "2026-02-06",
-          days_since_upload: 23,
-          message: "Upload reminder 3",
-        },
-        {
-          account_id: 9,
-          account_name: "UOB One",
-          platform: "UOB",
-          account_type: "BANK",
-          last_upload_date: "2026-01-16",
-          last_transaction_date: "2026-02-06",
-          days_since_upload: 21,
-          message: "Upload reminder 4",
-        },
-      ],
-      system_notifications: [],
-      total_count: 4,
-    });
     render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/wealth"]}>
@@ -294,11 +248,8 @@ describe("frontend contracts", () => {
     );
 
     expect(await screen.findByText("Portfolio Composition")).toBeInTheDocument();
-    expect(screen.getByText("DBS Multiplier")).toBeInTheDocument();
-    expect(screen.getByText("IBKR")).toBeInTheDocument();
-    expect(screen.getByText("OCBC 360")).toBeInTheDocument();
-    expect(screen.queryByText("UOB One")).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "View all alerts" })).toBeInTheDocument();
+    expect(screen.queryByText("Upload reminders")).not.toBeInTheDocument();
+    expect(screen.queryByText("Statement coverage")).not.toBeInTheDocument();
     expect(screen.getAllByText(/\+S\$ 1,000/).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Stocks & Funds").length).toBeGreaterThan(0);
     expect(screen.getByText("Top Movers")).toBeInTheDocument();
@@ -307,8 +258,6 @@ describe("frontend contracts", () => {
     expect(screen.getByText("50.0%")).toBeInTheDocument();
     expect(screen.getAllByText("25.0%").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Action queue")).not.toBeInTheDocument();
-    expect(vi.mocked(api.alertNotifications)).toHaveBeenCalledTimes(1);
-    expect(vi.mocked(api.alertNotifications).mock.calls[0]?.[0]).toEqual(expect.any(String));
   });
 
   it("renders Wealth Risk with risk and geographic exposure together", async () => {

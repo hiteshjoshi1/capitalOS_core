@@ -21,14 +21,6 @@ const DATA_HUB_ACTIONS: DataHubAction[] = [
     primary: true,
   },
   {
-    label: "Author Ingestion",
-    title: "Curate source discovery and ingestion for the library.",
-    description: "Add and validate author sources, fan out logical documents, and monitor ingestion jobs for your research corpus.",
-    to: "/author-ingestion",
-    cta: "Ingest Author Writings",
-    primary: true,
-  },
-  {
     label: "Refresh Market Data",
     title: "Refresh quotes and portfolio market snapshots.",
     description: "Pull the latest market data so valuations, positions, and downstream research surfaces stay current.",
