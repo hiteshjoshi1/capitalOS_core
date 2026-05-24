@@ -377,11 +377,15 @@ export default function AISage() {
       };
     });
 
+    let streamCompletedWithChat = false;
     try {
       await streamAiSageChatMessage(
         targetChatId,
         { content },
         (streamEvent) => {
+          if (streamEvent.type === "done") {
+            streamCompletedWithChat = true;
+          }
           applyStreamEvent(streamEvent, targetChatId!, pendingIds);
         },
         { signal: controller.signal },
@@ -394,11 +398,13 @@ export default function AISage() {
       }
     } finally {
       if (!controller.signal.aborted) {
-        const refreshed = await refreshChatAfterTurn(targetChatId);
-        if (refreshed) {
-          const latestAssistant = [...refreshed.messages].reverse().find((message) => message.role === "assistant");
-          if (latestAssistant?.status === "completed") {
-            setValidationError(null);
+        if (!streamCompletedWithChat) {
+          const refreshed = await refreshChatAfterTurn(targetChatId);
+          if (refreshed) {
+            const latestAssistant = [...refreshed.messages].reverse().find((message) => message.role === "assistant");
+            if (latestAssistant?.status === "completed") {
+              setValidationError(null);
+            }
           }
         }
         locallyCreatedChatIdRef.current = null;
