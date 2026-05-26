@@ -299,12 +299,14 @@ def test_collect_candidate_chunks_adds_topic_focused_retrieval_pass():
     import app.rag.concept_mode as cm
 
     call_queries: list[str] = []
+    keyword_queries: list[str | None] = []
 
     def _retrieve(query: str, *_args, **_kwargs):
         call_queries.append(query)
-        if query == "BYD":
-            return ([_mk_chunk("byd-topic", text="BYD was a remarkable company.", cosine_distance=0.2)], False, None)
-        return ([_mk_chunk("generic", text="Charlie Munger on markets generally.", cosine_distance=0.01)], False, None)
+        keyword_queries.append(_kwargs.get("keyword_query"))
+        if _kwargs.get("keyword_query") == "byd":
+            return ([_mk_chunk("byd-topic", text="BYD was a remarkable company.", cosine_distance=0.2, author_id="charlie_munger")], False, None)
+        return ([_mk_chunk("generic", text="Charlie Munger on markets generally.", cosine_distance=0.01, author_id="charlie_munger")], False, None)
 
     with patch("app.rag.concept_mode._retrieve_with_intent_fallback", side_effect=_retrieve):
         chunks, _relaxed, _reason = cm._collect_candidate_chunks(
@@ -320,7 +322,8 @@ def test_collect_candidate_chunks_adds_topic_focused_retrieval_pass():
             broad_top_k=6,
         )
 
-    assert call_queries == ["What does Charlie Munger say about BYD?", "BYD"]
+    assert call_queries == ["What does Charlie Munger say about BYD?"]
+    assert keyword_queries == ["byd"]
     assert any(chunk.chunk_id == "byd-topic" for chunk in chunks)
 
 
@@ -456,6 +459,58 @@ def test_nick_sleep_query_surfaces_multiple_distinct_examples():
     assert any("amazon" in t for t in texts)
     assert any("costco" in t for t in texts)
     assert any("long-termism" in t for t in texts)
+
+
+def test_explicit_single_author_query_drops_cross_author_candidates():
+    import app.rag.concept_mode as cm
+
+    candidates = [
+        _mk_chunk(
+            "buffett-amazon",
+            text="Buffett discussed Amazon at the annual meeting.",
+            cosine_distance=0.01,
+            author_id="warren_buffett",
+            author_name="Warren Buffett",
+        ),
+        _mk_chunk(
+            "sleep-amazon",
+            text="Nick Sleep linked Amazon to customer service and shared scale economics.",
+            cosine_distance=0.08,
+            chunk_index=1,
+            author_id="nick_sleep",
+            author_name="Nick Sleep",
+        ),
+    ]
+    selected = [
+        SelectedAuthor(
+            author_id="nick_sleep",
+            name="Nick Sleep",
+            score=4.2,
+            domains=["investing"],
+            expertise_tags=["scale_economies_shared"],
+            overall_weight=3.5,
+            role_type="investor",
+        )
+    ]
+
+    with (
+        patch("app.rag.concept_mode.parse_intent", return_value=QueryIntent(query_type="single_author", author_ids=["nick_sleep"], topic_entities=["Amazon"])),
+        patch("app.rag.concept_mode.select_authors", return_value=selected),
+        patch("app.rag.concept_mode._author_entries", return_value=[{"author_id": "nick_sleep", "name": "Nick Sleep"}]),
+        patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=candidates),
+        patch("app.rag.concept_mode.routing_available", return_value=False),
+        patch("app.rag.concept_mode.expand_chunks_with_context", side_effect=lambda chunks, *_args, **_kwargs: chunks),
+        patch("app.rag.concept_mode._enrich_chunks", side_effect=_fake_enrich),
+        patch("app.rag.concept_mode.inference_available", return_value=False),
+    ):
+        result = cm.execute_concept_query(
+            "What does Nick Sleep say about Amazon?",
+            MagicMock(),
+            top_k_chunks=3,
+        )
+
+    chunk_ids = [passage["chunk_id"] for passage in result.best_passages]
+    assert chunk_ids == ["sleep-amazon"]
 
 
 def test_diversity_cap_returns_final_chunks_sorted_by_score():

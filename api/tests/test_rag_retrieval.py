@@ -35,8 +35,12 @@ def _make_chunk(
     metadata: Optional[dict[str, Any]] = None,
     document_id: str = "doc-1",
     chunk_index: int = 0,
+    author_id: str = "charlie_munger",
 ) -> Any:
     from app.rag.retrieval import RetrievedChunk
+    chunk_metadata = {"author_id": author_id}
+    if metadata:
+        chunk_metadata.update(metadata)
 
     return RetrievedChunk(
         chunk_id=chunk_id,
@@ -44,7 +48,7 @@ def _make_chunk(
         chunk_index=chunk_index,
         text=text,
         token_count=10,
-        metadata_json=metadata or {},
+        metadata_json=chunk_metadata,
         cosine_distance=cosine_distance,
         ts_rank=ts_rank,
         rrf_score=rrf_score,
@@ -467,6 +471,31 @@ class TestRetrievalHardeningHelpers:
         assert plan.content_query == "best mental models"
         assert "mental models" in plan.required_phrases
 
+    @pytest.mark.parametrize(
+        ("query", "author_id", "topic_entity", "content_term"),
+        [
+            ("What does Nick Sleep say about Amazon's business model?", "nick_sleep", "Amazon", "amazon"),
+            ("What does Charlie Munger say about BYD?", "charlie_munger", "BYD", "byd"),
+            ("What are Buffett's views on GEICO?", "warren_buffett", "GEICO", "geico"),
+        ],
+    )
+    def test_retrieval_query_plan_extracts_discussed_entities_for_named_author_queries(
+        self,
+        query,
+        author_id,
+        topic_entity,
+        content_term,
+    ):
+        from app.rag.retrieval import build_retrieval_query_plan
+
+        plan = build_retrieval_query_plan(query)
+
+        assert plan.source_author_ids == [author_id]
+        assert topic_entity in plan.topic_entities
+        assert content_term in plan.content_query
+        assert all(part not in plan.content_query.lower() for part in author_id.split("_"))
+        assert "strict_source_author_filter" in plan.diagnostics
+
     def test_sparse_query_plan_extracts_entity_year_and_transcript_hints(self):
         from app.rag.retrieval import build_sparse_query_plan
 
@@ -496,6 +525,31 @@ class TestRetrievalHardeningHelpers:
         assert first_query == "main mental models"
         assert first_kwargs["author_ids"] == ["charlie_munger"]
         assert result[0].metadata_json["retrieval_query_plan"]["content_query"] == "main mental models"
+
+    def test_hardened_retrieval_removes_cross_author_results_for_single_author_query(self):
+        from app.rag.retrieval import retrieve_hybrid
+
+        nick_hit = _make_chunk(
+            "nick",
+            text="Amazon, Costco, and customer service are central examples.",
+            author_id="nick_sleep",
+        )
+        buffett_hit = _make_chunk(
+            "buffett",
+            text="Buffett also discussed Amazon in a meeting.",
+            author_id="warren_buffett",
+        )
+
+        with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[buffett_hit, nick_hit]), \
+             patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[buffett_hit]):
+            result = retrieve_hybrid(
+                "What does Nick Sleep say about Amazon?",
+                MagicMock(),
+                top_k=3,
+                hardening_enabled=True,
+            )
+
+        assert [chunk.chunk_id for chunk in result] == ["nick"]
 
     def test_explainable_fusion_boosts_exact_phrase_and_concept_hits(self):
         from app.rag.retrieval import build_retrieval_query_plan, fuse_hardened_candidates
@@ -606,6 +660,22 @@ class TestRetrievalHardeningHelpers:
         assert "authority" in terms
         assert "wesco financial" not in terms
         assert "lesson wisdom" not in terms
+
+    def test_feedback_terms_include_repeated_corpus_local_terms_outside_static_domain_list(self):
+        from app.rag.retrieval import _extract_salient_feedback_terms, build_retrieval_query_plan
+
+        plan = build_retrieval_query_plan("What does Nick Sleep say about Amazon?")
+        pools = {
+            "dense_content": [
+                _make_chunk("a", text="Amazon's customer service and reinvestment model matter.", author_id="nick_sleep"),
+                _make_chunk("b", text="Customer service compounds when scale is shared with customers.", author_id="nick_sleep"),
+                _make_chunk("c", text="Costco and Amazon both show customer service discipline.", author_id="nick_sleep"),
+            ]
+        }
+
+        terms = _extract_salient_feedback_terms(plan, pools, max_terms=8)
+
+        assert "customer service" in terms or "customer" in terms
 
     def test_hardened_retrieval_does_not_rank_neighbor_context_as_candidate_pool(self):
         from app.rag.retrieval import retrieve_hybrid

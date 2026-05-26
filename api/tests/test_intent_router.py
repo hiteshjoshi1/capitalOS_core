@@ -84,6 +84,20 @@ class TestParseIntentFromText:
         intent = self._parse("What does Nick Sleep think about scale economies?")
         assert "nick_sleep" in intent.author_ids
 
+    @pytest.mark.parametrize(
+        ("query", "author_id", "topic"),
+        [
+            ("What does Nick Sleep say about Amazon's business model?", "nick_sleep", "Amazon"),
+            ("What does Charlie Munger say about BYD?", "charlie_munger", "BYD"),
+            ("What are Buffett's views on GEICO?", "warren_buffett", "GEICO"),
+        ],
+    )
+    def test_single_author_queries_extract_discussed_company_entities(self, query, author_id, topic):
+        intent = self._parse(query)
+        assert intent.author_ids == [author_id]
+        assert intent.query_type == "single_author"
+        assert topic in intent.topic_entities
+
     # ── Source type extraction ─────────────────────────────────────────────
 
     def test_source_type_letter_not_hard_mapped(self):
