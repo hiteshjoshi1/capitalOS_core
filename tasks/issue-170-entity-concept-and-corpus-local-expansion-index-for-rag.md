@@ -466,6 +466,8 @@ GROUP BY rco.canonical_name ORDER BY chunk_hits DESC LIMIT 10;
 - [ ] Backend APIs remain OpenAPI-compatible; no router changes.
 - [ ] `make api-smoke` passes after deployment.
 
+<!-- IMMUTABLE_PLAN_END -->
+
 ## Task Checklist
 
 - [ ] Write `migrations/052_entity_concept_metadata.sql`.
@@ -478,3 +480,33 @@ GROUP BY rco.canonical_name ORDER BY chunk_hits DESC LIMIT 10;
 - [ ] Run `make api-rebuild`; verify migrations apply cleanly on a fresh DB.
 - [ ] Run backfill against live DB; run coverage query; verify counts are non-zero.
 - [ ] Confirm ingestion smoke test with mock extraction failure injected.
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `prepare`
+**Workflow Status**: `running`
+
+## Workflow Snapshot
+- latest_outcome: No workflow outcome recorded yet.
+- next_action: Workflow execution is in progress.
+- pipeline_version: `v3`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- No active requirements recorded yet.
+
+## Prepare
+Checked out `feature/issue-170-entity-concept-and-corpus-local-expansion-index-for-rag` from `main` and ensured task file exists.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->
