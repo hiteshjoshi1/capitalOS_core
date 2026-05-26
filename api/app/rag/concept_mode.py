@@ -452,8 +452,13 @@ def _collect_candidate_chunks(
     any_relaxed = False
     relaxation_reason: Optional[str] = None
 
-    # Use strict mode when the user gave explicit date constraints
-    has_explicit_constraints = bool(intent.date_from or intent.date_to)
+    strict_source_author = (
+        intent.query_type == "single_author"
+        and bool(author_ids)
+        and _query_mentions_author_alias(query, intent.author_ids)
+    )
+    # Use strict mode when the user gave explicit source/date constraints.
+    has_explicit_constraints = bool(intent.date_from or intent.date_to) or strict_source_author
 
     # Build cleaned keyword query: strip author names and years already used as filters
     kw_query = _clean_query_for_keyword_search(
@@ -477,6 +482,7 @@ def _collect_candidate_chunks(
             "author_ids_filter": author_ids,
             "broad_top_k": broad_top_k,
             "has_explicit_constraints": has_explicit_constraints,
+            "strict_source_author": strict_source_author,
         },
     )
 
@@ -598,6 +604,9 @@ def _collect_candidate_chunks(
         )
 
     deduped = _dedupe_chunks_by_id(candidates)
+    removed_by_author_gate: list[str] = []
+    if strict_source_author and author_ids:
+        deduped, removed_by_author_gate = _filter_chunks_to_author_ids(deduped, author_ids)
     if intent.topic_entities:
         deduped.sort(key=lambda chunk: _topic_candidate_pool_sort_key(chunk, topic_entities=intent.topic_entities))
     elif retrieval_mode == "hybrid":
@@ -616,6 +625,11 @@ def _collect_candidate_chunks(
             "returned_count": len(final_candidates),
             "constraints_relaxed": any_relaxed,
             "relaxation_reason": relaxation_reason,
+            "source_author_gate": {
+                "strict": strict_source_author,
+                "allowed_author_ids": author_ids or [],
+                "removed_chunk_ids": removed_by_author_gate,
+            },
         },
     )
     return final_candidates, any_relaxed, relaxation_reason
@@ -637,6 +651,26 @@ def _query_mentions_author_alias(query: str, author_ids: list[str] | None) -> bo
         if re.search(r"\b" + re.escape(alias.lower()) + r"\b", lowered):
             return True
     return False
+
+
+def _filter_chunks_to_author_ids(
+    chunks: list[RetrievedChunk],
+    author_ids: list[str],
+) -> tuple[list[RetrievedChunk], list[str]]:
+    allowed = {str(author_id) for author_id in author_ids if author_id}
+    if not allowed:
+        return chunks, []
+
+    kept: list[RetrievedChunk] = []
+    removed: list[str] = []
+    for chunk in chunks:
+        metadata = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+        chunk_author_id = metadata.get("author_id")
+        if not chunk_author_id or str(chunk_author_id) in allowed:
+            kept.append(chunk)
+        else:
+            removed.append(chunk.chunk_id)
+    return kept, removed
 
 
 _HEURISTIC_STOPWORDS = {

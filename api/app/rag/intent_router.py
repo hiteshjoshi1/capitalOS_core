@@ -156,6 +156,35 @@ _SOURCE_SIGNALS = re.compile(
     re.IGNORECASE,
 )
 
+_ENTITY_STARTERS_RE = re.compile(
+    r"\b(?:about|regarding|on|concerning|toward|towards|into|of)\s+(.{1,140})",
+    re.IGNORECASE,
+)
+_CAPITALIZED_ENTITY_RE = re.compile(
+    r"\b(?:[A-Z][A-Za-z0-9&.'-]*(?:\s+[A-Z][A-Za-z0-9&.'-]*){0,4}|[A-Z]{2,}(?:\s+[A-Z]{2,})*)\b"
+)
+_ENTITY_BOUNDARY_RE = re.compile(
+    r"\b(?:in|from|before|after|since|until|through|during|according|letters?|essays?|reports?|transcripts?)\b",
+    re.IGNORECASE,
+)
+_ENTITY_IGNORE = {
+    "a",
+    "an",
+    "and",
+    "about",
+    "business",
+    "did",
+    "does",
+    "how",
+    "model",
+    "the",
+    "what",
+    "when",
+    "where",
+    "which",
+    "why",
+}
+
 
 def _extract_authors(query: str) -> tuple[list[str], list[str], list[str]]:
     """Return (corpus_author_ids, corpus_display_names, topic_entity_names).
@@ -242,6 +271,63 @@ def _extract_authors(query: str) -> tuple[list[str], list[str], list[str]]:
             topic_entities.remove(first[1])
 
     return corpus_ids, corpus_names, topic_entities
+
+
+def _canonical_author_aliases(author_ids: list[str], author_names: list[str]) -> set[str]:
+    aliases = {name.lower() for name in author_names if name}
+    author_id_set = set(author_ids)
+    for alias, aid in _KNOWN_AUTHORS.items():
+        if aid in author_id_set:
+            aliases.add(alias.lower())
+    return aliases
+
+
+def _strip_possessive(entity: str) -> str:
+    return re.sub(r"(?:['’]s)\b", "", entity).strip()
+
+
+def _extract_discussed_entities(
+    query: str,
+    *,
+    source_author_ids: list[str],
+    source_author_names: list[str],
+    existing_topics: list[str],
+) -> list[str]:
+    """Extract non-author entities being discussed.
+
+    This is intentionally deterministic and conservative.  It does not try to
+    resolve arbitrary people; it extracts surface entities like "Amazon" or
+    "BYD" once source authors have already been separated from the query.
+    """
+    author_aliases = _canonical_author_aliases(source_author_ids, source_author_names)
+    seen = {topic.lower() for topic in existing_topics}
+    entities = list(existing_topics)
+
+    spans: list[str] = []
+    for match in _ENTITY_STARTERS_RE.finditer(query):
+        tail = match.group(1)
+        boundary = _ENTITY_BOUNDARY_RE.search(tail)
+        if boundary:
+            tail = tail[: boundary.start()]
+        spans.append(tail)
+    if not spans:
+        spans.append(query)
+
+    for span in spans:
+        for match in _CAPITALIZED_ENTITY_RE.finditer(span):
+            entity = _strip_possessive(match.group(0))
+            if not entity:
+                continue
+            key = entity.lower()
+            if key in seen or key in author_aliases or key in _ENTITY_IGNORE:
+                continue
+            tokens = [token.lower() for token in re.findall(r"[A-Za-z0-9]+", entity)]
+            if not tokens or all(token in _ENTITY_IGNORE for token in tokens):
+                continue
+            entities.append(entity)
+            seen.add(key)
+
+    return entities
 
 
 def _extract_source_types(query: str) -> list[str]:
@@ -336,6 +422,12 @@ def parse_intent_from_text(query: str) -> QueryIntent:
     - Basic sub-query decomposition
     """
     author_ids, author_names, topic_entities = _extract_authors(query)
+    topic_entities = _extract_discussed_entities(
+        query,
+        source_author_ids=author_ids,
+        source_author_names=author_names,
+        existing_topics=topic_entities,
+    )
     source_types = _extract_source_types(query)
     date_from, date_to = _extract_dates(query)
     output_shape = _extract_output_shape(query)

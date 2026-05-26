@@ -73,6 +73,7 @@ _SPARSE_GENERIC_TERMS = {
     "about",
     "from",
     "with",
+    "on",
     "into",
     "through",
     "around",
@@ -107,6 +108,12 @@ _QUERY_SCAFFOLDING_TERMS = {
     "how",
     "it",
     "its",
+    "mean",
+    "means",
+    "said",
+    "say",
+    "saying",
+    "says",
     "live",
     "lived",
     "lives",
@@ -120,6 +127,13 @@ _QUERY_SCAFFOLDING_TERMS = {
     "their",
     "them",
     "they",
+    "think",
+    "thinking",
+    "thinks",
+    "thought",
+    "thoughts",
+    "view",
+    "views",
     "we",
     "who",
     "why",
@@ -138,6 +152,7 @@ _KNOWN_CONCEPT_PHRASES = (
     "share buybacks",
     "second level thinking",
     "scale economies shared",
+    "business model",
 )
 _CONCEPT_EXPANSIONS = {
     "mental models": [
@@ -614,6 +629,26 @@ def _parse_source_author_intent(query: str) -> tuple[list[str], list[str], list[
         return [], [], []
 
 
+def _extract_discussed_entities_for_plan(
+    raw_query: str,
+    *,
+    author_ids: list[str],
+    author_names: list[str],
+    topics: list[str],
+) -> list[str]:
+    try:
+        from app.rag.intent_router import _extract_discussed_entities
+
+        return _extract_discussed_entities(
+            raw_query,
+            source_author_ids=author_ids,
+            source_author_names=author_names,
+            existing_topics=topics,
+        )
+    except Exception:
+        return topics
+
+
 def _remove_source_author_terms(query: str, author_terms: list[str]) -> tuple[str, list[str]]:
     cleaned = query
     removed: list[str] = []
@@ -713,6 +748,14 @@ def build_retrieval_query_plan(
     author_ids = _dedupe_preserve_order(list(source_author_ids or parsed_author_ids))
     author_names = _dedupe_preserve_order(list(source_author_names or parsed_author_names))
     topics = _dedupe_preserve_order(list(topic_entities or parsed_topic_entities))
+    topics = _dedupe_preserve_order(
+        _extract_discussed_entities_for_plan(
+            raw_query,
+            author_ids=author_ids,
+            author_names=author_names,
+            topics=topics,
+        )
+    )
 
     author_terms = _dedupe_preserve_order(
         [
@@ -746,6 +789,7 @@ def build_retrieval_query_plan(
         diagnostics={
             "author_terms_considered": author_terms,
             "content_query_source": "source_author_stripped" if removed_terms else "raw_query",
+            "strict_source_author_filter": len(author_ids) == 1,
         },
     )
 
@@ -914,6 +958,8 @@ def retrieve_similar_chunks(
             rd.dedupe_priority,
             rd.work_type,
             rd.metadata_json AS document_metadata_json,
+            COALESCE(rd.author_id, rs.author_id) AS author_id,
+            ra.name AS author_name,
             (re.embedding <=> CAST(:query_vec AS vector)) AS cosine_distance
         FROM rag_embeddings re
         JOIN rag_chunks    rc ON rc.id = re.chunk_id
@@ -949,6 +995,8 @@ def retrieve_similar_chunks(
                     **(dict(row["document_metadata_json"]) if row["document_metadata_json"] else {}),
                     "document_title": row["title"],
                     "source_section": row["source_section"],
+                    "author_id": row["author_id"],
+                    "author_name": row["author_name"],
                 },
             ),
             cosine_distance=float(row["cosine_distance"]),
@@ -1416,6 +1464,8 @@ def retrieve_keyword_chunks(
             rd.dedupe_priority,
             rd.work_type,
             rd.metadata_json AS document_metadata_json,
+            COALESCE(rd.author_id, rs.author_id) AS author_id,
+            ra.name AS author_name,
             ({rank_sql}) AS ts_rank
         FROM rag_chunks    rc
         JOIN rag_documents rd ON rd.id = rc.document_id
@@ -1450,6 +1500,8 @@ def retrieve_keyword_chunks(
                     **(dict(row["document_metadata_json"]) if row["document_metadata_json"] else {}),
                     "document_title": row["title"],
                     "source_section": row["source_section"],
+                    "author_id": row["author_id"],
+                    "author_name": row["author_name"],
                 },
             ),
             cosine_distance=1.0,  # no cosine distance for keyword results
@@ -1641,6 +1693,20 @@ def _feedback_tokenize(text: str) -> list[str]:
     ]
 
 
+def _allowed_feedback_term(term: str, *, score: float, existing: set[str], seed_tokens: set[str]) -> bool:
+    normalized = term.lower().strip()
+    if not normalized or normalized in existing or normalized in seed_tokens:
+        return False
+    if any(token in _FEEDBACK_STOPWORDS for token in normalized.split()):
+        return False
+    if normalized in _DOMAIN_FEEDBACK_TERMS:
+        return True
+    # Generic corpus-local expansion: allow terms that repeatedly surface in
+    # the already constrained candidate pool. This keeps expansion tied to the
+    # selected author/corpus instead of a global hand-written vocabulary.
+    return score >= 1.45
+
+
 def _extract_salient_feedback_terms(
     plan: RetrievalQueryPlan,
     pools: dict[str, list[RetrievedChunk]],
@@ -1661,8 +1727,9 @@ def _extract_salient_feedback_terms(
 
     for pool_name in pool_order:
         for rank, chunk in enumerate(pools.get(pool_name, [])[:12], start=1):
-            metadata = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
-            search_text = f"{_metadata_search_text(metadata)} {chunk.text or ''}"
+            # Expansion should be local to retrieved evidence text. Metadata is
+            # useful for scoring but too noisy for query expansion.
+            search_text = str(chunk.text or "")
             tokens = _feedback_tokenize(search_text)
             filtered: list[str] = []
             weight = 1.0 / max(rank, 1)
@@ -1683,8 +1750,8 @@ def _extract_salient_feedback_terms(
                 phrase_scores[phrase] += weight * 1.25
 
     selected: list[str] = []
-    for phrase, _score in phrase_scores.most_common(max_terms):
-        if phrase not in _DOMAIN_FEEDBACK_TERMS:
+    for phrase, score in phrase_scores.most_common(max_terms * 2):
+        if not _allowed_feedback_term(phrase, score=score, existing=existing, seed_tokens=seed_tokens):
             continue
         if any(term in phrase.split() for term in ("section", "title", "chunk")):
             continue
@@ -1692,10 +1759,8 @@ def _extract_salient_feedback_terms(
         if len(selected) >= max_terms // 2:
             break
 
-    for term, _score in term_scores.most_common(max_terms * 2):
-        if term not in _DOMAIN_FEEDBACK_TERMS:
-            continue
-        if term in existing or term in seed_tokens:
+    for term, score in term_scores.most_common(max_terms * 3):
+        if not _allowed_feedback_term(term, score=score, existing=existing, seed_tokens=seed_tokens):
             continue
         selected.append(term)
         if len(selected) >= max_terms:
@@ -2032,6 +2097,37 @@ def _neighbor_candidate_pool(
     return neighbors
 
 
+def _chunk_author_id(chunk: RetrievedChunk) -> Optional[str]:
+    metadata = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+    raw = metadata.get("author_id")
+    return str(raw) if raw else None
+
+
+def _enforce_source_author_gate(
+    chunks: list[RetrievedChunk],
+    *,
+    allowed_author_ids: Optional[list[str]],
+) -> tuple[list[RetrievedChunk], list[str]]:
+    if not allowed_author_ids:
+        return chunks, []
+    allowed = {str(author_id) for author_id in allowed_author_ids if author_id}
+    if not allowed:
+        return chunks, []
+
+    kept: list[RetrievedChunk] = []
+    removed: list[str] = []
+    for chunk in chunks:
+        chunk_author_id = _chunk_author_id(chunk)
+        # Older unit-test doubles may not carry author metadata. Real DB
+        # retrieval now attaches author_id to every chunk, so unknown metadata
+        # is retained but visible in trace output.
+        if chunk_author_id is None or chunk_author_id in allowed:
+            kept.append(chunk)
+        else:
+            removed.append(chunk.chunk_id)
+    return kept, removed
+
+
 def _retrieve_hardened(
     query: str,
     db: Session,
@@ -2233,12 +2329,22 @@ def _retrieve_hardened(
         top_k=top_k,
         weighting_enabled=weighting_enabled,
     )
+    fused, removed_by_author_gate = _enforce_source_author_gate(
+        fused,
+        allowed_author_ids=effective_author_ids or ([effective_author_id] if effective_author_id else None),
+    )
     trace_retrieval_chunks(
         "hardened_fused_final",
         query,
         fused,
         limit=top_k,
-        extra={"pool_sizes": {name: len(chunks) for name, chunks in pools.items()}},
+        extra={
+            "pool_sizes": {name: len(chunks) for name, chunks in pools.items()},
+            "source_author_gate": {
+                "allowed_author_ids": effective_author_ids or ([effective_author_id] if effective_author_id else []),
+                "removed_chunk_ids": removed_by_author_gate,
+            },
+        },
     )
     return fused
 
