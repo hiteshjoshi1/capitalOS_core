@@ -480,3 +480,43 @@ GROUP BY rco.canonical_name ORDER BY chunk_hits DESC LIMIT 10;
 - [ ] Run `make api-rebuild`; verify migrations apply cleanly on a fresh DB.
 - [ ] Run backfill against live DB; run coverage query; verify counts are non-zero.
 - [ ] Confirm ingestion smoke test with mock extraction failure injected.
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `agent_run`
+**Workflow Status**: `blocked`
+
+## Workflow Snapshot
+- latest_outcome: V3 agent run: provider subprocess failed or stalled before completing.
+- next_action: Inspect blockers and rerun the appropriate stage after adding new context.
+- pipeline_version: `v3`
+- retry_gate_pending: `no`
+- blocked_reason: V3 agent run: provider subprocess failed or stalled before completing.
+
+## Active Requirements
+- No active requirements recorded yet.
+
+## Prepare
+Checked out `feature/issue-170-entity-concept-and-corpus-local-expansion-index-for-rag` from `main` and ensured task file exists.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Blockers
+- V3 agent run: provider subprocess failed or stalled before completing.
+
+## Permanently Failed / Gave Up
+- Stop reason: agent_run failed: Provider `copilot` subprocess failed for v3 run: Error: Model "claude-sonnet-4.6" from --model flag is not available.
+- Attempted mitigations:
+- mitigation: No automated mitigation was recorded.
+- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.
+<!-- MACHINE_RENDERED_END -->
