@@ -466,6 +466,8 @@ GROUP BY rco.canonical_name ORDER BY chunk_hits DESC LIMIT 10;
 - [ ] Backend APIs remain OpenAPI-compatible; no router changes.
 - [ ] `make api-smoke` passes after deployment.
 
+<!-- IMMUTABLE_PLAN_END -->
+
 ## Task Checklist
 
 - [ ] Write `migrations/052_entity_concept_metadata.sql`.
