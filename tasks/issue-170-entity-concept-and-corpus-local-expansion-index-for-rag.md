@@ -511,12 +511,4 @@ _No review cycles yet._
 
 _No rework cycles yet._
 
-## Blockers
-- V3 agent run: provider subprocess failed or stalled before completing.
-
-## Permanently Failed / Gave Up
-- Stop reason: agent_run failed: Provider `copilot` subprocess failed for v3 run: Error: Model "claude-sonnet-4.6" from --model flag is not available.
-- Attempted mitigations:
-- mitigation: No automated mitigation was recorded.
-- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.
 <!-- MACHINE_RENDERED_END -->
