@@ -173,5 +173,108 @@ Recompute after major ingestion runs. Command is idempotent (UPSERT on PK).
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-171-entity-concept-retrieval-integration-and-corpus-expansion`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: migrations/054_corpus_expansion_index.sql applies cleanly
+- Acceptance criterion: compute_corpus_expansions completes on live DB with >= 1 author and stores rows for >= 1 (author, entity) pair
+- Acceptance criterion: --dry-run prints per-author/entity summary without writing rows
+- Acceptance criterion: Running twice produces identical row counts (idempotency via UPSERT)
+- Acceptance criterion: --author-id nick_sleep limits to that author only
+- Acceptance criterion: Nick Sleep + Amazon pair stores multi-word phrase (2-gram or 3-gram) expansion terms
+- Acceptance criterion: No changes to retrieval.py, intent_router.py, or any live query path
+- Acceptance criterion: make api-smoke passes
+
+## Prepare
+Checked out `feature/issue-171-entity-concept-retrieval-integration-and-corpus-expansion` from `main` and ensured task file exists.
+
+## Plan Summary
+1) Write migration 054_corpus_expansion_index.sql with rag_corpus_expansions table and index. 2) Implement compute_corpus_expansions.py with n-gram extraction, NPMI math, entity/concept co-expansion, idempotent UPSERT, CLI flags. 3) Write unit tests for pure functions (tokenize, ngrams, NPMI) and mock-based DB tests (dry-run, skip). 4) Apply migration, run script, verify idempotency and multi-word phrase output. 5) Run full verification suite.
+
+### Architecture Decisions
+- NPMI precomputed offline: avoids per-query corpus statistics cost
+- N-gram candidates (1/2/3-gram) using _normalize_content_query tokenizer to discover multi-word phrases like 'scale economies shared'
+- Stopword filtering at n-gram level: discard n-grams where ALL tokens are in _FEEDBACK_STOPWORDS
+- Deterministic ordering: sort pivot_ngrams_union and entity/concept dict keys before processing; sort tied NPMI values by expansion_term alpha to ensure idempotent top-N selection across Python runs
+- UPSERT on PK (author_id, pivot_type, pivot_id, expansion_term) with per-pivot savepoints for failure isolation
+- Entity and concept co-expansion step stores expansion_type='entity'/'concept' with expansion_ref_id set
+- No changes to retrieval.py or any live query path — pure offline data layer
+
+### Acceptance Criteria
+- migrations/054_corpus_expansion_index.sql applies cleanly
+- compute_corpus_expansions completes on live DB with >= 1 author and stores rows for >= 1 (author, entity) pair
+- --dry-run prints per-author/entity summary without writing rows
+- Running twice produces identical row counts (idempotency via UPSERT)
+- --author-id nick_sleep limits to that author only
+- Nick Sleep + Amazon pair stores multi-word phrase (2-gram or 3-gram) expansion terms
+- No changes to retrieval.py, intent_router.py, or any live query path
+- make api-smoke passes
+
+### Planned Paths
+- `migrations/054_corpus_expansion_index.sql`
+- `api/app/scripts/compute_corpus_expansions.py`
+- `api/tests/test_compute_corpus_expansions.py`
+
+## Build Summary
+Implemented Issue 171: corpus-local NPMI expansion index. Created migration 054_corpus_expansion_index.sql, implemented compute_corpus_expansions.py with full NPMI algorithm (1/2/3-gram extraction, stopword filtering, entity/concept co-expansion, idempotent UPSERT), and unit tests. Migration applied cleanly. Script ran against live DB producing 587 rows for nick_sleep including 216 multi-word phrases. All verification suites pass (825 backend tests, 189 frontend tests, 191 orch tests).
+
+### Changed Files
+- `api/app/scripts/compute_corpus_expansions.py`
+- `api/tests/test_compute_corpus_expansions.py`
+- `migrations/054_corpus_expansion_index.sql`
+- `tasks/issue-171-entity-concept-retrieval-integration-and-corpus-expansion.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented Issue 171: corpus-local NPMI expansion index. Created migration 054_corpus_expansion_index.sql, implemented compute_corpus_expansions.py with full NPMI algorithm (1/2/3-gram extraction, stopword filtering, entity/concept co-expansion, idempotent UPSERT), and unit tests. Migration applied cleanly. Script ran against live DB producing 587 rows for nick_sleep including 216 multi-word phrases. All verification suites pass (825 backend tests, 189 frontend tests, 191 orch tests).
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` migrations/054_corpus_expansion_index.sql applies cleanly on make api-rebuild: make db-migrate output: '054_corpus_expansion_index.sql' → CREATE TABLE, CREATE INDEX
+- `pass` compute_corpus_expansions completes on live DB with >= 1 author and stores expansion rows for >= 1 (author, entity) pair where chunk support >= 3: DONE authors=1 pivots=25 terms_stored=587; nick_sleep + amazon has 33 pivot_chunks, 30 expansion terms
+- `pass` Running with --dry-run prints per-author/entity summary without writing any rows: Dry-run output showed per-pivot lines and DONE; DB row count unchanged after dry-run. Unit test TestRunComputeDryRun confirms no commit/insert calls
+- `pass` Running twice (idempotent check) produces identical row counts: count1=587, run2 terms_stored=587, count2=587 — deterministic sort ensures identical top-N selection
+- `pass` --author-id nick_sleep limits computation to that author only; no rows written for others: SELECT DISTINCT author_id FROM rag_corpus_expansions returns only 'nick_sleep'
+- `pass` Nick Sleep + Amazon pair stores >= 1 multi-word phrase (2-gram or 3-gram): SELECT expansion_term LIKE '% %' WHERE pivot_id='amazon': 'scale efficiencies shared', 'jeff bezos', 'nebraska furniture mart', etc. Total 216 multi-word phrases for nick_sleep
+- `pass` No changes to retrieval.py, intent_router.py, or any live query path: git diff shows only 3 new files: migration, script, tests. No modifications to existing files except task markdown
+- `pass` make api-smoke passes (no regressions): Health OK, dashboard summary returned valid JSON with status 200
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-171-entity-concept-retrieval-integration-and-corpus-expansion`.
 <!-- MACHINE_RENDERED_END -->
