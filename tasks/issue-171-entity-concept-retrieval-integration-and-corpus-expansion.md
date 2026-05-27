@@ -169,3 +169,9 @@ Recompute after major ingestion runs. Command is idempotent (UPSERT on PK).
 - [ ] Verify multi-word phrase stored (SELECT from `rag_corpus_expansions` where
   `expansion_term LIKE '% %'` returns >= 1 row).
 
+<!-- IMMUTABLE_PLAN_END -->
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->

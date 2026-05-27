@@ -531,3 +531,10 @@ Final evidence: Nick Sleep chunks only. Buffett/Munger chunks blocked by author 
   - `RAG_RERANKER_ENTITY_CONTEXT=0` does not prepend any prefix to chunk text.
 - [ ] Run no-regression eval on hand-labeled golden set; verify gate passes.
 - [ ] Run `--mode structural_recall`; verify >= 10 tests generated, >= 3 authors.
+
+<!-- IMMUTABLE_PLAN_END -->
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->
