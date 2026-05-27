@@ -42,6 +42,11 @@ from app.rag.ingestion.source_presets import (
     apply_source_preset,
     normalize_source_parse_result,
 )
+from app.rag.ingestion.entity_extractor import (
+    extract_and_store_chunk_annotations,
+    _load_entity_alias_patterns,
+    _load_concept_alias_patterns,
+)
 
 log = logging.getLogger(__name__)
 
@@ -651,12 +656,44 @@ def _persist_logical_documents(
                 db.delete(existing_document)
             db.flush()
 
+            # Pre-load alias patterns once per ingestion job (not per chunk)
+            _entity_patterns = None
+            _concept_patterns = None
+            try:
+                _entity_patterns = _load_entity_alias_patterns(db)
+                _concept_patterns = _load_concept_alias_patterns(db)
+            except Exception as _exc:
+                log.warning("entity_extractor: failed to load alias patterns: %s", _exc)
+
+            doc_entities_extracted = 0
+            doc_concepts_extracted = 0
+
             for materialized_plan, _, validation in prepared_documents:
                 document, chunks = _persist_document_and_chunks(db, source, parsed, materialized_plan)
                 embeddings = _embed_and_persist(db, chunks)
                 total_chunks += len(chunks)
                 total_embeddings += embeddings
                 created_documents[materialized_plan.key] = document
+
+                # Extract entity/concept annotations per chunk (non-fatal)
+                for chunk in chunks:
+                    try:
+                        counts = extract_and_store_chunk_annotations(
+                            chunk.id,
+                            chunk.text,
+                            db,
+                            entity_patterns=_entity_patterns,
+                            concept_patterns=_concept_patterns,
+                        )
+                        doc_entities_extracted += counts.get("entities_extracted_count", 0)
+                        doc_concepts_extracted += counts.get("concepts_extracted_count", 0)
+                    except Exception as _exc:
+                        log.warning(
+                            "entity_extractor: chunk %s extraction failed: %s",
+                            chunk.id,
+                            _exc,
+                        )
+
                 outcome = {
                     "key": materialized_plan.key,
                     "status": "created",
@@ -666,6 +703,8 @@ def _persist_logical_documents(
                     "source_section": document.source_section,
                     "chunk_count": len(chunks),
                     "embedding_count": embeddings,
+                    "entities_extracted": doc_entities_extracted,
+                    "concepts_extracted": doc_concepts_extracted,
                     "parent_key": materialized_plan.parent_key,
                     "quality": {
                         "reasons": validation.reasons,

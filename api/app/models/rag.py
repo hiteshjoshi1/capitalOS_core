@@ -371,3 +371,77 @@ class RagEvalGolden(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     chunk = relationship("RagChunk")
+
+
+# ── Entity / concept metadata layer (Issue 170) ───────────────────────────────
+
+
+class RagEntity(Base):
+    __tablename__ = "rag_entities"
+
+    id = Column(String, primary_key=True)  # slug: 'amazon', 'berkshire_hathaway'
+    entity_type = Column(String, nullable=False)  # company|person|author|ticker|other
+    canonical_name = Column(String, nullable=False)
+    metadata_json = Column(_JsonBlob, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+
+    aliases = relationship("RagEntityAlias", back_populates="entity", cascade="all, delete-orphan")
+
+
+class RagEntityAlias(Base):
+    __tablename__ = "rag_entity_aliases"
+
+    entity_id = Column(String, ForeignKey("rag_entities.id", ondelete="CASCADE"), primary_key=True)
+    alias = Column(String, primary_key=True)  # lowercase normalized
+    alias_type = Column(String, nullable=False)  # name|ticker|short_name|surface_form
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    entity = relationship("RagEntity", back_populates="aliases")
+
+
+class RagChunkEntity(Base):
+    __tablename__ = "rag_chunk_entities"
+
+    chunk_id = Column(_UUIDStr, ForeignKey("rag_chunks.id", ondelete="CASCADE"), primary_key=True)
+    entity_id = Column(String, ForeignKey("rag_entities.id", ondelete="CASCADE"), primary_key=True)
+    surface_text = Column(Text)
+    confidence = Column(Float, nullable=False, default=1.0)
+    extractor = Column(String, nullable=False)
+
+    chunk = relationship("RagChunk")
+    entity = relationship("RagEntity")
+
+
+class RagConcept(Base):
+    __tablename__ = "rag_concepts"
+
+    id = Column(String, primary_key=True)  # slug: 'mental_models', 'margin_of_safety'
+    canonical_name = Column(String, nullable=False)
+    domain = Column(String)  # investing|psychology|valuation|operations|macro
+    description = Column(Text)
+    metadata_json = Column(_JsonBlob, nullable=False, default=dict)
+
+    aliases = relationship("RagConceptAlias", back_populates="concept", cascade="all, delete-orphan")
+
+
+class RagConceptAlias(Base):
+    __tablename__ = "rag_concept_aliases"
+
+    concept_id = Column(String, ForeignKey("rag_concepts.id", ondelete="CASCADE"), primary_key=True)
+    alias = Column(String, primary_key=True)  # lowercase normalized
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    concept = relationship("RagConcept", back_populates="aliases")
+
+
+class RagChunkConcept(Base):
+    __tablename__ = "rag_chunk_concepts"
+
+    chunk_id = Column(_UUIDStr, ForeignKey("rag_chunks.id", ondelete="CASCADE"), primary_key=True)
+    concept_id = Column(String, ForeignKey("rag_concepts.id", ondelete="CASCADE"), primary_key=True)
+    surface_text = Column(Text)
+    confidence = Column(Float, nullable=False, default=1.0)
+    extractor = Column(String, nullable=False)
+
+    chunk = relationship("RagChunk")
+    concept = relationship("RagConcept")
