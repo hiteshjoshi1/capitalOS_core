@@ -148,6 +148,7 @@ def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_
 
 
 def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(client: TestClient, db_engine, monkeypatch):
+    monkeypatch.setenv("QUOTE_STALE_DAYS", "10")
     as_of_snapshot = datetime(2026, 5, 1, tzinfo=timezone.utc)
     as_of_current = datetime(2026, 5, 20, tzinfo=timezone.utc)
     with db_engine.begin() as conn:
