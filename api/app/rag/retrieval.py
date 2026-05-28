@@ -154,6 +154,7 @@ _KNOWN_CONCEPT_PHRASES = (
     "scale economies shared",
     "business model",
 )
+# DEPRECATED: replaced by rag_corpus_expansions (Issue 171). Remove in Issue 173.
 _CONCEPT_EXPANSIONS = {
     "mental models": [
         "latticework",
@@ -429,6 +430,9 @@ def _trace_chunk_item(rank: int, chunk: "RetrievedChunk") -> dict[str, Any]:
         "aspect_hits": diagnostics.get("aspect_hits"),
         "score_components": diagnostics.get("score_components"),
         "diversity": diagnostics.get("diversity"),
+        # Issue 172: per-chunk annotation pool membership flags
+        "entity_pool_member": "entity_annotation_pool" in (diagnostics.get("pool_memberships") or {}),
+        "concept_pool_member": "concept_annotation_pool" in (diagnostics.get("pool_memberships") or {}),
         "content_query": plan.get("content_query"),
         "sparse_query": plan.get("sparse_query"),
         "text": str(chunk.text or "").replace("\n", " ")[:_TRACE_TEXT_LIMIT],
@@ -465,6 +469,10 @@ class RetrievalQueryPlan:
     concept_terms: list[str] = field(default_factory=list)
     removed_source_author_terms: list[str] = field(default_factory=list)
     topic_entities: list[str] = field(default_factory=list)
+    # Issue 172: entity/concept alias resolution and corpus expansion
+    resolved_entity_ids: list[str] = field(default_factory=list)
+    resolved_concept_ids: list[str] = field(default_factory=list)
+    corpus_expansion_terms: list[str] = field(default_factory=list)
     diagnostics: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict[str, Any]:
@@ -478,6 +486,10 @@ class RetrievalQueryPlan:
             "concept_terms": list(self.concept_terms),
             "removed_source_author_terms": list(self.removed_source_author_terms),
             "topic_entities": list(self.topic_entities),
+            # Issue 172 additions — backwards-compatible new fields
+            "resolved_entity_ids": list(self.resolved_entity_ids),
+            "resolved_concept_ids": list(self.resolved_concept_ids),
+            "corpus_expansion_terms": list(self.corpus_expansion_terms),
             "diagnostics": dict(self.diagnostics),
         }
 
@@ -692,7 +704,12 @@ def _extract_required_phrases(raw_query: str, content_query: str) -> list[str]:
     return _dedupe_preserve_order(phrases)
 
 
-def _build_concept_terms(content_query: str, required_phrases: list[str]) -> list[str]:
+def _build_concept_terms(
+    content_query: str,
+    required_phrases: list[str],
+    *,
+    use_static_expansions: bool = True,
+) -> list[str]:
     terms: list[str] = list(required_phrases)
     phrase_tokens = {
         token
@@ -705,8 +722,9 @@ def _build_concept_terms(content_query: str, required_phrases: list[str]) -> lis
         if token in phrase_tokens:
             continue
         terms.append(token)
-    for phrase in required_phrases:
-        terms.extend(_CONCEPT_EXPANSIONS.get(phrase.lower(), []))
+    if use_static_expansions:
+        for phrase in required_phrases:
+            terms.extend(_CONCEPT_EXPANSIONS.get(phrase.lower(), []))
     return _dedupe_preserve_order(terms)
 
 
@@ -731,12 +749,116 @@ def _build_sparse_query(required_phrases: list[str], concept_terms: list[str], c
     return content_query
 
 
+# ── Issue 172: Alias normalisation and corpus expansion helpers ──────────────
+
+def resolve_entity_ids(
+    surface_forms: list[str],
+    db: Session,
+) -> tuple[list[str], list[str]]:
+    """
+    Return (resolved_entity_ids, unresolved_surface_forms).
+
+    Looks up each lowercased surface form in rag_entity_aliases WHERE is_active = TRUE.
+    Unresolved forms fall back to the existing content_query text append (no behaviour change).
+    """
+    if not surface_forms:
+        return [], []
+    try:
+        rows = db.execute(
+            text("""
+                SELECT DISTINCT entity_id
+                FROM rag_entity_aliases
+                WHERE lower(alias) = ANY(:aliases)
+                  AND is_active = TRUE
+            """),
+            {"aliases": [s.lower() for s in surface_forms]},
+        ).fetchall()
+    except Exception:
+        log.debug("resolve_entity_ids: alias lookup failed — returning empty", exc_info=True)
+        return [], list(surface_forms)
+    resolved = [r.entity_id for r in rows]
+    resolved_lower = {r.entity_id for r in rows}
+    unresolved = [
+        s for s in surface_forms
+        if s.lower() not in resolved_lower
+           and s not in resolved_lower
+    ]
+    return resolved, unresolved
+
+
+def resolve_concept_ids(
+    phrases: list[str],
+    db: Session,
+) -> list[str]:
+    """
+    Look up each phrase in rag_concept_aliases WHERE is_active = TRUE.
+    Returns list of matched concept_ids.
+    """
+    if not phrases:
+        return []
+    try:
+        rows = db.execute(
+            text("""
+                SELECT DISTINCT concept_id
+                FROM rag_concept_aliases
+                WHERE lower(alias) = ANY(:aliases)
+                  AND is_active = TRUE
+            """),
+            {"aliases": [p.lower() for p in phrases]},
+        ).fetchall()
+    except Exception:
+        log.debug("resolve_concept_ids: alias lookup failed — returning empty", exc_info=True)
+        return []
+    return [r.concept_id for r in rows]
+
+
+def fetch_expansion_terms(
+    author_ids: list[str],
+    entity_ids: list[str],
+    concept_ids: list[str],
+    db: Session,
+    *,
+    max_terms: int = 15,
+) -> list[str]:
+    """
+    Return the top expansion terms from rag_corpus_expansions for the given
+    (author, entity/concept) pairs, sorted by npmi descending.
+    Returns [] if DB unavailable or no rows found (graceful fallback).
+    """
+    if not author_ids or (not entity_ids and not concept_ids):
+        return []
+    pivot_ids = list(entity_ids) + list(concept_ids)
+    if not pivot_ids:
+        return []
+    try:
+        rows = db.execute(
+            text("""
+                SELECT expansion_term
+                FROM rag_corpus_expansions
+                WHERE author_id = ANY(:author_ids)
+                  AND pivot_id  = ANY(:pivot_ids)
+                ORDER BY npmi DESC
+                LIMIT :max_terms
+            """),
+            {
+                "author_ids": author_ids,
+                "pivot_ids": pivot_ids,
+                "max_terms": max_terms,
+            },
+        ).fetchall()
+    except Exception:
+        log.debug("fetch_expansion_terms: DB query failed — returning empty", exc_info=True)
+        return []
+    return _dedupe_preserve_order([r.expansion_term for r in rows])
+
+
 def build_retrieval_query_plan(
     query: str,
     *,
     source_author_ids: Optional[list[str]] = None,
     source_author_names: Optional[list[str]] = None,
     topic_entities: Optional[list[str]] = None,
+    db: Optional[Session] = None,
 ) -> RetrievalQueryPlan:
     raw_query = (query or "").strip()
     parsed_author_ids: list[str] = []
@@ -773,7 +895,29 @@ def build_retrieval_query_plan(
         content_query = _normalize_content_query(raw_query) or raw_query
 
     required_phrases = _extract_required_phrases(raw_query, content_query)
-    concept_terms = _build_concept_terms(content_query, required_phrases)
+
+    # Issue 172: alias resolution and corpus expansion (require DB; degrade gracefully without it)
+    resolved_entity_ids: list[str] = []
+    unresolved_surface_forms: list[str] = list(topics)
+    resolved_concept_ids: list[str] = []
+    corpus_expansion_terms: list[str] = []
+    if db is not None:
+        resolved_entity_ids, unresolved_surface_forms = resolve_entity_ids(topics, db)
+        resolved_concept_ids = resolve_concept_ids(required_phrases, db)
+        corpus_expansion_terms = fetch_expansion_terms(
+            author_ids,
+            resolved_entity_ids,
+            resolved_concept_ids,
+            db,
+        )
+
+    # Bypass static _CONCEPT_EXPANSIONS when DB-backed corpus_expansion_terms are available
+    use_static_expansions = not corpus_expansion_terms
+    concept_terms = _build_concept_terms(
+        content_query,
+        required_phrases,
+        use_static_expansions=use_static_expansions,
+    )
     sparse_query = _build_sparse_query(required_phrases, concept_terms, content_query)
 
     return RetrievalQueryPlan(
@@ -786,10 +930,16 @@ def build_retrieval_query_plan(
         concept_terms=concept_terms,
         removed_source_author_terms=removed_terms,
         topic_entities=topics,
+        resolved_entity_ids=resolved_entity_ids,
+        resolved_concept_ids=resolved_concept_ids,
+        corpus_expansion_terms=corpus_expansion_terms,
         diagnostics={
             "author_terms_considered": author_terms,
             "content_query_source": "source_author_stripped" if removed_terms else "raw_query",
             "strict_source_author_filter": len(author_ids) == 1,
+            "resolved_entity_ids": resolved_entity_ids,
+            "resolved_concept_ids": resolved_concept_ids,
+            "corpus_expansion_terms": corpus_expansion_terms,
         },
     )
 
@@ -1523,7 +1673,215 @@ def retrieve_keyword_chunks(
     return ranked_chunks
 
 
-# ── Reciprocal Rank Fusion ────────────────────────────────────────────────────
+# ── Issue 172: Annotation-based retrieval pools ───────────────────────────────
+
+
+def retrieve_by_entity_ids(
+    entity_ids: list[str],
+    db: Session,
+    *,
+    author_ids: Optional[list[str]] = None,
+    top_k: int = 30,
+) -> list[RetrievedChunk]:
+    """
+    Return chunks annotated with any of the given entity_ids, ordered by
+    annotation confidence descending.
+    Scoped to author_ids when provided.
+    Returns [] gracefully when entity_ids is empty or no annotated chunks exist.
+    """
+    if not entity_ids:
+        return []
+
+    dialect_name = db.bind.dialect.name if db.bind else "unknown"
+    if dialect_name != "postgresql":
+        log.debug("retrieve_by_entity_ids: skipping on non-Postgres dialect=%s", dialect_name)
+        return []
+
+    params: dict[str, Any] = {"entity_ids": entity_ids, "top_k": top_k}
+    where_clauses = ["rce.entity_id = ANY(:entity_ids)"]
+
+    if author_ids:
+        author_id_conditions = " OR ".join(
+            f"COALESCE(rd.author_id, rs.author_id) = :entity_author_id_{i}"
+            for i in range(len(author_ids))
+        )
+        where_clauses.append(f"({author_id_conditions})")
+        for i, aid in enumerate(author_ids):
+            params[f"entity_author_id_{i}"] = aid
+
+    where_sql = "WHERE " + " AND ".join(where_clauses)
+    sql = text(
+        f"""
+        SELECT rc.id AS chunk_id,
+               rc.document_id,
+               rc.chunk_index,
+               rc.text,
+               rc.token_count,
+               rc.metadata_json,
+               rd.collection,
+               rd.title,
+               rd.source_section,
+               rd.canonical_status,
+               rd.dedupe_priority,
+               rd.work_type,
+               rd.metadata_json AS document_metadata_json,
+               COALESCE(rd.author_id, rs.author_id) AS author_id,
+               ra.name AS author_name,
+               rce.confidence AS score,
+               array_agg(rce.entity_id) AS entity_ids
+        FROM rag_chunks rc
+        JOIN rag_chunk_entities rce ON rce.chunk_id = rc.id
+        JOIN rag_documents rd       ON rd.id = rc.document_id
+        JOIN rag_sources rs         ON rs.id = rd.source_id
+        JOIN rag_authors ra         ON ra.id = COALESCE(rd.author_id, rs.author_id)
+        {where_sql}
+        GROUP BY rc.id, rc.document_id, rc.chunk_index, rc.text, rc.token_count, rc.metadata_json,
+                 rd.collection, rd.title, rd.source_section, rd.canonical_status,
+                 rd.dedupe_priority, rd.work_type, rd.metadata_json,
+                 COALESCE(rd.author_id, rs.author_id), ra.name, rce.confidence
+        ORDER BY rce.confidence DESC
+        LIMIT :top_k
+        """
+    )
+    try:
+        rows = db.execute(sql, params).mappings().all()
+    except Exception as exc:
+        log.exception("retrieve_by_entity_ids query failed: %s", exc)
+        return []
+
+    return [
+        RetrievedChunk(
+            chunk_id=str(row["chunk_id"]),
+            document_id=str(row["document_id"]),
+            chunk_index=row["chunk_index"],
+            text=row["text"],
+            token_count=row["token_count"],
+            metadata_json=merge_retrieval_metadata(
+                dict(row["metadata_json"]) if row["metadata_json"] else {},
+                collection=row["collection"],
+                canonical_status=row["canonical_status"],
+                dedupe_priority=row["dedupe_priority"],
+                work_type=row["work_type"],
+                document_metadata={
+                    **(dict(row["document_metadata_json"]) if row["document_metadata_json"] else {}),
+                    "document_title": row["title"],
+                    "source_section": row["source_section"],
+                    "author_id": row["author_id"],
+                    "author_name": row["author_name"],
+                    # Store matched entity IDs for optional reranker enrichment (Issue 172)
+                    "annotated_entity_ids": list(row["entity_ids"]) if row["entity_ids"] else [],
+                },
+            ),
+            cosine_distance=1.0,
+            ts_rank=float(row["score"]),
+            corpus_class="entity_annotation_pool",
+        )
+        for row in rows
+    ]
+
+
+def retrieve_by_concept_ids(
+    concept_ids: list[str],
+    db: Session,
+    *,
+    author_ids: Optional[list[str]] = None,
+    top_k: int = 30,
+) -> list[RetrievedChunk]:
+    """
+    Return chunks annotated with any of the given concept_ids, ordered by
+    annotation confidence descending.
+    Scoped to author_ids when provided.
+    Returns [] gracefully when concept_ids is empty or no annotated chunks exist.
+    """
+    if not concept_ids:
+        return []
+
+    dialect_name = db.bind.dialect.name if db.bind else "unknown"
+    if dialect_name != "postgresql":
+        log.debug("retrieve_by_concept_ids: skipping on non-Postgres dialect=%s", dialect_name)
+        return []
+
+    params: dict[str, Any] = {"concept_ids": concept_ids, "top_k": top_k}
+    where_clauses = ["rcc.concept_id = ANY(:concept_ids)"]
+
+    if author_ids:
+        author_id_conditions = " OR ".join(
+            f"COALESCE(rd.author_id, rs.author_id) = :concept_author_id_{i}"
+            for i in range(len(author_ids))
+        )
+        where_clauses.append(f"({author_id_conditions})")
+        for i, aid in enumerate(author_ids):
+            params[f"concept_author_id_{i}"] = aid
+
+    where_sql = "WHERE " + " AND ".join(where_clauses)
+    sql = text(
+        f"""
+        SELECT rc.id AS chunk_id,
+               rc.document_id,
+               rc.chunk_index,
+               rc.text,
+               rc.token_count,
+               rc.metadata_json,
+               rd.collection,
+               rd.title,
+               rd.source_section,
+               rd.canonical_status,
+               rd.dedupe_priority,
+               rd.work_type,
+               rd.metadata_json AS document_metadata_json,
+               COALESCE(rd.author_id, rs.author_id) AS author_id,
+               ra.name AS author_name,
+               rcc.confidence AS score,
+               array_agg(rcc.concept_id) AS concept_ids
+        FROM rag_chunks rc
+        JOIN rag_chunk_concepts rcc ON rcc.chunk_id = rc.id
+        JOIN rag_documents rd       ON rd.id = rc.document_id
+        JOIN rag_sources rs         ON rs.id = rd.source_id
+        JOIN rag_authors ra         ON ra.id = COALESCE(rd.author_id, rs.author_id)
+        {where_sql}
+        GROUP BY rc.id, rc.document_id, rc.chunk_index, rc.text, rc.token_count, rc.metadata_json,
+                 rd.collection, rd.title, rd.source_section, rd.canonical_status,
+                 rd.dedupe_priority, rd.work_type, rd.metadata_json,
+                 COALESCE(rd.author_id, rs.author_id), ra.name, rcc.confidence
+        ORDER BY rcc.confidence DESC
+        LIMIT :top_k
+        """
+    )
+    try:
+        rows = db.execute(sql, params).mappings().all()
+    except Exception as exc:
+        log.exception("retrieve_by_concept_ids query failed: %s", exc)
+        return []
+
+    return [
+        RetrievedChunk(
+            chunk_id=str(row["chunk_id"]),
+            document_id=str(row["document_id"]),
+            chunk_index=row["chunk_index"],
+            text=row["text"],
+            token_count=row["token_count"],
+            metadata_json=merge_retrieval_metadata(
+                dict(row["metadata_json"]) if row["metadata_json"] else {},
+                collection=row["collection"],
+                canonical_status=row["canonical_status"],
+                dedupe_priority=row["dedupe_priority"],
+                work_type=row["work_type"],
+                document_metadata={
+                    **(dict(row["document_metadata_json"]) if row["document_metadata_json"] else {}),
+                    "document_title": row["title"],
+                    "source_section": row["source_section"],
+                    "author_id": row["author_id"],
+                    "author_name": row["author_name"],
+                    # Store matched concept IDs for optional reranker enrichment (Issue 172)
+                    "annotated_concept_ids": list(row["concept_ids"]) if row["concept_ids"] else [],
+                },
+            ),
+            cosine_distance=1.0,
+            ts_rank=float(row["score"]),
+            corpus_class="concept_annotation_pool",
+        )
+        for row in rows
+    ]
 
 
 def reciprocal_rank_fusion(
@@ -1958,6 +2316,10 @@ def fuse_hardened_candidates(
         "sparse_feedback": 1.15,
         "dense_feedback": 0.85,
         "topic_entity_pool": 1.0,
+        # Issue 172 annotation pools
+        "entity_annotation_pool": 1.1,
+        "concept_annotation_pool": 1.1,
+        "corpus_expansion_pool": 0.9,
         "dense_raw_fallback": 0.2,
     }
     for pool_name, chunks in pools.items():
@@ -2152,6 +2514,7 @@ def _retrieve_hardened(
         source_author_ids=author_ids or ([author_id] if author_id else None),
         source_author_names=source_author_names,
         topic_entities=topic_entities,
+        db=db,
     )
     trace_retrieval_payload(
         "hardened_query_plan",
@@ -2302,6 +2665,54 @@ def _retrieve_hardened(
         )
         trace_retrieval_chunks("pool_topic_entity", " OR ".join(plan.topic_entities), pools["topic_entity_pool"])
 
+    # --- Entity annotation pool (Issue 172) ---
+    if plan.resolved_entity_ids and retrieval_mode in {"hybrid", "sparse_only"}:
+        pools["entity_annotation_pool"] = retrieve_by_entity_ids(
+            plan.resolved_entity_ids,
+            db,
+            author_ids=effective_author_ids or (
+                [effective_author_id] if effective_author_id else None
+            ),
+            top_k=fetch_k,
+        )
+        trace_retrieval_chunks(
+            "pool_entity_annotation",
+            str(plan.resolved_entity_ids),
+            pools["entity_annotation_pool"],
+        )
+
+    # --- Concept annotation pool (Issue 172) ---
+    if plan.resolved_concept_ids and retrieval_mode in {"hybrid", "sparse_only"}:
+        pools["concept_annotation_pool"] = retrieve_by_concept_ids(
+            plan.resolved_concept_ids,
+            db,
+            author_ids=effective_author_ids or (
+                [effective_author_id] if effective_author_id else None
+            ),
+            top_k=fetch_k,
+        )
+        trace_retrieval_chunks(
+            "pool_concept_annotation",
+            str(plan.resolved_concept_ids),
+            pools["concept_annotation_pool"],
+        )
+
+    # --- Corpus expansion pool (Issue 172) ---
+    if plan.corpus_expansion_terms and retrieval_mode in {"hybrid", "sparse_only"}:
+        expansion_query = " OR ".join(plan.corpus_expansion_terms[:15])
+        pools["corpus_expansion_pool"] = retrieve_keyword_chunks(
+            expansion_query,
+            db,
+            top_k=max(top_k, fetch_k // 2),
+            hardening_enabled=True,
+            **common_kwargs,
+        )
+        trace_retrieval_chunks(
+            "pool_corpus_expansion",
+            expansion_query,
+            pools["corpus_expansion_pool"],
+        )
+
     if retrieval_mode == "dense_only":
         dense = pools.get("dense_content", [])
         dense_only = [
@@ -2344,6 +2755,10 @@ def _retrieve_hardened(
                 "allowed_author_ids": effective_author_ids or ([effective_author_id] if effective_author_id else []),
                 "removed_chunk_ids": removed_by_author_gate,
             },
+            # Issue 172 per-pool diagnostic sizes
+            "entity_pool_size": len(pools.get("entity_annotation_pool", [])),
+            "concept_pool_size": len(pools.get("concept_annotation_pool", [])),
+            "expansion_terms_used_in_pool": len(plan.corpus_expansion_terms[:15]) if pools.get("corpus_expansion_pool") else 0,
         },
     )
     return fused

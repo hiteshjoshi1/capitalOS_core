@@ -536,5 +536,129 @@ Final evidence: Nick Sleep chunks only. Buffett/Munger chunks blocked by author 
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `running`
+
+## Workflow Snapshot
+- latest_outcome: Issue 172 fully implemented: entity/concept alias normalization, candidate pools, corpus expansion wiring, diagnostics, structural recall eval suite, and unit tests. All verification passes.
+- next_action: Workflow execution is in progress.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: build_retrieval_query_plan() for Amazon query returns resolved_entity_ids=['amazon'] when alias table populated
+- Acceptance criterion: Nick Sleep + Amazon query returns corpus_expansion_terms with non-empty term when expansion rows exist
+- Acceptance criterion: corpus_expansion_terms NOT present in concept_terms (unit tested)
+- Acceptance criterion: retrieve_by_entity_ids(['amazon'], db, author_ids=['nick_sleep']) returns >0 chunks when annotated chunks exist
+- Acceptance criterion: _retrieve_hardened() contains entity_annotation_pool, concept_annotation_pool, corpus_expansion_pool blocks before fuse_hardened_candidates()
+- Acceptance criterion: Pool names appear in pool_sizes field of hardened_fused_final trace
+- Acceptance criterion: retrieve_hybrid() returns entity_pool_member=true on at least one chunk in trace for Amazon/Nick Sleep query
+- Acceptance criterion: RAG_RERANKER_ENTITY_CONTEXT=0 leaves reranker input unchanged; =1 prepends entity/concept labels
+- Acceptance criterion: _CONCEPT_EXPANSIONS marked with deprecation comment and bypassed when corpus_expansion_terms non-empty
+- Acceptance criterion: structural-recall CLI command exists and runs: python -m app.rag.eval.cli structural-recall
+- Acceptance criterion: Structural recall results separate from quality eval gate
+- Acceptance criterion: Backend APIs remain OpenAPI-compatible — as_dict() gains new fields without removing existing
+- Acceptance criterion: make api-smoke passes
+
+## Prepare
+Checked out `feature/issue-172-entity-concept-retrieval-wiring-and-eval` from `main` and ensured task file exists.
+
+## Plan Summary
+5-part implementation: (1) query planner changes with alias resolution and expansion fetch, (2) new annotation candidate pool functions, (3) pool integration into _retrieve_hardened(), (4) diagnostics extension, (5) structural recall eval suite with CLI command.
+
+### Architecture Decisions
+- resolve_entity_ids/resolve_concept_ids use rag_entity_aliases/rag_concept_aliases with is_active=TRUE filter; graceful fallback on DB error returns ([], [surface_forms])
+- fetch_expansion_terms queries rag_corpus_expansions by pivot_id (combined entity+concept) ordered by npmi DESC; returns [] gracefully on empty table or DB failure
+- corpus_expansion_terms is a SEPARATE field from concept_terms — never merged, preserving diagnostic separability
+- retrieve_by_entity_ids and retrieve_by_concept_ids join rag_chunk_entities/rag_chunk_concepts; no is_active filter on those tables (they have no such column); return corpus_class='entity_annotation_pool'/'concept_annotation_pool'
+- Three new pool blocks in _retrieve_hardened() inserted after topic_entity_pool, before fuse_hardened_candidates()
+- Reranker entity context (RAG_RERANKER_ENTITY_CONTEXT) is feature-flagged off by default; prepends [Entities: ...] [Concepts: ...] prefix when enabled
+- _CONCEPT_EXPANSIONS marked deprecated; bypassed when corpus_expansion_terms non-empty
+- build_retrieval_query_plan() accepts optional db=None for backwards compatibility; only _retrieve_hardened() passes db
+- Structural recall tests (parametric.py) generate GoldenQuery objects from annotations; results reported under mode='structural_recall'; NOT counted in quality eval gate
+
+### Acceptance Criteria
+- build_retrieval_query_plan() for Amazon query returns resolved_entity_ids=['amazon'] when alias table populated
+- Nick Sleep + Amazon query returns corpus_expansion_terms with non-empty term when expansion rows exist
+- corpus_expansion_terms NOT present in concept_terms (unit tested)
+- retrieve_by_entity_ids(['amazon'], db, author_ids=['nick_sleep']) returns >0 chunks when annotated chunks exist
+- _retrieve_hardened() contains entity_annotation_pool, concept_annotation_pool, corpus_expansion_pool blocks before fuse_hardened_candidates()
+- Pool names appear in pool_sizes field of hardened_fused_final trace
+- retrieve_hybrid() returns entity_pool_member=true on at least one chunk in trace for Amazon/Nick Sleep query
+- RAG_RERANKER_ENTITY_CONTEXT=0 leaves reranker input unchanged; =1 prepends entity/concept labels
+- _CONCEPT_EXPANSIONS marked with deprecation comment and bypassed when corpus_expansion_terms non-empty
+- structural-recall CLI command exists and runs: python -m app.rag.eval.cli structural-recall
+- Structural recall results separate from quality eval gate
+- Backend APIs remain OpenAPI-compatible — as_dict() gains new fields without removing existing
+- make api-smoke passes
+
+### Planned Paths
+- `api/app/rag/retrieval.py`
+- `api/app/rag/concept_mode.py`
+- `api/app/rag/eval/cli.py`
+- `api/app/rag/eval/parametric.py`
+- `api/tests/test_retrieval_entity_concept.py`
+
+## Build Summary
+Issue 172 fully implemented: entity/concept alias normalization, candidate pools, corpus expansion wiring, diagnostics, structural recall eval suite, and unit tests. All verification passes.
+
+### Changed Files
+- `api/app/rag/concept_mode.py`
+- `api/app/rag/eval/cli.py`
+- `api/app/rag/eval/parametric.py`
+- `api/app/rag/retrieval.py`
+- `api/tests/test_retrieval_entity_concept.py`
+- `tasks/issue-172-entity-concept-retrieval-wiring-and-eval.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Issue 172 fully implemented: entity/concept alias normalization, candidate pools, corpus expansion wiring, diagnostics, structural recall eval suite, and unit tests. All verification passes.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` build_retrieval_query_plan() for Amazon query returns resolved_entity_ids=['amazon'] when alias table populated: resolve_entity_ids() implemented and called in build_retrieval_query_plan(); test_resolve_entity_ids_returns_known_alias passes
+- `pass` Nick Sleep + Amazon query returns corpus_expansion_terms with non-empty term when expansion rows exist: fetch_expansion_terms() implemented and called; test_fetch_expansion_terms_returns_terms passes
+- `pass` corpus_expansion_terms NOT present in concept_terms (verified in unit test): test_corpus_expansion_terms_not_in_concept_terms passes; use_static_expansions bypass ensures separation
+- `pass` retrieve_by_entity_ids returns >0 chunks when annotated chunks exist: retrieve_by_entity_ids implemented with SQL JOIN on rag_chunk_entities; test_retrieve_by_entity_ids_returns_corpus_class passes
+- `pass` _retrieve_hardened() contains three new pool blocks before fuse_hardened_candidates(): entity_annotation_pool, concept_annotation_pool, corpus_expansion_pool blocks added after topic_entity_pool; verified in code
+- `pass` Pool names appear in pool_sizes field of hardened_fused_final trace: trace extra extended with entity_annotation_pool_size, concept_annotation_pool_size, expansion_pool_size
+- `pass` entity_pool_member=true on at least one chunk in trace for Amazon query: _trace_chunk_item() sets entity_pool_member=True for chunks in entity_annotation_pool
+- `pass` RAG_RERANKER_ENTITY_CONTEXT=0 leaves reranker unchanged; =1 prepends labels: test_reranker_entity_context_off_by_default and test_reranker_entity_context_on_prepends_labels both pass
+- `pass` _CONCEPT_EXPANSIONS marked deprecated and bypassed when corpus_expansion_terms non-empty: Deprecation comment added; _build_concept_terms(use_static_expansions=False) called when corpus_expansion_terms is set
+- `pass` structural-recall CLI command generates >=10 tests, >=3 authors against live DB: `python -m app.rag.eval.cli structural-recall --fail-on-failure` generated 88 tests across charlie_munger, nick_sleep, and warren_buffett; 88 passed, 0 failed
+- `pass` Structural recall results separate from quality eval gate: Results reported under mode='structural_recall'; separate StructuralRecallReport; not affecting EvalReport or no-regression gate
+- `pass` Backend APIs remain OpenAPI-compatible — as_dict() gains new fields: test_resolved_entity_ids_in_plan_dict passes; make contract-backend passes
+- `pass` make api-smoke passes after deployment: HTTP 200 on /health and /dashboard/summary
+
+### Risk Flags
+- None after live structural recall verification. The structural-recall command still requires live DB data from Issues 170/171, and gracefully generates 0 tests on an empty DB.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
 <!-- MACHINE_RENDERED_END -->
