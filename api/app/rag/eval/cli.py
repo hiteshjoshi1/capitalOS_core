@@ -367,5 +367,47 @@ def seed(fixture_file: str, dry_run: bool, replace: bool) -> None:
         db.close()
 
 
+@cli.command("structural-recall")
+@click.option("--output", type=click.Path(), default=None, help="Write JSON report to this file.")
+@click.option("--fail-on-failure", is_flag=True, default=False, help="Exit non-zero when any structural recall test fails.")
+def structural_recall(output: Optional[str], fail_on_failure: bool) -> None:
+    """
+    Run structural recall eval suite (Issue 172).
+
+    Generates test cases from entity/concept annotations and verifies that
+    retrieve_by_entity_ids / retrieve_by_concept_ids return >= 3 candidates.
+
+    These are wiring assertions, NOT retrieval quality tests.
+    Results are reported separately and do NOT affect no-regression gate thresholds.
+
+    Usage:
+        python -m app.rag.eval.cli structural-recall
+    """
+    from app.rag.eval.parametric import run_structural_recall_eval
+
+    db = SessionLocal()
+    try:
+        report = run_structural_recall_eval(db)
+    finally:
+        db.close()
+
+    payload = json.dumps(report.as_dict(), indent=2)
+    click.echo(payload)
+
+    if output:
+        Path(output).write_text(payload)
+        click.echo(f"Structural recall report written to {output}", err=True)
+
+    click.echo(
+        f"Structural recall: {report.total_tests} tests, "
+        f"{report.passed} passed, {report.failed} failed, "
+        f"{len(report.authors_covered)} authors covered.",
+        err=True,
+    )
+
+    if fail_on_failure and report.failed > 0:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()

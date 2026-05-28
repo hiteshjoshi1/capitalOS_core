@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import textwrap
 import time
@@ -966,6 +967,31 @@ def _compact_reranker_text(anchor: RetrievedChunk, expanded: RetrievedChunk | No
     return body
 
 
+def _reranker_entity_context_enabled() -> bool:
+    """Feature flag: prepend entity/concept annotation labels before reranking (Issue 172)."""
+    return os.getenv("RAG_RERANKER_ENTITY_CONTEXT", "0").strip() == "1"
+
+
+def _apply_entity_context_prefix(chunk: RetrievedChunk, text: str) -> str:
+    """
+    Prepend [Entities: ...] [Concepts: ...] prefix to passage text when
+    RAG_RERANKER_ENTITY_CONTEXT=1.  No-op when the chunk has no annotations.
+    """
+    if not _reranker_entity_context_enabled():
+        return text
+    metadata = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+    entity_ids: list[str] = metadata.get("annotated_entity_ids") or []
+    concept_ids: list[str] = metadata.get("annotated_concept_ids") or []
+    if not entity_ids and not concept_ids:
+        return text
+    prefix_parts: list[str] = []
+    if entity_ids:
+        prefix_parts.append(f"[Entities: {', '.join(entity_ids)}]")
+    if concept_ids:
+        prefix_parts.append(f"[Concepts: {', '.join(concept_ids)}]")
+    return " ".join(prefix_parts) + "\n" + text
+
+
 def _reranker_passages_for_mode(
     candidates: list[RetrievedChunk],
     *,
@@ -975,15 +1001,24 @@ def _reranker_passages_for_mode(
     expanded_lookup = expanded_by_chunk_id or {}
     if input_mode == "expanded_context":
         inputs = [expanded_lookup.get(candidate.chunk_id, candidate) for candidate in candidates]
-        return inputs, [str(getattr(chunk, "text", "") or "") for chunk in inputs]
+        return inputs, [
+            _apply_entity_context_prefix(candidates[i], str(getattr(chunk, "text", "") or ""))
+            for i, chunk in enumerate(inputs)
+        ]
     if input_mode == "compact_context":
         inputs = [expanded_lookup.get(candidate.chunk_id, candidate) for candidate in candidates]
         passages = [
-            _compact_reranker_text(candidate, expanded_lookup.get(candidate.chunk_id))
-            for candidate in candidates
+            _apply_entity_context_prefix(
+                candidates[i],
+                _compact_reranker_text(candidate, expanded_lookup.get(candidate.chunk_id)),
+            )
+            for i, candidate in enumerate(candidates)
         ]
         return inputs, passages
-    return candidates, [str(getattr(chunk, "text", "") or "") for chunk in candidates]
+    return candidates, [
+        _apply_entity_context_prefix(chunk, str(getattr(chunk, "text", "") or ""))
+        for chunk in candidates
+    ]
 
 
 def _cross_encoder_fusion_mode() -> str:
