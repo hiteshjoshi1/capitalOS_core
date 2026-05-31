@@ -390,13 +390,10 @@ def _build_candidate_bundle(db: Session, query_text: str, *, candidate_pool_size
         _BROAD_RETRIEVAL_MAX,
         _BROAD_RETRIEVAL_MIN,
         _CONCEPT_TOP_K_AUTHORS,
-        _CONTEXT_EXPANSION_MAX_CHARS,
-        _CONTEXT_EXPANSION_WINDOW,
         _collect_candidate_chunks,
         _source_author_terms,
     )
     from app.rag.intent_router import parse_intent
-    from app.rag.retrieval import expand_chunks_with_context
 
     intent = parse_intent(query_text)
     if intent.query_type == "single_author" and intent.author_ids:
@@ -412,18 +409,11 @@ def _build_candidate_bundle(db: Session, query_text: str, *, candidate_pool_size
         author_ids=author_ids,
         broad_top_k=broad_top_k,
     )
-    expanded_chunks = expand_chunks_with_context(
-        candidates,
-        db,
-        window_size=_CONTEXT_EXPANSION_WINDOW,
-        max_chars=_CONTEXT_EXPANSION_MAX_CHARS,
-        only_when_needed=False,
-    )
     return CandidateBundle(
         query_text=query_text,
         intent=intent,
         candidates=candidates,
-        expanded_by_chunk_id={chunk.chunk_id: chunk for chunk in expanded_chunks},
+        expanded_by_chunk_id={},
         source_author_terms=_source_author_terms(intent),
         constraints_relaxed=constraints_relaxed,
         relaxation_reason=relaxation_reason,
@@ -816,18 +806,36 @@ def run_reranker_diagnosis(
         pool_row = _candidate_pool_row(gq, bundle)
         candidate_pool_rows.append(pool_row)
 
+        # Baseline uses execute_concept_query — the exact same code path the UI calls.
+        # This ensures baseline/heuristic numbers are identical to run-ai-sage eval numbers.
+        baseline_chunk_ids: list[str] = []
+        try:
+            from app.rag.concept_mode import execute_concept_query
+            baseline_result = execute_concept_query(gq.query_text, db, top_k_chunks=top_k)
+            baseline_chunk_ids = [
+                str(item.get("chunk_id"))
+                for item in baseline_result.best_passages
+                if isinstance(item, dict) and item.get("chunk_id")
+            ]
+        except Exception as exc:
+            log.warning("Baseline execute_concept_query failed for query %r: %s", gq.query_text[:60], exc)
+
         for experiment in experiments:
-            ranked_chunks, error = _rank_with_experiment(
-                gq.query_text,
-                bundle,
-                experiment,
-                top_k=top_k,
-                reranker_cache=reranker_cache,
-            )
-            metric = _compute_per_query(
-                gq,
-                [str(getattr(chunk, "chunk_id")) for chunk in ranked_chunks],
-            )
+            if experiment.is_baseline:
+                ranked_chunk_ids = baseline_chunk_ids
+                error = None
+                top_results: list[dict] = []
+            else:
+                ranked_chunks, error = _rank_with_experiment(
+                    gq.query_text,
+                    bundle,
+                    experiment,
+                    top_k=top_k,
+                    reranker_cache=reranker_cache,
+                )
+                ranked_chunk_ids = [str(getattr(chunk, "chunk_id")) for chunk in ranked_chunks]
+                top_results = _chunk_briefs(ranked_chunks)
+            metric = _compute_per_query(gq, ranked_chunk_ids)
             metric_rows[experiment.label].append(metric)
             per_query_rows[experiment.label].append(
                 {
@@ -836,7 +844,7 @@ def run_reranker_diagnosis(
                     "provider": experiment.provider,
                     "input_mode": experiment.input_mode,
                     "model": experiment.model,
-                    "top_results": _chunk_briefs(ranked_chunks),
+                    "top_results": top_results,
                     "error": error,
                 }
             )
@@ -1037,5 +1045,62 @@ def run_evaluation(
         mean_precision_at_10=_safe_mean([m.precision_at_10 for m in per_query_metrics]),
         mean_mrr=_safe_mean([m.mrr_score for m in per_query_metrics]),
         scope={"source_type": source_type} if source_type else {},
+        per_query=[m.as_dict() for m in per_query_metrics],
+    )
+
+
+def run_ai_sage_evaluation(
+    db: Session,
+    *,
+    config_label: str = "ai_sage_live",
+    top_k: int = 10,
+    source_type: Optional[str] = None,
+) -> EvalReport:
+    """Run golden queries through the live AI Sage concept pipeline."""
+    from app.rag.concept_mode import execute_concept_query
+
+    golden_queries = load_golden_queries(db, source_type=source_type)
+    if not golden_queries:
+        scope_note = f" for source_type={source_type}" if source_type else ""
+        log.warning("No golden queries found in rag_eval_golden%s; returning empty AI Sage report.", scope_note)
+        return EvalReport(
+            config_label=config_label,
+            num_queries=0,
+            mean_ndcg_at_5=0.0,
+            mean_ndcg_at_10=0.0,
+            mean_recall_at_5=0.0,
+            mean_recall_at_10=0.0,
+            mean_precision_at_5=0.0,
+            mean_precision_at_10=0.0,
+            mean_mrr=0.0,
+            scope={"source_type": source_type, "pipeline": "ai_sage_concept"} if source_type else {"pipeline": "ai_sage_concept"},
+            per_query=[],
+        )
+
+    per_query_metrics: list[PerQueryMetrics] = []
+    for gq in golden_queries:
+        try:
+            result = execute_concept_query(gq.query_text, db, top_k_chunks=top_k)
+            retrieved_ids = [
+                str(item.get("chunk_id"))
+                for item in result.best_passages
+                if isinstance(item, dict) and item.get("chunk_id")
+            ]
+        except Exception as exc:
+            log.warning("AI Sage evaluation failed for query %r: %s", gq.query_text[:60], exc)
+            retrieved_ids = []
+        per_query_metrics.append(_compute_per_query(gq, retrieved_ids))
+
+    return EvalReport(
+        config_label=config_label,
+        num_queries=len(per_query_metrics),
+        mean_ndcg_at_5=_safe_mean([m.ndcg_at_5 for m in per_query_metrics]),
+        mean_ndcg_at_10=_safe_mean([m.ndcg_at_10 for m in per_query_metrics]),
+        mean_recall_at_5=_safe_mean([m.recall_at_5 for m in per_query_metrics]),
+        mean_recall_at_10=_safe_mean([m.recall_at_10 for m in per_query_metrics]),
+        mean_precision_at_5=_safe_mean([m.precision_at_5 for m in per_query_metrics]),
+        mean_precision_at_10=_safe_mean([m.precision_at_10 for m in per_query_metrics]),
+        mean_mrr=_safe_mean([m.mrr_score for m in per_query_metrics]),
+        scope={"source_type": source_type, "pipeline": "ai_sage_concept"} if source_type else {"pipeline": "ai_sage_concept"},
         per_query=[m.as_dict() for m in per_query_metrics],
     )

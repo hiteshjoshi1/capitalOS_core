@@ -257,7 +257,10 @@ class TestRetrieveHybrid:
             connect_args={"check_same_thread": False},
         )
 
-        dense_chunks = [_make_chunk("dense1"), _make_chunk("dense2")]
+        dense_chunks = [
+            _make_chunk("dense1", text="capital allocation first example", chunk_index=1),
+            _make_chunk("dense2", text="capital allocation second example", chunk_index=2),
+        ]
 
         with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=dense_chunks), \
              patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[]) as mock_kw:
@@ -276,7 +279,10 @@ class TestRetrieveHybrid:
         """dense_only mode should only call retrieve_similar_chunks."""
         from app.rag.retrieval import retrieve_hybrid
 
-        dense_chunks = [_make_chunk("d1"), _make_chunk("d2")]
+        dense_chunks = [
+            _make_chunk("d1", text="moat analysis first example", chunk_index=1),
+            _make_chunk("d2", text="moat analysis second example", chunk_index=2),
+        ]
 
         with patch.dict(os.environ, {"RAG_RETRIEVAL_MODE": "dense_only"}), \
              patch("app.rag.retrieval._RETRIEVAL_MODE", "dense_only"), \
@@ -293,7 +299,7 @@ class TestRetrieveHybrid:
         """sparse_only mode should only call retrieve_keyword_chunks."""
         from app.rag.retrieval import retrieve_hybrid
 
-        sparse_chunks = [_make_chunk("s1", ts_rank=0.8)]
+        sparse_chunks = [_make_chunk("s1", text="Insurance float is the pool of money held by an insurer between collecting premiums and paying claims, funding Berkshire's investment operations.", ts_rank=0.8)]
 
         with patch("app.rag.retrieval._RETRIEVAL_MODE", "sparse_only"), \
              patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=sparse_chunks) as mock_kw, \
@@ -309,8 +315,16 @@ class TestRetrieveHybrid:
         """Hybrid mode should call both retrievers and use RRF combination."""
         from app.rag.retrieval import retrieve_hybrid
 
-        dense_chunks = [_make_chunk("d1"), _make_chunk("d2"), _make_chunk("shared")]
-        sparse_chunks = [_make_chunk("shared"), _make_chunk("s1"), _make_chunk("s2")]
+        dense_chunks = [
+            _make_chunk("d1", text="See Candies economics first example", chunk_index=1),
+            _make_chunk("d2", text="See Candies economics second example", chunk_index=2),
+            _make_chunk("shared", text="See Candies shared economics example", chunk_index=3),
+        ]
+        sparse_chunks = [
+            _make_chunk("shared", text="See Candies shared economics example", chunk_index=3),
+            _make_chunk("s1", text="See Candies pricing power example", chunk_index=4),
+            _make_chunk("s2", text="See Candies brand strength example", chunk_index=5),
+        ]
 
         with patch("app.rag.retrieval._RETRIEVAL_MODE", "hybrid"), \
              patch("app.rag.retrieval.retrieve_similar_chunks", return_value=dense_chunks), \
@@ -377,8 +391,8 @@ class TestRetrieveHybrid:
     def test_weighting_missing_metadata_falls_back_to_baseline_scores(self):
         from app.rag.retrieval import retrieve_hybrid
 
-        left = _make_chunk("left", cosine_distance=0.1)
-        right = _make_chunk("right", cosine_distance=0.2)
+        left = _make_chunk("left", text="test left evidence", cosine_distance=0.1, chunk_index=1)
+        right = _make_chunk("right", text="test right evidence", cosine_distance=0.2, chunk_index=2)
 
         with patch("app.rag.retrieval._RETRIEVAL_MODE", "dense_only"), \
              patch("app.rag.retrieval.retrieve_similar_chunks", return_value=[left, right]):
@@ -676,6 +690,58 @@ class TestRetrievalHardeningHelpers:
         terms = _extract_salient_feedback_terms(plan, pools, max_terms=8)
 
         assert "customer service" in terms or "customer" in terms
+
+    def test_hardened_pool_pruning_filters_short_entity_misses_and_caps_pool(self):
+        from app.rag.retrieval import _prune_retrieval_pool, build_retrieval_query_plan
+
+        plan = build_retrieval_query_plan("What does Nick Sleep say about Amazon?")
+        strong = [
+            _make_chunk(
+                f"amazon-{index}",
+                text=f"Amazon customer service and reinvestment discipline example {index}.",
+                cosine_distance=0.18 + (index * 0.001),
+                author_id="nick_sleep",
+            )
+            for index in range(20)
+        ]
+        unrelated = _make_chunk(
+            "generic",
+            text="Buffett had to think about the answer and watch out for drift.",
+            cosine_distance=0.19,
+            author_id="nick_sleep",
+        )
+
+        kept, dropped = _prune_retrieval_pool(plan, [unrelated, *strong], pool_name="dense_content", cap=15)
+
+        assert len(kept) == 15
+        assert "generic" not in [chunk.chunk_id for chunk in kept]
+        assert any(item["chunk_id"] == "generic" and item["reason"] == "missing_primary_entity_or_topic" for item in dropped)
+
+    def test_hardened_retrieval_caps_raw_fetch_and_merged_candidates(self):
+        from app.rag.retrieval import retrieve_hybrid
+
+        dense_hits = [
+            _make_chunk(
+                f"dense-{index}",
+                text=f"Amazon customer service and long-term reinvestment passage {index}.",
+                cosine_distance=0.2 + (index * 0.001),
+                author_id="nick_sleep",
+            )
+            for index in range(50)
+        ]
+
+        with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=dense_hits) as mock_dense, \
+             patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[]):
+            result = retrieve_hybrid(
+                "What does Nick Sleep say about Amazon?",
+                MagicMock(),
+                top_k=30,
+                hardening_enabled=True,
+            )
+
+        _, dense_kwargs = mock_dense.call_args_list[0]
+        assert dense_kwargs["top_k"] == 40
+        assert len(result) == 15
 
     def test_hardened_retrieval_does_not_rank_neighbor_context_as_candidate_pool(self):
         from app.rag.retrieval import retrieve_hybrid

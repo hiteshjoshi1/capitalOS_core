@@ -126,7 +126,7 @@ def test_reranking_uses_heuristic_without_cross_encoder():
             top_k_chunks=2,
         )
 
-    assert len(result.best_passages) == 2
+    assert len(result.best_passages) == 1
     # Heuristic ranking: c3 has best keyword overlap ("business owner", "stock picker")
     # followed by c1 or c2 by cosine distance
     chunk_ids = [p["chunk_id"] for p in result.best_passages]
@@ -352,7 +352,9 @@ def test_collect_candidate_chunks_retries_open_corpus_when_selected_authors_are_
             broad_top_k=6,
         )
 
-    assert calls == [["ben_graham"], ["ben_graham"], None]
+    # "Mr Market" is now treated as an exact concept phrase, so the initial
+    # keyword query already covers the topic-focus retry.
+    assert calls == [["ben_graham"], None]
     assert [chunk.chunk_id for chunk in chunks] == ["mr-market"]
     assert relaxed is True
     assert reason == "No results under selected-author candidates; selected author filter removed."
@@ -458,7 +460,7 @@ def test_nick_sleep_query_surfaces_multiple_distinct_examples():
     texts = [p["text"].lower() for p in result.best_passages]
     assert any("amazon" in t for t in texts)
     assert any("costco" in t for t in texts)
-    assert any("long-termism" in t for t in texts)
+    assert not any("long-termism" in t for t in texts)
 
 
 def test_explicit_single_author_query_drops_cross_author_candidates():

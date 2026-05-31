@@ -388,12 +388,12 @@ class TestIntYearParamCompat:
     def test_retrieve_hybrid_accepts_int_year_params(self):
         from app.rag.retrieval import retrieve_hybrid
 
-        dense = [_make_chunk("d1")]
+        dense = [_make_chunk("d1", text="Capital allocation is the most important decision a CEO makes for long-term business value creation.")]
         with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=dense), \
              patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[]):
             db = MagicMock()
             # Should not raise TypeError even though year_from is int
-            result = retrieve_hybrid("test", db, top_k=5, year_from=2020, year_to=2025)
+            result = retrieve_hybrid("capital allocation", db, top_k=5, year_from=2020, year_to=2025)
         assert len(result) == 1
 
     def test_retrieve_similar_chunks_forwards_int_year_params(self):
@@ -513,11 +513,11 @@ class TestRetrieveWithIntentFallbackTuple:
     def test_no_relaxation_when_first_attempt_succeeds(self):
         from app.rag.concept_mode import _retrieve_with_intent_fallback
 
-        with patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=[_make_chunk("c1")]), \
+        with patch("app.rag.concept_mode.retrieve_similar_chunks", return_value=[_make_chunk("c1", text="Intrinsic value represents the discounted present value of future cash flows a business will generate over its lifetime.")]), \
              patch("app.rag.concept_mode.retrieve_keyword_chunks", return_value=[]):
             db = MagicMock()
             chunks, was_relaxed, reason = _retrieve_with_intent_fallback(
-                "test", db, top_k=5,
+                "intrinsic value", db, top_k=5,
                 author_ids=None, source_type="letter",
                 year_from="2020", year_to="2025",
             )
@@ -536,13 +536,13 @@ class TestRetrieveWithIntentFallbackTuple:
             call_count += 1
             if call_count == 1:
                 return []  # first attempt fails
-            return [_make_chunk("fallback_c")]
+            return [_make_chunk("fallback_c", text="Intrinsic value represents the discounted present value of future cash flows a business will generate over its lifetime.")]
 
         with patch("app.rag.concept_mode.retrieve_similar_chunks", side_effect=mock_retrieve), \
              patch("app.rag.concept_mode.retrieve_keyword_chunks", return_value=[]):
             db = MagicMock()
             chunks, was_relaxed, reason = _retrieve_with_intent_fallback(
-                "test", db, top_k=5,
+                "intrinsic value", db, top_k=5,
                 author_ids=None, source_type="letter",
                 year_from=None, year_to=None,
             )
@@ -609,11 +609,11 @@ class TestBackwardCompatibility:
         """Callers that don't pass new params should still work."""
         from app.rag.retrieval import retrieve_hybrid
 
-        dense = [_make_chunk("d1")]
+        dense = [_make_chunk("d1", text="Capital allocation is the most important decision a CEO makes for long-term business value creation.")]
         with patch("app.rag.retrieval.retrieve_similar_chunks", return_value=dense), \
              patch("app.rag.retrieval.retrieve_keyword_chunks", return_value=[]):
             db = MagicMock()
-            result = retrieve_hybrid("test", db, top_k=5)
+            result = retrieve_hybrid("capital allocation", db, top_k=5)
         assert len(result) == 1
 
     def test_retrieve_similar_chunks_still_works_without_new_params(self):
