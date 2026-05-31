@@ -39,10 +39,10 @@ from app.rag.reranker import reranker_available, reranker_input_mode, reranker_p
 from app.rag.retrieval import (
     RetrievedChunk,
     build_retrieval_query_plan,
-    deliver_parent_sections,
     expand_chunks_with_context,
     reciprocal_rank_fusion,
     retrieval_hardening_enabled,
+    _prune_retrieval_pool,
     retrieve_keyword_chunks,
     retrieve_similar_chunks,
     suppress_near_duplicates,
@@ -293,31 +293,71 @@ def _retrieve_with_intent_fallback(
     # Use cleaned keyword query for sparse search to avoid AND-conjunction mismatches
     kw_q = keyword_query or query
     dense_q = kw_q if hardening_active else query
+    pruning_plan = build_retrieval_query_plan(
+        kw_q,
+        source_author_ids=author_ids,
+        topic_entities=None,
+        db=db,
+    )
 
-    if strict:
-        # Strict mode: execute once with full constraints, no fallback
+    def run_retrieval_attempt(attempt: dict[str, Any]) -> list[RetrievedChunk]:
         chunks = retrieve_similar_chunks(
             dense_q,
             db,
             top_k=top_k,
             author_ids=author_ids if author_ids else None,
-            source_type=source_type,
-            year_from=year_from_int,
-            year_to=year_to_int,
+            source_type=attempt["source_type"],
+            year_from=attempt["year_from"],
+            year_to=attempt["year_to"],
         )
+        if hardening_active:
+            chunks, dense_dropped = _prune_retrieval_pool(
+                pruning_plan,
+                chunks,
+                pool_name="ai_sage_dense_content",
+            )
+            trace_retrieval_chunks(
+                "ai_sage_dense_quality_pruned",
+                dense_q,
+                chunks,
+                extra={"dropped_count": len(dense_dropped), "dropped": dense_dropped[:12]},
+            )
         if retrieval_mode == "hybrid":
             sparse = retrieve_keyword_chunks(
                 kw_q,
                 db,
                 top_k=top_k,
                 author_ids=author_ids if author_ids else None,
-                source_type=source_type,
-                year_from=year_from_int,
-                year_to=year_to_int,
+                source_type=attempt["source_type"],
+                year_from=attempt["year_from"],
+                year_to=attempt["year_to"],
                 hardening_enabled=hardening_active,
             )
+            if hardening_active:
+                sparse, sparse_dropped = _prune_retrieval_pool(
+                    pruning_plan,
+                    sparse,
+                    pool_name="ai_sage_sparse_content",
+                )
+                trace_retrieval_chunks(
+                    "ai_sage_sparse_quality_pruned",
+                    kw_q,
+                    sparse,
+                    extra={"dropped_count": len(sparse_dropped), "dropped": sparse_dropped[:12]},
+                )
             if sparse:
                 chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
+        return chunks
+
+    if strict:
+        # Strict mode: execute once with full constraints, no fallback
+        chunks = run_retrieval_attempt(
+            {
+                "source_type": source_type,
+                "year_from": year_from_int,
+                "year_to": year_to_int,
+            }
+        )
         return chunks, False, None
 
     attempts: list[dict[str, Any]] = []
@@ -366,15 +406,7 @@ def _retrieve_with_intent_fallback(
         )
 
     for attempt in attempts:
-        chunks = retrieve_similar_chunks(
-            dense_q,
-            db,
-            top_k=top_k,
-            author_ids=author_ids if author_ids else None,
-            source_type=attempt["source_type"],
-            year_from=attempt["year_from"],
-            year_to=attempt["year_to"],
-        )
+        chunks = run_retrieval_attempt(attempt)
         if chunks:
             was_relaxed = attempt != attempts[0]
             relaxation_reason: Optional[str] = None
@@ -394,19 +426,6 @@ def _retrieve_with_intent_fallback(
                     attempt["year_from"],
                     attempt["year_to"],
                 )
-            if retrieval_mode == "hybrid":
-                sparse = retrieve_keyword_chunks(
-                    kw_q,
-                    db,
-                    top_k=top_k,
-                    author_ids=author_ids if author_ids else None,
-                    source_type=attempt["source_type"],
-                    year_from=attempt["year_from"],
-                    year_to=attempt["year_to"],
-                    hardening_enabled=hardening_active,
-                )
-                if sparse:
-                    chunks = reciprocal_rank_fusion(chunks, sparse)[:top_k]
             return chunks, was_relaxed, relaxation_reason
 
     return [], False, None
@@ -1374,49 +1393,47 @@ def execute_concept_query(
         _constraints_relaxed, _relaxation_reason = False, None
     hardening_active = retrieval_hardening_enabled()
     _trace_chunks("candidate_pool", query, candidate_chunks)
-    expanded_candidate_chunks = expand_chunks_with_context(
-        candidate_chunks,
-        db,
-        window_size=_CONTEXT_EXPANSION_WINDOW,
-        max_chars=_CONTEXT_EXPANSION_MAX_CHARS,
-        only_when_needed=False,
-    )
-    expanded_candidate_map = {chunk.chunk_id: chunk for chunk in expanded_candidate_chunks}
     winning_chunks = _rerank_candidate_chunks(
         query,
         candidate_chunks,
         top_k=min(top_k_chunks, len(candidate_chunks)),
         topic_entities=intent.topic_entities,
         source_author_terms=_source_author_terms(intent),
-        expanded_by_chunk_id=expanded_candidate_map,
     )
     _trace_chunks("reranked", query, winning_chunks)
-    expanded_chunks = _expanded_chunks_for_selection(winning_chunks, expanded_candidate_map)
     duplicates_suppressed: list[dict[str, Any]] = []
     if hardening_active:
-        expanded_chunks = deliver_parent_sections(expanded_chunks, db, only_when_needed=False)
-        _trace_chunks("parent_child_delivery", query, expanded_chunks)
-        expanded_chunks, duplicates_suppressed = suppress_near_duplicates(expanded_chunks)
+        # Deduplicate on original chunk texts BEFORE expansion.
+        # Expanded context windows for adjacent chunks overlap heavily — comparing
+        # them causes genuinely distinct chunks to be falsely suppressed as duplicates.
+        # Context expansion is for display only and must not influence deduplication.
+        winning_chunks, duplicates_suppressed = suppress_near_duplicates(winning_chunks)
         trace_retrieval_payload(
             "ai_sage_duplicate_suppression",
             {
                 "query": query,
-                "kept_count": len(expanded_chunks),
+                "kept_count": len(winning_chunks),
                 "duplicates_suppressed_count": len(duplicates_suppressed),
                 "duplicates_suppressed": duplicates_suppressed,
             },
         )
-        kept_chunk_ids = {chunk.chunk_id for chunk in expanded_chunks}
-        winning_chunks = [chunk for chunk in winning_chunks if chunk.chunk_id in kept_chunk_ids]
-    _trace_chunks("expanded_for_display", query, expanded_chunks)
-    display_chunks = _with_display_context(winning_chunks, expanded_chunks)
+        _trace_chunks("after_duplicate_suppression", query, winning_chunks)
+    # Expand final winners for display only — happens AFTER ranking and deduplication
+    # so it has zero bearing on which chunks were selected or their order.
+    # The resulting context_text is surfaced in the UI when a user clicks to see
+    # the paragraph surrounding a chunk.
+    try:
+        display_expanded = expand_chunks_with_context(winning_chunks, db, only_when_needed=False)
+    except Exception as _expand_exc:
+        log.warning("Display context expansion failed: %s", _expand_exc)
+        display_expanded = winning_chunks
+    display_chunks = _with_display_context(winning_chunks, display_expanded)
     evidence: list[EvidenceChunk] = _enrich_chunks(display_chunks, db, author_map)
 
     log.debug(
-        "concept evidence pipeline sizes: candidates=%d winners=%d expanded=%d",
+        "concept evidence pipeline sizes: candidates=%d winners=%d",
         len(candidate_chunks),
         len(winning_chunks),
-        len(expanded_chunks),
     )
 
     evidence_sufficient = len(evidence) >= _MIN_CHUNKS_FOR_CONFIDENCE
@@ -1440,7 +1457,7 @@ def execute_concept_query(
         try:
             critique = _llm_critique(
                 query,
-                [chunk.text for chunk in expanded_chunks[:_SINGLE_AUTHOR_SUMMARY_CHUNKS]],
+                [chunk.text for chunk in winning_chunks[:_SINGLE_AUTHOR_SUMMARY_CHUNKS]],
             )
         except Exception as exc:
             log.warning("LLM critique failed: %s", exc)

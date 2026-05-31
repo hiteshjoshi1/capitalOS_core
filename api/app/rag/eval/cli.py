@@ -24,7 +24,13 @@ from typing import Optional
 import click
 
 from app.db.session import SessionLocal
-from app.rag.eval.runner import EvalReport, compare_reports, run_evaluation, run_reranker_diagnosis
+from app.rag.eval.runner import (
+    EvalReport,
+    compare_reports,
+    run_ai_sage_evaluation,
+    run_evaluation,
+    run_reranker_diagnosis,
+)
 
 log = logging.getLogger(__name__)
 _DEFAULT_GOLDEN_FIXTURE = str(Path(__file__).with_name("fixtures") / "rag_golden_queries.yaml")
@@ -100,6 +106,43 @@ def run(label: str, top_k: int, source_type: Optional[str], output: Optional[str
     if output:
         Path(output).write_text(payload)
         click.echo(f"Report written to {output}", err=True)
+
+    if not _check_thresholds(report):
+        sys.exit(1)
+
+
+@cli.command("run-ai-sage")
+@click.option("--label", default="ai_sage_live", show_default=True, help="Config label for this run.")
+@click.option("--top-k", default=10, show_default=True, help="Number of AI Sage evidence chunks to score per query.")
+@click.option(
+    "--source-type",
+    type=click.Choice(["html", "pdf", "text", "manual"], case_sensitive=False),
+    default=None,
+    help="Restrict evaluation to golden evidence backed by this source type.",
+)
+@click.option("--output", type=click.Path(), default=None, help="Write JSON report to this file.")
+def run_ai_sage(label: str, top_k: int, source_type: Optional[str], output: Optional[str]) -> None:
+    """Run golden evaluation through the live AI Sage concept pipeline."""
+    db = SessionLocal()
+    try:
+        report = run_ai_sage_evaluation(db, config_label=label, top_k=top_k, source_type=source_type)
+    finally:
+        db.close()
+
+    if report.num_queries == 0:
+        scope_note = f" for source_type={source_type}" if source_type else ""
+        click.echo(
+            f"No golden queries found{scope_note}. Seed the dataset with: make rag-eval-seed",
+            err=True,
+        )
+        sys.exit(2)
+
+    payload = json.dumps(report.as_dict(), indent=2)
+    click.echo(payload)
+
+    if output:
+        Path(output).write_text(payload)
+        click.echo(f"AI Sage report written to {output}", err=True)
 
     if not _check_thresholds(report):
         sys.exit(1)
@@ -407,6 +450,143 @@ def structural_recall(output: Optional[str], fail_on_failure: bool) -> None:
 
     if fail_on_failure and report.failed > 0:
         sys.exit(1)
+
+
+@cli.command("diagnose-query")
+@click.option("--query", required=True, help="Free-text query to diagnose (e.g. 'what does Nick Sleep think about Amazon?').")
+@click.option("--top-k", default=10, show_default=True, help="Final number of chunks to return.")
+@click.option(
+    "--output",
+    type=click.Path(),
+    default=None,
+    help="Write stage trace + results to this file (default: /app/data/rag_debug_TIMESTAMP.txt, host-accessible via ./data/).",
+)
+def diagnose_query(query: str, top_k: int, output: Optional[str]) -> None:
+    """
+    Run the full retrieval pipeline for a single free-text query and dump
+    stage-by-stage trace to a file.
+
+    Captures every pool (dense, sparse, feedback, annotation, fusion) and the
+    final ranked output.  Useful for debugging irrelevant candidates or
+    investigating AI Sage vs lower-level retrieval path differences.
+
+    Usage:
+        python -m app.rag.eval.cli diagnose-query \\
+            --query "what does Nick Sleep think about Amazon?" \\
+            --top-k 10 \\
+            --output /app/data/nick_amazon_debug.txt
+
+    The output file is written to /app/data/ by default, which maps to
+    ./data/ on the host via the docker-compose volume mount. Access with:
+        cat ./data/rag_debug_TIMESTAMP.txt
+    """
+    import io
+    import sys
+    from datetime import datetime, timezone
+
+    from app.rag.author_selection import select_authors
+    from app.rag.retrieval import build_retrieval_query_plan, retrieve_hybrid
+
+    # Enable full trace at high verbosity so every pool stage is captured.
+    os.environ["RAG_RETRIEVAL_TRACE"] = "1"
+    os.environ["RAG_RETRIEVAL_TRACE_CHUNK_LIMIT"] = "40"
+
+    buf = io.StringIO()
+    old_stdout = sys.stdout
+    sys.stdout = buf
+
+    db = SessionLocal()
+    selected = []
+    chunks = []
+    plan = None
+    error: Optional[str] = None
+    try:
+        selected = select_authors(query, db, top_k=4)
+        author_ids = [a.author_id for a in selected]
+        author_names = [a.name for a in selected]
+
+        # Build the query plan explicitly so we can show it in the summary header.
+        plan = build_retrieval_query_plan(
+            query,
+            source_author_ids=author_ids,
+            source_author_names=author_names,
+            db=db,
+        )
+
+        # Full hardened hybrid retrieval — traces every internal stage to stdout.
+        chunks = retrieve_hybrid(
+            query,
+            db,
+            top_k=top_k,
+            author_ids=author_ids,
+            source_author_names=author_names,
+            hardening_enabled=True,
+        )
+    except Exception as exc:
+        error = str(exc)
+    finally:
+        db.close()
+        sys.stdout = old_stdout
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    out_path = output or f"/app/data/rag_debug_{timestamp}.txt"
+
+    # ── Summary header ─────────────────────────────────────────────────────
+    lines = [
+        "=" * 72,
+        f"RAG Stage Diagnostic",
+        f"Query   : {query!r}",
+        f"Timestamp: {timestamp}",
+        "=" * 72,
+        "",
+    ]
+    if plan:
+        lines += [
+            "── Query Plan ──────────────────────────────────────────────────────",
+            f"  content_query    : {plan.content_query}",
+            f"  sparse_query     : {plan.sparse_query}",
+            f"  required_phrases : {plan.required_phrases}",
+            f"  concept_terms    : {plan.concept_terms[:12]}",
+            f"  topic_entities   : {plan.topic_entities}",
+            f"  resolved_entity_ids : {plan.resolved_entity_ids}",
+            f"  resolved_concept_ids: {plan.resolved_concept_ids}",
+            "",
+        ]
+    lines += [
+        "── Authors Selected ────────────────────────────────────────────────",
+        *(f"  {a.name} (id={a.author_id})" for a in selected),
+        "",
+    ]
+    if error:
+        lines += [f"ERROR: {error}", ""]
+
+    lines += [
+        f"── Final Output  ({len(chunks)} chunks) ────────────────────────────────────",
+    ]
+    for i, chunk in enumerate(chunks, 1):
+        meta = chunk.metadata_json or {}
+        diag = meta.get("retrieval_diagnostics") or {}
+        pool_members = sorted((diag.get("pool_memberships") or {}).keys())
+        text_snippet = str(chunk.text or "").replace("\n", " ")[:300]
+        lines.append(
+            f"\n  [{i:02d}] sim={chunk.similarity:.4f}"
+            f"  pools={pool_members}"
+            f"\n        author : {meta.get('author_name')}"
+            f"\n        title  : {meta.get('document_title')}"
+            f"\n        text   : {text_snippet!r}"
+        )
+
+    lines += ["", "=" * 72, ""]
+    summary = "\n".join(lines)
+
+    # ── Write full trace to file ────────────────────────────────────────────
+    stage_trace = buf.getvalue()
+    full_content = summary + "\n\n── STAGE TRACE (internal) ──────────────────────────────────────────\n" + stage_trace
+    Path(out_path).write_text(full_content, encoding="utf-8")
+
+    # Print summary to console; full trace is in the file.
+    click.echo(summary)
+    click.echo(f"\nFull stage trace written to: {out_path}", err=True)
 
 
 if __name__ == "__main__":

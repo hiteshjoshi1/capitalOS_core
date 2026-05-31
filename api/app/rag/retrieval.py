@@ -56,8 +56,13 @@ _RETRIEVAL_HARDENING_DEFAULT = os.getenv("RAG_RETRIEVAL_HARDENING", "1") == "1"
 _NEAR_DUPLICATE_THRESHOLD = float(os.getenv("RAG_RETRIEVAL_NEAR_DUPLICATE_THRESHOLD", "0.92"))
 _PARENT_CHILD_WINDOW = int(os.getenv("RAG_PARENT_CHILD_WINDOW", "4"))
 _HARDENED_MIN_CANDIDATE_POOL = int(os.getenv("RAG_RETRIEVAL_HARDENED_MIN_CANDIDATES", "60"))
+_HARDENED_RAW_POOL_FETCH_K = int(os.getenv("RAG_RETRIEVAL_HARDENED_RAW_POOL_FETCH_K", "40"))
+_HARDENED_PER_POOL_CAP = int(os.getenv("RAG_RETRIEVAL_HARDENED_PER_POOL_CAP", "15"))
+_HARDENED_MERGED_CANDIDATE_CAP = int(os.getenv("RAG_RETRIEVAL_HARDENED_MERGED_CANDIDATE_CAP", "20"))
 _RETRIEVAL_TRACE_ENV = "RAG_RETRIEVAL_TRACE"
 _TRACE_TEXT_LIMIT = int(os.getenv("RAG_RETRIEVAL_TRACE_TEXT_LIMIT", "260"))
+_TRACE_CHUNK_LIMIT = int(os.getenv("RAG_RETRIEVAL_TRACE_CHUNK_LIMIT", "12"))
+_STATIC_CONCEPT_EXPANSIONS_ENABLED = os.getenv("RAG_STATIC_CONCEPT_EXPANSIONS", "1") == "1"
 
 _TRANSCRIPT_HINT_RE = re.compile(
     r"\b(?:transcript|q&a|q and a|question(?:s)?|answer(?:s)?|earnings call|shareholder meeting)\b",
@@ -95,25 +100,36 @@ _QUERY_SCAFFOLDING_TERMS = {
     "are",
     "as",
     "at",
+    "about",
+    "and",
     "be",
     "by",
     "can",
+    "did",
     "do",
+    "does",
     "for",
+    "from",
     "has",
     "have",
     "he",
     "her",
     "his",
     "how",
+    "into",
+    "investor",
+    "investors",
+    "is",
     "it",
     "its",
     "mean",
     "means",
+    "or",
     "said",
     "say",
     "saying",
     "says",
+    "should",
     "live",
     "lived",
     "lives",
@@ -134,9 +150,16 @@ _QUERY_SCAFFOLDING_TERMS = {
     "thoughts",
     "view",
     "views",
+    "was",
     "we",
+    "were",
+    "what",
+    "with",
+    "without",
     "who",
     "why",
+    "you",
+    "your",
 }
 _SOURCE_TYPE_TERMS_RE = re.compile(
     r"\b(?:letters?|essays?|memos?|reports?|transcripts?|speeches?|pdfs?|"
@@ -149,13 +172,27 @@ _KNOWN_CONCEPT_PHRASES = (
     "margin of safety",
     "pricing power",
     "intrinsic value",
+    "mr market",
+    "mr. market",
     "share buybacks",
     "second level thinking",
     "scale economies shared",
+    "scale efficiencies shared",
     "business model",
 )
 # DEPRECATED: replaced by rag_corpus_expansions (Issue 171). Remove in Issue 173.
 _CONCEPT_EXPANSIONS = {
+    "intrinsic value": [
+        "calculation",
+        "calculate",
+        "calculations",
+        "estimate",
+        "estimates",
+        "discount rate",
+        "retained earnings",
+        "future earnings",
+        "book value",
+    ],
     "mental models": [
         "latticework",
         "inversion",
@@ -198,6 +235,61 @@ _CONCEPT_EXPANSIONS = {
         "margin of safety",
         "checklist",
         "models",
+    ],
+    "mr market": [
+        "graham",
+        "ben graham",
+        "market was efficient",
+        "unemotional judgment",
+        "irrational fear",
+        "greed",
+        "volatility",
+    ],
+    "mr. market": [
+        "graham",
+        "ben graham",
+        "market was efficient",
+        "unemotional judgment",
+        "irrational fear",
+        "greed",
+        "volatility",
+    ],
+    "scale economies shared": [
+        "scale efficiencies shared",
+        "scale economics shared",
+        "price givebacks",
+        "lower prices",
+        "scale savings",
+        "customer",
+        "customers",
+        "volume",
+        "costco",
+        "amazon",
+        "bezos",
+    ],
+    "scale efficiencies shared": [
+        "scale economies shared",
+        "scale economics shared",
+        "price givebacks",
+        "lower prices",
+        "scale savings",
+        "customer",
+        "customers",
+        "volume",
+        "costco",
+        "amazon",
+        "bezos",
+    ],
+    "share buybacks": [
+        "repurchases",
+        "repurchase",
+        "repurchasing",
+        "share repurchases",
+        "stock repurchases",
+        "buy back",
+        "buybacks",
+        "intrinsic value",
+        "share count",
     ],
 }
 _CONCEPT_ASPECTS = {
@@ -444,14 +536,15 @@ def trace_retrieval_chunks(
     query: str,
     chunks: list["RetrievedChunk"],
     *,
-    limit: int = 12,
+    limit: Optional[int] = None,
     extra: Optional[dict[str, Any]] = None,
 ) -> None:
+    effective_limit = limit if limit is not None else _TRACE_CHUNK_LIMIT
     payload: dict[str, Any] = {
         "query": query,
         "chunk_count": len(chunks),
-        "shown": min(len(chunks), limit),
-        "chunks": [_trace_chunk_item(index, chunk) for index, chunk in enumerate(chunks[:limit], start=1)],
+        "shown": min(len(chunks), effective_limit),
+        "chunks": [_trace_chunk_item(index, chunk) for index, chunk in enumerate(chunks[:effective_limit], start=1)],
     }
     if extra:
         payload["extra"] = extra
@@ -911,8 +1004,10 @@ def build_retrieval_query_plan(
             db,
         )
 
-    # Bypass static _CONCEPT_EXPANSIONS when DB-backed corpus_expansion_terms are available
-    use_static_expansions = not corpus_expansion_terms
+    # Static concept expansions remain enabled by default until DB-backed
+    # corpus expansions have complete coverage for the existing concept
+    # registry. They are still bypassed when corpus-local expansion terms exist.
+    use_static_expansions = _STATIC_CONCEPT_EXPANSIONS_ENABLED and not corpus_expansion_terms
     concept_terms = _build_concept_terms(
         content_query,
         required_phrases,
@@ -1980,6 +2075,45 @@ def _aspect_hits_for_plan(plan: RetrievalQueryPlan, text: str, metadata_text: st
 def _concept_hit_score(hits: list[str]) -> float:
     weights = {
         "mental models": 0.65,
+        "intrinsic value": 0.75,
+        "calculation": 0.55,
+        "calculations": 0.55,
+        "calculate": 0.55,
+        "estimate": 0.55,
+        "estimates": 0.55,
+        "discount rate": 0.7,
+        "retained earnings": 0.7,
+        "future earnings": 0.65,
+        "book value": 0.35,
+        "mr market": 0.95,
+        "mr. market": 0.95,
+        "graham": 0.55,
+        "ben graham": 0.65,
+        "unemotional judgment": 0.75,
+        "irrational fear": 0.65,
+        "greed": 0.45,
+        "volatility": 0.4,
+        "scale economies shared": 1.0,
+        "scale efficiencies shared": 1.0,
+        "scale economics shared": 1.0,
+        "price givebacks": 0.9,
+        "lower prices": 0.75,
+        "scale savings": 0.8,
+        "customers": 0.35,
+        "customer": 0.35,
+        "volume": 0.35,
+        "costco": 0.4,
+        "amazon": 0.4,
+        "bezos": 0.45,
+        "share buybacks": 0.9,
+        "share repurchases": 0.9,
+        "stock repurchases": 0.9,
+        "repurchases": 0.65,
+        "repurchase": 0.65,
+        "repurchasing": 0.65,
+        "buybacks": 0.65,
+        "buy back": 0.65,
+        "share count": 0.55,
         "latticework": 0.95,
         "inversion": 0.9,
         "invert": 0.9,
@@ -2024,6 +2158,241 @@ def _aspect_coverage_score(aspect_hits: dict[str, list[str]]) -> float:
     aspect_count = len(aspect_hits)
     term_count = sum(len(hits) for hits in aspect_hits.values())
     return min(aspect_count, 5) * 0.85 + min(term_count, 8) * 0.12
+
+
+def _low_content_quality_penalty(text: str) -> float:
+    stripped = (text or "").strip()
+    if not stripped:
+        return -4.0
+
+    words = re.findall(r"\b[A-Za-z][A-Za-z'-]*\b", stripped)
+    numbers = re.findall(r"\b\d+(?:\.\d+)?%?\b", stripped)
+    pipe_count = stripped.count("|")
+    table_separator_count = stripped.count("---")
+    penalty = 0.0
+
+    if pipe_count >= 8 or table_separator_count >= 2:
+        penalty -= 4.0
+    if len(words) < 8:
+        penalty -= 3.0
+    if numbers and len(numbers) > max(len(words), 1):
+        penalty -= 2.5
+
+    return penalty
+
+
+def _retrieval_relevance_terms(plan: RetrievalQueryPlan) -> list[str]:
+    terms: list[str] = []
+    terms.extend(plan.required_phrases)
+    terms.extend(plan.topic_entities)
+    terms.extend(plan.concept_terms)
+    terms.extend(plan.corpus_expansion_terms[:8])
+    for token in re.findall(r"[a-z0-9][a-z0-9.'-]{2,}", plan.content_query.lower()):
+        if token not in _QUERY_SCAFFOLDING_TERMS:
+            terms.append(token)
+    return _dedupe_preserve_order([term.strip() for term in terms if term and term.strip()])
+
+
+def _boilerplate_noise_penalty(text: str) -> float:
+    lowered = (text or "").lower()
+    if not lowered:
+        return 4.0
+    penalty = 0.0
+    patterns = (
+        "this document is issued by",
+        "authorised and regulated",
+        "authorized and regulated",
+        "not for onward distribution",
+        "your first port of call",
+        "enquiries as to performance",
+        "administrator",
+        "administrators",
+        "can be reached at",
+        "www.census.gov",
+        "source:",
+    )
+    for pattern in patterns:
+        if pattern in lowered:
+            penalty += 1.35
+    url_count = len(re.findall(r"https?://|www\.", lowered))
+    if url_count:
+        penalty += min(url_count, 4) * 0.7
+    words = re.findall(r"[a-z][a-z'-]+", lowered)
+    if words and len(words) < 30:
+        penalty += 0.8
+    return penalty
+
+
+def _pool_candidate_quality_score(
+    plan: RetrievalQueryPlan,
+    chunk: RetrievedChunk,
+    *,
+    pool_name: str,
+    best_similarity: float,
+) -> tuple[float, dict[str, Any]]:
+    text = str(chunk.text or "")
+    metadata = chunk.metadata_json if isinstance(chunk.metadata_json, dict) else {}
+    metadata_text = _metadata_search_text(metadata)
+    haystack = f"{text} {metadata_text}"
+    relevance_terms = _retrieval_relevance_terms(plan)
+    relevance_hits = _count_term_hits(haystack, relevance_terms)
+    phrase_hits = _count_term_hits(haystack, plan.required_phrases)
+    topic_hits = _count_term_hits(haystack, plan.topic_entities)
+    concept_hits = _count_term_hits(haystack, plan.concept_terms)
+    similarity = float(chunk.similarity or 0.0)
+    lexical_score = (len(relevance_hits) * 1.2) + (len(topic_hits) * 2.0) + (len(phrase_hits) * 1.8)
+    concept_score = _concept_hit_score(concept_hits)
+    metadata_score = 0.45 * len(_count_term_hits(metadata_text, relevance_terms))
+    sparse_score = min(float(chunk.ts_rank or 0.0), 1.0) * 0.6
+    dense_score = similarity * 1.4
+    noise_penalty = _boilerplate_noise_penalty(text) + abs(_low_content_quality_penalty(text))
+    score = dense_score + sparse_score + lexical_score + concept_score + metadata_score - noise_penalty
+
+    content_tokens = [
+        token
+        for token in re.findall(r"[a-z0-9]+", plan.content_query.lower())
+        if token not in _QUERY_SCAFFOLDING_TERMS
+    ]
+    short_entity_query = bool(plan.topic_entities or plan.resolved_entity_ids or len(content_tokens) == 1)
+    has_primary_hit = bool(relevance_hits or topic_hits or phrase_hits)
+    relative_similarity_floor = max(0.0, best_similarity - 0.18)
+    keep = True
+    reason = "kept"
+    if short_entity_query and not has_primary_hit:
+        keep = False
+        reason = "missing_primary_entity_or_topic"
+    elif pool_name in ("dense_content", "dense_raw_fallback", "dense_feedback") and similarity < 0.45 and not has_primary_hit:
+        # Dense candidate has low vector similarity AND no lexical relevance signal — likely
+        # a topically-adjacent chunk that the embedding space rated similar but which does
+        # not actually discuss the query topic.  Drop early so it cannot crowd out signal.
+        keep = False
+        reason = "dense_low_similarity_no_relevance"
+    elif pool_name in ("sparse_content", "sparse_feedback", "topic_entity_pool") and similarity < 0.10 and not has_primary_hit:
+        # Sparse candidate matched FTS only marginally (ts_rank < 0.003) and has no
+        # lexical relevance hits — almost certainly a false positive.  Drop it.
+        keep = False
+        reason = "sparse_low_signal_no_relevance"
+    elif score < -0.25 and not has_primary_hit:
+        keep = False
+        reason = "low_quality_no_relevance_hits"
+
+    diagnostics = {
+        "pool_name": pool_name,
+        "quality_score": round(score, 6),
+        "keep": keep,
+        "reason": reason,
+        "similarity": round(similarity, 6),
+        "best_similarity": round(best_similarity, 6),
+        "relevance_hits": relevance_hits,
+        "topic_hits": topic_hits,
+        "phrase_hits": phrase_hits,
+        "concept_hits": concept_hits,
+        "noise_penalty": round(noise_penalty, 6),
+    }
+    return score, diagnostics
+
+
+def _copy_chunk_with_pool_quality(chunk: RetrievedChunk, diagnostics: dict[str, Any]) -> RetrievedChunk:
+    metadata = dict(chunk.metadata_json or {})
+    metadata["pool_quality"] = diagnostics
+    return _copy_chunk_with_metadata(chunk, metadata)
+
+
+def _dedupe_pool_exact(chunks: list[RetrievedChunk]) -> tuple[list[RetrievedChunk], list[dict[str, Any]]]:
+    kept: list[RetrievedChunk] = []
+    dropped: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    seen_text: dict[str, str] = {}
+    for chunk in chunks:
+        if chunk.chunk_id in seen_ids:
+            dropped.append({"chunk_id": chunk.chunk_id, "reason": "duplicate_chunk_id"})
+            continue
+        fingerprint = _normalize_duplicate_text(_duplicate_comparison_text(chunk))
+        if fingerprint and fingerprint in seen_text:
+            dropped.append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "reason": "duplicate_text",
+                    "matched_chunk_id": seen_text[fingerprint],
+                }
+            )
+            continue
+        seen_ids.add(chunk.chunk_id)
+        if fingerprint:
+            seen_text[fingerprint] = chunk.chunk_id
+        kept.append(chunk)
+    return kept, dropped
+
+
+def _prune_retrieval_pool(
+    plan: RetrievalQueryPlan,
+    chunks: list[RetrievedChunk],
+    *,
+    pool_name: str,
+    cap: int = _HARDENED_PER_POOL_CAP,
+) -> tuple[list[RetrievedChunk], list[dict[str, Any]]]:
+    if not chunks:
+        return [], []
+
+    best_similarity = max((float(chunk.similarity or 0.0) for chunk in chunks), default=0.0)
+    scored: list[tuple[float, int, RetrievedChunk]] = []
+    dropped: list[dict[str, Any]] = []
+    for index, chunk in enumerate(chunks):
+        score, diagnostics = _pool_candidate_quality_score(
+            plan,
+            chunk,
+            pool_name=pool_name,
+            best_similarity=best_similarity,
+        )
+        if diagnostics["keep"]:
+            scored.append((score, index, _copy_chunk_with_pool_quality(chunk, diagnostics)))
+        else:
+            dropped.append(
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "reason": diagnostics["reason"],
+                    "quality_score": diagnostics["quality_score"],
+                    "text": str(chunk.text or "").replace("\n", " ")[:180],
+                }
+            )
+
+    scored.sort(key=lambda item: (-item[0], item[1], item[2].chunk_id))
+    ordered = [chunk for _score, _index, chunk in scored]
+    # Do NOT restore failed chunks here.  If every candidate in this pool failed quality
+    # checks, returning an empty pool is correct — the fusion layer handles it gracefully
+    # and a zero-candidate pool is better than polluting the candidate set with irrelevant
+    # content that degrades final NDCG.  The old fallback was silently undermining the
+    # quality gate every time a query had no lexical hits in a particular pool.
+    deduped, suppressed = _dedupe_pool_exact(ordered)
+    if suppressed:
+        dropped.extend(suppressed)
+    return deduped[:cap], dropped
+
+
+def _prune_retrieval_pools(
+    plan: RetrievalQueryPlan,
+    pools: dict[str, list[RetrievedChunk]],
+    *,
+    cap: int = _HARDENED_PER_POOL_CAP,
+) -> tuple[dict[str, list[RetrievedChunk]], dict[str, Any]]:
+    pruned: dict[str, list[RetrievedChunk]] = {}
+    diagnostics: dict[str, Any] = {}
+    for pool_name, chunks in pools.items():
+        kept, dropped = _prune_retrieval_pool(plan, chunks, pool_name=pool_name, cap=cap)
+        pruned[pool_name] = kept
+        diagnostics[pool_name] = {
+            "input_count": len(chunks),
+            "kept_count": len(kept),
+            "dropped_count": len(dropped),
+            "dropped": dropped[:12],
+        }
+        trace_retrieval_chunks(
+            f"{pool_name}_quality_pruned",
+            plan.content_query or plan.raw_query,
+            kept,
+            extra=diagnostics[pool_name],
+        )
+    return pruned, diagnostics
 
 
 def _feedback_seed_tokens(plan: RetrievalQueryPlan) -> set[str]:
@@ -2316,9 +2685,12 @@ def fuse_hardened_candidates(
         "sparse_feedback": 1.15,
         "dense_feedback": 0.85,
         "topic_entity_pool": 1.0,
-        # Issue 172 annotation pools
-        "entity_annotation_pool": 1.1,
-        "concept_annotation_pool": 1.1,
+        # Issue 172 annotation pools — demoted from 1.1 to 0.7 (Issue 174).
+        # Annotation confidence order is not query-relevance order.  A chunk
+        # annotated with a concept/entity enters the pool as a recall signal;
+        # it can rank high only if dense/sparse signals independently support it.
+        "entity_annotation_pool": 0.7,
+        "concept_annotation_pool": 0.7,
         "corpus_expansion_pool": 0.9,
         "dense_raw_fallback": 0.2,
     }
@@ -2371,6 +2743,7 @@ def fuse_hardened_candidates(
             shallow_prompt_penalty = -3.0
         if re.match(r"\s*(?:questioner|question|q:)\b", text, re.IGNORECASE) and word_count <= 60:
             shallow_prompt_penalty -= 2.0
+        low_content_quality_penalty = _low_content_quality_penalty(text)
 
         score_components = {
             "pool_score": round(pool_score, 6),
@@ -2383,6 +2756,7 @@ def fuse_hardened_candidates(
             "neighbor_context_score": neighbor_context_score,
             "author_voice_score": author_voice_score,
             "shallow_prompt_penalty": shallow_prompt_penalty,
+            "low_content_quality_penalty": low_content_quality_penalty,
         }
         final_score = sum(score_components.values())
         scored.append(
@@ -2404,7 +2778,12 @@ def fuse_hardened_candidates(
         )
 
     scored.sort(key=lambda item: (-item[0], item[1]))
-    diversity_window = max(top_k * 8, 200)
+    # Keep the ranked prefix stable across different requested top_k values.
+    # A small top_k used to shrink the diversification window, which meant
+    # asking for 10 results could miss strong candidates that appeared when
+    # asking for 100. Use a fixed broad window so top-10 ranking is not an
+    # artifact of the caller's requested page size.
+    diversity_window = max(top_k * 8, _HARDENED_MIN_CANDIDATE_POOL * 12, 800)
     ranked = _diversify_hardened_candidates(scored[:diversity_window], top_k=top_k)
     return _rank_chunks(ranked, top_k=top_k, stage="hardened_fusion", weighting_enabled=weighting_active)
 
@@ -2541,7 +2920,8 @@ def _retrieve_hardened(
     if not effective_author_ids and not effective_author_id and len(plan.source_author_ids) == 1:
         effective_author_ids = plan.source_author_ids
 
-    fetch_k = max(top_k * _DENSE_TOP_K_MULTIPLIER, top_k, _HARDENED_MIN_CANDIDATE_POOL)
+    fetch_k = max(1, _HARDENED_RAW_POOL_FETCH_K)
+    final_top_k = max(1, min(top_k, _HARDENED_MERGED_CANDIDATE_CAP))
     common_kwargs: dict[str, Any] = {
         "author_id": effective_author_id,
         "author_ids": effective_author_ids,
@@ -2564,7 +2944,7 @@ def _retrieve_hardened(
             pools["dense_raw_fallback"] = retrieve_similar_chunks(
                 query,
                 db,
-                top_k=max(top_k, fetch_k // 2),
+                top_k=max(final_top_k, fetch_k // 2),
                 **common_kwargs,
             )
             trace_retrieval_chunks("pool_dense_raw_fallback", query, pools["dense_raw_fallback"])
@@ -2593,6 +2973,12 @@ def _retrieve_hardened(
             pools["sparse_required_phrase"] = phrase_chunks
             trace_retrieval_chunks("pool_sparse_required_phrase", " OR ".join(plan.required_phrases), phrase_chunks)
 
+    pools, pool_pruning_diagnostics = _prune_retrieval_pools(plan, pools)
+
+    # Keep the original user-intent plan for final scoring. Feedback expansion
+    # is allowed to add recall pools, but those derived terms are not primary
+    # relevance criteria; scoring them as concept hits caused severe topic drift.
+    scoring_plan = plan
     feedback_terms = _extract_salient_feedback_terms(plan, pools) if retrieval_mode == "hybrid" else []
     trace_retrieval_payload(
         "feedback_terms",
@@ -2605,6 +2991,14 @@ def _retrieve_hardened(
     )
     if feedback_terms:
         expanded_concept_terms = _dedupe_preserve_order([*plan.concept_terms, *feedback_terms])
+        scoring_plan = replace(
+            scoring_plan,
+            diagnostics={
+                **scoring_plan.diagnostics,
+                "feedback_terms": feedback_terms,
+                "feedback_terms_scoring": "retrieval_pool_only",
+            },
+        )
         plan = replace(
             plan,
             concept_terms=expanded_concept_terms,
@@ -2621,14 +3015,48 @@ def _retrieve_hardened(
                 **common_kwargs,
             )
             trace_retrieval_chunks("pool_sparse_feedback", feedback_query, pools["sparse_feedback"])
+            pools["sparse_feedback"], sparse_feedback_dropped = _prune_retrieval_pool(
+                plan,
+                pools["sparse_feedback"],
+                pool_name="sparse_feedback",
+            )
+            pool_pruning_diagnostics["sparse_feedback"] = {
+                "input_count": len(pools["sparse_feedback"]) + len(sparse_feedback_dropped),
+                "kept_count": len(pools["sparse_feedback"]),
+                "dropped_count": len(sparse_feedback_dropped),
+                "dropped": sparse_feedback_dropped[:12],
+            }
+            trace_retrieval_chunks(
+                "sparse_feedback_quality_pruned",
+                feedback_query,
+                pools["sparse_feedback"],
+                extra=pool_pruning_diagnostics["sparse_feedback"],
+            )
         if retrieval_mode in {"hybrid", "dense_only"}:
             pools["dense_feedback"] = retrieve_similar_chunks(
                 " ".join(feedback_terms[:10]),
                 db,
-                top_k=max(top_k, fetch_k // 2),
+                top_k=max(final_top_k, fetch_k // 2),
                 **common_kwargs,
             )
             trace_retrieval_chunks("pool_dense_feedback", " ".join(feedback_terms[:10]), pools["dense_feedback"])
+            pools["dense_feedback"], dense_feedback_dropped = _prune_retrieval_pool(
+                plan,
+                pools["dense_feedback"],
+                pool_name="dense_feedback",
+            )
+            pool_pruning_diagnostics["dense_feedback"] = {
+                "input_count": len(pools["dense_feedback"]) + len(dense_feedback_dropped),
+                "kept_count": len(pools["dense_feedback"]),
+                "dropped_count": len(dense_feedback_dropped),
+                "dropped": dense_feedback_dropped[:12],
+            }
+            trace_retrieval_chunks(
+                "dense_feedback_quality_pruned",
+                " ".join(feedback_terms[:10]),
+                pools["dense_feedback"],
+                extra=pool_pruning_diagnostics["dense_feedback"],
+            )
 
         secondary_terms = [
             term
@@ -2659,11 +3087,28 @@ def _retrieve_hardened(
         pools["topic_entity_pool"] = retrieve_keyword_chunks(
             " OR ".join(plan.topic_entities),
             db,
-            top_k=max(top_k, fetch_k // 2),
+            top_k=max(final_top_k, fetch_k // 2),
             hardening_enabled=True,
             **common_kwargs,
         )
         trace_retrieval_chunks("pool_topic_entity", " OR ".join(plan.topic_entities), pools["topic_entity_pool"])
+        pools["topic_entity_pool"], topic_dropped = _prune_retrieval_pool(
+            plan,
+            pools["topic_entity_pool"],
+            pool_name="topic_entity_pool",
+        )
+        pool_pruning_diagnostics["topic_entity_pool"] = {
+            "input_count": len(pools["topic_entity_pool"]) + len(topic_dropped),
+            "kept_count": len(pools["topic_entity_pool"]),
+            "dropped_count": len(topic_dropped),
+            "dropped": topic_dropped[:12],
+        }
+        trace_retrieval_chunks(
+            "topic_entity_pool_quality_pruned",
+            " OR ".join(plan.topic_entities),
+            pools["topic_entity_pool"],
+            extra=pool_pruning_diagnostics["topic_entity_pool"],
+        )
 
     # --- Entity annotation pool (Issue 172) ---
     if plan.resolved_entity_ids and retrieval_mode in {"hybrid", "sparse_only"}:
@@ -2679,6 +3124,23 @@ def _retrieve_hardened(
             "pool_entity_annotation",
             str(plan.resolved_entity_ids),
             pools["entity_annotation_pool"],
+        )
+        pools["entity_annotation_pool"], entity_dropped = _prune_retrieval_pool(
+            plan,
+            pools["entity_annotation_pool"],
+            pool_name="entity_annotation_pool",
+        )
+        pool_pruning_diagnostics["entity_annotation_pool"] = {
+            "input_count": len(pools["entity_annotation_pool"]) + len(entity_dropped),
+            "kept_count": len(pools["entity_annotation_pool"]),
+            "dropped_count": len(entity_dropped),
+            "dropped": entity_dropped[:12],
+        }
+        trace_retrieval_chunks(
+            "entity_annotation_pool_quality_pruned",
+            str(plan.resolved_entity_ids),
+            pools["entity_annotation_pool"],
+            extra=pool_pruning_diagnostics["entity_annotation_pool"],
         )
 
     # --- Concept annotation pool (Issue 172) ---
@@ -2696,6 +3158,23 @@ def _retrieve_hardened(
             str(plan.resolved_concept_ids),
             pools["concept_annotation_pool"],
         )
+        pools["concept_annotation_pool"], concept_dropped = _prune_retrieval_pool(
+            plan,
+            pools["concept_annotation_pool"],
+            pool_name="concept_annotation_pool",
+        )
+        pool_pruning_diagnostics["concept_annotation_pool"] = {
+            "input_count": len(pools["concept_annotation_pool"]) + len(concept_dropped),
+            "kept_count": len(pools["concept_annotation_pool"]),
+            "dropped_count": len(concept_dropped),
+            "dropped": concept_dropped[:12],
+        }
+        trace_retrieval_chunks(
+            "concept_annotation_pool_quality_pruned",
+            str(plan.resolved_concept_ids),
+            pools["concept_annotation_pool"],
+            extra=pool_pruning_diagnostics["concept_annotation_pool"],
+        )
 
     # --- Corpus expansion pool (Issue 172) ---
     if plan.corpus_expansion_terms and retrieval_mode in {"hybrid", "sparse_only"}:
@@ -2703,7 +3182,7 @@ def _retrieve_hardened(
         pools["corpus_expansion_pool"] = retrieve_keyword_chunks(
             expansion_query,
             db,
-            top_k=max(top_k, fetch_k // 2),
+            top_k=max(final_top_k, fetch_k // 2),
             hardening_enabled=True,
             **common_kwargs,
         )
@@ -2711,6 +3190,23 @@ def _retrieve_hardened(
             "pool_corpus_expansion",
             expansion_query,
             pools["corpus_expansion_pool"],
+        )
+        pools["corpus_expansion_pool"], expansion_dropped = _prune_retrieval_pool(
+            plan,
+            pools["corpus_expansion_pool"],
+            pool_name="corpus_expansion_pool",
+        )
+        pool_pruning_diagnostics["corpus_expansion_pool"] = {
+            "input_count": len(pools["corpus_expansion_pool"]) + len(expansion_dropped),
+            "kept_count": len(pools["corpus_expansion_pool"]),
+            "dropped_count": len(expansion_dropped),
+            "dropped": expansion_dropped[:12],
+        }
+        trace_retrieval_chunks(
+            "corpus_expansion_pool_quality_pruned",
+            expansion_query,
+            pools["corpus_expansion_pool"],
+            extra=pool_pruning_diagnostics["corpus_expansion_pool"],
         )
 
     if retrieval_mode == "dense_only":
@@ -2735,9 +3231,9 @@ def _retrieve_hardened(
         return []
 
     fused = fuse_hardened_candidates(
-        plan=plan,
+        plan=scoring_plan,
         pools={name: chunks for name, chunks in pools.items() if chunks},
-        top_k=top_k,
+        top_k=final_top_k,
         weighting_enabled=weighting_enabled,
     )
     fused, removed_by_author_gate = _enforce_source_author_gate(
@@ -2751,6 +3247,10 @@ def _retrieve_hardened(
         limit=top_k,
         extra={
             "pool_sizes": {name: len(chunks) for name, chunks in pools.items()},
+            "raw_pool_fetch_k": fetch_k,
+            "per_pool_cap": _HARDENED_PER_POOL_CAP,
+            "merged_candidate_cap": final_top_k,
+            "pool_pruning": pool_pruning_diagnostics,
             "source_author_gate": {
                 "allowed_author_ids": effective_author_ids or ([effective_author_id] if effective_author_id else []),
                 "removed_chunk_ids": removed_by_author_gate,

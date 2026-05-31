@@ -25,7 +25,6 @@ from app.rag.author_selection import SelectedAuthor, select_authors
 from app.rag.inference import create_inference_client, inference_available, inference_model
 from app.rag.retrieval import (
     RetrievedChunk,
-    deliver_parent_sections,
     retrieval_hardening_enabled,
     retrieve_hybrid,
     retrieve_similar_chunks,
@@ -458,8 +457,10 @@ def _prepare_evidence_pack(
     duplicates_suppressed: list[dict[str, Any]] = []
 
     if hardening_enabled:
-        delivered_chunks = deliver_parent_sections(chunks, db, only_when_needed=False)
-        trace_retrieval_chunks("delivery_parent_child", query_text, delivered_chunks, extra={"input_count": len(chunks)})
+        # Context expansion (deliver_parent_sections) is intentionally NOT called here.
+        # Retrieval results are returned with their original chunk text and rank order.
+        # Expanding context is an on-demand operation triggered by explicit user request,
+        # not a pre-pass that would silently replace chunk text before the user sees results.
         delivered_chunks, duplicates_suppressed = suppress_near_duplicates(delivered_chunks)
         trace_retrieval_chunks(
             "delivery_after_duplicate_suppression",

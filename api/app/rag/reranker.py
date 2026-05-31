@@ -34,7 +34,10 @@ _JINA_RERANK_URL = "https://api.jina.ai/v1/rerank"
 
 
 def _reranker_provider(provider: str | None = None) -> str:
-    raw = provider if provider is not None else os.getenv("RAG_RERANKER_PROVIDER", "jina")
+    # Default is "none" so heuristic ranking is used unless the caller or env
+    # explicitly opts into an external reranker.  Jina and other providers can
+    # be enabled via RAG_RERANKER_PROVIDER=jina etc. after quality gates pass.
+    raw = provider if provider is not None else os.getenv("RAG_RERANKER_PROVIDER", "none")
     return raw.strip().lower()
 
 
