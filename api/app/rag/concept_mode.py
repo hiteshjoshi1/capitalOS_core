@@ -314,7 +314,7 @@ def _retrieve_with_intent_fallback(
             chunks, dense_dropped = _prune_retrieval_pool(
                 pruning_plan,
                 chunks,
-                pool_name="ai_sage_dense_content",
+                pool_name="dense_content",
             )
             trace_retrieval_chunks(
                 "ai_sage_dense_quality_pruned",
@@ -337,7 +337,7 @@ def _retrieve_with_intent_fallback(
                 sparse, sparse_dropped = _prune_retrieval_pool(
                     pruning_plan,
                     sparse,
-                    pool_name="ai_sage_sparse_content",
+                    pool_name="sparse_content",
                 )
                 trace_retrieval_chunks(
                     "ai_sage_sparse_quality_pruned",
@@ -857,6 +857,56 @@ def _heuristic_rank_candidates(
         chunk.corpus_class = decision.corpus_class
         chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
     return sorted(candidates, key=ranking_sort_key)
+
+
+def _chunk_matches_topic_focus(
+    chunk: RetrievedChunk,
+    *,
+    topic_entities: list[str],
+    required_phrases: list[str],
+    resolved_entity_ids: list[str],
+) -> bool:
+    metadata = _chunk_meta(chunk)
+    context_text = str(metadata.get("context_text") or "")
+    text = f"{str(getattr(chunk, 'text', '') or '')} {context_text}".lower()
+    phrase_hits, token_hits = _topic_entity_match_counts(text, topic_entities=topic_entities)
+    if phrase_hits > 0 or token_hits > 0:
+        return True
+    if any(str(phrase).strip().lower() in text for phrase in required_phrases if str(phrase).strip()):
+        return True
+    annotated_ids = metadata.get("annotated_entity_ids") or []
+    if resolved_entity_ids and any(str(entity_id) in set(map(str, annotated_ids)) for entity_id in resolved_entity_ids):
+        return True
+    return False
+
+
+def _apply_topic_focus_guard(
+    chunks: list[RetrievedChunk],
+    *,
+    topic_entities: list[str],
+    required_phrases: list[str],
+    resolved_entity_ids: list[str],
+    min_keep: int,
+) -> tuple[list[RetrievedChunk], list[str]]:
+    if not chunks or not topic_entities:
+        return chunks, []
+
+    kept: list[RetrievedChunk] = []
+    removed_ids: list[str] = []
+    for chunk in chunks:
+        if _chunk_matches_topic_focus(
+            chunk,
+            topic_entities=topic_entities,
+            required_phrases=required_phrases,
+            resolved_entity_ids=resolved_entity_ids,
+        ):
+            kept.append(chunk)
+        else:
+            removed_ids.append(chunk.chunk_id)
+
+    if len(kept) >= min_keep:
+        return kept, removed_ids
+    return chunks, []
 
 
 def _chunk_meta(chunk: RetrievedChunk) -> dict[str, Any]:
@@ -1400,6 +1450,31 @@ def execute_concept_query(
         topic_entities=intent.topic_entities,
         source_author_terms=_source_author_terms(intent),
     )
+    topic_plan = build_retrieval_query_plan(
+        query,
+        source_author_ids=selected_ids,
+        source_author_names=intent.author_names,
+        topic_entities=intent.topic_entities if intent.topic_entities else None,
+        db=db,
+    )
+    winning_chunks, topic_focus_removed = _apply_topic_focus_guard(
+        winning_chunks,
+        topic_entities=topic_plan.topic_entities,
+        required_phrases=topic_plan.required_phrases,
+        resolved_entity_ids=topic_plan.resolved_entity_ids,
+        min_keep=max(3, min(top_k_chunks, 6)),
+    )
+    if topic_focus_removed:
+        trace_retrieval_payload(
+            "ai_sage_topic_focus_guard",
+            {
+                "query": query,
+                "topic_entities": topic_plan.topic_entities,
+                "required_phrases": topic_plan.required_phrases,
+                "removed_chunk_ids": topic_focus_removed,
+                "kept_count": len(winning_chunks),
+            },
+        )
     _trace_chunks("reranked", query, winning_chunks)
     duplicates_suppressed: list[dict[str, Any]] = []
     if hardening_active:
