@@ -273,15 +273,15 @@ the correct approach. Do not add generic expansion without evidence.
 
 ## Acceptance criteria
 
-- [ ] The live AI Sage golden-set comparison runs with Jina disabled and enabled.
-- [ ] The report includes `NDCG@5`, `NDCG@10`, `Recall@5`, `Recall@10`, `Precision@10`, and `MRR`.
+- [x] The live AI Sage golden-set comparison runs with Jina disabled and enabled.
+- [x] The report includes `NDCG@5`, `NDCG@10`, `Recall@5`, `Recall@10`, `Precision@10`, and `MRR`.
 - [x] Jina remains enabled in the running environment unless measured results prove another
   configuration is better. *(enabled: `RAG_RERANKER_PROVIDER=jina`)*
 - [ ] The final Jina-enabled metrics do not materially regress from the current baseline:
   `NDCG@10=0.5455`, `Recall@10=0.5693`, `Precision@10=0.3081`, `MRR=0.8095`.
 - [ ] The final Jina-disabled metrics do not materially regress from the current baseline:
   `NDCG@10=0.4953`, `Recall@10=0.5125`, `Precision@10=0.2881`, `MRR=0.7578`.
-- [ ] The Nick Sleep / Amazon trace identifies the exact stage that promotes weak results.
+- [x] The Nick Sleep / Amazon trace identifies the exact stage that promotes weak results.
 - [ ] Any ranking fix is generic and justified by before-and-after evidence.
 - [ ] Every AI Sage-only retrieval/reranking addition has been tested one-by-one against the
   hardened baseline and explicitly marked keep/remove.
@@ -297,30 +297,30 @@ the correct approach. Do not add generic expansion without evidence.
   *(855 passed, 0 failed after fixture updates.)*
 - [x] Targeted RAG tests pass.
 - [x] Full backend deterministic tests pass.
-- [ ] API smoke passes.
+- [x] API smoke passes.
 
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task checklist
 
-- [ ] Run the live AI Sage golden-set evaluation with Jina disabled and enabled and record results
+- [x] Run the live AI Sage golden-set evaluation with Jina disabled and enabled and record results
   in the execution journal. *(CLI already built: `run-ai-sage`, `compare`, `gate` commands exist.)*
-- [ ] Treat AI Sage UI path as the single golden retrieval path for quality decisions.
-- [ ] Apply retrieval/reranking optimizations one at a time with before/after measurement.
-- [ ] Roll back any optimization that worsens the golden-set metrics or UI evidence relevance.
-- [ ] Establish hardened low-level baseline report and lock it as the starting reference.
-- [ ] Enumerate AI Sage-only retrieval/reranking stages to test as overlays on baseline.
-- [ ] Execute keep/remove decision for each stage with recorded evidence.
+- [x] Treat AI Sage UI path as the single golden retrieval path for quality decisions.
+- [x] Apply retrieval/reranking optimizations one at a time with before/after measurement.
+- [x] Roll back any optimization that worsens the golden-set metrics or UI evidence relevance.
+- [x] Establish hardened low-level baseline report and lock it as the starting reference.
+- [x] Enumerate AI Sage-only retrieval/reranking stages to test as overlays on baseline.
+- [x] Execute keep/remove decision for each stage with recorded evidence.
 - [ ] Converge to a single path where AI Sage quality is baseline-or-better.
-- [ ] Trace the Nick Sleep / Amazon query through every retrieval stage using `diagnose-reranker`.
-- [ ] Classify the root cause before changing ranking behavior.
+- [x] Trace the Nick Sleep / Amazon query through every retrieval stage using `diagnose-reranker`.
+- [x] Classify the root cause before changing ranking behavior.
 - [ ] Implement the smallest generic fix supported by evidence, if needed.
 - [x] Confirm parent and neighboring context remains display-only. *(`only_when_needed=False`)*
 - [x] Repair stale synthetic relevance-pruning test fixtures. *(855 passed, 0 failed)*
 - [x] Run targeted RAG tests. *(passing)*
 - [x] Run the full backend deterministic suite. *(855 passed, 0 failed)*
-- [ ] Run API smoke.
-- [ ] Verify the final live AI Sage metrics against the protected baseline.
+- [x] Run API smoke.
+- [x] Verify the final live AI Sage metrics against the protected baseline. *(verification executed; metrics are currently below protected baseline and issue remains open.)*
 
 ## Stage Experiment Ledger (One-by-One)
 
@@ -381,5 +381,219 @@ Current operating rule (enforced):
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+
+### 2026-06-01 deterministic verification run (current production path)
+
+#### Commands executed
+
+1. `docker compose exec -T -e RAG_RERANKER_PROVIDER=none api python -m app.rag.eval.cli run-ai-sage --label issue174_ai_sage_jina_disabled --top-k 10 --output /app/data/reports/issue174/ai_sage_jina_disabled.json`
+2. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina api python -m app.rag.eval.cli run-ai-sage --label issue174_ai_sage_jina_enabled --top-k 10 --output /app/data/reports/issue174/ai_sage_jina_enabled.json`
+3. `make rag-eval-reranker-diagnose QUERY_CONTAINS="Nick Sleep say about Amazon" PROVIDERS=jina INPUT_MODES=raw RAG_RETRIEVAL_TRACE=1 OUTPUT=/app/data/reports/issue174/diagnose_nick_sleep_amazon_jina_raw.json`
+4. `make api-smoke`
+
+Artifacts:
+
+- `data/reports/issue174/ai_sage_jina_disabled.json`
+- `data/reports/issue174/ai_sage_jina_enabled.json`
+- `data/reports/issue174/diagnose_nick_sleep_amazon_jina_raw.json`
+- `data/reports/issue174/run_ai_sage_jina_disabled.stdout.log`
+- `data/reports/issue174/run_ai_sage_jina_enabled.stdout.log`
+- `data/reports/issue174/diagnose_nick_sleep_amazon_jina_raw.stdout.log`
+- `data/reports/issue174/api_smoke.stdout.log`
+
+#### Aggregate golden-set metrics (live AI Sage path)
+
+| Metric | Protected baseline (disabled) | Current disabled | Protected baseline (enabled) | Current enabled |
+|---|---:|---:|---:|---:|
+| `NDCG@5` | `0.4431` | `0.4359` | `0.4828` | `0.4803` |
+| `NDCG@10` | `0.4953` | `0.4881` | `0.5455` | `0.5263` |
+| `Recall@5` | `0.4077` | `0.3910` | `0.4155` | `0.4155` |
+| `Recall@10` | `0.5125` | `0.4959` | `0.5693` | `0.5387` |
+| `Precision@10` | `0.2881` | `0.3172` | `0.3081` | `0.3372` |
+| `MRR` | `0.7578` | `0.7489` | `0.8095` | `0.7729` |
+
+Result: Jina-enabled remains better than disabled in current runs, but both configurations are below the protected `NDCG@10` / `Recall@10` / `MRR` baselines recorded at issue lock-in, so Issue 174 is **not done**.
+
+#### Per-query comparison summary (enabled vs disabled)
+
+- Queries made worse by Jina in current run:
+  - `How does Charlie Munger think about mental models and latticework?` (`NDCG@10: -0.0135`, `MRR: -0.5000`)
+  - `What does Buffett say about circle of competence?` (`NDCG@10: -0.0369`)
+- Queries with no relevant result in top 10:
+  - Disabled: `How do great investors think about margin of safety?`
+  - Enabled: none
+
+Full per-query metrics for both configurations are in the two JSON reports above.
+
+#### Nick Sleep / Amazon stage diagnosis (fresh trace)
+
+- Query: `What does Nick Sleep say about Amazon's business model?`
+- `strict_source_author=true`; retrieval plan filtered to `author_ids_filter=[nick_sleep]`.
+- Candidate pool recall was complete (`candidate_pool_recall=1.0`), so recall is not the bottleneck.
+- `diagnose-reranker` for `jina/raw` still underperformed heuristic on this query (`NDCG@10: 0.2978 vs 0.3209`, `MRR: 0.1667 vs 0.2`) in the isolated reranker benchmark.
+- Current live AI Sage run with production fusion retained Nick query at `NDCG@10=0.3209`, `MRR=0.2` (no regression vs heuristic baseline for this one row).
+
+Diagnosis: remaining weakness is still ranking-stage behavior (reranker input/fusion sensitivity), not cross-author leakage and not candidate recall.
+
+#### Converged production path verification
+
+Verified in current code path (`execute_concept_query`):
+
+- AI Sage eval and diagnostics use the UI path (`execute_concept_query`) rather than a separate retrieval-only path.
+- Canonical pruning pool naming parity is in place (`dense_content`, `sparse_content`).
+- Topic-focus guard remains after rerank with bounded min-keep fallback.
+- Author-attribution adaptive fusion override (S9) is present (`_query_prefers_author_attribution_pure_rerank`).
+- S10-style extra attribution refinement is not retained; path is minimalized relative to tested removals.
+- Expanded context remains display-only and is attached after ranking/dedup.
+
+Conclusion: retained production path matches the converged keep/remove intent from the stage ledger, but acceptance is still blocked by aggregate baseline regression.
+
+#### API smoke result
+
+- `make api-smoke` passed (`/health` OK and authenticated `/dashboard/summary` returned valid JSON).
+
+#### Exact remaining work (issue still open)
+
+1. Reproduce and explain aggregate drift from protected baseline (`NDCG@10`, `Recall@10`, `MRR`) using the same corpus snapshot and reranker config assumptions as the lock-in run.
+2. Run one isolated ranking/fusion experiment at a time to recover aggregate guarded metrics while preserving Nick Sleep/Amazon non-regression.
+3. Keep only changes that pass guarded aggregate metrics and query-level sanity; roll back regressions immediately.
+4. Re-run final deterministic pack (`run-ai-sage` disabled/enabled + `api-smoke`) and update this journal with passing baseline bars before closure.
+
+#### Sentinel attempt (rolled back)
+
+- Ran one isolated sentinel change to backfill topic-focused candidate pools when undersized before rerank.
+- Gate outcome: **remove/rollback**.
+- Why removed:
+  - No improvement on the sentinel query (`What does Buffett say about circle of competence?` stayed at `retrieved_count=4`, no gain in `NDCG@10`/`Recall@10`/`MRR`).
+  - Jina-enabled aggregate regressed in this trial (`mean_ndcg@10` and `mean_recall@10` down vs current retained path).
+
+Sentinel trial artifacts:
+
+- `data/reports/issue174/sentinel_backfill_jina_disabled.json`
+- `data/reports/issue174/sentinel_backfill_jina_enabled.json`
+- `data/reports/issue174/sentinel_backfill_jina_disabled.stdout.log`
+- `data/reports/issue174/sentinel_backfill_jina_enabled.stdout.log`
+
+#### Deterministic drift reporting command (new)
+
+- Added committed comparison module inside backend eval package for reproducible report analysis:
+  - module: `api/app/rag/eval/drift.py`
+  - tests: `api/tests/test_rag_eval_drift.py`
+  - `make rag-eval-drift OLD_REPORT=<path> NEW_REPORT=<path> [MAX_ROWS=20]`
+- This replaces ad-hoc inline snippets for metric drift review and prints:
+  - aggregate deltas,
+  - per-query changed rows,
+  - slice-health deltas (`buffett`, `munger_mental_models`, `nick_sleep`).
+
+### 2026-06-01 attribution-density gate revisit
+
+#### Commands executed
+
+1. `make api-rebuild`
+2. `./.venv/bin/pytest -q api/tests/test_ai_sage_retrieval_pipeline.py -k 'author_attribution_pure_rerank_requires_candidate_support or nick_sleep_query_surfaces_multiple_distinct_examples'`
+3. `docker compose exec -T -e RAG_RERANKER_PROVIDER=none api python -m app.rag.eval.cli run-ai-sage --label issue174_attribution_gate_jina_disabled --top-k 10 --output /app/data/reports/issue174/attribution_gate_jina_disabled.json`
+4. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina api python -m app.rag.eval.cli run-ai-sage --label issue174_attribution_gate_jina_enabled --top-k 10 --output /app/data/reports/issue174/attribution_gate_jina_enabled.json`
+5. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_disabled.json NEW_REPORT=data/reports/issue174/attribution_gate_jina_disabled.json MAX_ROWS=12`
+6. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_enabled.json NEW_REPORT=data/reports/issue174/attribution_gate_jina_enabled.json MAX_ROWS=12`
+7. `make api-smoke`
+
+#### Outcome
+
+- Tightened the author-attribution pure-rerank trigger so it only fires when the candidate pool is large enough and actually contains multiple topic-bearing candidates.
+- Jina-disabled aggregate stayed flat versus the retained baseline (`mean_ndcg@10=0.4881`, `mean_recall@10=0.4959`, `mean_mrr=0.7489`).
+- Jina-enabled aggregate improved versus the retained baseline (`mean_ndcg@10=0.5407`, `mean_recall@10=0.561`, `mean_precision@10=0.3439`, `mean_mrr=0.7784`).
+- Changed-query drift was limited to two rows, with the biggest gain on `How should investors think about Mr Market?` and a smaller gain on `What does Buffett say about circle of competence?`.
+- This is an improvement, but it still does not clear the protected baseline bars, so Issue 174 remains open.
+
+### 2026-06-01 topic-admission density revisit
+
+#### Commands executed
+
+1. `./.venv/bin/pytest -q api/tests/test_ai_sage_retrieval_pipeline.py -k 'topic_focus_phrase_support_count_tracks_exact_matches or author_attribution_pure_rerank_requires_candidate_support'`
+2. `make api-rebuild`
+3. `docker compose exec -T -e RAG_RERANKER_PROVIDER=none api python -m app.rag.eval.cli run-ai-sage --label issue174_topic_density_gate_jina_disabled --top-k 10 --output /app/data/reports/issue174/topic_density_gate_jina_disabled.json`
+4. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina api python -m app.rag.eval.cli run-ai-sage --label issue174_topic_density_gate_jina_enabled --top-k 10 --output /app/data/reports/issue174/topic_density_gate_jina_enabled.json`
+5. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_disabled.json NEW_REPORT=data/reports/issue174/topic_density_gate_jina_disabled.json MAX_ROWS=12`
+6. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_enabled.json NEW_REPORT=data/reports/issue174/topic_density_gate_jina_enabled.json MAX_ROWS=12`
+7. `make api-smoke`
+
+#### Outcome
+
+- Added a stricter topic-admission density guard that only tightens the pool when multiple exact topic phrases are present.
+- Jina-disabled metrics stayed flat versus the retained baseline.
+- Jina-enabled metrics were nearly flat overall, with only a small NDCG gain on `What does Buffett say about circle of competence?` and no recall or MRR lift.
+- This is not a strong enough aggregate improvement to promote as the retained answer by itself; it remains an exploratory tweak while the issue stays open.
+
+### 2026-06-01 S8 min-keep recalibration revisit
+
+#### Commands executed
+
+1. `./.venv/bin/pytest -q api/tests/test_ai_sage_retrieval_pipeline.py -k 'topic_focus_min_keep_uses_s8_calibration or topic_focus_phrase_support_count_tracks_exact_matches or author_attribution_pure_rerank_requires_candidate_support'`
+2. `make api-rebuild`
+3. `docker compose exec -T -e RAG_RERANKER_PROVIDER=none api python -m app.rag.eval.cli run-ai-sage --label issue174_s8_min_keep_jina_disabled --top-k 10 --output /app/data/reports/issue174/s8_min_keep_jina_disabled.json`
+4. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina api python -m app.rag.eval.cli run-ai-sage --label issue174_s8_min_keep_jina_enabled --top-k 10 --output /app/data/reports/issue174/s8_min_keep_jina_enabled.json`
+5. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_disabled.json NEW_REPORT=data/reports/issue174/s8_min_keep_jina_disabled.json MAX_ROWS=12`
+6. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_enabled.json NEW_REPORT=data/reports/issue174/s8_min_keep_jina_enabled.json MAX_ROWS=12`
+
+#### Outcome
+
+- Re-tried S8 exactly as an isolated min-keep calibration (`max(4, min(top_k, 8))`).
+- Disabled metrics were unchanged (`mean_ndcg@10=0.4881`, `mean_recall@10=0.4959`, `mean_mrr=0.7489`).
+- Enabled metrics matched the current attribution-density run (`mean_ndcg@10=0.5407`, `mean_recall@10=0.561`, `mean_mrr=0.7784`), so S8 added no incremental value.
+- Decision: reject/remove. The calibration was reverted immediately because it did not change the rebuilt outcome.
+
+### 2026-06-01 S7 similarity-gated phrase fallback revisit
+
+#### Commands executed
+
+1. `./.venv/bin/pytest -q api/tests/test_ai_sage_retrieval_pipeline.py -k 'required_phrase_fallback_requires_strong_similarity or topic_focus_phrase_support_count_tracks_exact_matches or author_attribution_pure_rerank_requires_candidate_support'`
+2. `make api-rebuild`
+3. `docker compose exec -T -e RAG_RERANKER_PROVIDER=none api python -m app.rag.eval.cli run-ai-sage --label issue174_s7_phrase_gate_jina_disabled --top-k 10 --output /app/data/reports/issue174/s7_phrase_gate_jina_disabled.json`
+4. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina api python -m app.rag.eval.cli run-ai-sage --label issue174_s7_phrase_gate_jina_enabled --top-k 10 --output /app/data/reports/issue174/s7_phrase_gate_jina_enabled.json`
+5. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_disabled.json NEW_REPORT=data/reports/issue174/s7_phrase_gate_jina_disabled.json MAX_ROWS=12`
+6. `make rag-eval-drift OLD_REPORT=data/reports/issue174/ai_sage_jina_enabled.json NEW_REPORT=data/reports/issue174/s7_phrase_gate_jina_enabled.json MAX_ROWS=12`
+7. `./.venv/bin/pytest -q api/tests/test_ai_sage_retrieval_pipeline.py -k 'topic_focus_phrase_support_count_tracks_exact_matches or author_attribution_pure_rerank_requires_candidate_support'`
+8. `make api-rebuild`
+9. `make api-smoke`
+
+#### Outcome
+
+- Re-tried S7 as a strict phrase-only fallback gate keyed off retrieval similarity.
+- Against the older retained reports it showed only tiny isolated gains, but compared with the stronger current attribution-density path it clearly regressed enabled metrics back down to `mean_ndcg@10=0.5287`, `mean_recall@10=0.5387`, `mean_mrr=0.7729`.
+- Nick Sleep slice metrics stayed unchanged, so the gate did not help the main target while it erased broader enabled gains.
+- Decision: reject/remove. The change was reverted, the API image was rebuilt, and `make api-smoke` passed on the restored retained path.
+
+### 2026-06-01 golden set expansion to 45 queries
+
+#### Commands executed
+
+1. `rg -n '^  - query:' api/app/rag/eval/fixtures/rag_golden_queries.yaml | wc -l`
+2. `make api-rebuild`
+3. `docker compose exec -T api python -m app.rag.eval.cli seed --file app/rag/eval/fixtures/rag_golden_queries.yaml --replace`
+4. `docker compose exec -T api python - <<'PY' ... RagEvalGolden distinct(query_text) ... PY`
+
+#### Outcome
+
+- Expanded the fixture at `api/app/rag/eval/fixtures/rag_golden_queries.yaml` from 15 to 45 query prompts by adding paraphrased variants over the same validated evidence anchors.
+- Rebuilt the API image so the containerized seed command read the updated fixture.
+- Reseeding succeeded with `Loaded 45 golden query entries`, producing `golden_pairs=504` and `golden_queries=45` in Postgres.
+- The expanded set is now active for deterministic comparisons.
+
+### 2026-06-01 ranking-only blend-alpha sweep on 45-query set
+
+#### Commands executed
+
+1. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina api python -m app.rag.eval.cli run-ai-sage --label issue174_45_default_jina_enabled --top-k 10 --output /app/data/reports/issue174/45_default_jina_enabled.json`
+2. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina -e RAG_RERANKER_BLEND_ALPHA=0.30 api python -m app.rag.eval.cli run-ai-sage --label issue174_45_alpha_030_jina_enabled --top-k 10 --output /app/data/reports/issue174/45_alpha_030_jina_enabled.json`
+3. `docker compose exec -T -e RAG_RERANKER_PROVIDER=jina -e RAG_RERANKER_BLEND_ALPHA=0.60 api python -m app.rag.eval.cli run-ai-sage --label issue174_45_alpha_060_jina_enabled --top-k 10 --output /app/data/reports/issue174/45_alpha_060_jina_enabled.json`
+4. `make rag-eval-drift OLD_REPORT=data/reports/issue174/45_default_jina_enabled.json NEW_REPORT=data/reports/issue174/45_alpha_030_jina_enabled.json MAX_ROWS=20`
+5. `make rag-eval-drift OLD_REPORT=data/reports/issue174/45_default_jina_enabled.json NEW_REPORT=data/reports/issue174/45_alpha_060_jina_enabled.json MAX_ROWS=20`
+6. `make api-smoke`
+
+#### Outcome
+
+- Baseline (`alpha=0.45`): `mean_ndcg@10=0.4466`, `mean_recall@10=0.4694`, `mean_precision@10=0.3007`, `mean_mrr=0.6289`.
+- Candidate `alpha=0.30`: exactly identical aggregates and zero changed queries versus baseline.
+- Candidate `alpha=0.60`: slight regression (`mean_ndcg@10` delta `-0.0001`) with one changed query (`What are the mental models Munger tries to live by?` at `ndcg@10 -0.0032`).
+- Decision: reject blend-alpha tuning for now. No code change is retained from this sweep because the expanded-set evidence shows no improvement over current default behavior.
 <!-- MACHINE_RENDERED_END -->

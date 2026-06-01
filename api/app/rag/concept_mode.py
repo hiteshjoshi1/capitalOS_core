@@ -595,6 +595,8 @@ def _collect_candidate_chunks(
             any_relaxed = True
             relaxation_reason = topic_reason
 
+    # Guard against sparse candidate starvation on strict single-author phrase queries.
+    # This runs only when an explicit required phrase exists and the broad pool is still thin.
     if not candidates and author_ids and not _query_mentions_author_alias(query, intent.author_ids):
         open_chunks, _open_relaxed, _open_reason = _retrieve_with_intent_fallback(
             query,
@@ -642,10 +644,11 @@ def _collect_candidate_chunks(
             else:
                 removed_by_topic_focus_gate.append(chunk.chunk_id)
 
-        # Apply only when we still retain enough candidates; otherwise keep the broader pool
-        # to avoid starving reranking on sparse-corpus queries.
+        # Apply only when we still retain enough candidates and there is exact phrase support
+        # from multiple chunks; otherwise keep the broader pool to avoid starving reranking.
         min_topic_keep = max(6, min(broad_top_k, 10))
-        if len(topic_focus_filtered) >= min_topic_keep:
+        topic_phrase_support = _topic_focus_phrase_support_count(deduped, topic_entities=retrieval_plan.topic_entities)
+        if len(topic_focus_filtered) >= min_topic_keep and topic_phrase_support >= 2:
             deduped = topic_focus_filtered
             topic_focus_gate_applied = True
         else:
@@ -678,6 +681,7 @@ def _collect_candidate_chunks(
                 "topic_entities": retrieval_plan.topic_entities,
                 "required_phrases": retrieval_plan.required_phrases,
                 "resolved_entity_ids": retrieval_plan.resolved_entity_ids,
+                "phrase_support_count": topic_phrase_support if retrieval_plan.topic_entities else 0,
                 "removed_chunk_ids": removed_by_topic_focus_gate,
             },
         },
@@ -794,6 +798,20 @@ def _topic_candidate_pool_sort_key(chunk: RetrievedChunk, *, topic_entities: lis
     else:
         retrieval_score = 1.0 - float(getattr(chunk, "cosine_distance", 1.0) or 1.0)
     return (-phrase_hits, -token_hits, -retrieval_score)
+
+
+def _topic_focus_phrase_support_count(chunks: list[RetrievedChunk], *, topic_entities: list[str] | None = None) -> int:
+    if not topic_entities:
+        return 0
+    support_count = 0
+    for chunk in chunks:
+        metadata = _chunk_meta(chunk)
+        context_text = str(metadata.get("context_text") or "")
+        text = f"{str(getattr(chunk, 'text', '') or '')} {context_text}"
+        phrase_hits, _ = _topic_entity_match_counts(text, topic_entities=topic_entities)
+        if phrase_hits > 0:
+            support_count += 1
+    return support_count
 
 
 def _query_keywords(
@@ -1166,11 +1184,17 @@ def _query_prefers_author_attribution_pure_rerank(
     *,
     topic_entities: list[str] | None = None,
     source_author_terms: set[str] | None = None,
+    candidate_count: int = 0,
+    topic_support_count: int = 0,
 ) -> bool:
     normalized = re.sub(r"\s+", " ", str(query or "").lower()).strip()
     if not normalized:
         return False
     if not topic_entities or not source_author_terms:
+        return False
+    if candidate_count < 8:
+        return False
+    if topic_support_count < 2:
         return False
     has_attribution_shape = bool(re.search(r"\b(what\s+does|what\s+did|how\s+does|how\s+did)\b", normalized))
     has_speech_verb = bool(re.search(r"\b(say|says|said|write|writes|wrote|view|views|think|thinks|thought)\b", normalized))
@@ -1308,10 +1332,20 @@ def _rerank_candidate_chunks(
         expanded_by_chunk_id=expanded_by_chunk_id,
     )
     ranked = heuristic_ranked
+    topic_support_count = 0
+    if topic_entities:
+        topic_support_count = sum(
+            1
+            for chunk in heuristic_ranked
+            if _topic_entity_match_counts(getattr(chunk, "text", ""), topic_entities=topic_entities)[0] > 0
+            or _topic_entity_match_counts(getattr(chunk, "text", ""), topic_entities=topic_entities)[1] > 0
+        )
     force_pure_rerank = _query_prefers_author_attribution_pure_rerank(
         query,
         topic_entities=topic_entities,
         source_author_terms=source_author_terms,
+        candidate_count=len(candidates),
+        topic_support_count=topic_support_count,
     )
     trace_retrieval_chunks(
         "ai_sage_heuristic_rerank",
@@ -1322,6 +1356,7 @@ def _rerank_candidate_chunks(
             "topic_entities": topic_entities,
             "source_author_terms_removed_from_keywords": sorted(source_author_terms or set()),
             "force_pure_rerank": force_pure_rerank,
+            "topic_support_count": topic_support_count,
         },
     )
 

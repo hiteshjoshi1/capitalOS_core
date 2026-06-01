@@ -463,6 +463,47 @@ def test_nick_sleep_query_surfaces_multiple_distinct_examples():
     assert not any("long-termism" in t for t in texts)
 
 
+def test_author_attribution_pure_rerank_requires_candidate_support():
+    import app.rag.concept_mode as cm
+
+    assert not cm._query_prefers_author_attribution_pure_rerank(
+        "What does Nick Sleep say about Amazon?",
+        topic_entities=["Amazon"],
+        source_author_terms={"nick", "sleep"},
+        candidate_count=4,
+        topic_support_count=2,
+    )
+
+    assert not cm._query_prefers_author_attribution_pure_rerank(
+        "What does Nick Sleep say about Amazon?",
+        topic_entities=["Amazon"],
+        source_author_terms={"nick", "sleep"},
+        candidate_count=10,
+        topic_support_count=1,
+    )
+
+    assert cm._query_prefers_author_attribution_pure_rerank(
+        "What does Nick Sleep say about Amazon?",
+        topic_entities=["Amazon"],
+        source_author_terms={"nick", "sleep"},
+        candidate_count=10,
+        topic_support_count=2,
+    )
+
+
+def test_topic_focus_phrase_support_count_tracks_exact_matches():
+    import app.rag.concept_mode as cm
+
+    chunks = [
+        _mk_chunk("topic-1", text="Amazon is central to the discussion.", cosine_distance=0.1),
+        _mk_chunk("topic-2", text="A second Amazon passage is also relevant.", cosine_distance=0.2),
+        _mk_chunk("noise", text="This passage only mentions e-commerce in passing.", cosine_distance=0.3),
+    ]
+
+    assert cm._topic_focus_phrase_support_count(chunks, topic_entities=["Amazon"]) == 2
+    assert cm._topic_focus_phrase_support_count(chunks, topic_entities=["Buffett"]) == 0
+
+
 def test_explicit_single_author_query_drops_cross_author_candidates():
     import app.rag.concept_mode as cm
 

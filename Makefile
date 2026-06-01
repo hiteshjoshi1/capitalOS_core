@@ -408,7 +408,7 @@ orch-clean:
 	rm -rf .task-flow/
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
-.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test rag-eval rag-eval-compare rag-eval-seed rag-eval-pdf rag-eval-pdf-gate rag-eval-reranker-diagnose
+.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test rag-eval rag-eval-compare rag-eval-seed rag-eval-pdf rag-eval-pdf-gate rag-eval-reranker-diagnose rag-eval-drift
 
 api-rebuild:
 	docker compose build api
@@ -471,3 +471,8 @@ rag-eval-pdf-gate:
 
 rag-eval-reranker-diagnose:
 	docker compose exec -T -e RAG_RETRIEVAL_TRACE=$(or $(RAG_RETRIEVAL_TRACE),0) api python -m app.rag.eval.cli diagnose-reranker --top-k $(or $(TOP_K),10) --candidate-pool-size $(or $(CANDIDATE_POOL_SIZE),40) $(if $(SOURCE_TYPE),--source-type $(SOURCE_TYPE),) $(if $(INCLUDE_COHERE),--include-cohere,) $(foreach provider,$(PROVIDERS),--provider $(provider)) $(foreach mode,$(INPUT_MODES),--input-mode $(mode)) $(if $(QUERY_CONTAINS),--query-contains "$(QUERY_CONTAINS)",) $(if $(CACHE_PATH),--cache-path $(CACHE_PATH),) $(if $(OUTPUT),--output $(OUTPUT),)
+
+rag-eval-drift:
+	@test -n "$(OLD_REPORT)" || (echo "Usage: make rag-eval-drift OLD_REPORT=<path> NEW_REPORT=<path> [MAX_ROWS=20]" && exit 2)
+	@test -n "$(NEW_REPORT)" || (echo "Usage: make rag-eval-drift OLD_REPORT=<path> NEW_REPORT=<path> [MAX_ROWS=20]" && exit 2)
+	PYTHONPATH=api python3 -m app.rag.eval.drift --old $(OLD_REPORT) --new $(NEW_REPORT) --max-rows $(or $(MAX_ROWS),20)
