@@ -314,7 +314,7 @@ def _retrieve_with_intent_fallback(
             chunks, dense_dropped = _prune_retrieval_pool(
                 pruning_plan,
                 chunks,
-                pool_name="ai_sage_dense_content",
+                pool_name="dense_content",
             )
             trace_retrieval_chunks(
                 "ai_sage_dense_quality_pruned",
@@ -337,7 +337,7 @@ def _retrieve_with_intent_fallback(
                 sparse, sparse_dropped = _prune_retrieval_pool(
                     pruning_plan,
                     sparse,
-                    pool_name="ai_sage_sparse_content",
+                    pool_name="sparse_content",
                 )
                 trace_retrieval_chunks(
                     "ai_sage_sparse_quality_pruned",
@@ -595,6 +595,8 @@ def _collect_candidate_chunks(
             any_relaxed = True
             relaxation_reason = topic_reason
 
+    # Guard against sparse candidate starvation on strict single-author phrase queries.
+    # This runs only when an explicit required phrase exists and the broad pool is still thin.
     if not candidates and author_ids and not _query_mentions_author_alias(query, intent.author_ids):
         open_chunks, _open_relaxed, _open_reason = _retrieve_with_intent_fallback(
             query,
@@ -627,6 +629,30 @@ def _collect_candidate_chunks(
     removed_by_author_gate: list[str] = []
     if strict_source_author and author_ids:
         deduped, removed_by_author_gate = _filter_chunks_to_author_ids(deduped, author_ids)
+    removed_by_topic_focus_gate: list[str] = []
+    topic_focus_gate_applied = False
+    if retrieval_plan.topic_entities:
+        topic_focus_filtered: list[RetrievedChunk] = []
+        for chunk in deduped:
+            if _chunk_matches_topic_focus(
+                chunk,
+                topic_entities=retrieval_plan.topic_entities,
+                required_phrases=retrieval_plan.required_phrases,
+                resolved_entity_ids=retrieval_plan.resolved_entity_ids,
+            ):
+                topic_focus_filtered.append(chunk)
+            else:
+                removed_by_topic_focus_gate.append(chunk.chunk_id)
+
+        # Apply only when we still retain enough candidates and there is exact phrase support
+        # from multiple chunks; otherwise keep the broader pool to avoid starving reranking.
+        min_topic_keep = max(6, min(broad_top_k, 10))
+        topic_phrase_support = _topic_focus_phrase_support_count(deduped, topic_entities=retrieval_plan.topic_entities)
+        if len(topic_focus_filtered) >= min_topic_keep and topic_phrase_support >= 2:
+            deduped = topic_focus_filtered
+            topic_focus_gate_applied = True
+        else:
+            removed_by_topic_focus_gate = []
     if intent.topic_entities:
         deduped.sort(key=lambda chunk: _topic_candidate_pool_sort_key(chunk, topic_entities=intent.topic_entities))
     elif retrieval_mode == "hybrid":
@@ -649,6 +675,14 @@ def _collect_candidate_chunks(
                 "strict": strict_source_author,
                 "allowed_author_ids": author_ids or [],
                 "removed_chunk_ids": removed_by_author_gate,
+            },
+            "topic_focus_gate": {
+                "applied": topic_focus_gate_applied,
+                "topic_entities": retrieval_plan.topic_entities,
+                "required_phrases": retrieval_plan.required_phrases,
+                "resolved_entity_ids": retrieval_plan.resolved_entity_ids,
+                "phrase_support_count": topic_phrase_support if retrieval_plan.topic_entities else 0,
+                "removed_chunk_ids": removed_by_topic_focus_gate,
             },
         },
     )
@@ -766,6 +800,20 @@ def _topic_candidate_pool_sort_key(chunk: RetrievedChunk, *, topic_entities: lis
     return (-phrase_hits, -token_hits, -retrieval_score)
 
 
+def _topic_focus_phrase_support_count(chunks: list[RetrievedChunk], *, topic_entities: list[str] | None = None) -> int:
+    if not topic_entities:
+        return 0
+    support_count = 0
+    for chunk in chunks:
+        metadata = _chunk_meta(chunk)
+        context_text = str(metadata.get("context_text") or "")
+        text = f"{str(getattr(chunk, 'text', '') or '')} {context_text}"
+        phrase_hits, _ = _topic_entity_match_counts(text, topic_entities=topic_entities)
+        if phrase_hits > 0:
+            support_count += 1
+    return support_count
+
+
 def _query_keywords(
     query: str,
     *,
@@ -857,6 +905,56 @@ def _heuristic_rank_candidates(
         chunk.corpus_class = decision.corpus_class
         chunk.weighting_applied = decision.enabled and abs(decision.weight - 1.0) > 1e-9
     return sorted(candidates, key=ranking_sort_key)
+
+
+def _chunk_matches_topic_focus(
+    chunk: RetrievedChunk,
+    *,
+    topic_entities: list[str],
+    required_phrases: list[str],
+    resolved_entity_ids: list[str],
+) -> bool:
+    metadata = _chunk_meta(chunk)
+    context_text = str(metadata.get("context_text") or "")
+    text = f"{str(getattr(chunk, 'text', '') or '')} {context_text}".lower()
+    phrase_hits, token_hits = _topic_entity_match_counts(text, topic_entities=topic_entities)
+    if phrase_hits > 0 or token_hits > 0:
+        return True
+    if any(str(phrase).strip().lower() in text for phrase in required_phrases if str(phrase).strip()):
+        return True
+    annotated_ids = metadata.get("annotated_entity_ids") or []
+    if resolved_entity_ids and any(str(entity_id) in set(map(str, annotated_ids)) for entity_id in resolved_entity_ids):
+        return True
+    return False
+
+
+def _apply_topic_focus_guard(
+    chunks: list[RetrievedChunk],
+    *,
+    topic_entities: list[str],
+    required_phrases: list[str],
+    resolved_entity_ids: list[str],
+    min_keep: int,
+) -> tuple[list[RetrievedChunk], list[str]]:
+    if not chunks or not topic_entities:
+        return chunks, []
+
+    kept: list[RetrievedChunk] = []
+    removed_ids: list[str] = []
+    for chunk in chunks:
+        if _chunk_matches_topic_focus(
+            chunk,
+            topic_entities=topic_entities,
+            required_phrases=required_phrases,
+            resolved_entity_ids=resolved_entity_ids,
+        ):
+            kept.append(chunk)
+        else:
+            removed_ids.append(chunk.chunk_id)
+
+    if len(kept) >= min_keep:
+        return kept, removed_ids
+    return chunks, []
 
 
 def _chunk_meta(chunk: RetrievedChunk) -> dict[str, Any]:
@@ -1081,12 +1179,35 @@ def _query_allows_aggressive_rerank(query: str) -> bool:
     return False
 
 
+def _query_prefers_author_attribution_pure_rerank(
+    query: str,
+    *,
+    topic_entities: list[str] | None = None,
+    source_author_terms: set[str] | None = None,
+    candidate_count: int = 0,
+    topic_support_count: int = 0,
+) -> bool:
+    normalized = re.sub(r"\s+", " ", str(query or "").lower()).strip()
+    if not normalized:
+        return False
+    if not topic_entities or not source_author_terms:
+        return False
+    if candidate_count < 8:
+        return False
+    if topic_support_count < 2:
+        return False
+    has_attribution_shape = bool(re.search(r"\b(what\s+does|what\s+did|how\s+does|how\s+did)\b", normalized))
+    has_speech_verb = bool(re.search(r"\b(say|says|said|write|writes|wrote|view|views|think|thinks|thought)\b", normalized))
+    return has_attribution_shape and has_speech_verb
+
+
 def _apply_cross_encoder_scores(
     candidates: list[RetrievedChunk],
     heuristic_ranked: list[RetrievedChunk],
     results: list[Any],
     *,
     query: str = "",
+    force_pure_rerank: bool = False,
 ) -> list[RetrievedChunk]:
     result_by_index = {
         int(getattr(result, "index")): float(getattr(result, "relevance_score", 0.0) or 0.0)
@@ -1099,7 +1220,7 @@ def _apply_cross_encoder_scores(
     requested_fusion_mode = _cross_encoder_fusion_mode()
     fusion_mode = requested_fusion_mode
     if requested_fusion_mode == "adaptive":
-        fusion_mode = "pure" if _query_allows_aggressive_rerank(query) else "conditional_blend"
+        fusion_mode = "pure" if force_pure_rerank or _query_allows_aggressive_rerank(query) else "conditional_blend"
     heuristic_rank_by_id = {chunk.chunk_id: rank for rank, chunk in enumerate(heuristic_ranked)}
     candidate_count = max(len(candidates), 1)
     weighting_active = metadata_weighting_enabled()
@@ -1127,6 +1248,7 @@ def _apply_cross_encoder_scores(
                 "requested_mode": requested_fusion_mode,
                 "reranker_score": round(chunk.reranker_score, 6),
                 "aggressive_query": _query_allows_aggressive_rerank(query),
+                "forced_pure_rerank": force_pure_rerank,
             }
             chunk.metadata_json = diagnostics
             if chunk.chunk_id not in seen_ids:
@@ -1182,6 +1304,7 @@ def _apply_cross_encoder_scores(
             "blend_alpha": round(alpha, 4),
             "final_score": round(final_score, 6),
             "aggressive_query": _query_allows_aggressive_rerank(query),
+            "forced_pure_rerank": force_pure_rerank,
         }
         chunk.metadata_json = diagnostics
     return sorted(ranked, key=ranking_sort_key)
@@ -1209,6 +1332,21 @@ def _rerank_candidate_chunks(
         expanded_by_chunk_id=expanded_by_chunk_id,
     )
     ranked = heuristic_ranked
+    topic_support_count = 0
+    if topic_entities:
+        topic_support_count = sum(
+            1
+            for chunk in heuristic_ranked
+            if _topic_entity_match_counts(getattr(chunk, "text", ""), topic_entities=topic_entities)[0] > 0
+            or _topic_entity_match_counts(getattr(chunk, "text", ""), topic_entities=topic_entities)[1] > 0
+        )
+    force_pure_rerank = _query_prefers_author_attribution_pure_rerank(
+        query,
+        topic_entities=topic_entities,
+        source_author_terms=source_author_terms,
+        candidate_count=len(candidates),
+        topic_support_count=topic_support_count,
+    )
     trace_retrieval_chunks(
         "ai_sage_heuristic_rerank",
         query,
@@ -1217,6 +1355,8 @@ def _rerank_candidate_chunks(
             "candidate_count": len(candidates),
             "topic_entities": topic_entities,
             "source_author_terms_removed_from_keywords": sorted(source_author_terms or set()),
+            "force_pure_rerank": force_pure_rerank,
+            "topic_support_count": topic_support_count,
         },
     )
 
@@ -1264,7 +1404,13 @@ def _rerank_candidate_chunks(
                         ]
                     ),
                 )
-                ranked = _apply_cross_encoder_scores(candidates, heuristic_ranked, results, query=query)
+                ranked = _apply_cross_encoder_scores(
+                    candidates,
+                    heuristic_ranked,
+                    results,
+                    query=query,
+                    force_pure_rerank=force_pure_rerank,
+                )
                 trace_retrieval_chunks("ai_sage_cross_encoder_reranked", query, ranked)
                 log.debug("cross-encoder reranked %d candidates", len(candidates))
         except Exception as exc:
@@ -1400,6 +1546,31 @@ def execute_concept_query(
         topic_entities=intent.topic_entities,
         source_author_terms=_source_author_terms(intent),
     )
+    topic_plan = build_retrieval_query_plan(
+        query,
+        source_author_ids=selected_ids,
+        source_author_names=intent.author_names,
+        topic_entities=intent.topic_entities if intent.topic_entities else None,
+        db=db,
+    )
+    winning_chunks, topic_focus_removed = _apply_topic_focus_guard(
+        winning_chunks,
+        topic_entities=topic_plan.topic_entities,
+        required_phrases=topic_plan.required_phrases,
+        resolved_entity_ids=topic_plan.resolved_entity_ids,
+        min_keep=max(3, min(top_k_chunks, 6)),
+    )
+    if topic_focus_removed:
+        trace_retrieval_payload(
+            "ai_sage_topic_focus_guard",
+            {
+                "query": query,
+                "topic_entities": topic_plan.topic_entities,
+                "required_phrases": topic_plan.required_phrases,
+                "removed_chunk_ids": topic_focus_removed,
+                "kept_count": len(winning_chunks),
+            },
+        )
     _trace_chunks("reranked", query, winning_chunks)
     duplicates_suppressed: list[dict[str, Any]] = []
     if hardening_active:

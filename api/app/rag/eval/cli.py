@@ -463,12 +463,11 @@ def structural_recall(output: Optional[str], fail_on_failure: bool) -> None:
 )
 def diagnose_query(query: str, top_k: int, output: Optional[str]) -> None:
     """
-    Run the full retrieval pipeline for a single free-text query and dump
+    Run the live AI Sage concept pipeline for a single free-text query and dump
     stage-by-stage trace to a file.
 
-    Captures every pool (dense, sparse, feedback, annotation, fusion) and the
-    final ranked output.  Useful for debugging irrelevant candidates or
-    investigating AI Sage vs lower-level retrieval path differences.
+    Captures AI Sage retrieval/rerank traces and the final evidence shown to
+    users. Useful for debugging irrelevant candidates on the production path.
 
     Usage:
         python -m app.rag.eval.cli diagnose-query \\
@@ -484,8 +483,7 @@ def diagnose_query(query: str, top_k: int, output: Optional[str]) -> None:
     import sys
     from datetime import datetime, timezone
 
-    from app.rag.author_selection import select_authors
-    from app.rag.retrieval import build_retrieval_query_plan, retrieve_hybrid
+    from app.rag.concept_mode import execute_concept_query
 
     # Enable full trace at high verbosity so every pool stage is captured.
     os.environ["RAG_RETRIEVAL_TRACE"] = "1"
@@ -496,32 +494,13 @@ def diagnose_query(query: str, top_k: int, output: Optional[str]) -> None:
     sys.stdout = buf
 
     db = SessionLocal()
-    selected = []
-    chunks = []
-    plan = None
+    result = None
+    passages: list[dict[str, Any]] = []
     error: Optional[str] = None
     try:
-        selected = select_authors(query, db, top_k=4)
-        author_ids = [a.author_id for a in selected]
-        author_names = [a.name for a in selected]
-
-        # Build the query plan explicitly so we can show it in the summary header.
-        plan = build_retrieval_query_plan(
-            query,
-            source_author_ids=author_ids,
-            source_author_names=author_names,
-            db=db,
-        )
-
-        # Full hardened hybrid retrieval — traces every internal stage to stdout.
-        chunks = retrieve_hybrid(
-            query,
-            db,
-            top_k=top_k,
-            author_ids=author_ids,
-            source_author_names=author_names,
-            hardening_enabled=True,
-        )
+        # Always diagnose through the same production path used by UI.
+        result = execute_concept_query(query, db)
+        passages = list(result.best_passages or [])[:top_k]
     except Exception as exc:
         error = str(exc)
     finally:
@@ -540,39 +519,42 @@ def diagnose_query(query: str, top_k: int, output: Optional[str]) -> None:
         "=" * 72,
         "",
     ]
-    if plan:
+    intent_payload = result.intent if result is not None else None
+    if isinstance(intent_payload, dict):
         lines += [
-            "── Query Plan ──────────────────────────────────────────────────────",
-            f"  content_query    : {plan.content_query}",
-            f"  sparse_query     : {plan.sparse_query}",
-            f"  required_phrases : {plan.required_phrases}",
-            f"  concept_terms    : {plan.concept_terms[:12]}",
-            f"  topic_entities   : {plan.topic_entities}",
-            f"  resolved_entity_ids : {plan.resolved_entity_ids}",
-            f"  resolved_concept_ids: {plan.resolved_concept_ids}",
+            "── Parsed Intent ───────────────────────────────────────────────────",
+            f"  query_type       : {intent_payload.get('query_type')}",
+            f"  author_ids       : {intent_payload.get('author_ids')}",
+            f"  author_names     : {intent_payload.get('author_names')}",
+            f"  topic_entities   : {intent_payload.get('topic_entities')}",
+            f"  sub_queries      : {intent_payload.get('sub_queries')}",
             "",
         ]
-    lines += [
-        "── Authors Selected ────────────────────────────────────────────────",
-        *(f"  {a.name} (id={a.author_id})" for a in selected),
-        "",
-    ]
+    elif result is not None:
+        lines += [
+            "── Parsed Intent ───────────────────────────────────────────────────",
+            "  (no intent payload available)",
+            "",
+        ]
     if error:
         lines += [f"ERROR: {error}", ""]
 
     lines += [
-        f"── Final Output  ({len(chunks)} chunks) ────────────────────────────────────",
+        f"── Final Output  ({len(passages)} chunks) ────────────────────────────────────",
     ]
-    for i, chunk in enumerate(chunks, 1):
-        meta = chunk.metadata_json or {}
-        diag = meta.get("retrieval_diagnostics") or {}
+    for i, passage in enumerate(passages, 1):
+        metadata = passage.get("metadata") if isinstance(passage, dict) else {}
+        meta = metadata if isinstance(metadata, dict) else {}
+        diag = meta.get("retrieval_diagnostics") if isinstance(meta.get("retrieval_diagnostics"), dict) else {}
         pool_members = sorted((diag.get("pool_memberships") or {}).keys())
-        text_snippet = str(chunk.text or "").replace("\n", " ")[:300]
+        text_snippet = str((passage.get("text") if isinstance(passage, dict) else "") or "").replace("\n", " ")[:300]
+        score = passage.get("score") if isinstance(passage, dict) else None
+        score_text = "n/a" if score is None else f"{float(score):.4f}"
         lines.append(
-            f"\n  [{i:02d}] sim={chunk.similarity:.4f}"
+            f"\n  [{i:02d}] score={score_text}"
             f"  pools={pool_members}"
-            f"\n        author : {meta.get('author_name')}"
-            f"\n        title  : {meta.get('document_title')}"
+            f"\n        author : {passage.get('author_name') if isinstance(passage, dict) else None}"
+            f"\n        title  : {passage.get('title') if isinstance(passage, dict) else None}"
             f"\n        text   : {text_snippet!r}"
         )
 
