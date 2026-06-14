@@ -16,6 +16,7 @@ export default function StockHoldings() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
 
   const handleMonthChange = (nextMonth: string) => {
     setVisibleCount(PAGE_SIZE);
@@ -27,19 +28,37 @@ export default function StockHoldings() {
     setBaseCurrency(nextBaseCurrency);
   };
 
+  const loadSummary = async () => {
+    setErr("");
+    setState("loading");
+    const stockData = await api.stockHoldingsSummary(month, baseCurrency);
+    setSummary(stockData);
+    setState("ready");
+  };
+
   useEffect(() => {
     (async () => {
       try {
-        setState("loading");
-        const stockData = await api.stockHoldingsSummary(month, baseCurrency);
-        setSummary(stockData);
-        setState("ready");
+        await loadSummary();
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : String(e));
         setState("error");
       }
     })();
   }, [month, baseCurrency]);
+
+  const onRefresh = async () => {
+    try {
+      setRefreshing(true);
+      await api.marketDataRefreshNow();
+      await loadSummary();
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setState("error");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
@@ -90,6 +109,9 @@ export default function StockHoldings() {
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
         <>
+          <button className="btn" onClick={onRefresh} disabled={refreshing}>
+            {refreshing ? "Refreshing..." : "Refresh now"}
+          </button>
           <MonthControl month={month} onMonthChange={handleMonthChange} />
           <label className="pill">
             <span>Base</span>

@@ -278,6 +278,68 @@ def test_market_data_refresh_now_covers_all_active_symbols(client, db_engine, mo
     assert int(rows[0]) == 2
 
 
+def test_market_data_refresh_updates_all_assets_sharing_provider_symbol(client, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(210, '700', 'Tencent Holding Legacy', 'STOCK', 'HKD', 'HK'),"
+                "(211, '0700', 'Tencent Holdings', 'STOCK', 'HKD', 'HK')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_symbol_map
+                  (asset_id, exchange_code, exchange_symbol, quote_currency, is_active, yahoo_symbol_override)
+                VALUES
+                  (210, 'HKEX', '700', 'HKD', 1, NULL),
+                  (211, 'HKEX', '0700', 'HKD', 1, '0700.HK')
+                """
+            )
+        )
+
+    monkeypatch.setenv("STOCK_EXCHANGES", "HKEX")
+
+    def fake_yfinance(self, symbols, exchange_code=None, trade_date=None):
+        assert symbols == ["0700.HK"]
+        return {
+            "0700.HK": providers.EodQuote(
+                provider="yfinance",
+                symbol="0700.HK",
+                trade_date=datetime(2026, 6, 12, tzinfo=timezone.utc).date(),
+                close=512.5,
+                currency="HKD",
+            )
+        }
+
+    monkeypatch.setattr("app.market_data.providers.YFinanceProvider.fetch_prices", fake_yfinance)
+    monkeypatch.setattr(
+        "app.market_data.providers.YahooProvider.fetch_prices",
+        lambda self, symbols, exchange_code=None, trade_date=None: {},
+    )
+
+    response = client.post("/market-data/refresh-now")
+    assert response.status_code == 200
+
+    hkex = next(item for item in response.json()["exchanges"] if item["exchange_code"] == "HKEX")
+    assert hkex["upserted_rows"] == 2
+    assert hkex["missing_symbols"] == 0
+    assert hkex["diagnostics"]["diagnostics_summary"]["refreshed"] == 2
+
+    with db_engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT COUNT(DISTINCT asset_id)
+                FROM prices
+                WHERE source = 'yfinance_market' AND asset_id IN (210, 211)
+                """
+            )
+        ).scalar_one()
+    assert int(rows) == 2
+
+
 def test_market_data_status_surfaces_stale_and_failed_symbol_diagnostics(client, db_engine, monkeypatch):
     with db_engine.begin() as conn:
         conn.execute(
@@ -345,7 +407,7 @@ def test_market_data_scheduler_uses_grouped_refresh_windows(monkeypatch):
         def __init__(self, timezone=None):
             self.timezone = timezone
 
-        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None):
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
             added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
 
         def start(self):
@@ -360,8 +422,12 @@ def test_market_data_scheduler_uses_grouped_refresh_windows(monkeypatch):
 
     assert scheduler is not None
     job_ids = {job["id"] for job in added_jobs}
+    assert "stock_refresh_daily_catchup" in job_ids
     assert "stock_refresh_asia_close" in job_ids
     assert "stock_refresh_us_close" in job_ids
+    catchup_job = next(job for job in added_jobs if job["id"] == "stock_refresh_daily_catchup")
+    assert catchup_job["kwargs"]["window_name"] == "daily_catchup"
+    assert catchup_job["kwargs"]["exchanges"] == ["US", "SGX", "HKEX", "NSE"]
     asia_job = next(job for job in added_jobs if job["id"] == "stock_refresh_asia_close")
     assert asia_job["kwargs"]["exchanges"] == ["SGX", "HKEX", "NSE"]
 

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -10,6 +10,7 @@ import type { StockHoldingsSummary } from "../lib/api";
 vi.mock("../lib/api", () => ({
   api: {
     stockHoldingsSummary: vi.fn(),
+    marketDataRefreshNow: vi.fn(),
   },
 }));
 
@@ -136,6 +137,36 @@ describe("StockHoldings", () => {
 
     expect(screen.getAllByText("HK").length).toBeGreaterThan(0);
     expect(screen.getAllByText("IN").length).toBeGreaterThan(0);
+  });
+
+  it("refreshes market data before reloading stock holdings", async () => {
+    mockApi.marketDataRefreshNow.mockResolvedValueOnce({ status: "ok" });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...summaryFixture,
+      quote_freshness_summary: {
+        fresh: 2,
+        stale: 0,
+        missing: 0,
+      },
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Stale")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh now" }));
+
+    expect(await screen.findByText("Refreshing...")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockApi.marketDataRefreshNow).toHaveBeenCalledTimes(1);
+      expect(mockApi.stockHoldingsSummary).toHaveBeenCalledTimes(3);
+    });
   });
 
   it("shows top 20 positions first and reveals more on Next", async () => {
