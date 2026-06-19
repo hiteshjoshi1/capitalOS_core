@@ -280,6 +280,8 @@ The `run-ai-sage` command (`python -m app.rag.eval.cli run-ai-sage`) runs each g
 
 **Use this when**: measuring the quality of the full production path, including intent parsing, author selection, topic-focus gate, adaptive reranking, and diversity selection.
 
+This distinction between low-level retrieval eval and live-path eval is important because the production path contains technology choices that do not exist in the raw retrieval benchmark: the routing LLM, author selection logic, Jina reranking, and production audit behavior. Keeping both modes makes it possible to say whether a regression came from retrieval itself or from a later stage in the stack.
+
 The live eval respects all env vars that affect production behavior:
 - `RAG_RERANKER_PROVIDER` — whether Jina is active
 - `RAG_RERANKER_BLEND_ALPHA` — blend alpha value
@@ -354,6 +356,8 @@ Golden queries are selected to cover:
 
 The current 45-query set (expanded from the original 15) covers Buffett circle of competence, Nick Sleep scale economies shared/Amazon/Kelly/patient capital, Munger mental models/latticework, moat, margin of safety, Mr Market, temperament, intrinsic value, buybacks, and pricing power — across both direct and paraphrased query phrasings.
 
+The golden set lives in YAML rather than being curated only in the database because it needs to be diffable, reviewable, and reproducible with the code that is being tested. A spreadsheet or UI-only labeling workflow could be friendlier for annotation, but it would weaken the connection between a retrieval change and the exact judgments used to accept or reject it.
+
 ### Human Curation Process
 
 1. Identify a query that a user would plausibly ask.
@@ -389,6 +393,8 @@ WARNING: Chunk not found: doc=1996.html title=None index=37 — skipping
 ```
 
 This is intentional. The golden set gracefully degrades when documents are unavailable rather than failing the seed.
+
+That behavior is implemented in the CLI seed path against the same Postgres corpus tables used by production retrieval. The alternative would be to fail hard on every missing chunk, but that would make fixture maintenance much more brittle during iterative corpus expansion.
 
 ### Skipped Labels and Re-Ingestion Risks
 
@@ -426,6 +432,8 @@ docker compose exec -T api python -m app.rag.eval.cli run \
 ```
 
 This measures raw retrieval quality before the concept pipeline.
+
+The eval path is exposed as a CLI rather than a notebook because rollout decisions need deterministic, repeatable runs that execute inside the API container with the same code and environment variables as production. JSON reports are written to `/app/data/...` so they can be diffed, archived, and compared across experiments.
 
 ### Step 3 — Run Live AI Sage Eval
 
@@ -569,17 +577,4 @@ Structural recall results are reported separately and do **not** affect the no-r
 
 ---
 
-## Technologies Used
-
-| Component | Technology |
-|---|---|
-| Golden fixture | YAML at `api/app/rag/eval/fixtures/rag_golden_queries.yaml` |
-| Seeding | `python -m app.rag.eval.cli seed` |
-| Metric computation | Pure Python in `app/rag/eval/metrics.py` |
-| Eval runner | `app/rag/eval/runner.py` |
-| CLI entry point | `app/rag/eval/cli.py` |
-| Per-query gates | `evaluate_per_query_gates()` in `runner.py` |
-| Reranker diagnosis | `run_reranker_diagnosis()` in `runner.py` |
-| Structural recall | `run_structural_recall_eval()` in `parametric.py` |
-| Drift comparison | `make rag-eval-drift` / `drift.py` |
-| DB tables | `rag_eval_golden` (golden pairs), `rag_queries`, `rag_query_evidence` |
+The evaluation tooling is described where it matters in the workflow above: fixture representation, CLI seeding, metric computation, report generation, and drift comparison are all tied to the stage that uses them.

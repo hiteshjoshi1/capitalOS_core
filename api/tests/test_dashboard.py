@@ -151,6 +151,8 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
     monkeypatch.setenv("QUOTE_STALE_DAYS", "10")
     as_of_snapshot = datetime(2026, 5, 1, tzinfo=timezone.utc)
     as_of_current = datetime(2026, 5, 20, tzinfo=timezone.utc)
+    quote_trade_date = datetime(2026, 5, 1, tzinfo=timezone.utc).date()
+    monkeypatch.setattr("app.routers.dashboard._quote_age_days", lambda _trade_date: 1)
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -192,12 +194,10 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
         conn.execute(
             text(
                 "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
-                "(210, :snapshot, 110, 'USD', 'finnhub_market', '2026-04-06', 'US', 'AAPL'), "
-                "(211, :snapshot, 60, 'HKD', 'yfinance_market', '2026-04-06', 'HKEX', '0700.HK'), "
-                "(210, :current, 110, 'USD', 'finnhub_market', '2026-05-23', 'US', 'AAPL'), "
-                "(211, :current, 60, 'HKD', 'yfinance_market', '2026-05-23', 'HKEX', '0700.HK')"
+                "(210, :snapshot, 110, 'USD', 'finnhub_market', :quote_trade_date, 'US', 'AAPL'), "
+                "(211, :snapshot, 60, 'HKD', 'yfinance_market', :quote_trade_date, 'HKEX', '0700.HK')"
             ),
-            {"snapshot": as_of_snapshot, "current": as_of_current},
+            {"snapshot": as_of_snapshot, "current": as_of_current, "quote_trade_date": quote_trade_date},
         )
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})

@@ -70,7 +70,7 @@ flowchart TD
 
 ### Stage 1 — Source Registration
 
-The user adds author source URLs (or manual text) through the Author Library UI or config-driven sync. Each registered source is stored in `rag_sources` with its URL, source type (`html`, `pdf`, `text`, `manual`), author association, and ingestion status. Source types are detected from the URL response content-type.
+The user adds author source URLs (or manual text) through the Author Library UI or config-driven sync. Each registered source is stored in `rag_sources` with its URL, source type (`html`, `pdf`, `text`, `manual`), author association, and ingestion status. Source types are detected from the URL response content-type. This registry is SQLAlchemy + Postgres-backed and config-driven from `rag_authors.yaml` because source ownership and provenance need to be deterministic metadata, not inferred at retrieval time.
 
 ### Stage 2 — Parsing and Normalization
 
@@ -82,9 +82,11 @@ The fetcher downloads the source and the parser converts raw bytes into structur
 
 Normalization preserves headings, section paths, table content (as Markdown), list items, figure captions, and modality metadata. Structure that survives parsing produces better retrieval evidence.
 
+The concrete parser choices are the same ones explained in the ingestion document: BeautifulSoup + `lxml` for tolerant HTML traversal, `unstructured[pdf]` first for layout-aware PDFs, `pdfminer.six` as the safety-net fallback, and deterministic cleanup rules instead of model-driven rewriting.
+
 ### Stage 3 — Logical Document Fanout
 
-A single source may contain multiple distinct works (e.g., a compendium PDF or archive page containing many separate letters). A `FanoutPlan` identifies how many logical documents to produce from one source. Each logical document becomes a separate `RagDocument` row with its own title, author, publication date, and content. Single-work sources produce one document; compendiums fan out into many.
+A single source may contain multiple distinct works (e.g., a compendium PDF or archive page containing many separate letters). A deterministic `FanoutPlan` identifies how many logical documents to produce from one source. Each logical document becomes a separate `RagDocument` row with its own title, author, publication date, and content. Single-work sources produce one document; compendiums fan out into many. This is config- and preset-driven rather than LLM-driven because stable document identity is a prerequisite for stable chunk indices and eval labels.
 
 ### Stage 4 — Chunking and Embeddings
 
@@ -93,7 +95,7 @@ Each logical document is split into retrieval-sized chunks (~400 tokens target) 
 1. **Recursive character chunking** (always active): splits by paragraphs → sentences → words with configurable overlap and tiktoken-based token counting.
 2. **Semantic chunking** (optional, `RAG_CHUNKING_SEMANTIC=1`): detects topic shifts via adjacent sentence embedding similarity and only splits at genuine boundaries.
 
-Each chunk is embedded using the configured embedding provider (provider-isolated, deterministic mock mode available for tests) and stored in `rag_embeddings` with the model name recorded.
+Each chunk is embedded using the configured embedding provider (provider-isolated, deterministic mock mode available for tests) and stored in `rag_embeddings` with the model name recorded. `tiktoken` is used for budget control because chunking happens before embedding; spaCy's blank English sentencizer is used only for sentence boundaries when paragraph splits are too coarse. Voyage is the default embedding provider because it fits the current corpus well, but the provider stays isolated so embedding choice is not baked into the rest of the pipeline.
 
 Chunk metadata records: author, source URL, document title, section path, 0-based chunk index, parser path, source type, embedding model, and content modality.
 
@@ -111,7 +113,7 @@ Every query goes through `parse_intent()` before retrieval, producing a `QueryIn
 | `topic_entities` | Concept or entity phrases from the content part of the query |
 | `sub_queries` | Decomposed sub-questions for broad comparison queries |
 
-The intent parser first tries a cheap routing LLM (configured via `ROUTING_LLM_MODEL`); falls back to a pure-Python text parser if unavailable.
+The intent parser first tries a cheap routing LLM (configured via `ROUTING_LLM_MODEL`); falls back to a pure-Python text parser if unavailable. That combination is deliberate: the model path is better at broad and paraphrased intent shapes, while the deterministic fallback protects the production path from model outages and keeps author/date extraction predictable.
 
 **Key design point:** author names in the query become corpus filters, not relevance terms. A query like "What does Munger say about inversion?" routes into Munger's corpus and searches for "inversion" content. Chunks are not ranked by how often they say "Munger."
 
@@ -130,7 +132,7 @@ A broad pool of 24–60 candidate chunks is assembled before any ranking:
 - **Topic-focus search**: when `topic_entities` are detected, a separate retrieval pass runs using only those entity terms as the query.
 - **Sub-query expansion**: for broad comparison queries, each detected sub-query runs its own dense+sparse pass.
 
-All pools are merged by **Reciprocal Rank Fusion (RRF)** in `hybrid` mode (the default). **Retrieval hardening** (`RAG_RETRIEVAL_HARDENING=1`, enabled by default) prunes each pool independently using the retrieval query plan before fusion.
+All pools are merged by **Reciprocal Rank Fusion (RRF)** in `hybrid` mode (the default). Postgres + pgvector is used for dense retrieval because it keeps vectors beside chunk metadata and audit records. Postgres full-text search is used for sparse retrieval because exact phrase and lexical matches matter too much to delegate entirely to embeddings. **Retrieval hardening** (`RAG_RETRIEVAL_HARDENING=1`, enabled by default) prunes each pool independently using the retrieval query plan before fusion.
 
 ### Stage 8 — Pruning and Deduplication
 
@@ -146,7 +148,7 @@ The heuristic ranker scores each candidate using lexical overlap with query keyw
 
 ### Stage 10 — Adaptive Reranking
 
-When `RAG_RERANKER_PROVIDER=jina` (and `JINA_API_KEY` is set), the Jina cross-encoder reranker scores each `(query, passage)` pair. Default model: `jina-reranker-v2-base-multilingual`.
+When `RAG_RERANKER_PROVIDER=jina` (and `JINA_API_KEY` is set), the Jina cross-encoder reranker scores each `(query, passage)` pair. Default model: `jina-reranker-v2-base-multilingual`. The provider stays isolated behind a reranker interface because rerankers are the component most likely to change as quality, latency, and cost tradeoffs shift.
 
 **Input mode** options: `raw` (anchor text only), `compact_context` (title + heading + truncated text, ≤900 chars), or `expanded_context` (full neighbor context).
 
@@ -185,7 +187,7 @@ Every `execute_concept_query()` call logs to `rag_queries` and `rag_query_eviden
 - answer text and latency
 - retrieval configuration at the time of the call
 
-The `diagnose-query` CLI command replays the live pipeline for a single query and writes a full stage-by-stage trace to a file, accessible via `./data/` on the host.
+The `diagnose-query` CLI command replays the live pipeline for a single query and writes a full stage-by-stage trace to a file, accessible via `./data/` on the host. The audit trail is stored in structured Postgres tables rather than only in logs because regression analysis needs durable, queryable evidence about what the system actually ranked and why.
 
 ### Stage 15 — Evaluation and Rollout Gates
 

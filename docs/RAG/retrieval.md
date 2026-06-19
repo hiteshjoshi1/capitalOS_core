@@ -99,6 +99,8 @@ class QueryIntent:
 
 The parser first attempts the cheap routing LLM (`ROUTING_LLM_MODEL`); if unavailable or on failure, it falls back to a pure-Python text parser that uses pattern matching against `_KNOWN_AUTHORS`, date regexes, and output shape keywords.
 
+That hybrid approach is deliberate. A cheap routing LLM is useful because it can recognize paraphrased query shapes and broad-comparison intent more flexibly than rigid patterns. The pure-Python fallback remains essential because query routing must still work in degraded environments and because some intent fields, such as author IDs and date ranges, need deterministic extraction when the model path is unavailable.
+
 **Critical design rule:** Author names detected in the query become `author_id` corpus filters, not relevance terms. The text `"What does Munger say about inversion?"` sets `author_ids=["charlie_munger"]` and `topic_entities=["inversion"]`. The keyword query sent to sparse search will not contain the word "Munger."
 
 ### Stage 2 — Author and Corpus Constraints
@@ -110,12 +112,16 @@ The parser first attempts the cheap routing LLM (`ROUTING_LLM_MODEL`); if unavai
 
 The selected author IDs become SQL `WHERE author_id = ?` filters on every dense and sparse retrieval call. This is the only hard corpus constraint in the retrieval path. Source type is not used as a hard filter.
 
+This is implemented as a database-level filter, not as a post-processing preference, because candidate recall should be scoped before vector search or full-text search runs. The system intentionally does not use source type as another hard filter: that would be easy to add in SQL, but it would narrow the candidate pool too early and hurt recall more often than it helps precision.
+
 ### Stage 3 — Content Query and Topic Entity Query Building
 
 Two queries are built from the intent:
 
 **Content query** (for dense and sparse search):
 `_clean_query_for_keyword_search()` strips source-author name tokens and detected year numbers from the original query, then calls `build_retrieval_query_plan()` to extract the semantic core. This becomes the actual search string for both dense embedding and sparse `tsquery`.
+
+This separation exists because dense and sparse retrieval have different failure modes. Dense search is tolerant of paraphrase but can drift semantically; sparse search is precise on exact terms but brittle if noisy tokens stay in the query. Stripping author-name terms and year numbers before query construction reduces false conjunction pressure in Postgres full-text search and removes low-signal lexical clutter from the embedding query.
 
 **Topic entity query**: when `topic_entities` are non-empty (e.g. `["scale economies shared"]`), a separate query string is built from those entity terms alone. This runs as an independent retrieval pass to ensure the named concept gets strong representation in the pool.
 
@@ -128,6 +134,8 @@ pgvector cosine similarity search over `rag_embeddings`. The content query is em
 
 `_DENSE_TOP_K_MULTIPLIER = 3` multiplies the requested top-k before querying to provide more candidates for RRF.
 
+The implementation uses Postgres + pgvector rather than a separate vector database so dense retrieval sits beside the chunk, document, and audit metadata it already depends on. That keeps retrieval more operationally compact and makes author filtering, diagnostics, and later joins simpler. The tradeoff is that a dedicated vector store might offer more specialized ANN tuning at large scale, but the current corpus benefits more from integration and auditability than from introducing another storage system.
+
 #### Sparse Pool
 Postgres full-text search using `websearch_to_tsquery`. Operates on the `chunk_text_tsv` tsvector column (or equivalent). Returns chunks ordered by `ts_rank` descending.
 
@@ -138,8 +146,12 @@ Sparse search is good at:
 
 Sparse search is not used as a hard AND-conjunction gate. Author names are removed from the query before this step precisely because requiring both `"Munger" AND "mental models"` in the same chunk text would fail for chunks that correctly discuss mental models without repeating the author's name.
 
+`websearch_to_tsquery` is chosen over a more manual tsquery builder because it handles natural query text more safely and predictably while still using native Postgres full-text indexes. A dedicated search engine like Elasticsearch could support richer analyzers, but it would also duplicate corpus state and complicate the audit trail for a retrieval system that already lives in Postgres.
+
 #### Topic-Focus Pool
 When `topic_entities` are non-empty, `_retrieve_with_intent_fallback()` runs a separate pass using the topic entity string as the query. This pool contributes chunks that contain the named concept even if they do not match the broader content query.
+
+This is a separate retrieval pass rather than a bonus term inside one global score because entity-heavy questions often fail asymmetrically: the broad content query retrieves semantically related material while exact concept mentions get diluted. The independent pool gives those mentions explicit representation before fusion.
 
 #### Sub-Query Pools
 When `intent.sub_queries` is non-empty (broad comparison queries like "compare Buffett and Munger on patience"), each sub-question runs its own dense+sparse pass with `per_sub_k = max(8, broad_top_k // len(sub_queries))`. Results are accumulated into the shared pool.
@@ -158,6 +170,8 @@ When `RAG_RETRIEVAL_HARDENING=1` (enabled by default), `_prune_retrieval_pool()`
 
 This prevents clearly off-topic chunks from entering the merged pool. The prune step runs **before** RRF, so it affects the quality of what RRF sees.
 
+This is implemented as deterministic lexical and phrase pruning rather than another model call because it sits on the critical path of every retrieval. A model-based hardening stage could be more nuanced, but it would add latency, cost, and another source of nondeterminism before ranking even begins.
+
 ### Stage 6 — RRF Fusion and Deduplication
 
 `reciprocal_rank_fusion()` merges all pools using RRF:
@@ -165,6 +179,8 @@ This prevents clearly off-topic chunks from entering the merged pool. The prune 
 $$\text{score}(d) = \sum_{\text{pool}} \frac{1}{k + \text{rank}_{\text{pool}}(d)}$$
 
 where k = 60 (configurable via `RAG_RETRIEVAL_RRF_K`). A chunk that appears in rank 5 in the dense pool, rank 3 in the sparse pool, and rank 2 in the topic pool accumulates score from all three. A chunk that appears in only one pool gets a smaller combined score.
+
+RRF is used because it combines heterogeneous rank lists without pretending their native scores are comparable. That matters here because cosine distance, `ts_rank`, and topic-focus retrieval signals are not calibrated to one another. A learned score normalizer could exist, but RRF is deterministic, robust, and easier to diagnose when one pool starts dominating.
 
 **ID-level deduplication** then removes duplicate chunk entries so the same chunk_id cannot appear twice in the merged pool regardless of how many pools found it.
 
@@ -207,6 +223,8 @@ When `strict_source_author=True` (meaning the query explicitly names the author,
 
 Chunks are then sorted by the composite score descending. This heuristic order is the fallback and the baseline when no cross-encoder reranker is configured.
 
+The heuristic layer exists because it is cheap, explainable, and stable. It gives a useful ranking even when no reranker is configured and provides an interpretable baseline against which reranker changes can be measured. A purely neural ranking stack would be simpler on paper, but it would remove the transparent intermediate signal that the eval and diagnosis tooling currently relies on.
+
 ### Stage 9 — Cross-Encoder Reranking
 
 When `RAG_RERANKER_PROVIDER=jina` and `JINA_API_KEY` is set, `reranker_available()` returns True and the pipeline calls the Jina Reranker REST API.
@@ -248,6 +266,8 @@ If the Jina API call fails, the pipeline logs a warning and falls back to the he
 
 The fusion mode is recorded in each chunk's `metadata_json.retrieval_diagnostics.reranker_fusion` for later inspection.
 
+The reranker is provider-swappable on purpose. Jina is the current default because it improves query-passage matching enough to justify the extra network call in the current corpus, but it is isolated behind a provider interface so the system can fall back to heuristic ranking or compare alternatives without rewriting the retrieval pipeline. That separation is important because rerankers are one of the most volatile components in this stack.
+
 ### Stage 10 — Final Evidence Selection
 
 `_select_diverse_top_chunks()` applies a per-document cap (default: 2 chunks per document, `_RERANK_PER_DOCUMENT_CAP`):
@@ -274,6 +294,8 @@ After ranking and deduplication are complete, `expand_chunks_with_context()` que
 
 The neighboring text is attached to each anchor chunk's `metadata_json` as `context_text`. The UI shows this when the user expands an evidence card to see the surrounding passage.
 
+This is implemented as a direct neighbor query on `rag_chunks`, not as a second retrieval pass, because the goal is display context rather than new evidence selection. Keeping this as a cheap local lookup preserves ranking determinism and avoids reintroducing context blobs into the competition set.
+
 This step has no effect on which chunks were selected or their order. It is purely a display enhancement.
 
 ### Stage 13 — Audit Output
@@ -293,6 +315,8 @@ docker compose exec api python -m app.rag.eval.cli diagnose-query \
 ```
 
 The trace shows every pool transition, gate decision, and reranking step for post-hoc inspection.
+
+The audit layer lives in Postgres tables plus optional trace files because the system needs durable, queryable records for regression diagnosis. Log-only tracing would be easier to ship initially, but it is much harder to compare ranked evidence, pool composition, and reranker decisions across experiments if that data is not structured.
 
 ---
 
@@ -374,13 +398,4 @@ topic_entities: ["scale economies shared"]
 
 ---
 
-## Technologies Used
-
-| Step | Technology |
-|---|---|
-| Dense retrieval | Postgres + pgvector, cosine distance operator `<=>` |
-| Sparse retrieval | Postgres full-text search, `websearch_to_tsquery`, `ts_rank` |
-| RRF fusion | Deterministic application code, `reciprocal_rank_fusion()` |
-| Reranking | Provider-swappable; Jina REST API as current configured default |
-| Context expansion | `rag_chunks` neighbor query |
-| Audit | `rag_queries`, `rag_query_evidence`, trace events |
+The retrieval-stage technology choices are described where they matter: at the stage that uses them and in the tradeoff that justified them.

@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from app.db.session import get_db
@@ -68,6 +69,18 @@ def start_scheduler() -> BackgroundScheduler | None:
     scheduler = BackgroundScheduler(timezone=ZoneInfo("UTC"))
     exchanges = configured_exchanges()
     scheduled: set[str] = set()
+
+    if exchanges:
+        scheduler.add_job(
+            _run_window,
+            IntervalTrigger(hours=24, start_date=datetime.now(tz=timezone.utc)),
+            kwargs={"window_name": "daily_catchup", "exchanges": exchanges},
+            id="stock_refresh_daily_catchup",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
     for window_name, (_tz_name, _hour, _minute, members) in _DEFAULT_WINDOWS.items():
         window_exchanges = [exchange for exchange in exchanges if exchange in members]
         if not window_exchanges:

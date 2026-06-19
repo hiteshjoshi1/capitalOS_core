@@ -623,8 +623,8 @@ def _refresh_dividend_yields_for_exchange(
     return upserted
 
 
-def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> dict[str, SymbolMapRow]:
-    out: dict[str, SymbolMapRow] = {}
+def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> dict[str, list[SymbolMapRow]]:
+    out: dict[str, list[SymbolMapRow]] = {}
     for row in symbols:
         if provider_name == "eodhd":
             symbol = row.eodhd_symbol
@@ -638,7 +638,7 @@ def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> di
             symbol = row.yahoo_symbol
         symbol = symbol.strip().upper()
         if symbol:
-            out[symbol] = row
+            out.setdefault(symbol, []).append(row)
     return out
 
 
@@ -953,61 +953,82 @@ def run_exchange_refresh(
         upserted_rows = 0
         invalid_rows = 0
         next_unresolved: list[SymbolMapRow] = []
-        for provider_symbol, row in by_symbol.items():
-            attempted_asset_ids.add(row.asset_id)
+        for provider_symbol, mapped_rows in by_symbol.items():
+            for row in mapped_rows:
+                attempted_asset_ids.add(row.asset_id)
             quote = quotes.get(provider_symbol.upper())
             if quote is None:
-                next_unresolved.append(row)
-                _insert_item(
-                    db,
-                    run_id=run_id,
-                    asset_id=row.asset_id,
-                    provider=provider_name,
-                    exchange_code=exchange_code,
-                    symbol=provider_symbol,
-                    trade_date=trade_date,
-                    status="missing",
-                    price=None,
-                    currency=row.quote_currency,
-                    source_note=provider_error,
-                )
+                for row in mapped_rows:
+                    next_unresolved.append(row)
+                    _insert_item(
+                        db,
+                        run_id=run_id,
+                        asset_id=row.asset_id,
+                        provider=provider_name,
+                        exchange_code=exchange_code,
+                        symbol=provider_symbol,
+                        trade_date=trade_date,
+                        status="missing",
+                        price=None,
+                        currency=row.quote_currency,
+                        source_note=provider_error,
+                    )
                 continue
 
             # If provider returns an invalid quote, record it and do not
             # override existing rows or attempt fallback writes for this symbol.
             if quote.close is None or not math.isfinite(float(quote.close)) or float(quote.close) <= 0:
-                invalid_rows += 1
-                total_invalid += 1
-                _insert_item(
+                invalid_rows += len(mapped_rows)
+                total_invalid += len(mapped_rows)
+                for row in mapped_rows:
+                    _insert_item(
+                        db,
+                        run_id=run_id,
+                        asset_id=row.asset_id,
+                        provider=provider_name,
+                        exchange_code=exchange_code,
+                        symbol=quote.symbol,
+                        trade_date=trade_date,
+                        status="invalid",
+                        price=quote.close,
+                        currency=(row.quote_currency or quote.currency or "USD").upper(),
+                        source_note="missing/invalid price from provider",
+                    )
+                continue
+
+            for row in mapped_rows:
+                source = f"{provider_name}_market"
+                # Asset quote currency is source of truth for valuation conversion.
+                resolved_currency = (row.quote_currency or quote.currency or "USD").upper()
+                written = _upsert_price(
                     db,
-                    run_id=run_id,
                     asset_id=row.asset_id,
-                    provider=provider_name,
-                    exchange_code=exchange_code,
-                    symbol=quote.symbol,
-                    trade_date=trade_date,
-                    status="invalid",
+                    trade_date=quote.trade_date,
                     price=quote.close,
-                    currency=(row.quote_currency or quote.currency or "USD").upper(),
-                    source_note="missing/invalid price from provider",
+                    currency=resolved_currency,
+                    source=source,
+                    exchange_code=exchange_code,
+                    provider_symbol=quote.symbol,
                 )
-                continue
+                if not written:
+                    next_unresolved.append(row)
+                    _insert_item(
+                        db,
+                        run_id=run_id,
+                        asset_id=row.asset_id,
+                        provider=provider_name,
+                        exchange_code=exchange_code,
+                        symbol=quote.symbol,
+                        trade_date=trade_date,
+                        status="missing",
+                        price=None,
+                        currency=resolved_currency,
+                        source_note="missing/invalid price from provider",
+                    )
+                    continue
+                upserted_rows += 1
+                total_upserted += 1
 
-            source = f"{provider_name}_market"
-            # Asset quote currency is source of truth for valuation conversion.
-            resolved_currency = (row.quote_currency or quote.currency or "USD").upper()
-            written = _upsert_price(
-                db,
-                asset_id=row.asset_id,
-                trade_date=quote.trade_date,
-                price=quote.close,
-                currency=resolved_currency,
-                source=source,
-                exchange_code=exchange_code,
-                provider_symbol=quote.symbol,
-            )
-            if not written:
-                next_unresolved.append(row)
                 _insert_item(
                     db,
                     run_id=run_id,
@@ -1015,29 +1036,12 @@ def run_exchange_refresh(
                     provider=provider_name,
                     exchange_code=exchange_code,
                     symbol=quote.symbol,
-                    trade_date=trade_date,
-                    status="missing",
-                    price=None,
+                    trade_date=quote.trade_date,
+                    status="upserted" if step_idx == 0 else "fallback_upserted",
+                    price=quote.close,
                     currency=resolved_currency,
-                    source_note="missing/invalid price from provider",
+                    source_note=None if step_idx == 0 else "resolved via fallback",
                 )
-                continue
-            upserted_rows += 1
-            total_upserted += 1
-
-            _insert_item(
-                db,
-                run_id=run_id,
-                asset_id=row.asset_id,
-                provider=provider_name,
-                exchange_code=exchange_code,
-                symbol=quote.symbol,
-                trade_date=quote.trade_date,
-                status="upserted" if step_idx == 0 else "fallback_upserted",
-                price=quote.close,
-                currency=resolved_currency,
-                source_note=None if step_idx == 0 else "resolved via fallback",
-            )
 
         missing_symbols = len(next_unresolved) + invalid_rows
         run_status = "failed" if provider_error and upserted_rows == 0 else ("partial" if missing_symbols else "success")
