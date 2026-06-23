@@ -91,3 +91,125 @@ _Append command-level evidence here._
 ## Automation Log (Mutable)
 - 2026-06-20T09:03:51Z - Created phase-2 upload adapter issue from canonical portfolio architecture.
 - 2026-06-20T13:30:00Z - Added mandatory pre-work context requiring Issue 175 and completed Issue 176 implementation review before phase-2 work.
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-177-canonical-portfolio-phase-2-upload-parser-adapters`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: Existing upload endpoint behavior remains OpenAPI-compatible
+- Acceptance criterion: Existing parser tests for Sharekhan, DBS Vickers, IBKR CSV, DBS, UOB, OCBC, and Citi pass
+- Acceptance criterion: Sharekhan upload before/after canonical adapter migration produces identical legacy positions rows and dashboard output
+- Acceptance criterion: DBS Vickers upload before/after canonical adapter migration produces identical legacy positions rows and dashboard output
+- Acceptance criterion: Sharekhan canonical writes are isolated to Sharekhan source authority windows
+- Acceptance criterion: DBS Vickers canonical writes are isolated to DBS Vickers source authority windows
+- Acceptance criterion: IBKR manual CSV upload after Flex cutover cannot create authoritative canonical IBKR facts
+- Acceptance criterion: Uploads that lack cash/NAV/trade detail create explicit completeness records
+- Acceptance criterion: Adapter writes are idempotent for repeated identical uploads
+- Acceptance criterion: No Flex code path writes to Sharekhan or DBS Vickers canonical facts
+- Acceptance criterion: Existing upload reports continue to show useful parser counts and warnings
+
+## Prepare
+Checked out `feature/issue-177-canonical-portfolio-phase-2-upload-parser-adapters` from `main` and ensured task file exists.
+
+## Plan Summary
+1) Reviewed Issue 176 canonical write patterns in ibkr_flex.py and migrations/055. 2) Created upload_canonical.py with run_upload_canonical_adapter() implementing source authority, idempotent upserts, completeness records, and IBKR-CSV reference-only guard. 3) Modified runner.py to call the adapter post-legacy-write as a non-blocking step. 4) Created test_upload_canonical_phase2.py with 18 tests covering all acceptance criteria. 5) Rebuilt API container and verified 897 tests pass.
+
+### Architecture Decisions
+- Canonical adapter runs after legacy write path so legacy behavior is never disrupted
+- IBKR CSV uploads always produce reference authority_status; no authority window is created for reference-only platforms
+- Canonical failures are non-blocking: runner logs canonical_warning in report rather than raising
+- Source authority windows scoped per broker connection (sharekhan_upload, dbs_vickers_upload) matching Phase 1 pattern
+- Completeness records always written for upload parsers marking missing cash/NAV/trade dimensions
+- Idempotent writes use delete-then-insert on (broker_account_id, report_date) matching ibkr_flex.py pattern
+- No new canonical write style introduced; all patterns reuse or generalise Issue 176 ibkr_flex.py patterns
+
+### Acceptance Criteria
+- Existing upload endpoint behavior remains OpenAPI-compatible
+- Existing parser tests for Sharekhan, DBS Vickers, IBKR CSV, DBS, UOB, OCBC, and Citi pass
+- Sharekhan upload before/after canonical adapter migration produces identical legacy positions rows and dashboard output
+- DBS Vickers upload before/after canonical adapter migration produces identical legacy positions rows and dashboard output
+- Sharekhan canonical writes are isolated to Sharekhan source authority windows
+- DBS Vickers canonical writes are isolated to DBS Vickers source authority windows
+- IBKR manual CSV upload after Flex cutover cannot create authoritative canonical IBKR facts
+- Uploads that lack cash/NAV/trade detail create explicit completeness records
+- Adapter writes are idempotent for repeated identical uploads
+- No Flex code path writes to Sharekhan or DBS Vickers canonical facts
+- Existing upload reports continue to show useful parser counts and warnings
+
+### Planned Paths
+- `api/app/portfolio/upload_canonical.py`
+- `api/app/ingestion/runner.py`
+- `api/tests/test_upload_canonical_phase2.py`
+- `migrations/`
+
+## Build Summary
+Phase 2 canonical portfolio upload adapter implementation: added canonical adapter layer for Sharekhan and DBS Vickers upload parsers, converting ParseResult outputs into canonical broker_instruments, portfolio_position_snapshots, and completeness records while preserving all legacy write paths and dashboard output.
+
+### Changed Files
+- `api/app/ingestion/runner.py`
+- `api/app/portfolio/upload_canonical.py`
+- `api/tests/test_upload_canonical_phase2.py`
+- `tasks/issue-177-canonical-portfolio-phase-2-upload-parser-adapters.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Phase 2 canonical portfolio upload adapter implementation: added canonical adapter layer for Sharekhan and DBS Vickers upload parsers, converting ParseResult outputs into canonical broker_instruments, portfolio_position_snapshots, and completeness records while preserving all legacy write paths and dashboard output.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` Existing upload endpoint behavior remains OpenAPI-compatible: canonical_result and canonical_warning are additive optional fields in runner report dict; no existing fields removed; contract-backend 3 passed
+- `pass` Existing parser tests for Sharekhan, DBS Vickers, IBKR CSV, DBS, UOB, OCBC, and Citi pass: make test-backend: 897 passed including all pre-existing parser tests
+- `pass` Sharekhan upload before/after canonical adapter migration produces identical legacy positions rows and dashboard output: test_upload_canonical_phase2.py non-regression tests pass; legacy write path in runner.py unchanged
+- `pass` DBS Vickers upload before/after canonical adapter migration produces identical legacy positions rows and dashboard output: test_upload_canonical_phase2.py non-regression tests pass; legacy write path unchanged
+- `pass` Sharekhan canonical writes are isolated to Sharekhan source authority windows: test_sharekhan_canonical_isolation passes; broker_connection keyed on sharekhan_upload platform
+- `pass` DBS Vickers canonical writes are isolated to DBS Vickers source authority windows: test_dbs_vickers_canonical_isolation passes; broker_connection keyed on dbs_vickers_upload platform
+- `pass` IBKR manual CSV upload after Flex cutover cannot create authoritative canonical IBKR facts: test_ibkr_csv_reference_only passes; IBKR CSV always produces reference authority_status, no authority window created
+- `pass` Uploads that lack cash/NAV/trade detail create explicit completeness records: test_completeness_record_created passes; completeness written with missing_dimensions for all upload parsers
+- `pass` Adapter writes are idempotent for repeated identical uploads: test_idempotent_upload passes; 3 identical uploads produce 1 position snapshot row
+- `pass` No Flex code path writes to Sharekhan or DBS Vickers canonical facts: ibkr_flex.py untouched; upload_canonical.py has separate entry point; no cross-broker write possible by construction
+- `pass` Existing upload reports continue to show useful parser counts and warnings: runner.py _report() extended with canonical_result/canonical_warning; existing counts/warnings fields preserved
+
+### Risk Flags
+- Completeness records will always be incomplete for upload parsers until richer upload formats are available; downstream consumers must handle incomplete canonical positions gracefully
+- IBKR reference-only guard is name-based; any future IBKR platform name variant not in _REFERENCE_ONLY_PLATFORMS would bypass the guard and require a code update
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-177-canonical-portfolio-phase-2-upload-parser-adapters`.
+<!-- MACHINE_RENDERED_END -->

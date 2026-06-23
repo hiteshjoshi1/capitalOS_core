@@ -23,6 +23,7 @@ from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_
 from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
 from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_xls
 from app.models.import_job import ImportJob
+from app.portfolio.upload_canonical import is_canonical_upload_platform, run_upload_canonical_adapter
 
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "ibkr_activity_csv_v1": ("csv", parse_ibkr_activity_csv),
@@ -472,6 +473,31 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
         db.add(job)
         db.commit()
 
+        # --- Canonical adapter (Phase 2) ---
+        # Write canonical facts alongside the legacy write path.
+        # Failures in the canonical adapter are non-blocking; they are
+        # recorded in the report but do not change the IMPORTED status.
+        canonical_result: dict | None = None
+        canonical_warning: str | None = None
+        if is_canonical_upload_platform(job.platform):
+            try:
+                from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
+                flex_cutover = is_ibkr_flex_cutover_active(db, int(job.account_id))
+                canonical_result = run_upload_canonical_adapter(
+                    db,
+                    current_user_id=_get_account_user_id(db, int(job.account_id)),
+                    legacy_account_id=int(job.account_id),
+                    platform_code=job.platform,
+                    parse_result=result,
+                    stored_path=job.stored_path,
+                    file_sha256=job.file_sha256,
+                    is_ibkr_flex_cutover_active=flex_cutover,
+                )
+                db.commit()
+            except Exception as canonical_exc:  # noqa: BLE001
+                db.rollback()
+                canonical_warning = f"canonical_adapter_failed: {canonical_exc}"
+
         preview = [_serialize_tx(tx) for tx in parsed[:10]]
         report = _report(
             job,
@@ -489,12 +515,25 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
             },
             preview=preview,
             parser_meta=parser_meta,
+            canonical_result=canonical_result,
+            canonical_warning=canonical_warning,
         )
         return write_and_return(report)
     except Exception as exc:  # noqa: BLE001
         job.status = "FAILED"
         job.error_message = str(exc)
         return write_and_return(_report(job, status="FAILED", error=str(exc)))
+
+
+def _get_account_user_id(db: Session, account_id: int) -> int:
+    """Return the user_id for an account, falling back to 1 for legacy null-ownership."""
+    row = db.execute(
+        text("SELECT user_id FROM accounts WHERE id = :account_id LIMIT 1"),
+        {"account_id": account_id},
+    ).fetchone()
+    if row and row[0] is not None:
+        return int(row[0])
+    return 1
 
 
 def _report(
@@ -507,6 +546,8 @@ def _report(
     preview: List[Dict[str, Any]] | None = None,
     parser_meta: dict | None = None,
     error: str | None = None,
+    canonical_result: dict | None = None,
+    canonical_warning: str | None = None,
 ) -> dict:
     return {
         "job_id": job.id,
@@ -530,6 +571,8 @@ def _report(
         "parser_meta": parser_meta or {},
         "signature_debug": signature_debug,
         "error_message": error,
+        "canonical_result": canonical_result,
+        "canonical_warning": canonical_warning,
     }
 
 
