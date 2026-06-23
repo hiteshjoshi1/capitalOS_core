@@ -44,6 +44,11 @@ vi.mock("../lib/api", () => ({
       total: 100000,
       items: [],
     }),
+    platformAllocation: vi.fn().mockResolvedValue({
+      as_of: "2026-03-01T00:00:00+00:00",
+      total: 100000,
+      items: [],
+    }),
     spendingSummary: vi.fn().mockResolvedValue({
       month: "2026-02",
       base_currency: "SGD",

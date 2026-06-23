@@ -144,6 +144,9 @@ def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_
     assert "net_worth" not in data
     assert "net_worth_change" not in data
     assert "geography_breakdown" in data
+    assert "platform_breakdown" in data
+    assert "stock_current_total" in data
+    assert "stock_snapshot_total" in data
     assert "quote_freshness_summary" in data
 
 
@@ -207,13 +210,20 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
     data = resp.json()
 
     geography = {item["geography"]: item for item in data["geography_breakdown"]}
+    platform = {item["key"]: item for item in data["platform_breakdown"]}
     assert data["current_holdings_as_of"] == "2026-05-20T00:00:00+00:00"
+    assert data["stock_current_total"] == 2500.0
+    assert data["stock_snapshot_total"] == 1700.0
     assert geography["US"]["current_value"] == 2200.0
     assert geography["US"]["snapshot_value"] == 1100.0
     assert geography["US"]["delta_abs"] == 1100.0
     assert geography["HK"]["current_value"] == 300.0
     assert geography["HK"]["snapshot_value"] == 600.0
     assert geography["HK"]["delta_abs"] == -300.0
+    assert platform["IBKR"]["current_value"] == 2500.0
+    assert platform["IBKR"]["snapshot_value"] == 1700.0
+    assert platform["IBKR"]["delta_abs"] == 800.0
+    assert platform["IBKR"]["percent"] == 100.0
     assert data["quote_freshness_summary"]["fresh"] == 2
 
 
@@ -303,9 +313,10 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
     assert any(row["asset_class"] == "CRYPTO" for row in dashboard_body["top_holdings"])
     assert all(row["asset_class"] != "CASH" for row in dashboard_body["top_holdings"])
     assert dashboard_body["geography"] == [{"country": "SG", "value": 1000.0, "percent": 89.01}]
-    assert allocation_body["total"] == 1000.0
+    assert allocation_body["total"] == 1123.45
     assert allocation_body["items"] == [
-        {"platform": "DBS", "platform_type": "BANK", "country": "SG", "value": 1000.0, "percent": 100.0}
+        {"platform": "DBS", "platform_type": "BANK", "country": "SG", "value": 1000.0, "percent": 89.01},
+        {"platform": "CRYPTO", "platform_type": "WALLET_PROVIDER", "country": None, "value": 123.45, "percent": 10.99},
     ]
 
 
@@ -550,15 +561,122 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     assert resp.status_code == 200
     data = resp.json()
 
-    assert data["total"] == 80000.0
+    summary_resp = client.get("/dashboard/summary?month=2026-02")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+
+    assert data["total"] == pytest.approx(summary["net_worth"]["total"])
     assert data["as_of"] is not None
 
     items = data["items"]
-    assert len(items) == 2
-    assert items[0]["platform"] == "IBKR"
-    assert items[0]["value"] == 50000.0
-    assert items[1]["platform"] == "DBS"
-    assert items[1]["value"] == 30000.0
+    by_platform = {item["platform"]: item for item in items}
+    assert set(by_platform) == {"IBKR", "DBS", "CRYPTO"}
+    assert by_platform["IBKR"]["value"] == pytest.approx(50999.0)
+    assert by_platform["DBS"]["value"] == pytest.approx(27900.0)
+    assert by_platform["CRYPTO"]["value"] == pytest.approx(20000.0)
+
+
+def test_platform_allocation_prefers_account_platform_over_platform_id(client: TestClient, db_engine):
+    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(701, 'DBS', 'DBS Bank', 'BANK', 'SG'), "
+                "(702, 'DBS_VICKERS', 'DBS Vickers', 'BROKER', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country, platform_id) VALUES "
+                "(701, 'DBS Savings', 'DBS', 1, 'BANK', 'SGD', 'SG', 701), "
+                "(702, 'DBS Vickers', 'DBS_VICKERS', 1, 'BROKER', 'SGD', 'SG', 701)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(701, 'CASH', 'Cash', 'CASH', 'SGD', 'SG'), "
+                "(702, 'D05', 'DBS Group', 'STOCK', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(7010, 701, 701, :as_of, 1, NULL, 1000), "
+                "(7020, 702, 702, :as_of, 100, 20, 2000)"
+            ),
+            {"as_of": as_of},
+        )
+
+    resp = client.get("/dashboard/platform-allocation?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    by_platform = {item["platform"]: item for item in resp.json()["items"]}
+
+    assert set(by_platform) == {"DBS_VICKERS", "DBS"}
+    assert by_platform["DBS"]["platform_type"] == "BANK"
+    assert by_platform["DBS"]["value"] == pytest.approx(1000.0)
+    assert by_platform["DBS_VICKERS"]["platform_type"] == "BROKER"
+    assert by_platform["DBS_VICKERS"]["value"] == pytest.approx(2000.0)
+
+
+def test_platform_allocation_current_month_uses_last_completed_snapshot_anchor(client: TestClient, db_engine, monkeypatch):
+    def fake_rates(_date, _base, symbols):
+        return {s: 1.0 for s in symbols}
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(620, 'TESTBROKER', 'Test Broker', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country, platform_id) VALUES "
+                "(620, 'Test Broker Account', 'TESTBROKER', 1, 'BROKER', 'USD', 'US', 620)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(620, 'TEST', 'Test Inc.', 'STOCK', 'USD', 'US')"
+            )
+        )
+        completed_anchor = datetime(2026, 6, 1, tzinfo=timezone.utc)
+        later_snapshot = datetime(2026, 6, 10, tzinfo=timezone.utc)
+        conn.execute(
+            text(
+                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
+                "(6200, 620, 620, :completed_anchor, 10, 100, 1000), "
+                "(6201, 620, 620, :later_snapshot, 20, 100, 2000)"
+            ),
+            {"completed_anchor": completed_anchor, "later_snapshot": later_snapshot},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(620, :completed_anchor, 100, 'USD', 'test', '2026-06-01', 'US', 'TEST'), "
+                "(620, :later_snapshot, 200, 'USD', 'test', '2026-06-10', 'US', 'TEST')"
+            ),
+            {"completed_anchor": completed_anchor, "later_snapshot": later_snapshot},
+        )
+
+    monkeypatch.setenv("SNAPSHOT_DAY", "1")
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 6, 15, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/platform-allocation?month=2026-06&base_currency=USD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["as_of"] == "2026-06-01T00:00:00+00:00"
+    assert data["total"] == pytest.approx(1000.0)
+    assert data["items"][0]["platform"] == "TESTBROKER"
+    assert data["items"][0]["value"] == pytest.approx(1000.0)
 
 
 def test_dashboard_geography_exposure_breakdown_maps_crypto_to_us(client: TestClient, seed_dashboard_data, monkeypatch):

@@ -383,6 +383,7 @@ a {
   .grid.g-mid,
   .grid.g-bot,
   .wealthHeroGrid,
+  .wealthAllocationGrid,
   .wealthSurfaceGrid,
   .wealthDetailGrid,
   .cashFlowHeroGrid,
@@ -402,6 +403,16 @@ a {
 
   .split {
     grid-template-columns: 1fr;
+  }
+
+  .wealthSectionHeader {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .wealthDetailCardWide,
+  .wealthRiskLayout > :first-child {
+    grid-column: span 1;
   }
 }
 
@@ -885,6 +896,69 @@ a.btn {
 
 .grid.g-mid.stockHoldingsLayout {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.stockFreshnessCard {
+  padding: 18px;
+}
+
+.stockFreshnessCard .stockHoldingsHeader {
+  margin-bottom: 12px;
+}
+
+.stockFreshnessPills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.stockFreshnessPill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 116px;
+  padding: 9px 12px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent 28%);
+  background: color-mix(in srgb, var(--panel2) 78%, transparent 22%);
+}
+
+.stockFreshnessPill span {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.stockFreshnessPill strong {
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.stockFreshnessPillFresh {
+  border-color: color-mix(in srgb, var(--good) 36%, transparent 64%);
+}
+
+.stockFreshnessPillStale {
+  border-color: color-mix(in srgb, #f59f43 38%, transparent 62%);
+}
+
+.stockFreshnessPillMissing {
+  border-color: color-mix(in srgb, var(--trend-negative) 34%, transparent 66%);
+}
+
+@media (min-width: 1100px) {
+  .grid.g-mid.stockHoldingsLayout {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .stockFreshnessCard,
+  .stockHoldingsPrimaryCard {
+    grid-column: 1 / -1;
+  }
 }
 
 .geographyPieCard {
@@ -1841,8 +1915,42 @@ a.btn {
 
 .wealthHeroGrid {
   display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.95fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
+}
+
+.wealthSectionBlock {
+  display: grid;
+  gap: 14px;
+}
+
+.wealthSectionHeader {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.wealthSectionHeader h2 {
+  margin: 0;
+  font-family: "Newsreader", Georgia, serif;
+  font-size: 1.65rem;
+  line-height: 1.1;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+  color: var(--text);
+  text-transform: none;
+}
+
+.wealthSectionHeader .wealthEyebrow {
+  margin-bottom: 6px;
+}
+
+.wealthAllocationGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.45fr) minmax(340px, 0.85fr);
+  gap: 18px;
+  align-items: stretch;
 }
 
 .wealthHeroCard,
@@ -1852,7 +1960,8 @@ a.btn {
 
 .wealthHeroCard,
 .wealthSurfaceCard,
-.wealthDetailCard {
+.wealthDetailCard,
+.wealthPlatformAllocationCard {
   background: rgba(255, 255, 255, 0.03) !important;
   border-color: rgba(255, 255, 255, 0.08) !important;
   box-shadow: 0 0 30px -10px rgba(125, 211, 252, 0.1);
@@ -1866,7 +1975,8 @@ a.btn {
 
 [data-theme="light"] .wealthHeroCard,
 [data-theme="light"] .wealthSurfaceCard,
-[data-theme="light"] .wealthDetailCard {
+[data-theme="light"] .wealthDetailCard,
+[data-theme="light"] .wealthPlatformAllocationCard {
   background: rgba(255, 255, 255, 0.72) !important;
   border-color: rgba(25, 74, 58, 0.12) !important;
   box-shadow: 0 18px 38px rgba(31, 36, 33, 0.08);
@@ -1986,6 +2096,11 @@ a.btn {
   margin: 0;
 }
 
+.wealthSnapshotNote {
+  margin: -4px 0 0;
+  font-size: 0.86rem;
+}
+
 .wealthSnapshotBadge {
   display: inline-flex;
   align-items: center;
@@ -2052,6 +2167,46 @@ a.btn {
   justify-content: space-between;
   gap: 12px;
   align-items: center;
+}
+
+.wealthPlatformAllocationCard {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  min-width: 0;
+}
+
+.wealthPlatformAllocationCard .stockHoldingsHeader {
+  margin-bottom: 4px;
+}
+
+.wealthPlatformAllocationCard .cashFlowDonutLayout {
+  grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: center;
+}
+
+.wealthPlatformAllocationCard .cashFlowDonutChart {
+  width: 280px;
+  height: 280px;
+}
+
+.wealthPlatformAllocationCard .cashFlowDonutChart::after {
+  inset: 36px;
+}
+
+.wealthPlatformAllocationCard .cashFlowDonutCenter {
+  max-width: 160px;
+  text-align: center;
+}
+
+.wealthPlatformAllocationCard .cashFlowDonutCenter strong {
+  font-size: 1.05rem;
+  line-height: 1.15;
+}
+
+.wealthPlatformAllocationCard .table {
+  margin-top: 2px;
 }
 
 .wealthAllocationMeta {
@@ -2606,6 +2761,16 @@ a.btn {
   .cashFlowDonutChart {
     width: 200px;
     height: 200px;
+  }
+
+  .wealthPlatformAllocationCard .cashFlowDonutLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .wealthPlatformAllocationCard .cashFlowDonutChart {
+    justify-self: center;
+    width: 220px;
+    height: 220px;
   }
 
   .cashFlowAuditHeader {

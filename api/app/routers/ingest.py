@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from datetime import date
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -12,6 +13,7 @@ from app.ingestion.runner import create_import_job, run_ingestion
 from app.ingestion.registry import register_signature
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
+from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
 
 router = APIRouter(prefix="/ingest", tags=["ingest"], dependencies=[Depends(require_current_user)])
 
@@ -45,6 +47,16 @@ def _require_account_platform(db: Session, account_id: int, current_user_id: int
     return row[0] or "UNKNOWN"
 
 
+def _reject_ibkr_manual_upload_after_flex_cutover(db: Session, account_id: int, platform: str) -> None:
+    if str(platform or "").upper() != "IBKR":
+        return
+    if is_ibkr_flex_cutover_active(db, account_id, on_date=date.today()):
+        raise HTTPException(
+            status_code=409,
+            detail="Manual IBKR uploads are disabled after IBKR Flex cutover. Use /portfolio/ibkr-flex/import-now.",
+        )
+
+
 @router.post("/ibkr")
 def ingest_ibkr(
     account_id: int = Query(...),
@@ -55,7 +67,8 @@ def ingest_ibkr(
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    _require_account_platform(db, account_id, current_user.id)
+    platform = _require_account_platform(db, account_id, current_user.id)
+    _reject_ibkr_manual_upload_after_flex_cutover(db, account_id, platform)
 
     data_dir = _data_dir()
     os.makedirs(data_dir, exist_ok=True)
@@ -93,6 +106,7 @@ def ingest_upload(
         raise HTTPException(status_code=400, detail="No filename provided")
 
     platform = _require_account_platform(db, account_id, current_user.id)
+    _reject_ibkr_manual_upload_after_flex_cutover(db, account_id, platform)
 
     data_dir = _data_dir()
     os.makedirs(data_dir, exist_ok=True)

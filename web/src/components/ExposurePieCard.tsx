@@ -22,6 +22,7 @@ type ExposurePieCardProps = {
   totalLabel: string;
   formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
   ariaLabel: string;
+  className?: string;
 };
 
 function conicGradient(items: ExposurePieItem[]) {
@@ -45,11 +46,12 @@ export default function ExposurePieCard({
   totalLabel,
   formatMoney,
   ariaLabel,
+  className,
 }: ExposurePieCardProps) {
   const pieStyle = items.length > 0 ? { background: conicGradient(items) } : undefined;
 
   return (
-    <div className="card">
+    <div className={["card", className].filter(Boolean).join(" ")}>
       <div className="stockHoldingsHeader">
         <h2>{title}</h2>
         <div className="muted stockHoldingsMeta">{subtitle}</div>

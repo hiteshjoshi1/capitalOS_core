@@ -118,6 +118,15 @@ class NetWorthChangeResponse(BaseModel):
         populate_by_name = True
 
 
+class StockBreakdownItem(BaseModel):
+    key: str
+    current_value: float
+    snapshot_value: float
+    delta_abs: float
+    delta_pct: Optional[float] = None
+    percent: float
+
+
 class StockHoldingsResponse(BaseModel):
     as_of_month: str
     base_currency: str
@@ -130,6 +139,9 @@ class StockHoldingsResponse(BaseModel):
     net_worth_freshness_status: Optional[str] = None
     top_holdings: List[TopHolding]
     geography_breakdown: list["StockGeographyBreakdownItem"] = []
+    platform_breakdown: list[StockBreakdownItem] = []
+    stock_current_total: float = 0.0
+    stock_snapshot_total: float = 0.0
     quote_freshness_summary: Optional["QuoteFreshnessSummary"] = None
 
 

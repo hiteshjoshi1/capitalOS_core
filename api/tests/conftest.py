@@ -12,6 +12,7 @@ os.environ.setdefault("DATA_DIR", "/tmp/capitalos_test_data")
 os.environ.setdefault("SNAPSHOT_DAY", "1")
 os.environ.setdefault("CRYPTO_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
+os.environ.setdefault("IBKR_FLEX_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
 os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
@@ -41,6 +42,349 @@ def override_get_db():
 
 
 app.dependency_overrides[get_db] = override_get_db
+
+
+def _create_canonical_portfolio_tables(conn):
+    for ddl in (
+        """
+        CREATE TABLE IF NOT EXISTS broker_connections (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER,
+          platform_code TEXT NOT NULL,
+          connection_type TEXT NOT NULL,
+          display_name TEXT,
+          status TEXT NOT NULL DEFAULT 'active',
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS broker_accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          connection_id INTEGER NOT NULL,
+          legacy_account_id INTEGER,
+          broker_account_id TEXT NOT NULL,
+          account_alias TEXT,
+          base_currency TEXT NOT NULL,
+          country TEXT,
+          status TEXT NOT NULL DEFAULT 'active',
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          UNIQUE (connection_id, broker_account_id)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_source_authority_windows (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          source_kind TEXT NOT NULL,
+          fact_scope TEXT NOT NULL,
+          effective_from DATE NOT NULL,
+          effective_to DATE,
+          authority_status TEXT NOT NULL DEFAULT 'authoritative',
+          created_at TIMESTAMP,
+          UNIQUE (broker_account_id, source_kind, fact_scope, effective_from)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS broker_import_runs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER,
+          legacy_account_id INTEGER,
+          platform_code TEXT NOT NULL,
+          source_type TEXT NOT NULL,
+          import_scope TEXT NOT NULL DEFAULT 'daily',
+          status TEXT NOT NULL,
+          requested_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          started_at TIMESTAMP,
+          fetched_at TIMESTAMP,
+          parsed_at TIMESTAMP,
+          finished_at TIMESTAMP,
+          report_date_from DATE,
+          report_date_to DATE,
+          flex_reference_code TEXT,
+          raw_document_id INTEGER,
+          parser_version TEXT,
+          error_code TEXT,
+          error_message TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS raw_broker_documents (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          import_run_id INTEGER NOT NULL,
+          broker_account_id INTEGER,
+          source_type TEXT NOT NULL,
+          content_hash TEXT NOT NULL,
+          storage_path TEXT NOT NULL,
+          content_type TEXT NOT NULL DEFAULT 'application/xml',
+          report_date_from DATE,
+          report_date_to DATE,
+          parser_version TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS broker_instruments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          platform_code TEXT NOT NULL,
+          broker_instrument_id TEXT NOT NULL,
+          asset_id INTEGER,
+          symbol TEXT,
+          description TEXT,
+          security_type TEXT,
+          listing_exchange TEXT,
+          currency TEXT,
+          country TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_broker_instruments_platform_contract
+        ON broker_instruments(platform_code, broker_instrument_id, COALESCE(listing_exchange, ''), COALESCE(currency, ''))
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS asset_identifiers (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          asset_id INTEGER,
+          broker_instrument_id INTEGER,
+          identifier_namespace TEXT NOT NULL,
+          identifier_type TEXT NOT NULL,
+          identifier_value TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_position_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          legacy_account_id INTEGER,
+          broker_instrument_id INTEGER NOT NULL,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          quantity NUMERIC NOT NULL,
+          currency TEXT NOT NULL,
+          market_price NUMERIC,
+          market_value_local NUMERIC NOT NULL,
+          market_value_base NUMERIC NOT NULL,
+          cost_basis_local NUMERIC,
+          cost_basis_base NUMERIC,
+          fx_rate_to_base NUMERIC NOT NULL,
+          authority_status TEXT NOT NULL DEFAULT 'authoritative',
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_cash_balance_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          legacy_account_id INTEGER,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          currency TEXT NOT NULL,
+          cash_balance NUMERIC NOT NULL,
+          cash_balance_base NUMERIC NOT NULL,
+          fx_rate_to_base NUMERIC NOT NULL,
+          authority_status TEXT NOT NULL DEFAULT 'authoritative',
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_nav_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          legacy_account_id INTEGER,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          base_currency TEXT NOT NULL,
+          cash_base NUMERIC NOT NULL DEFAULT 0,
+          stock_base NUMERIC NOT NULL DEFAULT 0,
+          options_base NUMERIC NOT NULL DEFAULT 0,
+          funds_base NUMERIC NOT NULL DEFAULT 0,
+          bonds_base NUMERIC NOT NULL DEFAULT 0,
+          interest_accrual_base NUMERIC NOT NULL DEFAULT 0,
+          dividend_accrual_base NUMERIC NOT NULL DEFAULT 0,
+          total_nav_base NUMERIC NOT NULL,
+          authority_status TEXT NOT NULL DEFAULT 'authoritative',
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_report_metrics (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          report_section TEXT NOT NULL,
+          metric_code TEXT NOT NULL,
+          currency TEXT,
+          amount NUMERIC NOT NULL,
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_fx_rates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          from_currency TEXT NOT NULL,
+          to_currency TEXT NOT NULL,
+          rate NUMERIC NOT NULL,
+          source_platform TEXT NOT NULL DEFAULT 'IBKR',
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          UNIQUE (report_date, from_currency, to_currency, source_platform)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_reconciliations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          reconciliation_type TEXT NOT NULL,
+          expected_amount NUMERIC NOT NULL,
+          actual_amount NUMERIC NOT NULL,
+          difference_amount NUMERIC NOT NULL,
+          tolerance_amount NUMERIC NOT NULL DEFAULT 0,
+          status TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_data_quality_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER,
+          import_run_id INTEGER,
+          raw_document_id INTEGER,
+          report_date DATE,
+          severity TEXT NOT NULL,
+          event_code TEXT NOT NULL,
+          message TEXT NOT NULL,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_data_completeness (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          report_date DATE NOT NULL,
+          fact_scope TEXT NOT NULL,
+          completeness_status TEXT NOT NULL,
+          missing_reason TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP,
+          UNIQUE (broker_account_id, report_date, fact_scope)
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_event_groups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          event_date DATE NOT NULL,
+          event_type TEXT NOT NULL,
+          broker_event_id TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_trades (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          broker_instrument_id INTEGER,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          event_group_id INTEGER,
+          trade_date DATE NOT NULL,
+          settle_date DATE,
+          side TEXT,
+          quantity NUMERIC,
+          price NUMERIC,
+          proceeds NUMERIC,
+          commission NUMERIC,
+          currency TEXT,
+          broker_execution_id TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_cash_ledger_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          event_group_id INTEGER,
+          activity_date DATE NOT NULL,
+          currency TEXT NOT NULL,
+          amount NUMERIC NOT NULL,
+          activity_code TEXT,
+          description TEXT,
+          broker_activity_id TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_corporate_action_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          broker_account_id INTEGER NOT NULL,
+          broker_instrument_id INTEGER,
+          import_run_id INTEGER NOT NULL,
+          raw_document_id INTEGER,
+          event_group_id INTEGER,
+          action_date DATE NOT NULL,
+          action_type TEXT,
+          quantity NUMERIC,
+          cash_amount NUMERIC,
+          currency TEXT,
+          broker_action_id TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_import_locks (
+          broker_account_id INTEGER PRIMARY KEY,
+          source_type TEXT NOT NULL,
+          lock_owner TEXT NOT NULL,
+          locked_at TIMESTAMP
+        )
+        """,
+    ):
+        conn.exec_driver_sql(ddl)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -458,8 +802,32 @@ def setup_db():
             )
             """
         )
+        _create_canonical_portfolio_tables(conn)
     yield
     with engine.begin() as conn:
+        for table_name in (
+            "portfolio_import_locks",
+            "portfolio_corporate_action_events",
+            "portfolio_cash_ledger_entries",
+            "portfolio_trades",
+            "portfolio_event_groups",
+            "portfolio_data_completeness",
+            "portfolio_data_quality_events",
+            "portfolio_reconciliations",
+            "portfolio_fx_rates",
+            "portfolio_report_metrics",
+            "portfolio_nav_snapshots",
+            "portfolio_cash_balance_snapshots",
+            "portfolio_position_snapshots",
+            "asset_identifiers",
+            "broker_instruments",
+            "raw_broker_documents",
+            "broker_import_runs",
+            "portfolio_source_authority_windows",
+            "broker_accounts",
+            "broker_connections",
+        ):
+            conn.exec_driver_sql(f"DROP TABLE IF EXISTS {table_name}")
         conn.exec_driver_sql("DROP TABLE IF EXISTS currencies")
         conn.exec_driver_sql("DROP TABLE IF EXISTS parser_registry")
         conn.exec_driver_sql("DROP TABLE IF EXISTS import_jobs")
@@ -495,6 +863,29 @@ def setup_db():
 @pytest.fixture(autouse=True)
 def clear_db():
     with engine.begin() as conn:
+        for table_name in (
+            "portfolio_import_locks",
+            "portfolio_corporate_action_events",
+            "portfolio_cash_ledger_entries",
+            "portfolio_trades",
+            "portfolio_event_groups",
+            "portfolio_data_completeness",
+            "portfolio_data_quality_events",
+            "portfolio_reconciliations",
+            "portfolio_fx_rates",
+            "portfolio_report_metrics",
+            "portfolio_nav_snapshots",
+            "portfolio_cash_balance_snapshots",
+            "portfolio_position_snapshots",
+            "asset_identifiers",
+            "broker_instruments",
+            "raw_broker_documents",
+            "broker_import_runs",
+            "portfolio_source_authority_windows",
+            "broker_accounts",
+            "broker_connections",
+        ):
+            conn.exec_driver_sql(f"DELETE FROM {table_name}")
         conn.exec_driver_sql("DELETE FROM category_overrides")
         conn.exec_driver_sql("DELETE FROM category_rules")
         conn.exec_driver_sql("DELETE FROM category_taxonomy")

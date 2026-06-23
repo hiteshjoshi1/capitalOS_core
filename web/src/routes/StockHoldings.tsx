@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
+import { formatPlatformLabel } from "../lib/platformLabels";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
+import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
@@ -61,7 +63,7 @@ export default function StockHoldings() {
   };
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = (value?: number, maximumFractionDigits = 0) =>
+  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
   const formatQuantity = (value?: number | null) =>
     value == null ? "—" : value.toLocaleString(undefined, { maximumFractionDigits: 4 });
@@ -70,14 +72,6 @@ export default function StockHoldings() {
       return "—";
     }
     return `${quoteCurrency.toUpperCase()} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  };
-  const formatDelta = (value?: number | null, pct?: number | null) => {
-    if (value == null) {
-      return "—";
-    }
-    const sign = value >= 0 ? "+" : "-";
-    const pctSuffix = pct == null ? "" : ` (${pct >= 0 ? "+" : "-"}${Math.abs(pct * 100).toFixed(1)}%)`;
-    return `${sign}${formatMoney(Math.abs(value))}${pctSuffix}`;
   };
   const formatPnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
     if (
@@ -100,6 +94,27 @@ export default function StockHoldings() {
   const visibleHoldings = holdings.slice(0, visibleCount);
   const hasMore = visibleCount < holdings.length;
   const hasPrevious = visibleCount > PAGE_SIZE;
+  const stockCurrentTotal = summary?.stock_current_total ?? 0;
+  const geographyPieItems = useMemo(
+    () => (summary?.geography_breakdown ?? [])
+      .filter((item) => item.current_value > 0)
+      .map((item) => ({
+        label: item.geography,
+        value: item.current_value,
+        percent: stockCurrentTotal > 0 ? (item.current_value / stockCurrentTotal) * 100 : 0,
+      })),
+    [stockCurrentTotal, summary?.geography_breakdown],
+  );
+  const platformPieItems = useMemo(
+    () => (summary?.platform_breakdown ?? [])
+      .filter((item) => item.current_value > 0)
+      .map((item) => ({
+        label: formatPlatformLabel(item.key),
+        value: item.current_value,
+        percent: item.percent,
+      })),
+    [summary?.platform_breakdown],
+  );
 
   return (
     <PageShell
@@ -140,57 +155,46 @@ export default function StockHoldings() {
 
       {state === "ready" && (
         <section className="grid g-mid stockHoldingsLayout">
-          <div className="card">
+          <div className="card stockFreshnessCard">
             <div className="stockHoldingsHeader">
               <h2>Quote Freshness</h2>
               <div className="muted stockHoldingsMeta">
                 Current holdings as of {summary?.current_holdings_as_of?.slice(0, 10) ?? "—"}
               </div>
             </div>
-            <div className="split">
-              <div className="mini">
-                <h3>Fresh</h3>
-                <div className="big small">{summary?.quote_freshness_summary?.fresh ?? 0}</div>
+            <div className="stockFreshnessPills">
+              <div className="stockFreshnessPill stockFreshnessPillFresh">
+                <span>Fresh</span>
+                <strong>{summary?.quote_freshness_summary?.fresh ?? 0}</strong>
               </div>
-              <div className="mini">
-                <h3>Stale</h3>
-                <div className="big small">{summary?.quote_freshness_summary?.stale ?? 0}</div>
+              <div className="stockFreshnessPill stockFreshnessPillStale">
+                <span>Stale</span>
+                <strong>{summary?.quote_freshness_summary?.stale ?? 0}</strong>
               </div>
-              <div className="mini">
-                <h3>Missing</h3>
-                <div className="big small">{summary?.quote_freshness_summary?.missing ?? 0}</div>
+              <div className="stockFreshnessPill stockFreshnessPillMissing">
+                <span>Missing</span>
+                <strong>{summary?.quote_freshness_summary?.missing ?? 0}</strong>
               </div>
             </div>
           </div>
 
-          <div className="card">
-            <div className="stockHoldingsHeader">
-              <h2>Geography Breakdown</h2>
-              <div className="muted stockHoldingsMeta">
-                Current vs snapshot captured {summary?.net_worth_snapshot_as_of?.slice(0, 10) ?? "—"}
-              </div>
-            </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Geography</th>
-                  <th className="right">Current</th>
-                  <th className="right">Snapshot</th>
-                  <th className="right">Delta</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(summary?.geography_breakdown ?? []).map((item) => (
-                  <tr key={item.geography}>
-                    <td>{item.geography}</td>
-                    <td className="right">{formatMoney(item.current_value)}</td>
-                    <td className="right">{formatMoney(item.snapshot_value)}</td>
-                    <td className={`right ${item.delta_abs >= 0 ? "good" : "bad"}`}>{formatDelta(item.delta_abs, item.delta_pct)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ExposurePieCard
+            title="Geography Breakdown"
+            subtitle={`Stock exposure · snapshot ${summary?.net_worth_snapshot_as_of?.slice(0, 10) ?? "—"}`}
+            items={geographyPieItems}
+            totalLabel={formatMoney(stockCurrentTotal)}
+            formatMoney={formatMoney}
+            ariaLabel="Stock geography exposure pie chart"
+          />
+
+          <ExposurePieCard
+            title="Platform Breakdown"
+            subtitle="Stock exposure by broker/platform"
+            items={platformPieItems}
+            totalLabel={formatMoney(stockCurrentTotal)}
+            formatMoney={formatMoney}
+            ariaLabel="Stock platform exposure pie chart"
+          />
 
           <div className="card stockHoldingsPrimaryCard">
             <div className="stockHoldingsHeader">
