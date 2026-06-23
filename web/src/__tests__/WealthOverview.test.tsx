@@ -10,6 +10,7 @@ import { subscribeToRealtimeTopic } from "../lib/realtime";
 vi.mock("../lib/api", () => ({
   api: {
     dashboardSummary: vi.fn(),
+    platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
   },
 }));
@@ -72,6 +73,15 @@ describe("WealthOverview", () => {
       net: 0,
       savings_rate: null,
     } as never);
+    mockApi.platformAllocation.mockResolvedValue({
+      as_of: "2026-06-01T00:00:00+00:00",
+      total: 125,
+      items: [
+        { platform: "IBKR", platform_type: "BROKER", country: "US", value: 100, percent: 80 },
+        { platform: "CRYPTO", platform_type: "WALLET_PROVIDER", country: null, value: 25, percent: 20 },
+        { platform: "DBS_VICKERS", platform_type: "BROKER", country: "SG", value: 0, percent: 0 },
+      ],
+    } as never);
   });
 
   it("uses the wealth-specific current month instead of a stale global month", async () => {
@@ -87,8 +97,10 @@ describe("WealthOverview", () => {
 
     await waitFor(() => {
       expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-05", "prev_month,prev_year", "SGD");
+      expect(mockApi.platformAllocation).toHaveBeenCalledWith("2026-05", "SGD");
     });
     expect(window.localStorage.getItem("capitalos.selectedMonth.wealth")).toBe("2026-05");
+    expect(screen.getAllByText("DBS Vickers")).not.toHaveLength(0);
   });
 
   it("refetches summary when a portfolio refresh event arrives", async () => {
@@ -107,8 +119,10 @@ describe("WealthOverview", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("S$ 125")).toBeInTheDocument();
-    expect(screen.getByText("Snapshot net worth for 2026-05")).toBeInTheDocument();
+    expect(await screen.findAllByText("S$ 125")).not.toHaveLength(0);
+    expect(screen.getByText("Completed snapshot used for 2026-05")).toBeInTheDocument();
+    expect(screen.getByText("Snapshot period 2026-05 · Boundary 2026-06-01 · Source holdings 2026-05-01")).toBeInTheDocument();
+    expect(screen.getByText("Snapshot day 1. No exact boundary holdings exist; values use the latest holdings at or before the boundary plus known activity.")).toBeInTheDocument();
 
     await act(async () => {
       handlers?.onEvent?.({
@@ -136,6 +150,8 @@ describe("WealthOverview", () => {
     );
 
     expect(await screen.findByText("Portfolio Composition")).toBeInTheDocument();
+    expect(screen.getByText("Platform Allocation")).toBeInTheDocument();
+    expect(screen.getAllByText("IBKR")).not.toHaveLength(0);
     expect(screen.queryByText("Upload reminders")).not.toBeInTheDocument();
     expect(screen.queryByText("Statement coverage")).not.toBeInTheDocument();
   });

@@ -6,6 +6,8 @@ This document replaces `PRD-Module-1.md`.
 
 The Finance Control Plane is the structured-data foundation of CapitalOS. It gives a reliable view of personal capital, spending, holdings, market data, and snapshots.
 
+Target investment-account schema: [Canonical Portfolio Data Model](docs/finance/canonical-portfolio-model.md).
+
 It answers factual questions such as:
 
 - What is my net worth?

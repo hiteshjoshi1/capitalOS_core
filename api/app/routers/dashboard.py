@@ -30,6 +30,7 @@ from app.schemas.dashboard import (
     StockExposureOut,
 )
 from app.fx import get_rates
+from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(require_current_user)])
 
@@ -260,6 +261,14 @@ def _positions_coverage_as_of(db: Session, anchor_ts: datetime, current_user_id:
           FROM positions p
           JOIN accounts acc ON acc.id = p.account_id
           WHERE p.as_of <= :anchor_ts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM broker_accounts ba
+              JOIN portfolio_nav_snapshots ns ON ns.broker_account_id = ba.id
+              WHERE ba.legacy_account_id = p.account_id
+                AND ns.report_date <= :anchor_date
+                AND ns.authority_status = 'authoritative'
+            )
             AND """
         + account_scope_sql("acc")
         + """
@@ -268,7 +277,10 @@ def _positions_coverage_as_of(db: Session, anchor_ts: datetime, current_user_id:
         SELECT MIN(as_of) AS as_of FROM latest
         """
     )
-    row = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().one()
+    row = db.execute(
+        q,
+        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().one()
     return _normalize_ts(row["as_of"])
 
 
@@ -361,6 +373,14 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
           FROM positions p
           JOIN accounts acc ON acc.id = p.account_id
           WHERE p.as_of <= :anchor_ts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM broker_accounts ba
+              JOIN portfolio_nav_snapshots ns ON ns.broker_account_id = ba.id
+              WHERE ba.legacy_account_id = p.account_id
+                AND ns.report_date <= :anchor_date
+                AND ns.authority_status = 'authoritative'
+            )
             AND """
         + account_scope_sql("acc")
         + """
@@ -379,7 +399,9 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
           p.as_of,
           acc.account_type,
           acc.currency AS account_currency,
-          COALESCE(pl.code, acc.platform) AS platform,
+          COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
+          COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
+          COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
           a.id AS asset_id,
           a.symbol,
           a.name,
@@ -394,12 +416,13 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
         JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
         JOIN accounts acc ON acc.id = p.account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
+        LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
         JOIN assets a ON a.id = p.asset_id
         LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         WHERE """
         + account_scope_sql("acc")
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().all()
+    rows = db.execute(q, {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id}).mappings().all()
     if not rows:
         return []
 
@@ -417,6 +440,8 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
             "account_type": row["account_type"],
             "account_currency": row["account_currency"],
             "platform": row["platform"],
+            "platform_type": row["platform_type"],
+            "platform_country": row["platform_country"],
         }
         key = (account_id, row["asset_id"], (row["quote_currency"] or row["account_currency"] or "").upper())
         synthetic_rows[key] = {
@@ -429,6 +454,8 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
             "home_country": row["home_country"],
             "exchange_code": row["exchange_code"],
             "platform": row["platform"],
+            "platform_type": row["platform_type"],
+            "platform_country": row["platform_country"],
             "quantity": float(row["quantity"]) if row["quantity"] is not None else None,
             "avg_cost": float(row["avg_cost"]) if row["avg_cost"] is not None else None,
             "cost_basis_base": float(row["cost_basis_base"]) if row["cost_basis_base"] is not None else 0.0,
@@ -503,6 +530,8 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
                 "home_country": None,
                 "exchange_code": None,
                 "platform": account_meta[account_id]["platform"],
+                "platform_type": account_meta[account_id]["platform_type"],
+                "platform_country": account_meta[account_id]["platform_country"],
                 "quantity": 0.0,
                 "avg_cost": 1.0,
                 "cost_basis_base": 0.0,
@@ -532,6 +561,8 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
                 "home_country": tx["home_country"],
                 "exchange_code": None,
                 "platform": account_meta[account_id]["platform"],
+                "platform_type": account_meta[account_id]["platform_type"],
+                "platform_country": account_meta[account_id]["platform_country"],
                 "quantity": 0.0,
                 "avg_cost": None,
                 "cost_basis_base": 0.0,
@@ -596,6 +627,11 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
     rows = _synthetic_position_rows(db, anchor_ts, current_user_id)
     if not rows:
         rows = []
+    canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
     price_map = _latest_price_map(
         db,
         anchor_ts,
@@ -610,6 +646,7 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
         for r in rows
         if r["quote_currency"] or r.get("asset_id") in price_map
     }
+    currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     currencies.add("USD")  # Include USD for crypto wallet conversions
     rates = get_rates(anchor_ts, base_currency, currencies)
     cash = 0.0
@@ -633,6 +670,13 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
             cash += value
         elif asset_class in ("STOCK", "FUND"):
             stocks_funds += value
+    for row in canonical_nav_rows:
+        nav_currency = str(row["base_currency"] or base_currency).upper()
+        rate = rates.get(nav_currency, 1.0)
+        cash_base = float(row["cash_base"] or 0.0)
+        total_nav_base = float(row["total_nav_base"] or 0.0)
+        cash += cash_base * rate
+        stocks_funds += (total_nav_base - cash_base) * rate
     # Add crypto wallet snapshots (USD -> base_currency), latest per wallet
     as_of_date = anchor_ts.date()
     wallet_total = db.execute(
@@ -681,6 +725,14 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
           FROM positions p
           JOIN accounts acc ON acc.id = p.account_id
           WHERE p.as_of <= :anchor_ts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM broker_accounts ba
+              JOIN portfolio_nav_snapshots ns ON ns.broker_account_id = ba.id
+              WHERE ba.legacy_account_id = p.account_id
+                AND ns.report_date <= :anchor_date
+                AND ns.authority_status = 'authoritative'
+            )
             AND """
             + account_scope_sql("acc")
             + """
@@ -914,6 +966,14 @@ def _top_holdings(
           FROM positions p
           JOIN accounts acc ON acc.id = p.account_id
           WHERE p.as_of <= :anchor_ts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM broker_accounts ba
+              JOIN portfolio_nav_snapshots ns ON ns.broker_account_id = ba.id
+              WHERE ba.legacy_account_id = p.account_id
+                AND ns.report_date <= :anchor_date
+                AND ns.authority_status = 'authoritative'
+            )
             AND """
             + account_scope_sql("acc")
             + """
@@ -946,7 +1006,7 @@ def _top_holdings(
             CAST(COALESCE(lp.currency, a.quote_currency) AS TEXT) AS quote_currency,
             CAST(a.home_country AS TEXT) AS home_country,
             CAST(mx.exchange_code AS TEXT) AS exchange_code,
-            CAST(COALESCE(pl.code, acc.platform) AS TEXT) AS platform,
+            CAST(COALESCE(NULLIF(acc.platform, ''), pl.code) AS TEXT) AS platform,
             p.quantity AS quantity,
             p.avg_cost AS avg_cost,
             lp.price AS latest_price,
@@ -1206,32 +1266,81 @@ def _stock_geo_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
     return grouped
 
 
-def _stock_geography_breakdown(
-    db: Session,
-    snapshot_anchor: datetime,
-    base_currency: str,
-    current_user_id: int,
+def _stock_key_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
+    grouped: dict[str, float] = {}
+    for item in items:
+        key = str(item.get("key") or "UNKNOWN")
+        grouped[key] = grouped.get(key, 0.0) + float(item.get("value") or 0.0)
+    return grouped
+
+
+def _stock_breakdown_items(
+    current_values: dict[str, float],
+    snapshot_values: dict[str, float],
+    *,
+    current_total: float,
+    preferred_order: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
-    current_payload = _stock_exposure(db, _current_anchor_ts(), base_currency, current_user_id)
-    snapshot_payload = _stock_exposure(db, snapshot_anchor, base_currency, current_user_id)
-    current_values = _stock_geo_value_map(current_payload["by_country"])
-    snapshot_values = _stock_geo_value_map(snapshot_payload["by_country"])
+    keys = set(current_values) | set(snapshot_values)
+    if preferred_order:
+        ordered_keys = [key for key in preferred_order if key in keys]
+        ordered_keys.extend(sorted(keys - set(preferred_order)))
+    else:
+        ordered_keys = sorted(keys, key=lambda key: (-current_values.get(key, 0.0), key))
 
     items: list[dict[str, Any]] = []
-    for geography in ("US", "HK", "SG", "IN", "Other"):
-        current_value = current_values.get(geography, 0.0)
-        snapshot_value = snapshot_values.get(geography, 0.0)
+    for key in ordered_keys:
+        current_value = current_values.get(key, 0.0)
+        snapshot_value = snapshot_values.get(key, 0.0)
         delta_abs = current_value - snapshot_value
         items.append(
             {
-                "geography": geography,
+                "key": key,
                 "current_value": current_value,
                 "snapshot_value": snapshot_value,
                 "delta_abs": delta_abs,
                 "delta_pct": (delta_abs / snapshot_value) if snapshot_value > 0 else None,
+                "percent": round((current_value / current_total) * 100, 2) if current_total > 0 else 0.0,
             }
         )
     return items
+
+
+def _stock_geography_breakdown(
+    current_payload: dict[str, Any],
+    snapshot_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    current_values = _stock_geo_value_map(current_payload["by_country"])
+    snapshot_values = _stock_geo_value_map(snapshot_payload["by_country"])
+
+    return [
+        {
+            "geography": item["key"],
+            "current_value": item["current_value"],
+            "snapshot_value": item["snapshot_value"],
+            "delta_abs": item["delta_abs"],
+            "delta_pct": item["delta_pct"],
+        }
+        for item in _stock_breakdown_items(
+            current_values,
+            snapshot_values,
+            current_total=float(current_payload.get("total") or 0.0),
+            preferred_order=("US", "HK", "SG", "IN", "Other"),
+        )
+    ]
+
+
+def _stock_platform_breakdown(
+    current_payload: dict[str, Any],
+    snapshot_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    current_values = _stock_key_value_map(current_payload["by_platform"])
+    snapshot_values = _stock_key_value_map(snapshot_payload["by_platform"])
+    return _stock_breakdown_items(
+        current_values,
+        snapshot_values,
+        current_total=float(current_payload.get("total") or 0.0),
+    )
 
 
 def _quote_freshness_summary(top_holdings: list[dict[str, Any]]) -> dict[str, int]:
@@ -1581,62 +1690,78 @@ def _compute_component_changes(
 
 
 def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> dict:
-    q = text("""
-        WITH latest AS (
-          SELECT p.account_id, MAX(p.as_of) AS as_of
-          FROM positions p
-          JOIN accounts acc ON acc.id = p.account_id
-          WHERE p.as_of <= :anchor_ts
-            AND """
-            + account_scope_sql("acc")
+    rows = _synthetic_position_rows(db, anchor_ts, current_user_id)
+    canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
+    price_map = _latest_price_map(
+        db,
+        anchor_ts,
+        {
+            int(r["asset_id"])
+            for r in rows
+            if r.get("asset_id") is not None and str(r.get("asset_class") or "").upper() in {"STOCK", "FUND"}
+        },
+    )
+    wallet_total = db.execute(
+        text(
+            """
+            WITH latest AS (
+              SELECT s.wallet_id, MAX(s.as_of_date) AS as_of_date
+              FROM crypto_wallet_snapshots s
+              JOIN crypto_wallets w ON w.id = s.wallet_id
+              WHERE s.as_of_date <= :as_of_date
+                AND w.status = 'active'
+                AND """
+            + account_scope_sql("w")
             + """
-          GROUP BY p.account_id
+              GROUP BY s.wallet_id
+            )
+            SELECT SUM(s.total_usd) AS total_usd
+            FROM crypto_wallet_snapshots s
+            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+            """
         ),
-        latest_prices AS (
-          SELECT p1.asset_id, p1.price, p1.currency
-          FROM prices p1
-          JOIN (
-            SELECT asset_id, MAX(trade_date) AS trade_date
-            FROM prices
-            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
-            GROUP BY asset_id
-          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
-        )
-        SELECT
-          COALESCE(pl.code, a.platform) AS platform,
-          pl.platform_type AS platform_type,
-          COALESCE(pl.country, a.country) AS country,
-          COALESCE(lp.currency, a2.quote_currency) AS quote_currency,
-          CASE
-            WHEN a2.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
-              THEN p.quantity * lp.price
-            ELSE p.cost_basis_base
-          END AS value
-        FROM positions p
-        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
-        JOIN accounts a ON a.id = p.account_id
-        LEFT JOIN platforms pl ON pl.id = a.platform_id
-        JOIN assets a2 ON a2.id = p.asset_id
-        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
-        WHERE a2.asset_class <> 'CRYPTO'
-          AND """
-        + account_scope_sql("a")
-        + """
-    """)
-    rows = db.execute(
-        q,
-        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
-    ).mappings().all()
-    if not rows:
-        return {"as_of": None, "total": 0.0, "items": []}
-    currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+        {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
+    ).mappings().one()
+    wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
+    currencies = {
+        (price_map[int(r["asset_id"])]["currency"] if r.get("asset_id") in price_map else r["quote_currency"])
+        for r in rows
+        if r.get("quote_currency") or r.get("asset_id") in price_map
+    }
+    currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
+    if wallet_usd:
+        currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[tuple, float] = {}
     for r in rows:
-        key = (r["platform"], r["platform_type"], r["country"])
-        cur = (r["quote_currency"] or base_currency).upper()
-        value = float(r["value"]) * rates.get(cur, 1.0)
+        asset_class = str(r.get("asset_class") or "").upper()
+        if asset_class == "CRYPTO":
+            continue
+        asset_id = r.get("asset_id")
+        latest_price = price_map.get(int(asset_id), {}).get("price") if asset_id is not None else None
+        quote_currency = price_map.get(int(asset_id), {}).get("currency") if asset_id is not None else None
+        cur = (quote_currency or r.get("quote_currency") or base_currency).upper()
+        quantity = float(r["quantity"]) if r.get("quantity") is not None else None
+        if asset_class in ("STOCK", "FUND") and quantity is not None and latest_price is not None:
+            value_local = quantity * float(latest_price)
+        else:
+            value_local = float(r.get("cost_basis_base") or 0.0)
+        value = value_local * rates.get(cur, 1.0)
+        key = (r.get("platform") or "UNKNOWN", r.get("platform_type"), r.get("platform_country"))
         buckets[key] = buckets.get(key, 0.0) + value
+    for row in canonical_nav_rows:
+        nav_currency = str(row.get("base_currency") or base_currency).upper()
+        value = float(row.get("total_nav_base") or 0.0) * rates.get(nav_currency, 1.0)
+        key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("country"))
+        buckets[key] = buckets.get(key, 0.0) + value
+    if wallet_usd:
+        buckets[("CRYPTO", "WALLET_PROVIDER", None)] = buckets.get(("CRYPTO", "WALLET_PROVIDER", None), 0.0) + (
+            wallet_usd * rates.get("USD", 1.0)
+        )
     total = sum(buckets.values())
     items = []
     for (platform, platform_type, country), value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
@@ -1648,7 +1773,7 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, c
             "value": value,
             "percent": percent,
         })
-    return {"as_of": None, "total": total, "items": items}
+    return {"as_of": anchor_ts.isoformat(), "total": total, "items": items}
 
 
 def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> dict:
@@ -1659,6 +1784,14 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
           FROM positions p
           JOIN accounts acc ON acc.id = p.account_id
           WHERE p.as_of <= :anchor_ts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM broker_accounts ba
+              JOIN portfolio_nav_snapshots ns ON ns.broker_account_id = ba.id
+              WHERE ba.legacy_account_id = p.account_id
+                AND ns.report_date <= :anchor_date
+                AND ns.authority_status = 'authoritative'
+            )
             AND """
             + account_scope_sql("acc")
             + """
@@ -1675,7 +1808,7 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
           ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
         )
         SELECT
-          COALESCE(pl.code, a.platform) AS platform,
+          COALESCE(NULLIF(a.platform, ''), pl.code) AS platform,
           a2.symbol AS symbol,
           a2.home_country AS home_country,
           COALESCE(lp.currency, a2.quote_currency) AS quote_currency,
@@ -1700,9 +1833,15 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
         q,
         {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
-    if not rows:
+    canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
+    if not rows and not canonical_nav_rows:
         return {"as_of": None, "base_currency": base_currency, "total": 0.0, "by_country": [], "by_platform": []}
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     rates = get_rates(anchor_ts, base_currency, currencies)
 
     by_country: Dict[str, float] = {}
@@ -1715,6 +1854,16 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
         total += value
         platform = r["platform"] or "UNKNOWN"
         country = _infer_country(r["symbol"], r["home_country"], platform, r["quote_currency"])
+        by_platform[platform] = by_platform.get(platform, 0.0) + value
+        by_country[country] = by_country.get(country, 0.0) + value
+    for row in canonical_nav_rows:
+        nav_currency = str(row.get("base_currency") or base_currency).upper()
+        value = (float(row.get("total_nav_base") or 0.0) - float(row.get("cash_base") or 0.0)) * rates.get(nav_currency, 1.0)
+        if value <= 0:
+            continue
+        platform = row.get("platform") or "UNKNOWN"
+        country = row.get("country") or "UNKNOWN"
+        total += value
         by_platform[platform] = by_platform.get(platform, 0.0) + value
         by_country[country] = by_country.get(country, 0.0) + value
 
@@ -1949,7 +2098,10 @@ def stock_holdings_summary(
         for row in _top_holdings(db, current_anchor, current_nw["total"], base_currency, current_user.id, limit=top_holdings_limit)
         if str(row.get("asset_class") or "").upper() in {"STOCK", "FUND"}
     ]
-    geography_breakdown = _stock_geography_breakdown(db, anchor, base_currency, current_user.id)
+    current_stock_exposure = _stock_exposure(db, current_anchor, base_currency, current_user.id)
+    snapshot_stock_exposure = _stock_exposure(db, anchor, base_currency, current_user.id)
+    geography_breakdown = _stock_geography_breakdown(current_stock_exposure, snapshot_stock_exposure)
+    platform_breakdown = _stock_platform_breakdown(current_stock_exposure, snapshot_stock_exposure)
     quote_freshness_summary = _quote_freshness_summary(top)
 
     return {
@@ -1964,6 +2116,9 @@ def stock_holdings_summary(
         "net_worth_freshness_status": freshness_status,
         "top_holdings": top,
         "geography_breakdown": geography_breakdown,
+        "platform_breakdown": platform_breakdown,
+        "stock_current_total": current_stock_exposure["total"],
+        "stock_snapshot_total": snapshot_stock_exposure["total"],
         "quote_freshness_summary": quote_freshness_summary,
     }
 

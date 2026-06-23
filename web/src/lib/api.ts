@@ -390,6 +390,16 @@ export type StockHoldingsSummary = {
     delta_abs: number;
     delta_pct?: number | null;
   }>;
+  platform_breakdown?: Array<{
+    key: string;
+    current_value: number;
+    snapshot_value: number;
+    delta_abs: number;
+    delta_pct?: number | null;
+    percent: number;
+  }>;
+  stock_current_total?: number;
+  stock_snapshot_total?: number;
   quote_freshness_summary?: {
     fresh: number;
     stale: number;

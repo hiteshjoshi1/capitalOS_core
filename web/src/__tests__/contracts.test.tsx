@@ -14,6 +14,7 @@ vi.mock("../lib/api", () => ({
   api: {
     dashboardSummary: vi.fn(),
     dashboardGeographyExposure: vi.fn(),
+    platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
     categories: vi.fn(),
     cashFlowDetail: vi.fn(),
@@ -132,6 +133,15 @@ function mockWealthApis() {
     total: 100000,
     items: [
       { country: "US", stocks_funds: 50000, cash: 0, crypto: 15000, total: 65000, percent: 65 },
+    ],
+  });
+  vi.mocked(api.platformAllocation).mockResolvedValue({
+    as_of: "2026-03-01T00:00:00+00:00",
+    total: 100000,
+    items: [
+      { platform: "IBKR", platform_type: "BROKER", country: "US", value: 50000, percent: 50 },
+      { platform: "CRYPTO", platform_type: "WALLET_PROVIDER", country: null, value: 25000, percent: 25 },
+      { platform: "DBS", platform_type: "BANK", country: "SG", value: 25000, percent: 25 },
     ],
   });
   vi.mocked(api.categories).mockResolvedValue([
@@ -255,7 +265,7 @@ describe("frontend contracts", () => {
     expect(screen.getByText("Top Movers")).toBeInTheDocument();
     expect(screen.getAllByText("AAPL").length).toBeGreaterThan(0);
     expect(screen.getAllByText("BTC").length).toBeGreaterThan(0);
-    expect(screen.getByText("50.0%")).toBeInTheDocument();
+    expect(screen.getAllByText("50.0%").length).toBeGreaterThan(0);
     expect(screen.getAllByText("25.0%").length).toBeGreaterThan(0);
     expect(screen.queryByLabelText("Action queue")).not.toBeInTheDocument();
   });

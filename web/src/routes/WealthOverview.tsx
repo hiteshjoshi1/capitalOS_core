@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { DashboardSummary, SpendingSummary } from "../lib/api";
+import type { DashboardSummary, PlatformAllocation, SpendingSummary } from "../lib/api";
+import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
+import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
@@ -25,23 +27,37 @@ const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
 const WEALTH_OVERVIEW_MONTH_STORAGE_KEY = "capitalos.selectedMonth.wealth";
 
+function snapshotPeriodFromBoundary(value?: string | null): string {
+  if (!value) return "—";
+  const [yearRaw, monthRaw] = value.slice(0, 10).split("-");
+  const year = Number(yearRaw);
+  const month = Number(monthRaw);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return "—";
+  const periodMonth = month === 1 ? 12 : month - 1;
+  const periodYear = month === 1 ? year - 1 : year;
+  return `${periodYear}-${String(periodMonth).padStart(2, "0")}`;
+}
+
 export default function WealthOverview() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
+  const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
   const [month, setMonth] = useSelectedMonth(WEALTH_OVERVIEW_MONTH_STORAGE_KEY);
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
 
   const fetchDashboardData = useCallback(async () => {
-    const [summaryData, spendingData] = await Promise.all([
+    const [summaryData, spendingData, platformAllocationData] = await Promise.all([
       api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
       api.spendingSummary(month, baseCurrency),
+      api.platformAllocation(month, baseCurrency),
     ]);
     return {
       summaryData,
       spendingData,
+      platformAllocationData,
     };
   }, [baseCurrency, month]);
 
@@ -55,6 +71,7 @@ export default function WealthOverview() {
         if (cancelled) return;
         setSummary(data.summaryData);
         setSpendingSummary(data.spendingData);
+        setPlatformAllocation(data.platformAllocationData);
         setState("ready");
       } catch (error: unknown) {
         if (cancelled) return;
@@ -77,6 +94,7 @@ export default function WealthOverview() {
         if (cancelled) return;
         setSummary(data.summaryData);
         setSpendingSummary(data.spendingData);
+        setPlatformAllocation(data.platformAllocationData);
         setErr("");
         setState("ready");
       } catch (error: unknown) {
@@ -107,7 +125,7 @@ export default function WealthOverview() {
   }, [fetchDashboardData]);
 
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
-  const formatMoney = (value?: number, maximumFractionDigits = 0) =>
+  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
   const formatShortDate = (value?: string | null) => (value ? value.slice(0, 10) : "—");
 
@@ -162,12 +180,23 @@ export default function WealthOverview() {
     ],
     [cashPct, cryptoPct, stocksPct, summary],
   );
+  const platformPieItems = useMemo(
+    () =>
+      (platformAllocation?.items ?? []).map((item) => ({
+        label: formatPlatformLabel(item.platform),
+        value: item.value,
+        percent: item.percent,
+      })),
+    [platformAllocation],
+  );
 
   const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
   const topMovers = summary?.top_movers ?? null;
   const prevMonthChange = summary?.net_worth_change?.vs_prev_month;
   const prevYearChange = summary?.net_worth_change?.vs_prev_year;
   const netWorthAsOf = summary?.net_worth_as_of ?? null;
+  const snapshotBoundaryAt = summary?.net_worth_boundary_at ?? netWorthAsOf;
+  const snapshotPeriod = snapshotPeriodFromBoundary(snapshotBoundaryAt);
   const snapshotCapturedAt = summary?.net_worth_snapshot_as_of ?? null;
   const snapshotFreshnessStatus = summary?.net_worth_freshness_status ?? "missing";
   const snapshotStatusLabel =
@@ -182,6 +211,12 @@ export default function WealthOverview() {
       : snapshotFreshnessStatus === "synthetic"
         ? "wealthSnapshotBadgeSynthetic"
         : "wealthSnapshotBadgeMissing";
+  const snapshotFreshnessDescription =
+    snapshotFreshnessStatus === "exact"
+      ? "Exact holdings exist on the boundary."
+      : snapshotFreshnessStatus === "synthetic"
+        ? "No exact boundary holdings exist; values use the latest holdings at or before the boundary plus known activity."
+        : "No holdings snapshot exists at or before the boundary.";
 
   const renderDelta = (label: string, abs: number, pct: number | null) => (
     <div className="wealthDeltaPill">
@@ -274,13 +309,16 @@ export default function WealthOverview() {
               <div className="wealthSnapshotPanel">
                 <div className="wealthSnapshotPanelHeader">
                   <div>
-                    <p className="wealthSnapshotLabel">Snapshot net worth for {month}</p>
+                    <p className="wealthSnapshotLabel">Completed snapshot used for {summary.as_of_month ?? month}</p>
                     <strong className="wealthSnapshotValue">{formatMoney(summary.net_worth.total, 2)}</strong>
                   </div>
                   <span className={`wealthSnapshotBadge ${snapshotStatusClass}`}>{snapshotStatusLabel}</span>
                 </div>
                 <p className="muted wealthSnapshotMeta">
-                  {`Snapshot day ${summary.snapshot_day ?? "—"} · Captured ${formatShortDate(snapshotCapturedAt)} · Boundary ${formatShortDate(netWorthAsOf)}`}
+                  {`Snapshot period ${snapshotPeriod} · Boundary ${formatShortDate(snapshotBoundaryAt)} · Source holdings ${formatShortDate(snapshotCapturedAt)}`}
+                </p>
+                <p className="muted wealthSnapshotNote">
+                  {`Snapshot day ${summary.snapshot_day ?? "—"}. ${snapshotFreshnessDescription}`}
                 </p>
               </div>
               <div className="wealthDeltaRow" aria-label="Net worth changes">
@@ -288,7 +326,26 @@ export default function WealthOverview() {
                 {prevYearChange ? renderDelta(`vs ${prevYearChange.compare_month}`, prevYearChange.abs, prevYearChange.pct) : null}
               </div>
             </article>
+          </section>
 
+          <section className="wealthSectionBlock" aria-labelledby="wealth-allocation-heading">
+            <div className="wealthSectionHeader">
+              <div>
+                <p className="wealthEyebrow" id="wealth-allocation-heading">Allocation</p>
+                <h2>Where the money sits</h2>
+              </div>
+              <span className="muted">Platform and asset-class view of snapshot net worth</span>
+            </div>
+            <div className="wealthAllocationGrid">
+              <ExposurePieCard
+                title="Platform Allocation"
+                subtitle="Snapshot net worth by broker, bank, and wallet platform"
+                items={platformPieItems}
+                totalLabel={formatMoney(platformAllocation?.total ?? 0)}
+                formatMoney={formatMoney}
+                ariaLabel="Platform net worth allocation pie chart"
+                className="wealthPlatformAllocationCard"
+              />
             <article className="card wealthAllocationCard">
               <div className="wealthAllocationHeader">
                 <p className="wealthEyebrow">Portfolio Composition</p>
@@ -319,8 +376,16 @@ export default function WealthOverview() {
                 ))}
               </div>
             </article>
+            </div>
           </section>
 
+          <section className="wealthSectionBlock" aria-labelledby="wealth-components-heading">
+            <div className="wealthSectionHeader">
+              <div>
+                <p className="wealthEyebrow" id="wealth-components-heading">Components</p>
+                <h2>Open each balance-sheet surface</h2>
+              </div>
+            </div>
           <section className="wealthSurfaceGrid">
             {composition.map((slice) => (
               <Link
@@ -348,7 +413,15 @@ export default function WealthOverview() {
               </Link>
             ))}
           </section>
+          </section>
 
+          <section className="wealthSectionBlock" aria-labelledby="wealth-signals-heading">
+            <div className="wealthSectionHeader">
+              <div>
+                <p className="wealthEyebrow" id="wealth-signals-heading">Signals</p>
+                <h2>Cash flow, risk, and movement</h2>
+              </div>
+            </div>
           <section className="wealthDetailGrid">
             <article className="card wealthDetailCard">
               <p className="wealthEyebrow">Cash Flow</p>
@@ -424,6 +497,7 @@ export default function WealthOverview() {
               </div>
             </article>
 
+          </section>
           </section>
         </div>
       ) : null}

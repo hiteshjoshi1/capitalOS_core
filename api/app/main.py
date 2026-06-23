@@ -13,6 +13,7 @@ from app.routers.spending import router as spending_router
 from app.routers.ingest import router as ingest_router
 from app.routers.crypto import router as crypto_router
 from app.routers.market_data import router as market_data_router
+from app.routers.portfolio import router as portfolio_router
 from app.routers.alerts import router as alerts_router
 from app.routers.dividends import router as dividends_router
 from app.routers.rag import router as rag_router
@@ -20,6 +21,7 @@ from app.routers.ai_sage import router as ai_sage_router
 from app.routers.realtime import router as realtime_router
 from app.crypto.scheduler import start_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
+from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
 from app.services.ai_sage import prune_expired_ai_sage_chats
 
 
@@ -71,6 +73,7 @@ app.include_router(spending_router)
 app.include_router(ingest_router)
 app.include_router(crypto_router)
 app.include_router(market_data_router)
+app.include_router(portfolio_router)
 app.include_router(alerts_router)
 app.include_router(dividends_router)
 app.include_router(rag_router)
@@ -130,5 +133,6 @@ def _schedule_ai_sage_pruning() -> None:
 def _start_schedulers():
     start_scheduler()
     start_market_scheduler()
+    start_portfolio_scheduler()
     _schedule_alerts_pruning()
     _schedule_ai_sage_pruning()

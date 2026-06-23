@@ -35,6 +35,11 @@ const summaryFixture: StockHoldingsSummary = {
     { geography: "HK", current_value: 120000, snapshot_value: 100000, delta_abs: 20000, delta_pct: 0.2 },
     { geography: "IN", current_value: 90000, snapshot_value: 85000, delta_abs: 5000, delta_pct: 5000 / 85000 },
   ],
+  platform_breakdown: [
+    { key: "IBKR", current_value: 210000, snapshot_value: 185000, delta_abs: 25000, delta_pct: 25000 / 185000, percent: 100 },
+  ],
+  stock_current_total: 210000,
+  stock_snapshot_total: 185000,
   top_holdings: [
     {
       asset_id: 1,
@@ -99,6 +104,9 @@ describe("StockHoldings", () => {
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
     expect(screen.getByText("Quote Freshness")).toBeInTheDocument();
     expect(screen.getByText("Geography Breakdown")).toBeInTheDocument();
+    expect(screen.getByText("Platform Breakdown")).toBeInTheDocument();
+    expect(screen.getByLabelText("Stock geography exposure pie chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Stock platform exposure pie chart")).toBeInTheDocument();
     expect(screen.queryByText("Dividends")).not.toBeInTheDocument();
 
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
@@ -140,7 +148,7 @@ describe("StockHoldings", () => {
   });
 
   it("refreshes market data before reloading stock holdings", async () => {
-    mockApi.marketDataRefreshNow.mockResolvedValueOnce({ status: "ok" });
+    mockApi.marketDataRefreshNow.mockResolvedValueOnce({ status: "ok", exchanges: [] });
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
     mockApi.stockHoldingsSummary.mockResolvedValueOnce({
       ...summaryFixture,
