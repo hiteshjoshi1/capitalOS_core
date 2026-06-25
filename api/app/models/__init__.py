@@ -16,6 +16,7 @@ from .crypto import (
 )
 from .user import User, UserCredential, AuthSession, OAuthIdentity
 from .ai_sage_chat import AISageChat, AISageMessage, AISageTurnEvidence
+from .canonical_balance import AccountBalanceSnapshot
 from .rag import (
     RagAuthor,
     RagAuthorCard,
@@ -59,4 +60,5 @@ __all__ = [
     "RagEmbedding",
     "RagIngestionJob",
     "RealtimeEvent",
+    "AccountBalanceSnapshot",
 ]
