@@ -148,6 +148,7 @@ def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_
     assert "stock_current_total" in data
     assert "stock_snapshot_total" in data
     assert "quote_freshness_summary" in data
+    assert "trend" in data
 
 
 def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(client: TestClient, db_engine, monkeypatch):
@@ -225,6 +226,7 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
     assert platform["IBKR"]["delta_abs"] == 800.0
     assert platform["IBKR"]["percent"] == 100.0
     assert data["quote_freshness_summary"]["fresh"] == 2
+    assert data["trend"][-1]["month"] == "2026-04"
 
 
 def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, db_engine, monkeypatch):

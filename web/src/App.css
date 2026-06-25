@@ -795,6 +795,53 @@ a.btn {
   font-size: 13px;
 }
 
+.stockColumnMenu {
+  position: relative;
+}
+
+.stockColumnMenu[open] .stockColumnPanel {
+  display: grid;
+}
+
+.stockColumnSummary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.stockColumnSummary::-webkit-details-marker {
+  display: none;
+}
+
+.stockColumnPanel {
+  display: none;
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 5;
+  min-width: 190px;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent 22%);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 16px 34px color-mix(in srgb, black 18%, transparent 82%);
+}
+
+.stockColumnOption {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.stockColumnOption input {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--accent);
+}
+
 .stockHoldingsTableWrap {
   overflow-x: auto;
   border: 1px solid color-mix(in srgb, var(--line) 72%, transparent 28%);
@@ -868,6 +915,11 @@ a.btn {
   font-variant-numeric: tabular-nums;
 }
 
+.stockHoldingsQuantityCell {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
 .stockHoldingsPnlCell {
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -898,56 +950,118 @@ a.btn {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.stockFreshnessCard {
-  padding: 18px;
+.valueTrendCard {
+  padding: 16px;
 }
 
-.stockFreshnessCard .stockHoldingsHeader {
-  margin-bottom: 12px;
+.valueTrendCardWide {
+  grid-column: 1 / -1;
 }
 
-.stockFreshnessPills {
+.valueTrendCard .stockHoldingsHeader {
+  margin-bottom: 10px;
+}
+
+.valueTrendValue {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.stockFreshnessPill {
-  display: inline-flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-width: 116px;
+  margin-bottom: 10px;
   padding: 9px 12px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent 28%);
-  background: color-mix(in srgb, var(--panel2) 78%, transparent 22%);
+  border: 1px solid color-mix(in srgb, var(--line) 68%, transparent 32%);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--panel2) 74%, transparent 26%);
 }
 
-.stockFreshnessPill span {
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
+.valueTrendValue span {
+  font-size: 12px;
   color: var(--muted);
 }
 
-.stockFreshnessPill strong {
+.valueTrendValue strong {
   font-size: 18px;
   font-variant-numeric: tabular-nums;
   color: var(--text);
 }
 
-.stockFreshnessPillFresh {
-  border-color: color-mix(in srgb, var(--good) 36%, transparent 64%);
+.valueTrendChart {
+  display: grid;
+  gap: 8px;
 }
 
-.stockFreshnessPillStale {
-  border-color: color-mix(in srgb, #f59f43 38%, transparent 62%);
+.valueTrendChart svg {
+  width: 100%;
+  min-height: 190px;
+  overflow: visible;
 }
 
-.stockFreshnessPillMissing {
-  border-color: color-mix(in srgb, var(--trend-negative) 34%, transparent 66%);
+.valueTrendGridLine {
+  stroke: color-mix(in srgb, var(--line) 72%, transparent 28%);
+  stroke-width: 1;
+}
+
+.valueTrendAxisLine {
+  stroke: color-mix(in srgb, var(--line) 86%, transparent 14%);
+  stroke-width: 1.4;
+}
+
+.valueTrendLine {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.valueTrendPoint {
+  fill: var(--panel);
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.valueTrendMonthLabel {
+  fill: var(--muted);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.valueTrendPointLabel {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.valueTrendDataStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  gap: 6px;
+}
+
+.valueTrendDataPoint {
+  display: grid;
+  gap: 4px;
+  padding: 7px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 64%, transparent 36%);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--panel2) 66%, transparent 34%);
+}
+
+.valueTrendDataPoint span {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.valueTrendDataPoint strong {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+.valueTrendEmpty {
+  min-height: 140px;
+  display: grid;
+  place-items: center;
 }
 
 @media (min-width: 1100px) {
@@ -955,7 +1069,7 @@ a.btn {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .stockFreshnessCard,
+  .valueTrendCard,
   .stockHoldingsPrimaryCard {
     grid-column: 1 / -1;
   }

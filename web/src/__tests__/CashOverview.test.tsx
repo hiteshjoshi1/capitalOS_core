@@ -91,10 +91,22 @@ describe("CashOverview route", () => {
     );
 
     expect(await screen.findByText("Cash Snapshot")).toBeInTheDocument();
-    expect(screen.getByText("Currency Breakdown")).toBeInTheDocument();
+    const cashDepositsHeading = screen.getByText("Cash Deposits");
+    const currencyHeading = screen.getByText("Currency Breakdown");
+    const stablecoinsHeading = screen.getByText("Stablecoins");
+    const trendHeading = screen.getByText("Six-Month Cash Trend");
+    expect(currencyHeading).toBeInTheDocument();
     expect(screen.getByText("DBS")).toBeInTheDocument();
     expect(screen.getByText("62.5%")).toBeInTheDocument();
-    expect(screen.getByText("Six-Month Cash Trend")).toBeInTheDocument();
+    expect(trendHeading).toBeInTheDocument();
+    expect(screen.getByLabelText("Six-month cash trend")).toBeInTheDocument();
+    expect(cashDepositsHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(currencyHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(stablecoinsHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Nov '25")).not.toBeInTheDocument();
+    expect(screen.queryByText("Dec '25")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Jan '26").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S$ 35,000").length).toBeGreaterThan(0);
 
     expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
     expect(mockApi.cryptoSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");

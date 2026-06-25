@@ -4,8 +4,8 @@ import type { CashDeposits, CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
-import MiniTrend from "../components/MiniTrend";
 import PageShell from "../components/PageShell";
+import ValueTrendChart from "../components/ValueTrendChart";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -40,6 +40,10 @@ export default function CashOverview() {
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatCompactMoney = (value?: number | null) =>
+    value == null
+      ? "—"
+      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
 
   const stablecoins = useMemo(() => {
     const tokens = (cryptoSummary?.top_holdings ?? []).filter((t) => STABLECOINS.has((t.symbol || "").toUpperCase()));
@@ -110,14 +114,6 @@ export default function CashOverview() {
                   </div>
                 </div>
               </div>
-            </div>
-
-            <div className="card">
-              <div className="stockHoldingsHeader">
-                <h2>Six-Month Cash Trend</h2>
-                <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
-              </div>
-              <MiniTrend points={cashDeposits?.trend ?? []} ariaLabel="Six-month cash trend" />
             </div>
 
             <div className="card">
@@ -225,6 +221,23 @@ export default function CashOverview() {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            <div className="card valueTrendCard valueTrendCardWide">
+              <div className="stockHoldingsHeader">
+                <h2>Six-Month Cash Trend</h2>
+                <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
+              </div>
+              <div className="valueTrendValue">
+                <span>Current cash value</span>
+                <strong>{formatMoney(cashDeposits?.current_total)}</strong>
+              </div>
+              <ValueTrendChart
+                points={cashDeposits?.trend ?? []}
+                ariaLabel="Six-month cash trend"
+                formatMoney={formatMoney}
+                formatCompactMoney={formatCompactMoney}
+              />
             </div>
           </section>
         </>

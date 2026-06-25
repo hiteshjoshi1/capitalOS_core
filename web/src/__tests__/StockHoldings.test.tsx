@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import StockHoldings from "../routes/StockHoldings";
@@ -15,6 +15,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 const mockApi = vi.mocked(api, true);
+const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns";
 
 const summaryFixture: StockHoldingsSummary = {
   as_of_month: "2026-02",
@@ -40,6 +41,11 @@ const summaryFixture: StockHoldingsSummary = {
   ],
   stock_current_total: 210000,
   stock_snapshot_total: 185000,
+  trend: [
+    { month: "2026-01", value: 175000 },
+    { month: "2026-02", value: 185000 },
+    { month: "2026-03", value: 210000 },
+  ],
   top_holdings: [
     {
       asset_id: 1,
@@ -90,6 +96,11 @@ const summaryFixture: StockHoldingsSummary = {
 };
 
 describe("StockHoldings", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
 
@@ -102,9 +113,15 @@ describe("StockHoldings", () => {
     );
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
-    expect(screen.getByText("Quote Freshness")).toBeInTheDocument();
-    expect(screen.getByText("Geography Breakdown")).toBeInTheDocument();
-    expect(screen.getByText("Platform Breakdown")).toBeInTheDocument();
+    const trendHeading = screen.getByText("Six-Month Stock Trend");
+    const geographyHeading = screen.getByText("Geography Breakdown");
+    const platformHeading = screen.getByText("Platform Breakdown");
+    expect(trendHeading).toBeInTheDocument();
+    expect(screen.getByLabelText("Six-month stock trend")).toBeInTheDocument();
+    expect(screen.getAllByText("Jan '26").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S$ 175,000").length).toBeGreaterThan(0);
+    expect(geographyHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(platformHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByLabelText("Stock geography exposure pie chart")).toBeInTheDocument();
     expect(screen.getByLabelText("Stock platform exposure pie chart")).toBeInTheDocument();
     expect(screen.queryByText("Dividends")).not.toBeInTheDocument();
@@ -112,19 +129,21 @@ describe("StockHoldings", () => {
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
 
+    expect(screen.getByRole("columnheader", { name: "Shares" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Current Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Profit & Loss" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Quote freshness" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "% NW" })).toBeInTheDocument();
-    expect(screen.getByText("Fresh")).toBeInTheDocument();
-    expect(screen.getByText("Stale")).toBeInTheDocument();
+    const columnHeaders = screen.getAllByRole("columnheader").map((header) => header.textContent);
+    expect(columnHeaders.at(-1)).toBe("Quote freshness");
+    expect(screen.queryByText("Quote Freshness")).not.toBeInTheDocument();
 
     const hkRow = screen.getByText("700").closest("tr");
     expect(hkRow).not.toBeNull();
     if (hkRow) {
       const scoped = within(hkRow);
-      expect(scoped.getByText("10.5 shares")).toBeInTheDocument();
+      expect(scoped.getByText("10.5")).toBeInTheDocument();
       expect(scoped.getByText("HKD 123.45")).toBeInTheDocument();
       expect(scoped.getByText("HKD 150.12")).toBeInTheDocument();
       expect(scoped.getByText("+HKD 280.04")).toBeInTheDocument();
@@ -138,13 +157,34 @@ describe("StockHoldings", () => {
     expect(inRow).not.toBeNull();
     if (inRow) {
       const scoped = within(inRow);
-      expect(scoped.getByText("20 shares")).toBeInTheDocument();
+      expect(scoped.getByText("20")).toBeInTheDocument();
       expect(scoped.getAllByText("—").length).toBeGreaterThanOrEqual(2);
       expect(scoped.getByText("stale")).toBeInTheDocument();
     }
 
     expect(screen.getAllByText("HK").length).toBeGreaterThan(0);
     expect(screen.getAllByText("IN").length).toBeGreaterThan(0);
+  });
+
+  it("stores stock table column visibility in browser storage", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByRole("columnheader", { name: "Current Price" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Current Price"));
+
+    expect(screen.queryByRole("columnheader", { name: "Current Price" })).not.toBeInTheDocument();
+    expect(JSON.parse(window.localStorage.getItem(STOCK_COLUMN_STORAGE_KEY) ?? "{}")).toMatchObject({
+      currentPrice: false,
+    });
   });
 
   it("refreshes market data before reloading stock holdings", async () => {
@@ -167,13 +207,13 @@ describe("StockHoldings", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("Stale")).toBeInTheDocument();
+    expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Refresh now" }));
 
     expect(await screen.findByText("Refreshing...")).toBeInTheDocument();
     await waitFor(() => {
       expect(mockApi.marketDataRefreshNow).toHaveBeenCalledTimes(1);
-      expect(mockApi.stockHoldingsSummary).toHaveBeenCalledTimes(3);
+      expect(mockApi.stockHoldingsSummary).toHaveBeenCalledTimes(2);
     });
   });
 
