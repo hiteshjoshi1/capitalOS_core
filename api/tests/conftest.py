@@ -383,6 +383,33 @@ def _create_canonical_portfolio_tables(conn):
           locked_at TIMESTAMP
         )
         """,
+        """
+        CREATE TABLE IF NOT EXISTS account_balance_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL,
+          broker_account_id INTEGER,
+          import_job_id INTEGER,
+          broker_import_run_id INTEGER,
+          raw_document_id INTEGER,
+          as_of_date DATE NOT NULL,
+          currency TEXT NOT NULL,
+          balance_type TEXT NOT NULL DEFAULT 'cash',
+          balance_local NUMERIC NOT NULL,
+          balance_base NUMERIC NOT NULL,
+          fx_rate_to_base NUMERIC NOT NULL DEFAULT 1,
+          authority_status TEXT NOT NULL DEFAULT 'authoritative',
+          source_kind TEXT NOT NULL,
+          source_row_hash TEXT,
+          metadata_json TEXT,
+          created_at TIMESTAMP,
+          updated_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_account_balance_snapshots_authoritative
+        ON account_balance_snapshots(account_id, as_of_date, currency, balance_type)
+        WHERE authority_status = 'authoritative'
+        """,
     ):
         conn.exec_driver_sql(ddl)
 
@@ -806,6 +833,7 @@ def setup_db():
     yield
     with engine.begin() as conn:
         for table_name in (
+          "account_balance_snapshots",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
@@ -864,6 +892,7 @@ def setup_db():
 def clear_db():
     with engine.begin() as conn:
         for table_name in (
+        "account_balance_snapshots",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",

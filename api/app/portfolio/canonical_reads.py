@@ -1,10 +1,10 @@
 """
-Canonical portfolio read services for Phase 3 dashboard migration.
+Canonical portfolio read services for Phase 3/4 dashboard migration.
 
 Provides read-path functions that source facts from the canonical portfolio
 tables (portfolio_position_snapshots, portfolio_cash_balance_snapshots,
-portfolio_data_completeness) instead of the legacy positions / transactions
-tables.
+portfolio_data_completeness, account_balance_snapshots) instead of the legacy
+positions / transactions tables.
 
 Design rules:
 - IBKR Flex accounts are covered by NAV snapshots (latest_authoritative_nav_by_legacy_account).
@@ -14,6 +14,16 @@ Design rules:
 - If broker_instruments.asset_id is set, asset metadata is pulled from assets.
   Otherwise a symbol-based fallback lookup is attempted so that geography and
   platform allocation remain equivalent to legacy reads.
+
+Phase 4 additions:
+- account_balance_snapshots is the new canonical table for non-security cash
+  balances (bank cash, broker cash, stablecoin cash, etc.).
+- canonical_account_balance_rows() returns one normalized shape that surfaces
+  both account_balance_snapshots rows and any portfolio_cash_balance_snapshots
+  rows that have NOT yet been promoted, so dashboard/net-worth callers can read
+  from a single abstraction without knowing the source.
+- Future adapters writing cash facts MUST write to account_balance_snapshots,
+  not to positions(asset_class='CASH').
 """
 
 from __future__ import annotations
@@ -231,12 +241,134 @@ def canonical_cash_rows_by_legacy_account(
     return [dict(r) for r in rows]
 
 
-def get_data_completeness_status(
+def canonical_account_balance_rows(
     db: Session,
     *,
     current_user_id: int,
     anchor_date: date,
 ) -> list[dict[str, Any]]:
+    """
+    Return normalized cash/balance dicts for all accounts visible to this user.
+
+    **Phase 4 canonical cash read abstraction.**
+
+    Merges two source tables into one uniform shape so that dashboard and
+    net-worth callers do not need to know where a balance originated:
+
+    1. ``account_balance_snapshots`` — new canonical table; preferred source for
+       any account that has rows here.
+    2. ``portfolio_cash_balance_snapshots`` — broker-specific detail written by
+       IBKR Flex (Phase 1).  Rows from this table are surfaced for accounts
+       that do NOT already have a matching authoritative row in
+       ``account_balance_snapshots`` for the same (account, date), preventing
+       double-counting.
+
+    Each returned dict has the keys:
+    - ``account_id``     — legacy accounts.id
+    - ``currency``       — ISO-4217 currency code
+    - ``balance_type``   — one of: cash | broker_cash | bank_cash |
+                           credit_balance | loan_balance | stablecoin_cash
+    - ``balance_local``  — balance in the position currency
+    - ``balance_base``   — balance converted to the account's base currency
+    - ``fx_rate``        — FX rate used for the conversion
+    - ``source``         — 'account_balance_snapshots' | 'portfolio_cash_balance_snapshots'
+    - ``as_of_date``     — the snapshot date (DATE string)
+
+    Ordering: account_id ASC, as_of_date DESC, currency ASC.
+    """
+    q = text(
+        """
+        WITH
+        -- 1. Latest authoritative rows from the new canonical table.
+        abs_latest AS (
+          SELECT
+            abs.account_id,
+            MAX(abs.as_of_date) AS as_of_date
+          FROM account_balance_snapshots abs
+          JOIN accounts acc ON acc.id = abs.account_id
+          WHERE abs.as_of_date <= :anchor_date
+            AND abs.authority_status = 'authoritative'
+            AND ("""
+        + account_scope_sql("acc")
+        + """)
+          GROUP BY abs.account_id
+        ),
+        abs_rows AS (
+          SELECT
+            abs.account_id,
+            abs.currency,
+            abs.balance_type,
+            CAST(abs.balance_local AS DOUBLE PRECISION) AS balance_local,
+            CAST(abs.balance_base  AS DOUBLE PRECISION) AS balance_base,
+            CAST(abs.fx_rate_to_base AS DOUBLE PRECISION) AS fx_rate,
+            'account_balance_snapshots' AS source,
+            CAST(abs.as_of_date AS TEXT) AS as_of_date
+          FROM account_balance_snapshots abs
+          JOIN abs_latest al
+            ON al.account_id = abs.account_id
+           AND al.as_of_date = abs.as_of_date
+          WHERE abs.authority_status = 'authoritative'
+        ),
+
+        -- 2. Accounts already covered by the new canonical table.
+        abs_covered_accounts AS (
+          SELECT DISTINCT account_id FROM abs_rows
+        ),
+
+        -- 3. Latest authoritative portfolio_cash_balance_snapshots for accounts
+        --    NOT yet covered by account_balance_snapshots.
+        pcbs_latest AS (
+          SELECT
+            cs.broker_account_id,
+            MAX(cs.report_date) AS report_date
+          FROM portfolio_cash_balance_snapshots cs
+          JOIN broker_accounts ba ON ba.id = cs.broker_account_id
+          JOIN accounts acc ON acc.id = ba.legacy_account_id
+          WHERE cs.report_date <= :anchor_date
+            AND cs.authority_status = 'authoritative'
+            AND ba.legacy_account_id IS NOT NULL
+            AND ba.legacy_account_id NOT IN (SELECT account_id FROM abs_covered_accounts)
+            AND ("""
+        + account_scope_sql("acc")
+        + """)
+          GROUP BY cs.broker_account_id
+        ),
+        pcbs_rows AS (
+          SELECT
+            ba.legacy_account_id AS account_id,
+            cs.currency,
+            'broker_cash' AS balance_type,
+            CAST(cs.cash_balance      AS DOUBLE PRECISION) AS balance_local,
+            CAST(cs.cash_balance_base AS DOUBLE PRECISION) AS balance_base,
+            CAST(cs.fx_rate_to_base   AS DOUBLE PRECISION) AS fx_rate,
+            'portfolio_cash_balance_snapshots' AS source,
+            CAST(cs.report_date AS TEXT) AS as_of_date
+          FROM portfolio_cash_balance_snapshots cs
+          JOIN pcbs_latest pl
+            ON pl.broker_account_id = cs.broker_account_id
+           AND pl.report_date = cs.report_date
+          JOIN broker_accounts ba ON ba.id = cs.broker_account_id
+          WHERE cs.authority_status = 'authoritative'
+        )
+
+        SELECT * FROM abs_rows
+        UNION ALL
+        SELECT * FROM pcbs_rows
+        ORDER BY account_id ASC, as_of_date DESC, currency ASC
+        """
+    )
+    rows = db.execute(
+        q, {"anchor_date": anchor_date, "current_user_id": current_user_id}
+    ).mappings().all()
+    return [dict(r) for r in rows]
+
+
+def get_data_completeness_status(
+    db: Session,
+    *,
+    current_user_id: int,
+    anchor_date: date,
+  ) -> list[dict[str, Any]]:
     """
     Return the latest completeness record per (broker_account, fact_scope)
     for all canonical accounts visible to this user.
