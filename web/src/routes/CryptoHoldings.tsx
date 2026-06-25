@@ -4,9 +4,9 @@ import type { CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import ExposurePieCard from "../components/ExposurePieCard";
-import MiniTrend from "../components/MiniTrend";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import ValueTrendChart from "../components/ValueTrendChart";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -35,6 +35,10 @@ export default function CryptoHoldings() {
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatCompactMoney = (value?: number | null) =>
+    value == null
+      ? "—"
+      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
   const formatDelta = (value?: number | null, pct?: number | null) => {
     if (value == null) {
       return "—";
@@ -129,14 +133,6 @@ export default function CryptoHoldings() {
           </div>
 
           <div className="card">
-            <div className="stockHoldingsHeader">
-              <h2>Six-Month Mini Trend</h2>
-              <div className="muted stockHoldingsMeta">Snapshot history ending {summary?.month ?? month}</div>
-            </div>
-            <MiniTrend points={summary?.trend ?? []} ariaLabel="Six-month crypto trend" />
-          </div>
-
-          <div className="card">
             <h2>Top Holdings</h2>
             <label className="pill" style={{ marginBottom: 8, display: "inline-flex" }}>
               <input
@@ -220,6 +216,23 @@ export default function CryptoHoldings() {
             formatMoney={formatMoney}
             ariaLabel="Crypto wallet exposure pie chart"
           />
+
+          <div className="card valueTrendCard valueTrendCardWide">
+            <div className="stockHoldingsHeader">
+              <h2>Six-Month Crypto Trend</h2>
+              <div className="muted stockHoldingsMeta">Snapshot history ending {summary?.month ?? month}</div>
+            </div>
+            <div className="valueTrendValue">
+              <span>Current crypto value</span>
+              <strong>{formatMoney(summary?.total_crypto_base)}</strong>
+            </div>
+            <ValueTrendChart
+              points={summary?.trend ?? []}
+              ariaLabel="Six-month crypto trend"
+              formatMoney={formatMoney}
+              formatCompactMoney={formatCompactMoney}
+            />
+          </div>
         </section>
       )}
     </PageShell>

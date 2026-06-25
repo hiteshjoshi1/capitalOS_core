@@ -99,6 +99,7 @@ class DashboardSummaryResponse(BaseModel):
     net_worth_component_change: Optional[Dict[str, NetWorthChange]] = None
     top_movers: Optional[TopMovers] = None
     cash_percent: float
+    data_completeness_indicators: Optional[List[Dict[str, Any]]] = None
 
     class Config:
         populate_by_name = True
@@ -143,6 +144,7 @@ class StockHoldingsResponse(BaseModel):
     stock_current_total: float = 0.0
     stock_snapshot_total: float = 0.0
     quote_freshness_summary: Optional["QuoteFreshnessSummary"] = None
+    trend: list["MiniTrendPoint"] = []
 
 
 class PlatformAllocationItem(BaseModel):

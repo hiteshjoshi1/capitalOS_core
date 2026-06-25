@@ -27,6 +27,11 @@ READY FOR ARCHITECTURE REVIEW before implementation.
 - [Issue 176: Canonical portfolio phase 1 - IBKR Flex cutover](./issue-176-canonical-portfolio-phase-1-ibkr-flex-cutover.md)
 - [Issue 177: Canonical portfolio phase 2 - upload parser adapters](./issue-177-canonical-portfolio-phase-2-upload-parser-adapters.md)
 - [Issue 178: Canonical portfolio phase 3 - dashboard and analytics read migration](./issue-178-canonical-portfolio-phase-3-dashboard-analytics-read-migration.md)
+- [Issue 179: Canonical portfolio phase 4 - storage contract and cash balance model](./issue-179-canonical-portfolio-phase-4-storage-contract-and-cash-balance-model.md)
+- [Issue 180: Canonical portfolio phase 5 - complete parser adapters and stop legacy position writes](./issue-180-canonical-portfolio-phase-5-complete-parser-adapters-and-stop-legacy-position-writes.md)
+- [Issue 181: Canonical portfolio phase 6 - legacy position backfill and parity audit](./issue-181-canonical-portfolio-phase-6-legacy-position-backfill-and-parity-audit.md)
+- [Issue 182: Canonical portfolio phase 7 - canonical-only net worth and stock read cutover](./issue-182-canonical-portfolio-phase-7-canonical-only-net-worth-and-stock-read-cutover.md)
+- [Issue 183: Canonical portfolio phase 8 - legacy positions retirement and guardrails](./issue-183-canonical-portfolio-phase-8-legacy-positions-retirement-and-guardrails.md)
 - Target data model documentation: [Canonical Portfolio Data Model](../docs/finance/canonical-portfolio-model.md)
 
 ## Current-State Assessment

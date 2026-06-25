@@ -130,8 +130,21 @@ describe("CryptoHoldings route", () => {
     expect(screen.getByLabelText("Month")).toHaveValue("2026-02");
     expect(screen.getByLabelText("Base currency")).toHaveValue("SGD");
     expect(mockApi.cryptoSummary).toHaveBeenCalledWith("2026-02", "SGD");
-    expect(screen.getByText("Exposure by Chain")).toBeInTheDocument();
-    expect(screen.getByText("Exposure by Wallet")).toBeInTheDocument();
+    const topHoldingsHeading = screen.getByText("Top Holdings");
+    const chainHeading = screen.getByText("Exposure by Chain");
+    const walletHeading = screen.getByText("Exposure by Wallet");
+    const trendHeading = screen.getByText("Six-Month Crypto Trend");
+    expect(trendHeading).toBeInTheDocument();
+    expect(screen.getByLabelText("Six-month crypto trend")).toBeInTheDocument();
+    expect(topHoldingsHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chainHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(walletHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Sep '25")).not.toBeInTheDocument();
+    expect(screen.queryByText("Oct '25")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Nov '25").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S$ 9,000").length).toBeGreaterThan(0);
+    expect(chainHeading).toBeInTheDocument();
+    expect(walletHeading).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {

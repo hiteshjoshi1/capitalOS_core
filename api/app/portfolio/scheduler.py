@@ -37,6 +37,18 @@ def _schedule_time() -> tuple[str, int, int]:
     return tz_name, hour, minute
 
 
+def _scheduler_enabled() -> bool:
+    raw = os.getenv("IBKR_FLEX_SCHEDULER_ENABLED", "auto").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+
+    token = os.getenv("IBKR_FLEX_TOKEN") or os.getenv("IBKR_TOKEN")
+    query_id = os.getenv("IBKR_FLEX_QUERY_ID") or os.getenv("IBKR_QUERY_ID")
+    return bool(token and query_id)
+
+
 def _active_accounts(db) -> list[dict]:
     rows = db.execute(
         text(
@@ -89,7 +101,7 @@ def _run_daily_imports() -> None:
 
 def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
-    if os.getenv("IBKR_FLEX_SCHEDULER_ENABLED", "0") != "1":
+    if not _scheduler_enabled():
         logger.info("ibkr_flex_scheduler_disabled")
         return _scheduler
     if _scheduler:

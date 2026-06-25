@@ -31,6 +31,12 @@ from app.schemas.dashboard import (
 )
 from app.fx import get_rates
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.canonical_reads import (
+    canonical_position_rows_by_legacy_account,
+    canonical_cash_rows_by_legacy_account,
+    get_data_completeness_status,
+    has_canonical_position_snapshot_sql,
+)
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(require_current_user)])
 
@@ -381,6 +387,9 @@ def _synthetic_position_rows(db: Session, anchor_ts: datetime, current_user_id: 
                 AND ns.report_date <= :anchor_date
                 AND ns.authority_status = 'authoritative'
             )
+            AND NOT """
+        + has_canonical_position_snapshot_sql("p.account_id")
+        + """
             AND """
         + account_scope_sql("acc")
         + """
@@ -632,18 +641,26 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
+    # Canonical position rows for non-NAV accounts (Sharekhan, DBS Vickers)
+    canonical_pos_rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
+    # Merge: legacy rows + canonical position rows share the same structure
+    all_position_rows = rows + canonical_pos_rows
     price_map = _latest_price_map(
         db,
         anchor_ts,
         {
             int(r["asset_id"])
-            for r in rows
+            for r in all_position_rows
             if r.get("asset_id") is not None and str(r.get("asset_class") or "").upper() in {"STOCK", "FUND"}
         },
     )
     currencies = {
         (price_map[int(r["asset_id"])]["currency"] if r.get("asset_id") in price_map else r["quote_currency"])
-        for r in rows
+        for r in all_position_rows
         if r["quote_currency"] or r.get("asset_id") in price_map
     }
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
@@ -654,7 +671,7 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
     crypto = 0.0
     # Positions contribute cash and brokerage holdings only.
     # Crypto net worth is sourced from wallet snapshots below.
-    for r in rows:
+    for r in all_position_rows:
         asset_class = str(r["asset_class"] or "").upper()
         asset_id = r.get("asset_id")
         latest_price = price_map.get(int(asset_id), {}).get("price") if asset_id is not None else None
@@ -733,6 +750,9 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
                 AND ns.report_date <= :anchor_date
                 AND ns.authority_status = 'authoritative'
             )
+            AND NOT """
+            + has_canonical_position_snapshot_sql("p.account_id")
+            + """
             AND """
             + account_scope_sql("acc")
             + """
@@ -773,13 +793,30 @@ def _geography(db: Session, anchor_ts: datetime, total: float, base_currency: st
         q,
         {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
+    # Also include canonical position rows (Sharekhan / DBS Vickers)
+    canonical_pos_rows = canonical_position_rows_by_legacy_account(
+        db, current_user_id=current_user_id, anchor_date=anchor_ts.date()
+    )
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    currencies.update(r["quote_currency"] for r in canonical_pos_rows if r.get("quote_currency"))
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[str, float] = {}
     for r in rows:
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
         country = _infer_country(r["symbol"], r["home_country"], r["platform"], r["quote_currency"])
+        buckets[country] = buckets.get(country, 0.0) + value
+    for r in canonical_pos_rows:
+        asset_class = str(r.get("asset_class") or "").upper()
+        if asset_class in ("CRYPTO", "CASH"):
+            continue
+        cur = (r.get("quote_currency") or base_currency).upper()
+        value = float(r.get("cost_basis_base") or 0.0) * rates.get(cur, 1.0)
+        if value <= 0:
+            continue
+        country = _infer_country(
+            r.get("symbol"), r.get("home_country"), r.get("platform"), r.get("quote_currency"), r.get("exchange_code")
+        )
         buckets[country] = buckets.get(country, 0.0) + value
     out = []
     for country, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
@@ -803,6 +840,17 @@ def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str, cu
           FROM positions p
           JOIN accounts acc ON acc.id = p.account_id
           WHERE p.as_of <= :anchor_ts
+            AND NOT EXISTS (
+              SELECT 1
+              FROM broker_accounts ba
+              JOIN portfolio_nav_snapshots ns ON ns.broker_account_id = ba.id
+              WHERE ba.legacy_account_id = p.account_id
+                AND ns.report_date <= :anchor_date
+                AND ns.authority_status = 'authoritative'
+            )
+            AND NOT """
+          + has_canonical_position_snapshot_sql("p.account_id")
+          + """
             AND """
           + account_scope_sql("acc")
           + """
@@ -855,7 +903,16 @@ def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str, cu
         q,
         {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
+    # Canonical position rows for non-NAV accounts (Sharekhan / DBS Vickers).
+    # NAV-backed accounts remain represented by canonical NAV in exposure views
+    # to avoid double counting.
+    canonical_pos_rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
     currencies = {(row.get("quote_currency") or "").upper() for row in rows if row.get("quote_currency")}
+    currencies.update(r.get("quote_currency", "").upper() for r in canonical_pos_rows if r.get("quote_currency"))
     currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
     usd_rate = rates.get("USD", 1.0)
@@ -879,6 +936,29 @@ def _geography_exposure(db: Session, anchor_ts: datetime, base_currency: str, cu
             row.get("platform"),
             row.get("quote_currency"),
             row.get("exchange_code"),
+        )
+        bucket = _bucket(country)
+        if asset_class == "CASH":
+            bucket["cash"] += value_base
+        else:
+            bucket["stocks_funds"] += value_base
+
+    for r in canonical_pos_rows:
+        asset_class = str(r.get("asset_class") or "").upper()
+        if asset_class == "CRYPTO":
+            continue
+        if asset_class not in ("CASH", "STOCK", "FUND"):
+            asset_class = "STOCK"
+        quote_currency = (r.get("quote_currency") or base_currency).upper()
+        value_base = float(r.get("cost_basis_base") or 0.0) * rates.get(quote_currency, 1.0)
+        if value_base <= 0:
+            continue
+        country = _infer_country(
+            r.get("symbol"),
+            r.get("home_country"),
+            r.get("platform"),
+            r.get("quote_currency"),
+            r.get("exchange_code"),
         )
         bucket = _bucket(country)
         if asset_class == "CASH":
@@ -974,6 +1054,9 @@ def _top_holdings(
                 AND ns.report_date <= :anchor_date
                 AND ns.authority_status = 'authoritative'
             )
+            AND NOT """
+            + has_canonical_position_snapshot_sql("p.account_id")
+            + """
             AND """
             + account_scope_sql("acc")
             + """
@@ -1102,8 +1185,55 @@ def _top_holdings(
         },
     ).mappings().all()
 
+    # Canonical position rows for non-NAV accounts (Sharekhan / DBS Vickers)
+    # and NAV-backed accounts (IBKR Flex) for detail display. NAV-backed
+    # accounts are still valued through canonical NAV elsewhere; this list uses
+    # position snapshots only to show individual holdings.
+    canonical_pos_rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+        include_nav_accounts=True,
+    )
+    # Map canonical rows to the same shape expected by the aggregation loop below.
+    # These rows only cover STOCK/FUND (no CRYPTO or CASH for top holdings purposes).
+    # For upload-derived rows, market_price is the parser's average cost. For
+    # NAV-backed IBKR Flex rows, market_price is the broker statement mark price.
+    canonical_holding_rows: List[Dict[str, Any]] = []
+    for cr in canonical_pos_rows:
+        asset_class = str(cr.get("asset_class") or "STOCK").upper()
+        if asset_class in ("CRYPTO", "CASH"):
+            continue
+        quantity = float(cr.get("quantity") or 0.0)
+        has_nav_snapshot = bool(cr.get("has_nav_snapshot"))
+        snapshot_market_price = cr.get("snapshot_market_price")
+        snapshot_market_value_local = cr.get("snapshot_market_value_local")
+        snapshot_cost_basis_local = cr.get("snapshot_cost_basis_local")
+        latest_price = snapshot_market_price if has_nav_snapshot else None
+        avg_cost = cr.get("avg_cost")
+        if has_nav_snapshot and snapshot_cost_basis_local is not None and quantity > 0:
+            avg_cost = float(snapshot_cost_basis_local) / quantity
+        value = snapshot_market_value_local if has_nav_snapshot else cr.get("cost_basis_base")
+        canonical_holding_rows.append({
+            "asset_id": cr.get("asset_id"),
+            "symbol": cr.get("symbol"),
+            "asset_class": asset_class,
+            "quote_currency": cr.get("quote_currency"),
+            "home_country": cr.get("home_country"),
+            "exchange_code": cr.get("exchange_code"),
+            "platform": cr.get("platform"),
+            "quantity": cr.get("quantity"),
+            "avg_cost": avg_cost,
+            "latest_price": latest_price,
+            "latest_trade_date": cr.get("report_date") if has_nav_snapshot else None,
+            "price_source": "ibkr_flex" if has_nav_snapshot else None,
+            "provider_symbol": None,
+            "value": value,
+        })
+
     # Collect all unique currencies for FX conversion
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
+    currencies.update(r["quote_currency"] for r in canonical_holding_rows if r.get("quote_currency"))
     currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
     
@@ -1111,17 +1241,13 @@ def _top_holdings(
     agg: Dict[tuple, Dict[str, Any]] = {}
     geo_bucket: Dict[tuple, Dict[str, float]] = {}
     platform_bucket: Dict[tuple, Dict[str, float]] = {}
-    
-    for r in rows:
-        # Skip rows with NULL value
+
+    def _process_holding_row(r: Any) -> None:
         if r["value"] is None:
-            continue
-            
-        # Key: (asset_id, symbol, asset_class) - for crypto, asset_id is None so symbol is the grouping key
+            return
         key = (r["asset_id"], r["symbol"], r["asset_class"])
         cur = (r["quote_currency"] or base_currency).upper()
         value = float(r["value"]) * rates.get(cur, 1.0)
-        
         if key not in agg:
             agg[key] = {
                 "asset_id": r["asset_id"],
@@ -1141,7 +1267,6 @@ def _top_holdings(
                 "price_provider": _price_provider(r["price_source"]),
                 "quote_freshness_status": _quote_freshness_status(r["latest_trade_date"]),
             }
-
         agg[key]["value"] += value
         quantity = float(r["quantity"]) if r["quantity"] is not None else None
         if quantity is not None:
@@ -1150,7 +1275,6 @@ def _top_holdings(
             if r["avg_cost"] is not None and quantity > 0:
                 agg[key]["_avg_cost_numerator"] += float(r["avg_cost"]) * quantity
                 agg[key]["_avg_cost_denominator"] += quantity
-        
         if not agg[key]["quote_currency"] and r["quote_currency"]:
             agg[key]["quote_currency"] = str(r["quote_currency"]).upper()
         if agg[key]["latest_price"] is None and r["latest_price"] is not None:
@@ -1163,21 +1287,26 @@ def _top_holdings(
         if agg[key]["quote_freshness_status"] == "missing":
             agg[key]["quote_age_days"] = _quote_age_days(r["latest_trade_date"])
             agg[key]["quote_freshness_status"] = _quote_freshness_status(r["latest_trade_date"])
-        
         geo = _infer_country(
             r["symbol"],
-            r["home_country"],
-            r["platform"],
-            r["quote_currency"],
-            r["exchange_code"],
+            r["home_country"] if isinstance(r, dict) else r.get("home_country"),
+            r["platform"] if isinstance(r, dict) else r.get("platform"),
+            r["quote_currency"] if isinstance(r, dict) else r.get("quote_currency"),
+            r["exchange_code"] if isinstance(r, dict) else r.get("exchange_code"),
         )
         platform = r["platform"] or "UNKNOWN"
         geo_bucket.setdefault(key, {})[geo] = geo_bucket.setdefault(key, {}).get(geo, 0.0) + value
         platform_bucket.setdefault(key, {})[platform] = platform_bucket.setdefault(key, {}).get(platform, 0.0) + value
-    
+
+    # Process legacy position rows and canonical position rows through the same aggregator
+    for r in rows:
+        _process_holding_row(r)
+    for r in canonical_holding_rows:
+        _process_holding_row(r)
+
     # Sort by value and take top N
     out = sorted(agg.values(), key=lambda x: x["value"], reverse=True)[:limit]
-    
+
     for r in out:
         value = float(r["value"])
         den = float(r.pop("_avg_cost_denominator"))
@@ -1328,6 +1457,27 @@ def _stock_geography_breakdown(
             preferred_order=("US", "HK", "SG", "IN", "Other"),
         )
     ]
+
+
+def _stock_trend(
+    db: Session,
+    month_start: datetime,
+    base_currency: str,
+    current_user_id: int,
+    months: int = 6,
+) -> list[dict[str, Any]]:
+    trend_start = _add_months(month_start, -(months - 1))
+    points: list[dict[str, Any]] = []
+    for offset in range(months):
+        point_month = _add_months(trend_start, offset)
+        anchor = _completed_snapshot_anchor_ts(point_month)
+        exposure = _stock_exposure(db, anchor, base_currency, current_user_id)
+        total = float(exposure.get("total") or 0.0)
+        points.append({
+            "month": point_month.strftime("%Y-%m"),
+            "value": total if total > 0 else None,
+        })
+    return points
 
 
 def _stock_platform_breakdown(
@@ -1696,12 +1846,18 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, c
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
+    canonical_pos_rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
+    all_pos_rows = rows + canonical_pos_rows
     price_map = _latest_price_map(
         db,
         anchor_ts,
         {
             int(r["asset_id"])
-            for r in rows
+            for r in all_pos_rows
             if r.get("asset_id") is not None and str(r.get("asset_class") or "").upper() in {"STOCK", "FUND"}
         },
     )
@@ -1729,7 +1885,7 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, c
     wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
     currencies = {
         (price_map[int(r["asset_id"])]["currency"] if r.get("asset_id") in price_map else r["quote_currency"])
-        for r in rows
+        for r in all_pos_rows
         if r.get("quote_currency") or r.get("asset_id") in price_map
     }
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
@@ -1737,7 +1893,7 @@ def _platform_allocation(db: Session, anchor_ts: datetime, base_currency: str, c
         currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
     buckets: Dict[tuple, float] = {}
-    for r in rows:
+    for r in all_pos_rows:
         asset_class = str(r.get("asset_class") or "").upper()
         if asset_class == "CRYPTO":
             continue
@@ -1792,6 +1948,9 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
                 AND ns.report_date <= :anchor_date
                 AND ns.authority_status = 'authoritative'
             )
+            AND NOT """
+            + has_canonical_position_snapshot_sql("p.account_id")
+            + """
             AND """
             + account_scope_sql("acc")
             + """
@@ -1838,15 +1997,30 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
-    if not rows and not canonical_nav_rows:
+    canonical_pos_rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+        include_nav_accounts=True,
+    )
+    if not rows and not canonical_nav_rows and not canonical_pos_rows:
         return {"as_of": None, "base_currency": base_currency, "total": 0.0, "by_country": [], "by_platform": []}
     currencies = {r["quote_currency"] for r in rows if r["quote_currency"]}
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
+    currencies.update(r.get("quote_currency", "") for r in canonical_pos_rows if r.get("quote_currency"))
     rates = get_rates(anchor_ts, base_currency, currencies)
 
     by_country: Dict[str, float] = {}
     by_platform: Dict[str, float] = {}
     total = 0.0
+    nav_position_rows_by_account: Dict[int, list[dict[str, Any]]] = {}
+    for r in canonical_pos_rows:
+        if not r.get("has_nav_snapshot"):
+            continue
+        account_id = r.get("account_id")
+        if account_id is None:
+            continue
+        nav_position_rows_by_account.setdefault(int(account_id), []).append(r)
 
     for r in rows:
         cur = (r["quote_currency"] or base_currency).upper()
@@ -1858,11 +2032,58 @@ def _stock_exposure(db: Session, anchor_ts: datetime, base_currency: str, curren
         by_country[country] = by_country.get(country, 0.0) + value
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value = (float(row.get("total_nav_base") or 0.0) - float(row.get("cash_base") or 0.0)) * rates.get(nav_currency, 1.0)
+        raw_stock_value = float(row.get("total_nav_base") or 0.0) - float(row.get("cash_base") or 0.0)
+        value = raw_stock_value * rates.get(nav_currency, 1.0)
         if value <= 0:
             continue
         platform = row.get("platform") or "UNKNOWN"
-        country = row.get("country") or "UNKNOWN"
+        total += value
+        by_platform[platform] = by_platform.get(platform, 0.0) + value
+
+        detail_buckets: Dict[str, float] = {}
+        detail_total = 0.0
+        for detail in nav_position_rows_by_account.get(int(row["legacy_account_id"]), []):
+            asset_class = str(detail.get("asset_class") or "STOCK").upper()
+            if asset_class not in ("STOCK", "FUND"):
+                continue
+            detail_value_raw = detail.get("snapshot_market_value_base")
+            if detail_value_raw is not None:
+                detail_value = float(detail_value_raw) * rates.get(nav_currency, 1.0)
+            else:
+                detail_currency = (detail.get("quote_currency") or nav_currency).upper()
+                detail_value = float(detail.get("snapshot_market_value_local") or 0.0) * rates.get(detail_currency, 1.0)
+            if detail_value <= 0:
+                continue
+            country = _infer_country(
+                detail.get("symbol"),
+                detail.get("home_country"),
+                platform,
+                detail.get("quote_currency"),
+                detail.get("exchange_code"),
+            )
+            detail_buckets[country] = detail_buckets.get(country, 0.0) + detail_value
+            detail_total += detail_value
+        if detail_total > 0:
+            scale = value / detail_total
+            for country, detail_value in detail_buckets.items():
+                by_country[country] = by_country.get(country, 0.0) + (detail_value * scale)
+        else:
+            country = row.get("country") or "UNKNOWN"
+            by_country[country] = by_country.get(country, 0.0) + value
+    for r in canonical_pos_rows:
+        if r.get("has_nav_snapshot"):
+            continue
+        asset_class = str(r.get("asset_class") or "STOCK").upper()
+        if asset_class not in ("STOCK", "FUND"):
+            continue
+        cur = (r.get("quote_currency") or base_currency).upper()
+        value = float(r.get("cost_basis_base") or 0.0) * rates.get(cur, 1.0)
+        if value <= 0:
+            continue
+        platform = r.get("platform") or "UNKNOWN"
+        country = _infer_country(
+            r.get("symbol"), r.get("home_country"), platform, r.get("quote_currency"), r.get("exchange_code")
+        )
         total += value
         by_platform[platform] = by_platform.get(platform, 0.0) + value
         by_country[country] = by_country.get(country, 0.0) + value
@@ -2051,6 +2272,11 @@ def dashboard_summary(
     # Compute cash_percent
     cash_percent = round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
 
+    # Data completeness indicators from canonical portfolio sources
+    completeness_indicators = get_data_completeness_status(
+        db, current_user_id=current_user.id, anchor_date=anchor.date()
+    )
+
     return {
         "as_of_month": month,
         "base_currency": base_currency,
@@ -2072,6 +2298,7 @@ def dashboard_summary(
         "net_worth_component_change": component_changes,
         "top_movers": top_movers,
         "cash_percent": cash_percent,
+        "data_completeness_indicators": completeness_indicators if completeness_indicators else None,
     }
 
 
@@ -2103,6 +2330,7 @@ def stock_holdings_summary(
     geography_breakdown = _stock_geography_breakdown(current_stock_exposure, snapshot_stock_exposure)
     platform_breakdown = _stock_platform_breakdown(current_stock_exposure, snapshot_stock_exposure)
     quote_freshness_summary = _quote_freshness_summary(top)
+    trend = [MiniTrendPoint(**point) for point in _stock_trend(db, month_start, base_currency, current_user.id)]
 
     return {
         "as_of_month": month,
@@ -2120,6 +2348,7 @@ def stock_holdings_summary(
         "stock_current_total": current_stock_exposure["total"],
         "stock_snapshot_total": snapshot_stock_exposure["total"],
         "quote_freshness_summary": quote_freshness_summary,
+        "trend": trend,
     }
 
 

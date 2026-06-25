@@ -15,6 +15,7 @@ from app.portfolio.ibkr_flex import (
     is_ibkr_flex_cutover_active,
     run_ibkr_flex_import_from_xml,
 )
+from app.portfolio.scheduler import _scheduler_enabled
 
 
 def _seed_ibkr_account(db_engine, account_id: int = 300) -> None:
@@ -516,3 +517,19 @@ def test_manual_ibkr_upload_rejected_after_flex_cutover(client, db_engine, tmp_p
             files={"file": ("ibkr.csv", fh, "text/csv")},
         )
     assert response.status_code == 409
+
+
+def test_ibkr_flex_scheduler_auto_enabled_when_credentials_exist(monkeypatch):
+    monkeypatch.delenv("IBKR_FLEX_SCHEDULER_ENABLED", raising=False)
+    monkeypatch.setenv("IBKR_FLEX_TOKEN", "token")
+    monkeypatch.setenv("IBKR_QUERY_ID", "query")
+
+    assert _scheduler_enabled() is True
+
+
+def test_ibkr_flex_scheduler_explicit_disable_wins(monkeypatch):
+    monkeypatch.setenv("IBKR_FLEX_SCHEDULER_ENABLED", "0")
+    monkeypatch.setenv("IBKR_FLEX_TOKEN", "token")
+    monkeypatch.setenv("IBKR_QUERY_ID", "query")
+
+    assert _scheduler_enabled() is False

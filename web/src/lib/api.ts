@@ -405,6 +405,10 @@ export type StockHoldingsSummary = {
     stale: number;
     missing: number;
   } | null;
+  trend?: Array<{
+    month: string;
+    value?: number | null;
+  }>;
 };
 
 export type SpendingSummary = {
