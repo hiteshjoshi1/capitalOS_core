@@ -27,6 +27,7 @@ from app.ingestion.signature import compute_format_signature
 from app.ingestion.registry import register_signature
 from app.portfolio.upload_canonical import (
     is_canonical_upload_platform,
+    parser_canonical_target,
     run_upload_canonical_adapter,
 )
 from app.ingestion.parsers.base import ParseResult
@@ -107,11 +108,11 @@ def _setup_dbs_vickers_fixture(tmp_path, db_engine, account_id: int = 501):
 
 
 # ---------------------------------------------------------------------------
-# Non-regression: legacy positions still written
+# Phase 5: canonical-first write order - legacy positions NO LONGER written
 # ---------------------------------------------------------------------------
 
-def test_sharekhan_upload_still_writes_legacy_positions(client: TestClient, db_engine, tmp_path):
-    """Canonical adapter must not break legacy positions write."""
+def test_sharekhan_upload_does_not_write_legacy_positions(client: TestClient, db_engine, tmp_path):
+    """Phase 5: canonical adapter is now blocking; legacy positions must NOT be written."""
     account_id = 510
     fixture_path = _setup_sharekhan_fixture(tmp_path, db_engine, account_id)
 
@@ -123,7 +124,13 @@ def test_sharekhan_upload_still_writes_legacy_positions(client: TestClient, db_e
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "IMPORTED"
-    assert data["counts"]["positions_inserted"] == 1
+    # Legacy positions must be 0; canonical write replaces it.
+    assert data["counts"]["positions_inserted"] == 0, (
+        "Phase 5: legacy positions must not be written for canonical-covered parsers"
+    )
+    assert data["counts"].get("canonical_positions_written", 0) >= 1, (
+        "Phase 5: canonical_positions_written must reflect the canonical write count"
+    )
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
@@ -134,11 +141,11 @@ def test_sharekhan_upload_still_writes_legacy_positions(client: TestClient, db_e
         ).scalar()
     finally:
         db.close()
-    assert count == 1, "Legacy positions row must be written"
+    assert count == 0, "Legacy positions row must NOT be written for canonical-covered Sharekhan parser"
 
 
-def test_dbs_vickers_upload_still_writes_legacy_positions(client: TestClient, db_engine, tmp_path):
-    """DBS Vickers upload must still write legacy positions after canonical adapter."""
+def test_dbs_vickers_upload_does_not_write_legacy_positions(client: TestClient, db_engine, tmp_path):
+    """Phase 5: DBS Vickers upload must NOT write legacy positions after canonical-first refactor."""
     account_id = 511
     fixture_path = _setup_dbs_vickers_fixture(tmp_path, db_engine, account_id)
 
@@ -150,7 +157,10 @@ def test_dbs_vickers_upload_still_writes_legacy_positions(client: TestClient, db
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "IMPORTED"
-    assert data["counts"]["positions_inserted"] > 0
+    assert data["counts"]["positions_inserted"] == 0, (
+        "Phase 5: legacy positions must not be written for canonical-covered parsers"
+    )
+    assert data["counts"].get("canonical_positions_written", 0) >= 1
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
@@ -161,7 +171,7 @@ def test_dbs_vickers_upload_still_writes_legacy_positions(client: TestClient, db
         ).scalar()
     finally:
         db.close()
-    assert count > 0, "Legacy positions row must be written"
+    assert count == 0, "Legacy positions row must NOT be written for canonical-covered DBS Vickers parser"
 
 
 # ---------------------------------------------------------------------------
@@ -824,6 +834,20 @@ def test_is_canonical_upload_platform():
     assert is_canonical_upload_platform("DBS") is False
     assert is_canonical_upload_platform("OCBC") is False
     assert is_canonical_upload_platform("UOB") is False
+
+
+def test_parser_canonical_target_registry():
+    """PARSER_CANONICAL_REGISTRY must cover every known position-producing parser."""
+    assert parser_canonical_target("sharekhan_holdings_xls_v1") == "portfolio_positions"
+    assert parser_canonical_target("dbs_vickers_holdings_xls_v1") == "portfolio_positions"
+    assert parser_canonical_target("ibkr_activity_csv_v1") == "portfolio_positions"
+    assert parser_canonical_target("uob_account_xls_v1") == "account_balance"
+    assert parser_canonical_target("ocbc_account_csv_v1") == "account_balance"
+    assert parser_canonical_target("dbs_transaction_history_csv_v1") == "account_balance"
+    assert parser_canonical_target("uob_credit_card_xls_v1") == "none"
+    assert parser_canonical_target("citi_credit_card_csv_v1") == "none"
+    # Unknown parser returns None
+    assert parser_canonical_target("nonexistent_parser_v1") is None
 
 
 # ---------------------------------------------------------------------------

@@ -29,17 +29,17 @@ from app.ingestion.parsers.base import ParseResult
 
 UPLOAD_ADAPTER_VERSION = "upload_canonical_v1"
 
-# Platforms handled as canonical upload sources
+# Platforms handled as canonical upload sources (portfolio positions path)
 _PLATFORM_SOURCE_KIND: dict[str, str] = {
     "SHAREKHAN": "sharekhan_upload",
     "DBS_VICKERS": "dbs_vickers_upload",
     "IBKR": "ibkr_csv_upload",
 }
 
-# Platforms that are always authoritative for their facts
+# Platforms that are always authoritative for their portfolio position facts
 _AUTHORITATIVE_PLATFORMS: frozenset[str] = frozenset({"SHAREKHAN", "DBS_VICKERS"})
 
-# Platforms that are reference-only (their authoritative source is elsewhere)
+# Platforms that are reference-only for portfolio positions (authoritative source is elsewhere)
 _REFERENCE_ONLY_PLATFORMS: frozenset[str] = frozenset({"IBKR"})
 
 # Fact scopes that are always incomplete for upload-parser uploads
@@ -48,6 +48,30 @@ _INCOMPLETE_SCOPES: list[tuple[str, str]] = [
     ("nav", "upload_parser_no_nav_detail"),
     ("trades", "upload_parser_no_trade_detail"),
 ]
+
+# ---------------------------------------------------------------------------
+# Canonical adapter registry (Phase 5)
+# ---------------------------------------------------------------------------
+# Maps each parser_key to the canonical target type:
+#   "portfolio_positions" → portfolio_position_snapshots (investment holdings)
+#   "account_balance"     → account_balance_snapshots (bank/cash balances)
+#   "none"                → parser emits no positions; no canonical adapter needed
+#
+# Any parser that emits non-empty positions MUST have an explicit entry here.
+# Imports from unregistered parsers that produce positions will fail closed.
+PARSER_CANONICAL_REGISTRY: dict[str, str] = {
+    "sharekhan_holdings_xls_v1": "portfolio_positions",
+    "dbs_vickers_holdings_xls_v1": "portfolio_positions",
+    "ibkr_activity_csv_v1": "portfolio_positions",
+    "uob_account_xls_v1": "account_balance",
+    "ocbc_account_csv_v1": "account_balance",
+    "dbs_transaction_history_csv_v1": "account_balance",
+    "uob_credit_card_xls_v1": "none",
+    "citi_credit_card_csv_v1": "none",
+}
+
+# Source kind used when writing account balance snapshots from upload parsers
+_BALANCE_SOURCE_KIND = "upload_parser"
 
 
 def _now() -> datetime:
@@ -70,8 +94,25 @@ def _source_kind_for_platform(platform_code: str) -> str | None:
 
 
 def is_canonical_upload_platform(platform_code: str) -> bool:
-    """Return True if this platform has a canonical upload adapter."""
+    """Return True if this platform has a canonical portfolio-positions upload adapter.
+
+    Note: bank/cash parsers (UOB, OCBC, DBS) are covered by the balance adapter
+    which is looked up via ``parser_canonical_target`` using the parser key, not
+    the platform code.  This function only covers the portfolio-positions path.
+    """
     return platform_code.upper() in _PLATFORM_SOURCE_KIND
+
+
+def parser_canonical_target(parser_key: str) -> str | None:
+    """Return the canonical adapter target for a parser key.
+
+    Returns:
+        "portfolio_positions" – write to portfolio_position_snapshots
+        "account_balance"     – write to account_balance_snapshots
+        "none"                – parser emits no positions; no adapter needed
+        None                  – parser key is not registered (caller must decide whether to fail)
+    """
+    return PARSER_CANONICAL_REGISTRY.get(parser_key)
 
 
 def _ensure_broker_account(
@@ -834,5 +875,217 @@ def run_upload_canonical_adapter(
         "authority_status": authority_status,
         "counts": {
             "positions": positions_written,
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Canonical balance adapter for bank/account parsers (Phase 5)
+# ---------------------------------------------------------------------------
+
+def _resolve_balance_date(parse_result: ParseResult) -> date:
+    """Derive the canonical as_of_date for a bank/account balance snapshot.
+
+    Checks parser_meta keys in priority order, then falls back to today.
+    """
+    meta = parse_result.parser_meta or {}
+    for key in ("statement_period_end", "report_date", "statement_date", "as_of"):
+        val = meta.get(key)
+        if val is None:
+            continue
+        if hasattr(val, "date"):
+            return val.date()
+        if hasattr(val, "year"):
+            return val
+        try:
+            from datetime import datetime as _dt
+            parsed = _dt.fromisoformat(str(val))
+            return parsed.date()
+        except (ValueError, TypeError):
+            continue
+
+    # Try the positions themselves for an as_of value
+    for pos in (parse_result.positions or []):
+        pos_as_of = pos.get("as_of")
+        if pos_as_of is not None:
+            if hasattr(pos_as_of, "date"):
+                return pos_as_of.date()
+            if hasattr(pos_as_of, "year"):
+                return pos_as_of
+            try:
+                from datetime import datetime as _dt2
+                parsed2 = _dt2.fromisoformat(str(pos_as_of))
+                return parsed2.date()
+            except (ValueError, TypeError):
+                pass
+
+    return date.today()
+
+
+def _source_row_hash_for_balance(account_id: int, as_of_date: date, currency: str, balance: float) -> str:
+    """Stable hash for dedup-detection of a bank balance row."""
+    raw = f"{account_id}|{as_of_date.isoformat()}|{currency}|{balance}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+def _write_account_balance_snapshot(
+    db: Session,
+    *,
+    account_id: int,
+    import_job_id: int | None,
+    as_of_date: date,
+    currency: str,
+    balance_local: float,
+    balance_base: float,
+    balance_type: str,
+    source_row_hash: str,
+) -> None:
+    """Upsert a single authoritative account balance snapshot.
+
+    Uses DELETE + INSERT to handle the partial-unique-index constraint
+    (SQLite does not support ON CONFLICT on partial indexes).
+    """
+    dialect_name = getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", "sqlite")
+    if dialect_name == "postgresql":
+        db.execute(
+            text(
+                """
+                INSERT INTO account_balance_snapshots
+                  (account_id, import_job_id, as_of_date, currency, balance_type,
+                   balance_local, balance_base, fx_rate_to_base, authority_status,
+                   source_kind, source_row_hash)
+                VALUES
+                  (:account_id, :import_job_id, :as_of_date, :currency, :balance_type,
+                   :balance_local, :balance_base, 1, 'authoritative',
+                   :source_kind, :source_row_hash)
+                ON CONFLICT (account_id, as_of_date, currency, balance_type)
+                  WHERE authority_status = 'authoritative'
+                DO UPDATE SET
+                  balance_local = EXCLUDED.balance_local,
+                  balance_base = EXCLUDED.balance_base,
+                  import_job_id = EXCLUDED.import_job_id,
+                  source_row_hash = EXCLUDED.source_row_hash,
+                  updated_at = now()
+                """
+            ),
+            {
+                "account_id": account_id,
+                "import_job_id": import_job_id,
+                "as_of_date": as_of_date,
+                "currency": currency.upper(),
+                "balance_type": balance_type,
+                "balance_local": _db_decimal(balance_local),
+                "balance_base": _db_decimal(balance_base),
+                "source_kind": _BALANCE_SOURCE_KIND,
+                "source_row_hash": source_row_hash,
+            },
+        )
+    else:
+        # SQLite: manual delete-then-insert because partial-index ON CONFLICT is unsupported
+        db.execute(
+            text(
+                """
+                DELETE FROM account_balance_snapshots
+                WHERE account_id = :account_id
+                  AND as_of_date = :as_of_date
+                  AND currency = :currency
+                  AND balance_type = :balance_type
+                  AND authority_status = 'authoritative'
+                """
+            ),
+            {
+                "account_id": account_id,
+                "as_of_date": as_of_date,
+                "currency": currency.upper(),
+                "balance_type": balance_type,
+            },
+        )
+        db.execute(
+            text(
+                """
+                INSERT INTO account_balance_snapshots
+                  (account_id, import_job_id, as_of_date, currency, balance_type,
+                   balance_local, balance_base, fx_rate_to_base, authority_status,
+                   source_kind, source_row_hash)
+                VALUES
+                  (:account_id, :import_job_id, :as_of_date, :currency, :balance_type,
+                   :balance_local, :balance_base, 1, 'authoritative',
+                   :source_kind, :source_row_hash)
+                """
+            ),
+            {
+                "account_id": account_id,
+                "import_job_id": import_job_id,
+                "as_of_date": as_of_date,
+                "currency": currency.upper(),
+                "balance_type": balance_type,
+                "balance_local": _db_decimal(balance_local),
+                "balance_base": _db_decimal(balance_base),
+                "source_kind": _BALANCE_SOURCE_KIND,
+                "source_row_hash": source_row_hash,
+            },
+        )
+
+
+def run_upload_balance_canonical_adapter(
+    db: Session,
+    *,
+    account_id: int,
+    import_job_id: int | None,
+    parse_result: ParseResult,
+) -> dict[str, Any]:
+    """Adapt bank/account upload ParseResult into canonical account_balance_snapshots.
+
+    This is the canonical path for parsers that produce cash/balance positions:
+    - uob_account_xls_v1
+    - ocbc_account_csv_v1
+    - dbs_transaction_history_csv_v1
+
+    Only CASH asset-class positions are written as account balances.  Any other
+    asset class in positions is ignored (should not occur for these parsers but
+    the function is defensive).
+
+    Returns:
+        Dict with canonical write result metadata.
+    """
+    positions = [
+        p for p in (parse_result.positions or [])
+        if (p.get("asset_class") or "").upper() in ("CASH", "") or not p.get("asset_class")
+    ]
+    as_of_date = _resolve_balance_date(parse_result)
+    balances_written = 0
+
+    for pos in positions:
+        currency = (pos.get("currency") or "XXX").upper()
+        quantity = pos.get("quantity")
+        cost_basis_base = pos.get("cost_basis_base")
+
+        if quantity is None:
+            continue
+
+        balance_local = float(quantity)
+        balance_base = float(cost_basis_base) if cost_basis_base is not None else balance_local
+        row_hash = _source_row_hash_for_balance(account_id, as_of_date, currency, balance_local)
+
+        _write_account_balance_snapshot(
+            db,
+            account_id=account_id,
+            import_job_id=import_job_id,
+            as_of_date=as_of_date,
+            currency=currency,
+            balance_local=balance_local,
+            balance_base=balance_base,
+            balance_type="bank_cash",
+            source_row_hash=row_hash,
+        )
+        balances_written += 1
+
+    return {
+        "status": "CANONICAL_IMPORTED",
+        "adapter": "account_balance",
+        "account_id": account_id,
+        "as_of_date": as_of_date.isoformat(),
+        "counts": {
+            "balances": balances_written,
         },
     }

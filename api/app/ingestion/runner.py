@@ -23,7 +23,12 @@ from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_
 from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
 from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_xls
 from app.models.import_job import ImportJob
-from app.portfolio.upload_canonical import is_canonical_upload_platform, run_upload_canonical_adapter
+from app.portfolio.upload_canonical import (
+    is_canonical_upload_platform,
+    parser_canonical_target,
+    run_upload_canonical_adapter,
+    run_upload_balance_canonical_adapter,
+)
 
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "ibkr_activity_csv_v1": ("csv", parse_ibkr_activity_csv),
@@ -403,8 +408,32 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
             )
             inserted += 1
 
+        # --- Canonical adapter (Phase 5) ---
+        # For every parser that emits positions, canonical write is now the
+        # authoritative blocking path.  Legacy positions are no longer written
+        # for canonical-covered parsers.
+        #
+        # Decision tree by parser_key:
+        #   "portfolio_positions"  → run_upload_canonical_adapter (blocking)
+        #   "account_balance"      → run_upload_balance_canonical_adapter (blocking)
+        #   "none"                 → parser confirmed no positions; skip
+        #   None (unregistered)    → fail if positions present; no silent fallback
+        canonical_target = parser_canonical_target(parser_key)
+
+        # Guard: unregistered parser that emits positions must fail closed.
+        if canonical_target is None and positions:
+            job.status = "FAILED"
+            job.error_message = (
+                f"canonical_adapter_missing: parser '{parser_key}' emits "
+                f"{len(positions)} position(s) but has no canonical adapter registered. "
+                "Register the parser in PARSER_CANONICAL_REGISTRY before merging."
+            )
+            return write_and_return(_report(job, status="FAILED", error=job.error_message))
+
+        # Legacy positions write: only for parsers NOT covered by a canonical adapter.
+        # Canonical-covered parsers (portfolio_positions / account_balance) skip this block.
         positions_inserted = 0
-        if positions:
+        if canonical_target not in ("portfolio_positions", "account_balance") and positions:
             for pos in positions:
                 as_of = _resolve_position_as_of(pos, result.parser_meta or {}, parsed)
                 asset_id = _get_or_create_asset(db, pos)
@@ -467,36 +496,42 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                     )
                 positions_inserted += 1
 
+        # Canonical write (blocking for position-producing parsers).
+        # Must succeed before the job is marked IMPORTED.
+        canonical_result: dict | None = None
+        canonical_warning: str | None = None
+        canonical_positions_written = 0
+        canonical_balances_written = 0
+
+        if canonical_target == "portfolio_positions":
+            from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
+            flex_cutover = is_ibkr_flex_cutover_active(db, int(job.account_id))
+            canonical_result = run_upload_canonical_adapter(
+                db,
+                current_user_id=_get_account_user_id(db, int(job.account_id)),
+                legacy_account_id=int(job.account_id),
+                platform_code=job.platform,
+                parse_result=result,
+                stored_path=job.stored_path,
+                file_sha256=job.file_sha256,
+                is_ibkr_flex_cutover_active=flex_cutover,
+            )
+            canonical_positions_written = (canonical_result or {}).get("counts", {}).get("positions", 0)
+
+        elif canonical_target == "account_balance":
+            canonical_result = run_upload_balance_canonical_adapter(
+                db,
+                account_id=int(job.account_id),
+                import_job_id=int(job.id),
+                parse_result=result,
+            )
+            canonical_balances_written = (canonical_result or {}).get("counts", {}).get("balances", 0)
+
         db.commit()
         job.status = "IMPORTED"
         job.updated_at = _now()
         db.add(job)
         db.commit()
-
-        # --- Canonical adapter (Phase 2) ---
-        # Write canonical facts alongside the legacy write path.
-        # Failures in the canonical adapter are non-blocking; they are
-        # recorded in the report but do not change the IMPORTED status.
-        canonical_result: dict | None = None
-        canonical_warning: str | None = None
-        if is_canonical_upload_platform(job.platform):
-            try:
-                from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
-                flex_cutover = is_ibkr_flex_cutover_active(db, int(job.account_id))
-                canonical_result = run_upload_canonical_adapter(
-                    db,
-                    current_user_id=_get_account_user_id(db, int(job.account_id)),
-                    legacy_account_id=int(job.account_id),
-                    platform_code=job.platform,
-                    parse_result=result,
-                    stored_path=job.stored_path,
-                    file_sha256=job.file_sha256,
-                    is_ibkr_flex_cutover_active=flex_cutover,
-                )
-                db.commit()
-            except Exception as canonical_exc:  # noqa: BLE001
-                db.rollback()
-                canonical_warning = f"canonical_adapter_failed: {canonical_exc}"
 
         preview = [_serialize_tx(tx) for tx in parsed[:10]]
         report = _report(
@@ -512,6 +547,8 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
                 "duplicates_skipped": duplicates,
                 "positions_parsed": len(positions),
                 "positions_inserted": positions_inserted,
+                "canonical_positions_written": canonical_positions_written,
+                "canonical_balances_written": canonical_balances_written,
             },
             preview=preview,
             parser_meta=parser_meta,
@@ -565,6 +602,10 @@ def _report(
             "transactions_parsed": 0,
             "transactions_inserted": 0,
             "duplicates_skipped": 0,
+            "positions_parsed": 0,
+            "positions_inserted": 0,
+            "canonical_positions_written": 0,
+            "canonical_balances_written": 0,
         },
         "validation_warnings": warnings or [],
         "preview_transactions": preview or [],
