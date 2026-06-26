@@ -95,4 +95,5 @@ def test_ingest_upload_prefers_account_platform_over_generic_platform_code(
     assert data["status"] == "IMPORTED"
     assert data["platform"] == "DBS_VICKERS"
     assert data["parser_key"] == "dbs_vickers_holdings_xls_v1"
-    assert data["counts"]["positions_inserted"] > 0
+    assert data["counts"]["positions_inserted"] == 0
+    assert data["counts"].get("canonical_positions_written", 0) >= 1

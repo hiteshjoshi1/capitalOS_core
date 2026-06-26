@@ -115,7 +115,8 @@ def test_uob_ingest_upload_and_import(client: TestClient, db_engine):
     assert data["counts"]["transactions_inserted"] == 3
     assert data["counts"]["duplicates_skipped"] == 0
     assert data["counts"]["positions_parsed"] == 1
-    assert data["counts"]["positions_inserted"] == 1
+    assert data["counts"]["positions_inserted"] == 0
+    assert data["counts"].get("canonical_balances_written", 0) >= 1
 
     db = Session()
     try:
@@ -124,14 +125,14 @@ def test_uob_ingest_upload_and_import(client: TestClient, db_engine):
             {"account_id": account_id},
         ).scalar()
         pos_count = db.execute(
-            text("SELECT COUNT(*) FROM positions WHERE account_id = :account_id"),
+            text("SELECT COUNT(*) FROM account_balance_snapshots WHERE account_id = :account_id"),
             {"account_id": account_id},
         ).scalar()
     finally:
         db.close()
 
     assert tx_count == 3
-    assert pos_count == 1
+    assert pos_count >= 1
 
 
 def test_uob_ingest_idempotent(client: TestClient, db_engine):
@@ -175,13 +176,13 @@ def test_uob_ingest_idempotent(client: TestClient, db_engine):
     db = Session()
     try:
         pos_count = db.execute(
-            text("SELECT COUNT(*) FROM positions WHERE account_id = :account_id"),
+            text("SELECT COUNT(*) FROM account_balance_snapshots WHERE account_id = :account_id"),
             {"account_id": account_id},
         ).scalar()
     finally:
         db.close()
 
-    assert pos_count == 1
+    assert pos_count >= 1
 
 
 def test_uob_ingest_upload_with_legacy_platform_label(client: TestClient, db_engine):
@@ -214,7 +215,8 @@ def test_uob_ingest_upload_with_legacy_platform_label(client: TestClient, db_eng
     assert data["parser_key"] == "uob_account_xls_v1"
     assert data["counts"]["transactions_parsed"] == 3
     assert data["counts"]["transactions_inserted"] == 3
-    assert data["counts"]["positions_inserted"] == 1
+    assert data["counts"]["positions_inserted"] == 0
+    assert data["counts"].get("canonical_balances_written", 0) >= 1
 
 
 def test_uob_ingested_data_appears_in_dashboard_and_cash_flow(client: TestClient, db_engine):

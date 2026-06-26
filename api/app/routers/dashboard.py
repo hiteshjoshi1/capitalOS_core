@@ -32,6 +32,7 @@ from app.schemas.dashboard import (
 from app.fx import get_rates
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.portfolio.canonical_reads import (
+    canonical_account_balance_rows,
     canonical_position_rows_by_legacy_account,
     canonical_cash_rows_by_legacy_account,
     get_data_completeness_status,
@@ -647,6 +648,16 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
+    canonical_cash_rows = canonical_account_balance_rows(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+    )
+    nav_account_ids = {
+        int(row["legacy_account_id"])
+        for row in canonical_nav_rows
+        if row.get("legacy_account_id") is not None
+    }
     # Merge: legacy rows + canonical position rows share the same structure
     all_position_rows = rows + canonical_pos_rows
     price_map = _latest_price_map(
@@ -663,6 +674,7 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
         for r in all_position_rows
         if r["quote_currency"] or r.get("asset_id") in price_map
     }
+    currencies.update(row["currency"] for row in canonical_cash_rows if row.get("currency"))
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     currencies.add("USD")  # Include USD for crypto wallet conversions
     rates = get_rates(anchor_ts, base_currency, currencies)
@@ -694,6 +706,14 @@ def _networth_components(db: Session, anchor_ts: datetime, base_currency: str, c
         total_nav_base = float(row["total_nav_base"] or 0.0)
         cash += cash_base * rate
         stocks_funds += (total_nav_base - cash_base) * rate
+    for row in canonical_cash_rows:
+        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
+            continue
+        balance_type = str(row.get("balance_type") or "").lower()
+        if balance_type not in {"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"}:
+            continue
+        cash_currency = str(row["currency"] or base_currency).upper()
+        cash += float(row["balance_base"] or 0.0) * rates.get(cash_currency, 1.0)
     # Add crypto wallet snapshots (USD -> base_currency), latest per wallet
     as_of_date = anchor_ts.date()
     wallet_total = db.execute(

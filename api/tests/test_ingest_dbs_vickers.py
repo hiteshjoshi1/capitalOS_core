@@ -51,7 +51,8 @@ def test_dbs_vickers_holdings_ingest(client: TestClient, db_engine):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "IMPORTED"
-    assert data["counts"]["positions_inserted"] > 0
+    assert data["counts"]["positions_inserted"] == 0
+    assert data["counts"].get("canonical_positions_written", 0) >= 1
 
     # Re-upload should upsert (no duplicate rows)
     with open(fixture, "rb") as f:
@@ -63,10 +64,16 @@ def test_dbs_vickers_holdings_ingest(client: TestClient, db_engine):
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        count = db.execute(text("SELECT COUNT(*) FROM positions WHERE account_id = 201")).scalar()
+        count = db.execute(
+            text(
+                "SELECT COUNT(*) FROM portfolio_position_snapshots ps "
+                "JOIN broker_accounts ba ON ba.id = ps.broker_account_id "
+                "WHERE ba.legacy_account_id = 201"
+            )
+        ).scalar()
     finally:
         db.close()
-    assert count > 0
+    assert count >= 1
 
 
 def test_dbs_vickers_ingest_recovers_from_stale_csv_mapping(client: TestClient, db_engine):
@@ -116,4 +123,5 @@ def test_dbs_vickers_ingest_recovers_from_stale_csv_mapping(client: TestClient, 
     assert data["status"] == "IMPORTED"
     assert data["platform"] == "DBS_VICKERS"
     assert data["parser_key"] == "dbs_vickers_holdings_xls_v1"
-    assert data["counts"]["positions_inserted"] > 0
+    assert data["counts"]["positions_inserted"] == 0
+    assert data["counts"].get("canonical_positions_written", 0) >= 1

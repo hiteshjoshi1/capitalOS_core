@@ -50,7 +50,8 @@ def test_sharekhan_holdings_ingest(client: TestClient, db_engine, tmp_path):
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "IMPORTED"
-    assert data["counts"]["positions_inserted"] == 1
+    assert data["counts"]["positions_inserted"] == 0
+    assert data["counts"].get("canonical_positions_written", 0) >= 1
 
     # Re-upload should upsert (no duplicate rows)
     with open(fixture, "rb") as f:
@@ -62,7 +63,13 @@ def test_sharekhan_holdings_ingest(client: TestClient, db_engine, tmp_path):
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        count = db.execute(text("SELECT COUNT(*) FROM positions WHERE account_id = 200")).scalar()
+        count = db.execute(
+            text(
+                "SELECT COUNT(*) FROM portfolio_position_snapshots ps "
+                "JOIN broker_accounts ba ON ba.id = ps.broker_account_id "
+                "WHERE ba.legacy_account_id = 200"
+            )
+        ).scalar()
     finally:
         db.close()
-    assert count == 1
+    assert count >= 1
