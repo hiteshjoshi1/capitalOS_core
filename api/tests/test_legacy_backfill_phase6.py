@@ -529,6 +529,36 @@ def test_conflict_creates_data_quality_event(db_session, seeded_db):
     )
 
 
+def test_unmappable_legacy_rows_create_data_quality_events(db_session, db_engine, seeded_db):
+    """
+    Broken legacy rows should be visible as data-quality events instead of
+    disappearing through the normal account/asset joins.
+    """
+    with db_engine.begin() as conn:
+        _seed_position(conn, 9910, 999999, STOCK_ASSET_ID, AS_OF, 1.0, 1.0, 1.0)
+        _seed_position(conn, 9911, STOCK_ACCOUNT_ID, 999998, AS_OF, 1.0, 1.0, 1.0)
+
+    result = backfill_legacy_positions(db_session, current_user_id=USER_ID)
+
+    missing_account = db_session.execute(
+        text(
+            "SELECT COUNT(*) FROM portfolio_data_quality_events "
+            "WHERE event_code = 'backfill_missing_account_mapping'"
+        )
+    ).scalar()
+    unmapped_asset = db_session.execute(
+        text(
+            "SELECT COUNT(*) FROM portfolio_data_quality_events "
+            "WHERE event_code = 'backfill_unmapped_asset'"
+        )
+    ).scalar()
+
+    assert result.stock_fund_skipped_no_account >= 1
+    assert result.stock_fund_skipped_unmapped_asset >= 1
+    assert missing_account >= 1
+    assert unmapped_asset >= 1
+
+
 # ---------------------------------------------------------------------------
 # Test: legacy positions table is not modified
 # ---------------------------------------------------------------------------
@@ -605,6 +635,29 @@ def test_parity_report_before_backfill(db_session, seeded_db):
     assert report["net_worth"]["legacy_stock_fund"] > 0
     assert report["net_worth"]["canonical_stock_fund"] == 0.0
     assert report["summary"]["parity_ok"] is False
+
+
+def test_parity_report_legacy_latest_filters_before_anchor(db_session, db_engine, seeded_db):
+    """
+    Legacy latest-row selection must choose MAX(as_of) only from rows on or
+    before the anchor. A newer row after the anchor must not hide the older
+    valid stock/fund or cash row.
+    """
+    future_as_of = datetime(2026, 2, 28, 0, 0, 0, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        _seed_position(conn, 9902, STOCK_ACCOUNT_ID, STOCK_ASSET_ID, future_as_of, 120.0, 300.0, 36000.0)
+        _seed_position(conn, 9903, CASH_ACCOUNT_ID, CASH_ASSET_ID, future_as_of, 1.0, None, 4000.0)
+
+    report = generate_parity_report(db_session, current_user_id=USER_ID, anchor_date=REPORT_DATE)
+
+    stock_row = next(row for row in report["stock_holdings"] if row["symbol"] == "RELIANCE")
+    cash_row = next(row for row in report["cash_balances"] if row["account_id"] == CASH_ACCOUNT_ID)
+
+    assert stock_row["legacy_qty"] == pytest.approx(100.0)
+    assert stock_row["legacy_value"] == pytest.approx(25000.0)
+    assert cash_row["legacy"] == pytest.approx(3000.0)
+    assert report["net_worth"]["legacy_stock_fund"] == pytest.approx(30000.0)
+    assert report["net_worth"]["legacy_cash"] == pytest.approx(3000.0)
 
 
 # ---------------------------------------------------------------------------

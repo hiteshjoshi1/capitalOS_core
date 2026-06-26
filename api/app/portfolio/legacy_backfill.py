@@ -62,9 +62,11 @@ class BackfillResult:
     stock_fund_migrated: int = 0
     stock_fund_skipped_covered: int = 0
     stock_fund_skipped_no_account: int = 0
+    stock_fund_skipped_unmapped_asset: int = 0
     cash_migrated: int = 0
     cash_skipped_covered: int = 0
     cash_skipped_no_account: int = 0
+    cash_skipped_unmapped_asset: int = 0
     data_quality_events_written: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -77,8 +79,10 @@ class BackfillResult:
         return (
             self.stock_fund_skipped_covered
             + self.stock_fund_skipped_no_account
+            + self.stock_fund_skipped_unmapped_asset
             + self.cash_skipped_covered
             + self.cash_skipped_no_account
+            + self.cash_skipped_unmapped_asset
         )
 
 
@@ -448,6 +452,99 @@ def _record_dqe(
     )
 
 
+def _record_unmappable_legacy_positions(
+    db: Session,
+    *,
+    current_user_id: int,
+    dry_run: bool,
+) -> tuple[int, int, int, int, int]:
+    """
+    Record data-quality events for legacy rows that cannot enter the canonical
+    backfill because the account or asset identity is missing.
+
+    Returns (stock_fund_no_account, cash_no_account, stock_fund_unmapped_asset,
+    cash_unmapped_asset, dqe_written).
+    """
+    stock_fund_no_account = 0
+    cash_no_account = 0
+    stock_fund_unmapped_asset = 0
+    cash_unmapped_asset = 0
+
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              p.id AS pos_id,
+              p.account_id,
+              p.asset_id,
+              p.as_of,
+              a.id AS resolved_asset_id,
+              a.asset_class,
+              acc.id AS resolved_account_id
+            FROM positions p
+            LEFT JOIN assets a ON a.id = p.asset_id
+            LEFT JOIN accounts acc ON acc.id = p.account_id
+            WHERE acc.id IS NULL
+               OR (a.id IS NULL AND ("""
+            + account_scope_sql("acc")
+            + """))
+            ORDER BY p.id
+            """
+        ),
+        {"current_user_id": current_user_id},
+    ).mappings().all()
+
+    dqe_written = 0
+    for row in rows:
+        as_of_date: date = (
+            row["as_of"].date() if hasattr(row["as_of"], "date") else date.fromisoformat(str(row["as_of"])[:10])
+        )
+        asset_class = str(row["asset_class"] or "UNKNOWN").upper()
+        is_cash = asset_class == _CASH_ASSET_CLASS
+        if row["resolved_account_id"] is None:
+            if is_cash:
+                cash_no_account += 1
+            else:
+                stock_fund_no_account += 1
+            if not dry_run:
+                _record_dqe(
+                    db,
+                    broker_account_id=None,
+                    import_run_id=None,
+                    report_date=as_of_date,
+                    severity="error",
+                    event_code="backfill_missing_account_mapping",
+                    message=(
+                        f"Legacy position id={row['pos_id']} account={row['account_id']} "
+                        "has no matching accounts row; skipped."
+                    ),
+                )
+                dqe_written += 1
+            continue
+
+        if row["resolved_asset_id"] is None:
+            if is_cash:
+                cash_unmapped_asset += 1
+            else:
+                stock_fund_unmapped_asset += 1
+            if not dry_run:
+                _record_dqe(
+                    db,
+                    broker_account_id=None,
+                    import_run_id=None,
+                    report_date=as_of_date,
+                    severity="error",
+                    event_code="backfill_unmapped_asset",
+                    message=(
+                        f"Legacy position id={row['pos_id']} asset={row['asset_id']} "
+                        "has no matching assets row; skipped."
+                    ),
+                )
+                dqe_written += 1
+
+    return stock_fund_no_account, cash_no_account, stock_fund_unmapped_asset, cash_unmapped_asset, dqe_written
+
+
 # ---------------------------------------------------------------------------
 # Stock/fund backfill
 # ---------------------------------------------------------------------------
@@ -458,7 +555,7 @@ def _backfill_stock_fund_positions(
     *,
     current_user_id: int,
     dry_run: bool = False,
-) -> tuple[int, int, int, int]:
+) -> tuple[int, int, int, int, int]:
     """
     Migrate legacy stock/fund positions to portfolio_position_snapshots.
 
@@ -758,12 +855,21 @@ def backfill_legacy_positions(
     """
     result = BackfillResult()
 
+    sf_missing_acc, cash_missing_acc, sf_missing_asset, cash_missing_asset, preflight_dqe = (
+        _record_unmappable_legacy_positions(db, current_user_id=current_user_id, dry_run=dry_run)
+    )
+    result.stock_fund_skipped_no_account += sf_missing_acc
+    result.cash_skipped_no_account += cash_missing_acc
+    result.stock_fund_skipped_unmapped_asset += sf_missing_asset
+    result.cash_skipped_unmapped_asset += cash_missing_asset
+    result.data_quality_events_written += preflight_dqe
+
     sf_migrated, sf_skipped_cov, sf_skipped_acc, sf_dqe = _backfill_stock_fund_positions(
         db, current_user_id=current_user_id, dry_run=dry_run
     )
     result.stock_fund_migrated = sf_migrated
     result.stock_fund_skipped_covered = sf_skipped_cov
-    result.stock_fund_skipped_no_account = sf_skipped_acc
+    result.stock_fund_skipped_no_account += sf_skipped_acc
     result.data_quality_events_written += sf_dqe
 
     c_migrated, c_skipped_cov, c_skipped_acc, c_dqe = _backfill_cash_positions(
@@ -771,7 +877,7 @@ def backfill_legacy_positions(
     )
     result.cash_migrated = c_migrated
     result.cash_skipped_covered = c_skipped_cov
-    result.cash_skipped_no_account = c_skipped_acc
+    result.cash_skipped_no_account += c_skipped_acc
     result.data_quality_events_written += c_dqe
 
     if not dry_run:

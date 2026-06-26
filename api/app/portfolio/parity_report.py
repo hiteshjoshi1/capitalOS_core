@@ -74,6 +74,7 @@ def _legacy_stock_fund_values(
             WITH latest AS (
               SELECT account_id, asset_id, MAX(as_of) AS as_of
               FROM positions
+              WHERE DATE(as_of) <= :anchor_date
               GROUP BY account_id, asset_id
             )
             SELECT
@@ -90,7 +91,6 @@ def _legacy_stock_fund_values(
             JOIN assets a ON a.id = p.asset_id
             JOIN accounts acc ON acc.id = p.account_id
             WHERE a.asset_class IN ('STOCK', 'FUND')
-              AND DATE(p.as_of) <= :anchor_date
               AND ("""
             + account_scope_sql("acc")
             + """)
@@ -111,6 +111,7 @@ def _legacy_cash_values(
             WITH latest AS (
               SELECT account_id, asset_id, MAX(as_of) AS as_of
               FROM positions
+              WHERE DATE(as_of) <= :anchor_date
               GROUP BY account_id, asset_id
             )
             SELECT
@@ -123,7 +124,6 @@ def _legacy_cash_values(
             JOIN assets a ON a.id = p.asset_id
             JOIN accounts acc ON acc.id = p.account_id
             WHERE a.asset_class = 'CASH'
-              AND DATE(p.as_of) <= :anchor_date
               AND ("""
             + account_scope_sql("acc")
             + """)
