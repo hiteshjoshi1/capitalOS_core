@@ -499,6 +499,116 @@ def test_no_overwrite_existing_authoritative_position(db_session, seeded_db):
     assert float(row[0]) == pytest.approx(existing_value), "Backfill overwrote existing authoritative value"
 
 
+def test_partial_authoritative_coverage_does_not_skip_account_date(db_session, db_engine, seeded_db):
+    """
+    An existing authoritative snapshot for one security must not make the
+    backfill skip every other security for the same account/date.
+    """
+    second_asset_id = 9014
+    with db_engine.begin() as conn:
+        _seed_asset(conn, second_asset_id, "SECOND", "STOCK", "INR", "IN")
+        _seed_position(conn, 9014, STOCK_ACCOUNT_ID, second_asset_id, AS_OF, 25.0, 40.0, 1000.0)
+
+    with db_session.begin_nested():
+        db_session.execute(
+            text(
+                "INSERT INTO broker_connections "
+                "(user_id, platform_code, connection_type, status, metadata_json) "
+                "VALUES (:uid, 'SHAREKHAN', 'manual_upload', 'active', '{}')"
+            ),
+            {"uid": USER_ID},
+        )
+        conn_id = db_session.execute(
+            text(
+                "SELECT id FROM broker_connections WHERE user_id=:uid AND platform_code='SHAREKHAN' "
+                "AND connection_type='manual_upload' ORDER BY id DESC LIMIT 1"
+            ),
+            {"uid": USER_ID},
+        ).scalar()
+        db_session.execute(
+            text(
+                "INSERT INTO broker_accounts "
+                "(connection_id, legacy_account_id, broker_account_id, base_currency, status, metadata_json) "
+                "VALUES (:conn_id, :acct_id, 'partial_coverage_9010', 'INR', 'active', '{}')"
+            ),
+            {"conn_id": conn_id, "acct_id": STOCK_ACCOUNT_ID},
+        )
+        ba_id = db_session.execute(
+            text(
+                "SELECT id FROM broker_accounts WHERE connection_id=:conn_id "
+                "AND broker_account_id='partial_coverage_9010' LIMIT 1"
+            ),
+            {"conn_id": conn_id},
+        ).scalar()
+        db_session.execute(
+            text(
+                "INSERT INTO broker_import_runs "
+                "(broker_account_id, legacy_account_id, platform_code, source_type, status, "
+                "report_date_from, report_date_to, parser_version, metadata_json) "
+                "VALUES (:ba_id, :acct_id, 'SHAREKHAN', 'sharekhan_upload', 'completed', "
+                ":rd, :rd, 'test_v1', '{}')"
+            ),
+            {"ba_id": ba_id, "acct_id": STOCK_ACCOUNT_ID, "rd": REPORT_DATE},
+        )
+        run_id = db_session.execute(
+            text("SELECT id FROM broker_import_runs WHERE broker_account_id=:ba_id ORDER BY id DESC LIMIT 1"),
+            {"ba_id": ba_id},
+        ).scalar()
+        db_session.execute(
+            text(
+                "INSERT INTO broker_instruments "
+                "(platform_code, broker_instrument_id, asset_id, symbol, currency, metadata_json) "
+                "VALUES ('SHAREKHAN', 'RELIANCE_INR_PARTIAL', :asset_id, 'RELIANCE', 'INR', '{}')"
+            ),
+            {"asset_id": STOCK_ASSET_ID},
+        )
+        instr_id = db_session.execute(
+            text(
+                "SELECT id FROM broker_instruments WHERE platform_code='SHAREKHAN' "
+                "AND broker_instrument_id='RELIANCE_INR_PARTIAL' LIMIT 1"
+            )
+        ).scalar()
+        db_session.execute(
+            text(
+                "INSERT INTO portfolio_position_snapshots "
+                "(broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, "
+                "report_date, quantity, currency, market_price, market_value_local, market_value_base, "
+                "cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json) "
+                "VALUES (:ba_id, :acct_id, :instr_id, :run_id, :rd, 100, 'INR', 250, "
+                "25000, 25000, 25000, 25000, 1, 'authoritative', '{}')"
+            ),
+            {
+                "ba_id": ba_id,
+                "acct_id": STOCK_ACCOUNT_ID,
+                "instr_id": instr_id,
+                "run_id": run_id,
+                "rd": REPORT_DATE,
+            },
+        )
+
+    result = backfill_legacy_positions(db_session, current_user_id=USER_ID)
+
+    assert result.stock_fund_skipped_covered >= 1
+    second_row = db_session.execute(
+        text(
+            """
+            SELECT pps.quantity, pps.market_value_base
+            FROM portfolio_position_snapshots pps
+            JOIN broker_accounts ba ON ba.id = pps.broker_account_id
+            JOIN broker_instruments bi ON bi.id = pps.broker_instrument_id
+            WHERE ba.legacy_account_id = :acct_id
+              AND bi.asset_id = :asset_id
+              AND pps.report_date = :report_date
+              AND pps.authority_status = 'authoritative'
+            """
+        ),
+        {"acct_id": STOCK_ACCOUNT_ID, "asset_id": second_asset_id, "report_date": REPORT_DATE},
+    ).fetchone()
+    assert second_row is not None
+    assert float(second_row[0]) == pytest.approx(25.0)
+    assert float(second_row[1]) == pytest.approx(1000.0)
+
+
 # ---------------------------------------------------------------------------
 # Test: conflict creates data-quality event
 # ---------------------------------------------------------------------------

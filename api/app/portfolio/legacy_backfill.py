@@ -361,31 +361,50 @@ def _ensure_backfill_broker_instrument(
 # ---------------------------------------------------------------------------
 
 
-def _account_date_has_authoritative_positions(
+def _position_has_authoritative_snapshot(
     db: Session,
     *,
     legacy_account_id: int,
     report_date: date,
+    asset_id: int,
+    symbol: str,
+    currency: str,
 ) -> bool:
     """
-    Return True if ANY broker_account for this legacy account already has
-    authoritative position snapshots at this report_date.
+    Return True if this exact account/date/security already has an
+    authoritative canonical position snapshot.
 
-    Used to detect pre-existing canonical coverage so the backfill skips
-    rather than silently overwriting.
+    Backfill must not treat one covered security as account-wide coverage;
+    partial canonical coverage is expected during migration.
     """
     row = db.execute(
         text(
             """
             SELECT 1 FROM portfolio_position_snapshots pps
             JOIN broker_accounts ba ON ba.id = pps.broker_account_id
+            JOIN broker_instruments bi ON bi.id = pps.broker_instrument_id
             WHERE ba.legacy_account_id = :legacy_account_id
               AND pps.report_date = :report_date
               AND pps.authority_status = 'authoritative'
+              AND UPPER(pps.currency) = :currency
+              AND (
+                bi.asset_id = :asset_id
+                OR (
+                  bi.asset_id IS NULL
+                  AND UPPER(bi.symbol) = :symbol
+                  AND UPPER(COALESCE(bi.currency, '')) = :currency
+                )
+              )
             LIMIT 1
             """
         ),
-        {"legacy_account_id": legacy_account_id, "report_date": report_date},
+        {
+            "legacy_account_id": legacy_account_id,
+            "report_date": report_date,
+            "asset_id": asset_id,
+            "symbol": symbol.upper(),
+            "currency": currency.upper(),
+        },
     ).fetchone()
     return row is not None
 
@@ -617,9 +636,14 @@ def _backfill_stock_fund_positions(
             quote_currency=currency,
         )
 
-        # Check for pre-existing authoritative coverage for this account/date
-        if _account_date_has_authoritative_positions(
-            db, legacy_account_id=account_id, report_date=report_date
+        # Check for pre-existing authoritative coverage for this exact security.
+        if _position_has_authoritative_snapshot(
+            db,
+            legacy_account_id=account_id,
+            report_date=report_date,
+            asset_id=asset_id,
+            symbol=symbol,
+            currency=currency,
         ):
             skipped_covered += 1
             if not dry_run:
