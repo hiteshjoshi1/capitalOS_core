@@ -218,6 +218,36 @@ INDEX (content_sha256)
 
 Raw XML/upload content must be retained securely. Secrets in request URLs are not stored.
 
+### Legacy Position Backfill And Parity Audit
+
+Issue 181 uses a migration bridge to copy eligible legacy `positions` facts into canonical storage without deleting `positions`.
+
+Run the backfill for one user:
+
+```bash
+docker compose run --rm api python -m app.portfolio.legacy_backfill --user-id 1
+```
+
+Dry-run the same scope without writes:
+
+```bash
+docker compose run --rm api python -m app.portfolio.legacy_backfill --user-id 1 --dry-run
+```
+
+Generate the parity report at an explicit anchor date:
+
+```bash
+docker compose run --rm api python -m app.portfolio.parity_report --user-id 1 --anchor-date 2026-01-31
+```
+
+Interpretation:
+
+- `net_worth.delta_total`, `delta_stock_fund`, and `delta_cash` should be zero or within rounding tolerance after backfill.
+- `stock_holdings`, `cash_balances`, `platform_alloc`, and `geography_alloc` show row-level legacy-versus-canonical deltas.
+- `summary.parity_ok` is true only when stock quantities and cash balances match.
+- Legacy latest-row selection is anchored: both stock/fund and cash reads choose `MAX(as_of)` only from rows where `as_of <= anchor_date`.
+- `portfolio_data_quality_events` records skipped/conflicting canonical facts so existing authoritative rows are not overwritten.
+
 ---
 
 ## Instrument And Stock Modeling
@@ -804,4 +834,3 @@ For IBKR Flex accounts, total portfolio value is canonical NAV. Holdings plus ca
 - This model does not implement autonomous trading.
 - This model does not compute TWR/MWR until historical events and external flows are complete.
 - This model does not automatically merge economically related instruments such as ordinary shares and ADRs.
-

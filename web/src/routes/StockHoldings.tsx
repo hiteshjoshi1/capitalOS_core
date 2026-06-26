@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
@@ -83,13 +83,13 @@ export default function StockHoldings() {
     }));
   };
 
-  const loadSummary = async () => {
+  const loadSummary = useCallback(async () => {
     setErr("");
     setState("loading");
     const stockData = await api.stockHoldingsSummary(month, baseCurrency);
     setSummary(stockData);
     setState("ready");
-  };
+  }, [month, baseCurrency]);
 
   useEffect(() => {
     (async () => {
@@ -100,7 +100,7 @@ export default function StockHoldings() {
         setState("error");
       }
     })();
-  }, [month, baseCurrency]);
+  }, [loadSummary]);
 
   useEffect(() => {
     window.localStorage.setItem(STOCK_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns));
