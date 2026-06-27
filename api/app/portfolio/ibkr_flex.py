@@ -1150,6 +1150,10 @@ def _authority_status(report_date: date, cutover_date: date) -> str:
     return "authoritative" if report_date >= cutover_date else "reference"
 
 
+def _resolve_cutover_date(statement: FlexStatement, cutover_date: date | None) -> date:
+    return cutover_date or statement.report_date_from
+
+
 def _clear_existing_authoritative_facts(db: Session, broker_account_id: int, report_dates: set[date]) -> None:
     for report_date in report_dates:
         for table_name in (
@@ -1807,10 +1811,11 @@ def run_ibkr_flex_import_from_xml(
     current_user_id: int,
     legacy_account_id: int,
     xml_text: str,
-    cutover_date: date,
+    cutover_date: date | None = None,
     reference_code: str | None = None,
 ) -> dict[str, Any]:
     statement = parse_flex_statement(xml_text)
+    effective_cutover_date = _resolve_cutover_date(statement, cutover_date)
     broker_account_id = _ensure_broker_account(
         db,
         current_user_id=current_user_id,
@@ -1818,7 +1823,7 @@ def run_ibkr_flex_import_from_xml(
         broker_account_id=statement.broker_account_id,
         base_currency=statement.base_currency,
     )
-    _ensure_authority_window(db, broker_account_id, cutover_date)
+    _ensure_authority_window(db, broker_account_id, effective_cutover_date)
     lock_owner = _try_acquire_lock(db, broker_account_id, SOURCE_TYPE)
     db.commit()
 
@@ -1847,7 +1852,7 @@ def run_ibkr_flex_import_from_xml(
             import_run_id=import_run_id,
             raw_document_id=raw_document_id,
             statement=statement,
-            cutover_date=cutover_date,
+            cutover_date=effective_cutover_date,
         )
         _mark_import_completed(db, import_run_id)
         _release_lock(db, broker_account_id, lock_owner)
@@ -1917,7 +1922,7 @@ def run_ibkr_flex_import_from_config(
     *,
     current_user_id: int,
     legacy_account_id: int,
-    cutover_date: date,
+    cutover_date: date | None = None,
 ) -> dict[str, Any]:
     max_attempts = int(os.getenv("IBKR_FLEX_MAX_ATTEMPTS", "5"))
     initial_backoff_seconds = float(
@@ -1954,7 +1959,19 @@ def latest_authoritative_nav_by_legacy_account(
               JOIN broker_accounts ba ON ba.id = ns.broker_account_id
               JOIN accounts acc ON acc.id = ba.legacy_account_id
               WHERE ns.report_date <= :anchor_date
-                AND ns.authority_status = 'authoritative'
+                AND (
+                  ns.authority_status = 'authoritative'
+                  OR EXISTS (
+                    SELECT 1
+                    FROM portfolio_source_authority_windows aw
+                    WHERE aw.broker_account_id = ns.broker_account_id
+                      AND aw.source_kind = :source_kind
+                      AND aw.fact_scope = 'all'
+                      AND aw.authority_status = 'authoritative'
+                      AND aw.effective_from <= ns.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                  )
+                )
                 AND ba.legacy_account_id IS NOT NULL
                 AND (acc.user_id = :current_user_id OR acc.user_id IS NULL)
               GROUP BY ns.broker_account_id
@@ -1977,6 +1994,6 @@ def latest_authoritative_nav_by_legacy_account(
             LEFT JOIN platforms pl ON pl.id = acc.platform_id
             """
         ),
-        {"anchor_date": anchor_date, "current_user_id": current_user_id},
+        {"anchor_date": anchor_date, "current_user_id": current_user_id, "source_kind": SOURCE_TYPE},
     ).mappings().all()
     return [dict(row) for row in rows]

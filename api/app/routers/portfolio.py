@@ -31,7 +31,7 @@ def _validate_admin_key(x_admin_key: str | None) -> None:
         raise HTTPException(status_code=403, detail="Invalid admin key")
 
 
-def _parse_cutover_date(raw: str | None) -> date:
+def _parse_cutover_date(raw: str | None) -> date | None:
     if raw:
         try:
             return date.fromisoformat(raw)
@@ -43,7 +43,7 @@ def _parse_cutover_date(raw: str | None) -> date:
             return date.fromisoformat(env_value)
         except ValueError as exc:
             raise HTTPException(status_code=500, detail="Invalid IBKR_FLEX_CUTOVER_DATE") from exc
-    return date.today()
+    return None
 
 
 def _require_ibkr_account(db: Session, account_id: int, current_user_id: int) -> None:
@@ -77,7 +77,10 @@ def _iso(value: Any) -> str | None:
 @router.post("/ibkr-flex/import-now")
 def import_ibkr_flex_now(
     account_id: int = Query(...),
-    cutover_date: str | None = Query(None, description="YYYY-MM-DD. Defaults to IBKR_FLEX_CUTOVER_DATE or today."),
+    cutover_date: str | None = Query(
+        None,
+        description="YYYY-MM-DD. Defaults to IBKR_FLEX_CUTOVER_DATE or the Flex statement start date.",
+    ),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
     x_admin_key: str | None = Header(default=None, alias="X-Admin-Key"),

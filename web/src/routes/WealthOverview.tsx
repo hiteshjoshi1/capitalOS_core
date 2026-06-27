@@ -132,10 +132,10 @@ export default function WealthOverview() {
   const currentNetWorth = summary?.current_net_worth ?? summary?.net_worth ?? null;
   const currentNetWorthAsOf = summary?.current_net_worth_as_of ?? summary?.net_worth_as_of ?? null;
   const currentFreshness = summary?.current_net_worth_freshness ?? null;
-  const netWorthTotal = summary?.net_worth.total ?? 0;
-  const stocksPct = netWorthTotal ? ((summary?.net_worth.stocks_funds ?? 0) / netWorthTotal) * 100 : 0;
-  const cryptoPct = netWorthTotal ? ((summary?.net_worth.crypto ?? 0) / netWorthTotal) * 100 : 0;
-  const cashPct = netWorthTotal ? ((summary?.net_worth.cash ?? 0) / netWorthTotal) * 100 : 0;
+  const currentNetWorthTotal = currentNetWorth?.total ?? 0;
+  const stocksPct = currentNetWorthTotal ? ((currentNetWorth?.stocks_funds ?? 0) / currentNetWorthTotal) * 100 : 0;
+  const cryptoPct = currentNetWorthTotal ? ((currentNetWorth?.crypto ?? 0) / currentNetWorthTotal) * 100 : 0;
+  const cashPct = currentNetWorthTotal ? ((currentNetWorth?.cash ?? 0) / currentNetWorthTotal) * 100 : 0;
   const currentFreshnessItems = useMemo(
     () => [
       { label: "Positions", value: currentFreshness?.positions_as_of ?? null },
@@ -150,7 +150,7 @@ export default function WealthOverview() {
       {
         label: "Stocks & Funds",
         percent: stocksPct,
-        value: summary?.net_worth.stocks_funds ?? 0,
+        value: currentNetWorth?.stocks_funds ?? 0,
         to: "/holdings",
         toneClass: "wealthSliceStocks",
         deltaAbs: summary?.net_worth_component_change?.stocks_funds?.abs ?? null,
@@ -160,7 +160,7 @@ export default function WealthOverview() {
       {
         label: "Crypto",
         percent: cryptoPct,
-        value: summary?.net_worth.crypto ?? 0,
+        value: currentNetWorth?.crypto ?? 0,
         to: "/crypto/holdings",
         toneClass: "wealthSliceCrypto",
         deltaAbs: summary?.net_worth_component_change?.crypto?.abs ?? null,
@@ -170,7 +170,7 @@ export default function WealthOverview() {
       {
         label: "Cash",
         percent: cashPct,
-        value: summary?.net_worth.cash ?? 0,
+        value: currentNetWorth?.cash ?? 0,
         to: "/cash",
         toneClass: "wealthSliceCash",
         deltaAbs: summary?.net_worth_component_change?.cash?.abs ?? null,
@@ -178,7 +178,7 @@ export default function WealthOverview() {
         compareMonth: summary?.net_worth_component_change?.cash?.compare_month ?? null,
       },
     ],
-    [cashPct, cryptoPct, stocksPct, summary],
+    [cashPct, cryptoPct, currentNetWorth, stocksPct, summary],
   );
   const platformPieItems = useMemo(
     () =>
@@ -199,11 +199,12 @@ export default function WealthOverview() {
   const snapshotPeriod = snapshotPeriodFromBoundary(snapshotBoundaryAt);
   const snapshotCapturedAt = summary?.net_worth_snapshot_as_of ?? null;
   const snapshotFreshnessStatus = summary?.net_worth_freshness_status ?? "missing";
+  const snapshotHasValue = snapshotFreshnessStatus !== "missing";
   const snapshotStatusLabel =
     snapshotFreshnessStatus === "exact"
-      ? "Exact snapshot"
+      ? "Completed snapshot"
       : snapshotFreshnessStatus === "synthetic"
-        ? "Synthetic snapshot"
+        ? "Latest-known snapshot"
         : "Snapshot missing";
   const snapshotStatusClass =
     snapshotFreshnessStatus === "exact"
@@ -213,10 +214,10 @@ export default function WealthOverview() {
         : "wealthSnapshotBadgeMissing";
   const snapshotFreshnessDescription =
     snapshotFreshnessStatus === "exact"
-      ? "Exact holdings exist on the boundary."
+      ? "Computed at the configured boundary."
       : snapshotFreshnessStatus === "synthetic"
-        ? "No exact boundary holdings exist; values use the latest holdings at or before the boundary plus known activity."
-        : "No holdings snapshot exists at or before the boundary.";
+        ? "Computed from the latest known component values at or before the boundary."
+        : "No holdings data exists at or before the boundary.";
 
   const renderDelta = (label: string, abs: number, pct: number | null) => (
     <div className="wealthDeltaPill">
@@ -309,8 +310,10 @@ export default function WealthOverview() {
               <div className="wealthSnapshotPanel">
                 <div className="wealthSnapshotPanelHeader">
                   <div>
-                    <p className="wealthSnapshotLabel">Completed snapshot used for {summary.as_of_month ?? month}</p>
-                    <strong className="wealthSnapshotValue">{formatMoney(summary.net_worth.total, 2)}</strong>
+                    <p className="wealthSnapshotLabel">Snapshot context for {summary.as_of_month ?? month}</p>
+                    <strong className="wealthSnapshotValue">
+                      {snapshotHasValue ? formatMoney(summary.net_worth.total, 2) : "Missing"}
+                    </strong>
                   </div>
                   <span className={`wealthSnapshotBadge ${snapshotStatusClass}`}>{snapshotStatusLabel}</span>
                 </div>
@@ -334,12 +337,12 @@ export default function WealthOverview() {
                 <p className="wealthEyebrow" id="wealth-allocation-heading">Allocation</p>
                 <h2>Where the money sits</h2>
               </div>
-              <span className="muted">Platform and asset-class view of snapshot net worth</span>
+              <span className="muted">Platform and asset-class view of current net worth</span>
             </div>
             <div className="wealthAllocationGrid">
               <ExposurePieCard
                 title="Platform Allocation"
-                subtitle="Snapshot net worth by broker, bank, and wallet platform"
+                subtitle="Current net worth by broker, bank, and wallet platform"
                 items={platformPieItems}
                 totalLabel={formatMoney(platformAllocation?.total ?? 0)}
                 formatMoney={formatMoney}
@@ -349,7 +352,7 @@ export default function WealthOverview() {
             <article className="card wealthAllocationCard">
               <div className="wealthAllocationHeader">
                 <p className="wealthEyebrow">Portfolio Composition</p>
-                <span className="wealthAllocationMeta">Percent of snapshot net worth</span>
+                <span className="wealthAllocationMeta">Percent of current net worth</span>
               </div>
               <div className="wealthAllocationRail" aria-label="Snapshot net worth composition">
                 {composition.map((slice) => (
@@ -407,7 +410,7 @@ export default function WealthOverview() {
                   </p>
                 ) : null}
                 <div className="wealthSurfaceFooter">
-                  <span>{slice.percent.toFixed(1)}% of snapshot net worth</span>
+                  <span>{slice.percent.toFixed(1)}% of current net worth</span>
                   <span>Open details</span>
                 </div>
               </Link>

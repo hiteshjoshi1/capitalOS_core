@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from tests.canonical_test_helpers import backfill_legacy_positions_for_test
+
 
 def test_spending_summary(client: TestClient, seed_spending_data):
     resp = client.get("/spending/summary?month=2026-02&base_currency=SGD")
@@ -183,6 +185,7 @@ def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, d
                 "(15, '2026-01-18 12:00:00+00:00', 11, -900, 'EXPENSE', 'SGD', 'Groceries', 'Supermarket', NULL)"
             )
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     resp = client.get("/spending/cash-flow-detail?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200

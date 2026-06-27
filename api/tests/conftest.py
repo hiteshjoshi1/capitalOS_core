@@ -999,6 +999,68 @@ def seed_dashboard_data():
         )
         conn.execute(
             text(
+                "INSERT INTO broker_connections (id, user_id, platform_code, connection_type, display_name, status, metadata_json) VALUES "
+                "(1, 1, 'IBKR', 'test', 'IBKR Fixture', 'active', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_accounts (id, connection_id, legacy_account_id, broker_account_id, base_currency, status, metadata_json) VALUES "
+                "(1, 1, 2, 'U_FIXTURE', 'SGD', 'active', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_import_runs (id, broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status, metadata_json) VALUES "
+                "(1, 1, 2, 'IBKR', 'test', 'daily', 'completed', '{}'), "
+                "(2, 1, 2, 'IBKR', 'test', 'daily', 'completed', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_instruments (id, platform_code, broker_instrument_id, asset_id, symbol, description, security_type, currency, metadata_json) VALUES "
+                "(1, 'IBKR', 'AAPL_FIXTURE', 1, 'AAPL', 'Apple Inc.', 'STOCK', 'USD', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO portfolio_nav_snapshots
+                  (id, broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+                   cash_base, stock_base, total_nav_base, authority_status, metadata_json)
+                VALUES
+                  (1, 1, 2, 1, '2026-02-06', 'SGD', 0, 50000, 50000, 'authoritative', '{}'),
+                  (2, 1, 2, 2, '2026-01-06', 'SGD', 0, 45000, 45000, 'authoritative', '{}')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO portfolio_position_snapshots
+                  (id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                   quantity, currency, market_price, market_value_local, market_value_base,
+                   cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
+                VALUES
+                  (1, 1, 2, 1, 1, '2026-02-06', 10, 'USD', 5000, 50000, 50000, 50000, 50000, 1, 'authoritative', '{}'),
+                  (2, 1, 2, 1, 2, '2026-01-06', 9, 'USD', 5000, 45000, 45000, 45000, 45000, 1, 'authoritative', '{}')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO account_balance_snapshots
+                  (id, account_id, as_of_date, currency, balance_type, balance_local, balance_base,
+                   fx_rate_to_base, authority_status, source_kind, metadata_json)
+                VALUES
+                  (1, 1, '2026-02-06', 'SGD', 'bank_cash', 30000, 30000, 1, 'authoritative', 'test_fixture', '{}'),
+                  (2, 1, '2026-01-06', 'SGD', 'bank_cash', 30000, 30000, 1, 'authoritative', 'test_fixture', '{}')
+                """
+            )
+        )
+        conn.execute(
+            text(
                 "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
                 "('wallet-btc', 'evm', 'ethereum', '0xbtc', 'BTC Wallet', 'active', :as_of_cur)"
             ),

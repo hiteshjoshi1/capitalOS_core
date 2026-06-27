@@ -36,6 +36,9 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 
+_IBKR_FLEX_SOURCE_KIND = "ibkr_flex_daily"
+_IBKR_FLEX_FACT_SCOPE = "all"
+
 # SQL fragment that tests whether a legacy account has any authoritative
 # canonical position snapshots at/before a given anchor date.
 # Bind params required: :anchor_date, :current_user_id  (plus p.account_id in context)
@@ -87,33 +90,159 @@ def canonical_position_rows_by_legacy_account(
     consumers, such as the stock holdings list, may opt in to include those
     accounts while still using NAV for account totals.
 
-    Returned dicts match the shape produced by _synthetic_position_rows so that
-    callers can merge them with the legacy row list without special-casing.
+    Returned dicts use the dashboard's canonical position shape so callers do
+    not need to hand-write SQL against portfolio_position_snapshots.
     """
     q = text(
         """
-        WITH latest_canonical AS (
-          SELECT ps.broker_account_id, MAX(ps.report_date) AS report_date
-          FROM portfolio_position_snapshots ps
-          JOIN broker_accounts ba ON ba.id = ps.broker_account_id
+        WITH flex_authority_accounts AS (
+          SELECT ba.legacy_account_id AS account_id, ba.id AS broker_account_id
+          FROM portfolio_source_authority_windows aw
+          JOIN broker_accounts ba ON ba.id = aw.broker_account_id
+          JOIN broker_connections bc ON bc.id = ba.connection_id
           JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE ps.report_date <= :anchor_date
-            AND ps.authority_status = 'authoritative'
+          WHERE aw.source_kind = :ibkr_flex_source_kind
+            AND aw.fact_scope = :ibkr_flex_fact_scope
+            AND aw.authority_status = 'authoritative'
+            AND aw.effective_from <= :anchor_date
+            AND (aw.effective_to IS NULL OR aw.effective_to >= :anchor_date)
             AND ba.legacy_account_id IS NOT NULL
+            AND bc.platform_code = 'IBKR'
             AND (
-              :include_nav_accounts
-              OR NOT EXISTS (
+              EXISTS (
                 SELECT 1
                 FROM portfolio_nav_snapshots ns
                 WHERE ns.broker_account_id = ba.id
                   AND ns.report_date <= :anchor_date
-                  AND ns.authority_status = 'authoritative'
+                  AND (
+                    ns.authority_status = 'authoritative'
+                    OR (
+                      aw.effective_from <= ns.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                    )
+                  )
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_position_snapshots ps
+                WHERE ps.broker_account_id = ba.id
+                  AND ps.report_date <= :anchor_date
+                  AND (
+                    ps.authority_status = 'authoritative'
+                    OR (
+                      aw.effective_from <= ps.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= ps.report_date)
+                    )
+                  )
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_cash_balance_snapshots cs
+                WHERE cs.broker_account_id = ba.id
+                  AND cs.report_date <= :anchor_date
+                  AND (
+                    cs.authority_status = 'authoritative'
+                    OR (
+                      aw.effective_from <= cs.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= cs.report_date)
+                    )
+                  )
               )
             )
             AND ("""
         + account_scope_sql("acc")
         + """)
-          GROUP BY ps.broker_account_id
+        ),
+        nav_covered_accounts AS (
+          SELECT DISTINCT ba.legacy_account_id AS account_id
+          FROM portfolio_nav_snapshots ns
+          JOIN broker_accounts ba ON ba.id = ns.broker_account_id
+          JOIN accounts acc ON acc.id = ba.legacy_account_id
+          WHERE ns.report_date <= :anchor_date
+            AND (
+              ns.authority_status = 'authoritative'
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_source_authority_windows aw
+                WHERE aw.broker_account_id = ns.broker_account_id
+                  AND aw.source_kind = :ibkr_flex_source_kind
+                  AND aw.fact_scope = :ibkr_flex_fact_scope
+                  AND aw.authority_status = 'authoritative'
+                  AND aw.effective_from <= ns.report_date
+                  AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+              )
+            )
+            AND ba.legacy_account_id IS NOT NULL
+            AND ("""
+        + account_scope_sql("acc")
+        + """)
+        ),
+        latest_canonical AS (
+          SELECT ba.legacy_account_id AS account_id, MAX(ps.report_date) AS report_date
+          FROM portfolio_position_snapshots ps
+          JOIN broker_accounts ba ON ba.id = ps.broker_account_id
+          JOIN accounts acc ON acc.id = ba.legacy_account_id
+          WHERE ps.report_date <= :anchor_date
+            AND (
+              ps.authority_status = 'authoritative'
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_source_authority_windows aw
+                WHERE aw.broker_account_id = ps.broker_account_id
+                  AND aw.source_kind = :ibkr_flex_source_kind
+                  AND aw.fact_scope = :ibkr_flex_fact_scope
+                  AND aw.authority_status = 'authoritative'
+                  AND aw.effective_from <= ps.report_date
+                  AND (aw.effective_to IS NULL OR aw.effective_to >= ps.report_date)
+              )
+            )
+            AND ba.legacy_account_id IS NOT NULL
+            AND (
+              NOT EXISTS (
+                SELECT 1
+                FROM flex_authority_accounts faa
+                WHERE faa.account_id = ba.legacy_account_id
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM flex_authority_accounts faa
+                WHERE faa.account_id = ba.legacy_account_id
+                  AND faa.broker_account_id = ba.id
+              )
+            )
+            AND (
+              NOT EXISTS (
+                SELECT 1
+                FROM nav_covered_accounts nca
+                WHERE nca.account_id = ba.legacy_account_id
+              )
+              OR (
+                :include_nav_accounts
+                AND EXISTS (
+                  SELECT 1
+                  FROM portfolio_nav_snapshots ns
+                  WHERE ns.broker_account_id = ba.id
+                    AND ns.report_date <= :anchor_date
+                    AND (
+                      ns.authority_status = 'authoritative'
+                      OR EXISTS (
+                        SELECT 1
+                        FROM portfolio_source_authority_windows aw
+                        WHERE aw.broker_account_id = ns.broker_account_id
+                          AND aw.source_kind = :ibkr_flex_source_kind
+                          AND aw.fact_scope = :ibkr_flex_fact_scope
+                          AND aw.authority_status = 'authoritative'
+                          AND aw.effective_from <= ns.report_date
+                          AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                      )
+                    )
+                )
+              )
+            )
+            AND ("""
+        + account_scope_sql("acc")
+        + """)
+          GROUP BY ba.legacy_account_id
         ),
         sym_asset AS (
           SELECT LOWER(symbol) AS sym, MIN(id) AS asset_id
@@ -130,6 +259,8 @@ def canonical_position_rows_by_legacy_account(
         SELECT
           ba.id                      AS broker_account_id,
           ba.legacy_account_id AS account_id,
+          ba.base_currency AS account_base_currency,
+          acc.currency AS account_currency,
           COALESCE(a.id, a_sym.id)  AS asset_id,
           bi.symbol                  AS symbol,
           COALESCE(a.name, a_sym.name, bi.description, bi.symbol) AS name,
@@ -138,18 +269,40 @@ def canonical_position_rows_by_legacy_account(
           COALESCE(a.home_country, a_sym.home_country) AS home_country,
           COALESCE(mx.exchange_code, mx_sym.exchange_code) AS exchange_code,
           COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
-          pl.platform_type AS platform_type,
+          COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
           COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
           EXISTS (
             SELECT 1
             FROM portfolio_nav_snapshots ns
             WHERE ns.broker_account_id = ba.id
               AND ns.report_date <= :anchor_date
-              AND ns.authority_status = 'authoritative'
+              AND (
+                ns.authority_status = 'authoritative'
+                OR EXISTS (
+                  SELECT 1
+                  FROM portfolio_source_authority_windows aw
+                  WHERE aw.broker_account_id = ns.broker_account_id
+                    AND aw.source_kind = :ibkr_flex_source_kind
+                    AND aw.fact_scope = :ibkr_flex_fact_scope
+                    AND aw.authority_status = 'authoritative'
+                    AND aw.effective_from <= ns.report_date
+                    AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                )
+              )
           ) AS has_nav_snapshot,
           ps.report_date AS report_date,
           CAST(ps.quantity AS DOUBLE PRECISION) AS quantity,
-          CAST(ps.market_price AS DOUBLE PRECISION) AS avg_cost,
+          CASE
+            WHEN ps.quantity IS NOT NULL
+             AND CAST(ps.quantity AS DOUBLE PRECISION) != 0
+             AND ps.cost_basis_local IS NOT NULL
+              THEN CAST(ps.cost_basis_local AS DOUBLE PRECISION) / CAST(ps.quantity AS DOUBLE PRECISION)
+            WHEN ps.quantity IS NOT NULL
+             AND CAST(ps.quantity AS DOUBLE PRECISION) != 0
+             AND ps.cost_basis_base IS NOT NULL
+              THEN CAST(ps.cost_basis_base AS DOUBLE PRECISION) / CAST(ps.quantity AS DOUBLE PRECISION)
+            ELSE NULL
+          END AS avg_cost,
           CAST(ps.market_value_base AS DOUBLE PRECISION) AS cost_basis_base,
           CAST(ps.market_price AS DOUBLE PRECISION) AS snapshot_market_price,
           CAST(ps.market_value_local AS DOUBLE PRECISION) AS snapshot_market_value_local,
@@ -158,9 +311,9 @@ def canonical_position_rows_by_legacy_account(
           CAST(ps.cost_basis_base AS DOUBLE PRECISION) AS snapshot_cost_basis_base
         FROM portfolio_position_snapshots ps
         JOIN latest_canonical lc
-          ON lc.broker_account_id = ps.broker_account_id
-         AND lc.report_date = ps.report_date
+          ON lc.report_date = ps.report_date
         JOIN broker_accounts ba ON ba.id = ps.broker_account_id
+         AND ba.legacy_account_id = lc.account_id
         JOIN accounts acc ON acc.id = ba.legacy_account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
@@ -170,7 +323,61 @@ def canonical_position_rows_by_legacy_account(
         LEFT JOIN assets a_sym ON a_sym.id = sa.asset_id AND bi.asset_id IS NULL
         LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         LEFT JOIN map_exchange mx_sym ON mx_sym.asset_id = a_sym.id AND bi.asset_id IS NULL
-        WHERE ps.authority_status = 'authoritative'
+        WHERE (
+            ps.authority_status = 'authoritative'
+            OR EXISTS (
+              SELECT 1
+              FROM portfolio_source_authority_windows aw
+              WHERE aw.broker_account_id = ps.broker_account_id
+                AND aw.source_kind = :ibkr_flex_source_kind
+                AND aw.fact_scope = :ibkr_flex_fact_scope
+                AND aw.authority_status = 'authoritative'
+                AND aw.effective_from <= ps.report_date
+                AND (aw.effective_to IS NULL OR aw.effective_to >= ps.report_date)
+            )
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1
+              FROM flex_authority_accounts faa
+              WHERE faa.account_id = ba.legacy_account_id
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM flex_authority_accounts faa
+              WHERE faa.account_id = ba.legacy_account_id
+                AND faa.broker_account_id = ba.id
+            )
+          )
+          AND (
+            NOT EXISTS (
+              SELECT 1
+              FROM nav_covered_accounts nca
+              WHERE nca.account_id = ba.legacy_account_id
+            )
+            OR (
+              :include_nav_accounts
+              AND EXISTS (
+                SELECT 1
+                FROM portfolio_nav_snapshots ns
+                  WHERE ns.broker_account_id = ba.id
+                    AND ns.report_date <= :anchor_date
+                    AND (
+                      ns.authority_status = 'authoritative'
+                      OR EXISTS (
+                        SELECT 1
+                        FROM portfolio_source_authority_windows aw
+                        WHERE aw.broker_account_id = ns.broker_account_id
+                          AND aw.source_kind = :ibkr_flex_source_kind
+                          AND aw.fact_scope = :ibkr_flex_fact_scope
+                          AND aw.authority_status = 'authoritative'
+                          AND aw.effective_from <= ns.report_date
+                          AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                      )
+                    )
+              )
+            )
+          )
         """
     )
     rows = db.execute(
@@ -179,6 +386,8 @@ def canonical_position_rows_by_legacy_account(
             "anchor_date": anchor_date,
             "current_user_id": current_user_id,
             "include_nav_accounts": include_nav_accounts,
+            "ibkr_flex_source_kind": _IBKR_FLEX_SOURCE_KIND,
+            "ibkr_flex_fact_scope": _IBKR_FLEX_FACT_SCOPE,
         },
     ).mappings().all()
     out: list[dict[str, Any]] = []
@@ -216,7 +425,19 @@ def canonical_cash_rows_by_legacy_account(
           JOIN broker_accounts ba ON ba.id = cs.broker_account_id
           JOIN accounts acc ON acc.id = ba.legacy_account_id
           WHERE cs.report_date <= :anchor_date
-            AND cs.authority_status = 'authoritative'
+            AND (
+              cs.authority_status = 'authoritative'
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_source_authority_windows aw
+                WHERE aw.broker_account_id = cs.broker_account_id
+                  AND aw.source_kind = :ibkr_flex_source_kind
+                  AND aw.fact_scope = :ibkr_flex_fact_scope
+                  AND aw.authority_status = 'authoritative'
+                  AND aw.effective_from <= cs.report_date
+                  AND (aw.effective_to IS NULL OR aw.effective_to >= cs.report_date)
+              )
+            )
             AND ba.legacy_account_id IS NOT NULL
             AND ("""
         + account_scope_sql("acc")
@@ -279,6 +500,65 @@ def canonical_account_balance_rows(
     q = text(
         """
         WITH
+        flex_authority_accounts AS (
+          SELECT ba.legacy_account_id AS account_id, ba.id AS broker_account_id
+          FROM portfolio_source_authority_windows aw
+          JOIN broker_accounts ba ON ba.id = aw.broker_account_id
+          JOIN broker_connections bc ON bc.id = ba.connection_id
+          JOIN accounts acc ON acc.id = ba.legacy_account_id
+          WHERE aw.source_kind = :ibkr_flex_source_kind
+            AND aw.fact_scope = :ibkr_flex_fact_scope
+            AND aw.authority_status = 'authoritative'
+            AND aw.effective_from <= :anchor_date
+            AND (aw.effective_to IS NULL OR aw.effective_to >= :anchor_date)
+            AND ba.legacy_account_id IS NOT NULL
+            AND bc.platform_code = 'IBKR'
+            AND (
+              EXISTS (
+                SELECT 1
+                FROM portfolio_nav_snapshots ns
+                WHERE ns.broker_account_id = ba.id
+                  AND ns.report_date <= :anchor_date
+                  AND (
+                    ns.authority_status = 'authoritative'
+                    OR (
+                      aw.effective_from <= ns.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                    )
+                  )
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_position_snapshots ps
+                WHERE ps.broker_account_id = ba.id
+                  AND ps.report_date <= :anchor_date
+                  AND (
+                    ps.authority_status = 'authoritative'
+                    OR (
+                      aw.effective_from <= ps.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= ps.report_date)
+                    )
+                  )
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_cash_balance_snapshots cs
+                WHERE cs.broker_account_id = ba.id
+                  AND cs.report_date <= :anchor_date
+                  AND (
+                    cs.authority_status = 'authoritative'
+                    OR (
+                      aw.effective_from <= cs.report_date
+                      AND (aw.effective_to IS NULL OR aw.effective_to >= cs.report_date)
+                    )
+                  )
+              )
+            )
+            AND ("""
+        + account_scope_sql("acc")
+        + """)
+        ),
+
         -- 1. Latest authoritative rows from the new canonical table.
         abs_latest AS (
           SELECT
@@ -288,6 +568,11 @@ def canonical_account_balance_rows(
           JOIN accounts acc ON acc.id = abs.account_id
           WHERE abs.as_of_date <= :anchor_date
             AND abs.authority_status = 'authoritative'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM flex_authority_accounts faa
+              WHERE faa.account_id = abs.account_id
+            )
             AND ("""
         + account_scope_sql("acc")
         + """)
@@ -296,6 +581,10 @@ def canonical_account_balance_rows(
         abs_rows AS (
           SELECT
             abs.account_id,
+            acc.currency AS account_currency,
+            COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
+            COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
+            COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
             abs.currency,
             abs.balance_type,
             CAST(abs.balance_local AS DOUBLE PRECISION) AS balance_local,
@@ -304,6 +593,9 @@ def canonical_account_balance_rows(
             'account_balance_snapshots' AS source,
             CAST(abs.as_of_date AS TEXT) AS as_of_date
           FROM account_balance_snapshots abs
+          JOIN accounts acc ON acc.id = abs.account_id
+          LEFT JOIN platforms pl ON pl.id = acc.platform_id
+          LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
           JOIN abs_latest al
             ON al.account_id = abs.account_id
            AND al.as_of_date = abs.as_of_date
@@ -325,9 +617,34 @@ def canonical_account_balance_rows(
           JOIN broker_accounts ba ON ba.id = cs.broker_account_id
           JOIN accounts acc ON acc.id = ba.legacy_account_id
           WHERE cs.report_date <= :anchor_date
-            AND cs.authority_status = 'authoritative'
+            AND (
+              cs.authority_status = 'authoritative'
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_source_authority_windows aw
+                WHERE aw.broker_account_id = cs.broker_account_id
+                  AND aw.source_kind = :ibkr_flex_source_kind
+                  AND aw.fact_scope = :ibkr_flex_fact_scope
+                  AND aw.authority_status = 'authoritative'
+                  AND aw.effective_from <= cs.report_date
+                  AND (aw.effective_to IS NULL OR aw.effective_to >= cs.report_date)
+              )
+            )
             AND ba.legacy_account_id IS NOT NULL
             AND ba.legacy_account_id NOT IN (SELECT account_id FROM abs_covered_accounts)
+            AND (
+              NOT EXISTS (
+                SELECT 1
+                FROM flex_authority_accounts faa
+                WHERE faa.account_id = ba.legacy_account_id
+              )
+              OR EXISTS (
+                SELECT 1
+                FROM flex_authority_accounts faa
+                WHERE faa.account_id = ba.legacy_account_id
+                  AND faa.broker_account_id = ba.id
+              )
+            )
             AND ("""
         + account_scope_sql("acc")
         + """)
@@ -336,6 +653,10 @@ def canonical_account_balance_rows(
         pcbs_rows AS (
           SELECT
             ba.legacy_account_id AS account_id,
+            acc.currency AS account_currency,
+            COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
+            COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
+            COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
             cs.currency,
             'broker_cash' AS balance_type,
             CAST(cs.cash_balance      AS DOUBLE PRECISION) AS balance_local,
@@ -344,11 +665,26 @@ def canonical_account_balance_rows(
             'portfolio_cash_balance_snapshots' AS source,
             CAST(cs.report_date AS TEXT) AS as_of_date
           FROM portfolio_cash_balance_snapshots cs
-          JOIN pcbs_latest pl
-            ON pl.broker_account_id = cs.broker_account_id
-           AND pl.report_date = cs.report_date
+          JOIN pcbs_latest pcl
+            ON pcl.broker_account_id = cs.broker_account_id
+           AND pcl.report_date = cs.report_date
           JOIN broker_accounts ba ON ba.id = cs.broker_account_id
-          WHERE cs.authority_status = 'authoritative'
+          JOIN accounts acc ON acc.id = ba.legacy_account_id
+          LEFT JOIN platforms pl ON pl.id = acc.platform_id
+          LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
+          WHERE (
+              cs.authority_status = 'authoritative'
+              OR EXISTS (
+                SELECT 1
+                FROM portfolio_source_authority_windows aw
+                WHERE aw.broker_account_id = cs.broker_account_id
+                  AND aw.source_kind = :ibkr_flex_source_kind
+                  AND aw.fact_scope = :ibkr_flex_fact_scope
+                  AND aw.authority_status = 'authoritative'
+                  AND aw.effective_from <= cs.report_date
+                  AND (aw.effective_to IS NULL OR aw.effective_to >= cs.report_date)
+              )
+            )
         )
 
         SELECT * FROM abs_rows
@@ -358,9 +694,198 @@ def canonical_account_balance_rows(
         """
     )
     rows = db.execute(
-        q, {"anchor_date": anchor_date, "current_user_id": current_user_id}
+        q,
+        {
+            "anchor_date": anchor_date,
+            "current_user_id": current_user_id,
+            "ibkr_flex_source_kind": _IBKR_FLEX_SOURCE_KIND,
+            "ibkr_flex_fact_scope": _IBKR_FLEX_FACT_SCOPE,
+        },
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+def canonical_snapshot_coverage_as_of(
+    db: Session,
+    *,
+    current_user_id: int,
+    anchor_date: date,
+    include_positions: bool = True,
+    include_nav: bool = True,
+    include_cash: bool = True,
+) -> date | None:
+    """
+    Return the effective canonical snapshot date at/before ``anchor_date``.
+
+    This mirrors the old dashboard snapshot semantics from legacy
+    ``positions``: if the dashboard can compute a boundary view from latest
+    known component facts, the effective as-of date is the latest canonical
+    fact date available at or before the boundary. Individual component
+    staleness is exposed separately as freshness metadata; it should not make
+    the whole net-worth snapshot disappear.
+    """
+    selected: list[str] = []
+    if include_positions:
+        selected.append(
+            """
+            SELECT ba.legacy_account_id AS account_id, MAX(ps.report_date) AS as_of_date
+            FROM portfolio_position_snapshots ps
+            JOIN broker_accounts ba ON ba.id = ps.broker_account_id
+            JOIN accounts acc ON acc.id = ba.legacy_account_id
+            WHERE ps.report_date <= :anchor_date
+              AND (
+                ps.authority_status = 'authoritative'
+                OR EXISTS (
+                  SELECT 1
+                  FROM portfolio_source_authority_windows aw
+                  WHERE aw.broker_account_id = ps.broker_account_id
+                    AND aw.source_kind = :ibkr_flex_source_kind
+                    AND aw.fact_scope = :ibkr_flex_fact_scope
+                    AND aw.authority_status = 'authoritative'
+                    AND aw.effective_from <= ps.report_date
+                    AND (aw.effective_to IS NULL OR aw.effective_to >= ps.report_date)
+                )
+              )
+              AND ba.legacy_account_id IS NOT NULL
+              AND (
+                NOT EXISTS (
+                  SELECT 1
+                  FROM portfolio_nav_snapshots ns_account
+                  JOIN broker_accounts ba_account ON ba_account.id = ns_account.broker_account_id
+                  WHERE ba_account.legacy_account_id = ba.legacy_account_id
+                    AND ns_account.report_date <= :anchor_date
+                    AND (
+                      ns_account.authority_status = 'authoritative'
+                      OR EXISTS (
+                        SELECT 1
+                        FROM portfolio_source_authority_windows aw
+                        WHERE aw.broker_account_id = ns_account.broker_account_id
+                          AND aw.source_kind = :ibkr_flex_source_kind
+                          AND aw.fact_scope = :ibkr_flex_fact_scope
+                          AND aw.authority_status = 'authoritative'
+                          AND aw.effective_from <= ns_account.report_date
+                          AND (aw.effective_to IS NULL OR aw.effective_to >= ns_account.report_date)
+                      )
+                    )
+                )
+                OR EXISTS (
+                  SELECT 1
+                  FROM portfolio_nav_snapshots ns_same_broker
+                  WHERE ns_same_broker.broker_account_id = ba.id
+                    AND ns_same_broker.report_date <= :anchor_date
+                    AND (
+                      ns_same_broker.authority_status = 'authoritative'
+                      OR EXISTS (
+                        SELECT 1
+                        FROM portfolio_source_authority_windows aw
+                        WHERE aw.broker_account_id = ns_same_broker.broker_account_id
+                          AND aw.source_kind = :ibkr_flex_source_kind
+                          AND aw.fact_scope = :ibkr_flex_fact_scope
+                          AND aw.authority_status = 'authoritative'
+                          AND aw.effective_from <= ns_same_broker.report_date
+                          AND (aw.effective_to IS NULL OR aw.effective_to >= ns_same_broker.report_date)
+                      )
+                    )
+                )
+              )
+              AND ("""
+            + account_scope_sql("acc")
+            + """)
+            GROUP BY ba.legacy_account_id
+            """
+        )
+    if include_nav:
+        selected.append(
+            """
+            SELECT ba.legacy_account_id AS account_id, MAX(ns.report_date) AS as_of_date
+            FROM portfolio_nav_snapshots ns
+            JOIN broker_accounts ba ON ba.id = ns.broker_account_id
+            JOIN accounts acc ON acc.id = ba.legacy_account_id
+            WHERE ns.report_date <= :anchor_date
+              AND (
+                ns.authority_status = 'authoritative'
+                OR EXISTS (
+                  SELECT 1
+                  FROM portfolio_source_authority_windows aw
+                  WHERE aw.broker_account_id = ns.broker_account_id
+                    AND aw.source_kind = :ibkr_flex_source_kind
+                    AND aw.fact_scope = :ibkr_flex_fact_scope
+                    AND aw.authority_status = 'authoritative'
+                    AND aw.effective_from <= ns.report_date
+                    AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
+                )
+              )
+              AND ba.legacy_account_id IS NOT NULL
+              AND ("""
+            + account_scope_sql("acc")
+            + """)
+            GROUP BY ba.legacy_account_id
+            """
+        )
+    if include_cash:
+        selected.append(
+            """
+            SELECT abs.account_id AS account_id, MAX(abs.as_of_date) AS as_of_date
+            FROM account_balance_snapshots abs
+            JOIN accounts acc ON acc.id = abs.account_id
+            WHERE abs.as_of_date <= :anchor_date
+              AND abs.authority_status = 'authoritative'
+              AND ("""
+            + account_scope_sql("acc")
+            + """)
+            GROUP BY abs.account_id
+            """
+        )
+        selected.append(
+            """
+            SELECT ba.legacy_account_id AS account_id, MAX(cs.report_date) AS as_of_date
+            FROM portfolio_cash_balance_snapshots cs
+            JOIN broker_accounts ba ON ba.id = cs.broker_account_id
+            JOIN accounts acc ON acc.id = ba.legacy_account_id
+            WHERE cs.report_date <= :anchor_date
+              AND (
+                cs.authority_status = 'authoritative'
+                OR EXISTS (
+                  SELECT 1
+                  FROM portfolio_source_authority_windows aw
+                  WHERE aw.broker_account_id = cs.broker_account_id
+                    AND aw.source_kind = :ibkr_flex_source_kind
+                    AND aw.fact_scope = :ibkr_flex_fact_scope
+                    AND aw.authority_status = 'authoritative'
+                    AND aw.effective_from <= cs.report_date
+                    AND (aw.effective_to IS NULL OR aw.effective_to >= cs.report_date)
+                )
+              )
+              AND ba.legacy_account_id IS NOT NULL
+              AND ("""
+            + account_scope_sql("acc")
+            + """)
+            GROUP BY ba.legacy_account_id
+            """
+        )
+    if not selected:
+        return None
+    q = text(
+        """
+        WITH latest AS (
+        """
+        + "\nUNION ALL\n".join(selected)
+        + """
+        )
+        SELECT MAX(as_of_date) AS as_of_date
+        FROM latest
+        """
+    )
+    row = db.execute(
+        q,
+        {
+            "anchor_date": anchor_date,
+            "current_user_id": current_user_id,
+            "ibkr_flex_source_kind": _IBKR_FLEX_SOURCE_KIND,
+            "ibkr_flex_fact_scope": _IBKR_FLEX_FACT_SCOPE,
+        },
+    ).mappings().one()
+    return row["as_of_date"]
 
 
 def get_data_completeness_status(

@@ -113,6 +113,45 @@ def _seed_position(
     )
 
 
+def _seed_ibkr_flex_authority_window(
+    conn,
+    *,
+    user_id: int,
+    legacy_account_id: int,
+    broker_account_id: str,
+    effective_from: date,
+    effective_to: date | None = None,
+) -> None:
+    conn.exec_driver_sql(
+        "INSERT INTO broker_connections "
+        "(user_id, platform_code, connection_type, display_name, status, metadata_json) "
+        "VALUES (?, 'IBKR', 'flex_api', 'IBKR Flex', 'active', '{}')",
+        (user_id,),
+    )
+    connection_id = conn.exec_driver_sql(
+        "SELECT id FROM broker_connections "
+        "WHERE user_id = ? AND platform_code = 'IBKR' AND connection_type = 'flex_api' "
+        "ORDER BY id DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()[0]
+    conn.exec_driver_sql(
+        "INSERT INTO broker_accounts "
+        "(connection_id, legacy_account_id, broker_account_id, base_currency, status, metadata_json) "
+        "VALUES (?, ?, ?, 'SGD', 'active', '{}')",
+        (connection_id, legacy_account_id, broker_account_id),
+    )
+    broker_account_pk = conn.exec_driver_sql(
+        "SELECT id FROM broker_accounts WHERE connection_id = ? AND broker_account_id = ? LIMIT 1",
+        (connection_id, broker_account_id),
+    ).fetchone()[0]
+    conn.exec_driver_sql(
+        "INSERT INTO portfolio_source_authority_windows "
+        "(broker_account_id, source_kind, fact_scope, effective_from, effective_to, authority_status) "
+        "VALUES (?, 'ibkr_flex_daily', 'all', ?, ?, 'authoritative')",
+        (broker_account_pk, effective_from, effective_to),
+    )
+
+
 def _count_table(conn, table: str, where: str = "", params: tuple = ()) -> int:
     sql = f"SELECT COUNT(*) FROM {table}"
     if where:
@@ -306,6 +345,139 @@ def test_backfill_persists_historical_fx_rates(db_session, db_engine, monkeypatc
     assert float(cash_row[0]) == pytest.approx(1.5)
     assert float(cash_row[1]) == pytest.approx(1000.0)
     assert float(cash_row[2]) == pytest.approx(1500.0)
+
+
+def test_ibkr_pre_flex_backfill_treats_legacy_values_as_local(db_session, db_engine, monkeypatch):
+    user_id = 903
+    account_id = 9030
+    stock_asset_id = 9031
+    cash_asset_id = 9032
+    as_of = datetime(2026, 5, 15, 0, 0, 0, tzinfo=timezone.utc)
+
+    with db_engine.begin() as conn:
+        _seed_user(conn, user_id)
+        _seed_account(conn, account_id, user_id, platform="IBKR", currency="SGD")
+        _seed_asset(conn, stock_asset_id, "0700", "STOCK", "HKD", "HK")
+        _seed_asset(conn, cash_asset_id, "USD_CASH", "CASH", "USD", "US")
+        _seed_position(conn, 9201, account_id, stock_asset_id, as_of, 10.0, 40.0, 1000.0)
+        _seed_position(conn, 9202, account_id, cash_asset_id, as_of, 1.0, None, 1000.0)
+        _seed_ibkr_flex_authority_window(
+            conn,
+            user_id=user_id,
+            legacy_account_id=account_id,
+            broker_account_id="U_TEST_FLEX",
+            effective_from=date(2026, 6, 1),
+        )
+
+    def fake_get_rates(_date, base, symbols):
+        assert base == "SGD"
+        requested = set(symbols)
+        rates = {"SGD": 1.0, "HKD": 0.17, "USD": 1.35}
+        return {symbol: rates[symbol] for symbol in requested | {"SGD"}}
+
+    monkeypatch.setattr("app.portfolio.legacy_backfill.get_rates", fake_get_rates)
+
+    result = backfill_legacy_positions(db_session, current_user_id=user_id)
+
+    assert result.stock_fund_migrated == 1
+    assert result.cash_migrated == 1
+
+    stock_row = db_session.execute(
+        text(
+            """
+            SELECT pps.fx_rate_to_base, pps.market_price, pps.market_value_local,
+                   pps.market_value_base, pps.cost_basis_local, pps.cost_basis_base
+            FROM portfolio_position_snapshots pps
+            JOIN broker_accounts ba ON ba.id = pps.broker_account_id
+            WHERE ba.legacy_account_id = :acct_id
+              AND pps.report_date = :report_date
+              AND pps.authority_status = 'authoritative'
+            """
+        ),
+        {"acct_id": account_id, "report_date": as_of.date()},
+    ).fetchone()
+    assert stock_row is not None
+    assert float(stock_row[0]) == pytest.approx(0.17)
+    assert float(stock_row[1]) == pytest.approx(100.0)
+    assert float(stock_row[2]) == pytest.approx(1000.0)
+    assert float(stock_row[3]) == pytest.approx(170.0)
+    assert float(stock_row[4]) == pytest.approx(400.0)
+    assert float(stock_row[5]) == pytest.approx(68.0)
+
+    cash_row = db_session.execute(
+        text(
+            """
+            SELECT abs.fx_rate_to_base, abs.balance_local, abs.balance_base
+            FROM account_balance_snapshots abs
+            WHERE abs.account_id = :acct_id
+              AND abs.as_of_date = :report_date
+              AND abs.authority_status = 'authoritative'
+            """
+        ),
+        {"acct_id": account_id, "report_date": as_of.date()},
+    ).fetchone()
+    assert cash_row is not None
+    assert float(cash_row[0]) == pytest.approx(1.35)
+    assert float(cash_row[1]) == pytest.approx(1000.0)
+    assert float(cash_row[2]) == pytest.approx(1350.0)
+
+
+def test_ibkr_legacy_backfill_skips_rows_inside_flex_authority_window(
+    db_session,
+    db_engine,
+    monkeypatch,
+):
+    user_id = 904
+    account_id = 9040
+    stock_asset_id = 9041
+    cash_asset_id = 9042
+    as_of = datetime(2026, 6, 15, 0, 0, 0, tzinfo=timezone.utc)
+
+    with db_engine.begin() as conn:
+        _seed_user(conn, user_id)
+        _seed_account(conn, account_id, user_id, platform="IBKR", currency="SGD")
+        _seed_asset(conn, stock_asset_id, "NVO", "STOCK", "USD", "US")
+        _seed_asset(conn, cash_asset_id, "USD_CASH", "CASH", "USD", "US")
+        _seed_position(conn, 9301, account_id, stock_asset_id, as_of, 10.0, 51.0, 510.0)
+        _seed_position(conn, 9302, account_id, cash_asset_id, as_of, 1.0, None, 1000.0)
+        _seed_ibkr_flex_authority_window(
+            conn,
+            user_id=user_id,
+            legacy_account_id=account_id,
+            broker_account_id="U_TEST_FLEX_2",
+            effective_from=date(2026, 6, 1),
+        )
+
+    monkeypatch.setattr(
+        "app.portfolio.legacy_backfill.get_rates",
+        lambda _date, _base, symbols: {symbol: 1.35 for symbol in set(symbols) | {"SGD"}},
+    )
+
+    result = backfill_legacy_positions(db_session, current_user_id=user_id)
+
+    assert result.stock_fund_migrated == 0
+    assert result.cash_migrated == 0
+    assert result.stock_fund_skipped_covered == 1
+    assert result.cash_skipped_covered == 1
+
+    position_count = db_session.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM portfolio_position_snapshots pps
+            JOIN broker_accounts ba ON ba.id = pps.broker_account_id
+            WHERE ba.legacy_account_id = :acct_id
+            """
+        ),
+        {"acct_id": account_id},
+    ).scalar()
+    cash_count = db_session.execute(
+        text("SELECT COUNT(*) FROM account_balance_snapshots WHERE account_id = :acct_id"),
+        {"acct_id": account_id},
+    ).scalar()
+
+    assert position_count == 0
+    assert cash_count == 0
 
 
 # ---------------------------------------------------------------------------

@@ -50,6 +50,9 @@ BACKFILL_PLATFORM_CODE = "LEGACY_BACKFILL"
 BACKFILL_SOURCE_TYPE = "legacy_positions_backfill"
 BACKFILL_CONNECTION_TYPE = "legacy_backfill"
 BACKFILL_SOURCE_KIND = "legacy_positions_backfill"
+IBKR_FLEX_SOURCE_KIND = "ibkr_flex_daily"
+IBKR_FLEX_FACT_SCOPE = "all"
+_LOCAL_VALUE_LEGACY_PLATFORMS = {"IBKR"}
 
 # Asset classes that map to portfolio_position_snapshots
 _POSITION_ASSET_CLASSES = ("STOCK", "FUND")
@@ -108,6 +111,60 @@ def _historical_fx_rate(*, report_date: date, base_currency: str, quote_currency
         return 1.0
     rates = get_rates(datetime(report_date.year, report_date.month, report_date.day, tzinfo=timezone.utc), base, {quote})
     return float(rates.get(quote, 1.0))
+
+
+def legacy_position_values_are_local(platform: str | None) -> bool:
+    """
+    Return True when legacy ``positions.cost_basis_base`` actually stores
+    local/quote-currency value for this platform.
+
+    IBKR legacy imports used this column as local market/cash value. Treating
+    those values as account-base SGD inflates HKD/USD history.
+    """
+    return str(platform or "").upper() in _LOCAL_VALUE_LEGACY_PLATFORMS
+
+
+def _legacy_stock_amounts(
+    *,
+    raw_value: Any,
+    quantity: Any,
+    avg_cost: Any,
+    fx_rate_to_base: float,
+    platform: str | None,
+) -> dict[str, float | None]:
+    raw = float(raw_value or 0)
+    qty = float(quantity or 0)
+    avg = float(avg_cost) if avg_cost is not None else None
+
+    if legacy_position_values_are_local(platform):
+        market_value_local = raw
+        market_value_base = raw * fx_rate_to_base
+        cost_basis_local = (avg * qty) if avg is not None and qty else raw
+        cost_basis_base = cost_basis_local * fx_rate_to_base
+    else:
+        market_value_base = raw
+        market_value_local = raw / fx_rate_to_base if fx_rate_to_base else raw
+        cost_basis_local = market_value_local
+        cost_basis_base = market_value_base
+
+    market_price = market_value_local / qty if qty else avg
+    return {
+        "market_price": market_price,
+        "market_value_local": market_value_local,
+        "market_value_base": market_value_base,
+        "cost_basis_local": cost_basis_local,
+        "cost_basis_base": cost_basis_base,
+    }
+
+
+def _legacy_cash_amounts(*, raw_value: Any, fx_rate_to_base: float, platform: str | None) -> dict[str, float]:
+    raw = float(raw_value or 0)
+    if legacy_position_values_are_local(platform):
+        return {"balance_local": raw, "balance_base": raw * fx_rate_to_base}
+    return {
+        "balance_local": raw / fx_rate_to_base if fx_rate_to_base else raw,
+        "balance_base": raw,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +493,35 @@ def _account_date_has_authoritative_cash(
     return row is not None
 
 
+def _ibkr_flex_authority_covers(db: Session, *, legacy_account_id: int, report_date: date) -> bool:
+    """Return True when IBKR Flex owns portfolio facts for this account/date."""
+    row = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM portfolio_source_authority_windows aw
+            JOIN broker_accounts ba ON ba.id = aw.broker_account_id
+            JOIN broker_connections bc ON bc.id = ba.connection_id
+            WHERE ba.legacy_account_id = :legacy_account_id
+              AND bc.platform_code = 'IBKR'
+              AND aw.source_kind = :source_kind
+              AND aw.fact_scope = :fact_scope
+              AND aw.authority_status = 'authoritative'
+              AND aw.effective_from <= :report_date
+              AND (aw.effective_to IS NULL OR aw.effective_to >= :report_date)
+            LIMIT 1
+            """
+        ),
+        {
+            "legacy_account_id": legacy_account_id,
+            "source_kind": IBKR_FLEX_SOURCE_KIND,
+            "fact_scope": IBKR_FLEX_FACT_SCOPE,
+            "report_date": report_date,
+        },
+    ).fetchone()
+    return row is not None
+
+
 # ---------------------------------------------------------------------------
 # Data quality events
 # ---------------------------------------------------------------------------
@@ -630,6 +716,25 @@ def _backfill_stock_fund_positions(
         platform = str(row["platform"] or BACKFILL_PLATFORM_CODE).upper()
         account_currency = str(row["account_currency"] or currency).upper()
         user_id = current_user_id
+        if platform == "IBKR" and _ibkr_flex_authority_covers(
+            db, legacy_account_id=account_id, report_date=report_date
+        ):
+            skipped_covered += 1
+            if not dry_run:
+                _record_dqe(
+                    db,
+                    broker_account_id=None,
+                    import_run_id=None,
+                    report_date=report_date,
+                    severity="info",
+                    event_code="backfill_skipped_ibkr_flex_authority",
+                    message=(
+                        f"Legacy IBKR position id={pos_id} account={account_id} symbol={symbol} "
+                        f"skipped because IBKR Flex is authoritative on {report_date}."
+                    ),
+                )
+                dqe_written += 1
+            continue
         fx_rate_to_base = _historical_fx_rate(
             report_date=report_date,
             base_currency=account_currency,
@@ -690,8 +795,13 @@ def _backfill_stock_fund_positions(
         cost_basis_base = row["cost_basis_base"]
         quantity = row["quantity"]
         avg_cost = row["avg_cost"]
-        market_value_local = float(cost_basis_base) / fx_rate_to_base if fx_rate_to_base else float(cost_basis_base)
-        market_price = market_value_local / float(quantity) if quantity else avg_cost
+        amounts = _legacy_stock_amounts(
+            raw_value=cost_basis_base,
+            quantity=quantity,
+            avg_cost=avg_cost,
+            fx_rate_to_base=fx_rate_to_base,
+            platform=platform,
+        )
 
         db.execute(
             text(
@@ -719,11 +829,11 @@ def _backfill_stock_fund_positions(
                 "report_date": report_date,
                 "quantity": _db_decimal(quantity),
                 "currency": currency,
-                "market_price": _db_decimal(market_price),
-                "market_value_local": _db_decimal(market_value_local),
-                "market_value_base": _db_decimal(cost_basis_base),
-                "cost_basis_local": _db_decimal(market_value_local),
-                "cost_basis_base": _db_decimal(cost_basis_base),
+                "market_price": _db_decimal(amounts["market_price"]),
+                "market_value_local": _db_decimal(amounts["market_value_local"]),
+                "market_value_base": _db_decimal(amounts["market_value_base"]),
+                "cost_basis_local": _db_decimal(amounts["cost_basis_local"]),
+                "cost_basis_base": _db_decimal(amounts["cost_basis_base"]),
                 "fx_rate_to_base": _db_decimal(fx_rate_to_base),
             },
         )
@@ -763,7 +873,8 @@ def _backfill_cash_positions(
               p.as_of,
               p.cost_basis_base,
               a.quote_currency,
-                            acc.currency   AS account_currency,
+              acc.platform,
+              acc.currency   AS account_currency,
               acc.user_id
             FROM positions p
             JOIN assets a ON a.id = p.asset_id
@@ -787,12 +898,32 @@ def _backfill_cash_positions(
         currency = str(row["quote_currency"] or "XXX").upper()
         balance = row["cost_basis_base"]
         account_currency = str(row["account_currency"] or currency).upper()
+        platform = str(row["platform"] or "").upper()
+        if platform == "IBKR" and _ibkr_flex_authority_covers(
+            db, legacy_account_id=account_id, report_date=as_of_date
+        ):
+            skipped_covered += 1
+            if not dry_run:
+                _record_dqe(
+                    db,
+                    broker_account_id=None,
+                    import_run_id=None,
+                    report_date=as_of_date,
+                    severity="info",
+                    event_code="backfill_cash_skipped_ibkr_flex_authority",
+                    message=(
+                        f"Legacy IBKR cash position id={pos_id} account={account_id} currency={currency} "
+                        f"skipped because IBKR Flex is authoritative on {as_of_date}."
+                    ),
+                )
+                dqe_written += 1
+            continue
         fx_rate_to_base = _historical_fx_rate(
             report_date=as_of_date,
             base_currency=account_currency,
             quote_currency=currency,
         )
-        balance_local = float(balance) / fx_rate_to_base if fx_rate_to_base else float(balance)
+        amounts = _legacy_cash_amounts(raw_value=balance, fx_rate_to_base=fx_rate_to_base, platform=platform)
 
         # Check for pre-existing authoritative cash row
         if _account_date_has_authoritative_cash(
@@ -837,8 +968,8 @@ def _backfill_cash_positions(
                 "account_id": account_id,
                 "as_of_date": as_of_date,
                 "currency": currency,
-                "balance_local": _db_decimal(balance_local),
-                "balance_base": _db_decimal(balance),
+                "balance_local": _db_decimal(amounts["balance_local"]),
+                "balance_base": _db_decimal(amounts["balance_base"]),
                 "fx_rate_to_base": _db_decimal(fx_rate_to_base),
                 "source_kind": BACKFILL_SOURCE_KIND,
             },
