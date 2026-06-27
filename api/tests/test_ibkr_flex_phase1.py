@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
@@ -15,6 +15,7 @@ from app.portfolio.ibkr_flex import (
     is_ibkr_flex_cutover_active,
     run_ibkr_flex_import_from_xml,
 )
+import app.portfolio.scheduler as portfolio_scheduler
 from app.portfolio.scheduler import _scheduler_enabled
 
 
@@ -352,6 +353,29 @@ def test_ibkr_flex_import_is_idempotent_and_preserves_lineage(db_engine, tmp_pat
         db.close()
 
 
+def test_ibkr_flex_import_without_explicit_cutover_uses_statement_start_date(db_engine, tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed_ibkr_account(db_engine, account_id=301)
+
+    Session = sessionmaker(bind=db_engine)
+    db = Session()
+    try:
+        run_ibkr_flex_import_from_xml(
+            db,
+            current_user_id=1,
+            legacy_account_id=301,
+            xml_text=_valid_flex_xml(),
+            reference_code="REF_DEFAULT_CUTOVER",
+        )
+
+        assert is_ibkr_flex_cutover_active(db, 301, on_date=date(2026, 2, 20))
+        assert db.execute(text("SELECT DISTINCT authority_status FROM portfolio_nav_snapshots")).scalar() == "authoritative"
+        assert db.execute(text("SELECT DISTINCT authority_status FROM portfolio_position_snapshots")).scalar() == "authoritative"
+        assert db.execute(text("SELECT effective_from FROM portfolio_source_authority_windows")).scalar() == "2026-02-20"
+    finally:
+        db.close()
+
+
 def test_ibkr_flex_dashboard_uses_canonical_nav_and_excludes_legacy_positions(client, db_engine, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     _seed_ibkr_account(db_engine)
@@ -533,3 +557,59 @@ def test_ibkr_flex_scheduler_explicit_disable_wins(monkeypatch):
     monkeypatch.setenv("IBKR_QUERY_ID", "query")
 
     assert _scheduler_enabled() is False
+
+
+def test_ibkr_flex_scheduler_adds_startup_catchup_when_import_is_stale(monkeypatch):
+    added_jobs = []
+
+    class DummyScheduler:
+        def __init__(self, timezone=None):
+            self.timezone = timezone
+
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
+            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(portfolio_scheduler, "_scheduler", None)
+    monkeypatch.setattr(portfolio_scheduler, "BackgroundScheduler", DummyScheduler)
+    monkeypatch.setattr(portfolio_scheduler, "_latest_completed_import_finished_at", lambda: None)
+    monkeypatch.setenv("IBKR_FLEX_SCHEDULER_ENABLED", "1")
+
+    scheduler = portfolio_scheduler.start_scheduler()
+
+    assert scheduler is not None
+    job_ids = {job["id"] for job in added_jobs}
+    assert "ibkr_flex_daily_import" in job_ids
+    assert "ibkr_flex_startup_catchup" in job_ids
+
+
+def test_ibkr_flex_scheduler_skips_startup_catchup_when_import_is_fresh(monkeypatch):
+    added_jobs = []
+
+    class DummyScheduler:
+        def __init__(self, timezone=None):
+            self.timezone = timezone
+
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
+            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(portfolio_scheduler, "_scheduler", None)
+    monkeypatch.setattr(portfolio_scheduler, "BackgroundScheduler", DummyScheduler)
+    monkeypatch.setattr(
+        portfolio_scheduler,
+        "_latest_completed_import_finished_at",
+        lambda: datetime.now(tz=timezone.utc) - timedelta(hours=2),
+    )
+    monkeypatch.setenv("IBKR_FLEX_SCHEDULER_ENABLED", "1")
+
+    scheduler = portfolio_scheduler.start_scheduler()
+
+    assert scheduler is not None
+    job_ids = {job["id"] for job in added_jobs}
+    assert "ibkr_flex_daily_import" in job_ids
+    assert "ibkr_flex_startup_catchup" not in job_ids

@@ -37,6 +37,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
+from app.portfolio.legacy_backfill import (
+    _historical_fx_rate,
+    _legacy_cash_amounts,
+    _legacy_stock_amounts,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +77,12 @@ def _legacy_stock_fund_values(
         text(
             """
             WITH latest AS (
-              SELECT account_id, asset_id, MAX(as_of) AS as_of
-              FROM positions
-              WHERE DATE(as_of) <= :anchor_date
-              GROUP BY account_id, asset_id
+              SELECT p.account_id, MAX(p.as_of) AS as_of
+              FROM positions p
+              JOIN assets a ON a.id = p.asset_id
+              WHERE DATE(p.as_of) <= :anchor_date
+                AND a.asset_class IN ('STOCK', 'FUND')
+              GROUP BY p.account_id
             )
             SELECT
               p.account_id,
@@ -84,10 +91,13 @@ def _legacy_stock_fund_values(
               a.quote_currency,
               a.home_country,
               COALESCE(acc.platform, '') AS platform,
+              COALESCE(acc.currency, a.quote_currency) AS account_currency,
+              DATE(p.as_of) AS report_date,
               CAST(p.cost_basis_base AS REAL) AS base_value,
+              CAST(p.avg_cost AS REAL) AS avg_cost,
               CAST(p.quantity AS REAL) AS quantity
             FROM positions p
-            JOIN latest l ON l.account_id = p.account_id AND l.asset_id = p.asset_id AND l.as_of = p.as_of
+            JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
             JOIN assets a ON a.id = p.asset_id
             JOIN accounts acc ON acc.id = p.account_id
             WHERE a.asset_class IN ('STOCK', 'FUND')
@@ -98,7 +108,24 @@ def _legacy_stock_fund_values(
         ),
         {"anchor_date": anchor_date, "current_user_id": current_user_id},
     ).mappings().all()
-    return [dict(r) for r in rows]
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        fx_rate = _historical_fx_rate(
+            report_date=date.fromisoformat(str(item["report_date"])[:10]),
+            base_currency=str(item["account_currency"] or item["quote_currency"]),
+            quote_currency=str(item["quote_currency"]),
+        )
+        amounts = _legacy_stock_amounts(
+            raw_value=item["base_value"],
+            quantity=item["quantity"],
+            avg_cost=item["avg_cost"],
+            fx_rate_to_base=fx_rate,
+            platform=str(item["platform"]),
+        )
+        item["base_value"] = amounts["market_value_base"]
+        out.append(item)
+    return out
 
 
 def _legacy_cash_values(
@@ -109,18 +136,22 @@ def _legacy_cash_values(
         text(
             """
             WITH latest AS (
-              SELECT account_id, asset_id, MAX(as_of) AS as_of
-              FROM positions
-              WHERE DATE(as_of) <= :anchor_date
-              GROUP BY account_id, asset_id
+              SELECT p.account_id, MAX(p.as_of) AS as_of
+              FROM positions p
+              JOIN assets a ON a.id = p.asset_id
+              WHERE DATE(p.as_of) <= :anchor_date
+                AND a.asset_class = 'CASH'
+              GROUP BY p.account_id
             )
             SELECT
               p.account_id,
               a.quote_currency AS currency,
               COALESCE(acc.platform, '') AS platform,
+              COALESCE(acc.currency, a.quote_currency) AS account_currency,
+              DATE(p.as_of) AS report_date,
               CAST(p.cost_basis_base AS REAL) AS base_value
             FROM positions p
-            JOIN latest l ON l.account_id = p.account_id AND l.asset_id = p.asset_id AND l.as_of = p.as_of
+            JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
             JOIN assets a ON a.id = p.asset_id
             JOIN accounts acc ON acc.id = p.account_id
             WHERE a.asset_class = 'CASH'
@@ -131,7 +162,22 @@ def _legacy_cash_values(
         ),
         {"anchor_date": anchor_date, "current_user_id": current_user_id},
     ).mappings().all()
-    return [dict(r) for r in rows]
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        item = dict(row)
+        fx_rate = _historical_fx_rate(
+            report_date=date.fromisoformat(str(item["report_date"])[:10]),
+            base_currency=str(item["account_currency"] or item["currency"]),
+            quote_currency=str(item["currency"]),
+        )
+        amounts = _legacy_cash_amounts(
+            raw_value=item["base_value"],
+            fx_rate_to_base=fx_rate,
+            platform=str(item["platform"]),
+        )
+        item["base_value"] = amounts["balance_base"]
+        out.append(item)
+    return out
 
 
 # ---------------------------------------------------------------------------

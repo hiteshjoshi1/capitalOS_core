@@ -120,9 +120,10 @@ describe("WealthOverview", () => {
     );
 
     expect(await screen.findAllByText("S$ 125")).not.toHaveLength(0);
-    expect(screen.getByText("Completed snapshot used for 2026-05")).toBeInTheDocument();
+    expect(screen.getByText("Snapshot context for 2026-05")).toBeInTheDocument();
+    expect(screen.getByText("Latest-known snapshot")).toBeInTheDocument();
     expect(screen.getByText("Snapshot period 2026-05 · Boundary 2026-06-01 · Source holdings 2026-05-01")).toBeInTheDocument();
-    expect(screen.getByText("Snapshot day 1. No exact boundary holdings exist; values use the latest holdings at or before the boundary plus known activity.")).toBeInTheDocument();
+    expect(screen.getByText("Snapshot day 1. Computed from the latest known component values at or before the boundary.")).toBeInTheDocument();
 
     await act(async () => {
       handlers?.onEvent?.({

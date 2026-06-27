@@ -41,7 +41,7 @@ def _fetch_rates_frankfurter(date_key: str, base: str, symbols_set: set[str]) ->
     to_param = ",".join(sorted(symbols_set))
     url = f"https://api.frankfurter.app/{date_key}"
     params = {"from": base, "to": to_param}
-    resp = httpx.get(url, params=params, timeout=10)
+    resp = httpx.get(url, params=params, timeout=10, follow_redirects=True)
     resp.raise_for_status()
     data = resp.json()
     return {k.upper(): float(v) for k, v in data.get("rates", {}).items()}

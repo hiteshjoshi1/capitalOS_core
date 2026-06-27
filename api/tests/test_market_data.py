@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import text
@@ -416,20 +416,52 @@ def test_market_data_scheduler_uses_grouped_refresh_windows(monkeypatch):
     monkeypatch.setattr(market_scheduler, "_scheduler", None)
     monkeypatch.setattr(market_scheduler, "BackgroundScheduler", DummyScheduler)
     monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["US", "SGX", "HKEX", "NSE"])
+    monkeypatch.setattr(market_scheduler, "_latest_successful_run_finished_at", lambda: None)
     monkeypatch.setenv("STOCK_PRICE_SCHEDULER_ENABLED", "1")
 
     scheduler = market_scheduler.start_scheduler()
 
     assert scheduler is not None
     job_ids = {job["id"] for job in added_jobs}
-    assert "stock_refresh_daily_catchup" in job_ids
+    assert "stock_refresh_startup_catchup" in job_ids
     assert "stock_refresh_asia_close" in job_ids
     assert "stock_refresh_us_close" in job_ids
-    catchup_job = next(job for job in added_jobs if job["id"] == "stock_refresh_daily_catchup")
-    assert catchup_job["kwargs"]["window_name"] == "daily_catchup"
+    catchup_job = next(job for job in added_jobs if job["id"] == "stock_refresh_startup_catchup")
+    assert catchup_job["kwargs"]["window_name"] == "startup_catchup"
     assert catchup_job["kwargs"]["exchanges"] == ["US", "SGX", "HKEX", "NSE"]
     asia_job = next(job for job in added_jobs if job["id"] == "stock_refresh_asia_close")
     assert asia_job["kwargs"]["exchanges"] == ["SGX", "HKEX", "NSE"]
+
+
+def test_market_data_scheduler_skips_startup_catchup_when_prices_are_fresh(monkeypatch):
+    added_jobs = []
+
+    class DummyScheduler:
+        def __init__(self, timezone=None):
+            self.timezone = timezone
+
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
+            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(market_scheduler, "_scheduler", None)
+    monkeypatch.setattr(market_scheduler, "BackgroundScheduler", DummyScheduler)
+    monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["US"])
+    monkeypatch.setattr(
+        market_scheduler,
+        "_latest_successful_run_finished_at",
+        lambda: datetime.now(tz=timezone.utc) - timedelta(hours=2),
+    )
+    monkeypatch.setenv("STOCK_PRICE_SCHEDULER_ENABLED", "1")
+
+    scheduler = market_scheduler.start_scheduler()
+
+    assert scheduler is not None
+    job_ids = {job["id"] for job in added_jobs}
+    assert "stock_refresh_startup_catchup" not in job_ids
+    assert "stock_refresh_us_close" in job_ids
 
 
 def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, monkeypatch):

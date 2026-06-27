@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.portfolio.canonical_reads import (
     canonical_position_rows_by_legacy_account,
+    canonical_snapshot_coverage_as_of,
     get_data_completeness_status,
 )
 from app.portfolio.upload_canonical import run_upload_canonical_adapter
@@ -405,25 +406,11 @@ def test_dashboard_legacy_positions_excluded_when_canonical_exists(
     db_engine, sharekhan_canonical_account
 ):
     """
-    When an account has canonical position snapshots, the legacy positions
-    table should NOT be used for that account in _synthetic_position_rows.
+    Phase 7 removes the legacy dashboard position bridge entirely.
     """
-    from app.routers.dashboard import _synthetic_position_rows
-    from datetime import datetime, timezone
+    import app.routers.dashboard as dashboard
 
-    Session = sessionmaker(bind=db_engine)
-    db = Session()
-    try:
-        anchor = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        rows = _synthetic_position_rows(db, anchor_ts=anchor, current_user_id=2)
-        # Account 801 (Sharekhan) should NOT appear in legacy rows
-        account_ids = {r.get("account_id") for r in rows}
-        assert sharekhan_canonical_account not in account_ids, (
-            "Sharekhan account should be excluded from _synthetic_position_rows "
-            "since it has canonical position snapshots"
-        )
-    finally:
-        db.close()
+    assert not hasattr(dashboard, "_synthetic_position_rows")
 
 
 def test_dashboard_no_double_counting_when_canonical_and_legacy_both_present(
@@ -509,6 +496,181 @@ def test_stock_exposure_allocates_ibkr_flex_nav_by_position_country(
         assert countries["HK"]["value"] == pytest.approx(1000.0)
     finally:
         db.close()
+
+
+def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
+    client: TestClient,
+    db_engine,
+    ibkr_flex_canonical_account,
+    monkeypatch,
+):
+    """
+    IBKR dashboard values should use legacy-backfill history until actual Flex
+    facts exist at the read date. Once Flex facts exist, Flex NAV supersedes
+    older legacy-backfill rows for the same legacy account.
+    """
+    from app.routers.dashboard import _networth_components, _platform_allocation, _stock_exposure
+
+    def fake_rates(_dt, base, currencies):
+        return {c: 1.0 for c in currencies}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO portfolio_source_authority_windows
+                  (broker_account_id, source_kind, fact_scope, effective_from, authority_status)
+                SELECT ba.id, 'ibkr_flex_daily', 'all', '2026-02-01', 'authoritative'
+                FROM broker_accounts ba
+                WHERE ba.legacy_account_id = :account_id
+                  AND ba.broker_account_id = 'U_P3_FLEX'
+                """
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE portfolio_nav_snapshots
+                SET authority_status = 'reference'
+                WHERE legacy_account_id = :account_id
+                """
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+        conn.execute(
+            text(
+                """
+                UPDATE portfolio_position_snapshots
+                SET authority_status = 'reference'
+                WHERE legacy_account_id = :account_id
+                  AND broker_account_id = (
+                    SELECT id FROM broker_accounts WHERE broker_account_id = 'U_P3_FLEX'
+                  )
+                """
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_connections "
+                "(id, user_id, platform_code, connection_type, display_name, status, metadata_json) "
+                "VALUES (48001, 2, 'LEGACY_BACKFILL', 'legacy_backfill', 'IBKR stale backfill', 'active', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_accounts "
+                "(id, connection_id, legacy_account_id, broker_account_id, base_currency, status, metadata_json) "
+                "VALUES (48001, 48001, :account_id, 'backfill_ibkr_stale', 'USD', 'active', '{}')"
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_import_runs "
+                "(id, broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status, "
+                " report_date_from, report_date_to, metadata_json) "
+                "VALUES (48001, 48001, :account_id, 'IBKR', 'legacy_positions_backfill', 'backfill', 'completed', "
+                " '2026-02-10', '2026-02-10', '{}')"
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO broker_instruments "
+                "(id, platform_code, broker_instrument_id, asset_id, symbol, description, security_type, currency, metadata_json) "
+                "VALUES (48001, 'LEGACY_BACKFILL', 'backfill_AAPL_stale', 8030, 'AAPL', 'Apple stale backfill', "
+                " 'STOCK', 'USD', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO portfolio_position_snapshots
+                  (id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                   quantity, currency, market_price, market_value_local, market_value_base,
+                   cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
+                VALUES
+                  (48001, 48001, :account_id, 48001, 48001, '2026-02-10',
+                   100, 'USD', 7500, 750000, 750000, 750000, 750000, 1, 'authoritative', '{}')
+                """
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO account_balance_snapshots
+                  (id, account_id, broker_account_id, broker_import_run_id, as_of_date, currency, balance_type,
+                   balance_local, balance_base, fx_rate_to_base, authority_status, source_kind, metadata_json)
+                VALUES
+                  (48001, :account_id, 48001, 48001, '2026-02-10', 'USD', 'cash',
+                   103191, 103191, 1, 'authoritative', 'legacy_positions_backfill', '{}')
+                """
+            ),
+            {"account_id": ibkr_flex_canonical_account},
+        )
+
+    Session = sessionmaker(bind=db_engine)
+    db = Session()
+    try:
+        pre_report_anchor = datetime(2026, 2, 15, tzinfo=timezone.utc)
+        pre_report_components = _networth_components(db, pre_report_anchor, "USD", current_user_id=2)
+        pre_report_exposure = _stock_exposure(db, pre_report_anchor, "USD", current_user_id=2)
+
+        assert pre_report_components["cash"] == pytest.approx(103191.0)
+        assert pre_report_components["stocks_funds"] == pytest.approx(750000.0)
+        assert pre_report_components["total"] == pytest.approx(853191.0)
+        assert pre_report_exposure["total"] == pytest.approx(750000.0)
+
+        anchor = datetime(2026, 3, 1, tzinfo=timezone.utc)
+        components = _networth_components(db, anchor, "USD", current_user_id=2)
+        allocation = _platform_allocation(db, anchor, "USD", current_user_id=2)
+        exposure = _stock_exposure(db, anchor, "USD", current_user_id=2)
+
+        assert components["cash"] == pytest.approx(1000.0)
+        assert components["stocks_funds"] == pytest.approx(3000.0)
+        assert components["total"] == pytest.approx(4000.0)
+        assert allocation["total"] == pytest.approx(4000.0)
+        assert allocation["items"] == [
+            {
+                "platform": "IBKR",
+                "platform_type": "BROKER",
+                "country": "US",
+                "value": 4000.0,
+                "percent": 100.0,
+            }
+        ]
+        assert exposure["total"] == pytest.approx(3000.0)
+        assert exposure["by_platform"] == [{"key": "IBKR", "value": 3000.0, "percent": 100.0}]
+    finally:
+        db.close()
+
+    platform_resp = client.get("/dashboard/platform-allocation?month=2026-02&base_currency=USD")
+    assert platform_resp.status_code == 200
+    platform_payload = platform_resp.json()
+    assert platform_payload["total"] == pytest.approx(4000.0)
+    assert platform_payload["items"][0]["platform"] == "IBKR"
+    assert platform_payload["items"][0]["value"] == pytest.approx(4000.0)
+
+    holdings_resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=USD")
+    assert holdings_resp.status_code == 200
+    holdings_payload = holdings_resp.json()
+    assert holdings_payload["stock_current_total"] == pytest.approx(3000.0)
+    assert holdings_payload["platform_breakdown"] == [
+        {
+            "key": "IBKR",
+            "current_value": 3000.0,
+            "snapshot_value": 3000.0,
+            "delta_abs": 0.0,
+            "delta_pct": 0.0,
+            "percent": 100.0,
+        }
+    ]
+    assert max(row["value"] for row in holdings_payload["top_holdings"]) == pytest.approx(2000.0)
 
 
 def test_platform_allocation_includes_sharekhan_canonical(
@@ -638,18 +800,91 @@ def test_dbs_vickers_canonical_positions_no_double_count(
         db.close()
 
 
+def test_stock_holdings_current_value_uses_latest_quote_for_stale_upload_holdings(
+    client: TestClient,
+    db_engine,
+    dbs_vickers_canonical_account,
+    monkeypatch,
+):
+    """Current stock page values must equal latest quote * last known holdings."""
+    def fake_rates(_dt, base, currencies):
+        return {c: 1.0 for c in currencies}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 3, 1, tzinfo=timezone.utc),
+    )
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO prices
+                  (id, asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol)
+                VALUES
+                  (98020, 8020, '2026-02-28T00:00:00+00:00', 11, 'SGD',
+                   'yfinance_market', '2026-02-28', 'SGX', 'S68.SI')
+                """
+            )
+        )
+
+    resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    payload = resp.json()
+    holding = next(row for row in payload["top_holdings"] if row["symbol"] == "S68")
+
+    assert payload["stock_current_total"] == pytest.approx(1100.0)
+    assert payload["stock_snapshot_total"] == pytest.approx(950.0)
+    assert holding["value"] == pytest.approx(1100.0)
+    assert holding["quantity"] == pytest.approx(100.0)
+    assert holding["latest_price"] == pytest.approx(11.0)
+    assert holding["latest_trade_date"] == "2026-02-28"
+    assert holding["price_provider"] == "yfinance"
+
+
 def test_dbs_vickers_legacy_excluded_from_synthetic_rows(db_engine, dbs_vickers_canonical_account):
-    """DBS Vickers account should not appear in _synthetic_position_rows."""
-    from app.routers.dashboard import _synthetic_position_rows
-    from datetime import datetime, timezone
+    """DBS Vickers no longer needs the legacy dashboard position bridge."""
+    import app.routers.dashboard as dashboard
+
+    assert not hasattr(dashboard, "_synthetic_position_rows")
+
+
+def test_canonical_snapshot_effective_date_uses_latest_available_fact(
+    db_engine,
+    sharekhan_canonical_account,
+    dbs_vickers_canonical_account,
+):
+    """
+    A stale account should not make the whole dashboard snapshot look missing.
+    The value is computed from latest-known components; component staleness is
+    freshness metadata, not snapshot availability.
+    """
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                UPDATE portfolio_position_snapshots
+                SET report_date = '2026-03-01'
+                WHERE broker_account_id IN (
+                  SELECT id
+                  FROM broker_accounts
+                  WHERE legacy_account_id = :account_id
+                )
+                """
+            ),
+            {"account_id": dbs_vickers_canonical_account},
+        )
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        anchor = datetime(2026, 3, 1, tzinfo=timezone.utc)
-        rows = _synthetic_position_rows(db, anchor_ts=anchor, current_user_id=2)
-        account_ids = {r.get("account_id") for r in rows}
-        assert dbs_vickers_canonical_account not in account_ids
+        as_of = canonical_snapshot_coverage_as_of(
+            db,
+            current_user_id=2,
+            anchor_date=date(2026, 3, 1),
+        )
+        assert str(as_of) == "2026-03-01"
     finally:
         db.close()
 

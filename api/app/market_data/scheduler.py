@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.date import DateTrigger
+from sqlalchemy import text
 
-from app.db.session import get_db
+from app.db.session import SessionLocal
 from app.market_data.service import configured_exchanges, run_all_exchanges
 
 logger = logging.getLogger("capitalos.market_data")
@@ -34,8 +35,58 @@ def _window_schedule(window_name: str) -> tuple[str, int, int]:
     return tz, hour, minute
 
 
+def _catchup_stale_after() -> timedelta:
+    raw = os.getenv("STOCK_REFRESH_STALE_AFTER_HOURS", "24")
+    try:
+        hours = float(raw)
+    except ValueError:
+        hours = 24.0
+    return timedelta(hours=max(hours, 1.0))
+
+
+def _coerce_utc(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _latest_successful_run_finished_at() -> datetime | None:
+    db = SessionLocal()
+    try:
+        row = db.execute(
+            text(
+                """
+                SELECT MAX(finished_at)
+                FROM market_data_runs
+                WHERE status IN ('success', 'partial')
+                  AND finished_at IS NOT NULL
+                """
+            )
+        ).fetchone()
+        return _coerce_utc(row[0] if row else None)
+    finally:
+        db.close()
+
+
+def _startup_catchup_due() -> bool:
+    try:
+        latest = _latest_successful_run_finished_at()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("stock_refresh_last_run_check_failed", extra={"error": str(exc)})
+        return True
+    if latest is None:
+        return True
+    return datetime.now(tz=timezone.utc) - latest > _catchup_stale_after()
+
+
 def _run_window(window_name: str, exchanges: list[str]) -> None:
-    db = next(get_db())
+    db = SessionLocal()
     try:
         started = datetime.now(tz=timezone.utc)
         result = run_all_exchanges(db, exchanges=exchanges, full_coverage=True)
@@ -70,12 +121,12 @@ def start_scheduler() -> BackgroundScheduler | None:
     exchanges = configured_exchanges()
     scheduled: set[str] = set()
 
-    if exchanges:
+    if exchanges and _startup_catchup_due():
         scheduler.add_job(
             _run_window,
-            IntervalTrigger(hours=24, start_date=datetime.now(tz=timezone.utc)),
-            kwargs={"window_name": "daily_catchup", "exchanges": exchanges},
-            id="stock_refresh_daily_catchup",
+            DateTrigger(run_date=datetime.now(tz=timezone.utc) + timedelta(seconds=5)),
+            kwargs={"window_name": "startup_catchup", "exchanges": exchanges},
+            id="stock_refresh_startup_catchup",
             replace_existing=True,
             max_instances=1,
             coalesce=True,

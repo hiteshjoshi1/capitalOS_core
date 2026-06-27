@@ -19,7 +19,7 @@ def test_get_rates_fallback_cross(monkeypatch):
     monkeypatch.setenv("FX_DISABLE_REMOTE", "0")
     calls = {"count": 0}
 
-    def fake_get(url, params=None, timeout=10):
+    def fake_get(url, params=None, timeout=10, **_kwargs):
         calls["count"] += 1
         if "frankfurter.app" in url:
             base = params.get("from")
@@ -45,7 +45,7 @@ def test_get_rates_static_sgd_inr(monkeypatch):
     monkeypatch.setenv("FX_DISABLE_REMOTE", "0")
     monkeypatch.setenv("FX_FALLBACK_RATES", '{"SGD":{"INR":70}}')
 
-    def fake_get(url, params=None, timeout=10):
+    def fake_get(url, params=None, timeout=10, **_kwargs):
         raise Exception("network down")
 
     monkeypatch.setattr(fx.httpx, "get", fake_get)

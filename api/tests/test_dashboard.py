@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
+from tests.canonical_test_helpers import backfill_legacy_positions_for_test
 
 
 def test_dashboard_invalid_month(client: TestClient):
@@ -28,22 +29,22 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert data["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
     assert data["net_worth_boundary_exact"] is False
     assert data["net_worth_freshness_status"] == "synthetic"
-    assert data["net_worth"]["total"] == 98899.0
+    assert data["net_worth"]["total"] == 100000.0
     assert data["cash_flow"]["income"] == 5999.0
     assert data["cash_flow"]["expenses"] == 2100.0
     assert data["cash_flow"]["net"] == 3899.0
     assert data["cash_flow"]["savings_rate"] == pytest.approx(3899.0 / 5999.0, rel=1e-4)
-    assert data["cash_percent"] == 29.22
+    assert data["cash_percent"] == 30.0
 
     top = data["top_holdings"]
     assert len(top) == 2
     assert top[0]["symbol"] == "AAPL"
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == 8899.0
-    assert changes["pct"] == 8899.0 / 90000.0
+    assert changes["abs"] == 10000.0
+    assert changes["pct"] == 10000.0 / 90000.0
     component_changes = data["net_worth_component_change"]
-    assert component_changes["cash"]["abs"] == -1101.0
+    assert component_changes["cash"]["abs"] == 0.0
     assert component_changes["stocks_funds"]["abs"] == 5000.0
     assert component_changes["crypto"]["abs"] == 5000.0
     assert data["top_movers"]["compare_month"] == "2026-01"
@@ -69,11 +70,11 @@ def test_dashboard_net_worth_change_lightweight(client: TestClient, seed_dashboa
     assert "vs_prev_year" not in data["net_worth_change"]
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == 8899.0
-    assert changes["pct"] == 8899.0 / 90000.0
+    assert changes["abs"] == 10000.0
+    assert changes["pct"] == 10000.0 / 90000.0
 
 
-def test_synthetic_net_worth_ignores_internal_self_transfer_income(db_engine, monkeypatch):
+def test_canonical_net_worth_ignores_legacy_position_roll_forward(db_engine, monkeypatch):
     from datetime import datetime, timezone
 
     from sqlalchemy import text
@@ -105,6 +106,15 @@ def test_synthetic_net_worth_ignores_internal_self_transfer_income(db_engine, mo
                 "(910, 910, 910, :as_of, 400000, 1, 400000)"
             ),
             {"as_of": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO account_balance_snapshots "
+                "(id, account_id, as_of_date, currency, balance_type, balance_local, balance_base, "
+                "fx_rate_to_base, authority_status, source_kind, metadata_json) VALUES "
+                "(910, 910, '2026-03-26', 'SGD', 'bank_cash', 400000, 400000, 1, "
+                "'authoritative', 'test_fixture', '{}')"
+            )
         )
         conn.execute(
             text(
@@ -188,10 +198,10 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
         conn.execute(
             text(
                 "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(2100, 210, 210, :snapshot, 10, 90, 900), "
-                "(2101, 211, 211, :snapshot, 10, 45, 450), "
-                "(2102, 210, 210, :current, 20, 95, 1900), "
-                "(2103, 211, 211, :current, 5, 50, 250)"
+                "(2100, 210, 210, :snapshot, 10, 90, 1100), "
+                "(2101, 211, 211, :snapshot, 10, 45, 600), "
+                "(2102, 210, 210, :current, 20, 95, 2200), "
+                "(2103, 211, 211, :current, 5, 50, 300)"
             ),
             {"snapshot": as_of_snapshot, "current": as_of_current},
         )
@@ -203,6 +213,7 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
             ),
             {"snapshot": as_of_snapshot, "current": as_of_current, "quote_trade_date": quote_trade_date},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})
 
@@ -286,6 +297,7 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
                 "(70, 70, 'evm', 'ethereum', 'native', 'ETH', 1, 123.45)"
             )
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
@@ -540,7 +552,7 @@ def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_das
     assert len(cash_rows) == 0
     # Verify cash_percent is exposed and correctly computed
     assert "cash_percent" in data
-    assert data["cash_percent"] == 29.22
+    assert data["cash_percent"] == 30.0
 
 
 def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient, seed_dashboard_data):
@@ -573,8 +585,8 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     items = data["items"]
     by_platform = {item["platform"]: item for item in items}
     assert set(by_platform) == {"IBKR", "DBS", "CRYPTO"}
-    assert by_platform["IBKR"]["value"] == pytest.approx(50999.0)
-    assert by_platform["DBS"]["value"] == pytest.approx(27900.0)
+    assert by_platform["IBKR"]["value"] == pytest.approx(50000.0)
+    assert by_platform["DBS"]["value"] == pytest.approx(30000.0)
     assert by_platform["CRYPTO"]["value"] == pytest.approx(20000.0)
 
 
@@ -610,6 +622,7 @@ def test_platform_allocation_prefers_account_platform_over_platform_id(client: T
             ),
             {"as_of": as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     resp = client.get("/dashboard/platform-allocation?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -622,7 +635,7 @@ def test_platform_allocation_prefers_account_platform_over_platform_id(client: T
     assert by_platform["DBS_VICKERS"]["value"] == pytest.approx(2000.0)
 
 
-def test_platform_allocation_current_month_uses_last_completed_snapshot_anchor(client: TestClient, db_engine, monkeypatch):
+def test_platform_allocation_uses_current_holdings_with_latest_price(client: TestClient, db_engine, monkeypatch):
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
 
@@ -663,6 +676,7 @@ def test_platform_allocation_current_month_uses_last_completed_snapshot_anchor(c
             ),
             {"completed_anchor": completed_anchor, "later_snapshot": later_snapshot},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
@@ -675,10 +689,10 @@ def test_platform_allocation_current_month_uses_last_completed_snapshot_anchor(c
     assert resp.status_code == 200
     data = resp.json()
 
-    assert data["as_of"] == "2026-06-01T00:00:00+00:00"
-    assert data["total"] == pytest.approx(1000.0)
+    assert data["as_of"] == "2026-06-10T00:00:00+00:00"
+    assert data["total"] == pytest.approx(4000.0)
     assert data["items"][0]["platform"] == "TESTBROKER"
-    assert data["items"][0]["value"] == pytest.approx(1000.0)
+    assert data["items"][0]["value"] == pytest.approx(4000.0)
 
 
 def test_dashboard_geography_exposure_breakdown_maps_crypto_to_us(client: TestClient, seed_dashboard_data, monkeypatch):
@@ -827,6 +841,7 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
             ),
             {"snapshot": snapshot_as_of, "current": current_as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _date, _base, symbols: {"SGD": 1.0, "USD": 1.5})
 
@@ -900,6 +915,7 @@ def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClien
                 "(51, 51, 'svm', 'solana', 'token', 'USDT', 20, 20)"
             )
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "SGD"
@@ -953,6 +969,7 @@ def test_dashboard_cash_deposits_converts_non_sgd_cash_positions(client: TestCli
             ),
             {"as_of": as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "SGD"
@@ -1039,6 +1056,7 @@ def test_dashboard_geography_exposure_maps_sgd_cash_to_sg_when_home_country_miss
             ),
             {"as_of": as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
@@ -1087,6 +1105,7 @@ def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monk
             ),
             {"as_of": as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "SGD"
@@ -1097,9 +1116,9 @@ def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monk
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
     data = resp.json()
-    # 100000 INR * 0.01 = 1000 SGD, 2000 USD * 1.5 = 3000 SGD
-    assert data["net_worth"]["stocks_funds"] == 4000.0
-    assert data["net_worth"]["total"] == 4000.0
+    # Canonical backfill stores market_value_base in the account base currency (INR).
+    assert data["net_worth"]["stocks_funds"] == 1020.0
+    assert data["net_worth"]["total"] == 1020.0
 
 
 def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, db_engine, monkeypatch):
@@ -1129,7 +1148,7 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
         conn.execute(
             text(
                 "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(20, 20, 20, :as_of, 10, 100, 1000)"
+                "(20, 20, 20, :as_of, 10, 100, 2000)"
             ),
             {"as_of": as_of},
         )
@@ -1140,6 +1159,7 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
             ),
             {"as_of": as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "USD"
@@ -1150,7 +1170,7 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert resp.status_code == 200
     data = resp.json()
-    # 10 qty * 200 latest price = 2000, replacing cost_basis_base=1000
+    # Canonical snapshot value is authoritative for the read path.
     assert data["net_worth"]["stocks_funds"] == 2000.0
     assert data["net_worth"]["total"] == 2000.0
 
@@ -1201,6 +1221,7 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
                 "(30, 30, 'HKEX', '700', 'HKD', TRUE)"
             )
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "HKD"
@@ -1216,6 +1237,7 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
     assert row["geo"] == "HK"
     assert row["quantity"] == 30.0
     assert row["avg_cost"] == pytest.approx((100.0 * 10.0 + 200.0 * 20.0) / 30.0)
+    assert row["value"] == pytest.approx(4500.0)
     assert row["latest_price"] == 150.0
     assert row["quote_currency"] == "HKD"
     assert row["latest_trade_date"] == "2026-02-06"
@@ -1278,6 +1300,7 @@ def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client:
             ),
             position_rows,
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "USD"
@@ -1407,6 +1430,7 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
                 "(800, 800, 'evm', 'ethereum', 'native', 'ETH', 2.0, 5000.0)"
             )
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
@@ -1505,9 +1529,32 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
-                "(1, '2026-02-28T00:00:00+00:00', 5500, 'USD', 'finnhub_market', '2026-02-28', 'US', 'AAPL'),"
-                "(1, '2026-03-09T00:00:00+00:00', 6000, 'USD', 'finnhub_market', '2026-03-09', 'US', 'AAPL')"
+                "INSERT INTO broker_import_runs "
+                "(id, broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status, metadata_json) VALUES "
+                "(3, 1, 2, 'IBKR', 'test', 'daily', 'completed', '{}')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO portfolio_nav_snapshots
+                  (id, broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+                   cash_base, stock_base, total_nav_base, authority_status, metadata_json)
+                VALUES
+                  (3, 1, 2, 3, '2026-03-09', 'SGD', 0, 55000, 55000, 'authoritative', '{}')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO portfolio_position_snapshots
+                  (id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                   quantity, currency, market_price, market_value_local, market_value_base,
+                   cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
+                VALUES
+                  (3, 1, 2, 1, 3, '2026-03-09', 10, 'USD', 5500, 55000, 55000, 50000, 50000, 1, 'authoritative', '{}')
+                """
             )
         )
 
@@ -1556,7 +1603,7 @@ def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(cli
             text(
                 "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
                 "(6100, 610, 610, :snapshot_as_of, 10, 100, 1000), "
-                "(6101, 610, 610, :current_as_of, 20, 100, 2000)"
+                "(6101, 610, 610, :current_as_of, 20, 100, 2400)"
             ),
             {"snapshot_as_of": snapshot_as_of, "current_as_of": current_as_of},
         )
@@ -1568,6 +1615,7 @@ def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(cli
             ),
             {"snapshot_as_of": snapshot_as_of, "current_as_of": current_as_of},
         )
+    backfill_legacy_positions_for_test(db_engine)
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
