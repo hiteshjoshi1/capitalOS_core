@@ -376,20 +376,13 @@ def test_ibkr_flex_import_without_explicit_cutover_uses_statement_start_date(db_
         db.close()
 
 
-def test_ibkr_flex_dashboard_uses_canonical_nav_and_excludes_legacy_positions(client, db_engine, tmp_path, monkeypatch):
+def test_ibkr_flex_dashboard_uses_canonical_nav(client, db_engine, tmp_path, monkeypatch):
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     _seed_ibkr_account(db_engine)
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        db.execute(text("INSERT INTO assets (id, symbol, name, asset_class, quote_currency) VALUES (900, 'LEGACY', 'Legacy', 'STOCK', 'SGD')"))
-        db.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) "
-                "VALUES (900, 300, 900, '2026-02-06T00:00:00+00:00', 1, 1, 999999)"
-            )
-        )
         run_ibkr_flex_import_from_xml(
             db,
             current_user_id=1,

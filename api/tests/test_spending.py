@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
-from tests.canonical_test_helpers import backfill_legacy_positions_for_test
+from tests.canonical_test_helpers import seed_canonical_account_balance_for_test
 
 
 def test_spending_summary(client: TestClient, seed_spending_data):
@@ -170,13 +170,6 @@ def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, d
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(9001, 10, 900, '2026-01-31 00:00:00+00:00', 11000, 1, 11000), "
-                "(9002, 10, 900, '2026-02-28 00:00:00+00:00', 15000, 1, 15000)"
-            )
-        )
-        conn.execute(
-            text(
                 "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
                 "(11, '2026-01-05 12:00:00+00:00', 10, 10000, 'INCOME', 'SGD', 'Salary', 'Employer', NULL), "
                 "(12, '2026-01-08 09:00:00+00:00', 10, 300, 'INCOME', 'SGD', 'Dividends', 'Broker', NULL), "
@@ -185,7 +178,22 @@ def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, d
                 "(15, '2026-01-18 12:00:00+00:00', 11, -900, 'EXPENSE', 'SGD', 'Groceries', 'Supermarket', NULL)"
             )
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=10,
+        as_of="2026-01-31",
+        currency="SGD",
+        balance_base=11000,
+        balance_type="bank_cash",
+    )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=10,
+        as_of="2026-02-28",
+        currency="SGD",
+        balance_base=15000,
+        balance_type="bank_cash",
+    )
 
     resp = client.get("/spending/cash-flow-detail?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -256,18 +264,27 @@ def test_cash_flow_saved_vs_spent_answer_handles_negative_net_without_absurd_per
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(9101, 910, 901, '2026-01-31 00:00:00+00:00', 9000, 1, 9000), "
-                "(9102, 910, 901, '2026-02-28 00:00:00+00:00', 3500, 1, 3500)"
-            )
-        )
-        conn.execute(
-            text(
                 "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
                 "(91011, '2026-02-05 00:00:00+00:00', 910, 1000, 'INCOME', 'SGD', 'Salary', 'Employer', NULL), "
                 "(91012, '2026-02-12 00:00:00+00:00', 910, -6500, 'EXPENSE', 'SGD', 'Travel', 'Airline', NULL)"
             )
         )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=910,
+        as_of="2026-01-31",
+        currency="SGD",
+        balance_base=9000,
+        balance_type="bank_cash",
+    )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=910,
+        as_of="2026-02-28",
+        currency="SGD",
+        balance_base=3500,
+        balance_type="bank_cash",
+    )
 
     resp = client.get("/spending/cash-flow-detail?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200

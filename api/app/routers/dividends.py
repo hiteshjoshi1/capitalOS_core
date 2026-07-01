@@ -11,6 +11,7 @@ from app.auth_context import CurrentUser, account_scope_sql, require_current_use
 from app.db.session import get_db
 from app.fx import get_rates
 from app.market_data.service import YAHOO_SUFFIX
+from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.schemas.dividends import (
     DividendCompanyItemOut,
     DividendHistoryEventOut,
@@ -217,59 +218,41 @@ def _latest_asset_market_values(
     base_currency: str,
     current_user_id: int,
 ) -> dict[int, float]:
-    q = text(
-        """
-        WITH latest AS (
-          SELECT p.account_id, MAX(p.as_of) AS as_of
-          FROM positions p
-          JOIN accounts acc ON acc.id = p.account_id
-          WHERE p.as_of <= :anchor_ts
-            AND """
-            + account_scope_sql("acc")
-            + """
-          GROUP BY p.account_id
-        ),
-        latest_prices AS (
-          SELECT p1.asset_id, p1.price, p1.currency
-          FROM prices p1
-          JOIN (
-            SELECT asset_id, MAX(trade_date) AS trade_date
-            FROM prices
-            WHERE trade_date IS NOT NULL AND trade_date <= :anchor_date
-            GROUP BY asset_id
-          ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
-        )
-        SELECT
-          p.asset_id,
-          COALESCE(lp.currency, a.quote_currency) AS quote_currency,
-          SUM(
-            CASE
-              WHEN a.asset_class IN ('STOCK', 'FUND') AND p.quantity IS NOT NULL AND lp.price IS NOT NULL
-                THEN p.quantity * lp.price
-              ELSE p.cost_basis_base
-            END
-          ) AS value
-        FROM positions p
-        JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
-        JOIN assets a ON a.id = p.asset_id
-        LEFT JOIN latest_prices lp ON lp.asset_id = p.asset_id
-        WHERE a.asset_class IN ('STOCK', 'FUND')
-        GROUP BY p.asset_id, COALESCE(lp.currency, a.quote_currency)
-        """
+    rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+        include_nav_accounts=True,
     )
-    rows = db.execute(
-        q,
-        {"anchor_ts": anchor_ts, "anchor_date": anchor_ts.date(), "current_user_id": current_user_id},
-    ).mappings().all()
-    if not rows:
+    holding_rows = [
+        row
+        for row in rows
+        if row.get("asset_id") is not None and str(row.get("asset_class") or "").upper() in {"STOCK", "FUND"}
+    ]
+    if not holding_rows:
         return {}
-    currencies = {(r.get("quote_currency") or base_currency).upper() for r in rows}
+    currencies: set[str] = set()
+    price_by_asset: dict[int, tuple[float | None, str | None]] = {}
+    for row in holding_rows:
+        asset_id = int(row["asset_id"])
+        fallback_price, fallback_currency = _latest_price_for_asset(db, asset_id, anchor_ts.date())
+        price_by_asset[asset_id] = (fallback_price, fallback_currency)
+        if fallback_price is not None and fallback_currency:
+            currencies.add(fallback_currency.upper())
+        else:
+            currencies.add(str(row.get("account_base_currency") or row.get("account_currency") or base_currency).upper())
     fx_rates = get_rates(anchor_ts, base_currency, currencies)
     out: dict[int, float] = {}
-    for row in rows:
+    for row in holding_rows:
         asset = int(row["asset_id"])
-        quote_currency = (row.get("quote_currency") or base_currency).upper()
-        converted = float(row.get("value") or 0.0) * fx_rates.get(quote_currency, 1.0)
+        latest_price, latest_currency = price_by_asset.get(asset, (None, None))
+        if latest_price is not None:
+            currency = (latest_currency or row.get("quote_currency") or base_currency).upper()
+            value = float(row.get("quantity") or 0.0) * float(latest_price)
+        else:
+            currency = str(row.get("account_base_currency") or row.get("account_currency") or base_currency).upper()
+            value = float(row.get("snapshot_market_value_base") or row.get("cost_basis_base") or 0.0)
+        converted = value * fx_rates.get(currency, 1.0)
         out[asset] = out.get(asset, 0.0) + converted
     return out
 
@@ -538,55 +521,24 @@ def _to_yahoo_symbol(symbol: str, exchange_code: str | None) -> str:
 
 
 def _load_expected_holdings(db: Session, anchor_ts: datetime, current_user_id: int) -> list[dict[str, Any]]:
-    q = text(
-        """
-        WITH latest AS (
-          SELECT p.account_id, MAX(p.as_of) AS as_of
-          FROM positions p
-          JOIN accounts acc ON acc.id = p.account_id
-          WHERE p.as_of <= :anchor_ts
-            AND """
-            + account_scope_sql("acc")
-            + """
-          GROUP BY p.account_id
-        ),
-        latest_holdings AS (
-          SELECT p.asset_id, SUM(COALESCE(p.quantity, 0)) AS quantity
-          FROM positions p
-          JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
-          GROUP BY p.asset_id
-        ),
-        symbol_pick AS (
-          SELECT
-            m.asset_id,
-            MIN(m.exchange_code) AS exchange_code,
-            MIN(m.exchange_symbol) AS exchange_symbol,
-            MIN(m.yahoo_symbol_override) AS yahoo_symbol_override
-          FROM market_symbol_map m
-          WHERE COALESCE(m.is_active, TRUE) = TRUE
-          GROUP BY m.asset_id
-        )
-        SELECT
-          a.id AS asset_id,
-          a.symbol,
-          a.name,
-          a.quote_currency,
-          a.home_country,
-          h.quantity,
-          sp.exchange_code,
-          sp.exchange_symbol,
-          sp.yahoo_symbol_override
-        FROM latest_holdings h
-        JOIN assets a ON a.id = h.asset_id
-        LEFT JOIN symbol_pick sp ON sp.asset_id = a.id
-        WHERE a.asset_class IN ('STOCK', 'FUND')
-          AND h.quantity > 0
-        ORDER BY h.quantity DESC, a.id ASC
-        """
+    rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+        include_nav_accounts=True,
     )
-    rows = db.execute(q, {"anchor_ts": anchor_ts, "current_user_id": current_user_id}).mappings().all()
-    out: list[dict[str, Any]] = []
+    aggregated: dict[int, dict[str, Any]] = {}
     for row in rows:
+        if row.get("asset_id") is None or str(row.get("asset_class") or "").upper() not in {"STOCK", "FUND"}:
+            continue
+        quantity = float(row.get("quantity") or 0.0)
+        if quantity <= 0:
+            continue
+        asset_id = int(row["asset_id"])
+        item = aggregated.setdefault(asset_id, dict(row, quantity=0.0))
+        item["quantity"] = float(item.get("quantity") or 0.0) + quantity
+    out: list[dict[str, Any]] = []
+    for row in sorted(aggregated.values(), key=lambda r: (-float(r.get("quantity") or 0.0), int(r["asset_id"]))):
         exchange_code = (row.get("exchange_code") or "").strip().upper() or None
         exchange_symbol = (row.get("exchange_symbol") or row.get("symbol") or "").strip().upper()
         yahoo_override = (row.get("yahoo_symbol_override") or "").strip().upper()
@@ -643,29 +595,17 @@ def _quantity_on_date(
                 qty += signed
         return max(qty, 0.0)
 
-    snap_row = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT p.account_id, MAX(p.as_of) AS as_of
-              FROM positions p
-              JOIN accounts a ON a.id = p.account_id
-              WHERE p.asset_id = :asset_id
-                AND p.as_of < :cutoff
-                AND """
-            + account_scope_sql("a")
-            + """
-              GROUP BY p.account_id
-            )
-            SELECT SUM(COALESCE(p.quantity, 0)) AS quantity
-            FROM positions p
-            JOIN latest l ON l.account_id = p.account_id AND l.as_of = p.as_of
-            WHERE p.asset_id = :asset_id
-            """
-        ),
-        {"asset_id": asset_id, "cutoff": cutoff, "current_user_id": current_user_id},
-    ).mappings().one_or_none()
-    snap_qty = float(snap_row.get("quantity") or 0.0) if snap_row else 0.0
+    canonical_rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=event_date,
+        include_nav_accounts=True,
+    )
+    snap_qty = sum(
+        float(row.get("quantity") or 0.0)
+        for row in canonical_rows
+        if row.get("asset_id") is not None and int(row["asset_id"]) == asset_id
+    )
     if snap_qty > 0:
         return snap_qty
     return max(snapshot_fallback, 0.0)

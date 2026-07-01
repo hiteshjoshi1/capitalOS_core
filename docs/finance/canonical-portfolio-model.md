@@ -55,12 +55,12 @@ The current investment data path writes mostly into:
 | `import_jobs` | Upload job metadata and reports. |
 | `parser_registry` | Upload file signature to parser mapping. |
 | `assets` | Current security/cash display table, keyed weakly by `(symbol, quote_currency)`. |
-| `positions` | Snapshot-ish holdings table keyed by `(account_id, asset_id, as_of)`. |
+| `positions` | Retired read-only archive of legacy snapshot-ish holdings keyed by `(account_id, asset_id, as_of)`. Not portfolio truth. |
 | `transactions` | Generic spending, cash, and broker activity table. |
 | `prices` | Market prices by asset/date/source. |
 | `market_symbol_map` | Asset to exchange/provider symbol mapping. |
 
-This remains available during migration. The target state is that investment-platform writes and reads go through the canonical portfolio model, with legacy tables either retired or compatibility-frozen.
+The canonical portfolio model is the portfolio truth. Legacy `positions` remains available only as a read-only archive for approved migration/parity tooling; production portfolio reads and writes must go through canonical tables.
 
 ---
 
@@ -221,6 +221,12 @@ Raw XML/upload content must be retained securely. Secrets in request URLs are no
 ### Legacy Position Backfill And Parity Audit
 
 Issue 181 uses a migration bridge to copy eligible legacy `positions` facts into canonical storage without deleting `positions`.
+
+As of Issue 183, `positions` is retired in place as an archive table. Migration
+`057_retire_legacy_positions_guard.sql` installs write-blocking triggers for
+insert, update, and delete so new authoritative holdings cannot be silently
+reintroduced through the legacy table. Table deletion is intentionally deferred
+to a separate destructive migration.
 
 Run the backfill for one user:
 

@@ -430,71 +430,10 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
             )
             return write_and_return(_report(job, status="FAILED", error=job.error_message))
 
-        # Legacy positions write: only for parsers NOT covered by a canonical adapter.
-        # Canonical-covered parsers (portfolio_positions / account_balance) skip this block.
+        # Legacy positions are retired as authoritative storage.  Any parser
+        # that emits positions must either route to a canonical adapter or fail
+        # closed above; there is intentionally no legacy fallback write here.
         positions_inserted = 0
-        if canonical_target not in ("portfolio_positions", "account_balance") and positions:
-            for pos in positions:
-                as_of = _resolve_position_as_of(pos, result.parser_meta or {}, parsed)
-                asset_id = _get_or_create_asset(db, pos)
-                if asset_id is None:
-                    continue
-                exists_pos = db.execute(
-                    text(
-                        """
-                        SELECT 1 FROM positions
-                        WHERE account_id = :account_id
-                          AND asset_id = :asset_id
-                          AND as_of = :as_of
-                        LIMIT 1
-                        """
-                    ),
-                    {
-                        "account_id": job.account_id,
-                        "asset_id": asset_id,
-                        "as_of": as_of,
-                    },
-                ).fetchone()
-                if exists_pos:
-                    db.execute(
-                        text(
-                            """
-                            UPDATE positions
-                            SET quantity = :quantity,
-                                avg_cost = :avg_cost,
-                                cost_basis_base = :cost_basis_base
-                            WHERE account_id = :account_id
-                              AND asset_id = :asset_id
-                              AND as_of = :as_of
-                            """
-                        ),
-                        {
-                            "account_id": job.account_id,
-                            "asset_id": asset_id,
-                            "as_of": as_of,
-                            "quantity": pos.get("quantity"),
-                            "avg_cost": pos.get("avg_cost"),
-                            "cost_basis_base": pos.get("cost_basis_base"),
-                        },
-                    )
-                else:
-                    db.execute(
-                        text(
-                            """
-                            INSERT INTO positions (account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base)
-                            VALUES (:account_id, :asset_id, :as_of, :quantity, :avg_cost, :cost_basis_base)
-                            """
-                        ),
-                        {
-                            "account_id": job.account_id,
-                            "asset_id": asset_id,
-                            "as_of": as_of,
-                            "quantity": pos.get("quantity"),
-                            "avg_cost": pos.get("avg_cost"),
-                            "cost_basis_base": pos.get("cost_basis_base"),
-                        },
-                    )
-                positions_inserted += 1
 
         # Canonical write (blocking for position-producing parsers).
         # Must succeed before the job is marked IMPORTED.

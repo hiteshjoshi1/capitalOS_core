@@ -1,5 +1,7 @@
 from sqlalchemy import text
 
+from tests.canonical_test_helpers import seed_canonical_position_snapshot_for_test
+
 
 def _seed_dividend_data(db_engine):
     with db_engine.begin() as conn:
@@ -16,14 +18,6 @@ def _seed_dividend_data(db_engine):
                 """
                 INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES
                 (901, 'AAPL', 'Apple Inc.', 'STOCK', 'USD', 'US')
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES
-                (701, 501, 901, '2026-02-06T00:00:00+00:00', 100, 150, 15000)
                 """
             )
         )
@@ -47,6 +41,18 @@ def _seed_dividend_data(db_engine):
                 """
             )
         )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=501,
+        asset_id=901,
+        as_of="2026-02-06",
+        quantity=100,
+        market_value_base=15000,
+        market_price=150,
+        cost_basis_base=15000,
+        currency="USD",
+        platform_code="IBKR",
+    )
 
 
 def test_dividends_summary_by_month(client, db_engine):
@@ -139,14 +145,6 @@ def test_expected_dividends_overview_is_annualized_from_yield(client, db_engine)
         conn.execute(
             text(
                 """
-                INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES
-                (710, 510, 910, '2026-03-06T00:00:00+00:00', 10, 150, 1500)
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
                 INSERT INTO market_dividend_yields
                   (asset_id, as_of_date, yield_rate, annual_dividend_per_share, price, currency, source, exchange_code, provider_symbol)
                 VALUES
@@ -154,6 +152,18 @@ def test_expected_dividends_overview_is_annualized_from_yield(client, db_engine)
                 """
             )
         )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=510,
+        asset_id=910,
+        as_of="2026-03-06",
+        quantity=10,
+        market_value_base=1500,
+        market_price=150,
+        cost_basis_base=1500,
+        currency="USD",
+        platform_code="IBKR",
+    )
 
     resp = client.get(
         "/dividends/expected/overview"
@@ -201,14 +211,6 @@ def test_expected_dividends_overview_ignores_dummy_source_snapshots(client, db_e
         conn.execute(
             text(
                 """
-                INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES
-                (711, 511, 911, '2026-03-06T00:00:00+00:00', 10, 100, 1000)
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
                 INSERT INTO market_dividend_yields
                   (asset_id, as_of_date, yield_rate, annual_dividend_per_share, price, currency, source, exchange_code, provider_symbol)
                 VALUES
@@ -217,6 +219,18 @@ def test_expected_dividends_overview_ignores_dummy_source_snapshots(client, db_e
                 """
             )
         )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=511,
+        asset_id=911,
+        as_of="2026-03-06",
+        quantity=10,
+        market_value_base=1000,
+        market_price=100,
+        cost_basis_base=1000,
+        currency="USD",
+        platform_code="IBKR",
+    )
 
     resp = client.get(
         "/dividends/expected/overview"

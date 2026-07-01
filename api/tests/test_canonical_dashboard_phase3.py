@@ -95,24 +95,6 @@ def _seed_asset(db_engine, asset_id: int, symbol: str, name: str, asset_class: s
             )
 
 
-def _seed_legacy_position(db_engine, account_id: int, asset_id: int, as_of: datetime, quantity: float, cost_basis_base: float, avg_cost: float | None = None) -> None:
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO positions (account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) "
-                "VALUES (:account_id, :asset_id, :as_of, :quantity, :avg_cost, :cost_basis_base)"
-            ),
-            {
-                "account_id": account_id,
-                "asset_id": asset_id,
-                "as_of": as_of,
-                "quantity": quantity,
-                "avg_cost": avg_cost,
-                "cost_basis_base": cost_basis_base,
-            },
-        )
-
-
 def _run_canonical_upload(db_engine, account_id: int, platform_code: str, currency: str, positions_data: list[dict]) -> None:
     """Run canonical upload adapter for a given account and positions list."""
     data_dir = os.getenv("DATA_DIR", "/tmp/capitalos_test_data")
@@ -147,14 +129,10 @@ def _run_canonical_upload(db_engine, account_id: int, platform_code: str, curren
 
 @pytest.fixture
 def sharekhan_canonical_account(db_engine):
-    """Seed a Sharekhan account with both legacy positions and canonical snapshots."""
+    """Seed a Sharekhan account with canonical snapshots."""
     _seed_platform(db_engine, 801, "SHAREKHAN", "Sharekhan", "BROKER", "IN")
     _seed_account(db_engine, 801, "Sharekhan Test Phase3", "SHAREKHAN", "INR", platform_id=801, country="IN")
     _seed_asset(db_engine, 8010, "RELIANCE", "Reliance Industries", "STOCK", "INR", "IN")
-
-    # Seed legacy position (same data as canonical, to verify equivalence)
-    as_of = datetime(2026, 2, 20, tzinfo=timezone.utc)
-    _seed_legacy_position(db_engine, 801, 8010, as_of, quantity=10.0, cost_basis_base=25000.0, avg_cost=2500.0)
 
     # Seed canonical position snapshot via upload adapter
     _run_canonical_upload(
@@ -166,13 +144,10 @@ def sharekhan_canonical_account(db_engine):
 
 @pytest.fixture
 def dbs_vickers_canonical_account(db_engine):
-    """Seed a DBS Vickers account with both legacy positions and canonical snapshots."""
+    """Seed a DBS Vickers account with canonical snapshots."""
     _seed_platform(db_engine, 802, "DBS_VICKERS", "DBS Vickers", "BROKER", "SG")
     _seed_account(db_engine, 802, "DBS Vickers Test Phase3", "DBS_VICKERS", "SGD", platform_id=802, country="SG")
     _seed_asset(db_engine, 8020, "S68", "Singapore Exchange", "STOCK", "SGD", "SG")
-
-    as_of = datetime(2026, 2, 20, tzinfo=timezone.utc)
-    _seed_legacy_position(db_engine, 802, 8020, as_of, quantity=100.0, cost_basis_base=950.0, avg_cost=9.5)
 
     _run_canonical_upload(
         db_engine, 802, "DBS_VICKERS", "SGD",
