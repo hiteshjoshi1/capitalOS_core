@@ -987,18 +987,6 @@ def seed_dashboard_data():
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(1, 2, 1, :as_of_cur, 10, 5000, 50000), "
-                "(2, 2, 2, :as_of_cur, 1, 20000, 20000), "
-                "(3, 1, 3, :as_of_cur, 1, 30000, 30000), "
-                "(4, 2, 1, :as_of_prev, 9, 5000, 45000), "
-                "(5, 2, 2, :as_of_prev, 1, 15000, 15000), "
-                "(6, 1, 3, :as_of_prev, 1, 30000, 30000)"
-            ),
-            {"as_of_cur": as_of_cur, "as_of_prev": as_of_prev},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO broker_connections (id, user_id, platform_code, connection_type, display_name, status, metadata_json) VALUES "
                 "(1, 1, 'IBKR', 'test', 'IBKR Fixture', 'active', '{}')"
             )

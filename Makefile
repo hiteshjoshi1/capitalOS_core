@@ -199,12 +199,12 @@ db-reset:
 
 db-seed-dummy: db-wait
 	@echo "Seeding dummy demo data..."
-	@docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy.sql
+	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy.sql
 	@echo "Dummy data seeded."
 
 db-clear-dummy: db-wait
 	@echo "Removing dummy demo data..."
-	@docker exec -i $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy_cleanup.sql
+	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy_cleanup.sql
 	@echo "Dummy data removed."
 
 db-seed-demo: db-seed-dummy

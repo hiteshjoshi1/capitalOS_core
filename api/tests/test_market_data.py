@@ -585,14 +585,6 @@ def test_market_data_auto_backfills_missing_nse_symbol_map(client, db_engine, mo
                 """
             )
         )
-        conn.execute(
-            text(
-                """
-                INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES
-                (740, 540, 140, '2026-03-06T00:00:00+00:00', 10, 1500, 15000)
-                """
-            )
-        )
 
     def fake_yfinance(self, symbols, exchange_code=None, trade_date=None):
         assert exchange_code == "NSE"

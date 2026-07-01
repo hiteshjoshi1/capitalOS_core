@@ -5,7 +5,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
-from tests.canonical_test_helpers import backfill_legacy_positions_for_test
+from tests.canonical_test_helpers import (
+    seed_canonical_account_balance_for_test,
+    seed_canonical_position_snapshot_for_test,
+)
 
 
 def test_dashboard_invalid_month(client: TestClient):
@@ -102,13 +105,6 @@ def test_canonical_net_worth_ignores_legacy_position_roll_forward(db_engine, mon
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(910, 910, 910, :as_of, 400000, 1, 400000)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO account_balance_snapshots "
                 "(id, account_id, as_of_date, currency, balance_type, balance_local, balance_base, "
                 "fx_rate_to_base, authority_status, source_kind, metadata_json) VALUES "
@@ -197,23 +193,61 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(2100, 210, 210, :snapshot, 10, 90, 1100), "
-                "(2101, 211, 211, :snapshot, 10, 45, 600), "
-                "(2102, 210, 210, :current, 20, 95, 2200), "
-                "(2103, 211, 211, :current, 5, 50, 300)"
-            ),
-            {"snapshot": as_of_snapshot, "current": as_of_current},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
                 "(210, :snapshot, 110, 'USD', 'finnhub_market', :quote_trade_date, 'US', 'AAPL'), "
                 "(211, :snapshot, 60, 'HKD', 'yfinance_market', :quote_trade_date, 'HKEX', '0700.HK')"
             ),
             {"snapshot": as_of_snapshot, "current": as_of_current, "quote_trade_date": quote_trade_date},
         )
-    backfill_legacy_positions_for_test(db_engine)
+
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=210,
+        asset_id=210,
+        as_of=as_of_snapshot,
+        quantity=10,
+        market_value_base=1100,
+        market_price=110,
+        cost_basis_base=900,
+        currency="USD",
+        platform_code="IBKR",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=211,
+        asset_id=211,
+        as_of=as_of_snapshot,
+        quantity=10,
+        market_value_base=600,
+        market_price=60,
+        cost_basis_base=450,
+        currency="HKD",
+        platform_code="IBKR",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=210,
+        asset_id=210,
+        as_of=as_of_current,
+        quantity=20,
+        market_value_base=2200,
+        market_price=110,
+        cost_basis_base=1900,
+        currency="USD",
+        platform_code="IBKR",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=211,
+        asset_id=211,
+        as_of=as_of_current,
+        quantity=5,
+        market_value_base=300,
+        market_price=60,
+        cost_basis_base=250,
+        currency="HKD",
+        platform_code="IBKR",
+    )
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})
 
@@ -270,14 +304,6 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(70, 70, 70, :as_of, 1, 1000, 1000), "
-                "(71, 71, 71, :as_of, 1, 999, 999)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
                 "('wallet-70', 'evm', 'ethereum', '0x70', 'Main wallet', 'active', :as_of)"
             ),
@@ -297,7 +323,15 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
                 "(70, 70, 'evm', 'ethereum', 'native', 'ETH', 1, 123.45)"
             )
         )
-    backfill_legacy_positions_for_test(db_engine)
+
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=70,
+        as_of=as_of,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
 
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
@@ -447,100 +481,6 @@ def test_dashboard_crypto_fallback_join_does_not_double_count_duplicate_assets(
     assert eth_holdings[0]["value"] == 500
 
 
-def test_crypto_positions_cleanup_sql_removes_orphaned_assets(db_engine):
-    from datetime import datetime, timezone
-
-    from sqlalchemy import text
-
-    as_of = datetime(2026, 2, 6, tzinfo=timezone.utc)
-    with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
-                "(72, 'COINBASE', 'Coinbase', 'EXCHANGE', 'US')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(72, 'Coinbase', 'COINBASE', 'EXCHANGE', 'USD', 'US', 72)"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
-                "(72, 'ETH', 'Ether', 'CRYPTO', 'USD', 'GLOBAL')"
-            )
-        )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(72, 72, 72, :as_of, 2, 500, 1000)"
-            ),
-            {"as_of": as_of},
-        )
-
-        before_positions = conn.execute(
-            text(
-                """
-                SELECT COUNT(*)
-                FROM positions p
-                JOIN assets a ON a.id = p.asset_id
-                WHERE a.asset_class = 'CRYPTO'
-                """
-            )
-        ).scalar_one()
-        assert before_positions == 1
-
-        conn.execute(
-            text(
-                """
-                DELETE FROM positions
-                WHERE asset_id IN (
-                  SELECT id FROM assets WHERE asset_class = 'CRYPTO'
-                )
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                DELETE FROM assets
-                WHERE asset_class = 'CRYPTO'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM positions p WHERE p.asset_id = assets.id
-                  )
-                """
-            )
-        )
-
-        after_positions = conn.execute(
-            text(
-                """
-                SELECT COUNT(*)
-                FROM positions p
-                JOIN assets a ON a.id = p.asset_id
-                WHERE a.asset_class = 'CRYPTO'
-                """
-            )
-        ).scalar_one()
-        orphan_assets = conn.execute(
-            text(
-                """
-                SELECT COUNT(*)
-                FROM assets a
-                WHERE a.asset_class = 'CRYPTO'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM positions p WHERE p.asset_id = a.id
-                  )
-                """
-            )
-        ).scalar_one()
-
-    assert after_positions == 0
-    assert orphan_assets == 0
-
-
 def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/summary?month=2026-02&compare=prev_month")
     assert resp.status_code == 200
@@ -614,15 +554,26 @@ def test_platform_allocation_prefers_account_platform_over_platform_id(client: T
                 "(702, 'D05', 'DBS Group', 'STOCK', 'SGD', 'SG')"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(7010, 701, 701, :as_of, 1, NULL, 1000), "
-                "(7020, 702, 702, :as_of, 100, 20, 2000)"
-            ),
-            {"as_of": as_of},
-        )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=701,
+        as_of=as_of,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=702,
+        asset_id=702,
+        as_of=as_of,
+        quantity=100,
+        market_value_base=2000,
+        market_price=20,
+        cost_basis_base=2000,
+        currency="SGD",
+        platform_code="DBS_VICKERS",
+    )
 
     resp = client.get("/dashboard/platform-allocation?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -662,21 +613,36 @@ def test_platform_allocation_uses_current_holdings_with_latest_price(client: Tes
         later_snapshot = datetime(2026, 6, 10, tzinfo=timezone.utc)
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(6200, 620, 620, :completed_anchor, 10, 100, 1000), "
-                "(6201, 620, 620, :later_snapshot, 20, 100, 2000)"
-            ),
-            {"completed_anchor": completed_anchor, "later_snapshot": later_snapshot},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
                 "(620, :completed_anchor, 100, 'USD', 'test', '2026-06-01', 'US', 'TEST'), "
                 "(620, :later_snapshot, 200, 'USD', 'test', '2026-06-10', 'US', 'TEST')"
             ),
             {"completed_anchor": completed_anchor, "later_snapshot": later_snapshot},
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=620,
+        asset_id=620,
+        as_of=completed_anchor,
+        quantity=10,
+        market_value_base=1000,
+        market_price=100,
+        cost_basis_base=1000,
+        currency="USD",
+        platform_code="TESTBROKER",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=620,
+        asset_id=620,
+        as_of=later_snapshot,
+        quantity=20,
+        market_value_base=2000,
+        market_price=100,
+        cost_basis_base=2000,
+        currency="USD",
+        platform_code="TESTBROKER",
+    )
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
@@ -746,13 +712,6 @@ def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: T
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(801, 801, 801, :as_of, 1, 1000, 1000)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
                 "('wallet-geo', 'evm', 'ethereum', '0xgeo', 'Geo wallet', 'active', :as_of)"
             ),
@@ -773,6 +732,14 @@ def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: T
                 "(802, 801, 'evm', 'ethereum', 'native', 'BTC', 0.001, 60)"
             )
         )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=801,
+        as_of=as_of,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
 
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
@@ -831,17 +798,38 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
                 "(311, 'USD', 'USD Cash', 'CASH', 'USD', 'US')"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(3100, 310, 310, :snapshot, 1, 1000, 1000), "
-                "(3101, 311, 311, :snapshot, 1, 200, 200), "
-                "(3102, 310, 310, :current, 1, 1200, 1200), "
-                "(3103, 311, 311, :current, 1, 300, 300)"
-            ),
-            {"snapshot": snapshot_as_of, "current": current_as_of},
-        )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=310,
+        as_of=snapshot_as_of,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=311,
+        as_of=snapshot_as_of,
+        currency="USD",
+        balance_base=200,
+        balance_type="broker_cash",
+    )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=310,
+        as_of=current_as_of,
+        currency="SGD",
+        balance_base=1200,
+        balance_type="bank_cash",
+    )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=311,
+        as_of=current_as_of,
+        currency="USD",
+        balance_base=300,
+        balance_type="broker_cash",
+    )
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _date, _base, symbols: {"SGD": 1.0, "USD": 1.5})
 
@@ -886,13 +874,6 @@ def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClien
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(50, 50, 50, :as_of, 1, 1000, 1000)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
                 "('wallet-eth', 'evm', 'ethereum', '0xabc', 'Main wallet', 'active', :as_of), "
                 "('wallet-sol', 'svm', 'solana', 'So111', 'Sol wallet', 'active', :as_of)"
@@ -915,7 +896,14 @@ def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClien
                 "(51, 51, 'svm', 'solana', 'token', 'USDT', 20, 20)"
             )
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=50,
+        as_of=as_of,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
 
     def fake_rates(_date, base, symbols):
         assert base == "SGD"
@@ -962,14 +950,14 @@ def test_dashboard_cash_deposits_converts_non_sgd_cash_positions(client: TestCli
                 "(60, 'USD', 'USD Cash', 'CASH', 'USD', 'US')"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(60, 60, 60, :as_of, 1, 200, 200)"
-            ),
-            {"as_of": as_of},
-        )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=60,
+        as_of=as_of,
+        currency="USD",
+        balance_base=200,
+        balance_type="broker_cash",
+    )
 
     def fake_rates(_date, base, symbols):
         assert base == "SGD"
@@ -1049,14 +1037,14 @@ def test_dashboard_geography_exposure_maps_sgd_cash_to_sg_when_home_country_miss
                 "(990, 'SGD', 'SGD Cash', 'CASH', 'SGD', NULL)"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(990, 990, 990, :as_of, 1, 1000, 1000)"
-            ),
-            {"as_of": as_of},
-        )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=990,
+        as_of=as_of,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
 
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
@@ -1097,15 +1085,30 @@ def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monk
                 "(11, 'AAPL', 'Apple', 'STOCK', 'USD', 'US')"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(10, 10, 10, :as_of, 100, 1000, 100000), "
-                "(11, 10, 11, :as_of, 10, 200, 2000)"
-            ),
-            {"as_of": as_of},
-        )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=10,
+        asset_id=10,
+        as_of=as_of,
+        quantity=100,
+        market_value_base=100000,
+        market_price=1000,
+        cost_basis_base=100000,
+        currency="INR",
+        platform_code="SHAREKHAN",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=10,
+        asset_id=11,
+        as_of=as_of,
+        quantity=10,
+        market_value_base=2000,
+        market_price=200,
+        cost_basis_base=2000,
+        currency="USD",
+        platform_code="SHAREKHAN",
+    )
 
     def fake_rates(_date, base, symbols):
         assert base == "SGD"
@@ -1147,19 +1150,23 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(20, 20, 20, :as_of, 10, 100, 2000)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO prices (id, asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
                 "(20, 20, :as_of, 200, 'USD', 'eodhd_bulk', '2026-02-06', 'US', 'AAPL.US')"
             ),
             {"as_of": as_of},
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=20,
+        asset_id=20,
+        as_of=as_of,
+        quantity=10,
+        market_value_base=2000,
+        market_price=200,
+        cost_basis_base=1000,
+        currency="USD",
+        platform_code="IBKR",
+    )
 
     def fake_rates(_date, base, symbols):
         assert base == "USD"
@@ -1202,14 +1209,6 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(30, 30, 30, :as_of, 10, 100, 1000), "
-                "(31, 31, 30, :as_of, 20, 200, 4000)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO prices (id, asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
                 "(30, 30, :as_of, 150, 'HKD', 'eodhd_bulk', '2026-02-06', 'HKEX', '700.HK')"
             ),
@@ -1221,7 +1220,30 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
                 "(30, 30, 'HKEX', '700', 'HKD', TRUE)"
             )
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=30,
+        asset_id=30,
+        as_of=as_of,
+        quantity=10,
+        market_value_base=1000,
+        market_price=100,
+        cost_basis_base=1000,
+        currency="HKD",
+        platform_code="IBKR",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=31,
+        asset_id=30,
+        as_of=as_of,
+        quantity=20,
+        market_value_base=4000,
+        market_price=200,
+        cost_basis_base=4000,
+        currency="HKD",
+        platform_code="IBKR",
+    )
 
     def fake_rates(_date, base, symbols):
         assert base == "HKD"
@@ -1280,10 +1302,8 @@ def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client:
                     "id": asset_id,
                     "account_id": 40,
                     "asset_id": asset_id,
-                    "as_of": as_of,
                     "quantity": 10,
-                    "avg_cost": 10,
-                    "cost_basis_base": value,
+                    "market_value_base": value,
                 }
             )
         conn.execute(
@@ -1293,14 +1313,19 @@ def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client:
             ),
             asset_rows,
         )
-        conn.execute(
-            text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) "
-                "VALUES (:id, :account_id, :asset_id, :as_of, :quantity, :avg_cost, :cost_basis_base)"
-            ),
-            position_rows,
+    for row in position_rows:
+        seed_canonical_position_snapshot_for_test(
+            db_engine,
+            account_id=row["account_id"],
+            asset_id=row["asset_id"],
+            as_of=as_of,
+            quantity=row["quantity"],
+            market_value_base=row["market_value_base"],
+            market_price=row["market_value_base"] / row["quantity"],
+            cost_basis_base=row["market_value_base"],
+            currency="USD",
+            platform_code="IBKR",
         )
-    backfill_legacy_positions_for_test(db_engine)
 
     def fake_rates(_date, base, symbols):
         assert base == "USD"
@@ -1403,14 +1428,6 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
         )
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(80, 80, 80, :as_of, 1, 50000, 50000), "
-                "(81, 81, 81, :as_of, 100, 150, 20000)"
-            ),
-            {"as_of": as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
                 "('wallet-bootstrap-test', 'evm', 'ethereum', '0xBOOT', 'Bootstrap Wallet', 'active', :as_of)"
             ),
@@ -1430,7 +1447,26 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
                 "(800, 800, 'evm', 'ethereum', 'native', 'ETH', 2.0, 5000.0)"
             )
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=80,
+        as_of=as_of,
+        currency="SGD",
+        balance_base=50000,
+        balance_type="bank_cash",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=81,
+        asset_id=81,
+        as_of=as_of,
+        quantity=100,
+        market_value_base=20000,
+        market_price=200,
+        cost_basis_base=15000,
+        currency="USD",
+        platform_code="IBKR",
+    )
 
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
@@ -1601,21 +1637,36 @@ def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(cli
         current_as_of = datetime(2026, 5, 15, tzinfo=timezone.utc)
         conn.execute(
             text(
-                "INSERT INTO positions (id, account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) VALUES "
-                "(6100, 610, 610, :snapshot_as_of, 10, 100, 1000), "
-                "(6101, 610, 610, :current_as_of, 20, 100, 2400)"
-            ),
-            {"snapshot_as_of": snapshot_as_of, "current_as_of": current_as_of},
-        )
-        conn.execute(
-            text(
                 "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
                 "(610, :snapshot_as_of, 100, 'USD', 'finnhub_market', '2026-05-01', 'US', 'AAPL'), "
                 "(610, :current_as_of, 120, 'USD', 'finnhub_market', '2026-05-15', 'US', 'AAPL')"
             ),
             {"snapshot_as_of": snapshot_as_of, "current_as_of": current_as_of},
         )
-    backfill_legacy_positions_for_test(db_engine)
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=610,
+        asset_id=610,
+        as_of=snapshot_as_of,
+        quantity=10,
+        market_value_base=1000,
+        market_price=100,
+        cost_basis_base=1000,
+        currency="USD",
+        platform_code="IBKR",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=610,
+        asset_id=610,
+        as_of=current_as_of,
+        quantity=20,
+        market_value_base=2400,
+        market_price=120,
+        cost_basis_base=2000,
+        currency="USD",
+        platform_code="IBKR",
+    )
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)

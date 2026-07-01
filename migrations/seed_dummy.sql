@@ -19,6 +19,9 @@ WHERE LOWER(username) = 'demo';
 
 -- Remove prior demo artifacts (safe to re-run)
 DELETE FROM crypto_wallets WHERE label LIKE 'DUMMY - %';
+DELETE FROM account_balance_snapshots WHERE source_kind = 'DUMMY';
+DELETE FROM broker_import_runs WHERE source_type = 'DUMMY';
+DELETE FROM broker_connections WHERE connection_type = 'dummy_seed' AND display_name LIKE 'DUMMY - %';
 DELETE FROM accounts WHERE name LIKE 'DUMMY - %';
 DELETE FROM transactions WHERE source = 'DUMMY';
 DELETE FROM prices WHERE source = 'DUMMY';
@@ -94,64 +97,359 @@ VALUES
   ((SELECT id FROM accounts WHERE name = 'DUMMY - UOB Credit Card'), 'UOB Reserve', 'UOB', 100000, 10, 18)
 ON CONFLICT (account_id) DO NOTHING;
 
--- Portfolio snapshot at month anchor day (2026-03-06)
+-- Canonical cash snapshots at month anchor day (2026-03-06)
 WITH a AS (
   SELECT id, name FROM accounts WHERE name LIKE 'DUMMY - %'
-),
-ast AS (
-  SELECT id, symbol, quote_currency FROM assets
 )
-INSERT INTO positions (account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base)
+INSERT INTO account_balance_snapshots (
+  account_id,
+  as_of_date,
+  currency,
+  balance_type,
+  balance_local,
+  balance_base,
+  fx_rate_to_base,
+  authority_status,
+  source_kind,
+  metadata_json
+)
 VALUES
-  -- Cash ~ 2M equivalent across 3 banks + IBKR
-  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Savings'), (SELECT id FROM ast WHERE symbol = 'SGD' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 1, 1, 400000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - OCBC 360'), (SELECT id FROM ast WHERE symbol = 'SGD' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 1, 1, 350000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - UOB One'), (SELECT id FROM ast WHERE symbol = 'SGD' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 1, 1, 300000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'USD' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1, 1, 700000),
-  -- Money market fund
-  ((SELECT id FROM a WHERE name = 'DUMMY - SG Money Market Fund'), (SELECT id FROM ast WHERE symbol = 'SGDMMF' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 300000, 1, 300000),
+  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Savings'), '2026-03-06', 'SGD', 'bank_cash', 400000, 400000, 1, 'authoritative', 'DUMMY', '{}'::jsonb),
+  ((SELECT id FROM a WHERE name = 'DUMMY - OCBC 360'), '2026-03-06', 'SGD', 'bank_cash', 350000, 350000, 1, 'authoritative', 'DUMMY', '{}'::jsonb),
+  ((SELECT id FROM a WHERE name = 'DUMMY - UOB One'), '2026-03-06', 'SGD', 'bank_cash', 300000, 300000, 1, 'authoritative', 'DUMMY', '{}'::jsonb),
+  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), '2026-03-06', 'USD', 'broker_cash', 700000, 700000, 1, 'authoritative', 'DUMMY', '{}'::jsonb)
+ON CONFLICT (account_id, as_of_date, currency, balance_type)
+WHERE authority_status = 'authoritative'
+DO UPDATE SET
+  balance_local = EXCLUDED.balance_local,
+  balance_base = EXCLUDED.balance_base,
+  fx_rate_to_base = EXCLUDED.fx_rate_to_base,
+  source_kind = EXCLUDED.source_kind,
+  metadata_json = EXCLUDED.metadata_json,
+  updated_at = NOW();
 
-  -- US equities (conservative, equity-heavy; Mag7 + pharma overweight)
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'MSFT' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 700, 360, 252000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'GOOGL' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1400, 150, 210000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'META' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 500, 430, 215000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'AMZN' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1200, 160, 192000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'NVDA' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1800, 110, 198000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'AAPL' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1300, 170, 221000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'TSLA' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 700, 200, 140000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'BRK-B' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 256, 390, 99840),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'XOM' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 773, 95, 73435),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'CVX' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 516, 135, 69660),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'COP' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 609, 100, 60900),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'SLB' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 900, 42, 37800),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'JPM' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 500, 175, 87500),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'V' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 333, 250, 83250),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'MA' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 177, 430, 76110),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'UNH' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 180, 430, 77400),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'LLY' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 280, 700, 196000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'NVO' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1900, 105, 199500),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'REGN' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 250, 860, 215000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'NFLX' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 123, 560, 68880),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'ORCL' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 500, 120, 60000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'PLTR' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 1500, 24, 36000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'AVGO' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 73, 1200, 87600),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = 'CRM' AND quote_currency = 'USD'), '2026-03-06T00:00:00Z', 317, 260, 82420),
+-- Canonical portfolio position snapshots at month anchor day (2026-03-06)
+WITH demo_user AS (
+  SELECT id AS user_id FROM users WHERE LOWER(username) = 'demo' LIMIT 1
+),
+platforms_needed(platform_code) AS (
+  VALUES ('DBS'), ('DBS_VICKERS'), ('IBKR')
+)
+INSERT INTO broker_connections (user_id, platform_code, connection_type, display_name, status, metadata_json)
+SELECT
+  demo_user.user_id,
+  platforms_needed.platform_code,
+  'dummy_seed',
+  'DUMMY - ' || platforms_needed.platform_code || ' Connection',
+  'active',
+  '{}'::jsonb
+FROM demo_user
+CROSS JOIN platforms_needed
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM broker_connections bc
+  WHERE bc.user_id = demo_user.user_id
+    AND bc.platform_code = platforms_needed.platform_code
+    AND bc.connection_type = 'dummy_seed'
+    AND bc.display_name = 'DUMMY - ' || platforms_needed.platform_code || ' Connection'
+);
 
-  -- Singapore equities (5)
-  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Vickers SGX'), (SELECT id FROM ast WHERE symbol = 'D05' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 18000, 31, 558000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Vickers SGX'), (SELECT id FROM ast WHERE symbol = 'U11' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 12000, 27, 324000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Vickers SGX'), (SELECT id FROM ast WHERE symbol = 'O39' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 22000, 13, 286000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Vickers SGX'), (SELECT id FROM ast WHERE symbol = 'S68' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 15000, 10, 150000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - DBS Vickers SGX'), (SELECT id FROM ast WHERE symbol = 'H02' AND quote_currency = 'SGD'), '2026-03-06T00:00:00Z', 20000, 10.5, 210000),
+WITH account_map(account_name, platform_code) AS (
+  VALUES
+    ('DUMMY - SG Money Market Fund', 'DBS'),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS'),
+    ('DUMMY - IBKR Global', 'IBKR')
+),
+connections AS (
+  SELECT bc.id, bc.platform_code
+  FROM broker_connections bc
+  JOIN users u ON u.id = bc.user_id
+  WHERE LOWER(u.username) = 'demo'
+    AND bc.connection_type = 'dummy_seed'
+    AND bc.display_name LIKE 'DUMMY - %'
+),
+accounts_to_seed AS (
+  SELECT
+    acc.id AS account_id,
+    acc.name,
+    acc.currency,
+    acc.country,
+    account_map.platform_code,
+    connections.id AS connection_id
+  FROM account_map
+  JOIN accounts acc ON acc.name = account_map.account_name
+  JOIN connections ON connections.platform_code = account_map.platform_code
+)
+INSERT INTO broker_accounts (
+  connection_id,
+  legacy_account_id,
+  broker_account_id,
+  account_alias,
+  base_currency,
+  country,
+  status,
+  metadata_json
+)
+SELECT
+  connection_id,
+  account_id,
+  'DUMMY:' || account_id::text,
+  name,
+  currency,
+  country,
+  'active',
+  '{}'::jsonb
+FROM accounts_to_seed
+ON CONFLICT (connection_id, broker_account_id) DO UPDATE SET
+  legacy_account_id = EXCLUDED.legacy_account_id,
+  account_alias = EXCLUDED.account_alias,
+  base_currency = EXCLUDED.base_currency,
+  country = EXCLUDED.country,
+  status = 'active',
+  updated_at = NOW();
 
-  -- Hong Kong equities (3)
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = '0700' AND quote_currency = 'HKD'), '2026-03-06T00:00:00Z', 7500, 280, 2100000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = '9988' AND quote_currency = 'HKD'), '2026-03-06T00:00:00Z', 20000, 72, 1440000),
-  ((SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), (SELECT id FROM ast WHERE symbol = '0388' AND quote_currency = 'HKD'), '2026-03-06T00:00:00Z', 5240, 210, 1100400)
-ON CONFLICT (account_id, asset_id, as_of) DO UPDATE
-SET quantity = EXCLUDED.quantity,
-    avg_cost = EXCLUDED.avg_cost,
-    cost_basis_base = EXCLUDED.cost_basis_base;
+WITH holdings(account_name, platform_code, symbol, currency, quantity, avg_cost, market_value_base) AS (
+  VALUES
+    ('DUMMY - SG Money Market Fund', 'DBS', 'SGDMMF', 'SGD', 300000::numeric, 1::numeric, 300000::numeric),
+    ('DUMMY - IBKR Global', 'IBKR', 'MSFT', 'USD', 700, 360, 252000),
+    ('DUMMY - IBKR Global', 'IBKR', 'GOOGL', 'USD', 1400, 150, 210000),
+    ('DUMMY - IBKR Global', 'IBKR', 'META', 'USD', 500, 430, 215000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AMZN', 'USD', 1200, 160, 192000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NVDA', 'USD', 1800, 110, 198000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AAPL', 'USD', 1300, 170, 221000),
+    ('DUMMY - IBKR Global', 'IBKR', 'TSLA', 'USD', 700, 200, 140000),
+    ('DUMMY - IBKR Global', 'IBKR', 'BRK-B', 'USD', 256, 390, 99840),
+    ('DUMMY - IBKR Global', 'IBKR', 'XOM', 'USD', 773, 95, 73435),
+    ('DUMMY - IBKR Global', 'IBKR', 'CVX', 'USD', 516, 135, 69660),
+    ('DUMMY - IBKR Global', 'IBKR', 'COP', 'USD', 609, 100, 60900),
+    ('DUMMY - IBKR Global', 'IBKR', 'SLB', 'USD', 900, 42, 37800),
+    ('DUMMY - IBKR Global', 'IBKR', 'JPM', 'USD', 500, 175, 87500),
+    ('DUMMY - IBKR Global', 'IBKR', 'V', 'USD', 333, 250, 83250),
+    ('DUMMY - IBKR Global', 'IBKR', 'MA', 'USD', 177, 430, 76110),
+    ('DUMMY - IBKR Global', 'IBKR', 'UNH', 'USD', 180, 430, 77400),
+    ('DUMMY - IBKR Global', 'IBKR', 'LLY', 'USD', 280, 700, 196000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NVO', 'USD', 1900, 105, 199500),
+    ('DUMMY - IBKR Global', 'IBKR', 'REGN', 'USD', 250, 860, 215000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NFLX', 'USD', 123, 560, 68880),
+    ('DUMMY - IBKR Global', 'IBKR', 'ORCL', 'USD', 500, 120, 60000),
+    ('DUMMY - IBKR Global', 'IBKR', 'PLTR', 'USD', 1500, 24, 36000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AVGO', 'USD', 73, 1200, 87600),
+    ('DUMMY - IBKR Global', 'IBKR', 'CRM', 'USD', 317, 260, 82420),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'D05', 'SGD', 18000, 31, 558000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'U11', 'SGD', 12000, 27, 324000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'O39', 'SGD', 22000, 13, 286000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'S68', 'SGD', 15000, 10, 150000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'H02', 'SGD', 20000, 10.5, 210000),
+    ('DUMMY - IBKR Global', 'IBKR', '0700', 'HKD', 7500, 280, 2100000),
+    ('DUMMY - IBKR Global', 'IBKR', '9988', 'HKD', 20000, 72, 1440000),
+    ('DUMMY - IBKR Global', 'IBKR', '0388', 'HKD', 5240, 210, 1100400)
+),
+resolved AS (
+  SELECT
+    h.*,
+    acc.id AS account_id,
+    ba.id AS broker_account_id,
+    ast.id AS asset_id,
+    ast.asset_class,
+    ast.name AS asset_name
+  FROM holdings h
+  JOIN accounts acc ON acc.name = h.account_name
+  JOIN broker_accounts ba ON ba.legacy_account_id = acc.id
+  JOIN broker_connections bc ON bc.id = ba.connection_id AND bc.platform_code = h.platform_code
+  JOIN assets ast ON ast.symbol = h.symbol AND ast.quote_currency = h.currency
+)
+INSERT INTO broker_import_runs (
+  broker_account_id,
+  legacy_account_id,
+  platform_code,
+  source_type,
+  import_scope,
+  status,
+  report_date_from,
+  report_date_to,
+  metadata_json
+)
+SELECT DISTINCT
+  broker_account_id,
+  account_id,
+  platform_code,
+  'DUMMY',
+  'daily',
+  'completed',
+  '2026-03-06'::date,
+  '2026-03-06'::date,
+  '{}'::jsonb
+FROM resolved;
+
+WITH holdings(account_name, platform_code, symbol, currency, quantity, avg_cost, market_value_base) AS (
+  VALUES
+    ('DUMMY - SG Money Market Fund', 'DBS', 'SGDMMF', 'SGD', 300000::numeric, 1::numeric, 300000::numeric),
+    ('DUMMY - IBKR Global', 'IBKR', 'MSFT', 'USD', 700, 360, 252000),
+    ('DUMMY - IBKR Global', 'IBKR', 'GOOGL', 'USD', 1400, 150, 210000),
+    ('DUMMY - IBKR Global', 'IBKR', 'META', 'USD', 500, 430, 215000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AMZN', 'USD', 1200, 160, 192000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NVDA', 'USD', 1800, 110, 198000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AAPL', 'USD', 1300, 170, 221000),
+    ('DUMMY - IBKR Global', 'IBKR', 'TSLA', 'USD', 700, 200, 140000),
+    ('DUMMY - IBKR Global', 'IBKR', 'BRK-B', 'USD', 256, 390, 99840),
+    ('DUMMY - IBKR Global', 'IBKR', 'XOM', 'USD', 773, 95, 73435),
+    ('DUMMY - IBKR Global', 'IBKR', 'CVX', 'USD', 516, 135, 69660),
+    ('DUMMY - IBKR Global', 'IBKR', 'COP', 'USD', 609, 100, 60900),
+    ('DUMMY - IBKR Global', 'IBKR', 'SLB', 'USD', 900, 42, 37800),
+    ('DUMMY - IBKR Global', 'IBKR', 'JPM', 'USD', 500, 175, 87500),
+    ('DUMMY - IBKR Global', 'IBKR', 'V', 'USD', 333, 250, 83250),
+    ('DUMMY - IBKR Global', 'IBKR', 'MA', 'USD', 177, 430, 76110),
+    ('DUMMY - IBKR Global', 'IBKR', 'UNH', 'USD', 180, 430, 77400),
+    ('DUMMY - IBKR Global', 'IBKR', 'LLY', 'USD', 280, 700, 196000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NVO', 'USD', 1900, 105, 199500),
+    ('DUMMY - IBKR Global', 'IBKR', 'REGN', 'USD', 250, 860, 215000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NFLX', 'USD', 123, 560, 68880),
+    ('DUMMY - IBKR Global', 'IBKR', 'ORCL', 'USD', 500, 120, 60000),
+    ('DUMMY - IBKR Global', 'IBKR', 'PLTR', 'USD', 1500, 24, 36000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AVGO', 'USD', 73, 1200, 87600),
+    ('DUMMY - IBKR Global', 'IBKR', 'CRM', 'USD', 317, 260, 82420),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'D05', 'SGD', 18000, 31, 558000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'U11', 'SGD', 12000, 27, 324000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'O39', 'SGD', 22000, 13, 286000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'S68', 'SGD', 15000, 10, 150000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'H02', 'SGD', 20000, 10.5, 210000),
+    ('DUMMY - IBKR Global', 'IBKR', '0700', 'HKD', 7500, 280, 2100000),
+    ('DUMMY - IBKR Global', 'IBKR', '9988', 'HKD', 20000, 72, 1440000),
+    ('DUMMY - IBKR Global', 'IBKR', '0388', 'HKD', 5240, 210, 1100400)
+),
+resolved AS (
+  SELECT
+    h.*,
+    ast.id AS asset_id,
+    ast.asset_class,
+    ast.name AS asset_name
+  FROM holdings h
+  JOIN assets ast ON ast.symbol = h.symbol AND ast.quote_currency = h.currency
+)
+INSERT INTO broker_instruments (
+  platform_code,
+  broker_instrument_id,
+  asset_id,
+  symbol,
+  description,
+  security_type,
+  currency,
+  metadata_json
+)
+SELECT DISTINCT
+  platform_code,
+  'DUMMY:' || symbol || ':' || currency,
+  asset_id,
+  symbol,
+  asset_name,
+  asset_class,
+  currency,
+  '{}'::jsonb
+FROM resolved
+ON CONFLICT DO NOTHING;
+
+WITH holdings(account_name, platform_code, symbol, currency, quantity, avg_cost, market_value_base) AS (
+  VALUES
+    ('DUMMY - SG Money Market Fund', 'DBS', 'SGDMMF', 'SGD', 300000::numeric, 1::numeric, 300000::numeric),
+    ('DUMMY - IBKR Global', 'IBKR', 'MSFT', 'USD', 700, 360, 252000),
+    ('DUMMY - IBKR Global', 'IBKR', 'GOOGL', 'USD', 1400, 150, 210000),
+    ('DUMMY - IBKR Global', 'IBKR', 'META', 'USD', 500, 430, 215000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AMZN', 'USD', 1200, 160, 192000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NVDA', 'USD', 1800, 110, 198000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AAPL', 'USD', 1300, 170, 221000),
+    ('DUMMY - IBKR Global', 'IBKR', 'TSLA', 'USD', 700, 200, 140000),
+    ('DUMMY - IBKR Global', 'IBKR', 'BRK-B', 'USD', 256, 390, 99840),
+    ('DUMMY - IBKR Global', 'IBKR', 'XOM', 'USD', 773, 95, 73435),
+    ('DUMMY - IBKR Global', 'IBKR', 'CVX', 'USD', 516, 135, 69660),
+    ('DUMMY - IBKR Global', 'IBKR', 'COP', 'USD', 609, 100, 60900),
+    ('DUMMY - IBKR Global', 'IBKR', 'SLB', 'USD', 900, 42, 37800),
+    ('DUMMY - IBKR Global', 'IBKR', 'JPM', 'USD', 500, 175, 87500),
+    ('DUMMY - IBKR Global', 'IBKR', 'V', 'USD', 333, 250, 83250),
+    ('DUMMY - IBKR Global', 'IBKR', 'MA', 'USD', 177, 430, 76110),
+    ('DUMMY - IBKR Global', 'IBKR', 'UNH', 'USD', 180, 430, 77400),
+    ('DUMMY - IBKR Global', 'IBKR', 'LLY', 'USD', 280, 700, 196000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NVO', 'USD', 1900, 105, 199500),
+    ('DUMMY - IBKR Global', 'IBKR', 'REGN', 'USD', 250, 860, 215000),
+    ('DUMMY - IBKR Global', 'IBKR', 'NFLX', 'USD', 123, 560, 68880),
+    ('DUMMY - IBKR Global', 'IBKR', 'ORCL', 'USD', 500, 120, 60000),
+    ('DUMMY - IBKR Global', 'IBKR', 'PLTR', 'USD', 1500, 24, 36000),
+    ('DUMMY - IBKR Global', 'IBKR', 'AVGO', 'USD', 73, 1200, 87600),
+    ('DUMMY - IBKR Global', 'IBKR', 'CRM', 'USD', 317, 260, 82420),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'D05', 'SGD', 18000, 31, 558000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'U11', 'SGD', 12000, 27, 324000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'O39', 'SGD', 22000, 13, 286000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'S68', 'SGD', 15000, 10, 150000),
+    ('DUMMY - DBS Vickers SGX', 'DBS_VICKERS', 'H02', 'SGD', 20000, 10.5, 210000),
+    ('DUMMY - IBKR Global', 'IBKR', '0700', 'HKD', 7500, 280, 2100000),
+    ('DUMMY - IBKR Global', 'IBKR', '9988', 'HKD', 20000, 72, 1440000),
+    ('DUMMY - IBKR Global', 'IBKR', '0388', 'HKD', 5240, 210, 1100400)
+),
+resolved AS (
+  SELECT
+    h.*,
+    acc.id AS account_id,
+    ba.id AS broker_account_id,
+    bi.id AS broker_instrument_id,
+    bir.id AS import_run_id
+  FROM holdings h
+  JOIN accounts acc ON acc.name = h.account_name
+  JOIN broker_accounts ba ON ba.legacy_account_id = acc.id
+  JOIN broker_connections bc ON bc.id = ba.connection_id AND bc.platform_code = h.platform_code
+  JOIN broker_instruments bi
+    ON bi.platform_code = h.platform_code
+   AND bi.broker_instrument_id = 'DUMMY:' || h.symbol || ':' || h.currency
+   AND bi.currency = h.currency
+  JOIN broker_import_runs bir
+    ON bir.broker_account_id = ba.id
+   AND bir.source_type = 'DUMMY'
+   AND bir.report_date_to = '2026-03-06'
+)
+INSERT INTO portfolio_position_snapshots (
+  broker_account_id,
+  legacy_account_id,
+  broker_instrument_id,
+  import_run_id,
+  report_date,
+  quantity,
+  currency,
+  market_price,
+  market_value_local,
+  market_value_base,
+  cost_basis_local,
+  cost_basis_base,
+  fx_rate_to_base,
+  authority_status,
+  metadata_json
+)
+SELECT
+  broker_account_id,
+  account_id,
+  broker_instrument_id,
+  import_run_id,
+  '2026-03-06'::date,
+  quantity,
+  currency,
+  avg_cost,
+  market_value_base,
+  market_value_base,
+  market_value_base,
+  market_value_base,
+  1,
+  'authoritative',
+  '{}'::jsonb
+FROM resolved
+ON CONFLICT (broker_account_id, report_date, broker_instrument_id, currency)
+WHERE authority_status = 'authoritative'
+DO UPDATE SET
+  quantity = EXCLUDED.quantity,
+  market_price = EXCLUDED.market_price,
+  market_value_local = EXCLUDED.market_value_local,
+  market_value_base = EXCLUDED.market_value_base,
+  cost_basis_local = EXCLUDED.cost_basis_local,
+  cost_basis_base = EXCLUDED.cost_basis_base,
+  fx_rate_to_base = EXCLUDED.fx_rate_to_base,
+  metadata_json = EXCLUDED.metadata_json,
+  updated_at = NOW();
 
 -- Latest prices used by dashboard valuation
 WITH v(symbol, currency, price, exchange_code) AS (
