@@ -39,6 +39,16 @@
   - Does not require the API to know Loki exists.
 
 ## Configuration Plan
+- Add `config/observability.env.example` with safe local defaults:
+  - `LOG_LEVEL=INFO`
+  - `LOG_FORMAT=logfmt`
+  - `LOKI_RETENTION_PERIOD=15d`
+  - `GRAFANA_ADMIN_USER=admin`
+  - `GRAFANA_ADMIN_PASSWORD=capitalos`
+- Runtime observability services should read from an env file, either:
+  - `config/observability.env`, copied from the example for local use, or
+  - the repo root `.env` if the implementation keeps all local env values in one file.
+- Retention must come from `LOKI_RETENTION_PERIOD` in the env file, not a hardcoded duration inside Loki config.
 - Add `config/loki/local-config.yaml`.
 - Add `config/alloy/config.alloy`.
 - Add Grafana provisioning under `config/grafana/provisioning/`.
@@ -49,12 +59,7 @@
 - Add Docker volumes:
   - `loki-data`
   - `grafana-data`
-- Add env defaults:
-  - `LOG_LEVEL=INFO`
-  - `LOG_FORMAT=logfmt`
-  - `LOKI_RETENTION_PERIOD=30d`
-  - `GRAFANA_ADMIN_USER=admin`
-  - `GRAFANA_ADMIN_PASSWORD=capitalos`
+- Configure Loki with environment expansion, for example `-config.expand-env=true`, so `LOKI_RETENTION_PERIOD` from the env file controls retention.
 - Do not require these services for normal `make up` unless intentionally chosen. Prefer a separate observability target first, so app startup stays simple.
 
 ## Application Logging Plan
@@ -117,8 +122,9 @@
 
 ## Retention Requirements
 - Retention must be set in Loki config, not by manually deleting files.
-- Default retention: 30 days.
-- Retention must be configurable by env or a clearly documented config value.
+- Default retention: 15 days.
+- Retention must be configured through `LOKI_RETENTION_PERIOD=15d` in an env file.
+- Loki config must reference the env value using environment expansion instead of hardcoding `15d`.
 - Log volumes must be persistent across `make down`.
 - Destructive cleanup must require an explicit command and must not run as part of normal startup.
 
@@ -132,6 +138,7 @@
 - [ ] `make observability-up` starts Loki, Grafana, and Alloy locally.
 - [ ] Grafana is reachable locally and has Loki auto-provisioned as a datasource.
 - [ ] Loki persists logs to a named Docker volume and enforces documented retention.
+- [ ] `LOKI_RETENTION_PERIOD=15d` lives in an observability env file or documented `.env` entry, not hardcoded only in Loki YAML.
 - [ ] API request logs are emitted as readable logfmt-style key-value lines.
 - [ ] Existing Python loggers continue to work without rewriting every module.
 - [ ] API request logs include request ID, method, path, status, duration, level, logger, and event name.
@@ -155,6 +162,7 @@
 
 ## Task Checklist
 - [ ] Add Loki, Grafana, and Alloy config files.
+- [ ] Add observability env example with `LOKI_RETENTION_PERIOD=15d`.
 - [ ] Add Docker Compose services and persistent volumes.
 - [ ] Add Makefile observability targets.
 - [ ] Add backend logging setup and request middleware.
@@ -193,7 +201,6 @@ _Fill only if workflow stops without shipping._
 _Human-readable next steps._
 - Next expected action: run the orchestration workflow for issue 184 after issue 183 is merged.
 - Open questions:
-  - Confirm default retention period. Proposed default is 30 days.
   - Confirm whether `make up` should include observability by default or whether observability should stay behind `make observability-up`.
 
 ## Automation Log (Mutable)
