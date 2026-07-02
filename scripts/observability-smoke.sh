@@ -103,10 +103,10 @@ except json.JSONDecodeError:
     raise SystemExit
 
 streams = payload.get("data", {}).get("result", [])
-print(len(streams))
+print(sum(len(stream.get("values", [])) for stream in streams))
 ')
   if [ "$count" -gt 0 ]; then
-    echo "Observability smoke passed: found $count Loki result stream(s)."
+    echo "Observability smoke passed: found $count Loki log line(s)."
     exit 0
   fi
   attempt=$((attempt + 1))
