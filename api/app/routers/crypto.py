@@ -31,7 +31,7 @@ from app.fx import get_rates
 _STALE_THRESHOLD_SECONDS = 24 * 3600
 
 router = APIRouter(prefix="/crypto", tags=["crypto"], dependencies=[Depends(require_current_user)])
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("capitalos.crypto.router")
 _SOLANA_MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 
 

@@ -144,3 +144,127 @@ _Human-readable next steps._
 
 ## Automation Log (Mutable)
 - 2026-07-02T00:00:00+08:00 - Created phase 2 observability issue for API logfmt, request correlation, logger normalization, and redaction.
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `waiting_for_human`
+
+## Workflow Snapshot
+- latest_outcome: Implemented API logfmt logging, request correlation, logger normalization, and redaction for Issue 185.
+- next_action: All deterministic gates passed. Review the changes in the working tree, then run `make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.5`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: API request logs are emitted as readable logfmt-style key-value lines.
+- Acceptance criterion: Existing Python loggers continue to work without rewriting every module.
+- Acceptance criterion: Application logger names are normalized under capitalos.* and crypto app logs no longer use uvicorn.error.
+- Acceptance criterion: API request logs include request ID, method, path, status, duration, level, logger, and event.
+- Acceptance criterion: Request ID middleware sets request.state.request_id, returns X-Request-ID, and exposes request ID through context propagation.
+- Acceptance criterion: RAG query logs attach active request ID when one exists.
+- Acceptance criterion: Sensitive values are redacted before reaching stdout.
+- Acceptance criterion: Existing make logs and make api-logs remain readable.
+- Acceptance criterion: Backend tests and API smoke pass.
+- Acceptance criterion: Request logs contain request_id fields suitable for Loki lookup when the observability stack is running.
+
+## Prepare
+Checked out `feature/issue-185-api-logfmt-request-correlation-and-redaction` from `main` and ensured task file exists.
+
+## Plan Summary
+Added a backend logging core with logfmt formatting and redaction, wired request ID middleware into FastAPI, propagated request IDs through contextvars, normalized application logger names under capitalos.*, moved crypto operational logging off uvicorn.error, attached request IDs to RAG query audit rows, and covered the behavior with focused backend tests.
+
+### Architecture Decisions
+- Implemented logging infrastructure in api/app/core/logging.py using stdlib logging, contextvars, and ASGI middleware without new dependencies.
+- Mapped app.* and api.app.* logger names to capitalos.* at formatting/record creation time so existing getLogger(__name__) calls continue to work.
+- Kept uvicorn.* framework logs separate while installing redaction filters on existing handlers so sensitive access-log values are scrubbed before stdout.
+- Stored request IDs in request.state.request_id and a request-scoped context variable with explicit token reset after each HTTP call.
+- Added request_id to rag_queries through a narrow migration so RAG audit rows can be correlated with HTTP request logs.
+
+### Acceptance Criteria
+- API request logs are emitted as readable logfmt-style key-value lines.
+- Existing Python loggers continue to work without rewriting every module.
+- Application logger names are normalized under capitalos.* and crypto app logs no longer use uvicorn.error.
+- API request logs include request ID, method, path, status, duration, level, logger, and event.
+- Request ID middleware sets request.state.request_id, returns X-Request-ID, and exposes request ID through context propagation.
+- RAG query logs attach active request ID when one exists.
+- Sensitive values are redacted before reaching stdout.
+- Existing make logs and make api-logs remain readable.
+- Backend tests and API smoke pass.
+- Request logs contain request_id fields suitable for Loki lookup when the observability stack is running.
+
+### Planned Paths
+- `api/app/core/`
+- `api/app/main.py`
+- `api/app/crypto/`
+- `api/app/routers/crypto.py`
+- `api/app/models/rag.py`
+- `api/app/rag/query_logger.py`
+- `api/tests/`
+- `migrations/`
+- `docker-compose.yml`
+- `tasks/issue-185-api-logfmt-request-correlation-and-redaction.md`
+
+## Build Summary
+Implemented API logfmt logging, request correlation, logger normalization, and redaction for Issue 185.
+
+### Changed Files
+- `api/app/core/__init__.py`
+- `api/app/core/logging.py`
+- `api/app/crypto/refresh.py`
+- `api/app/crypto/verify.py`
+- `api/app/main.py`
+- `api/app/models/rag.py`
+- `api/app/rag/query_logger.py`
+- `api/app/routers/crypto.py`
+- `api/tests/test_observability_logging.py`
+- `docker-compose.yml`
+- `migrations/058_rag_query_request_id.sql`
+- `tasks/issue-185-api-logfmt-request-correlation-and-redaction.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented API logfmt logging, request correlation, logger normalization, and redaction for Issue 185.
+
+- semantic_intent_achieved: `True`
+- provider_model: `codex/gpt-5.5`
+
+### Semantic Checks
+- `pass` API request logs are emitted as readable logfmt-style key-value lines.: Request logs emit lines such as ts=... level=info logger=capitalos.request request_id=... event=http_request method=GET path=/health status=200 duration_ms=...
+- `pass` Existing Python loggers continue to work without rewriting every module.: Existing getLogger(__name__) names are normalized by logging infrastructure; backend suite passed.
+- `pass` Application logger names are normalized under capitalos.*; app modules no longer log operational events to uvicorn.error.: app.* and api.app.* map to capitalos.*; crypto refresh, verify, and router loggers now use capitalos.crypto.*.
+- `pass` API request logs include request ID, method, route/path, status, duration, level, logger, and event name.: test_health_endpoint_emits_logfmt_request_log asserts all required request log fields.
+- `pass` Request ID middleware sets request.state.request_id, returns X-Request-ID, and exposes request ID to lower-level logs through context propagation.: Middleware tests cover generated IDs, accepted safe incoming IDs, response headers, request.state, lower-level logger context, and reset.
+- `pass` RAG query logs attach the active request ID when a request context exists.: test_rag_query_log_attaches_active_request_id verifies rag_queries.request_id is populated.
+- `pass` Sensitive values are redacted from logs before they reach stdout.: Redaction tests cover Authorization, cookies, API keys, IBKR query/reference fields, URL tokens, raw rows, and uvicorn access args; docker logs show access_token=[REDACTED].
+- `pass` Existing make logs and make api-logs remain usable and readable.: Application logs remain stdout/stderr text logfmt; uvicorn framework logs remain separate and readable.
+- `pass` Backend tests and API smoke pass.: make test-backend passed 978 tests with 4 skipped; make api-smoke passed.
+- `pass` When issue 184 observability stack is running, a request log can be found in Loki by request_id.: App-side logs include searchable request_id fields; Loki infrastructure validation remains dependent on Issue 184 stack being running.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+<!-- MACHINE_RENDERED_END -->

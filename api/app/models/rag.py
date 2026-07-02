@@ -338,6 +338,7 @@ class RagQuery(Base):
     retrieval_config = Column(_JsonBlob, nullable=False, default=dict)
     answer_text = Column(Text)
     latency_ms = Column(Integer)
+    request_id = Column(String(128))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
 
     evidence = relationship("RagQueryEvidence", back_populates="query", cascade="all, delete-orphan")
