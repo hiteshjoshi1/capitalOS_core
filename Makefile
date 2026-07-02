@@ -10,6 +10,9 @@ SMOKE_USER?=demo
 SMOKE_PASSWORD?=Test@1234
 
 API_CONTAINER=capitalos-api
+OBSERVABILITY_SERVICES=loki grafana alloy
+OBSERVABILITY_ENV_FILE=$(shell test -f config/observability.env && printf '%s' config/observability.env || printf '%s' config/observability.env.example)
+OBSERVABILITY_COMPOSE=docker compose --env-file $(OBSERVABILITY_ENV_FILE)
 WEB_DIR=web
 WEB_PACKAGE_MANIFESTS=$(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 WEB_NODE_MODULES_STAMP=$(WEB_DIR)/node_modules/.install-stamp
@@ -77,7 +80,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit
+.PHONY: up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
 
 up:
 	docker compose up -d
@@ -99,6 +102,21 @@ web-up: web-deps
 
 api-logs:
 	docker logs -f $(API_CONTAINER)
+
+observability-up:
+	$(OBSERVABILITY_COMPOSE) up -d $(OBSERVABILITY_SERVICES)
+
+observability-down:
+	$(OBSERVABILITY_COMPOSE) stop $(OBSERVABILITY_SERVICES)
+
+observability-logs:
+	$(OBSERVABILITY_COMPOSE) logs -f $(OBSERVABILITY_SERVICES)
+
+observability-smoke:
+	./scripts/observability-smoke.sh
+
+grafana-url:
+	@echo "http://localhost:3000"
 
 openapi:
 	curl -s http://localhost:8000/openapi.json > openapi.json

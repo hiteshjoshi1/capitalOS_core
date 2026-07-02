@@ -27,5 +27,66 @@ services:
       - ./data:/app/data
       - ./config:/app/config:ro
 
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: capitalos-loki
+    profiles:
+      - observability
+    command:
+      - -config.file=/etc/loki/local-config.yaml
+      - -config.expand-env=true
+    env_file:
+      - path: ./config/observability.env.example
+      - path: ./config/observability.env
+        required: false
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./config/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    container_name: capitalos-grafana
+    profiles:
+      - observability
+    env_file:
+      - path: ./config/observability.env.example
+      - path: ./config/observability.env
+        required: false
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-capitalos}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - loki
+    volumes:
+      - ./config/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+
+  alloy:
+    image: grafana/alloy:v1.4.3
+    container_name: capitalos-alloy
+    profiles:
+      - observability
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --server.http.listen-addr=0.0.0.0:12345
+    env_file:
+      - path: ./config/observability.env.example
+      - path: ./config/observability.env
+        required: false
+    depends_on:
+      - loki
+    volumes:
+      - ./config/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      # Local-only observability tradeoff: read-only Docker socket access lets Alloy tail container logs.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
 volumes:
   pgdata:
+  loki-data:
+  grafana-data:
