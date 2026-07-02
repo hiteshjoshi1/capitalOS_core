@@ -4,13 +4,15 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$ROOT_DIR"
 
-ENV_FILE="config/observability.env"
-if [ ! -f "$ENV_FILE" ]; then
-  ENV_FILE="config/observability.env.example"
-fi
+ENV_FILE="config/observability.env.example"
+LOCAL_ENV_FILE="config/observability.env"
 
 set -a
 . "$ENV_FILE"
+if [ -f "$LOCAL_ENV_FILE" ]; then
+  . "$LOCAL_ENV_FILE"
+  ENV_FILE="$LOCAL_ENV_FILE"
+fi
 set +a
 
 LOKI_URL=${LOKI_URL:-http://127.0.0.1:3100}
@@ -43,6 +45,44 @@ while [ "$attempt" -le 30 ]; do
   fi
   if [ "$attempt" -eq 30 ]; then
     echo "Grafana did not become healthy." >&2
+    exit 1
+  fi
+  attempt=$((attempt + 1))
+  sleep 2
+done
+
+datasource_name=$(python3 - <<'PY'
+from urllib.parse import quote
+
+print(quote("CapitalOS Loki", safe=""))
+PY
+)
+
+echo "Verifying Grafana Loki datasource provisioning..."
+attempt=1
+while [ "$attempt" -le 30 ]; do
+  response=$(curl -fsS -u "$GRAFANA_ADMIN_USER:$GRAFANA_ADMIN_PASSWORD" "$GRAFANA_URL/api/datasources/name/$datasource_name" 2>/dev/null || true)
+  datasource_ok=$(printf '%s' "$response" | python3 -c '
+import json
+import sys
+
+raw = sys.stdin.read()
+try:
+    payload = json.loads(raw)
+except json.JSONDecodeError:
+    print("no")
+    raise SystemExit
+
+if payload.get("type") == "loki" and payload.get("url") == "http://loki:3100":
+    print("yes")
+else:
+    print("no")
+')
+  if [ "$datasource_ok" = "yes" ]; then
+    break
+  fi
+  if [ "$attempt" -eq 30 ]; then
+    echo "Grafana Loki datasource was not provisioned." >&2
     exit 1
   fi
   attempt=$((attempt + 1))

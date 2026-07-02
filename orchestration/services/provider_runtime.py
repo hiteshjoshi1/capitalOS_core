@@ -253,7 +253,7 @@ class ProviderRuntimeService:
             model,
             "--full-auto",
             "--sandbox",
-            "workspace-write",
+            getattr(self.cfg, "codex_sandbox_mode", "workspace-write"),
             "--cd",
             self.repo_root,
             "--output-last-message",
@@ -273,6 +273,7 @@ class ProviderRuntimeService:
             diagnostics = [
                 f"provider=codex",
                 f"model={model}",
+                f"sandbox={getattr(self.cfg, 'codex_sandbox_mode', 'workspace-write')}",
                 f"stdout_chars={len(output)}",
                 f"stderr_chars={len(error)}",
             ]

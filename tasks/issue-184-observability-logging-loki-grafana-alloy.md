@@ -115,30 +115,35 @@
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Add observability env example with `LOKI_RETENTION_PERIOD=15d`.
-- [ ] Add Loki, Grafana, and Alloy config files.
-- [ ] Add Docker Compose services and persistent volumes.
-- [ ] Add Makefile observability targets.
-- [ ] Add dedicated observability smoke script with Loki query and bounded retry.
-- [ ] Wire `make observability-smoke` to the smoke script.
-- [ ] Run deterministic safety gates.
+- [x] Add observability env example with `LOKI_RETENTION_PERIOD=15d`.
+- [x] Add Loki, Grafana, and Alloy config files.
+- [x] Add Docker Compose services and persistent volumes.
+- [x] Add Makefile observability targets.
+- [x] Add dedicated observability smoke script with Loki query and bounded retry.
+- [x] Wire `make observability-smoke` to the smoke script.
+- [x] Run deterministic safety gates.
 - [ ] Verify semantic intent is achieved.
 
 ## Execution Journal (Codex Mutable)
-- Current Stage: `planned`
-- Workflow Status: `not-started`
-- Provider/Model: `manual/task-planning`
-- Last Updated: `2026-07-02T00:00:00+08:00`
+- Current Stage: `deterministic_gates`
+- Workflow Status: `blocked`
+- Provider/Model: `codex/gpt-5`
+- Last Updated: `2026-07-02T14:44:36+08:00`
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
-- `lint`: `skip` - planning issue only
-- `typecheck`: `skip` - planning issue only
-- `tests`: `skip` - planning issue only
-- `e2e`: `skip` - planning issue only
-- `api-smoke`: `skip` - planning issue only
-- `observability-smoke`: `skip` - planning issue only
-- `policy-checks`: `skip` - planning issue only
+- `api-rebuild`: `pass` - built API image and restarted `capitalos-api`.
+- `contract-backend`: `fail` - Docker API permission denied at `unix:///Users/hiteshjoshi/.docker/run/docker.sock` before pytest started; failed after bounded retries.
+- `test-backend`: `pass` - 967 passed, 4 skipped.
+- `api-smoke`: `pass` - `/health` returned `{"status":"ok"}` and dashboard summary returned valid JSON.
+- `lint`: `pass` - frontend eslint passed; backend lint skipped by existing target because `ruff` is not installed in the API image.
+- `typecheck`: `pass` - TypeScript build passed; backend mypy skipped by existing target because `mypy` is not installed in the API image.
+- `contract-frontend`: `pass` - 6 passed.
+- `test-frontend`: `pass` - 191 passed.
+- `e2e`: `pass` - 17 Playwright tests passed.
+- `orch-test`: `pass` - 191 passed.
+- `observability-up`: `fail` - Docker API permission denied before Compose could start services; failed after bounded retries.
+- `observability-smoke`: `pass` - started API/Loki/Grafana/Alloy, verified Loki ready, Grafana health, Grafana Loki datasource provisioning, Alloy running, and found 1 uniquely identified API `/health` log line in Loki.
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._
@@ -146,18 +151,19 @@ _List all out-of-scope files with explicit rationale._
 
 ## Permanently Failed / Gave Up (Codex Mutable)
 _Fill only if workflow stops without shipping._
-- Stop reason:
-- Attempted mitigations:
-- Suggested human action:
+- Stop reason: Exact Docker-backed targets `make contract-backend` and `make observability-up` failed at Docker API permission checks despite other Docker-backed targets passing.
+- Attempted mitigations: Retried failing Make targets within the retry cap; ran `make test-backend`, `make api-smoke`, and `make observability-smoke` successfully when Docker access was available.
+- Suggested human action: Restore stable Docker Desktop socket access and rerun `make contract-backend` and `make observability-up`.
 
 ## Human Action Summary (Codex Mutable)
 _Human-readable next steps._
-- Next expected action: run the orchestration workflow for issue 184 first, then 185, then 186.
+- Next expected action: restore stable Docker socket access, rerun failed deterministic gates, then proceed with ship review.
 - Open questions:
   - Confirm whether observability should remain behind `make observability-up` after phase 1, or become part of `make up` later.
 
 ## Automation Log (Mutable)
 - 2026-07-02T00:00:00+08:00 - Split observability work into three phases and scoped issue 184 to local Loki/Grafana/Alloy infrastructure only.
+- 2026-07-02T14:44:36+08:00 - Implemented phase-1 observability verification tightening and ran deterministic gates; observability smoke passed, but exact Docker-backed targets had socket permission failures.
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
@@ -165,7 +171,7 @@ _Human-readable next steps._
 **Workflow Status**: `blocked`
 
 ## Workflow Snapshot
-- latest_outcome: Phase-1 observability infrastructure is present and the Loki query assertion was tightened to count actual returned log lines. The end-to-end observability smoke passed, but the exact `make contract-backend` and `make observability-up` targets had unresolved intermittent Docker socket permission failures.
+- latest_outcome: Implemented and verified the Issue 184 observability phase as far as the local Docker environment allowed. The Loki/Grafana/Alloy stack is present on the branch, and this session tightened the smoke test to layer env defaults safely and assert Grafana's Loki datasource provisioning before validating Loki log ingestion.
 - next_action: Inspect deterministic gate failures, apply mitigations, then rerun the workflow.
 - pipeline_version: `v3`
 - provider_model: `codex/gpt-5.5`
@@ -173,13 +179,13 @@ _Human-readable next steps._
 - blocked_reason: Agent run reported semantic intent not achieved.
 
 ## Active Requirements
-- Acceptance criterion: config/observability.env.example exists and includes LOKI_RETENTION_PERIOD=15d.
-- Acceptance criterion: make observability-up starts Loki, Grafana, and Alloy locally.
+- Acceptance criterion: `config/observability.env.example` exists and includes `LOKI_RETENTION_PERIOD=15d`.
+- Acceptance criterion: `make observability-up` starts Loki, Grafana, and Alloy locally.
 - Acceptance criterion: Grafana is reachable locally and has Loki auto-provisioned as a datasource.
-- Acceptance criterion: Loki persists logs to a named Docker volume and enforces retention from LOKI_RETENTION_PERIOD.
+- Acceptance criterion: Loki persists logs to a named Docker volume and enforces retention from `LOKI_RETENTION_PERIOD`.
 - Acceptance criterion: Alloy collects API container logs through a read-only local Docker socket mount and forwards them to Loki.
-- Acceptance criterion: make observability-smoke proves a uniquely identified /health request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.
-- Acceptance criterion: Existing make logs and make api-logs remain usable.
+- Acceptance criterion: `make observability-smoke` proves a uniquely identified `/health` request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.
+- Acceptance criterion: Existing `make logs` and `make api-logs` remain usable.
 - Acceptance criterion: No API or frontend behavior depends on Grafana/Loki being available.
 - Acceptance criterion: Backend tests and API smoke still pass.
 
@@ -187,25 +193,25 @@ _Human-readable next steps._
 Checked out `feature/issue-184-observability-logging-loki-grafana-alloy` from `main` and ensured task file exists.
 
 ## Plan Summary
-Validate the existing Loki/Grafana/Alloy stack against the task, keep API/frontend logging semantics unchanged, minimally adjust the smoke test to assert non-zero Loki log entries, then run the required Makefile verification suite and observability smoke.
+Keep observability optional behind explicit Make targets, leave API/frontend logging semantics unchanged, use Loki for persistent local logs, Grafana for viewing, and Alloy for read-only Docker log collection. Verify with the mandated Makefile suite plus an end-to-end observability smoke test.
 
 ### Architecture Decisions
-- Keep observability optional behind explicit Make targets instead of normal `make up`.
-- Use Loki for local persistent log storage, Grafana for viewing, and Alloy for Docker log collection.
-- Keep stdout/stderr Docker logs as the only source in this phase.
-- Configure Loki retention through `LOKI_RETENTION_PERIOD` with `-config.expand-env=true`.
-- Bind Loki and Grafana ports only to localhost.
-- Mount the Docker socket read-only for Alloy as a local-only tradeoff.
-- Use low-cardinality Loki labels: service, container, and environment.
+- Use Docker Compose services for Loki, Grafana, and Alloy behind explicit observability targets.
+- Keep normal `make up` independent of the observability stack.
+- Use stdout/stderr Docker logs as the only collection source for this phase.
+- Configure Loki retention through `LOKI_RETENTION_PERIOD` with environment expansion.
+- Bind Loki and Grafana to localhost only.
+- Use read-only Docker socket access for Alloy as a documented local-only tradeoff.
+- Use low-cardinality labels: service, container, and environment.
 
 ### Acceptance Criteria
-- config/observability.env.example exists and includes LOKI_RETENTION_PERIOD=15d.
-- make observability-up starts Loki, Grafana, and Alloy locally.
+- `config/observability.env.example` exists and includes `LOKI_RETENTION_PERIOD=15d`.
+- `make observability-up` starts Loki, Grafana, and Alloy locally.
 - Grafana is reachable locally and has Loki auto-provisioned as a datasource.
-- Loki persists logs to a named Docker volume and enforces retention from LOKI_RETENTION_PERIOD.
+- Loki persists logs to a named Docker volume and enforces retention from `LOKI_RETENTION_PERIOD`.
 - Alloy collects API container logs through a read-only local Docker socket mount and forwards them to Loki.
-- make observability-smoke proves a uniquely identified /health request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.
-- Existing make logs and make api-logs remain usable.
+- `make observability-smoke` proves a uniquely identified `/health` request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.
+- Existing `make logs` and `make api-logs` remain usable.
 - No API or frontend behavior depends on Grafana/Loki being available.
 - Backend tests and API smoke still pass.
 
@@ -220,7 +226,7 @@ Validate the existing Loki/Grafana/Alloy stack against the task, keep API/fronte
 - `tasks/issue-184-observability-logging-loki-grafana-alloy.md`
 
 ## Build Summary
-Phase-1 observability infrastructure is present and the Loki query assertion was tightened to count actual returned log lines. The end-to-end observability smoke passed, but the exact `make contract-backend` and `make observability-up` targets had unresolved intermittent Docker socket permission failures.
+Implemented and verified the Issue 184 observability phase as far as the local Docker environment allowed. The Loki/Grafana/Alloy stack is present on the branch, and this session tightened the smoke test to layer env defaults safely and assert Grafana's Loki datasource provisioning before validating Loki log ingestion.
 
 ### Changed Files
 - `scripts/observability-smoke.sh`
@@ -242,27 +248,26 @@ Phase-1 observability infrastructure is present and the Loki query assertion was
 - None
 
 ## Agent Run Summary
-Phase-1 observability infrastructure is present and the Loki query assertion was tightened to count actual returned log lines. The end-to-end observability smoke passed, but the exact `make contract-backend` and `make observability-up` targets had unresolved intermittent Docker socket permission failures.
+Implemented and verified the Issue 184 observability phase as far as the local Docker environment allowed. The Loki/Grafana/Alloy stack is present on the branch, and this session tightened the smoke test to layer env defaults safely and assert Grafana's Loki datasource provisioning before validating Loki log ingestion.
 
 - semantic_intent_achieved: `False`
 - provider_model: `codex/gpt-5.5`
 
 ### Semantic Checks
-- `pass` config/observability.env.example exists and includes LOKI_RETENTION_PERIOD=15d.: `config/observability.env.example` contains `LOKI_RETENTION_PERIOD=15d`, Grafana admin defaults, and `OBSERVABILITY_ENV=local`.
-- `partial` make observability-up starts Loki, Grafana, and Alloy locally.: Makefile target is wired and Compose renders the services, but direct `make observability-up` failed on three attempts due Docker socket permission denial.
-- `pass` Grafana is reachable locally and has Loki auto-provisioned as a datasource.: `make observability-smoke` verified Grafana `/api/health`; datasource provisioning file defines `CapitalOS Loki` at `http://loki:3100`.
-- `pass` Loki persists logs to a named Docker volume and enforces retention from LOKI_RETENTION_PERIOD.: Compose config mounts named `loki-data` at `/loki`; Loki config uses `retention_period: ${LOKI_RETENTION_PERIOD}` with `-config.expand-env=true`.
-- `pass` Alloy collects API container logs through a read-only local Docker socket mount and forwards them to Loki.: Compose config mounts `/var/run/docker.sock` read-only for Alloy; `make observability-smoke` found the unique API `/health` marker in Loki.
-- `pass` make observability-smoke proves a uniquely identified /health request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.: `make observability-smoke` passed and reported `found 1 Loki log line(s)`.
-- `pass` Existing make logs and make api-logs remain usable.: Existing `logs` and `api-logs` targets remain present and unchanged.
+- `pass` `config/observability.env.example` exists and includes `LOKI_RETENTION_PERIOD=15d`.: `config/observability.env.example` contains `LOKI_RETENTION_PERIOD=15d`, Grafana admin defaults, and `OBSERVABILITY_ENV=local`.
+- `partial` `make observability-up` starts Loki, Grafana, and Alloy locally.: The Makefile target is wired to `docker compose --env-file ... up -d loki grafana alloy`, and Compose renders the services, but the exact target failed in this environment due Docker socket permission errors.
+- `pass` Grafana is reachable locally and has Loki auto-provisioned as a datasource.: `make observability-smoke` verified Grafana `/api/health` and the `CapitalOS Loki` datasource with type `loki` and URL `http://loki:3100`.
+- `pass` Loki persists logs to a named Docker volume and enforces retention from `LOKI_RETENTION_PERIOD`.: Compose mounts named `loki-data` at `/loki`; Loki config uses `retention_period: ${LOKI_RETENTION_PERIOD}` with `-config.expand-env=true`.
+- `pass` Alloy collects API container logs through a read-only local Docker socket mount and forwards them to Loki.: Compose mounts `/var/run/docker.sock:/var/run/docker.sock:ro` for Alloy; `make observability-smoke` found the unique API `/health` marker in Loki.
+- `pass` `make observability-smoke` proves a uniquely identified `/health` request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.: `make observability-smoke` passed and reported `found 1 Loki log line(s)`.
+- `pass` Existing `make logs` and `make api-logs` remain usable.: Existing `logs` and `api-logs` targets remain present and unchanged.
 - `pass` No API or frontend behavior depends on Grafana/Loki being available.: No `api/app` or `web/src` files were changed; observability remains behind explicit services and targets.
 - `pass` Backend tests and API smoke still pass.: `make test-backend` passed 967 tests with 4 skipped; `make api-smoke` passed.
 
 ### Risk Flags
-- docker_socket_permission_denied_intermittently
+- docker_socket_permission_denied
 - contract_backend_exact_target_failed
 - observability_up_exact_target_failed
-- task_markdown_preexisting_dirty_diff
 
 ## Human Gate Decisions
 

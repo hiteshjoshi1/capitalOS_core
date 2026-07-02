@@ -551,13 +551,16 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
         repair_enabled=False,
         provider="codex",
         model="gpt-5.3-codex",
+        codex_sandbox_mode="danger-full-access",
     )
     monkeypatch.setattr("orchestration.services.provider_runtime.get_config", lambda: cfg)
     created: dict[str, Path] = {}
+    captured_args: dict[str, list[str]] = {}
 
     class FakePopen:
         def __init__(self, args, cwd, stdout, stderr, text, bufsize):
             _ = (cwd, stdout, stderr, text, bufsize)
+            captured_args["args"] = args
             out_idx = args.index("--output-last-message") + 1
             output_path = Path(args[out_idx])
             output_path.write_text('{"ok": true}')
@@ -581,6 +584,9 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
     result = service._run_codex(model="gpt-5.3-codex", prompt="do it")
     assert result.provider == "codex"
     assert result.output == '{"ok": true}'
+    sandbox_idx = captured_args["args"].index("--sandbox") + 1
+    assert captured_args["args"][sandbox_idx] == "danger-full-access"
+    assert "sandbox=danger-full-access" in result.diagnostics
     assert created["path"].exists() is False
 
 
