@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refresh_lock, upsert_snapshot
 from app.services.portfolio_realtime import publish_portfolio_refresh
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("capitalos.crypto.refresh")
 
 
 def refresh_wallet_snapshot(db: Session, wallet_id: str, *, user_id: int | None, automatic: bool) -> bool:

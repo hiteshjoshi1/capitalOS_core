@@ -10,7 +10,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from nacl.signing import VerifyKey
 
-logger = logging.getLogger("uvicorn.error")
+logger = logging.getLogger("capitalos.crypto.verify")
 
 @dataclass
 class VerificationResult:

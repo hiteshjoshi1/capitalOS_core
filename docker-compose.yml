@@ -18,6 +18,8 @@ services:
     env_file:
       - .env
     environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-logfmt}
       UPLOAD_STALE_DAYS: ${UPLOAD_STALE_DAYS:-30}
     ports:
       - "8000:8000"

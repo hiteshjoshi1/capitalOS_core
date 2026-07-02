@@ -19,6 +19,7 @@ from app.routers.dividends import router as dividends_router
 from app.routers.rag import router as rag_router
 from app.routers.ai_sage import router as ai_sage_router
 from app.routers.realtime import router as realtime_router
+from app.core.logging import RequestIdMiddleware, configure_logging
 from app.crypto.scheduler import start_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
 from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
@@ -61,6 +62,7 @@ if origins:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+app.add_middleware(RequestIdMiddleware)
 
 app.include_router(health_router)
 app.include_router(auth_router)
@@ -131,6 +133,7 @@ def _schedule_ai_sage_pruning() -> None:
 
 @app.on_event("startup")
 def _start_schedulers():
+    configure_logging()
     start_scheduler()
     start_market_scheduler()
     start_portfolio_scheduler()

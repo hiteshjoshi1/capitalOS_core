@@ -13,6 +13,8 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_request_id
+
 log = logging.getLogger(__name__)
 
 
@@ -50,6 +52,7 @@ def log_query(
             retrieval_config=retrieval_config or {},
             answer_text=answer_text,
             latency_ms=latency_ms,
+            request_id=get_request_id(),
         )
         db.add(query_row)
         db.flush()  # Populate query_row.id before writing evidence rows.
