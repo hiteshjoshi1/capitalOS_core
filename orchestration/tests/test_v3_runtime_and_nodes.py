@@ -584,8 +584,9 @@ def test_provider_runtime_run_codex_uses_output_file_and_cleans_up(monkeypatch, 
     result = service._run_codex(model="gpt-5.3-codex", prompt="do it")
     assert result.provider == "codex"
     assert result.output == '{"ok": true}'
-    sandbox_idx = captured_args["args"].index("--sandbox") + 1
-    assert captured_args["args"][sandbox_idx] == "danger-full-access"
+    assert "--full-auto" not in captured_args["args"]
+    assert "--sandbox" not in captured_args["args"]
+    assert "--dangerously-bypass-approvals-and-sandbox" in captured_args["args"]
     assert "sandbox=danger-full-access" in result.diagnostics
     assert created["path"].exists() is False
 
