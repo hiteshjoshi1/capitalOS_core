@@ -1,57 +1,41 @@
-# Issue 184: Observability logging with Loki, Grafana, and Alloy
+# Issue 184: Observability phase 1 - Loki, Grafana, and Alloy stack
 
 ## Objective
-- Add local-first persistent application logging for CapitalOS using Loki for log storage, Grafana for viewing, and Alloy for Docker log collection.
-- Make logs readable in terminal and searchable in Grafana with retention controlled by configuration.
-- Keep application changes minimal: API logs continue to go to stdout/stderr, with structured redacted logfmt-style fields.
+- Add local-first persistent log storage and viewing for CapitalOS using Loki, Grafana, and Alloy.
+- Keep this phase infrastructure-only: collect existing Docker logs, make them searchable, and enforce env-driven retention.
+- Provide deterministic Makefile commands to start, stop, inspect, and smoke-test observability without changing app logging semantics yet.
+
+## Split Plan
+- Issue 184: local observability stack, retention, Docker log collection, Grafana datasource, smoke test.
+- Issue 185: API logfmt contract, request ID middleware, context propagation, logger namespace normalization, and redaction.
+- Issue 186: operational job correlation, DB slow-query logging, sampling rules, and Grafana views for finance/RAG flows.
 
 ## Current State
 - `make logs` and `make api-logs` only stream Docker logs.
-- Logs are not persisted as an application-level observability store with query UI, retention policy, or saved views.
-- The API already uses Python `logging` in multiple modules, but formatting, request context, redaction, and event names are inconsistent.
-- Frontend logging is mostly browser-local and should not be pulled into the first observability phase unless explicit client error reporting is added later.
+- Logs are not persisted in a queryable local observability store.
+- There is no Grafana datasource or saved view for application logs.
+- Retention is not controlled by a CapitalOS configuration file.
 
 ## Architecture Decisions
-- Use Loki + Grafana + Alloy as the standard local observability stack.
-- Do not write operational logs into Postgres. Postgres should be reserved for product data and explicit audit/business events.
-- Do not build a custom log viewer in CapitalOS for this phase. Grafana already solves search, filtering, saved views, and retention visibility.
-- Keep API logging on stdout/stderr. Alloy collects Docker container logs and forwards them to Loki.
-- Use human-readable key-value logs, also called logfmt-style logs, for application logs:
-  - Example: `ts=2026-07-02T09:15:22Z level=info logger=capitalos.request event=http_request method=GET path=/dashboard/summary status=200 duration_ms=42 request_id=...`
-  - This is readable in `docker compose logs`, and still structured enough for Loki/Grafana queries.
-  - Use low-cardinality Loki labels only: service, container, environment, level, logger. Keep request IDs, paths, user IDs, tickers, and account IDs as log fields, not labels.
-- Add JSON logging only if a later need appears. Logfmt is the better first step because this is a local operational workflow and human readability matters.
-- Add a separate `audit_events` or `job_runs` model later only for business facts that must be queryable in-app, such as IBKR Flex refresh status, quote refresh status, uploads, and snapshots. That is not a replacement for operational logs.
-
-## Proposed Stack
-- `loki`
-  - Stores logs on a Docker volume.
-  - Enforces retention through Loki compactor config.
-  - Exposes API on localhost for health checks and Grafana queries.
-- `grafana`
-  - Stores Grafana state on a Docker volume.
-  - Auto-provisions Loki as the default datasource.
-  - Provides saved queries/dashboards for API errors, request latency, ingestion jobs, IBKR Flex, quote refreshes, and RAG ingestion.
-- `alloy`
-  - Reads Docker container logs.
-  - Adds service/container/environment labels.
-  - Forwards logs to Loki.
-  - Does not require the API to know Loki exists.
+- Use Loki for log storage, Grafana for viewing, and Alloy for Docker log collection.
+- Keep API and frontend code unchanged in this phase.
+- Keep existing stdout/stderr logging as the collection source.
+- Do not write operational logs into Postgres. Postgres remains for product data and future explicit audit/business events.
+- Do not build a custom in-app log viewer. Grafana is the viewer.
+- Keep observability optional behind explicit Make targets. Normal `make up` should not require Loki/Grafana/Alloy unless a later issue changes that deliberately.
+- Use low-cardinality Loki labels only: service, container, environment, level when safely available. Do not label request IDs, user IDs, account IDs, tickers, raw paths with IDs, or exception messages.
 
 ## Configuration Plan
 - Add `config/observability.env.example` with safe local defaults:
-  - `LOG_LEVEL=INFO`
-  - `LOG_FORMAT=logfmt`
   - `LOKI_RETENTION_PERIOD=15d`
   - `GRAFANA_ADMIN_USER=admin`
   - `GRAFANA_ADMIN_PASSWORD=capitalos`
-- Runtime observability services should read from an env file, either:
-  - `config/observability.env`, copied from the example for local use, or
-  - the repo root `.env` if the implementation keeps all local env values in one file.
-- Retention must come from `LOKI_RETENTION_PERIOD` in the env file, not a hardcoded duration inside Loki config.
+  - `OBSERVABILITY_ENV=local`
+- Runtime observability services should read from an env file, preferably `config/observability.env` copied from the example.
+- Retention must come from `LOKI_RETENTION_PERIOD` in the env file, not a hardcoded duration inside Loki YAML.
 - Add `config/loki/local-config.yaml`.
 - Add `config/alloy/config.alloy`.
-- Add Grafana provisioning under `config/grafana/provisioning/`.
+- Add Grafana datasource provisioning under `config/grafana/provisioning/`.
 - Add Docker Compose services:
   - `loki`
   - `grafana`
@@ -59,116 +43,84 @@
 - Add Docker volumes:
   - `loki-data`
   - `grafana-data`
-- Configure Loki with environment expansion, for example `-config.expand-env=true`, so `LOKI_RETENTION_PERIOD` from the env file controls retention.
-- Do not require these services for normal `make up` unless intentionally chosen. Prefer a separate observability target first, so app startup stays simple.
-
-## Application Logging Plan
-- Add one backend logging setup module, for example `api/app/core/logging.py`.
-- Configure Python logging once during FastAPI startup.
-- Keep existing module loggers working.
-- Add request middleware that logs one event per HTTP request:
-  - event name
-  - method
-  - path pattern where feasible
-  - status code
-  - duration
-  - request ID
-  - authenticated user identifier if already safely available
-- Add `X-Request-ID` propagation:
-  - accept incoming request ID if present,
-  - generate one otherwise,
-  - return it in the response,
-  - include it in logs.
-- Add redaction rules before anything reaches stdout:
-  - redact Authorization headers,
-  - redact cookies,
-  - redact IBKR tokens/query IDs/ref codes,
-  - redact API keys,
-  - redact uploaded file contents and raw statement rows,
-  - avoid logging full SQL rows with account numbers or personal data.
-- Normalize job logs for scheduled/background work:
-  - `event=ibkr_flex_refresh_started|succeeded|failed`
-  - `event=quote_refresh_started|succeeded|failed`
-  - `event=upload_ingest_started|succeeded|failed`
-  - `event=snapshot_created|failed`
-  - include duration, rows, provider, stale/fresh decision, and error class where relevant.
+- Configure Loki with environment expansion, for example `-config.expand-env=true`, so `LOKI_RETENTION_PERIOD` controls retention.
+- Configure the local Alloy service with read-only Docker socket access:
+  - `/var/run/docker.sock:/var/run/docker.sock:ro`
+  - This is local-only and must not be copied into non-local deployment compose files without a separate security review.
 
 ## Makefile Plan
 - Add:
   - `make observability-up`
   - `make observability-down`
   - `make observability-logs`
-  - `make grafana-open` if local browser opening is acceptable, otherwise document URL only.
+  - `make observability-smoke`
+  - `make grafana-url`
 - Keep existing:
   - `make logs`
   - `make api-logs`
-- Optional:
-  - `make observability-smoke` should verify:
-    - Loki ready endpoint returns healthy,
-    - Grafana health endpoint returns healthy,
-    - Alloy is running,
-    - a generated API request appears in Loki query results.
-
-## Grafana Views
-- Provision saved dashboards or documented saved queries for:
-  - API errors by endpoint/logger.
-  - Recent warnings/errors.
-  - Request latency by route.
-  - IBKR Flex refresh lifecycle.
-  - Quote refresh lifecycle.
-  - Upload ingestion lifecycle.
-  - RAG ingestion failures.
-- First version may use Explore queries instead of full dashboards, but datasource provisioning is required.
+- `make observability-smoke` must be end-to-end:
+  - Implement it as a dedicated script, for example `scripts/observability-smoke.sh`, or an equivalent checked-in script invoked by Make.
+  - Do not hide the Loki query/retry logic inside a long Makefile one-liner.
+  - Start or require the observability services.
+  - Verify Loki ready endpoint is healthy.
+  - Verify Grafana health endpoint is healthy.
+  - Verify Alloy container is running.
+  - Generate a unique smoke ID.
+  - Call an existing API endpoint such as `/health?observability_smoke=<smoke-id>` so the API container emits an access log containing that ID.
+  - Query Loki through `/loki/api/v1/query` or `/loki/api/v1/query_range` using a short look-back window.
+  - Use bounded retry with short backoff until Loki indexes the line, then assert a non-zero result count.
+  - Do not rely on one fixed sleep.
 
 ## Retention Requirements
-- Retention must be set in Loki config, not by manually deleting files.
 - Default retention: 15 days.
-- Retention must be configured through `LOKI_RETENTION_PERIOD=15d` in an env file.
+- `LOKI_RETENTION_PERIOD=15d` must live in `config/observability.env.example`.
 - Loki config must reference the env value using environment expansion instead of hardcoding `15d`.
-- Log volumes must be persistent across `make down`.
-- Destructive cleanup must require an explicit command and must not run as part of normal startup.
+- Log volumes must persist across `make down`.
+- Destructive log cleanup must require an explicit command and must not run as part of normal startup.
 
 ## Security And Privacy Requirements
-- Do not expose Grafana/Loki beyond localhost in local development.
-- Do not log secrets, bearer tokens, cookies, IBKR tokens/query IDs/ref codes, API keys, or raw uploaded statement contents.
-- Do not use high-cardinality Loki labels for request IDs, users, symbols, accounts, paths with IDs, or exception messages.
-- Docker socket access for Alloy must be documented as a local observability tradeoff. If Alloy requires Docker socket read access, keep it scoped to local development and do not deploy that mode publicly.
+- Grafana and Loki must bind only to localhost in local development.
+- Alloy Docker socket access must be read-only and documented as a local-only tradeoff.
+- Do not add remote log shipping.
+- Do not add custom secrets to committed env files.
+- Do not add app log payload changes in this phase; redaction and log format are handled by Issue 185.
 
 ## Acceptance Criteria
+- [ ] `config/observability.env.example` exists and includes `LOKI_RETENTION_PERIOD=15d`.
 - [ ] `make observability-up` starts Loki, Grafana, and Alloy locally.
 - [ ] Grafana is reachable locally and has Loki auto-provisioned as a datasource.
-- [ ] Loki persists logs to a named Docker volume and enforces documented retention.
-- [ ] `LOKI_RETENTION_PERIOD=15d` lives in an observability env file or documented `.env` entry, not hardcoded only in Loki YAML.
-- [ ] API request logs are emitted as readable logfmt-style key-value lines.
-- [ ] Existing Python loggers continue to work without rewriting every module.
-- [ ] API request logs include request ID, method, path, status, duration, level, logger, and event name.
-- [ ] Sensitive values are redacted from logs before they reach stdout.
-- [ ] Alloy collects API container logs and forwards them to Loki.
-- [ ] A smoke command proves a request to `/health` or `/dashboard/summary` appears in Loki.
+- [ ] Loki persists logs to a named Docker volume and enforces retention from `LOKI_RETENTION_PERIOD`.
+- [ ] Alloy collects API container logs through a read-only local Docker socket mount and forwards them to Loki.
+- [ ] `make observability-smoke` proves a uniquely identified `/health` request appears in Loki through the Loki query API with bounded retry and non-zero result assertion.
 - [ ] Existing `make logs` and `make api-logs` remain usable.
-- [ ] No frontend behavior depends on Grafana/Loki being available.
+- [ ] No API or frontend behavior depends on Grafana/Loki being available.
 - [ ] Backend tests and API smoke still pass.
 
 ## Out Of Scope
+- API logfmt formatting.
+- Request ID middleware.
+- Redaction filters.
+- Logger namespace normalization.
+- Job IDs for scheduler/background work.
+- Slow DB query logging.
+- High-frequency log sampling.
+- Grafana dashboards beyond datasource provisioning.
 - Custom in-app log viewer.
 - Remote/hosted observability.
 - Alerting and notifications.
 - OpenTelemetry tracing.
 - Metrics collection with Prometheus.
 - Frontend browser error reporting.
-- Business audit tables for IBKR/quote/upload run history, except to document the later need.
 
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Add Loki, Grafana, and Alloy config files.
 - [ ] Add observability env example with `LOKI_RETENTION_PERIOD=15d`.
+- [ ] Add Loki, Grafana, and Alloy config files.
 - [ ] Add Docker Compose services and persistent volumes.
 - [ ] Add Makefile observability targets.
-- [ ] Add backend logging setup and request middleware.
-- [ ] Add request ID propagation.
-- [ ] Add redaction tests.
-- [ ] Add observability smoke verification.
+- [ ] Add dedicated observability smoke script with Loki query and bounded retry.
+- [ ] Wire `make observability-smoke` to the smoke script.
 - [ ] Run deterministic safety gates.
 - [ ] Verify semantic intent is achieved.
 
@@ -180,12 +132,13 @@
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
-- `lint`: `skip` — planning issue only
-- `typecheck`: `skip` — planning issue only
-- `tests`: `skip` — planning issue only
-- `e2e`: `skip` — planning issue only
-- `api-smoke`: `skip` — planning issue only
-- `policy-checks`: `skip` — planning issue only
+- `lint`: `skip` - planning issue only
+- `typecheck`: `skip` - planning issue only
+- `tests`: `skip` - planning issue only
+- `e2e`: `skip` - planning issue only
+- `api-smoke`: `skip` - planning issue only
+- `observability-smoke`: `skip` - planning issue only
+- `policy-checks`: `skip` - planning issue only
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._
@@ -199,9 +152,9 @@ _Fill only if workflow stops without shipping._
 
 ## Human Action Summary (Codex Mutable)
 _Human-readable next steps._
-- Next expected action: run the orchestration workflow for issue 184 after issue 183 is merged.
+- Next expected action: run the orchestration workflow for issue 184 first, then 185, then 186.
 - Open questions:
-  - Confirm whether `make up` should include observability by default or whether observability should stay behind `make observability-up`.
+  - Confirm whether observability should remain behind `make observability-up` after phase 1, or become part of `make up` later.
 
 ## Automation Log (Mutable)
-- 2026-07-02T00:00:00+08:00 - Created planning issue for local persistent logging using Loki, Grafana, and Alloy with logfmt-style API logs.
+- 2026-07-02T00:00:00+08:00 - Split observability work into three phases and scoped issue 184 to local Loki/Grafana/Alloy infrastructure only.
