@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from orchestration.models.pipeline import PrepareResult
 from orchestration.render import render_task_file
 from orchestration.services.config import get_config
@@ -23,12 +25,14 @@ def run(state: GraphState) -> GraphState:
     git = GitService(pipeline.issue.repo_root)
     md = TaskMarkdownService(pipeline.issue.repo_root)
 
-    md.bootstrap_if_missing(
-        pipeline.issue.task_file,
-        pipeline.issue.title,
-        pipeline.issue.issue_id,
-    )
-    emit_progress("prepare", current_action="Task file verified", actions_taken=[f"Ensured `{pipeline.issue.task_file}` exists"])
+    task_path = Path(pipeline.issue.repo_root) / pipeline.issue.task_file
+    if not task_path.exists():
+        raise RuntimeError(
+            f"Task file does not exist: {pipeline.issue.task_file}. "
+            "Create the task file explicitly before running the workflow."
+        )
+    md.ensure_required_markers(pipeline.issue.task_file)
+    emit_progress("prepare", current_action="Task file verified", actions_taken=[f"Verified `{pipeline.issue.task_file}` exists"])
     git.ensure_clean_worktree_except([pipeline.issue.task_file])
     git.checkout_main_and_prepare_branch(pipeline.issue.branch, base_branch=cfg.base_branch)
 
@@ -36,8 +40,8 @@ def run(state: GraphState) -> GraphState:
         base_branch=cfg.base_branch,
         branch_name=pipeline.issue.branch,
         branch_ready=True,
-        task_file_bootstrapped=True,
-        summary=f"Checked out `{pipeline.issue.branch}` from `{cfg.base_branch}` and ensured task file exists.",
+        task_file_bootstrapped=False,
+        summary=f"Checked out `{pipeline.issue.branch}` from `{cfg.base_branch}` and verified task file exists.",
     )
 
     render_task_file(pipeline)
