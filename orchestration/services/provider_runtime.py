@@ -246,22 +246,28 @@ class ProviderRuntimeService:
         with tempfile.NamedTemporaryFile(prefix="codex-last-message-", suffix=".txt", delete=False) as handle:
             output_path = Path(handle.name)
 
+        sandbox_mode = getattr(self.cfg, "codex_sandbox_mode", "workspace-write")
         args = [
             "codex",
             "exec",
             "--model",
             model,
-            "--full-auto",
-            "--sandbox",
-            "workspace-write",
-            "--cd",
-            self.repo_root,
-            "--output-last-message",
-            str(output_path),
-            "--color",
-            "never",
-            prompt,
         ]
+        if sandbox_mode == "danger-full-access":
+            args.extend(["--dangerously-bypass-approvals-and-sandbox"])
+        else:
+            args.extend(["--sandbox", sandbox_mode])
+        args.extend(
+            [
+                "--cd",
+                self.repo_root,
+                "--output-last-message",
+                str(output_path),
+                "--color",
+                "never",
+                prompt,
+            ]
+        )
         final_args = self._prefix_with_caffeinate(args)
         try:
             returncode, output, error = self._run_streaming_command(final_args)
@@ -273,6 +279,7 @@ class ProviderRuntimeService:
             diagnostics = [
                 f"provider=codex",
                 f"model={model}",
+                f"sandbox={sandbox_mode}",
                 f"stdout_chars={len(output)}",
                 f"stderr_chars={len(error)}",
             ]

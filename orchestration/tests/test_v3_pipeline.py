@@ -147,3 +147,11 @@ def test_model_routing_config_supports_v3_fields() -> None:
     assert cfg.v3_provider == "codex"
     assert cfg.v3_model == "gpt-5.3-codex"
     assert cfg.v3_reasoning_effort == "xhigh"
+
+
+def test_model_routing_config_loads_codex_sandbox_mode(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_SANDBOX_MODE", "danger-full-access")
+
+    cfg = ModelRoutingConfig.from_env()
+
+    assert cfg.codex_sandbox_mode == "danger-full-access"

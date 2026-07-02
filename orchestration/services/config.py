@@ -38,6 +38,7 @@ class ModelRoutingConfig(BaseModel):
     max_retries: int = Field(default=3, ge=1)
     max_rework_cycles: int = Field(default=2, ge=1)
     codex_timeout_minutes: int = Field(default=60, ge=1)
+    codex_sandbox_mode: Literal["read-only", "workspace-write", "danger-full-access"] = "workspace-write"
     build_max_autopilot_continues: int = Field(default=12, ge=1)
 
     create_pr_on_ship: bool = False
@@ -114,6 +115,7 @@ class ModelRoutingConfig(BaseModel):
             max_retries=int(os.getenv("MAX_RETRIES", "3")),
             max_rework_cycles=int(os.getenv("MAX_REWORK_CYCLES", "2")),
             codex_timeout_minutes=int(os.getenv("CODEX_TIMEOUT_MINUTES", "60")),
+            codex_sandbox_mode=os.getenv("CODEX_SANDBOX_MODE", "workspace-write"),
             build_max_autopilot_continues=int(os.getenv("BUILD_MAX_AUTOPILOT_CONTINUES", "12")),
             create_pr_on_ship=os.getenv("CREATE_PR_ON_SHIP", "0") == "1",
             base_branch=os.getenv("BASE_BRANCH", "main"),
