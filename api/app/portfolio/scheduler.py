@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy import text
 
+from app.core.logging import job_context
 from app.db.session import SessionLocal
 from app.portfolio.ibkr_flex import SOURCE_TYPE, run_ibkr_flex_import_from_config
 
@@ -126,31 +128,79 @@ def _active_accounts(db) -> list[dict]:
 
 
 def _run_daily_imports() -> None:
-    db = SessionLocal()
-    try:
-        for account in _active_accounts(db):
-            try:
-                result = run_ibkr_flex_import_from_config(
-                    db,
-                    current_user_id=int(account["user_id"]),
-                    legacy_account_id=int(account["legacy_account_id"]),
-                    cutover_date=_cutover_date(),
-                )
-                logger.info(
-                    "ibkr_flex_import_success",
+    with job_context():
+        started = time.perf_counter()
+        successes = 0
+        failures = 0
+        db = SessionLocal()
+        try:
+            accounts = _active_accounts(db)
+            logger.info(
+                "ibkr_flex_refresh_started",
+                extra={"event": "ibkr_flex_refresh_started", "provider": "ibkr_flex", "platform": "IBKR", "rows": len(accounts)},
+            )
+            for account in accounts:
+                try:
+                    result = run_ibkr_flex_import_from_config(
+                        db,
+                        current_user_id=int(account["user_id"]),
+                        legacy_account_id=int(account["legacy_account_id"]),
+                        cutover_date=_cutover_date(),
+                    )
+                    successes += 1
+                    logger.info(
+                        "ibkr_flex_refresh_succeeded",
+                        extra={
+                            "event": "ibkr_flex_refresh_succeeded",
+                            "provider": "ibkr_flex",
+                            "platform": "IBKR",
+                            "legacy_account_id": int(account["legacy_account_id"]),
+                            "import_run_id": result.get("import_run_id"),
+                            "duration_ms": int((time.perf_counter() - started) * 1000),
+                            **(result.get("counts") or {}),
+                        },
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    db.rollback()
+                    logger.exception(
+                        "ibkr_flex_refresh_failed",
+                        extra={
+                            "event": "ibkr_flex_refresh_failed",
+                            "provider": "ibkr_flex",
+                            "platform": "IBKR",
+                            "legacy_account_id": int(account["legacy_account_id"]),
+                            "error_class": exc.__class__.__name__,
+                            "duration_ms": int((time.perf_counter() - started) * 1000),
+                        },
+                    )
+            if failures:
+                logger.warning(
+                    "ibkr_flex_refresh_failed",
                     extra={
-                        "legacy_account_id": int(account["legacy_account_id"]),
-                        "import_run_id": result.get("import_run_id"),
+                        "event": "ibkr_flex_refresh_failed",
+                        "provider": "ibkr_flex",
+                        "platform": "IBKR",
+                        "rows": len(accounts),
+                        "inserted": successes,
+                        "skipped": failures,
+                        "duration_ms": int((time.perf_counter() - started) * 1000),
                     },
                 )
-            except Exception as exc:  # noqa: BLE001
-                db.rollback()
-                logger.exception(
-                    "ibkr_flex_import_failed",
-                    extra={"legacy_account_id": int(account["legacy_account_id"]), "error": str(exc)},
+            else:
+                logger.info(
+                    "ibkr_flex_refresh_succeeded",
+                    extra={
+                        "event": "ibkr_flex_refresh_succeeded",
+                        "provider": "ibkr_flex",
+                        "platform": "IBKR",
+                        "rows": len(accounts),
+                        "inserted": successes,
+                        "duration_ms": int((time.perf_counter() - started) * 1000),
+                    },
                 )
-    finally:
-        db.close()
+        finally:
+            db.close()
 
 
 def start_scheduler() -> BackgroundScheduler | None:

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import logging
+import time
 from datetime import date
 from typing import Any
 
@@ -9,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
+from app.core.logging import job_context
 from app.db.session import get_db
 from app.portfolio.ibkr_flex import (
     IbkrFlexConfigError,
@@ -19,6 +22,7 @@ from app.portfolio.ibkr_flex import (
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"], dependencies=[Depends(require_current_user)])
+logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
 
 
 def _configured_admin_key() -> str | None:
@@ -87,21 +91,89 @@ def import_ibkr_flex_now(
 ):
     _validate_admin_key(x_admin_key)
     _require_ibkr_account(db, account_id, current_user.id)
-    try:
-        return run_ibkr_flex_import_from_config(
-            db,
-            current_user_id=current_user.id,
-            legacy_account_id=account_id,
-            cutover_date=_parse_cutover_date(cutover_date),
-        )
-    except IbkrFlexImportInProgress as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    except IbkrFlexConfigError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    except IbkrFlexImportError as exc:
-        raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
-    except IbkrFlexError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    started = time.perf_counter()
+    with job_context():
+        try:
+            logger.info(
+                "ibkr_flex_refresh_started",
+                extra={
+                    "event": "ibkr_flex_refresh_started",
+                    "provider": "ibkr_flex",
+                    "platform": "IBKR",
+                    "legacy_account_id": account_id,
+                },
+            )
+            result = run_ibkr_flex_import_from_config(
+                db,
+                current_user_id=current_user.id,
+                legacy_account_id=account_id,
+                cutover_date=_parse_cutover_date(cutover_date),
+            )
+            logger.info(
+                "ibkr_flex_refresh_succeeded",
+                extra={
+                    "event": "ibkr_flex_refresh_succeeded",
+                    "provider": "ibkr_flex",
+                    "platform": "IBKR",
+                    "legacy_account_id": account_id,
+                    "import_run_id": result.get("import_run_id"),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                    **(result.get("counts") or {}),
+                },
+            )
+            return result
+        except IbkrFlexImportInProgress as exc:
+            logger.warning(
+                "ibkr_flex_refresh_failed",
+                extra={
+                    "event": "ibkr_flex_refresh_failed",
+                    "provider": "ibkr_flex",
+                    "platform": "IBKR",
+                    "legacy_account_id": account_id,
+                    "error_class": exc.__class__.__name__,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except IbkrFlexConfigError as exc:
+            logger.exception(
+                "ibkr_flex_refresh_failed",
+                extra={
+                    "event": "ibkr_flex_refresh_failed",
+                    "provider": "ibkr_flex",
+                    "platform": "IBKR",
+                    "legacy_account_id": account_id,
+                    "error_class": exc.__class__.__name__,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        except IbkrFlexImportError as exc:
+            logger.warning(
+                "ibkr_flex_refresh_failed",
+                extra={
+                    "event": "ibkr_flex_refresh_failed",
+                    "provider": "ibkr_flex",
+                    "platform": "IBKR",
+                    "legacy_account_id": account_id,
+                    "error_class": exc.__class__.__name__,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+            raise HTTPException(status_code=422, detail={"code": exc.code, "message": exc.message}) from exc
+        except IbkrFlexError as exc:
+            logger.exception(
+                "ibkr_flex_refresh_failed",
+                extra={
+                    "event": "ibkr_flex_refresh_failed",
+                    "provider": "ibkr_flex",
+                    "platform": "IBKR",
+                    "legacy_account_id": account_id,
+                    "error_class": exc.__class__.__name__,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @router.get("/ibkr-flex/import-runs")

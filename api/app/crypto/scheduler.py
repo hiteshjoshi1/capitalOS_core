@@ -9,6 +9,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import text
 
+from app.core.logging import job_context
 from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
 
@@ -17,21 +18,22 @@ _scheduler: BackgroundScheduler | None = None
 
 
 def _refresh_all_wallets():
-    db = next(get_db())
-    try:
-        rows = db.execute(
-            text("SELECT id, user_id FROM crypto_wallets WHERE status = 'active'")
-        ).fetchall()
-        for wallet_id, user_id in rows:
-            wallet_id = str(wallet_id)
-            refresh_wallet_snapshot(
-                db,
-                wallet_id,
-                user_id=int(user_id) if user_id is not None else None,
-                automatic=True,
-            )
-    finally:
-        db.close()
+    with job_context():
+        db = next(get_db())
+        try:
+            rows = db.execute(
+                text("SELECT id, user_id FROM crypto_wallets WHERE status = 'active'")
+            ).fetchall()
+            for wallet_id, user_id in rows:
+                wallet_id = str(wallet_id)
+                refresh_wallet_snapshot(
+                    db,
+                    wallet_id,
+                    user_id=int(user_id) if user_id is not None else None,
+                    automatic=True,
+                )
+        finally:
+            db.close()
 
 
 def start_scheduler() -> BackgroundScheduler | None:

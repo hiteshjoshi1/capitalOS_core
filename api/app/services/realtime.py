@@ -11,6 +11,8 @@ from typing import Any
 from fastapi import WebSocket
 from starlette.websockets import WebSocketDisconnect
 
+from app.core.logging import high_frequency_log_enabled, log_sample_rate_high_freq
+
 log = logging.getLogger(__name__)
 
 HEARTBEAT_INTERVAL_SECONDS = max(int(os.getenv("REALTIME_HEARTBEAT_INTERVAL_SECONDS", "20")), 5)
@@ -79,10 +81,28 @@ class RealtimeService:
             ]
 
         if not recipients:
-            log.info("Realtime publish skipped: user_id=%s topic=%s recipients=0", user_id, topic)
+            if high_frequency_log_enabled(logging.INFO):
+                log.info(
+                    "realtime_publish_skipped",
+                    extra={
+                        "event": "realtime_publish_skipped",
+                        "topic": topic,
+                        "recipients": 0,
+                        "sample_rate": log_sample_rate_high_freq(),
+                    },
+                )
             return
 
-        log.info("Realtime publish: user_id=%s topic=%s recipients=%s", user_id, topic, len(recipients))
+        if high_frequency_log_enabled(logging.INFO):
+            log.info(
+                "realtime_publish",
+                extra={
+                    "event": "realtime_publish",
+                    "topic": topic,
+                    "recipients": len(recipients),
+                    "sample_rate": log_sample_rate_high_freq(),
+                },
+            )
         failed_connections: list[RealtimeConnection] = []
         for connection in recipients:
             try:

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -10,6 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy import text
 
+from app.core.logging import job_context
 from app.db.session import SessionLocal
 from app.market_data.service import configured_exchanges, run_all_exchanges
 
@@ -86,27 +88,46 @@ def _startup_catchup_due() -> bool:
 
 
 def _run_window(window_name: str, exchanges: list[str]) -> None:
-    db = SessionLocal()
-    try:
-        started = datetime.now(tz=timezone.utc)
-        result = run_all_exchanges(db, exchanges=exchanges, full_coverage=True)
-        logger.info(
-            "stock_refresh_success",
-            extra={
-                "window": window_name,
-                "exchanges": exchanges,
-                "result": result,
-                "duration_ms": int((datetime.now(tz=timezone.utc) - started).total_seconds() * 1000),
-            },
-        )
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
-        logger.exception(
-            "stock_refresh_failed",
-            extra={"window": window_name, "exchanges": exchanges, "error": str(exc)},
-        )
-    finally:
-        db.close()
+    with job_context():
+        started = time.perf_counter()
+        db = SessionLocal()
+        try:
+            logger.info(
+                "quote_refresh_started",
+                extra={"event": "quote_refresh_started", "provider": "market_data", "window": window_name, "rows": len(exchanges)},
+            )
+            result = run_all_exchanges(db, exchanges=exchanges, full_coverage=True)
+            exchange_results = result.get("exchanges") or []
+            failed = [item for item in exchange_results if item.get("status") == "failed"]
+            event_name = "quote_refresh_failed" if failed else "quote_refresh_succeeded"
+            level = logger.warning if failed else logger.info
+            level(
+                event_name,
+                extra={
+                    "event": event_name,
+                    "provider": "market_data",
+                    "window": window_name,
+                    "rows": sum(int(item.get("requested_symbols") or 0) for item in exchange_results),
+                    "inserted": sum(int(item.get("upserted_rows") or 0) for item in exchange_results),
+                    "skipped": sum(int(item.get("missing_symbols") or 0) for item in exchange_results),
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            db.rollback()
+            logger.exception(
+                "quote_refresh_failed",
+                extra={
+                    "event": "quote_refresh_failed",
+                    "provider": "market_data",
+                    "window": window_name,
+                    "rows": len(exchanges),
+                    "error_class": exc.__class__.__name__,
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+        finally:
+            db.close()
 
 
 def start_scheduler() -> BackgroundScheduler | None:

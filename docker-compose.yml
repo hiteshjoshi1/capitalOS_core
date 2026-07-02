@@ -20,6 +20,8 @@ services:
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-logfmt}
+      DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-500}
+      LOG_SAMPLE_RATE_HIGH_FREQ: ${LOG_SAMPLE_RATE_HIGH_FREQ:-0.10}
       UPLOAD_STALE_DAYS: ${UPLOAD_STALE_DAYS:-30}
     ports:
       - "8000:8000"

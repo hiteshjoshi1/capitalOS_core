@@ -1,0 +1,309 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [],
+  "panels": [
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "prettifyLogMessage": false,
+        "showCommonLabels": false,
+        "showLabels": false,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | level=~\"warn|error\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Recent API Warnings And Errors",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 2,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "quantile_over_time(0.95, {service=\"api\"} | logfmt | event=\"http_request\" | unwrap duration_ms [5m]) by (path)",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Request P95 Latency By Route",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "id": 3,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | event=\"db_slow_query\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Slow DB Queries",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "id": 4,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | event=~\"ibkr_flex_refresh_started|ibkr_flex_refresh_succeeded|ibkr_flex_refresh_failed\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "IBKR Flex Lifecycle By Job ID",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 15
+      },
+      "id": 5,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | event=~\"quote_refresh_started|quote_refresh_succeeded|quote_refresh_failed\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Quote Refresh Lifecycle By Job ID",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 15
+      },
+      "id": 6,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | event=~\"upload_ingest_started|upload_ingest_succeeded|upload_ingest_failed|upload_ingest_needs_mapping\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Upload Ingestion Lifecycle By Job ID",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 0,
+        "y": 22
+      },
+      "id": 7,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | event=~\"snapshot_created|snapshot_failed\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "Snapshot Creation Outcomes",
+      "type": "logs"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "capitalos-loki"
+      },
+      "gridPos": {
+        "h": 7,
+        "w": 12,
+        "x": 12,
+        "y": 22
+      },
+      "id": 8,
+      "options": {
+        "dedupStrategy": "none",
+        "enableLogDetails": true,
+        "showTime": true,
+        "sortOrder": "Descending",
+        "wrapLogMessage": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "loki",
+            "uid": "capitalos-loki"
+          },
+          "editorMode": "code",
+          "expr": "{service=\"api\"} | logfmt | event=\"rag_ingest_failed\"",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "RAG Ingestion Failures",
+      "type": "logs"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": [
+    "capitalos",
+    "operations",
+    "loki"
+  ],
+  "templating": {
+    "list": []
+  },
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "CapitalOS Operational Logs",
+  "uid": "capitalos-operational-logs",
+  "version": 1,
+  "weekStart": ""
+}

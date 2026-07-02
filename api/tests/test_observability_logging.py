@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import io
 import logging
+import re
 
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.core.logging import (
@@ -13,11 +15,16 @@ from app.core.logging import (
     RequestIdMiddleware,
     bind_request_id,
     generate_request_id,
+    get_job_id,
     get_request_id,
+    high_frequency_log_enabled,
+    job_context,
     normalize_logger_name,
+    reset_job_id,
     reset_request_id,
 )
 from app.main import app as api_app
+from app.models.import_job import ImportJob
 from app.models.rag import RagQuery
 from app.rag.query_logger import log_query
 
@@ -203,6 +210,212 @@ def test_request_context_token_reset_prevents_leaks() -> None:
     finally:
         reset_request_id(outer)
     assert get_request_id() is None
+
+
+def test_job_context_propagates_to_logfmt() -> None:
+    logger, stream, handler, old_propagate, old_level = _capture_logger("capitalos.tests.job")
+    try:
+        with job_context("job-test-1"):
+            logger.info("job event", extra={"event": "job_event"})
+            assert get_job_id() == "job-test-1"
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+
+    line = stream.getvalue()
+    assert "event=job_event" in line
+    assert "job_id=job-test-1" in line
+    assert get_job_id() is None
+
+
+def test_job_context_token_reset_prevents_leaks() -> None:
+    outer = job_context("outer-job")
+    outer.__enter__()
+    try:
+        token = resettable = None
+        from app.core.logging import bind_job_id
+
+        token = bind_job_id("inner-job")
+        resettable = token
+        assert get_job_id() == "inner-job"
+        reset_job_id(resettable)
+        assert get_job_id() == "outer-job"
+    finally:
+        outer.__exit__(None, None, None)
+    assert get_job_id() is None
+
+
+def test_high_frequency_sampling_never_samples_warnings(monkeypatch) -> None:
+    monkeypatch.setenv("LOG_SAMPLE_RATE_HIGH_FREQ", "0")
+
+    assert high_frequency_log_enabled(logging.INFO) is False
+    assert high_frequency_log_enabled(logging.DEBUG) is False
+    assert high_frequency_log_enabled(logging.WARNING) is True
+    assert high_frequency_log_enabled(logging.ERROR) is True
+
+
+def test_db_slow_query_log_excludes_parameters(monkeypatch, db_engine) -> None:
+    from app.db.session import install_db_observability
+
+    install_db_observability(db_engine)
+    monkeypatch.setenv("DB_SLOW_QUERY_MS", "0")
+    logger, stream, handler, old_propagate, old_level = _capture_logger("capitalos.db")
+    try:
+        with db_engine.connect() as conn:
+            conn.execute(text("SELECT :secret_value AS value"), {"secret_value": "acct-123456789"})
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+
+    line = stream.getvalue()
+    assert "event=db_slow_query" in line
+    assert "operation=select" in line
+    assert "acct-123456789" not in line
+    assert "secret_value" not in line
+    assert "SELECT" not in line
+
+
+def test_ibkr_scheduler_lifecycle_logs_job_id(monkeypatch) -> None:
+    from app.portfolio import scheduler as portfolio_scheduler
+
+    class FakeDb:
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(portfolio_scheduler, "SessionLocal", lambda: FakeDb())
+    monkeypatch.setattr(
+        portfolio_scheduler,
+        "_active_accounts",
+        lambda db: [{"user_id": 1, "legacy_account_id": 2}],
+    )
+    monkeypatch.setattr(
+        portfolio_scheduler,
+        "run_ibkr_flex_import_from_config",
+        lambda *args, **kwargs: {"import_run_id": 9, "counts": {"positions": 3}},
+    )
+
+    logger, stream, handler, old_propagate, old_level = _capture_logger("capitalos.portfolio.ibkr_flex")
+    try:
+        portfolio_scheduler._run_daily_imports()
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+
+    output = stream.getvalue()
+    assert "event=ibkr_flex_refresh_started" in output
+    assert "event=ibkr_flex_refresh_succeeded" in output
+    assert "provider=ibkr_flex" in output
+    job_ids = set(re.findall(r"job_id=([A-Za-z0-9._:-]+)", output))
+    assert len(job_ids) == 1
+
+
+def test_quote_scheduler_lifecycle_logs_job_id(monkeypatch) -> None:
+    from app.market_data import scheduler as market_scheduler
+
+    class FakeDb:
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(market_scheduler, "SessionLocal", lambda: FakeDb())
+    monkeypatch.setattr(
+        market_scheduler,
+        "run_all_exchanges",
+        lambda *args, **kwargs: {
+            "exchanges": [
+                {
+                    "status": "success",
+                    "requested_symbols": 4,
+                    "upserted_rows": 3,
+                    "missing_symbols": 1,
+                }
+            ]
+        },
+    )
+
+    logger, stream, handler, old_propagate, old_level = _capture_logger("capitalos.market_data")
+    try:
+        market_scheduler._run_window("test_window", ["US"])
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+
+    output = stream.getvalue()
+    assert "event=quote_refresh_started" in output
+    assert "event=quote_refresh_succeeded" in output
+    assert "provider=market_data" in output
+    job_ids = set(re.findall(r"job_id=([A-Za-z0-9._:-]+)", output))
+    assert len(job_ids) == 1
+
+
+def test_upload_ingestion_failed_branch_logs_warning(db_engine, tmp_path) -> None:
+    from app.ingestion.runner import run_ingestion
+
+    db = Session(db_engine)
+    job = ImportJob(
+        account_id=1,
+        platform="DBS",
+        original_filename="missing.csv",
+        stored_path=str(tmp_path / "missing.csv"),
+        file_sha256="sha",
+        status="UPLOADED",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    logger, stream, handler, old_propagate, old_level = _capture_logger("capitalos.ingestion")
+    try:
+        report = run_ingestion(db, int(job.id), str(tmp_path))
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+        db.close()
+
+    output = stream.getvalue()
+    assert report["status"] == "FAILED"
+    assert "event=upload_ingest_started" in output
+    assert "event=upload_ingest_failed" in output
+    assert "level=warning" in output
+    assert "job_db_id=" in output
+    assert "job_id=" in output
+    assert "missing.csv" not in output
+
+
+def test_upload_ingestion_needs_mapping_branch_logs_warning(monkeypatch, db_engine, tmp_path) -> None:
+    from app.ingestion import runner
+
+    stored = tmp_path / "statement.csv"
+    stored.write_text("header\nvalue\n", encoding="utf-8")
+    db = Session(db_engine)
+    job = ImportJob(
+        account_id=1,
+        platform="DBS",
+        original_filename="statement.csv",
+        stored_path=str(stored),
+        file_sha256="sha",
+        status="UPLOADED",
+    )
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+
+    monkeypatch.setattr(runner, "compute_format_signature", lambda *args, **kwargs: ("sig-safe", {"delimiter": ","}))
+    monkeypatch.setattr(runner, "lookup_parser_key", lambda *args, **kwargs: None)
+
+    logger, stream, handler, old_propagate, old_level = _capture_logger("capitalos.ingestion")
+    try:
+        report = runner.run_ingestion(db, int(job.id), str(tmp_path))
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+        db.close()
+
+    output = stream.getvalue()
+    assert report["status"] == "NEEDS_MAPPING"
+    assert "event=upload_ingest_needs_mapping" in output
+    assert "level=warning" in output
+    assert "format_signature=sig-safe" in output
+    assert "statement.csv" not in output
 
 
 def test_rag_query_log_attaches_active_request_id(db_engine) -> None:
