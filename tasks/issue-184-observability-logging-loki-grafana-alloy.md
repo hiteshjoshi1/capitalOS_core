@@ -85,6 +85,12 @@
 - Do not add custom secrets to committed env files.
 - Do not add app log payload changes in this phase; redaction and log format are handled by Issue 185.
 
+## How To Test
+- Run `make observability-up` and confirm Loki, Grafana, and Alloy containers start.
+- Run `make observability-smoke` and confirm it finds the unique `/health` smoke request in Loki with a non-zero result count.
+- Run `make api-rebuild`, `make test-backend`, and `make api-smoke` and confirm all pass.
+- Open Grafana locally from `make grafana-url` and confirm the Loki datasource is provisioned.
+
 ## Acceptance Criteria
 - [ ] `config/observability.env.example` exists and includes `LOKI_RETENTION_PERIOD=15d`.
 - [ ] `make observability-up` starts Loki, Grafana, and Alloy locally.

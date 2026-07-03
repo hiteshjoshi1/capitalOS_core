@@ -75,6 +75,13 @@
 - Unit test redaction for tokens, cookies, Authorization headers, IBKR values, and API keys.
 - Focused API test for `/health` or a low-risk endpoint showing request log fields are emitted.
 
+## How To Test
+- Run `make api-rebuild`, `make contract-backend`, `make test-backend`, and `make api-smoke` and confirm all pass.
+- Run focused backend logging tests for logfmt formatting, request ID middleware, request context propagation, logger normalization, and redaction.
+- Call `curl -i http://localhost:8000/health` and confirm the response includes `X-Request-ID`.
+- Run `make api-logs` or `docker logs capitalos-api` and confirm the `/health` request emits a readable logfmt request line with `event=http_request`, method, path or route, status, duration, level, logger, and request_id.
+- If Issue 184 observability is running, query Loki by the returned request ID and confirm the request log is found.
+
 ## Acceptance Criteria
 - [ ] API request logs are emitted as readable logfmt-style key-value lines.
 - [ ] Existing Python loggers continue to work without rewriting every module.

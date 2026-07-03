@@ -116,6 +116,12 @@
 - Unit test sampling never samples warnings/errors.
 - Smoke check against Loki/Grafana when the issue 184 stack is running.
 
+## How To Test
+- Run `make api-rebuild`, `make contract-backend`, `make test-backend`, and `make api-smoke` and confirm all pass.
+- Run focused backend tests for job context propagation, lifecycle log fields, slow-query redaction, and sampling behavior.
+- With Issue 184 observability running, trigger representative job and slow-query paths, then query Loki by `job_id` or event name and confirm matching logfmt entries are found.
+- Open Grafana locally and confirm saved queries or dashboards exist for API errors, slow DB queries, IBKR Flex, quote refreshes, uploads, snapshots, and RAG ingestion failures.
+
 ## Acceptance Criteria
 - [ ] Background scheduler logs include a per-run `job_id` for IBKR Flex, quote refresh, upload ingestion, snapshot, and RAG ingestion jobs.
 - [ ] Job lifecycle events use stable event names and include duration, status, rows/counts where available, provider/platform where relevant, and error class on failure.

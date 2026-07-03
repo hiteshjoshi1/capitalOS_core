@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 
 IMMUTABLE_END = "<!-- IMMUTABLE_PLAN_END -->"
 MACHINE_START = "<!-- MACHINE_RENDERED_START -->"
 MACHINE_END = "<!-- MACHINE_RENDERED_END -->"
+REQUIRED_TEST_SECTIONS = ("How To Test", "Verification Plan")
 
 
 DEFAULT_TEMPLATE = """# Issue {issue_id}: {title}
@@ -25,6 +27,9 @@ DEFAULT_TEMPLATE = """# Issue {issue_id}: {title}
 
 ## Acceptance Criteria
 - Add concrete acceptance criteria here.
+
+## How To Test
+- List exact commands and expected observable results.
 
 {immutable_end}
 
@@ -69,12 +74,31 @@ class TaskMarkdownService:
         content = self.read(task_file)
         if IMMUTABLE_END not in content:
             raise RuntimeError(f"Missing required immutable marker: {IMMUTABLE_END}")
+        self.ensure_test_instructions(task_file, content)
         if MACHINE_START not in content or MACHINE_END not in content:
             updated = self.replace_machine_rendered_region(
                 content,
                 "## Execution Journal\n_Not rendered yet._",
             )
             self.write(task_file, updated)
+
+    def ensure_test_instructions(self, task_file: str, content: str | None = None) -> None:
+        if content is None:
+            content = self.read(task_file)
+        marker_pattern = rf"(?m)^[ \t]*{re.escape(IMMUTABLE_END)}[ \t]*$"
+        marker_match = re.search(marker_pattern, content)
+        if marker_match is None:
+            raise RuntimeError(f"Missing immutable marker: {IMMUTABLE_END}")
+        immutable_content = content[: marker_match.start()]
+        section_options = "|".join(re.escape(section) for section in REQUIRED_TEST_SECTIONS)
+        section_pattern = rf"(?m)^## ({section_options})[ \t]*$"
+        if re.search(section_pattern, immutable_content):
+            return
+        raise RuntimeError(
+            "Missing required task test instructions in "
+            f"{task_file}: add a `## How To Test` or `## Verification Plan` "
+            f"section before `{IMMUTABLE_END}`."
+        )
 
     def immutable_region(self, content: str) -> str:
         if IMMUTABLE_END not in content:
