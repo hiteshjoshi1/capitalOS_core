@@ -11,6 +11,10 @@
 - [ ] Criterion 1
 - [ ] Criterion 2
 
+## How To Test
+- Run `make <target>` and confirm `<expected result>`.
+- Run any focused curl/UI checks needed for this task and confirm `<expected observable result>`.
+
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist

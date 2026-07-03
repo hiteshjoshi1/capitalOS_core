@@ -25,6 +25,9 @@ def make_task_file(tmp_path: Path) -> str:
 ## Acceptance Criteria
 - Test acceptance criteria
 
+## How To Test
+- Run `make orch-test` and confirm this mocked flow passes.
+
 ## Human Approval Gate
 - [ ] Approved for implementation
 

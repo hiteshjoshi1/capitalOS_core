@@ -1178,10 +1178,13 @@ resolve_plan_task_file_output() {
 
 validate_generated_task_file_content() {
   local content="$1"
+  local immutable_content
+  immutable_content="$(awk '/<!-- IMMUTABLE_PLAN_END -->/{exit} {print}' <<<"$content")"
   grep -Eq '^# Issue [0-9]+:' <<<"$content" || return 1
   grep -q '^## Objective' <<<"$content" || return 1
   grep -q '^## Architecture Decisions' <<<"$content" || return 1
   grep -q '^## Acceptance Criteria' <<<"$content" || return 1
+  grep -Eq '^## (How To Test|Verification Plan)[[:space:]]*$' <<<"$immutable_content" || return 1
   grep -q '^## Task Checklist' <<<"$content" || return 1
   grep -q '^## Human Rework Input \(Mutable\)' <<<"$content" || return 1
   grep -q '<!-- IMMUTABLE_PLAN_END -->' <<<"$content" || return 1
@@ -1790,6 +1793,7 @@ Requirements:
    - Risks
    - Open Questions
    - Acceptance Criteria
+   - How To Test (or Verification Plan) with exact commands and expected observable results
    - Task Checklist
    - Workflow Commands (exact commands with TASK=$TASK_FILE)
    - Implementation Reasoning Addendum (Codex Mutable)
@@ -1798,7 +1802,7 @@ Requirements:
    - Human Rework Input (Mutable)
    - Retry Log (Max 3)
    - Automation Log (Mutable)
-2) Keep marker exactly: <!-- IMMUTABLE_PLAN_END -->
+2) Keep marker exactly: <!-- IMMUTABLE_PLAN_END -->, with How To Test or Verification Plan before it.
 3) Keep output deterministic and scoped to requested feature.
 4) Do not edit files directly; only return final markdown content between markers.
 5) The Task Checklist must contain only actionable implementation items. Mark reviewer-only or post-ship items with HUMAN_ONLY: or POST_SHIP: prefixes.
