@@ -4,14 +4,17 @@ import contextvars
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import string
 import sys
 import time
 from collections.abc import Mapping
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -20,6 +23,10 @@ _REQUEST_ID_MAX_LENGTH = 128
 _REQUEST_ID_SAFE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _request_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "capitalos_request_id",
+    default=None,
+)
+_job_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "capitalos_job_id",
     default=None,
 )
 _old_record_factory = logging.getLogRecordFactory()
@@ -128,6 +135,53 @@ def reset_request_id(token: contextvars.Token[str | None]) -> None:
     _request_id_var.reset(token)
 
 
+def generate_job_id() -> str:
+    return str(uuid4())
+
+
+def get_job_id() -> str | None:
+    return _job_id_var.get()
+
+
+def bind_job_id(job_id: str | None) -> contextvars.Token[str | None]:
+    return _job_id_var.set(job_id)
+
+
+def reset_job_id(token: contextvars.Token[str | None]) -> None:
+    _job_id_var.reset(token)
+
+
+@contextmanager
+def job_context(job_id: str | None = None):
+    token: contextvars.Token[str | None] | None = None
+    if get_job_id() is None:
+        token = bind_job_id(job_id or generate_job_id())
+    try:
+        yield get_job_id()
+    finally:
+        if token is not None:
+            reset_job_id(token)
+
+
+def high_frequency_log_enabled(level: int | str = logging.INFO, rate: float | None = None) -> bool:
+    if isinstance(level, str):
+        level_no = logging._checkLevel(level.upper())
+    else:
+        level_no = int(level)
+    if level_no >= logging.WARNING:
+        return True
+    sample_rate = log_sample_rate_high_freq() if rate is None else rate
+    return random.random() < max(0.0, min(sample_rate, 1.0))
+
+
+def log_sample_rate_high_freq() -> float:
+    raw = os.getenv("LOG_SAMPLE_RATE_HIGH_FREQ", "0.10")
+    try:
+        return float(raw)
+    except ValueError:
+        return 0.10
+
+
 def normalize_logger_name(name: str) -> str:
     if name.startswith("capitalos.") or name == "capitalos":
         return name
@@ -206,6 +260,9 @@ class LogfmtFormatter(logging.Formatter):
         request_id = getattr(record, "request_id", None) or get_request_id()
         if request_id:
             fields["request_id"] = request_id
+        job_id = getattr(record, "job_id", None) or get_job_id()
+        if job_id:
+            fields["job_id"] = job_id
         for key, value in self._extra_fields(record).items():
             if key not in fields and value is not None:
                 fields[key] = value

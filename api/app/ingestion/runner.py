@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import shutil
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_job_id, job_context
 from app.ingestion.parsers import ParseResult
 from app.ingestion.parsers.citi_credit_card_csv_v1 import parse_citi_credit_card_csv
 from app.ingestion.signature import compute_format_signature
@@ -30,6 +33,8 @@ from app.portfolio.upload_canonical import (
     run_upload_balance_canonical_adapter,
 )
 
+logger = logging.getLogger("capitalos.ingestion")
+
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "ibkr_activity_csv_v1": ("csv", parse_ibkr_activity_csv),
     "dbs_transaction_history_csv_v1": ("csv", parse_dbs_transaction_history_csv),
@@ -48,6 +53,47 @@ CSV_PARSERS = {
 
 def _now() -> datetime:
     return datetime.now(tz=timezone.utc)
+
+
+def _reason_category(payload: dict) -> str | None:
+    if payload.get("error_class"):
+        return str(payload["error_class"])
+    error = str(payload.get("error_message") or "").strip()
+    if not error:
+        return None
+    return error.split(":", 1)[0].strip().lower().replace(" ", "_")[:80]
+
+
+def _log_ingestion_result(payload: dict, duration_ms: int) -> None:
+    status = str(payload.get("status") or "")
+    if status == "IMPORTED":
+        event = "upload_ingest_succeeded"
+        level = logger.info
+    elif status == "NEEDS_MAPPING":
+        event = "upload_ingest_needs_mapping"
+        level = logger.warning
+    elif status == "FAILED":
+        event = "upload_ingest_failed"
+        level = logger.warning
+    else:
+        return
+
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    extra = {
+        "event": event,
+        "status": status,
+        "job_db_id": payload.get("job_id"),
+        "platform": payload.get("platform"),
+        "parser_key": payload.get("parser_key"),
+        "format_signature": payload.get("format_signature"),
+        "rows": counts.get("rows_total"),
+        "inserted": counts.get("transactions_inserted") or counts.get("canonical_positions_written") or counts.get("canonical_balances_written"),
+        "skipped": counts.get("duplicates_skipped"),
+        "duration_ms": duration_ms,
+        "error_class": payload.get("error_class"),
+        "reason": _reason_category(payload),
+    }
+    level(event, extra={key: value for key, value in extra.items() if value is not None})
 
 
 def _sha256_file(file_path: str) -> str:
@@ -215,8 +261,29 @@ def create_import_job(db: Session, account_id: int, platform: str, original_file
 
 
 def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
+    context = job_context() if get_job_id() is None else None
+    if context is not None:
+        context.__enter__()
+    started = time.perf_counter()
+    try:
+        return _run_ingestion_with_context(db, job_id, data_dir, started)
+    finally:
+        if context is not None:
+            context.__exit__(None, None, None)
+
+
+def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started: float) -> dict:
     job = db.query(ImportJob).filter(ImportJob.id == job_id).one()
     report_path = os.path.join(data_dir, "reports", f"{job.id}.json")
+    logger.info(
+        "upload_ingest_started",
+        extra={
+            "event": "upload_ingest_started",
+            "job_db_id": job.id,
+            "platform": job.platform,
+            "status": job.status,
+        },
+    )
 
     def write_and_return(payload: dict) -> dict:
         write_report(report_path, payload)
@@ -224,6 +291,7 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
         job.updated_at = _now()
         db.add(job)
         db.commit()
+        _log_ingestion_result(payload, int((time.perf_counter() - started) * 1000))
         return payload
 
     try:
@@ -498,7 +566,7 @@ def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
     except Exception as exc:  # noqa: BLE001
         job.status = "FAILED"
         job.error_message = str(exc)
-        return write_and_return(_report(job, status="FAILED", error=str(exc)))
+        return write_and_return(_report(job, status="FAILED", error=str(exc), error_class=exc.__class__.__name__))
 
 
 def _get_account_user_id(db: Session, account_id: int) -> int:
@@ -522,6 +590,7 @@ def _report(
     preview: List[Dict[str, Any]] | None = None,
     parser_meta: dict | None = None,
     error: str | None = None,
+    error_class: str | None = None,
     canonical_result: dict | None = None,
     canonical_warning: str | None = None,
 ) -> dict:
@@ -551,6 +620,7 @@ def _report(
         "parser_meta": parser_meta or {},
         "signature_debug": signature_debug,
         "error_message": error,
+        "error_class": error_class,
         "canonical_result": canonical_result,
         "canonical_warning": canonical_warning,
     }

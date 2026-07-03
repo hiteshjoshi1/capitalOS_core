@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_job_id, job_context
 from app.models.rag import RagAuthor, RagChunk, RagDocument, RagEmbedding, RagIngestionJob, RagSource
 from app.rag.ingestion.events import record_source_event
 from app.rag.ingestion.chunker import Chunk, DocumentSection as ChunkerSection, chunk_structured, chunk_text
@@ -156,6 +158,35 @@ def _log_pdf_parser_path(source: RagSource, parse_result: ParseResult) -> None:
         parser_metadata.get("pdf_parser_fallback_used"),
         parser_metadata.get("pdf_parser_policy"),
     )
+
+
+def _log_rag_lifecycle(
+    event: str,
+    *,
+    source: RagSource,
+    job: RagIngestionJob,
+    duration_ms: int,
+    stats: dict[str, Any] | None = None,
+    error_class: str | None = None,
+    reason: str | None = None,
+) -> None:
+    stats = stats or {}
+    extra = {
+        "event": event,
+        "source_id": str(source.id),
+        "job_db_id": str(job.id),
+        "author_id": source.author_id,
+        "source_type": source.source_type,
+        "status": job.status,
+        "rows": stats.get("chunks"),
+        "inserted": stats.get("documents_created"),
+        "skipped": stats.get("documents_rejected"),
+        "duration_ms": duration_ms,
+        "error_class": error_class,
+        "reason": reason,
+    }
+    level = log.warning if event == "rag_ingest_failed" else log.info
+    level(event, extra={key: value for key, value in extra.items() if value is not None})
 
 
 def _parser_sections_to_chunker(parser_sections: list) -> list[ChunkerSection]:
@@ -795,6 +826,10 @@ def run_url_ingestion(
     On any error the job is marked 'failed' and the error message is stored.
     The caller is responsible for committing the session.
     """
+    context = job_context() if get_job_id() is None else None
+    if context is not None:
+        context.__enter__()
+    started = time.perf_counter()
     if existing_job is not None:
         from datetime import datetime, timezone
         job = existing_job
@@ -808,6 +843,12 @@ def run_url_ingestion(
         job.batch_id = batch_id
     source.status = "running"
     db.flush()
+    _log_rag_lifecycle(
+        "rag_ingest_started",
+        source=source,
+        job=job,
+        duration_ms=0,
+    )
 
     if source.user_id is not None:
         record_source_event(
@@ -846,6 +887,14 @@ def run_url_ingestion(
             source.last_ingested_at = _now()
 
         _close_job(db, job, success=success, stats=stats, error=error, failure_category=failure_category)
+        _log_rag_lifecycle(
+            "rag_ingest_succeeded" if success else "rag_ingest_failed",
+            source=source,
+            job=job,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            stats=stats,
+            reason=failure_category,
+        )
         if success and source.user_id is not None:
             record_source_event(
                 db,
@@ -877,6 +926,14 @@ def run_url_ingestion(
             error=str(exc),
             failure_category=_classify_failure(exc, source.source_type),
         )
+        _log_rag_lifecycle(
+            "rag_ingest_failed",
+            source=source,
+            job=job,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            error_class=exc.__class__.__name__,
+            reason=_classify_failure(exc, source.source_type),
+        )
         if source.user_id is not None:
             record_source_event(
                 db,
@@ -888,6 +945,8 @@ def run_url_ingestion(
                 batch_id=batch_id,
             )
 
+    if context is not None:
+        context.__exit__(None, None, None)
     return job
 
 
@@ -976,8 +1035,18 @@ def run_manual_ingestion(
     source.source_type should be set to 'manual' or 'text' before calling.
     The caller is responsible for committing the session.
     """
+    context = job_context() if get_job_id() is None else None
+    if context is not None:
+        context.__enter__()
+    started = time.perf_counter()
     job = _open_job(db, source)
     source.status = "running"
+    _log_rag_lifecycle(
+        "rag_ingest_started",
+        source=source,
+        job=job,
+        duration_ms=0,
+    )
 
     try:
         source.hash = _sha256(text)
@@ -1006,6 +1075,14 @@ def run_manual_ingestion(
             error=error,
             failure_category=failure_category,
         )
+        _log_rag_lifecycle(
+            "rag_ingest_succeeded" if success else "rag_ingest_failed",
+            source=source,
+            job=job,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            stats=stats,
+            reason=failure_category,
+        )
     except Exception as exc:
         log.exception("Manual ingestion failed for source %s", source.id)
         source.status = "failed"
@@ -1017,5 +1094,15 @@ def run_manual_ingestion(
             error=str(exc),
             failure_category=_classify_failure(exc, source.source_type),
         )
+        _log_rag_lifecycle(
+            "rag_ingest_failed",
+            source=source,
+            job=job,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            error_class=exc.__class__.__name__,
+            reason=_classify_failure(exc, source.source_type),
+        )
 
+    if context is not None:
+        context.__exit__(None, None, None)
     return job
