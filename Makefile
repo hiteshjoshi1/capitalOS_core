@@ -45,6 +45,7 @@ endif
 # ---- Helpers ----
 define require_task
 	@test -n "$(TASK)" || (echo "Usage: make $(1) TASK=tasks/issue-<id>-<slug>.md THREAD_ID=<thread-id>" && exit 2)
+	@test -f "$(TASK)" || (echo "Task file does not exist: $(TASK)" && exit 2)
 endef
 
 define require_thread
