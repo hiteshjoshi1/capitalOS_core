@@ -76,5 +76,5 @@ test("alert cards contain links to ingest page", async ({ page }) => {
 
   const ingestLinks = page.getByRole("link", { name: /Go to Ingest/i });
   await expect(ingestLinks.first()).toBeVisible();
-  await expect(ingestLinks.first()).toHaveAttribute("href", "/ingest");
+  await expect(ingestLinks.first()).toHaveAttribute("href", "/ingest?account_id=1");
 });

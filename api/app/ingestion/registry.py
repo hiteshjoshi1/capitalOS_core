@@ -3,6 +3,7 @@ from __future__ import annotations
 from sqlalchemy.orm import Session
 
 from app.models.parser_registry import ParserRegistry
+from app.ingestion.parsers.dbs_credit_card_csv_v1 import DBS_CREDIT_CARD_CSV_HEADERS
 from app.ingestion.parsers.uob_account_xls_v1 import UOB_ACCOUNT_XLS_HEADERS
 from app.ingestion.parsers.uob_credit_card_xls_v1 import UOB_CREDIT_CARD_XLS_HEADERS
 
@@ -41,10 +42,22 @@ def _has_ordered_header_subset(header: object, expected: tuple[str, ...]) -> boo
     return False
 
 
+def _has_dbs_credit_card_marker(header: object) -> bool:
+    normalized = _normalize_header(header)
+    if not normalized:
+        return False
+    joined = " ".join(normalized)
+    return "card transaction details for" in joined and "mastercard" in joined
+
+
 def _infer_parser_key(signature_debug: dict | None, platform_hint: str | None) -> str | None:
     header = signature_debug.get("header") if isinstance(signature_debug, dict) else None
     file_kind = signature_debug.get("file_kind") if isinstance(signature_debug, dict) else None
     platform_text = (platform_hint or "").strip().upper()
+    if file_kind == "flat_csv":
+        has_dbs_cc_header = _has_ordered_header_subset(header, DBS_CREDIT_CARD_CSV_HEADERS)
+        if has_dbs_cc_header or _has_dbs_credit_card_marker(header):
+            return "dbs_credit_card_csv_v1"
     # UOB bank statements are currently identified by this ordered header shape.
     # R6 showed platform labels are not reliable enough to be the gating factor.
     has_uob_header = _has_ordered_header_subset(header, UOB_ACCOUNT_XLS_HEADERS)

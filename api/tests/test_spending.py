@@ -185,6 +185,41 @@ def test_cash_flow_infers_signed_non_internal_transfer_rows(client: TestClient, 
     assert data["net"] == 5000.0
 
 
+def test_cash_flow_counts_rent_standing_instruction_as_expense(client: TestClient, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(701, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(7011, '2026-07-01 00:00:00+00:00', 701, 5000, 'INCOME', 'SGD', 'Salary', 'Employer', NULL), "
+                "(7012, '2026-07-04 00:00:00+00:00', 701, -3450, 'TRANSFER', 'SGD', 'Bank::GR', "
+                "'SI TO : YOAGARANI D REF:Rent 260704073204SI00274165', 'Payments or Collections via GIRO')"
+            )
+        )
+
+    summary_resp = client.get("/spending/summary?month=2026-07&base_currency=SGD")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    assert summary["income_total"] == 5000.0
+    assert summary["expense_total"] == 3450.0
+    assert summary["net"] == 1550.0
+    assert summary["savings_rate"] == 1550.0 / 5000.0
+
+    detail_resp = client.get("/spending/cash-flow-detail?month=2026-07&base_currency=SGD")
+    assert detail_resp.status_code == 200
+    expenses = detail_resp.json()["expenses"]["transactions"]
+    rent_tx = next(
+        item for item in expenses if item["merchant_counterparty"].startswith("SI TO : YOAGARANI D")
+    )
+    assert rent_tx["type"] == "TRANSFER"
+    assert rent_tx["base_amount"] == -3450.0
+
+
 def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, db_engine, seed_spending_data):
     with db_engine.begin() as conn:
         conn.execute(

@@ -229,7 +229,19 @@ def _is_non_operating_transfer_like(row) -> bool:
     return _is_explicit_source_transfer(row)
 
 
+def _is_rent_outflow(row) -> bool:
+    try:
+        amount = float(row.get("amount") or 0)
+    except (TypeError, ValueError):
+        amount = 0.0
+    if amount >= 0:
+        return False
+    return "rent" in _row_features(row)
+
+
 def _cash_flow_bucket(row) -> str | None:
+    if _is_rent_outflow(row):
+        return "expense"
     if _is_transfer_resolved_category(row) or _is_non_operating_transfer_like(row):
         return None
     if row["type"] in INCOME_TYPES:
