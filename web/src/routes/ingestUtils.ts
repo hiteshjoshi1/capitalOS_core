@@ -4,6 +4,7 @@ type SignatureDebug = { header?: unknown; file_kind?: unknown };
 const PLATFORM_PARSERS: Record<string, PlatformParserConfig> = {
   IBKR: { label: "Approve as IBKR", parserKey: "ibkr_activity_csv_v1" },
   DBS: { label: "Approve as DBS", parserKey: "dbs_transaction_history_csv_v1" },
+  DBS_CC: { label: "Approve as DBS CC", parserKey: "dbs_credit_card_csv_v1" },
   SHAREKHAN: { label: "Approve as Sharekhan", parserKey: "sharekhan_holdings_xls_v1" },
   DBS_VICKERS: { label: "Approve as DBS Vickers", parserKey: "dbs_vickers_holdings_xls_v1" },
   CITI: { label: "Approve as Citi CC", parserKey: "citi_credit_card_csv_v1" },
@@ -29,6 +30,17 @@ const UOB_CC_HEADERS = [
   "transaction amount(local)",
 ] as const;
 
+const DBS_CC_HEADERS = [
+  "transaction date",
+  "transaction posting date",
+  "transaction description",
+  "transaction type",
+  "payment type",
+  "transaction status",
+  "debit amount",
+  "credit amount",
+] as const;
+
 export type { PlatformParserConfig, SignatureDebug };
 
 export function hasOrderedHeaderSubset(header: unknown, expected: readonly string[]): boolean {
@@ -49,6 +61,12 @@ export function resolvePlatformParser(
   platform: string | undefined,
   signatureDebug: SignatureDebug | undefined,
 ): PlatformParserConfig | undefined {
+  if (
+    signatureDebug?.file_kind === "flat_csv" &&
+    (hasOrderedHeaderSubset(signatureDebug.header, DBS_CC_HEADERS) || hasDbsCreditCardMarker(signatureDebug.header))
+  ) {
+    return PLATFORM_PARSERS.DBS_CC;
+  }
   if (
     signatureDebug?.file_kind === "excel" &&
     hasOrderedHeaderSubset(signatureDebug.header, UOB_HEADERS)
@@ -74,4 +92,13 @@ export function resolvePlatformParser(
     return PLATFORM_PARSERS.UOB;
   }
   return PLATFORM_PARSERS[normalized];
+}
+
+function hasDbsCreditCardMarker(header: unknown): boolean {
+  if (!Array.isArray(header)) return false;
+  const joined = header
+    .map((value) => String(value).trim().toLowerCase())
+    .filter((value) => value && value !== "nan" && !value.startsWith("unnamed:"))
+    .join(" ");
+  return joined.includes("card transaction details for") && joined.includes("mastercard");
 }

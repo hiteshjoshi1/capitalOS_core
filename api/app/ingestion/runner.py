@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from app.core.logging import get_job_id, job_context
 from app.ingestion.parsers import ParseResult
 from app.ingestion.parsers.citi_credit_card_csv_v1 import parse_citi_credit_card_csv
+from app.ingestion.parsers.dbs_credit_card_csv_v1 import parse_dbs_credit_card_csv
 from app.ingestion.signature import compute_format_signature
 from app.ingestion.registry import lookup_parser_key
 from app.ingestion.validators import validate_transactions
@@ -37,6 +38,7 @@ logger = logging.getLogger("capitalos.ingestion")
 
 PARSER_REGISTRY: dict[str, tuple[str, Callable[..., ParseResult]]] = {
     "ibkr_activity_csv_v1": ("csv", parse_ibkr_activity_csv),
+    "dbs_credit_card_csv_v1": ("csv", parse_dbs_credit_card_csv),
     "dbs_transaction_history_csv_v1": ("csv", parse_dbs_transaction_history_csv),
     "ocbc_account_csv_v1": ("csv", parse_ocbc_account_csv),
     "sharekhan_holdings_xls_v1": ("excel", parse_sharekhan_holdings_xls),

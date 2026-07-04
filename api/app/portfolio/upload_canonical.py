@@ -66,6 +66,7 @@ PARSER_CANONICAL_REGISTRY: dict[str, str] = {
     "uob_account_xls_v1": "account_balance",
     "ocbc_account_csv_v1": "account_balance",
     "dbs_transaction_history_csv_v1": "account_balance",
+    "dbs_credit_card_csv_v1": "none",
     "uob_credit_card_xls_v1": "none",
     "citi_credit_card_csv_v1": "none",
 }

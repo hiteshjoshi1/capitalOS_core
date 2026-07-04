@@ -45,6 +45,12 @@ describe("Ingest helpers", () => {
       }),
     ).toEqual({ label: "Approve as UOB CC", parserKey: "uob_credit_card_xls_v1" });
     expect(
+      resolvePlatformParser(undefined, {
+        file_kind: "flat_csv",
+        header: ["card transaction details for:", "dbs/posb mastercard platinum 5520-3800-5921-2403"],
+      }),
+    ).toEqual({ label: "Approve as DBS CC", parserKey: "dbs_credit_card_csv_v1" });
+    expect(
       resolvePlatformParser("UOB Credit Card", undefined),
     ).toEqual({ label: "Approve as UOB CC", parserKey: "uob_credit_card_xls_v1" });
     expect(
