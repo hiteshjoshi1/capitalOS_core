@@ -134,3 +134,8 @@ _Human-readable next steps._
 
 ## Automation Log (Mutable)
 - 2026-07-04T00:00:00+08:00 - Created DBS credit-card CSV ingestion planning issue from fixture `data/fixtures/transaction_history_04072026_105429.csv`.
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->

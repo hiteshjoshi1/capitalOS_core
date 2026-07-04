@@ -61,3 +61,8 @@ _Human-readable next steps._
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->
