@@ -177,6 +177,16 @@ def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_eng
             ),
             {"account_id": account_id},
         ).mappings().all()
+        card_meta = db.execute(
+            text(
+                """
+                SELECT credit_limit, available_limit, available_limit_as_of
+                FROM credit_card_accounts
+                WHERE account_id = :account_id
+                """
+            ),
+            {"account_id": account_id},
+        ).mappings().one()
     finally:
         db.close()
 
@@ -189,3 +199,6 @@ def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_eng
     assert any(row["category"] == "CreditCard::Interest" for row in rows)
     assert any(row["category"] == "CreditCard::Fee" for row in rows)
     assert all(FULL_CARD_NUMBER not in str(row["notes"] or "") for row in rows)
+    assert float(card_meta["credit_limit"]) == 60000.0
+    assert float(card_meta["available_limit"]) == 59739.44
+    assert str(card_meta["available_limit_as_of"]).startswith("2026-07-04")

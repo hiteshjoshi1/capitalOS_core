@@ -541,6 +541,8 @@ def setup_db():
               card_name TEXT NOT NULL,
               issuer TEXT NOT NULL,
               credit_limit REAL NOT NULL,
+              available_limit REAL,
+              available_limit_as_of TIMESTAMP,
               statement_day INTEGER NOT NULL,
               due_day INTEGER NOT NULL
             )

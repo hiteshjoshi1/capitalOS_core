@@ -125,5 +125,137 @@ _Human-readable next steps._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `blocked`
+
+## Workflow Snapshot
+- latest_outcome: Implemented DBS credit-card current outstanding integration across ingestion metadata, Credit Cards, cash-flow, and net-worth/dashboard paths with targeted backend and frontend coverage.
+- next_action: Inspect deterministic gate failures, apply mitigations, then rerun the workflow.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.5`
+- latest_failed_checks: `test-backend`
+- retry_gate_pending: `no`
+- retry_detail: `test-backend` stopped after attempt 1/3: Code failure with no auto-fix available: tests/test_ingest_uob_cc.py:183: AssertionError
+- blocked_reason: Deterministic gates failed: test-backend
+- stopped_due_to: Verification remained red after the available automated recovery steps.
+
+## Active Requirements
+- Acceptance criterion: DBS credit-card account appears on Credit Cards after Issue 188 import.
+- Acceptance criterion: DBS card transactions appear on the Credit Cards detail page with correct signs and categories.
+- Acceptance criterion: Cash-flow pages include DBS card expenses and exclude DBS card payments as operating expenses.
+- Acceptance criterion: Net worth includes DBS credit-card liability exactly once when a current/outstanding value is available.
+- Acceptance criterion: DBS bank, DBS Vickers, and DBS credit-card surfaces remain distinguishable.
+- Acceptance criterion: Backend/API tests assert totals equal database-derived expected values.
+- Acceptance criterion: Frontend tests cover visible DBS card data rather than only shallow rendering.
+
+## Prepare
+Checked out `feature/issue-189-dbs-credit-card-pages-cashflow-networth-integration` from `main` and verified task file exists.
+
+## Plan Summary
+Persist optional DBS available-limit metadata, prefer credit_limit - available_limit for current card outstanding when imported as-of metadata exists, fall back to transaction-derived outstanding otherwise, add dashboard liability computation that avoids counting card balances as cash, and cover the affected API/UI surfaces with parity tests.
+
+### Architecture Decisions
+- Added optional available_limit and available_limit_as_of columns to credit_card_accounts instead of introducing a separate liabilities model.
+- Persist DBS available-limit metadata only for dbs_credit_card_csv_v1 imports when credit_limit, available_limit, and transactions_as_at are all present.
+- Credit-card current_due uses available-limit outstanding when current metadata exists; otherwise it uses transaction-derived outstanding including payments and credits.
+- Dashboard net worth treats credit-card outstanding as liabilities and skips credit-card account balance rows from cash to avoid double-counting.
+- Cash-flow operating logic remains separate from card liability logic: purchases, fees, taxes, and interest are expenses; payments remain transfers.
+
+### Acceptance Criteria
+- DBS credit-card account appears on Credit Cards after Issue 188 import.
+- DBS card transactions appear on the Credit Cards detail page with correct signs and categories.
+- Cash-flow pages include DBS card expenses and exclude DBS card payments as operating expenses.
+- Net worth includes DBS credit-card liability exactly once when a current/outstanding value is available.
+- DBS bank, DBS Vickers, and DBS credit-card surfaces remain distinguishable.
+- Backend/API tests assert totals equal database-derived expected values.
+- Frontend tests cover visible DBS card data rather than only shallow rendering.
+
+### Planned Paths
+- `api/app/ingestion`
+- `api/app/models`
+- `api/app/routers`
+- `api/app/schemas`
+- `api/tests`
+- `migrations`
+- `web/src`
+- `tasks`
+
+## Build Summary
+Implemented DBS credit-card current outstanding integration across ingestion metadata, Credit Cards, cash-flow, and net-worth/dashboard paths with targeted backend and frontend coverage.
+
+### Changed Files
+- `api/app/ingestion/runner.py`
+- `api/app/models/credit_card.py`
+- `api/app/routers/dashboard.py`
+- `api/app/routers/spending.py`
+- `api/app/schemas/spending.py`
+- `api/tests/conftest.py`
+- `api/tests/test_dashboard.py`
+- `api/tests/test_ingest_dbs_credit_card.py`
+- `api/tests/test_spending.py`
+- `migrations/060_credit_card_available_limit.sql`
+- `tasks/issue-189-dbs-credit-card-pages-cashflow-networth-integration.md`
+- `web/src/__tests__/CashFlowDetail.test.tsx`
+- `web/src/__tests__/CreditCards.test.tsx`
+- `web/src/__tests__/WealthOverview.test.tsx`
+- `web/src/lib/api.ts`
+- `web/src/routes/CreditCards.tsx`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: FAIL (exit 2)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented DBS credit-card current outstanding integration across ingestion metadata, Credit Cards, cash-flow, and net-worth/dashboard paths with targeted backend and frontend coverage.
+
+- semantic_intent_achieved: `True`
+- provider_model: `codex/gpt-5.5`
+
+### Semantic Checks
+- `pass` DBS credit-card account appears on Credit Cards after Issue 188 import.: api/tests/test_spending.py asserts /spending/credit-cards returns only DBS Credit Card with DBS/POSB MasterCard Platinum metadata.
+- `pass` DBS card transactions appear on the Credit Cards detail page with correct signs and categories.: api/tests/test_spending.py asserts detail transactions include EXPENSE, FEE, TAX, INTEREST, TRANSFER with payment amount positive and top purchases limited to purchase rows.
+- `pass` Cash-flow pages include DBS card expenses and exclude DBS card payments as operating expenses.: api/tests/test_spending.py derives expected expenses from SQL charge rows and asserts cash-flow expense transactions exclude TRANSFER rows.
+- `pass` Net worth includes DBS credit-card liability exactly once when a current/outstanding value is available.: api/tests/test_dashboard.py asserts net-worth liabilities equal credit_limit - available_limit while a credit-card balance snapshot is skipped from cash.
+- `pass` DBS bank, DBS Vickers, and DBS credit-card surfaces remain distinguishable.: api/tests/test_spending.py seeds DBS bank, DBS Vickers broker, and DBS credit-card accounts and asserts card endpoints only include the credit-card account.
+- `pass` Backend/API tests assert totals equal database-derived expected values.: api/tests/test_spending.py and api/tests/test_dashboard.py compute expected expense/outstanding/liability values via SQL and compare API/helper totals to those values.
+- `pass` Frontend tests cover visible DBS card data rather than only shallow rendering.: CreditCards, CashFlowDetail, and WealthOverview tests assert visible DBS card, DBS card expense, and liability text.
+
+### Risk Flags
+- Local Postgres collation-version warning observed during db-migrate; command passed.
+- Backend ruff and mypy were skipped by existing Makefile targets because the tools are not installed in the API image.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Retry Log
+- test-backend: attempt 1/3, class=code, exit=2, log=.task-flow/failures/20260704T091058Z_test-backend_attempt1.log, notes=Code failure with no auto-fix available: tests/test_ingest_uob_cc.py:183: AssertionError
+
+## Blockers
+- Deterministic gates failed: test-backend
+
+## Permanently Failed / Gave Up
+- Stop reason: Deterministic gates failed: test-backend
+- Attempted mitigations:
+- mitigation: Code failure with no auto-fix available: tests/test_ingest_uob_cc.py:183: AssertionError
+- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.
 <!-- MACHINE_RENDERED_END -->

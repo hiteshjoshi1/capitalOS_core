@@ -542,6 +542,9 @@ export type CreditCardSummary = {
     card_name: string;
     issuer: string;
     credit_limit: number;
+    available_limit?: number | null;
+    available_limit_as_of?: string | null;
+    current_due_source?: string;
     statement_day: number;
     due_day: number;
     due_date: string;

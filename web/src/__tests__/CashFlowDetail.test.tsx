@@ -318,6 +318,49 @@ describe("CashFlowDetail route", () => {
     expect(screen.getByText("Expense transactions (2)")).toBeInTheDocument();
   });
 
+  it("renders visible DBS credit card expenses without payment transfers", async () => {
+    mockApi.cashFlowDetail.mockResolvedValueOnce({
+      ...detailFixture,
+      expense_total: 8820,
+      net: 3660,
+      expenses: {
+        ...detailFixture.expenses,
+        total: 8820,
+        transaction_count: 3,
+        transactions: [
+          ...detailFixture.expenses.transactions,
+          {
+            transaction_id: 44,
+            ts: "2026-02-16T10:00:00+00:00",
+            account_id: 11,
+            account_name: "DBS Credit Card",
+            account_type: "CREDIT_CARD",
+            amount: -110,
+            currency: "SGD",
+            base_amount: -110,
+            type: "EXPENSE",
+            raw_category: "CreditCard::Purchase",
+            resolved_category: "CreditCard::Purchase",
+            resolved_category_id: null,
+            category_source: "parser",
+            merchant_counterparty: "SHENG SIONG",
+            notes: "card_last4=2403",
+          },
+        ],
+      },
+    });
+
+    renderRoute("/cash-flow/expenses");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Expenses" })).toBeInTheDocument();
+    expect(screen.getByText("Expense transactions (3)")).toBeInTheDocument();
+    expect(screen.getByText("DBS Credit Card")).toBeInTheDocument();
+    expect(screen.getByText("CREDIT_CARD")).toBeInTheDocument();
+    expect(screen.getByText("SHENG SIONG")).toBeInTheDocument();
+    expect(screen.getAllByText("CreditCard::Purchase").length).toBeGreaterThan(0);
+    expect(screen.queryByText("GIRO PAYMENT DBS CREDIT CARD")).not.toBeInTheDocument();
+  });
+
   it("degrades the reconciliation card when month-boundary snapshots are unavailable", async () => {
     mockApi.cashFlowDetail.mockResolvedValueOnce(staleBoundaryDetailFixture);
 

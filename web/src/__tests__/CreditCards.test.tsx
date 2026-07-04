@@ -26,26 +26,29 @@ function currentMonthYYYYMM() {
 const detailFixture: CreditCardDetail = {
   month: "2026-02",
   base_currency: "SGD",
-  total_spend: 2990,
+  total_spend: 260.56,
   cards: [
     {
       account_id: 11,
       account_name: "DBS Credit Card",
-      card_name: "DBS Altitude",
+      card_name: "DBS/POSB MasterCard Platinum (2403)",
       issuer: "DBS",
-      credit_limit: 20000,
+      credit_limit: 60000,
+      available_limit: 59739.44,
+      available_limit_as_of: "2026-07-04T00:00:00+00:00",
+      current_due_source: "available_limit",
       statement_day: 20,
       due_day: 25,
-      due_date: "2026-02-25",
-      current_due: 2990,
-      utilization: 0.1495,
+      due_date: "2026-07-25",
+      current_due: 260.56,
+      utilization: 260.56 / 60000,
     },
   ],
   transactions: [
     {
       account_id: 11,
       account_name: "DBS Credit Card",
-      card_name: "DBS Altitude",
+      card_name: "DBS/POSB MasterCard Platinum (2403)",
       issuer: "DBS",
       ts: "2026-02-22T12:00:00+00:00",
       description: "Netflix",
@@ -58,7 +61,7 @@ const detailFixture: CreditCardDetail = {
     {
       account_id: 11,
       account_name: "DBS Credit Card",
-      card_name: "DBS Altitude",
+      card_name: "DBS/POSB MasterCard Platinum (2403)",
       issuer: "DBS",
       ts: "2026-02-20T12:00:00+00:00",
       description: "Hawker Center",
@@ -73,7 +76,7 @@ const detailFixture: CreditCardDetail = {
     {
       account_id: 11,
       account_name: "DBS Credit Card",
-      card_name: "DBS Altitude",
+      card_name: "DBS/POSB MasterCard Platinum (2403)",
       issuer: "DBS",
       ts: "2026-02-20T12:00:00+00:00",
       description: "Hawker Center",
@@ -86,7 +89,7 @@ const detailFixture: CreditCardDetail = {
     {
       account_id: 11,
       account_name: "DBS Credit Card",
-      card_name: "DBS Altitude",
+      card_name: "DBS/POSB MasterCard Platinum (2403)",
       issuer: "DBS",
       ts: "2026-02-22T12:00:00+00:00",
       description: "Netflix",
@@ -101,7 +104,7 @@ const detailFixture: CreditCardDetail = {
     {
       account_id: 11,
       account_name: "DBS Credit Card",
-      card_name: "DBS Altitude",
+      card_name: "DBS/POSB MasterCard Platinum (2403)",
       issuer: "DBS",
       merchant_counterparty: "Netflix",
       months_present: 3,
@@ -138,6 +141,8 @@ describe("CreditCards route", () => {
     expect(screen.getByText("Top Purchases")).toBeInTheDocument();
     expect(screen.getByText("Recurring Payments")).toBeInTheDocument();
     expect(screen.getByText("All Transactions")).toBeInTheDocument();
+    expect(screen.getAllByText(/DBS\/POSB MasterCard Platinum \(2403\)/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Outstanding from available limit as of 2026-07-04/)).toBeInTheDocument();
     expect(screen.getAllByText("Netflix").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
   });

@@ -152,6 +152,39 @@ def _latest_transaction_ts(parsed: list[dict[str, Any]]) -> datetime | None:
     return max(normalized) if normalized else None
 
 
+def _persist_credit_card_limit_metadata(
+    db: Session,
+    *,
+    account_id: int,
+    parser_key: str | None,
+    parser_meta: dict[str, Any],
+) -> None:
+    if parser_key != "dbs_credit_card_csv_v1":
+        return
+    credit_limit = parser_meta.get("credit_limit")
+    available_limit = parser_meta.get("available_limit")
+    available_limit_as_of = _normalize_datetime(parser_meta.get("transactions_as_at"))
+    if credit_limit is None or available_limit is None or available_limit_as_of is None:
+        return
+    db.execute(
+        text(
+            """
+            UPDATE credit_card_accounts
+            SET credit_limit = :credit_limit,
+                available_limit = :available_limit,
+                available_limit_as_of = :available_limit_as_of
+            WHERE account_id = :account_id
+            """
+        ),
+        {
+            "account_id": account_id,
+            "credit_limit": credit_limit,
+            "available_limit": available_limit,
+            "available_limit_as_of": available_limit_as_of,
+        },
+    )
+
+
 def _resolve_position_as_of(pos: Dict[str, Any], parser_meta: Dict[str, Any], parsed: list[dict[str, Any]]) -> datetime:
     explicit = _normalize_datetime(pos.get("as_of"))
     if explicit is not None:
@@ -371,6 +404,12 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
         positions = result.positions
         section_counts = result.section_counts
         parser_meta = result.parser_meta
+        _persist_credit_card_limit_metadata(
+            db,
+            account_id=int(job.account_id),
+            parser_key=parser_key,
+            parser_meta=parser_meta,
+        )
 
         warnings = validate_transactions(parsed)
         job.status = "VALIDATED"
