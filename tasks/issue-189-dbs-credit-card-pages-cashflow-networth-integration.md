@@ -126,18 +126,15 @@ _Human-readable next steps._
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
 **Current Stage**: `deterministic_gates`
-**Workflow Status**: `blocked`
+**Workflow Status**: `waiting_for_human`
 
 ## Workflow Snapshot
 - latest_outcome: Implemented DBS credit-card current outstanding integration across ingestion metadata, Credit Cards, cash-flow, and net-worth/dashboard paths with targeted backend and frontend coverage.
-- next_action: Inspect deterministic gate failures, apply mitigations, then rerun the workflow.
+- next_action: All deterministic gates passed. Review the changes in the working tree, then run `make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR.
 - pipeline_version: `v3`
 - provider_model: `codex/gpt-5.5`
-- latest_failed_checks: `test-backend`
 - retry_gate_pending: `no`
 - retry_detail: `test-backend` stopped after attempt 1/3: Code failure with no auto-fix available: tests/test_ingest_uob_cc.py:183: AssertionError
-- blocked_reason: Deterministic gates failed: test-backend
-- stopped_due_to: Verification remained red after the available automated recovery steps.
 
 ## Active Requirements
 - Acceptance criterion: DBS credit-card account appears on Credit Cards after Issue 188 import.
@@ -184,27 +181,12 @@ Persist optional DBS available-limit metadata, prefer credit_limit - available_l
 Implemented DBS credit-card current outstanding integration across ingestion metadata, Credit Cards, cash-flow, and net-worth/dashboard paths with targeted backend and frontend coverage.
 
 ### Changed Files
-- `api/app/ingestion/runner.py`
-- `api/app/models/credit_card.py`
-- `api/app/routers/dashboard.py`
-- `api/app/routers/spending.py`
-- `api/app/schemas/spending.py`
-- `api/tests/conftest.py`
-- `api/tests/test_dashboard.py`
-- `api/tests/test_ingest_dbs_credit_card.py`
-- `api/tests/test_spending.py`
-- `migrations/060_credit_card_available_limit.sql`
 - `tasks/issue-189-dbs-credit-card-pages-cashflow-networth-integration.md`
-- `web/src/__tests__/CashFlowDetail.test.tsx`
-- `web/src/__tests__/CreditCards.test.tsx`
-- `web/src/__tests__/WealthOverview.test.tsx`
-- `web/src/lib/api.ts`
-- `web/src/routes/CreditCards.tsx`
 
 ## Latest Verification
 - api-rebuild: PASS (exit 0)
 - contract-backend: PASS (exit 0)
-- test-backend: FAIL (exit 2)
+- test-backend: PASS (exit 0)
 - api-smoke: PASS (exit 0)
 - lint: PASS (exit 0)
 - typecheck: PASS (exit 0)
@@ -249,13 +231,4 @@ _No rework cycles yet._
 
 ## Retry Log
 - test-backend: attempt 1/3, class=code, exit=2, log=.task-flow/failures/20260704T091058Z_test-backend_attempt1.log, notes=Code failure with no auto-fix available: tests/test_ingest_uob_cc.py:183: AssertionError
-
-## Blockers
-- Deterministic gates failed: test-backend
-
-## Permanently Failed / Gave Up
-- Stop reason: Deterministic gates failed: test-backend
-- Attempted mitigations:
-- mitigation: Code failure with no auto-fix available: tests/test_ingest_uob_cc.py:183: AssertionError
-- Suggested human action: Fix the cited blocker and rerun the workflow on the same thread.
 <!-- MACHINE_RENDERED_END -->
