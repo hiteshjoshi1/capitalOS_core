@@ -139,6 +139,25 @@ describe("Ingest", () => {
     expect(screen.getByRole("link", { name: "Create account" })).toHaveAttribute("href", "/accounts/new");
   });
 
+  it("preselects the account from the alert account_id query parameter", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 21, name: "DBS Savings", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" },
+      { id: 22, name: "OCBC 360", platform: "OCBC", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/ingest?account_id=22"]}>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    const accountSelect = await screen.findByLabelText("Account");
+    expect(accountSelect).toHaveValue("22");
+  });
+
   it("surfaces string-based errors from upload, registration, and load-job paths", async () => {
     mockApi.accounts.mockResolvedValueOnce([
       { id: 8, name: "Test", platform: "TEST", account_type: "BANK", currency: "SGD", country: "SG" },

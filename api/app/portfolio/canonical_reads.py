@@ -250,6 +250,12 @@ def canonical_position_rows_by_legacy_account(
           WHERE symbol IS NOT NULL AND symbol <> ''
           GROUP BY LOWER(symbol)
         ),
+        norm_sym_asset AS (
+          SELECT LOWER(REPLACE(REPLACE(REPLACE(symbol, ' ', ''), '-', ''), '.', '')) AS norm_sym, MIN(id) AS asset_id
+          FROM assets
+          WHERE symbol IS NOT NULL AND symbol <> ''
+          GROUP BY LOWER(REPLACE(REPLACE(REPLACE(symbol, ' ', ''), '-', ''), '.', ''))
+        ),
         map_exchange AS (
           SELECT m.asset_id, MIN(UPPER(m.exchange_code)) AS exchange_code
           FROM market_symbol_map m
@@ -261,13 +267,19 @@ def canonical_position_rows_by_legacy_account(
           ba.legacy_account_id AS account_id,
           ba.base_currency AS account_base_currency,
           acc.currency AS account_currency,
-          COALESCE(a.id, a_sym.id)  AS asset_id,
-          bi.symbol                  AS symbol,
-          COALESCE(a.name, a_sym.name, bi.description, bi.symbol) AS name,
-          COALESCE(CAST(a.asset_class AS TEXT), CAST(a_sym.asset_class AS TEXT), bi.security_type, 'STOCK') AS asset_class,
-          COALESCE(a.quote_currency, a_sym.quote_currency, bi.currency) AS quote_currency,
-          COALESCE(a.home_country, a_sym.home_country) AS home_country,
-          COALESCE(mx.exchange_code, mx_sym.exchange_code) AS exchange_code,
+          COALESCE(a.id, a_sym.id, a_norm.id)  AS asset_id,
+          COALESCE(a.symbol, a_sym.symbol, a_norm.symbol, bi.symbol) AS symbol,
+          COALESCE(a.name, a_sym.name, a_norm.name, bi.description, bi.symbol) AS name,
+          CASE
+            WHEN COALESCE(CAST(a.asset_class AS TEXT), CAST(a_sym.asset_class AS TEXT), CAST(a_norm.asset_class AS TEXT)) IS NOT NULL
+              THEN COALESCE(CAST(a.asset_class AS TEXT), CAST(a_sym.asset_class AS TEXT), CAST(a_norm.asset_class AS TEXT))
+            WHEN UPPER(COALESCE(bi.security_type, '')) IN ('STK', 'STOCK') THEN 'STOCK'
+            WHEN UPPER(COALESCE(bi.security_type, '')) IN ('FUND', 'ETF', 'MF') THEN 'FUND'
+            ELSE COALESCE(NULLIF(UPPER(bi.security_type), ''), 'STOCK')
+          END AS asset_class,
+          COALESCE(a.quote_currency, a_sym.quote_currency, a_norm.quote_currency, bi.currency) AS quote_currency,
+          COALESCE(a.home_country, a_sym.home_country, a_norm.home_country) AS home_country,
+          COALESCE(mx.exchange_code, mx_sym.exchange_code, mx_norm.exchange_code) AS exchange_code,
           COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
           COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
           COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
@@ -321,8 +333,11 @@ def canonical_position_rows_by_legacy_account(
         LEFT JOIN assets a ON a.id = bi.asset_id
         LEFT JOIN sym_asset sa ON sa.sym = LOWER(bi.symbol)
         LEFT JOIN assets a_sym ON a_sym.id = sa.asset_id AND bi.asset_id IS NULL
+        LEFT JOIN norm_sym_asset nsa ON nsa.norm_sym = LOWER(REPLACE(REPLACE(REPLACE(bi.symbol, ' ', ''), '-', ''), '.', ''))
+        LEFT JOIN assets a_norm ON a_norm.id = nsa.asset_id AND bi.asset_id IS NULL AND a_sym.id IS NULL
         LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         LEFT JOIN map_exchange mx_sym ON mx_sym.asset_id = a_sym.id AND bi.asset_id IS NULL
+        LEFT JOIN map_exchange mx_norm ON mx_norm.asset_id = a_norm.id AND bi.asset_id IS NULL AND a_sym.id IS NULL
         WHERE (
             ps.authority_status = 'authoritative'
             OR EXISTS (

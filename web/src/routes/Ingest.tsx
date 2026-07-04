@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Account, ImportJobListItem } from "../lib/api";
 import "../App.css";
@@ -10,6 +10,8 @@ import type { SignatureDebug } from "./ingestUtils";
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 export default function Ingest() {
+  const [searchParams] = useSearchParams();
+  const requestedAccountId = searchParams.get("account_id") ?? "";
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -28,6 +30,9 @@ export default function Ingest() {
         const [a, j] = await Promise.all([api.accounts(), api.ingestJobs()]);
         setAccounts(a);
         setJobs(j);
+        if (requestedAccountId && a.some((account) => String(account.id) === requestedAccountId)) {
+          setAccountId(requestedAccountId);
+        }
         setState("ready");
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -35,7 +40,7 @@ export default function Ingest() {
         setState("error");
       }
     })();
-  }, []);
+  }, [requestedAccountId]);
 
   async function onUpload() {
     if (!file || !accountId) return;

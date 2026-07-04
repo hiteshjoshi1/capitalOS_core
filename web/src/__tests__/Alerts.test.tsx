@@ -136,7 +136,7 @@ describe("Alerts page", () => {
     expect(screen.getByText(/Network error/)).toBeInTheDocument();
   });
 
-  it("each upload reminder card includes a link to /ingest", async () => {
+  it("each upload reminder card links to ingest with the reminder account selected", async () => {
     mockApi.alertNotifications.mockResolvedValueOnce({
       upload_reminders: MOCK_REMINDERS,
       system_notifications: [],
@@ -147,7 +147,8 @@ describe("Alerts page", () => {
     await screen.findByText("DBS Savings");
     const ingestLinks = screen.getAllByRole("link", { name: /Go to Ingest/i });
     expect(ingestLinks.length).toBe(2);
-    expect(ingestLinks[0]).toHaveAttribute("href", "/ingest");
+    expect(ingestLinks[0]).toHaveAttribute("href", "/ingest?account_id=1");
+    expect(ingestLinks[1]).toHaveAttribute("href", "/ingest?account_id=2");
   });
 
   it("shows last_transaction_date as em dash when null", async () => {

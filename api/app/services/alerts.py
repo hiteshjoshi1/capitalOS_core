@@ -9,28 +9,52 @@ from sqlalchemy.orm import Session
 
 log = logging.getLogger(__name__)
 
-RETENTION_DAYS = 180  # 6 months
+DEFAULT_RETENTION_DAYS = 180  # 6 months for non-alert realtime events.
+AUTHOR_INGESTION_TOPIC = "author-ingestion"
+AUTHOR_INGESTION_RETENTION_DAYS = 1
 
 
 def prune_old_realtime_events(db: Session) -> int:
-    """Delete realtime_events older than RETENTION_DAYS (180 days / ~6 months).
+    """Delete expired realtime_events.
+
+    Author-ingestion events back the user-visible system notifications on the
+    Alerts page, so they are intentionally short-lived. Other realtime event
+    topics retain the older default retention window.
 
     Returns the number of rows deleted.  Safe to call on both SQLite (tests)
-    and PostgreSQL (production) because we pass the cutoff as an ISO string.
+    and PostgreSQL (production) because SQLAlchemy binds datetime cutoffs.
     """
-    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=RETENTION_DAYS)
-    cutoff_str = cutoff.isoformat()
+    now = datetime.now(tz=timezone.utc)
+    author_ingestion_cutoff = now - timedelta(days=AUTHOR_INGESTION_RETENTION_DAYS)
+    default_cutoff = now - timedelta(days=DEFAULT_RETENTION_DAYS)
     result = db.execute(
-        text("DELETE FROM realtime_events WHERE created_at < :cutoff"),
-        {"cutoff": cutoff_str},
+        text(
+            """
+            DELETE FROM realtime_events
+            WHERE (
+                topic = :author_ingestion_topic
+                AND created_at < :author_ingestion_cutoff
+            )
+            OR (
+                topic <> :author_ingestion_topic
+                AND created_at < :default_cutoff
+            )
+            """
+        ),
+        {
+            "author_ingestion_topic": AUTHOR_INGESTION_TOPIC,
+            "author_ingestion_cutoff": author_ingestion_cutoff,
+            "default_cutoff": default_cutoff,
+        },
     )
-    deleted: int = result.rowcount
+    deleted: int = result.rowcount or 0
     if deleted:
         log.info(
-            "Pruned %d expired realtime_events older than %s days (cutoff=%s)",
+            "Pruned %d expired realtime_events "
+            "(author_ingestion_retention_days=%s, default_retention_days=%s)",
             deleted,
-            RETENTION_DAYS,
-            cutoff_str,
+            AUTHOR_INGESTION_RETENTION_DAYS,
+            DEFAULT_RETENTION_DAYS,
         )
     db.commit()
     return deleted

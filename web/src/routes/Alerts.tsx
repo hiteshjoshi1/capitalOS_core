@@ -180,7 +180,7 @@ export default function Alerts() {
                   </div>
 
                   <div className="alertActions">
-                    <Link className="btn" to="/ingest">
+                    <Link className="btn" to={`/ingest?account_id=${encodeURIComponent(String(r.account_id))}`}>
                       Go to Ingest →
                     </Link>
                   </div>
