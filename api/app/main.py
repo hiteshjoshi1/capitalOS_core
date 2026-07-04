@@ -84,7 +84,7 @@ app.include_router(realtime_router)
 
 
 def _schedule_alerts_pruning() -> None:
-    """Schedule a daily background job to prune expired realtime_events (6-month retention)."""
+    """Schedule a daily background job to prune expired realtime_events."""
     import logging
     from apscheduler.schedulers.background import BackgroundScheduler
     from app.db.session import SessionLocal
@@ -105,7 +105,7 @@ def _schedule_alerts_pruning() -> None:
     scheduler = BackgroundScheduler()
     scheduler.add_job(_run_prune, "interval", hours=24, id="alerts_prune_daily")
     scheduler.start()
-    log.info("Alerts pruning scheduler started (interval=24h, retention_days=180)")
+    log.info("Alerts pruning scheduler started (interval=24h)")
 
 
 def _schedule_ai_sage_pruning() -> None:

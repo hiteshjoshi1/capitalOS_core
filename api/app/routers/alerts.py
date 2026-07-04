@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, List
 
 from fastapi import APIRouter, Depends
@@ -18,7 +18,12 @@ from app.schemas.alert import (
     UploadReminderAlert,
     UploadReminderCountResponse,
 )
-from app.services.alerts import prune_old_realtime_events
+from app.services.alerts import (
+    AUTHOR_INGESTION_RETENTION_DAYS,
+    AUTHOR_INGESTION_TOPIC,
+    DEFAULT_RETENTION_DAYS,
+    prune_old_realtime_events,
+)
 
 router = APIRouter(prefix="/alerts", tags=["alerts"], dependencies=[Depends(require_current_user)])
 
@@ -105,6 +110,7 @@ def _fetch_stale_accounts(
         WHERE """
         + account_scope_sql("a")
         + """
+          AND UPPER(COALESCE(p.code, a.platform, '')) <> 'IBKR'
         GROUP BY a.id, a.name, a.platform, a.account_type, p.code
         ORDER BY a.name
         """
@@ -236,9 +242,12 @@ def get_notifications(
     """
     reminders = _fetch_stale_accounts(db, _stale_days(), current_user.id, month)
 
+    system_notification_cutoff = datetime.now(tz=timezone.utc) - timedelta(days=AUTHOR_INGESTION_RETENTION_DAYS)
     events = (
         db.query(RealtimeEvent)
         .filter(RealtimeEvent.user_id == current_user.id)
+        .filter(RealtimeEvent.topic == AUTHOR_INGESTION_TOPIC)
+        .filter(RealtimeEvent.created_at >= system_notification_cutoff)
         .order_by(RealtimeEvent.created_at.desc())
         .limit(100)
         .all()
@@ -282,10 +291,14 @@ def prune_notifications(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ) -> dict:
-    """Prune realtime_events older than 6 months for all users (admin action).
+    """Prune expired realtime_events for all users (admin action).
 
     This can be called by an admin or a scheduled job to enforce the 6-month
-    retention policy for user-visible system notifications.
+    default retention policy and the 1-day author-ingestion notification policy.
     """
     deleted = prune_old_realtime_events(db)
-    return {"deleted": deleted, "retention_days": 180}
+    return {
+        "deleted": deleted,
+        "retention_days": DEFAULT_RETENTION_DAYS,
+        "author_ingestion_retention_days": AUTHOR_INGESTION_RETENTION_DAYS,
+    }

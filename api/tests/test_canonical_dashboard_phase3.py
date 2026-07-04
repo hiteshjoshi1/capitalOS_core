@@ -352,6 +352,83 @@ def test_canonical_position_rows_can_include_ibkr_flex_detail_rows(db_engine, ib
         db.close()
 
 
+def test_canonical_position_rows_maps_ibkr_class_share_symbols_and_stk_security_type(db_engine):
+    """IBKR class-share symbols like BRK B should resolve to canonical BRK-B stock assets."""
+    _seed_platform(db_engine, 804, "IBKR", "IBKR", "BROKER", "US")
+    _seed_account(db_engine, 804, "IBKR Flex Class Shares Phase3", "IBKR", "USD", platform_id=804, country="US")
+    _seed_asset(db_engine, 8040, "BRK-B", "Berkshire Hathaway Inc. Class B", "STOCK", "USD", "US")
+
+    with db_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO broker_connections (user_id, platform_code, connection_type, display_name, status, metadata_json) "
+            "VALUES (2, 'IBKR', 'flex', 'IBKR Flex Class Shares Phase3', 'active', '{}')"
+        ))
+        conn.execute(text(
+            "INSERT INTO broker_accounts (connection_id, legacy_account_id, broker_account_id, base_currency, status, metadata_json) "
+            "SELECT id, 804, 'U_P3_BRK', 'USD', 'active', '{}' FROM broker_connections "
+            "WHERE display_name='IBKR Flex Class Shares Phase3' ORDER BY id DESC LIMIT 1"
+        ))
+        conn.execute(text(
+            "INSERT INTO broker_import_runs (broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status, metadata_json) "
+            "SELECT ba.id, 804, 'IBKR', 'flex', 'daily', 'completed', '{}' FROM broker_accounts ba "
+            "WHERE ba.broker_account_id = 'U_P3_BRK' ORDER BY ba.id DESC LIMIT 1"
+        ))
+        conn.execute(text(
+            "INSERT INTO broker_instruments (platform_code, broker_instrument_id, asset_id, symbol, description, security_type, currency, metadata_json) "
+            "VALUES ('IBKR', 'BRK_B_CONID_P3', NULL, 'BRK B', 'BERKSHIRE HATHAWAY INC-CL B', 'STK', 'USD', '{}')"
+        ))
+        conn.execute(text(
+            """
+            INSERT INTO portfolio_nav_snapshots
+              (broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+               cash_base, stock_base, total_nav_base, authority_status, metadata_json)
+            SELECT ba.id, 804, ir.id, '2026-02-20', 'USD', 1000, 5078, 6078, 'authoritative', '{}'
+            FROM broker_accounts ba
+            JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
+            WHERE ba.broker_account_id = 'U_P3_BRK'
+            ORDER BY ir.id DESC
+            LIMIT 1
+            """
+        ))
+        conn.execute(text(
+            """
+            INSERT INTO portfolio_position_snapshots
+              (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+               quantity, currency, market_price, market_value_local, market_value_base,
+               cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
+            SELECT ba.id, 804, bi.id, ir.id, '2026-02-20',
+                   10, 'USD', 507.8, 5078, 5078, 4691.09, 4691.09, 1, 'authoritative', '{}'
+            FROM broker_accounts ba
+            JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
+            JOIN broker_instruments bi ON bi.broker_instrument_id = 'BRK_B_CONID_P3'
+            WHERE ba.broker_account_id = 'U_P3_BRK'
+            ORDER BY ir.id DESC
+            LIMIT 1
+            """
+        ))
+
+    Session = sessionmaker(bind=db_engine)
+    db = Session()
+    try:
+        rows = canonical_position_rows_by_legacy_account(
+            db,
+            current_user_id=2,
+            anchor_date=date(2026, 2, 20),
+            include_nav_accounts=True,
+        )
+        brk = next((row for row in rows if row.get("account_id") == 804 and row.get("symbol") == "BRK-B"), None)
+        assert brk is not None, f"Expected BRK-B in canonical rows, got: {[row.get('symbol') for row in rows]}"
+        assert brk["asset_id"] == 8040
+        assert brk["asset_class"] == "STOCK"
+        assert brk["quote_currency"] == "USD"
+        assert brk["home_country"] == "US"
+        assert brk["has_nav_snapshot"] is True
+        assert float(brk["quantity"]) == pytest.approx(10.0)
+        assert float(brk["snapshot_market_value_base"]) == pytest.approx(5078.0)
+    finally:
+        db.close()
+
+
 # ---------------------------------------------------------------------------
 # Tests: dashboard uses canonical positions (legacy excluded)
 # ---------------------------------------------------------------------------

@@ -11,7 +11,11 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.models.rag import RealtimeEvent, RagAuthor, RagSource, RagIngestionJob
-from app.services.alerts import prune_old_realtime_events
+from app.services.alerts import (
+    AUTHOR_INGESTION_RETENTION_DAYS,
+    DEFAULT_RETENTION_DAYS,
+    prune_old_realtime_events,
+)
 from tests.conftest import TestingSessionLocal
 
 
@@ -21,6 +25,10 @@ def _iso(dt: datetime) -> str:
 
 def _days_ago(n: int) -> datetime:
     return datetime.now(tz=timezone.utc) - timedelta(days=n)
+
+
+def _hours_ago(n: int) -> datetime:
+    return datetime.now(tz=timezone.utc) - timedelta(hours=n)
 
 
 # ---------------------------------------------------------------------------
@@ -76,7 +84,7 @@ def _cleanup(db_engine):
     """Remove alert-test data after each test."""
     yield
     with db_engine.begin() as conn:
-        for aid in (901, 902, 903, 904, 905):
+        for aid in (901, 902, 903, 904, 905, 906):
             conn.execute(text("DELETE FROM transactions WHERE account_id = :a"), {"a": aid})
             conn.execute(text("DELETE FROM import_jobs WHERE account_id = :a"), {"a": aid})
             conn.execute(text("DELETE FROM accounts WHERE id = :a"), {"a": aid})
@@ -106,6 +114,24 @@ class TestUploadReminders:
         assert alert["days_since_upload"] >= 35
         assert "Stale Account" in alert["message"]
         assert alert["last_upload_date"] is not None
+
+    def test_ibkr_account_excluded_from_upload_reminders(self, client: TestClient, db_engine):
+        """IBKR Flex is automatic, so stale legacy IBKR imports should not create upload reminders."""
+        Session = sessionmaker(bind=db_engine)
+        db = Session()
+        try:
+            _insert_account(db, 906, "IBKR Flex Account", "IBKR")
+            _insert_import_job(db, 9006, 906, "IMPORTED", _days_ago(90))
+        finally:
+            db.close()
+
+        reminders = client.get("/alerts/upload-reminders").json()
+        count_resp = client.get("/alerts/upload-reminders/count").json()
+        notifications = client.get("/alerts/notifications").json()
+
+        assert 906 not in [a["account_id"] for a in reminders]
+        assert 906 not in [a["account_id"] for a in notifications["upload_reminders"]]
+        assert count_resp["count"] == len(reminders)
 
     def test_fresh_account_excluded(self, client: TestClient, db_engine):
         """Account with IMPORTED job < 30 days ago is NOT returned."""
@@ -231,12 +257,13 @@ def _insert_realtime_event(
     author_id: str,
     created_at: datetime,
     status: str = "done",
+    topic: str = "author-ingestion",
 ) -> RealtimeEvent:
     db = TestingSessionLocal()
     try:
         event = RealtimeEvent(
             user_id=user_id,
-            topic="author-ingestion",
+            topic=topic,
             event_name=event_name,
             author_id=author_id,
             status=status,
@@ -292,7 +319,7 @@ class TestUnifiedNotifications:
             user_id=1,
             event_name="batch_completed",
             author_id="test_author",
-            created_at=_days_ago(1),
+            created_at=_hours_ago(12),
         )
 
         resp = client.get("/alerts/notifications")
@@ -319,7 +346,7 @@ class TestUnifiedNotifications:
             user_id=1,
             event_name="source_ingested",
             author_id="test_author",
-            created_at=_days_ago(2),
+            created_at=_hours_ago(12),
         )
 
         resp = client.get("/alerts/notifications")
@@ -333,7 +360,7 @@ class TestUnifiedNotifications:
                 user_id=1,
                 event_name=event_name,
                 author_id="buffett",
-                created_at=_days_ago(1),
+                created_at=_hours_ago(12),
             )
 
         resp = client.get("/alerts/notifications")
@@ -357,13 +384,34 @@ class TestUnifiedNotifications:
             user_id=1,
             event_name="source_ingested",
             author_id="charlie_munger",
-            created_at=_days_ago(3),
+            created_at=_hours_ago(12),
         )
 
         resp = client.get("/alerts/notifications")
         notifs = resp.json()["system_notifications"]
         charlie_notifs = [n for n in notifs if n.get("author_id") == "charlie_munger"]
         assert len(charlie_notifs) >= 1
+
+    def test_notifications_hide_author_ingestion_events_older_than_one_day(self, client: TestClient, db_engine):
+        """Author-ingestion notifications should clear from the Alerts page after one day."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="expired_author",
+            created_at=_days_ago(2),
+        )
+        _insert_realtime_event(
+            user_id=1,
+            event_name="source_ingested",
+            author_id="fresh_author",
+            created_at=_hours_ago(12),
+        )
+
+        resp = client.get("/alerts/notifications")
+        assert resp.status_code == 200
+        author_ids = [n.get("author_id") for n in resp.json()["system_notifications"]]
+        assert "expired_author" not in author_ids
+        assert "fresh_author" in author_ids
 
 
 # ---------------------------------------------------------------------------
@@ -377,20 +425,20 @@ class TestAlertsRetentionPruning:
         with db_engine.begin() as conn:
             conn.execute(text("DELETE FROM realtime_events WHERE user_id = 1"))
 
-    def test_prune_removes_old_events(self, db_engine):
-        """prune_old_realtime_events deletes events older than 180 days."""
-        # Insert one old event (200 days ago) and one recent event (10 days ago)
+    def test_prune_removes_old_author_ingestion_events(self, db_engine):
+        """prune_old_realtime_events deletes author-ingestion notifications older than one day."""
+        # Insert one expired author-ingestion event and one recent event.
         _insert_realtime_event(
             user_id=1,
             event_name="batch_completed",
             author_id="old_author",
-            created_at=_days_ago(200),
+            created_at=_days_ago(2),
         )
         _insert_realtime_event(
             user_id=1,
             event_name="source_ingested",
             author_id="recent_author",
-            created_at=_days_ago(10),
+            created_at=_hours_ago(12),
         )
 
         db = TestingSessionLocal()
@@ -419,12 +467,12 @@ class TestAlertsRetentionPruning:
             db2.close()
 
     def test_prune_does_not_remove_recent_events(self, db_engine):
-        """prune_old_realtime_events does NOT delete events within 180 days."""
+        """prune_old_realtime_events does NOT delete author-ingestion events within one day."""
         _insert_realtime_event(
             user_id=1,
             event_name="source_ingested",
             author_id="fresh_author",
-            created_at=_days_ago(5),
+            created_at=_hours_ago(12),
         )
 
         db = TestingSessionLocal()
@@ -443,6 +491,33 @@ class TestAlertsRetentionPruning:
         finally:
             db2.close()
 
+    def test_prune_keeps_non_author_ingestion_events_until_default_retention(self, db_engine):
+        """Only author-ingestion notifications use the 1-day retention policy."""
+        _insert_realtime_event(
+            user_id=1,
+            event_name="other_event",
+            author_id="other_recent",
+            created_at=_days_ago(2),
+            topic="other-topic",
+        )
+
+        db = TestingSessionLocal()
+        try:
+            deleted = prune_old_realtime_events(db)
+        finally:
+            db.close()
+
+        db2 = TestingSessionLocal()
+        try:
+            remaining = db2.query(RealtimeEvent).filter(
+                RealtimeEvent.user_id == 1,
+                RealtimeEvent.author_id == "other_recent",
+            ).all()
+            assert len(remaining) == 1
+            assert deleted == 0
+        finally:
+            db2.close()
+
     def test_prune_endpoint_returns_deleted_count(self, client: TestClient, db_engine):
         """POST /alerts/prune returns the number of deleted records."""
         _insert_realtime_event(
@@ -457,7 +532,8 @@ class TestAlertsRetentionPruning:
         data = resp.json()
         assert "deleted" in data
         assert data["deleted"] >= 1
-        assert data["retention_days"] == 180
+        assert data["retention_days"] == DEFAULT_RETENTION_DAYS
+        assert data["author_ingestion_retention_days"] == AUTHOR_INGESTION_RETENTION_DAYS
 
     def test_prune_endpoint_when_nothing_to_prune(self, client: TestClient, db_engine):
         """POST /alerts/prune returns 0 when no expired events exist."""
@@ -465,7 +541,7 @@ class TestAlertsRetentionPruning:
             user_id=1,
             event_name="source_ingested",
             author_id="new_author",
-            created_at=_days_ago(1),
+            created_at=_hours_ago(12),
         )
 
         resp = client.post("/alerts/prune")
