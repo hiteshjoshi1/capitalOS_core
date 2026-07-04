@@ -306,6 +306,15 @@ def _inflow_source_label(row) -> str:
     return "Other"
 
 
+def _is_stable_recurring_charge(monthly_amounts: dict[str, float]) -> bool:
+    amounts = sorted(round(abs(amount), 2) for amount in monthly_amounts.values() if amount > 0)
+    if len(amounts) < 3:
+        return False
+    median = amounts[len(amounts) // 2]
+    tolerance = max(2.0, median * 0.10)
+    return all(abs(amount - median) <= tolerance for amount in amounts)
+
+
 def _sorted_breakdown_items(items: dict[str, float], total: float, limit: int | None = None) -> list[CashFlowBreakdownItem]:
     ranked = sorted(items.items(), key=lambda entry: (-entry[1], entry[0].lower()))
     if limit is not None:
@@ -1094,19 +1103,22 @@ def credit_card_transactions(
                 "issuer": row["issuer"],
                 "merchant_counterparty": merchant,
                 "months": set(),
+                "monthly_amounts": defaultdict(float),
                 "current_month_amount": 0.0,
             },
         )
         month_key = _month_key(row["ts"])
+        amount = -converted
         record["months"].add(month_key)
+        record["monthly_amounts"][month_key] += amount
         if month_key == month:
-            record["current_month_amount"] += -converted
+            record["current_month_amount"] += amount
 
     recurring_payments: list[CreditCardRecurringPaymentItem] = []
     for record in recurring_index.values():
         months_present = len(record["months"])
         current_month_amount = float(record["current_month_amount"])
-        if months_present < 2 or current_month_amount <= 0:
+        if current_month_amount <= 0 or not _is_stable_recurring_charge(record["monthly_amounts"]):
             continue
         recurring_payments.append(
             CreditCardRecurringPaymentItem(

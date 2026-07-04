@@ -92,11 +92,36 @@ def test_credit_card_transactions_detail(client: TestClient, seed_spending_data)
     assert first_tx["category_source"] == "parser"
 
     assert [abs(item["amount"]) for item in data["top_purchases"]] == [1780.0, 1210.0]
-    assert len(data["recurring_payments"]) == 1
-    recurring = data["recurring_payments"][0]
-    assert recurring["merchant_counterparty"] == "Netflix"
-    assert recurring["months_present"] == 3
-    assert recurring["current_month_amount"] == 1210.0
+    assert data["recurring_payments"] == []
+
+
+def test_credit_card_recurring_payments_require_stable_monthly_amounts(client: TestClient, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(510, 'UOB One Card', 'UOB', 'CREDIT_CARD', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(51001, '2025-12-08 00:00:00+00:00', 510, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', NULL), "
+                "(51002, '2026-01-08 00:00:00+00:00', 510, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', NULL), "
+                "(51003, '2026-02-08 00:00:00+00:00', 510, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', NULL), "
+                "(51004, '2025-12-10 00:00:00+00:00', 510, -90, 'EXPENSE', 'SGD', 'Groceries', 'NTUC FairPrice Online SINGAPORE SG', NULL), "
+                "(51005, '2026-01-10 00:00:00+00:00', 510, -130, 'EXPENSE', 'SGD', 'Groceries', 'NTUC FairPrice Online SINGAPORE SG', NULL), "
+                "(51006, '2026-02-10 00:00:00+00:00', 510, -65, 'EXPENSE', 'SGD', 'Groceries', 'NTUC FairPrice Online SINGAPORE SG', NULL)"
+            )
+        )
+
+    resp = client.get("/spending/credit-card-transactions?month=2026-02&base_currency=SGD")
+    assert resp.status_code == 200
+    recurring = resp.json()["recurring_payments"]
+
+    assert [item["merchant_counterparty"] for item in recurring] == ["Netflix"]
+    assert recurring[0]["months_present"] == 3
+    assert recurring[0]["current_month_amount"] == 18.0
 
 
 def test_credit_card_endpoints_include_credit_card_accounts_without_metadata(client: TestClient, db_engine):
