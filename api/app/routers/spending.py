@@ -129,6 +129,10 @@ def _tx_iso(value: datetime | str) -> str:
         if value.tzinfo is None:
             return value.replace(tzinfo=timezone.utc).isoformat()
         return value.astimezone(timezone.utc).isoformat()
+    try:
+        return _row_ts(value).isoformat()
+    except ValueError:
+        pass
     return str(value)
 
 
@@ -740,6 +744,8 @@ def _credit_cards(db: Session, current_user_id: int):
           COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
           COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
           COALESCE(cc.credit_limit, 0) AS credit_limit,
+          cc.available_limit,
+          cc.available_limit_as_of,
           COALESCE(cc.statement_day, 1) AS statement_day,
           COALESCE(cc.due_day, 1) AS due_day
         FROM accounts a
@@ -802,7 +808,17 @@ def _credit_card_items(
         account_currency = (card["account_currency"] or base_currency).upper()
         rate = account_rates.get(account_currency, 1.0)
         credit_limit = float(card["credit_limit"]) * rate
-        current_due = spend_by_account.get(int(card["account_id"]), 0.0)
+        available_limit = (
+            float(card["available_limit"]) * rate
+            if card["available_limit"] is not None
+            else None
+        )
+        if available_limit is not None and card["available_limit_as_of"] is not None:
+            current_due = max(credit_limit - available_limit, 0.0)
+            current_due_source = "available_limit"
+        else:
+            current_due = spend_by_account.get(int(card["account_id"]), 0.0)
+            current_due_source = "transactions"
         utilization = (current_due / credit_limit) if credit_limit > 0 else None
         due_date = _clamp_day(start, int(card["due_day"])).date().isoformat()
         items.append(
@@ -812,6 +828,13 @@ def _credit_card_items(
                 card_name=card["card_name"],
                 issuer=card["issuer"],
                 credit_limit=credit_limit,
+                available_limit=available_limit,
+                available_limit_as_of=(
+                    _tx_iso(card["available_limit_as_of"])
+                    if card["available_limit_as_of"] is not None
+                    else None
+                ),
+                current_due_source=current_due_source,
                 statement_day=int(card["statement_day"]),
                 due_day=int(card["due_day"]),
                 due_date=due_date,

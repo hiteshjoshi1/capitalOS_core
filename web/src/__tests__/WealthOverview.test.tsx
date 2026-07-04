@@ -22,7 +22,7 @@ vi.mock("../lib/realtime", () => ({
 const mockApi = vi.mocked(api, true);
 const mockSubscribe = vi.mocked(subscribeToRealtimeTopic);
 
-function makeSummary(snapshotTotal: number, currentTotal = snapshotTotal) {
+function makeSummary(snapshotTotal: number, currentTotal = snapshotTotal, liabilities = 0) {
   return {
     as_of_month: "2026-05",
     base_currency: "SGD",
@@ -31,9 +31,9 @@ function makeSummary(snapshotTotal: number, currentTotal = snapshotTotal) {
     current_net_worth: {
       total: currentTotal,
       cash: 10,
-      stocks_funds: currentTotal - 10,
+      stocks_funds: currentTotal - 10 + liabilities,
       crypto: 0,
-      liabilities: 0,
+      liabilities,
     },
     current_net_worth_freshness: {
       positions_as_of: "2026-05-15T12:00:00+00:00",
@@ -47,9 +47,9 @@ function makeSummary(snapshotTotal: number, currentTotal = snapshotTotal) {
     net_worth: {
       total: snapshotTotal,
       cash: 10,
-      stocks_funds: snapshotTotal - 10,
+      stocks_funds: snapshotTotal - 10 + liabilities,
       crypto: 0,
-      liabilities: 0,
+      liabilities,
     },
     geography: [],
     cash_flow: { income: 0, expenses: 0, net: 0, savings_rate: null },
@@ -155,5 +155,20 @@ describe("WealthOverview", () => {
     expect(screen.getAllByText("IBKR")).not.toHaveLength(0);
     expect(screen.queryByText("Upload reminders")).not.toBeInTheDocument();
     expect(screen.queryByText("Statement coverage")).not.toBeInTheDocument();
+  });
+
+  it("renders DBS credit card liability from net worth summary", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(739.44, 739.44, 260.56) as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Liabilities")).toBeInTheDocument();
+    expect(screen.getByText("Outstanding obligations remain visible inside the Liabilities section overview.")).toBeInTheDocument();
+    expect(screen.getByText("S$ 261")).toBeInTheDocument();
   });
 });

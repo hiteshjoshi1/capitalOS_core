@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import pytest
 from sqlalchemy import text
 
 from tests.canonical_test_helpers import seed_canonical_account_balance_for_test
@@ -156,6 +157,98 @@ def test_credit_card_endpoints_include_credit_card_accounts_without_metadata(cli
     assert len(detail["transactions"]) == 2
     assert detail["transactions"][0]["card_name"] == "Citi CC"
     assert detail["transactions"][0]["issuer"] == "CITI"
+
+
+def test_dbs_credit_card_pages_and_cash_flow_match_database_totals(client: TestClient, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(810, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG'), "
+                "(811, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG'), "
+                "(812, 'DBS Vickers Cash Upfront', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO credit_card_accounts
+                  (account_id, card_name, issuer, credit_limit, available_limit, available_limit_as_of, statement_day, due_day)
+                VALUES
+                  (811, 'DBS/POSB MasterCard Platinum (2403)', 'DBS', 60000, 59739.44,
+                   '2026-07-04 00:00:00+00:00', 14, 25)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(81101, '2026-07-02 00:00:00+00:00', 811, -100, 'EXPENSE', 'SGD', 'CreditCard::Purchase', 'SHENG SIONG', NULL), "
+                "(81102, '2026-07-03 00:00:00+00:00', 811, -10, 'FEE', 'SGD', 'CreditCard::Fee', 'ANNUAL FEE', NULL), "
+                "(81103, '2026-07-03 00:00:00+00:00', 811, -0.9, 'TAX', 'SGD', 'CreditCard::Tax', 'GST @ 9%', NULL), "
+                "(81104, '2026-07-04 00:00:00+00:00', 811, -5, 'INTEREST', 'SGD', 'CreditCard::Interest', 'FINANCE CHARGES', NULL), "
+                "(81105, '2026-07-05 00:00:00+00:00', 811, 50, 'TRANSFER', 'SGD', 'CreditCard::Payment', 'GIRO PAYMENT', NULL), "
+                "(81001, '2026-07-05 00:00:00+00:00', 810, -50, 'TRANSFER', 'SGD', 'Bank::Transfer', 'GIRO PAYMENT DBS CREDIT CARD', NULL), "
+                "(81201, '2026-07-08 00:00:00+00:00', 812, -999, 'TRANSFER', 'SGD', 'Brokerage::Transfer', 'DBS VICKERS FUNDING', NULL)"
+            )
+        )
+
+    with db_engine.connect() as conn:
+        expected_expenses = float(
+            conn.execute(
+                text(
+                    """
+                    SELECT SUM(-amount)
+                    FROM transactions
+                    WHERE account_id = 811
+                      AND type IN ('EXPENSE','FEE','TAX','INTEREST')
+                    """
+                )
+            ).scalar()
+        )
+        expected_outstanding = float(
+            conn.execute(
+                text(
+                    """
+                    SELECT credit_limit - available_limit
+                    FROM credit_card_accounts
+                    WHERE account_id = 811
+                    """
+                )
+            ).scalar()
+        )
+
+    summary_resp = client.get("/spending/credit-cards?month=2026-07&base_currency=SGD")
+    assert summary_resp.status_code == 200
+    summary = summary_resp.json()
+    assert summary["total_spend"] == pytest.approx(expected_outstanding)
+    assert [card["account_name"] for card in summary["cards"]] == ["DBS Credit Card"]
+    card = summary["cards"][0]
+    assert card["card_name"] == "DBS/POSB MasterCard Platinum (2403)"
+    assert card["issuer"] == "DBS"
+    assert card["credit_limit"] == 60000.0
+    assert card["available_limit"] == 59739.44
+    assert card["available_limit_as_of"] == "2026-07-04T00:00:00+00:00"
+    assert card["current_due"] == pytest.approx(expected_outstanding)
+    assert card["current_due_source"] == "available_limit"
+
+    detail_resp = client.get("/spending/credit-card-transactions?month=2026-07&base_currency=SGD")
+    assert detail_resp.status_code == 200
+    detail = detail_resp.json()
+    assert len(detail["transactions"]) == 5
+    assert {tx["account_name"] for tx in detail["transactions"]} == {"DBS Credit Card"}
+    assert {tx["type"] for tx in detail["transactions"]} == {"EXPENSE", "FEE", "TAX", "INTEREST", "TRANSFER"}
+    payment = next(tx for tx in detail["transactions"] if tx["type"] == "TRANSFER")
+    assert payment["amount"] == 50.0
+    assert [tx["description"] for tx in detail["top_purchases"]] == ["SHENG SIONG"]
+    assert detail["recurring_payments"] == []
+
+    cash_flow_resp = client.get("/spending/cash-flow-detail?month=2026-07&base_currency=SGD")
+    assert cash_flow_resp.status_code == 200
+    cash_flow = cash_flow_resp.json()
+    assert cash_flow["expense_total"] == pytest.approx(expected_expenses)
+    assert cash_flow["expenses"]["transaction_count"] == 4
+    assert all(tx["type"] != "TRANSFER" for tx in cash_flow["expenses"]["transactions"])
 
 
 def test_cash_flow_infers_signed_non_internal_transfer_rows(client: TestClient, db_engine):

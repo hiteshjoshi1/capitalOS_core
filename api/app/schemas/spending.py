@@ -133,6 +133,9 @@ class CreditCardItem(BaseModel):
     card_name: str
     issuer: str
     credit_limit: float
+    available_limit: float | None = None
+    available_limit_as_of: str | None = None
+    current_due_source: str = "transactions"
     statement_day: int
     due_day: int
     due_date: str

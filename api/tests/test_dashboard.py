@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import Session
 
 from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
 from tests.canonical_test_helpers import (
@@ -131,6 +132,63 @@ def test_canonical_net_worth_ignores_legacy_position_roll_forward(db_engine, mon
 
     assert components["cash"] == 400000.0
     assert components["total"] == 400000.0
+
+
+def test_net_worth_includes_dbs_credit_card_liability_once(db_engine, monkeypatch):
+    anchor = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(820, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG'), "
+                "(821, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO credit_card_accounts
+                  (account_id, card_name, issuer, credit_limit, available_limit, available_limit_as_of, statement_day, due_day)
+                VALUES
+                  (821, 'DBS/POSB MasterCard Platinum (2403)', 'DBS', 60000, 59739.44,
+                   '2026-07-04 00:00:00+00:00', 14, 25)
+                """
+            )
+        )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=820,
+        as_of=anchor,
+        currency="SGD",
+        balance_base=1000,
+        balance_type="bank_cash",
+    )
+    seed_canonical_account_balance_for_test(
+        db_engine,
+        account_id=821,
+        as_of=anchor,
+        currency="SGD",
+        balance_base=-260.56,
+        balance_type="credit_balance",
+    )
+    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"SGD": 1.0, "USD": 1.0})
+
+    with db_engine.connect() as conn:
+        expected_liability = float(
+            conn.execute(
+                text("SELECT credit_limit - available_limit FROM credit_card_accounts WHERE account_id = 821")
+            ).scalar()
+        )
+
+    db = Session(bind=db_engine)
+    try:
+        components = _networth_components(db, anchor, "SGD", 1)
+    finally:
+        db.close()
+
+    assert components["cash"] == 1000.0
+    assert components["liabilities"] == pytest.approx(expected_liability)
+    assert components["total"] == pytest.approx(1000.0 - expected_liability)
 
 
 def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_dashboard_data):

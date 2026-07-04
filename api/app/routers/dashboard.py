@@ -301,6 +301,101 @@ def _canonical_cash_value(row: Dict[str, Any], rates: Dict[str, float], fallback
     return float(row.get("balance_base") or 0.0) * rates.get(currency, 1.0)
 
 
+def _card_liability_transaction_start(anchor_ts: datetime) -> datetime:
+    month_start = anchor_ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if (
+        anchor_ts.day == _configured_snapshot_day()
+        and anchor_ts.hour == 0
+        and anchor_ts.minute == 0
+        and anchor_ts.second == 0
+        and anchor_ts.microsecond == 0
+    ):
+        return _add_months(month_start, -1)
+    return month_start
+
+
+def _credit_card_liability_component(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+) -> tuple[float, set[int]]:
+    cards = db.execute(
+        text(
+            """
+            SELECT
+              a.id AS account_id,
+              a.currency AS account_currency,
+              COALESCE(cc.credit_limit, 0) AS credit_limit,
+              cc.available_limit,
+              cc.available_limit_as_of
+            FROM accounts a
+            LEFT JOIN credit_card_accounts cc ON cc.account_id = a.id
+            WHERE a.account_type = 'CREDIT_CARD'
+              AND """
+            + account_scope_sql("a")
+        ),
+        {"current_user_id": current_user_id},
+    ).mappings().all()
+    card_account_ids = {int(card["account_id"]) for card in cards}
+    if not cards:
+        return 0.0, set()
+
+    transaction_start = _card_liability_transaction_start(anchor_ts)
+    transaction_rows = db.execute(
+        text(
+            """
+            SELECT t.account_id, t.amount, t.currency
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.ts >= :start
+              AND t.ts < :anchor
+              AND a.account_type = 'CREDIT_CARD'
+              AND t.type IN ('EXPENSE','FEE','TAX','INTEREST','TRANSFER','INCOME')
+              AND """
+            + account_scope_sql("a")
+        ),
+        {"start": transaction_start, "anchor": anchor_ts, "current_user_id": current_user_id},
+    ).mappings().all()
+
+    currencies = {
+        str(card["account_currency"] or base_currency).upper()
+        for card in cards
+    }
+    currencies.update(str(row["currency"] or base_currency).upper() for row in transaction_rows)
+    rates = get_rates(anchor_ts, base_currency, currencies)
+
+    transaction_outstanding: dict[int, float] = {}
+    for row in transaction_rows:
+        currency = str(row["currency"] or base_currency).upper()
+        account_id = int(row["account_id"])
+        transaction_outstanding[account_id] = (
+            transaction_outstanding.get(account_id, 0.0)
+            + (-float(row["amount"] or 0.0) * rates.get(currency, 1.0))
+        )
+
+    liability = 0.0
+    for card in cards:
+        account_id = int(card["account_id"])
+        account_currency = str(card["account_currency"] or base_currency).upper()
+        rate = rates.get(account_currency, 1.0)
+        available_as_of = _normalize_ts(card["available_limit_as_of"])
+        if (
+            card["available_limit"] is not None
+            and card["credit_limit"] is not None
+            and available_as_of is not None
+            and available_as_of <= anchor_ts
+        ):
+            outstanding = (
+                float(card["credit_limit"] or 0.0)
+                - float(card["available_limit"] or 0.0)
+            ) * rate
+        else:
+            outstanding = transaction_outstanding.get(account_id, 0.0)
+        liability += max(outstanding, 0.0)
+    return liability, card_account_ids
+
+
 def _current_networth_state(db: Session, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     anchor = _current_anchor_ts()
     components = _networth_components(db, anchor, base_currency, current_user_id, price_overlay=True)
@@ -412,6 +507,12 @@ def _networth_components(
     cash = 0.0
     stocks_funds = 0.0
     crypto = 0.0
+    credit_card_liabilities, credit_card_account_ids = _credit_card_liability_component(
+        db,
+        anchor_ts,
+        base_currency,
+        current_user_id,
+    )
     for r in canonical_pos_rows:
         asset_class = str(r["asset_class"] or "").upper()
         if asset_class in ("STOCK", "FUND"):
@@ -425,6 +526,8 @@ def _networth_components(
         stocks_funds += (total_nav_base - cash_base) * rate
     for row in canonical_cash_rows:
         if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
+            continue
+        if row.get("account_id") is not None and int(row["account_id"]) in credit_card_account_ids:
             continue
         balance_type = str(row.get("balance_type") or "").lower()
         if balance_type not in {"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"}:
@@ -458,7 +561,7 @@ def _networth_components(
         usd_rate = rates.get("USD", 1.0)
         crypto += wallet_usd * usd_rate
 
-    liabilities = 0.0  # later when loans modeled
+    liabilities = credit_card_liabilities
     total = cash + stocks_funds + crypto - liabilities
     return {
         "cash": cash,

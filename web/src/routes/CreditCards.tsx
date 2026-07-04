@@ -91,6 +91,12 @@ export default function CreditCards() {
                         <div className="muted" style={{ marginTop: 8, fontSize: 12 }}>
                           Utilization: {card.utilization == null ? "-" : `${utilizationPct.toFixed(1)}%`} of {formatMoney(card.credit_limit)}
                         </div>
+                        {card.current_due_source === "available_limit" && card.available_limit_as_of && (
+                          <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                            Outstanding from available limit as of {asDate(card.available_limit_as_of)}
+                            {card.available_limit == null ? "" : `, available ${formatMoney(card.available_limit)}`}
+                          </div>
+                        )}
                         <div className="bar">
                           <span style={{ width: `${utilizationPct}%`, background: "var(--accent)" }}></span>
                         </div>
