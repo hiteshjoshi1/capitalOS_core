@@ -56,6 +56,7 @@ const cryptoSummaryFixture: CryptoSummary = {
       value_base: 10667,
       asset_class: "CRYPTO",
       price_change_usd: 50,
+      price_provider: "defillama,coingecko",
       value_change_base: 267,
       value_change_pct: 0.025,
       snapshot_delta_base: 600,
@@ -69,6 +70,7 @@ const cryptoSummaryFixture: CryptoSummary = {
       value_base: 533,
       asset_class: "CRYPTO",
       price_change_usd: -2,
+      price_provider: "helius",
       value_change_base: -20,
       value_change_pct: -0.04,
       snapshot_delta_base: 200,
@@ -100,6 +102,10 @@ const cryptoSummaryFixture: CryptoSummary = {
     },
   ],
   last_refreshed_at: "2026-02-06T00:00:00+00:00",
+  holdings_as_of: "2026-02-06T00:00:00+00:00",
+  price_as_of: "2026-02-06T01:00:00+00:00",
+  stale_holdings: false,
+  stale_prices: false,
   is_stale: false,
   refresh_triggered: false,
 };
@@ -145,6 +151,9 @@ describe("CryptoHoldings route", () => {
     expect(screen.getAllByText("S$ 9,000").length).toBeGreaterThan(0);
     expect(chainHeading).toBeInTheDocument();
     expect(walletHeading).toBeInTheDocument();
+    expect(screen.getByText("defillama,coingecko")).toBeInTheDocument();
+    expect(screen.getByText("Fresh holdings")).toBeInTheDocument();
+    expect(screen.getByText("Fresh prices")).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {
@@ -174,6 +183,8 @@ describe("CryptoHoldings route", () => {
       wallet_chain_exposure: [],
       refresh_triggered: true,
       is_stale: true,
+      stale_holdings: true,
+      stale_prices: false,
     };
     mockApi.cryptoSummary.mockResolvedValueOnce(dusty);
 
@@ -188,7 +199,8 @@ describe("CryptoHoldings route", () => {
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
     expect(screen.queryByText("DUST")).not.toBeInTheDocument();
-    expect(screen.getByText(/Stale/)).toBeInTheDocument();
+    expect(screen.getByText("Stale holdings")).toBeInTheDocument();
+    expect(screen.getByText("Fresh prices (refreshing)")).toBeInTheDocument();
     expect(screen.getByText(/\(refreshing\)/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("checkbox", { name: /Show <\$10 tokens/i }));
@@ -257,6 +269,8 @@ describe("CryptoHoldings route", () => {
       wallet_exposure: [],
       wallet_chain_exposure: [],
       last_refreshed_at: null,
+      holdings_as_of: null,
+      price_as_of: null,
       eth_exposure_usd: undefined,
       eth_exposure_base: undefined,
       token_exposure_usd: undefined,

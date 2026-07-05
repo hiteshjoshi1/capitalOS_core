@@ -280,7 +280,9 @@ def test_coinbase_scheduler_creates_and_refreshes_stale_exchange_wallet(db_engin
     assert wallet["address"] == "coinbase:1:default"
     assert wallet["label"] == "Coinbase"
     assert wallet["status"] == "active"
-    assert refreshed == [{"wallet_id": wallet["id"], "user_id": 1, "automatic": True}]
+    assert {item["wallet_id"] for item in refreshed} == {"evm-stale-wallet", wallet["id"]}
+    assert all(item["user_id"] == 1 for item in refreshed)
+    assert all(item["automatic"] is True for item in refreshed)
 
 
 def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch):
@@ -548,24 +550,12 @@ def test_refresh_wallet_snapshot_does_not_persist_partial_evm_snapshot(db_engine
             {"wallet_id": wallet_id, "fetched_at": old_as_of},
         )
 
-    class FailingTokenAdapter:
-        def get_native_balance(self, address):
-            return SimpleNamespace(
-                symbol="ETH",
-                decimals=18,
-                raw_amount="1000000000000000000",
-                normalized_amount=1.0,
-                price_usd=2000.0,
-                value_usd=2000.0,
-                price_source="test",
-            )
-
-        def get_token_balances(self, address):
-            raise RuntimeError("Alchemy token balance fetch failed")
-
     monkeypatch.setenv("CRYPTO_EVM_CHAINS", "ethereum")
     monkeypatch.setenv("CRYPTO_EVM_TOKEN_CHAINS", "ethereum")
-    monkeypatch.setattr("app.crypto.ingest._adapter", lambda chain_type, chain: FailingTokenAdapter())
+    monkeypatch.setattr(
+        "app.crypto.ingest.fetch_wallet_holdings",
+        lambda chain_type, chain, address: (_ for _ in ()).throw(RuntimeError("Alchemy token balance fetch failed")),
+    )
 
     with Session(db_engine) as db:
         refreshed = refresh_wallet_snapshot(db, wallet_id, user_id=1, automatic=True)
@@ -586,3 +576,152 @@ def test_refresh_wallet_snapshot_does_not_persist_partial_evm_snapshot(db_engine
     assert len(rows) == 1
     assert str(rows[0]["as_of_date"]) == "2026-07-03"
     assert float(rows[0]["total_usd"]) == 40000.0
+
+
+def test_evm_provider_order_falls_back_from_moralis_to_alchemy(monkeypatch):
+    from app.crypto import providers
+    from app.crypto.adapters import NativeBalance
+
+    class FailingMoralis:
+        provider_name = "moralis"
+        supported_chains = {"ethereum"}
+
+        def fetch_wallet_holdings(self, address, chain):
+            raise RuntimeError("moralis unavailable")
+
+    class WorkingAlchemy:
+        provider_name = "alchemy"
+        supported_chains = {"ethereum"}
+
+        def fetch_wallet_holdings(self, address, chain):
+            return (
+                NativeBalance(
+                    symbol="ETH",
+                    decimals=18,
+                    raw_amount="1000000000000000000",
+                    normalized_amount=1.0,
+                ),
+                [],
+            )
+
+    monkeypatch.setenv("MORALIS_API_KEY", "test-key")
+    monkeypatch.setenv("CRYPTO_EVM_HOLDINGS_PROVIDERS", "moralis,alchemy")
+    monkeypatch.setattr(providers, "MoralisHoldingsProvider", FailingMoralis)
+    monkeypatch.setattr(providers, "AlchemyHoldingsProvider", WorkingAlchemy)
+
+    native, tokens, provider_name = providers.fetch_wallet_holdings("evm", "ethereum", "0xabc")
+
+    assert provider_name == "alchemy"
+    assert native.normalized_amount == 1.0
+    assert tokens == []
+
+
+def test_crypto_http_retry_is_bounded_for_rate_limits(monkeypatch):
+    from app.crypto import http
+
+    calls: list[dict] = []
+    sleeps: list[float] = []
+
+    class RateLimitedResponse:
+        status_code = 429
+
+    monkeypatch.setattr(http.time, "sleep", lambda seconds: sleeps.append(seconds))
+    monkeypatch.setattr(
+        http.httpx,
+        "request",
+        lambda method, url, **kwargs: calls.append({"method": method, "url": url, **kwargs}) or RateLimitedResponse(),
+    )
+
+    response = http.request_with_retry(
+        "GET",
+        "https://example.test/rate-limited",
+        max_attempts=3,
+        backoff_seconds=0.25,
+        retry_statuses={429},
+    )
+
+    assert response.status_code == 429
+    assert len(calls) == 3
+    assert sleeps == [0.25, 0.5]
+
+
+def test_failed_holdings_refresh_overlays_fresh_prices_without_new_snapshot(client: TestClient, db_engine, monkeypatch):
+    wallet_id = "wallet-stale-holdings-fresh-price"
+    old_as_of = datetime(2026, 7, 3, tzinfo=timezone.utc)
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at)
+                VALUES (:wallet_id, 1, 'evm', 'ethereum', '0xstaleprice', 'Stale Wallet', 'active', :now)
+                """
+            ),
+            {"wallet_id": wallet_id, "now": old_as_of},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd, source_versions)
+                VALUES (
+                  9910,
+                  :wallet_id,
+                  '2026-07-03',
+                  :fetched_at,
+                  200,
+                  '{"holdings_as_of":"2026-07-03T00:00:00+00:00","price_as_of":"2026-07-03T00:00:00+00:00","holdings_provider":"alchemy","price_provider":"coingecko"}'
+                )
+                """
+            ),
+            {"wallet_id": wallet_id, "fetched_at": old_as_of},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallet_snapshot_items
+                (snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, price_usd, value_usd)
+                VALUES (9910, 'evm', 'ethereum', 'native', 'ETH', 2, 100, 200)
+                """
+            )
+        )
+
+    monkeypatch.setattr("app.crypto.refresh.ingest_wallet", lambda db, wallet_id: (_ for _ in ()).throw(RuntimeError("Alchemy 429")))
+    monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: 150.0 if symbol == "ETH" else None)
+    monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
+    monkeypatch.setattr("app.crypto.valuation.price_by_mint", lambda mints: {})
+
+    with Session(db_engine) as db:
+        refreshed = refresh_wallet_snapshot(db, wallet_id, user_id=1, automatic=True)
+
+    assert refreshed is False
+    with db_engine.connect() as conn:
+        snapshots = conn.execute(
+            text("SELECT COUNT(*) FROM crypto_wallet_snapshots WHERE wallet_id = :wallet_id"),
+            {"wallet_id": wallet_id},
+        ).scalar_one()
+        row = conn.execute(
+            text(
+                """
+                SELECT s.total_usd, i.price_usd, i.value_usd, s.source_versions
+                FROM crypto_wallet_snapshots s
+                JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+                WHERE s.wallet_id = :wallet_id
+                """
+            ),
+            {"wallet_id": wallet_id},
+        ).mappings().one()
+
+    assert snapshots == 1
+    assert float(row["total_usd"]) == 300.0
+    assert float(row["price_usd"]) == 150.0
+    assert float(row["value_usd"]) == 300.0
+    assert "2026-07-03T00:00:00+00:00" in row["source_versions"]
+
+    resp = client.get("/crypto/summary?base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_crypto_usd"] == 300.0
+    assert body["holdings_as_of"] == "2026-07-03T00:00:00+00:00"
+    assert body["price_as_of"] is not None
+    assert body["stale_holdings"] is True
+    assert body["stale_prices"] is False

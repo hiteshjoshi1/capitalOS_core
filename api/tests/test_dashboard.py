@@ -430,6 +430,7 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
     assert dashboard_body["net_worth"]["total"] == 1123.45
     assert crypto_body["total_crypto_base"] == 123.45
     assert dashboard_body["net_worth"]["crypto"] == crypto_body["total_crypto_base"]
+    assert dashboard_body["current_net_worth"]["crypto"] == crypto_body["total_crypto_base"]
     # After changes: CASH is excluded, CRYPTO (ETH) is included in top_holdings
     assert [row["symbol"] for row in dashboard_body["top_holdings"]] == ["ETH"]
     assert any(row["asset_class"] == "CRYPTO" for row in dashboard_body["top_holdings"])

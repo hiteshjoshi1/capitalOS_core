@@ -742,6 +742,10 @@ export type CryptoSummary = {
     snapshot_value_base?: number | null;
     snapshot_delta_base?: number | null;
     snapshot_delta_pct?: number | null;
+    holdings_as_of?: string | null;
+    price_as_of?: string | null;
+    holdings_provider?: string | null;
+    price_provider?: string | null;
   }>;
   wallet_exposure?: Array<{
     wallet_id: string;
@@ -752,6 +756,12 @@ export type CryptoSummary = {
     total_usd: number;
     total_base: number;
     percent?: number;
+    holdings_as_of?: string | null;
+    price_as_of?: string | null;
+    holdings_provider?: string | null;
+    price_provider?: string | null;
+    stale_holdings?: boolean;
+    stale_prices?: boolean;
   }>;
   chain_exposure?: Array<{
     chain: string;
@@ -766,6 +776,10 @@ export type CryptoSummary = {
     total_base: number;
   }>;
   last_refreshed_at: string | null;
+  holdings_as_of?: string | null;
+  price_as_of?: string | null;
+  stale_holdings?: boolean;
+  stale_prices?: boolean;
   is_stale: boolean;
   refresh_triggered: boolean;
 };
@@ -829,6 +843,8 @@ export type NetWorthFreshness = {
   positions_as_of?: string | null;
   market_data_as_of?: string | null;
   crypto_as_of?: string | null;
+  crypto_holdings_as_of?: string | null;
+  crypto_price_as_of?: string | null;
 };
 
 export type DashboardBootstrap = {

@@ -27,6 +27,7 @@ from app.crypto.verify import (
 )
 from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refresh_lock, upsert_snapshot
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
+from app.crypto.valuation import latest_wallet_valuation
 from app.fx import get_rates
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
@@ -701,7 +702,7 @@ def _crypto_total_and_freshness(wallet_rows: list[dict[str, Any]]) -> tuple[floa
     for row in wallet_rows:
         if row.get("total_usd") is not None:
             total_usd += float(row["total_usd"])
-        fetched_at = row.get("fetched_at")
+        fetched_at = row.get("holdings_as_of") or row.get("fetched_at")
         if isinstance(fetched_at, str):
             try:
                 fetched_at = datetime.fromisoformat(fetched_at)
@@ -744,13 +745,17 @@ def crypto_summary(
     selected_month_start = _parse_month_start(month)
     snapshot_anchor = _anchor_date(selected_month_start)
 
-    wallet_rows = _latest_wallet_rows(db, current_user.id)
-    snapshot_wallet_rows = _latest_wallet_rows(db, current_user.id, as_of_date=snapshot_anchor)
-    current_items, previous_items = _latest_and_previous_wallet_items(db, current_user.id)
-    snapshot_items = _latest_wallet_items(db, current_user.id, as_of_date=snapshot_anchor)
+    current_valuation = latest_wallet_valuation(db, current_user.id)
+    snapshot_valuation = latest_wallet_valuation(db, current_user.id, as_of_date=snapshot_anchor.date())
+    wallet_rows = current_valuation["wallets"]
+    snapshot_wallet_rows = snapshot_valuation["wallets"]
+    current_items = current_valuation["items"]
+    _, previous_items = _latest_and_previous_wallet_items(db, current_user.id)
+    snapshot_items = snapshot_valuation["items"]
 
-    total_usd, last_refreshed, is_stale = _crypto_total_and_freshness(wallet_rows)
+    total_usd, last_refreshed, _ = _crypto_total_and_freshness(wallet_rows)
     snapshot_total_usd, _, _ = _crypto_total_and_freshness(snapshot_wallet_rows)
+    is_stale = bool(current_valuation["stale_holdings"] or current_valuation["stale_prices"])
     rate = get_rates(datetime.now(tz=timezone.utc), base_currency, {"USD"}).get("USD", 1.0)
     total_base = total_usd * rate
     snapshot_total_base = snapshot_total_usd * rate
@@ -823,6 +828,10 @@ def crypto_summary(
                 "snapshot_delta_pct": ((current_value_usd - snapshot_value_usd) / snapshot_value_usd)
                 if snapshot_value_usd > 0
                 else None,
+                "holdings_as_of": row["holdings_as_of"].isoformat() if row.get("holdings_as_of") else None,
+                "price_as_of": row["price_as_of"].isoformat() if row.get("price_as_of") else None,
+                "holdings_provider": row.get("holdings_provider"),
+                "price_provider": row.get("price_provider"),
             }
         )
 
@@ -843,6 +852,12 @@ def crypto_summary(
                 if wallet_total > 0 and row.get("total_usd") is not None
                 else 0.0
             ),
+            "holdings_as_of": row["holdings_as_of"].isoformat() if row.get("holdings_as_of") else None,
+            "price_as_of": row["price_as_of"].isoformat() if row.get("price_as_of") else None,
+            "holdings_provider": row.get("holdings_provider"),
+            "price_provider": row.get("price_provider"),
+            "stale_holdings": bool(row.get("stale_holdings")),
+            "stale_prices": bool(row.get("stale_prices")),
         }
         for row in wallet_rows
         if row.get("total_usd") is not None
@@ -915,6 +930,12 @@ def crypto_summary(
         "chain_exposure": chain_exposure,
         "wallet_chain_exposure": wallet_chain_exposure,
         "last_refreshed_at": last_refreshed.isoformat() if last_refreshed else None,
+        "holdings_as_of": current_valuation["holdings_as_of"].isoformat()
+        if current_valuation["holdings_as_of"]
+        else None,
+        "price_as_of": current_valuation["price_as_of"].isoformat() if current_valuation["price_as_of"] else None,
+        "stale_holdings": bool(current_valuation["stale_holdings"]),
+        "stale_prices": bool(current_valuation["stale_prices"]),
         "is_stale": is_stale,
         "refresh_triggered": False,
     }
