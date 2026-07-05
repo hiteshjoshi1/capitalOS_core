@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
@@ -71,20 +72,7 @@ def _active_wallets(db, *, coinbase_only: bool = False) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _latest_snapshot_fetched_at(db, wallet_id: str) -> datetime | None:
-    row = db.execute(
-        text(
-            """
-            SELECT fetched_at
-            FROM crypto_wallet_snapshots
-            WHERE wallet_id = :wallet_id
-            ORDER BY as_of_date DESC, fetched_at DESC NULLS LAST, id DESC
-            LIMIT 1
-            """
-        ),
-        {"wallet_id": wallet_id},
-    ).fetchone()
-    value = row[0] if row else None
+def _parse_snapshot_timestamp(value) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, str):
@@ -99,13 +87,47 @@ def _latest_snapshot_fetched_at(db, wallet_id: str) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
+def _latest_snapshot_freshness(db, wallet_id: str) -> tuple[datetime | None, datetime | None]:
+    row = db.execute(
+        text(
+            """
+            SELECT fetched_at, source_versions
+            FROM crypto_wallet_snapshots
+            WHERE wallet_id = :wallet_id
+            ORDER BY as_of_date DESC, fetched_at DESC NULLS LAST, id DESC
+            LIMIT 1
+            """
+        ),
+        {"wallet_id": wallet_id},
+    ).fetchone()
+    if row is None:
+        return None, None
+    fetched_at = _parse_snapshot_timestamp(row[0])
+    source_versions = {}
+    if row[1]:
+        try:
+            source_versions = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+        except (TypeError, json.JSONDecodeError):
+            source_versions = {}
+    if not isinstance(source_versions, dict):
+        source_versions = {}
+    holdings_as_of = _parse_snapshot_timestamp(source_versions.get("holdings_as_of")) or fetched_at
+    price_as_of = _parse_snapshot_timestamp(source_versions.get("price_as_of")) or fetched_at
+    return holdings_as_of, price_as_of
+
+
+def _wallet_refresh_due(db, wallet_id: str) -> bool:
+    holdings_as_of, price_as_of = _latest_snapshot_freshness(db, wallet_id)
+    return should_refresh(holdings_as_of) or should_refresh(price_as_of)
+
+
 def _startup_catchup_due() -> bool:
     db = next(get_db())
     try:
-        wallets = _active_wallets(db, coinbase_only=True)
+        wallets = _active_wallets(db)
         if not wallets:
             return False
-        return any(should_refresh(_latest_snapshot_fetched_at(db, str(wallet["id"]))) for wallet in wallets)
+        return any(_wallet_refresh_due(db, str(wallet["id"])) for wallet in wallets)
     except Exception as exc:  # noqa: BLE001
         logger.exception("crypto_startup_catchup_check_failed", extra={"error_class": exc.__class__.__name__})
         return True
@@ -134,7 +156,7 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False) -> None:
             )
             for wallet in rows:
                 wallet_id = str(wallet["id"])
-                if only_stale and not should_refresh(_latest_snapshot_fetched_at(db, wallet_id)):
+                if only_stale and not _wallet_refresh_due(db, wallet_id):
                     skipped += 1
                     continue
                 if refresh_wallet_snapshot(
@@ -166,7 +188,7 @@ def _refresh_all_wallets():
 
 
 def _refresh_due_wallets():
-    _refresh_wallets(only_stale=True, coinbase_only=True)
+    _refresh_wallets(only_stale=True)
 
 
 def start_scheduler() -> BackgroundScheduler | None:

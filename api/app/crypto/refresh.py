@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.logging import get_job_id, job_context
 from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refresh_lock, upsert_snapshot
+from app.crypto.valuation import refresh_latest_snapshot_prices
 from app.services.portfolio_realtime import publish_portfolio_refresh
 
 logger = logging.getLogger("capitalos.crypto.refresh")
@@ -54,6 +55,22 @@ def refresh_wallet_snapshot(db: Session, wallet_id: str, *, user_id: int | None,
         return True
     except Exception as exc:
         db.rollback()
+        price_overlay_updated = False
+        try:
+            price_overlay_updated = refresh_latest_snapshot_prices(db, wallet_id)
+            db.commit()
+        except Exception as price_exc:  # noqa: BLE001
+            db.rollback()
+            logger.warning(
+                "snapshot_price_overlay_failed",
+                extra={
+                    "event": "snapshot_price_overlay_failed",
+                    "provider": "crypto",
+                    "platform": "crypto",
+                    "wallet_id": wallet_id,
+                    "error_class": price_exc.__class__.__name__,
+                },
+            )
         logger.exception(
             "snapshot_failed",
             extra={
@@ -62,6 +79,7 @@ def refresh_wallet_snapshot(db: Session, wallet_id: str, *, user_id: int | None,
                 "platform": "crypto",
                 "wallet_id": wallet_id,
                 "error_class": exc.__class__.__name__,
+                "price_overlay_updated": price_overlay_updated,
                 "duration_ms": int((time.perf_counter() - lifecycle_started) * 1000),
             },
         )

@@ -11,8 +11,9 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
-from app.crypto.adapters import EvmAlchemyAdapter, SolanaHeliusAdapter, TokenBalance, NativeBalance
+from app.crypto.adapters import TokenBalance, NativeBalance
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
+from app.crypto.providers import configured_price_provider_order, fetch_wallet_holdings
 
 
 SINGAPORE_TZ = ZoneInfo("Asia/Singapore")
@@ -51,14 +52,6 @@ def _fetch_prices(chain_type: str, chain: str, tokens: List[TokenBalance]) -> Di
         mints = [t.contract_or_mint for t in tokens if t.contract_or_mint]
         return price_by_mint(mints)
     return {}
-
-
-def _adapter(chain_type: str, chain: str):
-    if chain_type == "evm":
-        return EvmAlchemyAdapter(chain)
-    if chain_type == "solana":
-        return SolanaHeliusAdapter()
-    raise ValueError(f"Unsupported chain_type: {chain_type}")
 
 
 def _evm_chains() -> list[str]:
@@ -111,9 +104,10 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
 
     items: list[dict] = []
     total_usd = 0.0
+    provider_names: set[str] = set()
     source_versions = {
-        "balances_provider": "alchemy" if wallet["chain_type"] == "evm" else "helius",
-        "pricing_provider": "coingecko",
+        "holdings_provider": None,
+        "price_provider": ",".join(configured_price_provider_order()),
     }
 
     if wallet["chain_type"] == "evm":
@@ -124,13 +118,10 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
         chain_errors: list[str] = []
         for chain in chains:
             try:
-                adapter = _adapter("evm", chain)
-                native = adapter.get_native_balance(wallet["address"])
-                tokens = (
-                    adapter.get_token_balances(wallet["address"])
-                    if chain in token_chains
-                    else []
-                )
+                native, tokens, provider_name = fetch_wallet_holdings("evm", chain, wallet["address"])
+                provider_names.add(provider_name)
+                if chain not in token_chains:
+                    tokens = []
             except Exception as exc:
                 chain_errors.append(f"{chain}: {exc}")
                 logger.warning(
@@ -169,7 +160,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                 symbol_price = price_by_symbol(native.symbol)
                 if symbol_price is not None:
                     price, value = _normalize_price(native, symbol_price)
-                    native.price_source = "coingecko_symbol"
+                    native.price_source = ",".join(configured_price_provider_order())
             if value is not None:
                 total_usd += value
                 items.append(
@@ -195,7 +186,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                     price = prices.get(token.contract_or_mint.lower())
                     if price:
                         value = token.normalized_amount * price if token.normalized_amount is not None else None
-                        token.price_source = "coingecko_contract"
+                        token.price_source = ",".join(configured_price_provider_order())
                 # No fallback pricing: rely on API prices only.
                 if value is None and price is not None and token.normalized_amount is not None:
                     value = token.normalized_amount * price
@@ -219,9 +210,8 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
         if chain_errors:
             raise RuntimeError("Crypto wallet refresh incomplete: " + "; ".join(chain_errors))
     else:
-        adapter = _adapter(wallet["chain_type"], wallet["chain"])
-        native = adapter.get_native_balance(wallet["address"])
-        tokens = adapter.get_token_balances(wallet["address"])
+        native, tokens, provider_name = fetch_wallet_holdings(wallet["chain_type"], wallet["chain"], wallet["address"])
+        provider_names.add(provider_name)
         allow_by_chain = _allowlist_from_db(db)
         if allow_by_chain.get("solana"):
             tokens = [
@@ -239,7 +229,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
             symbol_price = price_by_symbol(native.symbol)
             if symbol_price is not None:
                 price, value = _normalize_price(native, symbol_price)
-                native.price_source = "coingecko_symbol"
+                native.price_source = ",".join(configured_price_provider_order())
         if value is not None:
             total_usd += value
             items.append(
@@ -265,7 +255,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                 price = prices.get(token.contract_or_mint.lower())
                 if price:
                     value = token.normalized_amount * price if token.normalized_amount is not None else None
-                    token.price_source = "coingecko_mint"
+                    token.price_source = ",".join(configured_price_provider_order())
             if value is not None:
                 total_usd += value
             items.append(
@@ -284,11 +274,18 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                 }
             )
 
+    source_versions["holdings_provider"] = ",".join(sorted(provider_names)) if provider_names else None
+    source_versions["balances_provider"] = source_versions["holdings_provider"]
+    source_versions["pricing_provider"] = source_versions["price_provider"]
     return SnapshotResult(total_usd=total_usd, items=items, source_versions=source_versions)
 
 
 def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
     as_of = _as_of_date()
+    now = datetime.now(tz=timezone.utc)
+    source_versions = dict(getattr(result, "source_versions", {}) or {})
+    source_versions.setdefault("holdings_as_of", now.isoformat())
+    source_versions.setdefault("price_as_of", now.isoformat())
     existing = db.execute(
         text(
             "SELECT id FROM crypto_wallet_snapshots WHERE wallet_id = :wallet_id AND as_of_date = :as_of"
@@ -304,8 +301,8 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
             {
                 "id": snapshot_id,
                 "total_usd": result.total_usd,
-                "source_versions": json.dumps(result.source_versions),
-                "now": datetime.now(tz=timezone.utc),
+                "source_versions": json.dumps(source_versions),
+                "now": now,
             },
         )
         db.execute(
@@ -322,8 +319,8 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
                 "wallet_id": wallet_id,
                 "as_of_date": as_of,
                 "total_usd": result.total_usd,
-                "source_versions": json.dumps(result.source_versions),
-                "now": datetime.now(tz=timezone.utc),
+                "source_versions": json.dumps(source_versions),
+                "now": now,
             },
         ).fetchone()
         snapshot_id = int(row[0])

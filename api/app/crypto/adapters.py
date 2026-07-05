@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from dataclasses import dataclass
 from typing import Iterable, Protocol, List
 
@@ -57,6 +59,17 @@ ALCHEMY_CHAIN_SLUG = {
 
 
 class EvmAlchemyAdapter:
+    _metadata_cache: dict[tuple[str, str], dict] = {}
+    _metadata_lock = threading.Lock()
+
+    @staticmethod
+    def supported_chains() -> set[str]:
+        return set(ALCHEMY_CHAIN_SLUG)
+
+    @staticmethod
+    def native_symbol(chain: str) -> str:
+        return EVM_NATIVE.get(chain, "ETH")
+
     def __init__(self, chain: str, api_key: str | None = None, timeout: int = 10):
         self.chain = chain
         self.api_key = api_key or os.getenv("ALCHEMY_API_KEY", "")
@@ -70,10 +83,28 @@ class EvmAlchemyAdapter:
 
     def _rpc(self, method: str, params: list) -> dict:
         payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-        data = json_request("POST", self.url, json=payload, timeout=self.timeout)
+        data = json_request(
+            "POST",
+            self.url,
+            json=payload,
+            timeout=self.timeout,
+            max_attempts=int(os.getenv("CRYPTO_ALCHEMY_MAX_ATTEMPTS", "3")),
+        )
         if "error" in data:
             raise RuntimeError(data["error"])
         return data["result"]
+
+    def _token_metadata(self, contract: str) -> dict:
+        ttl = int(os.getenv("CRYPTO_TOKEN_METADATA_CACHE_TTL_SECONDS", "86400"))
+        cache_key = (self.chain, contract.lower())
+        with self._metadata_lock:
+            cached = self._metadata_cache.get(cache_key)
+            if cached and time.time() - float(cached.get("_cached_at", 0)) <= ttl:
+                return cached
+        meta = self._rpc("alchemy_getTokenMetadata", [contract])
+        with self._metadata_lock:
+            self._metadata_cache[cache_key] = {**meta, "_cached_at": time.time()}
+        return meta
 
     def get_native_balance(self, address: str) -> NativeBalance:
         raw = self._rpc("eth_getBalance", [address, "latest"])
@@ -81,7 +112,7 @@ class EvmAlchemyAdapter:
         decimals = 18
         normalized = value / (10 ** decimals)
         return NativeBalance(
-            symbol=EVM_NATIVE.get(self.chain, "ETH"),
+            symbol=self.native_symbol(self.chain),
             decimals=decimals,
             raw_amount=str(value),
             normalized_amount=normalized,
@@ -105,7 +136,7 @@ class EvmAlchemyAdapter:
                 continue
             if int(raw_balance, 16) == 0:
                 continue
-            meta = self._rpc("alchemy_getTokenMetadata", [contract])
+            meta = self._token_metadata(contract)
             decimals = meta.get("decimals")
             symbol = meta.get("symbol")
             name = meta.get("name")

@@ -140,5 +140,134 @@
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-190-crypto-fetch-strategy-provider-resilience-current-valuation`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.5`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: Crypto scheduler performs daily refresh and startup catch-up for all active crypto wallets, not just Coinbase.
+- Acceptance criterion: Startup catch-up queues work in the background and never blocks dashboard or crypto page load.
+- Acceptance criterion: Current crypto valuation uses latest known holdings plus latest available prices.
+- Acceptance criterion: API exposes separate holdings freshness and price freshness.
+- Acceptance criterion: EVM holdings provider order is configurable and supports optional Moralis plus existing Alchemy fallback.
+- Acceptance criterion: The app runs without a Moralis key and falls back to existing providers.
+- Acceptance criterion: Alchemy 429 or provider failure does not write partial/zero snapshots.
+- Acceptance criterion: Provider retries/backoff/rate limiting are bounded and tested.
+- Acceptance criterion: Dashboard current crypto value and /crypto/summary current crypto value come from the same service.
+- Acceptance criterion: UI shows stale holdings/prices clearly when refreshes fail or are older than 24 hours.
+
+## Prepare
+Checked out `feature/issue-190-crypto-fetch-strategy-provider-resilience-current-valuation` from `main` and verified task file exists.
+
+## Plan Summary
+Added configurable holdings/price provider strategy, introduced a read-only current valuation layer using latest complete holdings plus latest available prices, wired dashboard and crypto summary to shared valuation, made startup catch-up cover all active crypto wallets, surfaced separate holdings/price freshness and provider metadata, and verified with required make targets.
+
+### Architecture Decisions
+- Added app.crypto.providers with CryptoHoldingsProvider-style adapters for Alchemy, optional Moralis, and Helius while keeping Coinbase exchange ingestion separate.
+- Kept Moralis optional: it is only used when MORALIS_API_KEY is configured; configured order defaults to moralis,alchemy and falls back safely.
+- Did not add a new valuation table; current valuation is computed from latest complete snapshot items, with background refresh jobs allowed to overlay fresh prices onto latest holdings metadata.
+- Stored holdings_as_of and price_as_of in crypto_wallet_snapshots.source_versions to avoid schema churn and preserve existing historical snapshots.
+- Kept page reads provider-free; provider calls happen only in scheduler/manual refresh paths.
+- Dashboard current net worth and /crypto/summary now use the same crypto valuation helper for current crypto value.
+
+### Acceptance Criteria
+- Crypto scheduler performs daily refresh and startup catch-up for all active crypto wallets, not just Coinbase.
+- Startup catch-up queues work in the background and never blocks dashboard or crypto page load.
+- Current crypto valuation uses latest known holdings plus latest available prices.
+- API exposes separate holdings freshness and price freshness.
+- EVM holdings provider order is configurable and supports optional Moralis plus existing Alchemy fallback.
+- The app runs without a Moralis key and falls back to existing providers.
+- Alchemy 429 or provider failure does not write partial/zero snapshots.
+- Provider retries/backoff/rate limiting are bounded and tested.
+- Dashboard current crypto value and /crypto/summary current crypto value come from the same service.
+- UI shows stale holdings/prices clearly when refreshes fail or are older than 24 hours.
+
+### Planned Paths
+- `api/app/crypto/`
+- `api/app/routers/crypto.py`
+- `api/app/routers/dashboard.py`
+- `api/app/schemas/dashboard.py`
+- `api/tests/test_crypto.py`
+- `api/tests/test_dashboard.py`
+- `web/src/lib/api.ts`
+- `web/src/routes/CryptoHoldings.tsx`
+- `web/src/__tests__/CryptoHoldings.test.tsx`
+- `config/crypto.env.example`
+- `tasks/issue-190-crypto-fetch-strategy-provider-resilience-current-valuation.md`
+
+## Build Summary
+Implemented Issue 190 crypto provider resilience and current valuation changes across backend, scheduler, API contract, UI, tests, and env examples.
+
+### Changed Files
+- `api/app/crypto/adapters.py`
+- `api/app/crypto/ingest.py`
+- `api/app/crypto/pricing.py`
+- `api/app/crypto/providers.py`
+- `api/app/crypto/refresh.py`
+- `api/app/crypto/scheduler.py`
+- `api/app/crypto/valuation.py`
+- `api/app/routers/crypto.py`
+- `api/app/routers/dashboard.py`
+- `api/app/schemas/dashboard.py`
+- `api/tests/test_crypto.py`
+- `api/tests/test_dashboard.py`
+- `config/crypto.env.example`
+- `tasks/issue-190-crypto-fetch-strategy-provider-resilience-current-valuation.md`
+- `web/src/__tests__/CryptoHoldings.test.tsx`
+- `web/src/lib/api.ts`
+- `web/src/routes/CryptoHoldings.tsx`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented Issue 190 crypto provider resilience and current valuation changes across backend, scheduler, API contract, UI, tests, and env examples.
+
+- semantic_intent_achieved: `True`
+- provider_model: `codex/gpt-5.5`
+
+### Semantic Checks
+- `pass` Crypto scheduler performs daily refresh and startup catch-up for all active crypto wallets, not just Coinbase.: Scheduler _startup_catchup_due and _refresh_due_wallets now inspect all active wallets; test_crypto verifies stale EVM and Coinbase wallets are both refreshed.
+- `pass` Startup catch-up queues work in the background and never blocks dashboard or crypto page load.: Startup catch-up remains scheduled via APS DateTrigger; /crypto/summary still returns refresh_triggered false and no DB refresh mutation in tests.
+- `pass` Current crypto valuation uses latest known holdings plus latest available prices.: latest_wallet_valuation reads latest complete snapshot items as quantity source; failed holdings refresh test overlays ETH price from 100 to 150 and summary total changes to 300 while holdings_as_of remains old.
+- `pass` API exposes separate holdings freshness and price freshness.: /crypto/summary and dashboard freshness include holdings_as_of/price_as_of fields; make crypto-smoke and api-smoke showed those fields in live JSON.
+- `pass` EVM holdings provider order is configurable and supports optional Moralis plus existing Alchemy fallback.: CRYPTO_EVM_HOLDINGS_PROVIDERS controls provider order; test_evm_provider_order_falls_back_from_moralis_to_alchemy passes.
+- `pass` The app runs without a Moralis key and falls back to existing providers.: Moralis provider is skipped when MORALIS_API_KEY is absent; full backend, frontend, e2e, and smoke suites passed without requiring Moralis.
+- `pass` Alchemy 429 or provider failure does not write partial/zero snapshots.: Failed holdings tests assert refresh returns false and no new/lower partial snapshot is persisted.
+- `pass` Provider retries/backoff/rate limiting are bounded and tested.: request_with_retry bounds max_attempts and exponential sleeps; test_crypto_http_retry_is_bounded_for_rate_limits asserts exactly 3 attempts and [0.25, 0.5] sleeps for 429.
+- `pass` Dashboard current crypto value and /crypto/summary current crypto value come from the same service.: Dashboard _networth_components uses latest_wallet_valuation for current price_overlay path; dashboard test asserts current_net_worth.crypto equals crypto summary total.
+- `pass` UI shows stale holdings/prices clearly when refreshes fail or are older than 24 hours.: CryptoHoldings renders separate holdings/prices freshness labels; CryptoHoldings tests assert Stale holdings and Fresh prices (refreshing).
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-190-crypto-fetch-strategy-provider-resilience-current-valuation`.
 <!-- MACHINE_RENDERED_END -->

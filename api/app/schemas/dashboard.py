@@ -14,6 +14,8 @@ class NetWorthFreshness(BaseModel):
     positions_as_of: Optional[str] = None
     market_data_as_of: Optional[str] = None
     crypto_as_of: Optional[str] = None
+    crypto_holdings_as_of: Optional[str] = None
+    crypto_price_as_of: Optional[str] = None
 
 
 class GeographyItem(BaseModel):

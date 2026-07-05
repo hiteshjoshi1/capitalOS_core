@@ -7,6 +7,7 @@ import time
 import threading
 
 from app.crypto.http import json_request, request_with_retry
+from app.crypto.providers import configured_price_provider_order
 
 COINGECKO_BASE = "https://api.coingecko.com/api/v3"
 DEFILLAMA_BASE = "https://coins.llama.fi"
@@ -138,10 +139,16 @@ def price_by_contract(chain: str, contracts: Iterable[str]) -> Dict[str, float]:
         if invalid:
             _LOG.warning("contracts_invalid", extra={"count": len(invalid)})
         return {}
-    results = _defillama_price_by_contract(chain, unique)
-    missing = {c for c in unique if c not in results}
-    if missing:
-        results.update(_coingecko_price_by_contract(chain, missing))
+    results: Dict[str, float] = {}
+    missing = set(unique)
+    for provider in configured_price_provider_order():
+        if not missing:
+            break
+        if provider == "defillama":
+            results.update(_defillama_price_by_contract(chain, missing))
+        elif provider == "coingecko":
+            results.update(_coingecko_price_by_contract(chain, missing))
+        missing = {c for c in unique if c not in results}
     return results
 
 
@@ -200,10 +207,16 @@ def price_by_mint(mints: Iterable[str]) -> Dict[str, float]:
     unique = {m.lower() for m in mints if m}
     if not unique:
         return {}
-    results = _defillama_price_by_mint(unique)
-    missing = {m for m in unique if m not in results}
-    if missing:
-        results.update(_coingecko_price_by_mint(missing))
+    results: Dict[str, float] = {}
+    missing = set(unique)
+    for provider in configured_price_provider_order():
+        if not missing:
+            break
+        if provider == "defillama":
+            results.update(_defillama_price_by_mint(missing))
+        elif provider == "coingecko":
+            results.update(_coingecko_price_by_mint(missing))
+        missing = {m for m in unique if m not in results}
     return results
 
 
@@ -251,10 +264,16 @@ def price_by_symbol(symbol: str) -> float | None:
     coin_id = NATIVE_IDS.get(symbol.upper())
     if not coin_id:
         return None
-    llama_price = _defillama_price_by_symbol(coin_id)
-    if llama_price is not None:
-        return llama_price
-    return _coingecko_price_by_symbol(coin_id)
+    for provider in configured_price_provider_order():
+        if provider == "defillama":
+            llama_price = _defillama_price_by_symbol(coin_id)
+            if llama_price is not None:
+                return llama_price
+        elif provider == "coingecko":
+            coingecko_price = _coingecko_price_by_symbol(coin_id)
+            if coingecko_price is not None:
+                return coingecko_price
+    return None
 
 
 def _coingecko_price_by_symbol(coin_id: str) -> float | None:

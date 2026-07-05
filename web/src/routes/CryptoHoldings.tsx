@@ -39,6 +39,7 @@ export default function CryptoHoldings() {
     value == null
       ? "—"
       : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
+  const formatDate = (value?: string | null) => value?.slice(0, 10) ?? "—";
   const formatDelta = (value?: number | null, pct?: number | null) => {
     if (value == null) {
       return "—";
@@ -107,14 +108,21 @@ export default function CryptoHoldings() {
                 <div className="muted">Selected month {summary?.month ?? month}</div>
               </div>
               <div className="mini">
-                <h3>Last refresh</h3>
-                <div className="big small">{summary?.last_refreshed_at?.slice(0, 10) ?? "—"}</div>
+                <h3>Holdings as of</h3>
+                <div className="big small">{formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)}</div>
                 <div className="muted">
-                  {summary?.is_stale ? "Stale" : "Fresh"} {summary?.refresh_triggered ? "(refreshing)" : ""}
+                  {summary?.stale_holdings ?? summary?.is_stale ? "Stale holdings" : "Fresh holdings"}
                 </div>
               </div>
             </div>
             <div className="split" style={{ marginTop: 12 }}>
+              <div className="mini">
+                <h3>Prices as of</h3>
+                <div className="big small">{formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)}</div>
+                <div className="muted">
+                  {summary?.stale_prices ?? summary?.is_stale ? "Stale prices" : "Fresh prices"} {summary?.refresh_triggered ? "(refreshing)" : ""}
+                </div>
+              </div>
               <div className="mini">
                 <h3>ETH</h3>
                 <div className="big small">{summary?.eth.balance?.toFixed(4) ?? "0"}</div>
@@ -151,6 +159,7 @@ export default function CryptoHoldings() {
                   <th className="right">Unit</th>
                   <th className="right">Value</th>
                   <th>Chain</th>
+                  <th>Provider</th>
                   <th className="right">Price move</th>
                   <th className="right">Value move</th>
                   <th className="right">Snapshot delta</th>
@@ -165,7 +174,7 @@ export default function CryptoHoldings() {
                   if (!filtered.length) {
                     return (
                       <tr>
-                        <td className="muted" colSpan={8}>No crypto holdings yet.</td>
+                        <td className="muted" colSpan={9}>No crypto holdings yet.</td>
                       </tr>
                     );
                   }
@@ -178,6 +187,7 @@ export default function CryptoHoldings() {
                         <td className="right">{unit == null ? "—" : formatMoney(unit, 2)}</td>
                         <td className="right">{formatMoney(h.value_base)}</td>
                         <td className="muted">{h.chain.toUpperCase()}</td>
+                        <td className="muted">{h.price_provider ?? h.holdings_provider ?? "—"}</td>
                         <td className={`right ${(h.price_change_usd ?? 0) >= 0 ? "good" : "bad"}`}>
                           {h.price_change_usd == null ? "—" : `${h.price_change_usd >= 0 ? "+" : "-"}USD ${Math.abs(h.price_change_usd).toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
                         </td>

@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
+from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
 from app.schemas.dashboard import (
     BootstrapResponse,
@@ -410,7 +411,12 @@ def _current_networth_state(db: Session, base_currency: str, current_user_id: in
     report_dates = [row.get("report_date") for row in rows if row.get("report_date") is not None]
     market_data_as_of = min(report_dates) if report_dates else None
     positions_as_of = _positions_coverage_as_of(db, anchor, current_user_id)
-    crypto_as_of = _crypto_snapshot_coverage_as_of(db, anchor.date(), current_user_id)
+    crypto_valuation = latest_wallet_valuation(db, current_user_id)
+    crypto_as_of = crypto_valuation.get("holdings_as_of") or _crypto_snapshot_coverage_as_of(
+        db,
+        anchor.date(),
+        current_user_id,
+    )
     cash_percent = round((components["cash"] / components["total"]) * 100, 2) if components["total"] > 0 else 0.0
     return {
         "anchor": anchor,
@@ -420,6 +426,8 @@ def _current_networth_state(db: Session, base_currency: str, current_user_id: in
             "positions_as_of": _iso_value(positions_as_of),
             "market_data_as_of": _iso_value(market_data_as_of),
             "crypto_as_of": _iso_value(crypto_as_of),
+            "crypto_holdings_as_of": _iso_value(crypto_valuation.get("holdings_as_of")),
+            "crypto_price_as_of": _iso_value(crypto_valuation.get("price_as_of")),
         },
     }
 
@@ -535,30 +543,10 @@ def _networth_components(
         if balance_type not in {"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"}:
             continue
         cash += _canonical_cash_value(row, rates, base_currency)
-    # Add crypto wallet snapshots (USD -> base_currency), latest per wallet
-    as_of_date = anchor_ts.date()
-    wallet_total = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT wallet_id, MAX(as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots
-              WHERE as_of_date <= :as_of_date
-              GROUP BY wallet_id
-            )
-            SELECT SUM(s.total_usd) AS total_usd
-            FROM crypto_wallet_snapshots s
-            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
-            JOIN crypto_wallets w ON w.id = s.wallet_id
-            WHERE w.status = 'active'
-              AND """
-            + account_scope_sql("w")
-            + """
-            """
-        ),
-        {"as_of_date": as_of_date, "current_user_id": current_user_id},
-    ).mappings().one()
-    wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
+    if price_overlay:
+        wallet_usd = float(latest_wallet_valuation(db, current_user_id)["total_usd"])
+    else:
+        wallet_usd = float(latest_wallet_valuation(db, current_user_id, as_of_date=anchor_ts.date())["total_usd"])
     if wallet_usd:
         usd_rate = rates.get("USD", 1.0)
         crypto += wallet_usd * usd_rate
