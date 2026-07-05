@@ -104,6 +104,11 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
     if not wallet:
         raise ValueError("Wallet not found")
 
+    if wallet["chain_type"] == "exchange" and wallet["chain"] == "coinbase":
+        from app.crypto.coinbase import fetch_coinbase_snapshot
+
+        return fetch_coinbase_snapshot()
+
     items: list[dict] = []
     total_usd = 0.0
     source_versions = {
@@ -116,6 +121,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
         allow_by_chain = _allowlist_from_db(db)
         chains = _evm_chains()
         token_chains = _evm_token_chains()
+        chain_errors: list[str] = []
         for chain in chains:
             try:
                 adapter = _adapter("evm", chain)
@@ -126,6 +132,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                     else []
                 )
             except Exception as exc:
+                chain_errors.append(f"{chain}: {exc}")
                 logger.warning(
                     "crypto_chain_fetch_failed",
                     extra={"wallet_id": wallet_id, "chain": chain, "error": str(exc)},
@@ -209,6 +216,8 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                         "chain": chain,
                     }
                 )
+        if chain_errors:
+            raise RuntimeError("Crypto wallet refresh incomplete: " + "; ".join(chain_errors))
     else:
         adapter = _adapter(wallet["chain_type"], wallet["chain"])
         native = adapter.get_native_balance(wallet["address"])

@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from types import SimpleNamespace
 
 
@@ -7,11 +8,23 @@ from eth_account.messages import encode_defunct
 from nacl.signing import SigningKey
 import base58
 import base64
+import jwt
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm import Session
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 
 import app.routers.crypto as crypto_router
+from app.crypto.coinbase import (
+    CoinbaseClient,
+    CoinbaseConfig,
+    build_jwt,
+    ensure_coinbase_wallet,
+    parse_coinbase_accounts,
+)
+from app.crypto.ingest import SnapshotResult
 from app.crypto.refresh import refresh_wallet_snapshot
 
 
@@ -81,6 +94,266 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
     assert body["total_crypto_usd"] == 123.45
     assert body["total_crypto_base"] == 123.45
     assert body["top5_holdings"][0]["symbol"] == "ETH"
+
+
+def test_coinbase_account_parser_skips_fiat_inactive_and_zero_balances():
+    accounts = [
+        {
+            "uuid": "btc-account",
+            "name": "BTC Wallet",
+            "currency": "BTC",
+            "active": True,
+            "available_balance": {"value": "0.10"},
+            "hold": {"value": "0.025"},
+        },
+        {
+            "uuid": "usd-account",
+            "name": "USD Wallet",
+            "currency": "USD",
+            "active": True,
+            "available_balance": {"value": "1000"},
+        },
+        {
+            "uuid": "eth-account",
+            "name": "ETH Wallet",
+            "currency": "ETH",
+            "active": False,
+            "available_balance": {"value": "2"},
+        },
+        {
+            "uuid": "sol-account",
+            "name": "SOL Wallet",
+            "currency": "SOL",
+            "active": True,
+            "available_balance": {"value": "0"},
+        },
+    ]
+
+    positions = parse_coinbase_accounts(accounts, lambda symbol: {"BTC": Decimal("60000")}.get(symbol))
+
+    assert len(positions) == 1
+    position = positions[0]
+    assert position.account_uuid == "btc-account"
+    assert position.symbol == "BTC"
+    assert position.quantity == Decimal("0.125")
+    assert position.price_usd == Decimal("60000")
+    assert position.value_usd == Decimal("7500.000")
+
+
+def test_coinbase_jwt_uses_advanced_trade_uri_and_key_id():
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    private_pem = private_key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode("utf-8")
+    config = CoinbaseConfig(
+        key_id="organizations/test-org/apiKeys/test-key",
+        key_secret=private_pem,
+    )
+
+    token = build_jwt(config, "GET", "/api/v3/brokerage/accounts")
+
+    header = jwt.get_unverified_header(token)
+    payload = jwt.decode(token, options={"verify_signature": False})
+    assert header["kid"] == config.key_id
+    assert header["alg"] == "ES256"
+    assert payload["sub"] == config.key_id
+    assert payload["iss"] == "cdp"
+    assert payload["uri"] == "GET api.coinbase.com/api/v3/brokerage/accounts"
+
+
+def test_coinbase_prices_usd_stablecoins_at_parity():
+    client = CoinbaseClient(
+        CoinbaseConfig(
+            key_id="organizations/test-org/apiKeys/test-key",
+            key_secret="not-used-for-stablecoin-price",
+        )
+    )
+
+    assert client.price_usd("USDC") == Decimal("1")
+    assert client.price_usd("usdt") == Decimal("1")
+
+
+def test_coinbase_exchange_wallet_refreshes_into_crypto_summary(client: TestClient, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets
+                  (id, user_id, chain_type, chain, address, label, status, created_at)
+                VALUES
+                  ('coinbase-wallet', 1, 'exchange', 'coinbase', 'coinbase:1:default', 'Coinbase', 'active', :now)
+                """
+            ),
+            {"now": datetime.now(tz=timezone.utc)},
+        )
+
+    def fake_fetch_coinbase_snapshot():
+        return SnapshotResult(
+            total_usd=7500.0,
+            items=[
+                {
+                    "asset_kind": "exchange_spot",
+                    "contract_or_mint": "btc-account",
+                    "symbol": "BTC",
+                    "name": "BTC Wallet",
+                    "decimals": None,
+                    "raw_amount": "0.125",
+                    "normalized_amount": 0.125,
+                    "price_usd": 60000.0,
+                    "value_usd": 7500.0,
+                    "price_source": "coinbase_public_product",
+                    "chain": "coinbase",
+                }
+            ],
+            source_versions={
+                "balances_provider": "coinbase_advanced_trade",
+                "pricing_provider": "coinbase_public_products",
+            },
+        )
+
+    monkeypatch.setattr("app.crypto.coinbase.fetch_coinbase_snapshot", fake_fetch_coinbase_snapshot)
+
+    with Session(db_engine) as db:
+        refreshed = refresh_wallet_snapshot(db, "coinbase-wallet", user_id=1, automatic=True)
+
+    assert refreshed is True
+    resp = client.get("/crypto/summary?base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["total_crypto_usd"] == 7500.0
+    assert body["top_holdings"][0]["symbol"] == "BTC"
+    assert body["top_holdings"][0]["chain"] == "coinbase"
+    assert body["wallet_exposure"][0]["label"] == "Coinbase"
+
+
+def test_coinbase_scheduler_creates_and_refreshes_stale_exchange_wallet(db_engine, monkeypatch):
+    import app.crypto.scheduler as crypto_scheduler
+
+    SessionLocal = sessionmaker(bind=db_engine)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at)
+                VALUES ('evm-stale-wallet', 1, 'evm', 'ethereum', '0xstale', 'Existing EVM', 'active', :now)
+                """
+            ),
+            {"now": datetime.now(tz=timezone.utc)},
+        )
+
+    def fake_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    refreshed: list[dict] = []
+
+    def fake_refresh_wallet_snapshot(db, wallet_id, *, user_id, automatic):
+        refreshed.append({"wallet_id": wallet_id, "user_id": user_id, "automatic": automatic})
+        return True
+
+    monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
+    monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
+    monkeypatch.setenv("COINBASE_SCHEDULER_ENABLED", "auto")
+    monkeypatch.delenv("COINBASE_USERNAME", raising=False)
+    monkeypatch.setenv("COINBASE_USER_ID", "1")
+    monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
+    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)
+
+    crypto_scheduler._refresh_due_wallets()
+
+    with db_engine.connect() as conn:
+        wallet = conn.execute(
+            text(
+                """
+                SELECT id, user_id, chain_type, chain, address, label, status
+                FROM crypto_wallets
+                WHERE chain_type = 'exchange' AND chain = 'coinbase'
+                """
+            )
+        ).mappings().one()
+    assert wallet["user_id"] == 1
+    assert wallet["address"] == "coinbase:1:default"
+    assert wallet["label"] == "Coinbase"
+    assert wallet["status"] == "active"
+    assert refreshed == [{"wallet_id": wallet["id"], "user_id": 1, "automatic": True}]
+
+
+def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch):
+    import app.crypto.scheduler as crypto_scheduler
+
+    SessionLocal = sessionmaker(bind=db_engine)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO users (id, username, display_name, is_active)
+                VALUES (2, 'hitesh', 'Hitesh', 1)
+                """
+            )
+        )
+
+    def fake_get_db():
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    refreshed: list[dict] = []
+
+    def fake_refresh_wallet_snapshot(db, wallet_id, *, user_id, automatic):
+        refreshed.append({"wallet_id": wallet_id, "user_id": user_id, "automatic": automatic})
+        return True
+
+    monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
+    monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
+    monkeypatch.setenv("COINBASE_SCHEDULER_ENABLED", "auto")
+    monkeypatch.setenv("COINBASE_USERNAME", "hitesh")
+    monkeypatch.setenv("COINBASE_USER_ID", "1")
+    monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
+    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)
+
+    crypto_scheduler._refresh_due_wallets()
+
+    with db_engine.connect() as conn:
+        wallet = conn.execute(
+            text(
+                """
+                SELECT id, user_id, address, label, status
+                FROM crypto_wallets
+                WHERE chain_type = 'exchange' AND chain = 'coinbase'
+                """
+            )
+        ).mappings().one()
+    assert wallet["user_id"] == 2
+    assert wallet["address"] == "coinbase:2:default"
+    assert wallet["label"] == "Coinbase"
+    assert wallet["status"] == "active"
+    assert refreshed == [{"wallet_id": wallet["id"], "user_id": 2, "automatic": True}]
+
+
+def test_ensure_coinbase_wallet_is_idempotent(db_engine):
+    with Session(db_engine) as db:
+        first = ensure_coinbase_wallet(db, 1)
+        second = ensure_coinbase_wallet(db, 1)
+
+    assert first == second
+    with db_engine.connect() as conn:
+        count = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM crypto_wallets
+                WHERE chain_type = 'exchange' AND chain = 'coinbase' AND address = 'coinbase:1:default'
+                """
+            )
+        ).scalar_one()
+    assert count == 1
 
 
 def test_crypto_summary_exposes_snapshot_delta_and_refresh_movements(client: TestClient, db_engine, monkeypatch):
@@ -249,3 +522,67 @@ def test_refresh_wallet_snapshot_publishes_portfolio_refresh(db_engine, monkeypa
             },
         }
     ]
+
+
+def test_refresh_wallet_snapshot_does_not_persist_partial_evm_snapshot(db_engine, monkeypatch):
+    wallet_id = "wallet-partial-failure"
+    old_as_of = datetime(2026, 7, 3, tzinfo=timezone.utc)
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, status, created_at)
+                VALUES (:wallet_id, 1, 'evm', 'ethereum', '0xpartial', 'active', :now)
+                """
+            ),
+            {"wallet_id": wallet_id, "now": old_as_of},
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd)
+                VALUES (9901, :wallet_id, '2026-07-03', :fetched_at, 40000)
+                """
+            ),
+            {"wallet_id": wallet_id, "fetched_at": old_as_of},
+        )
+
+    class FailingTokenAdapter:
+        def get_native_balance(self, address):
+            return SimpleNamespace(
+                symbol="ETH",
+                decimals=18,
+                raw_amount="1000000000000000000",
+                normalized_amount=1.0,
+                price_usd=2000.0,
+                value_usd=2000.0,
+                price_source="test",
+            )
+
+        def get_token_balances(self, address):
+            raise RuntimeError("Alchemy token balance fetch failed")
+
+    monkeypatch.setenv("CRYPTO_EVM_CHAINS", "ethereum")
+    monkeypatch.setenv("CRYPTO_EVM_TOKEN_CHAINS", "ethereum")
+    monkeypatch.setattr("app.crypto.ingest._adapter", lambda chain_type, chain: FailingTokenAdapter())
+
+    with Session(db_engine) as db:
+        refreshed = refresh_wallet_snapshot(db, wallet_id, user_id=1, automatic=True)
+
+    assert refreshed is False
+    with db_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT as_of_date, total_usd
+                FROM crypto_wallet_snapshots
+                WHERE wallet_id = :wallet_id
+                ORDER BY as_of_date DESC
+                """
+            ),
+            {"wallet_id": wallet_id},
+        ).mappings().all()
+    assert len(rows) == 1
+    assert str(rows[0]["as_of_date"]) == "2026-07-03"
+    assert float(rows[0]["total_usd"]) == 40000.0

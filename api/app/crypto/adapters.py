@@ -96,7 +96,7 @@ class EvmAlchemyAdapter:
                 "alchemy_token_balances_failed",
                 extra={"address": address, "error": str(exc)},
             )
-            return []
+            raise RuntimeError("Alchemy token balance fetch failed") from exc
         balances = []
         for item in result.get("tokenBalances", []):
             contract = item.get("contractAddress")
