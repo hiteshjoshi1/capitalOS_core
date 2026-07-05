@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_current_user
+from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
 from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
 from app.crypto.verify import (
@@ -1017,6 +1018,8 @@ def refresh_now(
     if _ADMIN_LAST_CALL and now - _ADMIN_LAST_CALL < min_interval:
         raise HTTPException(status_code=429, detail="Too many refresh requests")
     _ADMIN_LAST_CALL = now
+    if coinbase_configured():
+        ensure_coinbase_wallet(db, current_user.id)
     rows = db.execute(
         text("SELECT id FROM crypto_wallets w WHERE w.status = 'active' AND " + _wallet_scope_sql("w")),
         {"current_user_id": current_user.id},

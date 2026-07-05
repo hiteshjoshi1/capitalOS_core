@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+import app.routers.dashboard as dashboard_router
 from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
 from tests.canonical_test_helpers import (
     seed_canonical_account_balance_for_test,
@@ -16,6 +17,21 @@ def test_dashboard_invalid_month(client: TestClient):
     resp = client.get("/dashboard/summary?month=2026-13")
     assert resp.status_code == 400
     assert "Invalid month format" in resp.json()["detail"]
+
+
+def test_current_anchor_uses_configured_local_timezone(monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            utc_now = datetime(2026, 7, 4, 18, 30, tzinfo=timezone.utc)
+            return utc_now.astimezone(tz) if tz else utc_now.replace(tzinfo=None)
+
+    monkeypatch.setenv("TZ", "Asia/Singapore")
+    monkeypatch.setattr(dashboard_router, "datetime", FixedDateTime)
+
+    anchor = dashboard_router._current_anchor_ts()
+
+    assert anchor.isoformat() == "2026-07-05T02:30:00+08:00"
 
 
 def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):

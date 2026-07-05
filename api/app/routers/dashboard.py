@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Callable
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import JSONResponse
@@ -91,7 +92,8 @@ def _anchor_ts(month_start: datetime) -> datetime:
 
 
 def _current_anchor_ts() -> datetime:
-    return datetime.now(tz=timezone.utc).replace(microsecond=0)
+    tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
+    return datetime.now(tz=tz).replace(microsecond=0)
 
 
 def _completed_snapshot_anchor_ts(month_start: datetime) -> datetime:

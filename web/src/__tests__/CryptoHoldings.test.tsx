@@ -197,6 +197,58 @@ describe("CryptoHoldings route", () => {
     });
   });
 
+  it("shows Coinbase exchange holdings and wallet exposure from the crypto summary", async () => {
+    const coinbase: CryptoSummary = {
+      ...cryptoSummaryFixture,
+      total_crypto_usd: 15900,
+      total_crypto_base: 15900,
+      base_currency: "USD",
+      top_holdings: [
+        {
+          symbol: "BTC",
+          chain: "coinbase",
+          amount: 0.125,
+          value_usd: 7500,
+          value_base: 7500,
+          asset_class: "CRYPTO",
+          wallet_id: "coinbase-wallet",
+          wallet_label: "Coinbase",
+        },
+        ...cryptoSummaryFixture.top_holdings,
+      ],
+      chain_exposure: [
+        { chain: "coinbase", total_usd: 7500, total_base: 7500, percent: 47.2 },
+        ...(cryptoSummaryFixture.chain_exposure ?? []),
+      ],
+      wallet_exposure: [
+        {
+          wallet_id: "coinbase-wallet",
+          chain_type: "exchange",
+          chain: "coinbase",
+          address: "coinbase:1:default",
+          label: "Coinbase",
+          total_usd: 7500,
+          total_base: 7500,
+          percent: 47.2,
+        },
+        ...(cryptoSummaryFixture.wallet_exposure ?? []),
+      ],
+    };
+    mockApi.cryptoSummary.mockResolvedValueOnce(coinbase);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("BTC")).toBeInTheDocument();
+    expect(screen.getByText("COINBASE")).toBeInTheDocument();
+    expect(screen.getAllByText("Coinbase").length).toBeGreaterThan(0);
+  });
+
   it("shows fallback rows when there are no holdings", async () => {
     mockApi.cryptoSummary.mockResolvedValueOnce({
       ...cryptoSummaryFixture,
