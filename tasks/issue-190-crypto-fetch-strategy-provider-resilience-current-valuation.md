@@ -21,11 +21,10 @@
   - `alchemy`: EVM native/token balances and metadata.
   - `defillama`: crypto price lookup.
   - `coingecko`: crypto price lookup fallback.
-- Add optional EVM portfolio providers:
-  - `moralis`: optional EVM wallet token-balance/provider adapter. Treat as free-tier-capable only when `MORALIS_API_KEY` is configured; do not make the app depend on a paid plan.
-  - `debank`: optional EVM portfolio provider only when `DEBANK_ACCESS_KEY` is configured. Do not assume a free tier; implementation must degrade cleanly if no key/plan is present.
+- Add optional EVM portfolio provider:
+  - `moralis`: optional EVM wallet token-balance/provider adapter enabled when `MORALIS_API_KEY` is configured; do not make the app depend on a paid plan.
 - Provider ordering must be configurable, for example:
-  - `CRYPTO_EVM_HOLDINGS_PROVIDERS=moralis,debank,alchemy`
+  - `CRYPTO_EVM_HOLDINGS_PROVIDERS=moralis,alchemy`
   - `CRYPTO_PRICE_PROVIDERS=defillama,coingecko`
 
 ## Architecture Decisions
@@ -45,7 +44,6 @@
   - `CryptoHoldingsProvider` interface with `provider_name`, supported chains, `fetch_wallet_holdings`.
   - Existing Alchemy adapter becomes one provider, not hardcoded pipeline logic.
   - Add optional Moralis provider if `MORALIS_API_KEY` is present.
-  - Add optional DeBank provider if `DEBANK_ACCESS_KEY` is present.
   - Keep Helius as the Solana provider and Coinbase as the exchange provider.
 - Add provider selection/config:
   - provider order from env,
@@ -79,7 +77,6 @@
   - show provider and freshness per wallet/token where useful.
 - Add docs/env examples:
   - `MORALIS_API_KEY`,
-  - `DEBANK_ACCESS_KEY`,
   - `CRYPTO_EVM_HOLDINGS_PROVIDERS`,
   - `CRYPTO_PRICE_PROVIDERS`,
   - provider rate-limit/backoff knobs.
@@ -115,22 +112,21 @@
 - [ ] Startup catch-up queues work in the background and never blocks dashboard or crypto page load.
 - [ ] Current crypto valuation uses latest known holdings plus latest available prices.
 - [ ] API exposes separate holdings freshness and price freshness.
-- [ ] EVM holdings provider order is configurable and supports optional Moralis and optional DeBank adapters.
-- [ ] The app runs without Moralis/DeBank keys and falls back to existing providers.
+- [ ] EVM holdings provider order is configurable and supports optional Moralis plus existing Alchemy fallback.
+- [ ] The app runs without a Moralis key and falls back to existing providers.
 - [ ] Alchemy `429` or provider failure does not write partial/zero snapshots.
 - [ ] Provider retries/backoff/rate limiting are bounded and tested.
 - [ ] Dashboard current crypto value and `/crypto/summary` current crypto value come from the same service.
 - [ ] UI shows stale holdings/prices clearly when refreshes fail or are older than 24 hours.
 
 ## Risks
-- Moralis and DeBank limits/pricing may change; integrations must be optional and configurable.
+- Moralis limits/pricing may change; the integration must be optional and configurable.
 - Aggregator providers may disagree on token lists/values; tests should assert internal consistency, not provider-specific live prices.
 - Current valuation with stale holdings is better than stale snapshot value, but still not proof that holdings are current.
 - More providers add configuration and observability requirements.
 
 ## Open Questions
-- Should Moralis or DeBank be the preferred EVM holdings provider once configured?
-- Should DeBank be included only after confirming account access/cost for this deployment?
+- Should Moralis be the preferred EVM holdings provider whenever configured, with Alchemy as fallback?
 - Should crypto current valuation be persisted in a new table, or computed on read from latest holdings plus cached prices?
 - What staleness threshold should the UI use for warning vs error: 24 hours, 48 hours, or per-wallet/provider-specific?
 
