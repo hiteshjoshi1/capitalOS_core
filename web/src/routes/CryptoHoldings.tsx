@@ -151,6 +151,7 @@ export default function CryptoHoldings() {
               />
               Show &lt;$10 tokens
             </label>
+            <div className="tableWrap">
             <table className="table">
               <thead>
                 <tr>
@@ -199,6 +200,7 @@ export default function CryptoHoldings() {
                 })()}
               </tbody>
             </table>
+            </div>
           </div>
 
           <ExposurePieCard

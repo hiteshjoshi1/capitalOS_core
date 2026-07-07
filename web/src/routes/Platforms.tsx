@@ -117,6 +117,7 @@ export default function Platforms() {
 
           <div className="card">
             <div className="cardTitle">Registered Platforms</div>
+            <div className="tableWrap">
             <table className="table">
               <thead>
                 <tr>
@@ -144,6 +145,7 @@ export default function Platforms() {
                 ) : null}
               </tbody>
             </table>
+            </div>
           </div>
         </section>
       )}

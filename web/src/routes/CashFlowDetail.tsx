@@ -345,6 +345,7 @@ function DeltaTableCard({
       </div>
 
       {items.length > 0 ? (
+        <div className="tableWrap">
         <table className="table cashFlowMiniTable">
           <thead>
             <tr>
@@ -366,6 +367,7 @@ function DeltaTableCard({
             ))}
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="muted">No month-over-month deterioration was detected.</p>
       )}
@@ -394,6 +396,7 @@ function MerchantTableCard({
       </div>
 
       {items.length > 0 ? (
+        <div className="tableWrap">
         <table className="table cashFlowMiniTable">
           <thead>
             <tr>
@@ -412,6 +415,7 @@ function MerchantTableCard({
             ))}
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="muted">No merchant outflows for this month.</p>
       )}

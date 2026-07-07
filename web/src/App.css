@@ -687,7 +687,8 @@ a.btn {
   box-shadow: 0 24px 80px var(--shadow);
 }
 
-.table {
+.table,
+.dataTable {
   width: 100%;
   border-collapse: collapse;
   border: 1px solid color-mix(in srgb, var(--line) 70%, transparent 30%);
@@ -697,20 +698,29 @@ a.btn {
 }
 
 .table th,
-.table td {
+.table td,
+.dataTable th,
+.dataTable td {
   padding: 10px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
   font-size: 12.5px;
   text-align: left;
 }
 
-.table th {
+.table th,
+.dataTable th {
   color: var(--muted);
   font-weight: 800;
 }
 
-.table tr:last-child td {
+.table tr:last-child td,
+.dataTable tr:last-child td {
   border-bottom: none;
+}
+
+.tableWrap {
+  overflow-x: auto;
+  border-radius: 12px;
 }
 
 .stockHoldingsHeader {
@@ -1445,6 +1455,146 @@ a.btn {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
 }
 
+/* ── Author Ingestion form/control system (reuses .field/.label/.hint tokens) ── */
+
+.formSection {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, var(--line) 80%, transparent 20%);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--panel) 76%, transparent 24%);
+}
+
+.formRow {
+  display: grid;
+  gap: 6px;
+}
+
+.formLabel {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  text-transform: uppercase;
+}
+
+.formHint {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.required {
+  color: var(--bad);
+}
+
+.highlight {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.monospace {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.segmentedControl {
+  display: inline-flex;
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent 15%);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.segmentedControl .btn {
+  border: none;
+  border-right: 1px solid color-mix(in srgb, var(--line) 85%, transparent 15%);
+  border-radius: 0;
+}
+
+.segmentedControl .btn:last-child {
+  border-right: none;
+}
+
+.btnPrimary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btnPrimary:hover {
+  border-color: var(--accent);
+  opacity: 0.92;
+}
+
+.btnDanger {
+  color: var(--bad);
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--line) 55%);
+}
+
+.btnDanger:hover {
+  border-color: var(--bad);
+}
+
+.btnSmall {
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.successBanner {
+  border: 1px solid color-mix(in srgb, var(--good) 40%, transparent 60%);
+  background: color-mix(in srgb, var(--good) 12%, transparent 88%);
+  color: var(--good);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+}
+
+.urlInputList {
+  display: grid;
+  gap: 8px;
+}
+
+.urlInputRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.urlInput {
+  flex: 1;
+  min-width: 160px;
+}
+
+.urlCell {
+  overflow-wrap: anywhere;
+}
+
+.urlLink {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.urlLink:hover {
+  text-decoration: underline;
+}
+
+.urlRemoveBtn {
+  flex-shrink: 0;
+}
+
 .footer {
   margin-top: 18px;
   color: var(--muted);
@@ -1490,6 +1640,15 @@ a.btn {
 }
 
 /* ── Alert Cards ────────────────────────────────────────────── */
+.alertSectionTitle {
+  margin: 0 0 10px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
 .alertList {
   display: flex;
   flex-direction: column;

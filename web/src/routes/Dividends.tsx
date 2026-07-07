@@ -147,6 +147,7 @@ export default function Dividends() {
           <section className="grid g-mid" style={{ marginTop: 16 }}>
             <div className="card">
               <h2>Monthly Buckets (Realized)</h2>
+              <div className="tableWrap">
               <table className="table">
                 <thead>
                   <tr>
@@ -174,10 +175,12 @@ export default function Dividends() {
                   ) : null}
                 </tbody>
               </table>
+              </div>
             </div>
 
             <div className="card">
               <h2>By Company (Realized, Selected Month)</h2>
+              <div className="tableWrap">
               <table className="table">
                 <thead>
                   <tr>
@@ -207,6 +210,7 @@ export default function Dividends() {
                   ) : null}
                 </tbody>
               </table>
+              </div>
             </div>
           </section>
 
@@ -216,6 +220,7 @@ export default function Dividends() {
               <div className="muted">
                 Holdings considered: {expectedOverview?.holdings_considered ?? 0} | Assets estimated: {expectedOverview?.assets_with_actions ?? 0} | Yield snapshots used: {expectedOverview?.actions_evaluated ?? 0}
               </div>
+              <div className="tableWrap">
               <table className="table" style={{ marginTop: 12 }}>
                 <thead>
                   <tr>
@@ -246,10 +251,12 @@ export default function Dividends() {
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
 
             <div className="card">
               <h2>By Company (Expected)</h2>
+              <div className="tableWrap">
               <table className="table">
                 <thead>
                   <tr>
@@ -287,6 +294,7 @@ export default function Dividends() {
                   ) : null}
                 </tbody>
               </table>
+              </div>
             </div>
           </section>
         </>

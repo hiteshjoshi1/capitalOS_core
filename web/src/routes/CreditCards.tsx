@@ -114,6 +114,7 @@ export default function CreditCards() {
 
             <div className="card">
               <h2>Top Purchases</h2>
+              <div className="tableWrap">
               <table className="table">
                 <thead>
                   <tr>
@@ -139,10 +140,12 @@ export default function CreditCards() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
 
             <div className="card">
               <h2>Recurring Payments</h2>
+              <div className="tableWrap">
               <table className="table">
                 <thead>
                   <tr>
@@ -168,6 +171,7 @@ export default function CreditCards() {
                   )}
                 </tbody>
               </table>
+              </div>
             </div>
           </section>
 

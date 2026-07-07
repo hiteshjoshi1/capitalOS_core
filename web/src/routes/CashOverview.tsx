@@ -120,6 +120,7 @@ export default function CashOverview() {
               <h2>Cash Deposits</h2>
               <div className="mini">
                 <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Grouped by bank, broker, or wallet source</div>
+                <div className="tableWrap">
                 <table className="table">
                   <thead>
                     <tr>
@@ -150,6 +151,7 @@ export default function CashOverview() {
                     </tr>
                   </tfoot>
                 </table>
+                </div>
               </div>
             </div>
           </section>
@@ -159,6 +161,7 @@ export default function CashOverview() {
               <h2>Currency Breakdown</h2>
               <div className="mini">
                 <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Current vs selected snapshot</div>
+                <div className="tableWrap">
                 <table className="table">
                   <thead>
                     <tr>
@@ -187,6 +190,7 @@ export default function CashOverview() {
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
 
@@ -195,6 +199,7 @@ export default function CashOverview() {
               <div className="mini">
                 <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
                 <div className="big small">{formatMoney(stablecoinTotal)}</div>
+                <div className="tableWrap">
                 <table className="table" style={{ marginTop: 8 }}>
                   <thead>
                     <tr>
@@ -220,6 +225,7 @@ export default function CashOverview() {
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
 
