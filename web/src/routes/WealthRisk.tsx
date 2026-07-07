@@ -69,10 +69,10 @@ export default function WealthRisk() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{selectedBaseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={selectedBaseCurrency}
               onChange={(event) => setBaseCurrency(event.target.value)}

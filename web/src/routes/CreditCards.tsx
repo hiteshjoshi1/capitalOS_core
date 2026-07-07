@@ -46,10 +46,10 @@ export default function CreditCards() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{baseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={baseCurrency}
               onChange={(e) => setBaseCurrency(e.target.value)}

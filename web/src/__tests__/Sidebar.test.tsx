@@ -75,7 +75,7 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
   });
 
-  it("renders icon-led primary sections and omits the old signed-in copy", () => {
+  it("renders primary sections without old signed-in copy or theme toggle in sidebar", () => {
     renderSidebar();
     expect(screen.queryByText("Signed in")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Toggle theme" })).not.toBeInTheDocument();

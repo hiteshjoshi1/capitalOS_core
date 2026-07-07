@@ -220,12 +220,13 @@ describe("frontend contracts", () => {
     );
 
     expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Wealth" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Research" })).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
+    const sidebar = screen.getByRole("complementary", { name: "Main navigation" });
+    expect(within(sidebar).getByRole("link", { name: "Wealth" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
+    expect(within(sidebar).getByRole("link", { name: "Research" })).toBeInTheDocument();
+    expect(within(sidebar).queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(screen.getByText("Wealth Content")).toBeInTheDocument();
   });
 
@@ -242,7 +243,8 @@ describe("frontend contracts", () => {
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("link", { name: "Wealth" })).toHaveClass("sidebarLinkActive");
+    const sidebar = screen.getByRole("complementary", { name: "Main navigation" });
+    expect(within(sidebar).getByRole("link", { name: "Wealth" })).toHaveClass("sidebarLinkActive");
     expect(within(screen.getByRole("navigation", { name: "Wealth tabs" })).queryByRole("link", { name: "Cash Flow" })).not.toBeInTheDocument();
   });
 
@@ -257,16 +259,20 @@ describe("frontend contracts", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("Portfolio Composition")).toBeInTheDocument();
+    // New allocation section
+    expect(await screen.findByText("Where the money sits")).toBeInTheDocument();
     expect(screen.queryByText("Upload reminders")).not.toBeInTheDocument();
     expect(screen.queryByText("Statement coverage")).not.toBeInTheDocument();
-    expect(screen.getAllByText(/\+S\$ 1,000/).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Stocks & Funds").length).toBeGreaterThan(0);
-    expect(screen.getByText("Top Movers")).toBeInTheDocument();
+    // Net worth change renders (vs_prev_month abs=1500)
+    expect(screen.getAllByText(/\+S\$ 1,500/).length).toBeGreaterThan(0);
+    // Holdings card shows positions
     expect(screen.getAllByText("AAPL").length).toBeGreaterThan(0);
     expect(screen.getAllByText("BTC").length).toBeGreaterThan(0);
+    // Platform allocation percentages (IBKR 50%, CRYPTO 25%)
     expect(screen.getAllByText("50.0%").length).toBeGreaterThan(0);
     expect(screen.getAllByText("25.0%").length).toBeGreaterThan(0);
+    // Holdings/Movers toggle is present
+    expect(screen.getByRole("group", { name: "Holdings view" })).toBeInTheDocument();
     expect(screen.queryByLabelText("Action queue")).not.toBeInTheDocument();
   });
 

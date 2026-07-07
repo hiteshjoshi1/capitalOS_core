@@ -1076,10 +1076,10 @@ export default function CashFlowDetailRoute() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{baseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={baseCurrency}
               onChange={(event) => setBaseCurrency(event.target.value)}

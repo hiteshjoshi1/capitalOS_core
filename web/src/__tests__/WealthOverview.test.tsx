@@ -120,10 +120,6 @@ describe("WealthOverview", () => {
     );
 
     expect(await screen.findAllByText("S$ 125")).not.toHaveLength(0);
-    expect(screen.getByText("Snapshot context for 2026-05")).toBeInTheDocument();
-    expect(screen.getByText("Latest-known snapshot")).toBeInTheDocument();
-    expect(screen.getByText("Snapshot period 2026-05 · Boundary 2026-06-01 · Source holdings 2026-05-01")).toBeInTheDocument();
-    expect(screen.getByText("Snapshot day 1. Computed from the latest known component values at or before the boundary.")).toBeInTheDocument();
 
     await act(async () => {
       handlers?.onEvent?.({
@@ -150,8 +146,8 @@ describe("WealthOverview", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Portfolio Composition")).toBeInTheDocument();
-    expect(screen.getByText("Platform Allocation")).toBeInTheDocument();
+    // New allocation section renders platform allocation rows
+    expect(await screen.findByText("Where the money sits")).toBeInTheDocument();
     expect(screen.getAllByText("IBKR")).not.toHaveLength(0);
     expect(screen.queryByText("Upload reminders")).not.toBeInTheDocument();
     expect(screen.queryByText("Statement coverage")).not.toBeInTheDocument();
@@ -167,8 +163,9 @@ describe("WealthOverview", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText("Liabilities")).toBeInTheDocument();
-    expect(screen.getByText("Outstanding obligations remain visible inside the Liabilities section overview.")).toBeInTheDocument();
+    // Signals section shows LIABILITIES with the value
+    expect(await screen.findByText("LIABILITIES")).toBeInTheDocument();
+    expect(screen.getByText("Outstanding obligations vs current net worth.")).toBeInTheDocument();
     expect(screen.getByText("S$ 261")).toBeInTheDocument();
   });
 });

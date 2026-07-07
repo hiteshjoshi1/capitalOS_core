@@ -245,13 +245,13 @@ describe("StockHoldings", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("Showing 20 of 25 positions")).toBeInTheDocument();
+    expect(await screen.findByText("20 of 25 positions")).toBeInTheDocument();
     expect(screen.getByText("POS20")).toBeInTheDocument();
     expect(screen.queryByText("POS21")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
 
-    expect(await screen.findByText("Showing 25 of 25 positions")).toBeInTheDocument();
+    expect(await screen.findByText("25 of 25 positions")).toBeInTheDocument();
     expect(screen.getByText("POS25")).toBeInTheDocument();
   });
 });

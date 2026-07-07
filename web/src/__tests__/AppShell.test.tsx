@@ -211,11 +211,11 @@ describe("AppShell", () => {
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
   });
 
-  it("keeps sidebar width at 272px for shell layout stability", () => {
+  it("keeps sidebar width at 248px for shell layout stability", () => {
     const appCss = readFileSync(resolve(process.cwd(), "src/App.css"), "utf8");
     expect(appCss).toContain(".sidebar {");
-    expect(appCss).toContain("width: 272px;");
-    expect(appCss).toContain("min-width: 272px;");
+    expect(appCss).toContain("width: 248px;");
+    expect(appCss).toContain("min-width: 248px;");
   });
 
   it("renders content inside appShellMain alongside sidebar", () => {
