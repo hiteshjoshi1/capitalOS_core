@@ -3,11 +3,13 @@ import { api } from "../lib/api";
 import type { CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
-import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
+import StackedBar from "../components/StackedBar";
+
+const EXPOSURE_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8", "#2ebac6", "#f4cf5d", "#8f9db2"];
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -119,32 +121,50 @@ export default function CryptoHoldings() {
             insightText={`USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · Holdings as of ${formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)} (${holdingsFresh ? "fresh" : "stale"}) · Prices as of ${formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)} (${pricesFresh ? "fresh" : "stale"}${summary?.refresh_triggered ? ", refreshing" : ""})`}
           />
 
-          <section className="grid g-mid">
-            <ExposurePieCard
-              title="Exposure by Chain"
-              subtitle="Current chain mix"
-              items={(summary?.chain_exposure ?? []).map((item) => ({
-                label: item.chain,
-                value: item.total_base,
-                percent: item.percent,
-              }))}
-              totalLabel={formatMoney(summary?.total_crypto_base)}
-              formatMoney={formatMoney}
-              ariaLabel="Crypto chain exposure pie chart"
-            />
+          <section>
+            <div className="cashFlowSectionHeading">
+              <p className="wealthEyebrow">Exposure</p>
+              <h2 className="cashFlowSectionTitle">Breakdown by chain and wallet</h2>
+            </div>
+            <div className="grid g-mid">
+              <div className="card" aria-label="Crypto chain exposure chart">
+                <p className="cashFlowCardTitle">Chain mix</p>
+                {(summary?.chain_exposure ?? []).length === 0 ? (
+                  <p className="muted">No exposure data yet.</p>
+                ) : (
+                  <StackedBar
+                    layout="rows"
+                    ariaLabel="Crypto chain exposure chart"
+                    segments={(summary?.chain_exposure ?? []).map((item, idx) => ({
+                      key: item.chain,
+                      label: item.chain,
+                      percent: item.percent,
+                      color: EXPOSURE_COLORS[idx % EXPOSURE_COLORS.length],
+                      valueLabel: `${formatMoney(item.total_base)} · ${item.percent.toFixed(1)}%`,
+                    }))}
+                  />
+                )}
+              </div>
 
-            <ExposurePieCard
-              title="Exposure by Wallet"
-              subtitle="Current wallet mix"
-              items={(summary?.wallet_exposure ?? []).map((item) => ({
-                label: item.label ?? `${item.address.slice(0, 6)}…${item.address.slice(-4)}`,
-                value: item.total_base,
-                percent: item.percent ?? 0,
-              }))}
-              totalLabel={formatMoney(summary?.total_crypto_base)}
-              formatMoney={formatMoney}
-              ariaLabel="Crypto wallet exposure pie chart"
-            />
+              <div className="card" aria-label="Crypto wallet exposure chart">
+                <p className="cashFlowCardTitle">Wallet mix</p>
+                {(summary?.wallet_exposure ?? []).length === 0 ? (
+                  <p className="muted">No exposure data yet.</p>
+                ) : (
+                  <StackedBar
+                    layout="rows"
+                    ariaLabel="Crypto wallet exposure chart"
+                    segments={(summary?.wallet_exposure ?? []).map((item, idx) => ({
+                      key: item.wallet_id,
+                      label: item.label ?? `${item.address.slice(0, 6)}…${item.address.slice(-4)}`,
+                      percent: item.percent ?? 0,
+                      color: EXPOSURE_COLORS[idx % EXPOSURE_COLORS.length],
+                      valueLabel: `${formatMoney(item.total_base)} · ${(item.percent ?? 0).toFixed(1)}%`,
+                    }))}
+                  />
+                )}
+              </div>
+            </div>
           </section>
 
           <div className="card">

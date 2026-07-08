@@ -118,7 +118,7 @@ export default function AppShell() {
           <span className="coMobileBottomNavLabel">Cash</span>
         </Link>
         <Link
-          className={`coMobileBottomNavItem${location.pathname.startsWith("/liabilities") || location.pathname.startsWith("/credit-cards") || location.pathname.startsWith("/loans") ? " coMobileBottomNavItemActive" : ""}`}
+          className={`coMobileBottomNavItem${location.pathname.startsWith("/liabilities") ? " coMobileBottomNavItemActive" : ""}`}
           to="/liabilities"
         >
           <span className="coMobileBottomNavDot" aria-hidden="true" />

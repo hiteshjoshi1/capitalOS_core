@@ -6,7 +6,6 @@ import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
-import ExposurePieCard from "../components/ExposurePieCard";
 import StackedBar from "../components/StackedBar";
 import TrendBarChart from "../components/TrendBarChart";
 
@@ -14,6 +13,22 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 
 const STABLECOINS = new Set(["USDC", "USDT"]);
 const STACKED_BAR_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8"];
+
+type DonutItem = { label: string; value: number; percent: number };
+
+function donutConicGradient(items: DonutItem[]): string {
+  let offset = 0;
+  const parts = items.map((item, idx) => {
+    const next = offset + Math.max(0, item.percent);
+    const part = `${STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length]} ${offset.toFixed(2)}% ${next.toFixed(2)}%`;
+    offset = next;
+    return part;
+  });
+  if (offset < 100) {
+    parts.push(`color-mix(in srgb, var(--line) 65%, transparent 35%) ${offset.toFixed(2)}% 100%`);
+  }
+  return `conic-gradient(${parts.join(", ")})`;
+}
 
 export default function CashOverview() {
   const [state, setState] = useState<LoadState>("idle");
@@ -136,52 +151,73 @@ export default function CashOverview() {
             insightText={`Snapshot ${cashDeposits?.snapshot_cash_as_of?.slice(0, 10) ?? "—"} vs. current ${cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}`}
           />
 
-          <ExposurePieCard
-            title="Where the cash sits"
-            subtitle={`${accountItems.length} accounts`}
-            items={accountItems}
-            totalLabel={formatMoney(cashDeposits?.total)}
-            formatMoney={formatMoney}
-            ariaLabel="Cash by account"
-          />
-
-          <section className="grid g-mid">
-            <div className="card">
-              <h2>Currency mix</h2>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>Current value and delta vs. prior snapshot</div>
-              <StackedBar segments={currencySegments} ariaLabel="Currency mix" />
+          <section>
+            <div className="cashFlowSectionHeading">
+              <p className="wealthEyebrow">Allocation</p>
+              <h2 className="cashFlowSectionTitle">Where the cash sits</h2>
             </div>
+            {accountItems.length === 0 ? (
+              <div className="card muted">No cash deposits yet.</div>
+            ) : (
+              <div className="card cashFlowDonutLayout" style={{ padding: 28 }} aria-label="Cash by account">
+                <div className="cashFlowDonutChart" style={{ background: donutConicGradient(accountItems) }}>
+                  <div className="cashFlowDonutCenter">
+                    <span className="label">Total</span>
+                    <strong>{formatMoney(cashDeposits?.total)}</strong>
+                  </div>
+                </div>
+                <div className="cashFlowLegendList">
+                  {accountItems.map((item, idx) => (
+                    <div className="cashFlowLegendRow" key={item.label}>
+                      <span className="cashFlowLegendLabel">
+                        <i style={{ background: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length] }} />
+                        <span className="cashFlowLegendText">{item.label}</span>
+                      </span>
+                      <span className="muted">
+                        {formatMoney(item.value)} <strong>{item.percent.toFixed(1)}%</strong>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>
 
-            <div className="card">
-              <h2>Stablecoins</h2>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
-              <div className="big small">{formatMoney(stablecoinTotal)}</div>
-              <div className="tableWrap">
-                <table className="table" style={{ marginTop: 8 }}>
-                  <thead>
-                    <tr>
-                      <th>Token</th>
-                      <th className="right">Qty</th>
-                      <th className="right">Value</th>
-                      <th>Chain</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stablecoins.map((t) => (
-                      <tr key={`${t.symbol}-${t.chain}-${t.wallet_id ?? ""}`}>
-                        <td>{t.symbol}</td>
-                        <td className="right">{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
-                        <td className="right">{formatMoney(t.value_base)}</td>
-                        <td className="muted">{t.chain.toUpperCase()}</td>
-                      </tr>
-                    ))}
-                    {stablecoins.length === 0 && (
-                      <tr>
-                        <td className="muted" colSpan={4}>No stablecoin balances found.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+          <section>
+            <div className="cashFlowSectionHeading">
+              <p className="wealthEyebrow">Signals</p>
+              <h2 className="cashFlowSectionTitle">Currency mix and stablecoins</h2>
+            </div>
+            <div className="grid g-mid">
+              <div className="card" style={{ padding: 24 }}>
+                <p className="cashFlowCardTitle">Currency exposure</p>
+                <StackedBar layout="rows" segments={currencySegments} ariaLabel="Currency mix" />
+              </div>
+
+              <div className="card" style={{ padding: 24 }}>
+                <div className="cashFlowCardHeader" style={{ marginBottom: 6 }}>
+                  <p className="cashFlowCardTitle" style={{ margin: 0 }}>Stablecoins</p>
+                  <span className="muted">USDC / USDT</span>
+                </div>
+                <div className="big small">{formatMoney(stablecoinTotal)}</div>
+                <div className="listRows" style={{ marginTop: 8 }}>
+                  {stablecoins.length === 0 ? (
+                    <p className="muted">No stablecoin balances found.</p>
+                  ) : (
+                    stablecoins.map((t) => (
+                      <div className="listRow" key={`${t.symbol}-${t.chain}-${t.wallet_id ?? ""}`}>
+                        <div className="listRowMain">
+                          <span className="listRowTitle">{t.symbol}</span>
+                          <span className="listRowMeta">
+                            <span>{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+                            <span>{t.chain.toUpperCase()}</span>
+                          </span>
+                        </div>
+                        <div className="listRowValue">{formatMoney(t.value_base)}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             </div>
           </section>

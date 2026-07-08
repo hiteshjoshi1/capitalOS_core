@@ -92,12 +92,13 @@ describe("CashOverview route", () => {
 
     expect(await screen.findByText("CURRENT CASH")).toBeInTheDocument();
     const cashSitsHeading = screen.getByText("Where the cash sits");
-    const currencyHeading = screen.getByText("Currency mix");
+    const currencyHeading = screen.getByText("Currency mix and stablecoins");
     const stablecoinsHeading = screen.getByText("Stablecoins");
     const trendHeading = screen.getByText("Six-month cash trend");
     expect(currencyHeading).toBeInTheDocument();
+    expect(screen.getByText("Currency exposure")).toBeInTheDocument();
     expect(screen.getAllByText("DBS").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("62.5%").length).toBeGreaterThan(0);
+    expect(screen.getByText("62.5%")).toBeInTheDocument();
     expect(trendHeading).toBeInTheDocument();
     expect(screen.getByLabelText("Six-month cash trend")).toBeInTheDocument();
     expect(cashSitsHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

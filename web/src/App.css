@@ -2976,6 +2976,12 @@ a.btn {
   gap: 18px;
 }
 
+/* ── StackedBar (bar + legend, used by Chain/Wallet/Currency mix cards) ── */
+
+.stackedBarTrack {
+  margin-bottom: 16px;
+}
+
 /* ── ListRow (shared row pattern: title+meta left, value+secondary right) ── */
 
 .listRows {
@@ -5585,4 +5591,310 @@ html, body {
   font-size: inherit;
   -webkit-appearance: none;
   appearance: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Liabilities + Credit Cards — redesign (Issue design_handoff_capitalos_wealth _1)
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ─── Due-status pill (shared: Liabilities + Credit Cards) ─────────── */
+
+.coDuePill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.coDuePill--overdue {
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--text);
+  font-weight: 800;
+}
+
+.coDuePill--warn {
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn) 22%, transparent 78%);
+}
+
+.coDuePill--normal {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line);
+}
+
+.coDuePill--not-synced {
+  color: var(--muted);
+  background: transparent;
+  border: 1px dashed var(--line);
+}
+
+/* ─── Rows with a due-status/category pill (Upcoming payments, Notable   ─── */
+/* ─── charges, All transactions) — fixed-width trailing columns so the   ─── */
+/* ─── pill and amount line up regardless of how long the row title is.   ─── */
+
+.liabDueRow {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 168px 96px;
+  column-gap: 14px;
+}
+
+.liabDueRow .listRowMain {
+  min-width: 0;
+}
+
+.liabDueRow .coDuePill,
+.liabDueRow .tag {
+  justify-self: start;
+}
+
+.liabDueRow .listRowValue {
+  justify-self: end;
+}
+
+@media (max-width: 640px) {
+  .liabDueRow {
+    display: flex;
+    flex-wrap: wrap;
+  }
+}
+
+/* ─── Hero legend row (Liabilities hero: revolving vs installment) ─── */
+
+.coHeroLegendRow {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
+.coHeroLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.coHeroLegendDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+/* ─── Wallet tile (Credit Cards "Wallet" row + Liabilities compact grid) ─── */
+
+.ccWalletRow {
+  display: flex;
+  gap: 16px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ccWalletTile {
+  flex: 0 0 260px;
+  border-radius: 20px;
+  padding: 20px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 26px;
+  min-height: 150px;
+  box-shadow: 0 18px 36px rgba(0, 0, 0, 0.3);
+}
+
+.ccWalletTileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ccWalletTileName {
+  font-size: 15px;
+  font-weight: 700;
+  display: block;
+}
+
+.ccWalletTileMeta {
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+.ccWalletTileBadge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  white-space: nowrap;
+  color: #fff;
+}
+
+.ccWalletTileBalance {
+  font-size: 22px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  display: block;
+  margin-bottom: 8px;
+}
+
+.ccWalletTileBar {
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  overflow: hidden;
+}
+
+.ccWalletTileBar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: #fff;
+}
+
+.ccWalletTileSub {
+  font-size: 11px;
+  opacity: 0.8;
+}
+
+/* Compact card tile grid (Liabilities "Credit cards" section) */
+
+.liabCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.liabCardTile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.liabCardTileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.liabCardTileFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+/* ─── Loans section (Liabilities, hasLoans === true) ────────────────── */
+
+.liabLoanRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.liabLoanMeta,
+.liabLoanBalance,
+.liabLoanNextPayment {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.liabLoanBalance,
+.liabLoanNextPayment {
+  align-items: flex-end;
+}
+
+.liabLoanNextPayment {
+  min-width: 130px;
+}
+
+/* No-loans empty state banner */
+
+.liabNoLoansBanner {
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  padding: 18px 22px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  background: color-mix(in srgb, var(--panel2) 60%, transparent 40%);
+}
+
+.liabNoLoansText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.liabConnectLoanBtn {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--muted);
+  cursor: not-allowed;
+  white-space: nowrap;
+}
+
+/* ─── Ledger toggle (Credit Cards "All transactions") ───────────────── */
+
+.liabWorkspaceCta {
+  border-radius: 999px;
+  padding: 10px 18px;
+  background: var(--panel2);
+  font-size: 14px;
+  gap: 6px;
+}
+
+.ccLedgerToggle {
+  font-size: 12px;
+  font-weight: 700;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+@media (max-width: 980px) {
+  .liabCardGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .coHeroLegendRow {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .liabLoanRow {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .liabLoanBalance,
+  .liabLoanNextPayment {
+    align-items: flex-start;
+  }
 }

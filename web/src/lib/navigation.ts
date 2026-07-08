@@ -52,11 +52,7 @@ export const APP_SECTIONS: AppSection[] = [
     label: "Liabilities",
     icon: "trending_down",
     to: "/liabilities",
-    tabs: [
-      { label: "Overview", to: "/liabilities", exact: true },
-      { label: "Credit Cards", to: "/credit-cards" },
-      { label: "Loans", to: "/loans" },
-    ],
+    tabs: [],
   },
   {
     id: "operations",

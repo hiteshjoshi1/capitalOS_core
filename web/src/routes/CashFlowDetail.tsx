@@ -321,7 +321,7 @@ function SplitCard({
             label: item.label,
             percent: item.percent * 100,
             color: palette[idx % palette.length],
-            valueLabel: formatMoney(item.amount),
+            valueLabel: `${formatMoney(item.amount)} (${formatPercent(item.percent)})`,
           }))}
         />
       ) : (

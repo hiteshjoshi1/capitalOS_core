@@ -15,14 +15,12 @@ import CryptoHoldings from "./routes/CryptoHoldings.tsx";
 import StockHoldings from "./routes/StockHoldings.tsx";
 import CashOverview from "./routes/CashOverview.tsx";
 import MarketData from "./routes/MarketData.tsx";
-import CreditCards from "./routes/CreditCards.tsx";
 import CashFlowDetail from "./routes/CashFlowDetail.tsx";
 import CashFlowMapping from "./routes/CashFlowMapping.tsx";
 import Alerts from "./routes/Alerts.tsx";
 import WealthOverview from "./routes/WealthOverview.tsx";
 import WealthRisk from "./routes/WealthRisk.tsx";
 import Dividends from "./routes/Dividends.tsx";
-import Loans from "./routes/Loans.tsx";
 import Companies from "./routes/Companies.tsx";
 import AISage from "./routes/AISage.tsx";
 import AuthorLibrary from "./routes/AuthorLibrary.tsx";
@@ -70,8 +68,8 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/cash-flow/map-transactions" element={<CashFlowMapping />} />
                       <Route path="/cash-flow/mapping" element={<Navigate to="/cash-flow/map-transactions" replace />} />
                       <Route path="/liabilities" element={<LiabilitiesOverview />} />
-                      <Route path="/credit-cards" element={<CreditCards />} />
-                      <Route path="/loans" element={<Loans />} />
+                      <Route path="/credit-cards" element={<Navigate to="/liabilities" replace />} />
+                      <Route path="/loans" element={<Navigate to="/liabilities" replace />} />
                       <Route path="/intelligence" element={<IntelligenceOverview />} />
                       <Route path="/companies" element={<Companies />} />
                       <Route path="/alerts" element={<Alerts />} />

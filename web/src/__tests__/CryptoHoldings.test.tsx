@@ -136,8 +136,8 @@ describe("CryptoHoldings route", () => {
     expect(screen.getByLabelText("Month")).toHaveValue("2026-02");
     expect(screen.getByLabelText("Base currency")).toHaveValue("SGD");
     expect(mockApi.cryptoSummary).toHaveBeenCalledWith("2026-02", "SGD");
-    const chainHeading = screen.getByText("Exposure by Chain");
-    const walletHeading = screen.getByText("Exposure by Wallet");
+    const chainHeading = screen.getByText("Chain mix");
+    const walletHeading = screen.getByText("Wallet mix");
     const trendHeading = screen.getByText("Six-month value trend");
     const topHoldingsHeading = screen.getByText("Top holdings");
     expect(trendHeading).toBeInTheDocument();
@@ -286,7 +286,7 @@ describe("CryptoHoldings route", () => {
     );
 
     expect(await screen.findByText("No crypto holdings yet.")).toBeInTheDocument();
-    expect(screen.getByText("Exposure by Wallet")).toBeInTheDocument();
+    expect(screen.getByText("Wallet mix")).toBeInTheDocument();
     expect(screen.getAllByText("No exposure data yet.").length).toBeGreaterThan(0);
   });
 });
