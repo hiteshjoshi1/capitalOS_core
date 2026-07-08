@@ -287,8 +287,8 @@ describe("frontend contracts", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Risk" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Geographic Exposure" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Largest position" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Where the wealth is booked" })).toBeInTheDocument();
   });
 
   it("renders Cash Flow as a dedicated workspace route", async () => {

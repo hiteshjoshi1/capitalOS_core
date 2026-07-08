@@ -5,11 +5,15 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
-import ValueTrendChart from "../components/ValueTrendChart";
+import HeroMetricCard from "../components/HeroMetricCard";
+import ExposurePieCard from "../components/ExposurePieCard";
+import StackedBar from "../components/StackedBar";
+import TrendBarChart from "../components/TrendBarChart";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 const STABLECOINS = new Set(["USDC", "USDT"]);
+const STACKED_BAR_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8"];
 
 export default function CashOverview() {
   const [state, setState] = useState<LoadState>("idle");
@@ -52,6 +56,39 @@ export default function CashOverview() {
 
   const stablecoinTotal = stablecoins.reduce((acc, t) => acc + (t.value_base ?? 0), 0);
 
+  const accountItems = useMemo(
+    () => (cashDeposits?.items ?? []).map((item) => ({ label: item.source, value: item.value, percent: item.percent })),
+    [cashDeposits],
+  );
+
+  const currencySegments = useMemo(() => {
+    const breakdown = cashDeposits?.currency_breakdown ?? [];
+    const sum = breakdown.reduce((acc, c) => acc + Math.max(0, c.current_value), 0) || 1;
+    return breakdown.map((c, idx) => ({
+      key: c.currency,
+      label: c.currency,
+      percent: (Math.max(0, c.current_value) / sum) * 100,
+      color: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length],
+      valueLabel: `${formatMoney(c.current_value)} (${c.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(c.delta_abs))})`,
+    }));
+  }, [cashDeposits, currencyPrefix]);
+
+  const trendPoints = useMemo(
+    () =>
+      (cashDeposits?.trend ?? [])
+        .filter((point) => point.value != null)
+        .map((point) => ({
+          month: point.month,
+          value: point.value as number,
+          displayValue: formatCompactMoney(point.value),
+          tone: "neutral" as const,
+        })),
+    [cashDeposits, currencyPrefix],
+  );
+
+  const deltaPositive = (cashDeposits?.delta_abs ?? 0) >= 0;
+  const deltaPct = cashDeposits?.delta_pct;
+
   return (
     <PageShell
       title="Cash Overview"
@@ -87,119 +124,39 @@ export default function CashOverview() {
       )}
 
       {state === "ready" && (
-        <>
-          <section className="grid" style={{ marginBottom: 16 }}>
-            <div className="card">
-              <div className="stockHoldingsHeader">
-                <h2>Cash Snapshot</h2>
-                <div className="muted stockHoldingsMeta">
-                  Current as of {cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}
-                </div>
-              </div>
-              <div className="split">
-                <div className="mini">
-                  <h3>Current total</h3>
-                  <div className="big small">{formatMoney(cashDeposits?.current_total)}</div>
-                </div>
-                <div className="mini">
-                  <h3>Snapshot total</h3>
-                  <div className="big small">{formatMoney(cashDeposits?.snapshot_total)}</div>
-                </div>
-                <div className="mini">
-                  <h3>Delta</h3>
-                  <div className={`big small ${(cashDeposits?.delta_abs ?? 0) >= 0 ? "good" : "bad"}`}>
-                    {cashDeposits?.delta_abs == null
-                      ? "—"
-                      : `${cashDeposits.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(cashDeposits.delta_abs))}`}
-                  </div>
-                </div>
-              </div>
-            </div>
+        <div className="wealthOverviewLayout">
+          <HeroMetricCard
+            eyebrow="CURRENT CASH"
+            value={formatMoney(cashDeposits?.current_total)}
+            deltaChip={
+              deltaPct == null
+                ? null
+                : { text: `${deltaPositive ? "+" : "-"}${Math.abs(deltaPct * 100).toFixed(1)}%`, positive: deltaPositive }
+            }
+            insightText={`Snapshot ${cashDeposits?.snapshot_cash_as_of?.slice(0, 10) ?? "—"} vs. current ${cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}`}
+          />
 
-            <div className="card">
-              <h2>Cash Deposits</h2>
-              <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Grouped by bank, broker, or wallet source</div>
-                <div className="tableWrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th className="right">Value</th>
-                      <th className="right">% of Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashDeposits?.items.map((item) => (
-                      <tr key={item.source}>
-                        <td>{item.source}</td>
-                        <td className="right">{formatMoney(item.value)}</td>
-                        <td className="right">{item.percent.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</td>
-                      </tr>
-                    ))}
-                    {cashDeposits && cashDeposits.items.length === 0 && (
-                      <tr>
-                        <td className="muted" colSpan={3}>No cash deposits yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <th>Total</th>
-                      <th className="right">{formatMoney(cashDeposits?.total)}</th>
-                      <th className="right">{cashDeposits?.total ? "100%" : "0%"}</th>
-                    </tr>
-                  </tfoot>
-                </table>
-                </div>
-              </div>
-            </div>
-          </section>
+          <ExposurePieCard
+            title="Where the cash sits"
+            subtitle={`${accountItems.length} accounts`}
+            items={accountItems}
+            totalLabel={formatMoney(cashDeposits?.total)}
+            formatMoney={formatMoney}
+            ariaLabel="Cash by account"
+          />
 
           <section className="grid g-mid">
             <div className="card">
-              <h2>Currency Breakdown</h2>
-              <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Current vs selected snapshot</div>
-                <div className="tableWrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Currency</th>
-                      <th className="right">Current</th>
-                      <th className="right">Snapshot</th>
-                      <th className="right">Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashDeposits?.currency_breakdown?.map((c) => (
-                      <tr key={c.currency}>
-                        <td>{c.currency}</td>
-                        <td className="right">{formatMoney(c.current_value)}</td>
-                        <td className="right">{formatMoney(c.snapshot_value)}</td>
-                        <td className={`right ${c.delta_abs >= 0 ? "good" : "bad"}`}>
-                          {c.delta_abs >= 0 ? "+" : "-"}
-                          {formatMoney(Math.abs(c.delta_abs))}
-                        </td>
-                      </tr>
-                    ))}
-                    {cashDeposits?.currency_breakdown && cashDeposits.currency_breakdown.length === 0 && (
-                      <tr>
-                        <td className="muted" colSpan={4}>No cash balances yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                </div>
-              </div>
+              <h2>Currency mix</h2>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>Current value and delta vs. prior snapshot</div>
+              <StackedBar segments={currencySegments} ariaLabel="Currency mix" />
             </div>
 
             <div className="card">
               <h2>Stablecoins</h2>
-              <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
-                <div className="big small">{formatMoney(stablecoinTotal)}</div>
-                <div className="tableWrap">
+              <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
+              <div className="big small">{formatMoney(stablecoinTotal)}</div>
+              <div className="tableWrap">
                 <table className="table" style={{ marginTop: 8 }}>
                   <thead>
                     <tr>
@@ -225,28 +182,18 @@ export default function CashOverview() {
                     )}
                   </tbody>
                 </table>
-                </div>
               </div>
-            </div>
-
-            <div className="card valueTrendCard valueTrendCardWide">
-              <div className="stockHoldingsHeader">
-                <h2>Six-Month Cash Trend</h2>
-                <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
-              </div>
-              <div className="valueTrendValue">
-                <span>Current cash value</span>
-                <strong>{formatMoney(cashDeposits?.current_total)}</strong>
-              </div>
-              <ValueTrendChart
-                points={cashDeposits?.trend ?? []}
-                ariaLabel="Six-month cash trend"
-                formatMoney={formatMoney}
-                formatCompactMoney={formatCompactMoney}
-              />
             </div>
           </section>
-        </>
+
+          <div className="card">
+            <div className="stockHoldingsHeader">
+              <h2>Six-month cash trend</h2>
+              <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
+            </div>
+            <TrendBarChart points={trendPoints} ariaLabel="Six-month cash trend" />
+          </div>
+        </div>
       )}
     </PageShell>
   );

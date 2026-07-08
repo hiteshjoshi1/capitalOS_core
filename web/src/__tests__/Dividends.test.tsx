@@ -114,13 +114,19 @@ describe("Dividends", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Dividends" })).toBeInTheDocument();
-    expect(screen.getByText("Realized (Selected Month)")).toBeInTheDocument();
-    expect(screen.getByText("By Company (Realized, Selected Month)")).toBeInTheDocument();
-    expect(screen.getByText("Expected Dividends (Holdings-Based)")).toBeInTheDocument();
-    expect(screen.getByText("By Company (Expected)")).toBeInTheDocument();
+    expect(screen.getByText("REALIZED THIS MONTH")).toBeInTheDocument();
+    expect(screen.getByText("Expected, next 12 months")).toBeInTheDocument();
+    expect(screen.getByText("Portfolio coverage")).toBeInTheDocument();
+    expect(screen.getByText("12-month dividend income")).toBeInTheDocument();
+    expect(screen.getByText("Who paid you this month")).toBeInTheDocument();
     expect(screen.getAllByText("Apple Inc.").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByLabelText("Assumed tax rate percent")).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Country tax rates")).not.toBeInTheDocument();
+
+    const user = (await import("@testing-library/user-event")).default.setup();
+    await user.click(screen.getByRole("button", { name: "Expected" }));
+    expect(await screen.findByText("Projected annual payers")).toBeInTheDocument();
+    expect(screen.getAllByText("Apple Inc.").length).toBeGreaterThanOrEqual(1);
   });
 
   it("renders API error state when loading fails", async () => {
@@ -206,7 +212,10 @@ describe("Dividends", () => {
 
     expect(await screen.findByText("No dividends in selected range.")).toBeInTheDocument();
     expect(screen.getByText("No company-level dividend records yet.")).toBeInTheDocument();
-    expect(screen.getByText("No expected dividend estimates found for selected range.")).toBeInTheDocument();
+
+    const user = (await import("@testing-library/user-event")).default.setup();
+    await user.click(screen.getByRole("button", { name: "Expected" }));
+    expect(await screen.findByText("No expected dividend estimates found for selected range.")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(mockApi.dividendsSummary).toHaveBeenLastCalledWith(

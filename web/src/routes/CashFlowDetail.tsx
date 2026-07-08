@@ -13,8 +13,12 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import TrendBarChart from "../components/TrendBarChart";
+import StackedBar from "../components/StackedBar";
+import SegmentedToggle from "../components/SegmentedToggle";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
 
 type CategoryGroup = {
@@ -33,6 +37,7 @@ type TransactionTableProps = {
   formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
   onSelectionChange: (transactionId: number, value: string) => void;
   onSave: (transactionId: number, categoryId: number) => Promise<void>;
+  pageSize?: number;
 };
 
 const CHART_COLORS = [
@@ -290,12 +295,15 @@ function SplitCard({
   subtitle,
   items,
   formatMoney,
+  colors,
 }: {
   title: string;
   subtitle: string;
   items: CashFlowBreakdownItem[];
   formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
+  colors?: string[];
 }) {
+  const palette = colors ?? CHART_COLORS;
   return (
     <article className="card wealthDetailCard cashFlowInsightCard">
       <div className="cashFlowCardHeader">
@@ -306,17 +314,16 @@ function SplitCard({
       </div>
 
       {items.length > 0 ? (
-        <div className="cashFlowSplitList">
-          {items.map((item) => (
-            <div key={`${title}-${item.label}`} className="cashFlowSplitRow">
-              <div>
-                <strong>{item.label}</strong>
-                <div className="muted">{formatMoney(item.amount)}</div>
-              </div>
-              <span className="wealthHeroChip wealthHeroChipPositive">{formatPercent(item.percent)}</span>
-            </div>
-          ))}
-        </div>
+        <StackedBar
+          ariaLabel={subtitle}
+          segments={items.map((item, idx) => ({
+            key: item.label,
+            label: item.label,
+            percent: item.percent * 100,
+            color: palette[idx % palette.length],
+            valueLabel: formatMoney(item.amount),
+          }))}
+        />
       ) : (
         <p className="muted">No split available for this month.</p>
       )}
@@ -370,54 +377,6 @@ function DeltaTableCard({
         </div>
       ) : (
         <p className="muted">No month-over-month deterioration was detected.</p>
-      )}
-    </article>
-  );
-}
-
-function MerchantTableCard({
-  title,
-  subtitle,
-  items,
-  formatMoney,
-}: {
-  title: string;
-  subtitle: string;
-  items: CashFlowDetail["analytics"]["top_outflow_merchants"];
-  formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
-}) {
-  return (
-    <article className="card wealthDetailCard cashFlowInsightCard">
-      <div className="cashFlowCardHeader">
-        <div>
-          <p className="wealthEyebrow">{title}</p>
-          <h2 className="cashFlowCardTitle">{subtitle}</h2>
-        </div>
-      </div>
-
-      {items.length > 0 ? (
-        <div className="tableWrap">
-        <table className="table cashFlowMiniTable">
-          <thead>
-            <tr>
-              <th>Merchant</th>
-              <th className="right">Outflow</th>
-              <th className="right">Share</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <tr key={item.merchant}>
-                <td>{item.merchant}</td>
-                <td className="right">{formatMoney(item.amount)}</td>
-                <td className="right">{formatPercent(item.percent)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
-      ) : (
-        <p className="muted">No merchant outflows for this month.</p>
       )}
     </article>
   );
@@ -549,7 +508,7 @@ function WaterfallCard({
 function TransactionTable({
   title,
   emptyMessage,
-  transactions,
+  transactions: allTransactions,
   categoryGroups,
   overrideSelections,
   pendingOverrides,
@@ -557,7 +516,11 @@ function TransactionTable({
   formatMoney,
   onSelectionChange,
   onSave,
+  pageSize,
 }: TransactionTableProps) {
+  const [visibleCount, setVisibleCount] = useState(pageSize ?? allTransactions.length);
+  const transactions = pageSize ? allTransactions.slice(0, visibleCount) : allTransactions;
+
   return (
     <div className="card">
       <h2>{title}</h2>
@@ -654,6 +617,22 @@ function TransactionTable({
           </tbody>
         </table>
       </div>
+      {pageSize && allTransactions.length > 0 ? (
+        <div className="footer">
+          <span className="muted">
+            Showing {Math.min(visibleCount, allTransactions.length)} of {allTransactions.length} transactions
+          </span>
+          {visibleCount < allTransactions.length ? (
+            <button
+              className="btn footerAction"
+              type="button"
+              onClick={() => setVisibleCount((current) => current + pageSize)}
+            >
+              Show more
+            </button>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -731,14 +710,27 @@ function OverviewTab({
           <h2 className="cashFlowSectionTitle">High-level diagnostics for the selected month</h2>
         </div>
         <div className="cashFlowInsightGrid cashFlowInsightGridTwoUp">
-          <TrendCard
-            title="Health"
-            subtitle="Net cash flow trend"
-            points={detail.analytics.trend}
-            valueKey="net"
-            formatValue={(value) => formatMoney(value, 0)}
-            ariaLabel="Net cash flow trend by month"
-          />
+          <article className="card wealthDetailCard cashFlowInsightCard">
+            <div className="cashFlowCardHeader">
+              <div>
+                <p className="wealthEyebrow">Health</p>
+                <h2 className="cashFlowCardTitle">Six-month net cash flow</h2>
+              </div>
+            </div>
+            {detail.analytics.trend.length > 0 ? (
+              <TrendBarChart
+                ariaLabel="Net cash flow trend by month"
+                points={detail.analytics.trend.map((point) => ({
+                  month: point.month,
+                  value: point.net ?? 0,
+                  displayValue: formatMoney(point.net, 0),
+                  tone: (point.net ?? 0) >= 0 ? "positive" : "negative",
+                }))}
+              />
+            ) : (
+              <p className="muted">Trend data is not available yet.</p>
+            )}
+          </article>
           <DistributionCard
             title="Money in"
             subtitle="Compact inflow composition"
@@ -885,7 +877,12 @@ function ExpensesTab({
   onSelectionChange: (transactionId: number, value: string) => void;
   onSave: (transactionId: number, categoryId: number) => Promise<void>;
 }) {
+  const [merchantsView, setMerchantsView] = useState<MerchantsView>("all");
   const diningMerchants = topDiningMerchantItems(detail.expenses.transactions);
+  const activeMerchantItems: CashFlowBreakdownItem[] =
+    merchantsView === "dining"
+      ? diningMerchants
+      : detail.analytics.top_outflow_merchants.map((m) => ({ label: m.merchant, amount: m.amount, percent: m.percent }));
 
   return (
     <>
@@ -928,24 +925,53 @@ function ExpensesTab({
             items={detail.analytics.outflow_recurring_split}
             formatMoney={formatMoney}
           />
-          <MerchantTableCard
-            title="Money out"
-            subtitle="Top merchants"
-            items={detail.analytics.top_outflow_merchants}
-            formatMoney={formatMoney}
-          />
-          <BreakdownBarsCard
-            title="Money out"
-            subtitle="Top dining merchants"
-            items={diningMerchants}
-            ariaLabel="Top dining merchants chart"
-            formatMoney={formatMoney}
-          />
+          <article className="card wealthDetailCard cashFlowInsightCard">
+            <div className="cashFlowCardHeader">
+              <div>
+                <p className="wealthEyebrow">Money out</p>
+                <h2 className="cashFlowCardTitle">{merchantsView === "dining" ? "Top dining merchants" : "Top merchants"}</h2>
+              </div>
+              <SegmentedToggle
+                ariaLabel="Merchant view"
+                value={merchantsView}
+                onChange={setMerchantsView}
+                options={[
+                  { value: "all", label: "All" },
+                  { value: "dining", label: "Dining" },
+                ]}
+              />
+            </div>
+            {activeMerchantItems.length > 0 ? (
+              <div className="cashFlowBarList" aria-label={merchantsView === "dining" ? "Top dining merchants chart" : "Top merchants chart"}>
+                {activeMerchantItems.slice(0, 6).map((item, idx) => {
+                  const maxAmount = Math.max(...activeMerchantItems.map((i) => i.amount), 1);
+                  return (
+                    <div key={`${merchantsView}-${item.label}`} className="cashFlowBarRow">
+                      <div className="cashFlowBarMeta">
+                        <strong>{item.label}</strong>
+                        <span className="muted">{formatMoney(item.amount)}</span>
+                      </div>
+                      <div className="cashFlowBarTrack">
+                        <span
+                          className="cashFlowBarFill"
+                          style={{ width: `${(item.amount / maxAmount) * 100}%`, background: CHART_COLORS[idx % CHART_COLORS.length] }}
+                        />
+                      </div>
+                      <span className="cashFlowBarPercent">{formatPercent(item.percent)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="muted">No merchant data for this month.</p>
+            )}
+          </article>
           <SplitCard
             title="Money out"
             subtitle="Fixed vs variable expenses"
             items={detail.analytics.outflow_fixed_variable_split}
             formatMoney={formatMoney}
+            colors={["#4f8cff", "#7d67ff"]}
           />
           <DeltaTableCard
             title="Money out"
@@ -972,6 +998,7 @@ function ExpensesTab({
           formatMoney={formatMoney}
           onSelectionChange={onSelectionChange}
           onSave={onSave}
+          pageSize={8}
         />
       </section>
     </>

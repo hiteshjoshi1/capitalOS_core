@@ -132,28 +132,27 @@ describe("CryptoHoldings route", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("Overview")).toBeInTheDocument();
+    expect(await screen.findByText("CURRENT CRYPTO VALUE")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toHaveValue("2026-02");
     expect(screen.getByLabelText("Base currency")).toHaveValue("SGD");
     expect(mockApi.cryptoSummary).toHaveBeenCalledWith("2026-02", "SGD");
-    const topHoldingsHeading = screen.getByText("Top Holdings");
     const chainHeading = screen.getByText("Exposure by Chain");
     const walletHeading = screen.getByText("Exposure by Wallet");
-    const trendHeading = screen.getByText("Six-Month Crypto Trend");
+    const trendHeading = screen.getByText("Six-month value trend");
+    const topHoldingsHeading = screen.getByText("Top holdings");
     expect(trendHeading).toBeInTheDocument();
     expect(screen.getByLabelText("Six-month crypto trend")).toBeInTheDocument();
-    expect(topHoldingsHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(chainHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(walletHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(trendHeading.compareDocumentPosition(topHoldingsHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText("Sep '25")).not.toBeInTheDocument();
     expect(screen.queryByText("Oct '25")).not.toBeInTheDocument();
     expect(screen.getAllByText("Nov '25").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("S$ 9,000").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("S$ 9K").length).toBeGreaterThan(0);
     expect(chainHeading).toBeInTheDocument();
     expect(walletHeading).toBeInTheDocument();
-    expect(screen.getByText("defillama,coingecko")).toBeInTheDocument();
-    expect(screen.getByText("Fresh holdings")).toBeInTheDocument();
-    expect(screen.getByText("Fresh prices")).toBeInTheDocument();
+    expect(screen.getByText(/fresh\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Holdings as of 2026-02-06/)).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {
@@ -197,16 +196,17 @@ describe("CryptoHoldings route", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+    expect(await screen.findByText("Top holdings")).toBeInTheDocument();
     expect(screen.queryByText("DUST")).not.toBeInTheDocument();
-    expect(screen.getByText("Stale holdings")).toBeInTheDocument();
-    expect(screen.getByText("Fresh prices (refreshing)")).toBeInTheDocument();
-    expect(screen.getByText(/\(refreshing\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under \$10/)).toBeInTheDocument();
+    expect(screen.getByText(/stale\)/)).toBeInTheDocument();
+    expect(screen.getByText(/refreshing/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: /Show <\$10 tokens/i }));
+    await user.click(screen.getByRole("checkbox", { name: /Show holdings under \$10/i }));
     await waitFor(() => {
       expect(screen.getByText("DUST")).toBeInTheDocument();
     });
+    expect(screen.getByText(/Showing all 2 holdings, including dust under \$10/)).toBeInTheDocument();
   });
 
   it("shows Coinbase exchange holdings and wallet exposure from the crypto summary", async () => {
@@ -286,7 +286,6 @@ describe("CryptoHoldings route", () => {
     );
 
     expect(await screen.findByText("No crypto holdings yet.")).toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(screen.getByText("Exposure by Wallet")).toBeInTheDocument();
     expect(screen.getAllByText("No exposure data yet.").length).toBeGreaterThan(0);
   });

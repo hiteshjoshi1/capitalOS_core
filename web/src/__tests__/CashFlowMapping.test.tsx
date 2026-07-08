@@ -38,6 +38,30 @@ const unmappedFixture: UnmappedTransaction[] = [
     merchant_counterparty: "NTUC FairPrice",
     notes: null,
   },
+  {
+    transaction_id: 9002,
+    ts: "2026-02-12T09:30:00+00:00",
+    account_id: 7,
+    account_name: "DBS Savings",
+    amount: -18.0,
+    currency: "SGD",
+    type: "EXPENSE",
+    raw_category: null,
+    merchant_counterparty: "NTUC FairPrice",
+    notes: null,
+  },
+  {
+    transaction_id: 9003,
+    ts: "2026-02-14T09:30:00+00:00",
+    account_id: 7,
+    account_name: "DBS Savings",
+    amount: -12.0,
+    currency: "SGD",
+    type: "EXPENSE",
+    raw_category: null,
+    merchant_counterparty: "Grab",
+    notes: null,
+  },
 ];
 
 function renderRoute() {
@@ -67,14 +91,15 @@ describe("CashFlowMapping route", () => {
     });
   });
 
-  it("renders the unmapped queue with month-scoped transactions", async () => {
+  it("renders the unmapped queue grouped by merchant", async () => {
     renderRoute();
 
-    expect(await screen.findByText("Unmapped queue")).toBeInTheDocument();
-    expect(screen.getByRole("heading", { level: 1, name: "Map Transactions" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { level: 1, name: "Map Transactions" })).toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
-    expect(screen.getByText("DBS Savings")).toBeInTheDocument();
+    expect(screen.getByText("3 transactions across 2 merchants still need a category")).toBeInTheDocument();
     expect(screen.getByText("NTUC FairPrice")).toBeInTheDocument();
+    expect(screen.getByText("Grab")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "2 transactions · S$ 42.5")).toBeInTheDocument();
   });
 
   it("shows loading state while category and queue data are still in flight", async () => {
@@ -94,19 +119,51 @@ describe("CashFlowMapping route", () => {
     expect(await screen.findByText("All transactions mapped for 2026-02.")).toBeInTheDocument();
   });
 
-  it("posts an override and removes the row after success", async () => {
+  it("expands a merchant group to review individual transactions", async () => {
+    const user = userEvent.setup();
+    renderRoute();
+
+    expect(await screen.findByText("NTUC FairPrice")).toBeInTheDocument();
+    expect(screen.queryByText("DBS Savings")).not.toBeInTheDocument();
+
+    const reviewButtons = screen.getAllByRole("button", { name: "Review" });
+    await user.click(reviewButtons[0]);
+
+    expect(await screen.findByText("Hide")).toBeInTheDocument();
+    expect(screen.getAllByText("DBS Savings").length).toBeGreaterThan(0);
+  });
+
+  it("filters merchant groups via the search box", async () => {
+    const user = userEvent.setup();
+    renderRoute();
+
+    expect(await screen.findByText("Grab")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Search merchant"), "grab");
+
+    expect(screen.getByText("Grab")).toBeInTheDocument();
+    expect(screen.queryByText("NTUC FairPrice")).not.toBeInTheDocument();
+  });
+
+  it("applies a category to every transaction in a merchant group and removes it from the queue", async () => {
     const user = userEvent.setup();
     renderRoute();
 
     expect(await screen.findByText("NTUC FairPrice")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Override category for transaction 9001"), "2");
+    await user.selectOptions(screen.getByLabelText("Category for NTUC FairPrice"), "2");
+    await user.click(screen.getByRole("button", { name: "Apply to all 2" }));
 
     await waitFor(() => {
       expect(mockApi.categoryOverride).toHaveBeenCalledWith({ transaction_id: 9001, category_id: 2 });
+      expect(mockApi.categoryOverride).toHaveBeenCalledWith({ transaction_id: 9002, category_id: 2 });
     });
     await waitFor(() => {
       expect(screen.queryByText("NTUC FairPrice")).not.toBeInTheDocument();
     });
+    expect(
+      screen.getAllByText(
+        (_, element) => element?.tagName === "SPAN" && element?.textContent === "1 transactions across 1 merchants still need a category",
+      ).length,
+    ).toBeGreaterThan(0);
   });
 });

@@ -312,10 +312,15 @@ describe("CashFlowDetail route", () => {
     expect(screen.getAllByRole("heading", { name: "Which recurring expenses are driving most of my outflows?" }).length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
     expect(screen.getByLabelText("Monthly spend by category chart")).toBeInTheDocument();
-    expect(screen.getByLabelText("Top dining merchants chart")).toBeInTheDocument();
+    expect(screen.getByLabelText("Top merchants chart")).toBeInTheDocument();
     expect(screen.getAllByText("Landlord").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Hawker Center").length).toBeGreaterThan(0);
     expect(screen.getByText("Expense transactions (2)")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Dining" }));
+    expect(await screen.findByLabelText("Top dining merchants chart")).toBeInTheDocument();
+    expect(screen.getAllByText("Hawker Center").length).toBeGreaterThan(0);
   });
 
   it("renders visible DBS credit card expenses without payment transfers", async () => {
