@@ -4,32 +4,23 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useContext } from "react";
 import { AuthContext, AuthProvider } from "../context/AuthContext";
 
-const { mockApi, mockSetAccessToken, mockSetAuthFailureHandler, MockAuthExpiredError } = vi.hoisted(() => {
-  class _MockAuthExpiredError extends Error {
-    constructor(msg = "Session expired") {
-      super(msg);
-      this.name = "AuthSessionExpiredError";
-    }
-  }
-  return {
-    mockApi: {
-      authRefresh: vi.fn(),
-      authMe: vi.fn(),
-      authLogin: vi.fn(),
-      authSignup: vi.fn(),
-      authLogout: vi.fn(),
-    },
-    mockSetAccessToken: vi.fn(),
-    mockSetAuthFailureHandler: vi.fn(),
-    MockAuthExpiredError: _MockAuthExpiredError,
-  };
-});
+const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
+  mockApi: {
+    authMe: vi.fn(),
+    authLogin: vi.fn(),
+    authSignup: vi.fn(),
+    authLogout: vi.fn(),
+  },
+  mockRefreshAccessTokenNow: vi.fn(),
+  mockSetAccessToken: vi.fn(),
+  mockSetAuthFailureHandler: vi.fn(),
+}));
 
 vi.mock("../lib/api", () => ({
   api: mockApi,
+  refreshAccessTokenNow: mockRefreshAccessTokenNow,
   setAccessToken: mockSetAccessToken,
   setAuthFailureHandler: mockSetAuthFailureHandler,
-  AuthSessionExpiredError: MockAuthExpiredError,
 }));
 
 function AuthConsumer() {
@@ -45,6 +36,14 @@ function AuthConsumer() {
   );
 }
 
+/** The real refreshAccessTokenNow() clears the token and notifies this handler on a
+ * definitive 401 (see api.ts callRefreshEndpoint) — grab it so tests can fire that
+ * same signal without re-mocking the network layer. */
+function capturedAuthFailureHandler(): (() => void) | null {
+  const lastCall = mockSetAuthFailureHandler.mock.calls.at(-1);
+  return (lastCall?.[0] as (() => void) | undefined) ?? null;
+}
+
 describe("AuthProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -56,7 +55,7 @@ describe("AuthProvider", () => {
   });
 
   it("loads session on mount when refresh succeeds", async () => {
-    mockApi.authRefresh.mockResolvedValueOnce({ access_token: "t", token_type: "bearer", expires_in: 3600 });
+    mockRefreshAccessTokenNow.mockResolvedValueOnce("t");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
     render(
@@ -70,13 +69,49 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("loading").textContent).toBe("false");
       expect(screen.getByTestId("user").textContent).toBe("demo");
     });
-    expect(mockSetAccessToken).toHaveBeenCalledWith("t");
+    expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(1);
   });
 
-  it("refreshes an active session when the tab becomes visible", async () => {
-    mockApi.authRefresh
-      .mockResolvedValueOnce({ access_token: "initial", token_type: "bearer", expires_in: 3600 })
-      .mockResolvedValueOnce({ access_token: "rotated", token_type: "bearer", expires_in: 3600 });
+  it("does not call authMe when the mount-time refresh fails", async () => {
+    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+
+    render(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading").textContent).toBe("false");
+    });
+    expect(mockApi.authMe).not.toHaveBeenCalled();
+    expect(screen.getByTestId("user").textContent).toBe("none");
+  });
+
+  it("refreshes an active session when the tab becomes visible, deduped through one helper", async () => {
+    mockRefreshAccessTokenNow.mockResolvedValue("token");
+    mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
+
+    render(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+    expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(1);
+
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    await waitFor(() => {
+      expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("clears session when the auth-failure handler fires (definitive 401 during background refresh)", async () => {
+    mockRefreshAccessTokenNow.mockResolvedValue("token");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
     render(
@@ -89,15 +124,21 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("user").textContent).toBe("demo");
     });
 
-    document.dispatchEvent(new Event("visibilitychange"));
+    // Simulate what the real callRefreshEndpoint() does on a definitive 401: it clears
+    // the in-memory token itself, then notifies AuthProvider's registered handler.
+    capturedAuthFailureHandler()?.();
 
     await waitFor(() => {
-      expect(mockSetAccessToken).toHaveBeenCalledWith("rotated");
+      expect(screen.getByTestId("user").textContent).toBe("none");
+      expect(screen.getByTestId("loading").textContent).toBe("false");
     });
   });
 
-  it("clears session on definitive auth failure (AuthSessionExpiredError) during bootstrap", async () => {
-    mockApi.authRefresh.mockRejectedValueOnce(new MockAuthExpiredError("Session expired"));
+  it("does not force logout on transient failure during bootstrap", async () => {
+    // refreshAccessTokenNow() resolves to null (not a thrown error) for transient
+    // failures too — network/5xx errors are swallowed internally and never reach
+    // authFailureHandler, so AuthProvider just stops loading without clearing anyone.
+    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
 
     render(
       <AuthProvider>
@@ -109,31 +150,12 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("loading").textContent).toBe("false");
       expect(screen.getByTestId("user").textContent).toBe("none");
     });
-    expect(mockSetAccessToken).toHaveBeenCalledWith(null);
-    expect(mockSetAuthFailureHandler).toHaveBeenCalled();
-  });
-
-  it("does not force logout on transient network error during bootstrap", async () => {
-    mockApi.authRefresh.mockRejectedValueOnce(new Error("Unable to reach API at http://localhost:8000: Failed to fetch"));
-
-    render(
-      <AuthProvider>
-        <AuthConsumer />
-      </AuthProvider>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId("loading").textContent).toBe("false");
-      expect(screen.getByTestId("user").textContent).toBe("none");
-    });
-    // setAccessToken should NOT be called with null on a transient error
-    expect(mockSetAccessToken).not.toHaveBeenCalledWith(null);
+    expect(mockSetAccessToken).not.toHaveBeenCalled();
   });
 
   it("runs login/signup/logout flows and updates user", async () => {
-    mockApi.authRefresh.mockResolvedValueOnce({ access_token: "initial", token_type: "bearer", expires_in: 3600 });
+    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
     mockApi.authMe
-      .mockResolvedValueOnce({ id: 10, username: "seed", is_admin: false })
       .mockResolvedValueOnce({ id: 11, username: "alice", is_admin: false })
       .mockResolvedValueOnce({ id: 12, username: "bob", is_admin: false });
     mockApi.authLogin
@@ -174,7 +196,7 @@ describe("AuthProvider", () => {
   });
 
   it("registers and unregisters auth failure handler", async () => {
-    mockApi.authRefresh.mockRejectedValueOnce(new MockAuthExpiredError("Session expired"));
+    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
 
     const { unmount } = render(
       <AuthProvider>

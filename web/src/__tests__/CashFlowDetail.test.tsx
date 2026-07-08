@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
 import CashFlowDetail from "../routes/CashFlowDetail";
@@ -172,8 +172,8 @@ const detailFixture: CashFlowDetailResponse = {
         base_amount: -1780,
         type: "EXPENSE",
         raw_category: "Dining",
-        resolved_category: "Dining",
         resolved_category_id: null,
+        resolved_category: "Dining",
         category_source: "parser",
         merchant_counterparty: "Hawker Center",
         notes: null,
@@ -281,41 +281,92 @@ describe("CashFlowDetail route", () => {
     });
   });
 
-  it("renders a high-level overview tab without cramming the audit tables into it", async () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+    vi.useRealTimers();
+    window.localStorage.clear();
+    cleanup();
+  });
+
+  it("renders the overview tab with a hero, 6-month trend, drivers, and cash bridge — no audit table", async () => {
     renderRoute("/cash-flow");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
-    expect(screen.getByText("High-level diagnostics for the selected month")).toBeInTheDocument();
+
+    // Hero: value, delta chip, and the savings/burn insight sentence
+    expect(screen.getByText("Net cash flow this month")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 3,770")).toBeInTheDocument();
+    expect(screen.getByText("-S$ 2,412 vs January")).toBeInTheDocument();
+    expect(screen.getByText("Saved 30.2% of income · Burn rate 69.8%")).toBeInTheDocument();
+
+    // 4 KPI tiles
+    expect(screen.getByText("Total inflows")).toBeInTheDocument();
+    expect(screen.getByText("Total outflows")).toBeInTheDocument();
+    expect(screen.getByText("Savings rate")).toBeInTheDocument();
+    expect(screen.getByText("Burn rate")).toBeInTheDocument();
+
+    // Six-month trend chart
     expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
-    expect(screen.getByLabelText("Compact inflow composition")).toBeInTheDocument();
-    expect(screen.getByLabelText("Compact outflow composition")).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "What changed versus last month?" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("heading", { name: "How much of my income was saved vs spent?" }).length).toBeGreaterThan(0);
+
+    // Vs. last month narrative + driver rows
+    expect(screen.getByRole("heading", { name: "Vs. last month" })).toBeInTheDocument();
+    expect(screen.getByText(/Net cash flow was 3770 this month versus 6182/)).toBeInTheDocument();
+    const driversSection = screen.getByText("Vs. last month").closest("section") as HTMLElement;
+    expect(within(driversSection).getByText("Dining")).toBeInTheDocument();
+    expect(within(driversSection).getByText("+S$ 1,780")).toBeInTheDocument();
+
+    // Cash bridge
+    expect(screen.getByLabelText("Cash bridge chart")).toBeInTheDocument();
+    expect(screen.getByText("Starting cash")).toBeInTheDocument();
+    expect(screen.getByText("Ending cash")).toBeInTheDocument();
+
+    // No audit trail on the overview tab
     expect(screen.queryByText("Expense transactions (2)")).not.toBeInTheDocument();
+    expect(screen.queryByText("Income transactions (1)")).not.toBeInTheDocument();
   });
 
-  it("renders the income tab with source composition and income transactions", async () => {
+  it("renders the income tab with a hero, source composition, recurring split, and income transactions", async () => {
     renderRoute("/cash-flow/income");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "What percentage of inflows came from salary, dividends, and transfers?" }).length).toBeGreaterThan(0);
+
+    const hero = screen.getByText("Total inflows this month").closest("article") as HTMLElement;
+    expect(within(hero).getByText("S$ 12,480")).toBeInTheDocument();
+    expect(screen.getByText("Salary 96.2%, dividends 3.8%, transfers 0.0%.")).toBeInTheDocument();
+
     expect(screen.getByLabelText("Income source donut chart")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Recurring vs. one-off" })).toBeInTheDocument();
+
     expect(screen.getByText("Income transactions (1)")).toBeInTheDocument();
     expect(screen.getByText("DBS Savings")).toBeInTheDocument();
   });
 
-  it("renders the expenses tab with category, merchant, and audit diagnostics", async () => {
+  it("renders the expenses tab with category, split, merchant, and driver diagnostics", async () => {
     renderRoute("/cash-flow/expenses");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Expenses" })).toBeInTheDocument();
-    expect(screen.getAllByRole("heading", { name: "Where did my money go this month?" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("heading", { name: "Which recurring expenses are driving most of my outflows?" }).length).toBeGreaterThan(0);
+
+    const hero = screen.getByText("Total outflows this month").closest("article") as HTMLElement;
+    expect(within(hero).getByText("S$ 8,710")).toBeInTheDocument();
+    expect(screen.getByText(/Most outflows went to Rent/)).toBeInTheDocument();
+
     expect(screen.getByLabelText("Top expense categories donut chart")).toBeInTheDocument();
-    expect(screen.getByLabelText("Monthly spend by category chart")).toBeInTheDocument();
+
+    expect(screen.getByRole("heading", { name: "How predictable is your spend" })).toBeInTheDocument();
+    expect(screen.getByText("Recurring vs. non-recurring")).toBeInTheDocument();
+    expect(screen.getByText("Fixed vs. variable")).toBeInTheDocument();
+
     expect(screen.getByLabelText("Top merchants chart")).toBeInTheDocument();
     expect(screen.getAllByText("Landlord").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Hawker Center").length).toBeGreaterThan(0);
+
+    expect(screen.getByRole("heading", { name: "Categories trending up" })).toBeInTheDocument();
+
     expect(screen.getByText("Expense transactions (2)")).toBeInTheDocument();
+
+    // The old boxed "recurring expenses driving outflows" answer card is dropped — no
+    // equivalent section exists in the redesigned page.
+    expect(screen.queryByText("Which recurring expenses are driving most of my outflows?")).not.toBeInTheDocument();
 
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Dining" }));
@@ -359,14 +410,13 @@ describe("CashFlowDetail route", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Expenses" })).toBeInTheDocument();
     expect(screen.getByText("Expense transactions (3)")).toBeInTheDocument();
-    expect(screen.getByText("DBS Credit Card")).toBeInTheDocument();
-    expect(screen.getByText("CREDIT_CARD")).toBeInTheDocument();
+    expect(screen.getByText(/DBS Credit Card/)).toBeInTheDocument();
     expect(screen.getByText("SHENG SIONG")).toBeInTheDocument();
     expect(screen.getAllByText("CreditCard::Purchase").length).toBeGreaterThan(0);
     expect(screen.queryByText("GIRO PAYMENT DBS CREDIT CARD")).not.toBeInTheDocument();
   });
 
-  it("degrades the reconciliation card when month-boundary snapshots are unavailable", async () => {
+  it("degrades the cash bridge when month-boundary snapshots are unavailable", async () => {
     mockApi.cashFlowDetail.mockResolvedValueOnce(staleBoundaryDetailFixture);
 
     renderRoute("/cash-flow");
@@ -374,16 +424,20 @@ describe("CashFlowDetail route", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
     expect(screen.getByLabelText("Cash reconciliation unavailable")).toBeInTheDocument();
     expect(screen.getByText(/needs exact cash snapshots on 2026-01-31 and 2026-02-28/i)).toBeInTheDocument();
-    expect(screen.queryByLabelText("Cash waterfall chart")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Cash bridge chart")).not.toBeInTheDocument();
   });
 
-  it("posts an override from the income audit table and refreshes the diagnostics", async () => {
+  it("edits a category inline from the income transaction list and refreshes the diagnostics", async () => {
     const user = userEvent.setup();
     mockApi.cashFlowDetail.mockResolvedValueOnce(detailFixture).mockResolvedValueOnce(updatedDetailFixture);
 
     renderRoute("/cash-flow/income");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
+
+    // Category tag is read-only-looking by default; clicking it reveals the editor.
+    expect(screen.queryByLabelText("Select category for transaction 2")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Edit category for transaction 2" }));
 
     await user.selectOptions(screen.getByLabelText("Select category for transaction 2"), "151");
     await user.click(screen.getByLabelText("Save category for transaction 2"));
@@ -396,5 +450,25 @@ describe("CashFlowDetail route", () => {
     });
     expect(await screen.findByText("Income transactions (0)")).toBeInTheDocument();
     expect(screen.getByText("No income transactions for 2026-02.")).toBeInTheDocument();
+
+    // The editor closes itself once the save succeeds.
+    expect(screen.queryByLabelText("Select category for transaction 2")).not.toBeInTheDocument();
+  });
+
+  it("keeps the inline editor open and shows the error when a save fails", async () => {
+    const user = userEvent.setup();
+    mockApi.categoryOverride.mockRejectedValueOnce(new Error("Category save failed"));
+
+    renderRoute("/cash-flow/income");
+
+    expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit category for transaction 2" }));
+    await user.selectOptions(screen.getByLabelText("Select category for transaction 2"), "151");
+    await user.click(screen.getByLabelText("Save category for transaction 2"));
+
+    expect(await screen.findByText("Category save failed")).toBeInTheDocument();
+    // Still open — the editor must not silently disappear on failure.
+    expect(screen.getByLabelText("Select category for transaction 2")).toBeInTheDocument();
   });
 });

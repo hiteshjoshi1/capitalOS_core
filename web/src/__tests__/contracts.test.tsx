@@ -302,7 +302,7 @@ describe("frontend contracts", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("High-level diagnostics for the selected month")).toBeInTheDocument();
+    expect(await screen.findByText("Net cash flow this month")).toBeInTheDocument();
     expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
   });
 });

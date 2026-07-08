@@ -1,7 +1,10 @@
+import threading
 from datetime import datetime, timezone
 
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from app.main import app
 from app.services.auth import hash_password
 
 
@@ -143,7 +146,11 @@ def test_auth_refresh_rotates_session(client, db_engine, monkeypatch):
 
 
 def test_auth_refresh_grace_window_concurrent(client, db_engine, monkeypatch):
-    """Two concurrent refresh requests with the same token: second should succeed via grace window."""
+    """Sequential replay of an already-rotated token within the grace window: the second
+    call's initial claim finds the row already revoked and should recover via the grace
+    window. (For a genuinely concurrent race — both requests' claim racing on a token
+    that's still unrevoked when either starts — see
+    test_auth_refresh_true_concurrent_race_does_not_log_out below.)"""
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
     monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
@@ -174,6 +181,62 @@ def test_auth_refresh_grace_window_concurrent(client, db_engine, monkeypatch):
             text(
                 "SELECT COUNT(*) FROM auth_sessions WHERE user_id = 901 AND revoked_at IS NULL"
             )
+        ).scalar_one()
+        assert int(active) == 1
+
+
+def test_auth_refresh_true_concurrent_race_does_not_log_out(db_engine, monkeypatch):
+    """Regression test for the "refreshing the page logs me out" bug.
+
+    React 18 StrictMode double-invokes effects in dev, so AuthProvider's bootstrap
+    refresh can genuinely fire twice at once with the exact same refresh-token cookie
+    (the same thing can happen with two tabs, or an interval tick overlapping a
+    visibility-change refresh). Both requests' "is this token still active" claim can
+    pass before either one's revoke commits. Neither caller should ever be logged out
+    as a result — both must come back with a valid access token.
+
+    Uses real OS threads against independent TestClient instances so the two requests'
+    claims can actually race, unlike a sequential call pattern.
+    """
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "30")
+
+    _insert_user_with_password(db_engine, user_id=904, username="race_user", password="RacePass1!")
+
+    login_response = TestClient(app).post(
+        "/auth/login", json={"username": "race_user", "password": "RacePass1!"}
+    )
+    assert login_response.status_code == 200
+    shared_cookie = _cookie_value(login_response.headers.get("set-cookie", ""), "capitalos_refresh")
+
+    responses: list = [None, None]
+    errors: list = [None, None]
+
+    def do_refresh(idx: int) -> None:
+        try:
+            responses[idx] = TestClient(app).post(
+                "/auth/refresh", cookies={"capitalos_refresh": shared_cookie}
+            )
+        except Exception as exc:  # noqa: BLE001 - surface as an assertion, not a bare thread crash
+            errors[idx] = exc
+
+    threads = [threading.Thread(target=do_refresh, args=(i,)) for i in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == [None, None], f"concurrent refresh requests raised: {errors}"
+    statuses = [r.status_code for r in responses]
+    bodies = [r.json() for r in responses]
+    assert statuses == [200, 200], f"neither concurrent refresh should log the user out, got {statuses}: {bodies}"
+    assert all(body.get("access_token") for body in bodies)
+
+    with db_engine.begin() as conn:
+        active = conn.execute(
+            text("SELECT COUNT(*) FROM auth_sessions WHERE user_id = 904 AND revoked_at IS NULL")
         ).scalar_one()
         assert int(active) == 1
 

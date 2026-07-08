@@ -2691,23 +2691,6 @@ a.btn {
   align-items: flex-start;
 }
 
-.cashFlowWorkspace {
-  display: grid;
-  gap: 22px;
-}
-
-.cashFlowHeroGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 1fr);
-  gap: 18px;
-}
-
-.cashFlowHeroCard {
-  display: grid;
-  gap: 14px;
-}
-
-.cashFlowHeroTitle,
 .card .cashFlowCardTitle,
 .cashFlowSectionTitle {
   margin: 0;
@@ -2719,60 +2702,40 @@ a.btn {
   text-transform: none !important;
 }
 
-[data-theme="light"] .cashFlowHeroTitle,
 [data-theme="light"] .card .cashFlowCardTitle,
 [data-theme="light"] .cashFlowSectionTitle {
   color: #1e2529;
 }
 
-.cashFlowHeroActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
 .cashFlowKpiGrid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
 }
 
 .cashFlowKpiCard {
-  min-height: 100%;
+  display: grid;
+  gap: 6px;
 }
 
-.cashFlowSectionGrid {
-  display: grid;
-  gap: 14px;
+.cashFlowKpiValue {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
 }
 
 .cashFlowSectionHeading {
   display: grid;
   gap: 4px;
+  margin-bottom: 16px;
 }
 
-.cashFlowInsightGrid {
+.cashFlowInsightGridTwoUp {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 18px;
-}
-
-.cashFlowInsightGridTwoUp,
-.cashFlowAnswerGridTwoUp {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.cashFlowInsightGridWide {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.cashFlowInsightCard,
-.cashFlowAnswerCard,
-.cashFlowAuditCard {
-  display: grid;
-  gap: 14px;
 }
 
 .cashFlowCardHeader {
@@ -2815,23 +2778,15 @@ a.btn {
   gap: 4px;
 }
 
-.cashFlowLegendList,
-.cashFlowSplitList,
-.cashFlowTrendList {
+.cashFlowLegendList {
   display: grid;
-  gap: 10px;
-}
-
-.cashFlowLegendRow,
-.cashFlowSplitRow,
-.cashFlowTrendRow,
-.cashFlowBarRow {
-  display: grid;
-  align-items: center;
   gap: 10px;
 }
 
 .cashFlowLegendRow {
+  display: grid;
+  align-items: center;
+  gap: 10px;
   grid-template-columns: minmax(0, 1fr) auto;
 }
 
@@ -2855,81 +2810,162 @@ a.btn {
   flex: 0 0 auto;
 }
 
-.cashFlowBarList {
+/* ── Split bar (Recurring vs one-off, Fixed vs variable) ─────────────── */
+
+.cashFlowSplitBarCard {
   display: grid;
   gap: 12px;
 }
 
-.cashFlowBarMeta {
+.cashFlowSplitBarTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.cashFlowSplitBarTrack {
+  height: 14px;
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.cashFlowBarTrack,
-.cashFlowTrendTrack {
-  position: relative;
-  overflow: hidden;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--line) 65%, transparent 35%);
+  overflow: hidden;
+  background: var(--panel2);
 }
 
-.cashFlowBarTrack {
-  height: 10px;
-}
-
-.cashFlowBarFill,
-.cashFlowTrendFill {
+.cashFlowSplitBarTrack > span {
   display: block;
   height: 100%;
-  border-radius: inherit;
 }
 
-.cashFlowBarPercent,
-.cashFlowTrendValue {
-  font-size: 12px;
-  color: var(--muted);
-  white-space: nowrap;
+.cashFlowSplitBarLegend {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
 }
 
-.cashFlowSplitRow {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.cashFlowMiniTable td,
-.cashFlowMiniTable th {
+.cashFlowSplitBarLegendItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
 }
 
-.cashFlowTrendRow {
-  grid-template-columns: 74px minmax(0, 1fr) auto;
+.cashFlowSplitBarLegendItem i {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
-.cashFlowTrendMonth {
+/* ── Merchant rows (single line: label | track | amount | percent) ──── */
+
+.cashFlowMerchantList {
+  display: grid;
+  gap: 14px;
+}
+
+.cashFlowMerchantRow {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.cashFlowMerchantLabel {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.cashFlowMerchantTrack {
+  flex: 1;
+  min-width: 80px;
+  max-width: 220px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+.cashFlowMerchantTrack > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.cashFlowMerchantAmount {
+  width: 80px;
+  flex-shrink: 0;
+  text-align: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cashFlowMerchantPercent {
+  width: 40px;
+  flex-shrink: 0;
+  text-align: right;
   font-size: 12px;
   color: var(--muted);
 }
 
-.cashFlowTrendTrack {
-  height: 12px;
+/* ── Driver rows (Vs. last month drivers, Categories trending up) ───── */
+
+.cashFlowNarrative {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: var(--text);
+  line-height: 1.6;
 }
 
-.cashFlowTrendFill.positive,
-.cashFlowWaterfallFill.positive {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--good) 72%, white 28%), var(--good));
-}
-
-.cashFlowTrendFill.negative,
-.cashFlowWaterfallFill.negative {
-  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 72%, white 28%), var(--bad));
-}
-
-.cashFlowWaterfall {
+.cashFlowDriverList {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+}
+
+.cashFlowDriverRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
+}
+
+.cashFlowDriverRow:first-child {
+  border-top: none;
+}
+
+.cashFlowDriverLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cashFlowDriverValues {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cashFlowDriverValues strong {
+  width: 72px;
+  text-align: right;
+}
+
+/* ── Cash bridge (waterfall column chart) ────────────────────────────── */
+
+.cashFlowBridge {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
   gap: 16px;
   align-items: end;
-  min-height: 260px;
+  min-height: 220px;
 }
 
 .cashFlowUnavailableState {
@@ -2941,21 +2977,28 @@ a.btn {
   background: color-mix(in srgb, var(--panel2) 82%, transparent 18%);
 }
 
-.cashFlowWaterfallStep {
+.cashFlowBridgeStep {
   display: grid;
-  gap: 10px;
+  gap: 8px;
   justify-items: center;
   text-align: center;
 }
 
-.cashFlowWaterfallLabel {
+.cashFlowBridgeValue {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.cashFlowBridgeLabel {
   font-size: 12px;
   color: var(--muted);
 }
 
-.cashFlowWaterfallTrack {
+.cashFlowBridgeTrack {
   width: 100%;
-  min-height: 160px;
+  min-height: 140px;
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -2964,16 +3007,49 @@ a.btn {
   padding: 14px 10px;
 }
 
-.cashFlowWaterfallFill {
+.cashFlowBridgeFill {
   width: 100%;
   border-radius: 12px 12px 6px 6px;
   min-height: 6px;
 }
 
-.cashFlowAnswerGrid {
+.cashFlowBridgeFill.positive,
+.cashFlowBridgeFill.neutral {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, white 28%), var(--accent));
+}
+
+.cashFlowBridgeFill.negative {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 72%, white 28%), var(--bad));
+}
+
+/* ── Transaction rows (audit trail, click-to-edit category) ──────────── */
+
+.cashFlowTxn {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+}
+
+.cashFlowTxnCategoryBtn {
+  appearance: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.cashFlowTxnCategoryBtn:hover {
+  border-color: color-mix(in srgb, var(--text) 40%, var(--line) 60%);
+  color: var(--text);
+}
+
+.cashFlowTxnEditor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 0 0 14px;
+}
+
+.cashFlowTxnCancelBtn {
+  background: transparent;
 }
 
 /* ── StackedBar (bar + legend, used by Chain/Wallet/Currency mix cards) ── */
@@ -3115,26 +3191,11 @@ a.btn {
   }
 }
 
-.cashFlowAuditHeader {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.cashFlowAuditTables {
-  display: grid;
-  gap: 16px;
-}
-
 @media (max-width: 980px) {
   .wealthSignalGrid,
   .cashFlowDonutLayout,
-  .cashFlowWaterfall,
-  .cashFlowInsightGrid,
-  .cashFlowInsightGridTwoUp,
-  .cashFlowAnswerGrid,
-  .cashFlowAnswerGridTwoUp {
+  .cashFlowBridge,
+  .cashFlowInsightGridTwoUp {
     grid-template-columns: 1fr;
   }
 
@@ -3153,9 +3214,14 @@ a.btn {
     height: 220px;
   }
 
-  .cashFlowAuditHeader {
-    flex-direction: column;
-    align-items: flex-start;
+  .cashFlowMerchantRow {
+    flex-wrap: wrap;
+  }
+
+  .cashFlowMerchantTrack {
+    order: 3;
+    flex: 1 1 100%;
+    max-width: none;
   }
 }
 
@@ -5366,8 +5432,7 @@ html, body {
   .row2, .row3, .row4, .row5,
   .grid.g-top, .grid.g-mid, .grid.g-bot,
   .wealthHeroGrid, .wealthAllocationGrid, .wealthSurfaceGrid, .wealthDetailGrid,
-  .cashFlowHeroGrid, .cashFlowKpiGrid, .cashFlowInsightGrid,
-  .cashFlowInsightGridWide, .cashFlowAnswerGrid, .cashFlowAuditTables,
+  .cashFlowKpiGrid, .cashFlowInsightGridTwoUp,
   .wealthRiskLayout, .sectionOverviewGrid {
     grid-template-columns: 1fr;
   }
