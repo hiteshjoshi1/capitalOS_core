@@ -41,7 +41,7 @@ export default function CreditCardCard({ month, summary, formatMoney }: CreditCa
       <div className="hint" style={{ marginTop: 10 }}>
         Configured cards: {cards.length}
       </div>
-      <Link className="exposureCardCta" to="/credit-cards" aria-label="Credit cards details">
+      <Link className="exposureCardCta" to="/liabilities" aria-label="Credit cards details">
         View details -&gt;
       </Link>
     </div>

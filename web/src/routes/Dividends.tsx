@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { DividendCompanyItem, DividendsByCompany, DividendsSummary, ExpectedDividendsOverview } from "../lib/api";
+import type { DividendCompanyItem, DividendsByCompany, DividendsSummary, ExpectedDividendCompany, ExpectedDividendsOverview } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import HeroMetricCard from "../components/HeroMetricCard";
+import TrendBarChart from "../components/TrendBarChart";
+import SegmentedToggle from "../components/SegmentedToggle";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type CompanyTab = "realized" | "expected";
 
 function shiftMonth(month: string, delta: number): string {
   const [yearRaw, monthRaw] = month.split("-");
@@ -26,6 +30,7 @@ export default function Dividends() {
   const [expectedOverview, setExpectedOverview] = useState<ExpectedDividendsOverview | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [companyTab, setCompanyTab] = useState<CompanyTab>("realized");
 
   const fromMonth = useMemo(() => shiftMonth(month, -11), [month]);
 
@@ -53,13 +58,17 @@ export default function Dividends() {
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatCompactMoney = (value?: number | null) =>
+    value == null
+      ? "—"
+      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
   const formatNumber = (value?: number, maximumFractionDigits = 4) =>
     typeof value === "number" && Number.isFinite(value)
       ? value.toLocaleString(undefined, { maximumFractionDigits })
       : "—";
 
   const topCompanies: DividendCompanyItem[] = (companySummary?.items ?? []).slice(0, 20);
-  const expectedCompanies = expectedOverview?.companies ?? [];
+  const expectedCompanies: ExpectedDividendCompany[] = expectedOverview?.companies ?? [];
   const monthKey = month;
   const yearKey = month.slice(0, 4);
   const quarterKey = (() => {
@@ -90,12 +99,36 @@ export default function Dividends() {
         { gross: 0, withholding: 0, net_received: 0, payout_minus_tax: 0 },
       );
   const realizedMonth = sumRealized((bucket) => bucket.bucket === monthKey);
+  const realizedPrevMonth = sumRealized((bucket) => bucket.bucket === shiftMonth(month, -1));
   const realizedQuarter = sumRealized((bucket) => toQuarterKey(bucket.bucket) === quarterKey);
   const realizedYear = sumRealized((bucket) => bucket.bucket.startsWith(`${yearKey}-`));
+  const realizedTrailing12 = sumRealized(() => true);
 
-  const expectedMonth = expectedOverview?.monthly ?? { gross: 0, estimated_tax: 0, payout_minus_tax: 0 };
-  const expectedQuarter = expectedOverview?.quarterly ?? { gross: 0, estimated_tax: 0, payout_minus_tax: 0 };
   const expectedYear = expectedOverview?.yearly ?? { gross: 0, estimated_tax: 0, payout_minus_tax: 0 };
+
+  const avgYieldPct = useMemo(() => {
+    const withYield = expectedCompanies.filter((c) => c.yield_pct != null);
+    if (withYield.length === 0) return null;
+    return withYield.reduce((acc, c) => acc + (c.yield_pct ?? 0), 0) / withYield.length;
+  }, [expectedCompanies]);
+
+  const momDeltaAbs = realizedMonth.payout_minus_tax - realizedPrevMonth.payout_minus_tax;
+  const momDeltaPct = realizedPrevMonth.payout_minus_tax !== 0 ? momDeltaAbs / Math.abs(realizedPrevMonth.payout_minus_tax) : null;
+  const expectedVsTrailingPct =
+    realizedTrailing12.payout_minus_tax !== 0
+      ? (expectedYear.payout_minus_tax - realizedTrailing12.payout_minus_tax) / Math.abs(realizedTrailing12.payout_minus_tax)
+      : null;
+
+  const trendPoints = useMemo(
+    () =>
+      realizedBuckets.map((bucket) => ({
+        month: bucket.bucket,
+        value: bucket.payout_minus_tax,
+        displayValue: formatCompactMoney(bucket.payout_minus_tax),
+        tone: "neutral" as const,
+      })),
+    [realizedBuckets, currencyPrefix],
+  );
 
   return (
     <PageShell
@@ -105,10 +138,10 @@ export default function Dividends() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{baseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={baseCurrency}
               onChange={(e) => setBaseCurrency(e.target.value)}
@@ -131,165 +164,116 @@ export default function Dividends() {
       )}
 
       {state === "ready" && (
-        <>
+        <div className="wealthOverviewLayout">
+          <HeroMetricCard
+            eyebrow="REALIZED THIS MONTH"
+            value={formatMoney(realizedMonth.payout_minus_tax)}
+            deltaChip={{
+              text: `${momDeltaAbs >= 0 ? "+" : "-"}${momDeltaPct == null ? "—" : Math.abs(momDeltaPct * 100).toFixed(1) + "%"}`,
+              positive: momDeltaAbs >= 0,
+            }}
+            insightText={`Gross ${formatMoney(realizedMonth.gross)} · Withholding ${formatMoney(realizedMonth.withholding)}`}
+            deltaRow={[
+              { label: "QUARTER-TO-DATE", value: formatMoney(realizedQuarter.payout_minus_tax), positive: true },
+              { label: "YEAR-TO-DATE", value: formatMoney(realizedYear.payout_minus_tax), positive: true },
+            ]}
+          />
+
           <section className="grid g-mid">
             <div className="card">
-              <h2>Realized (Selected Month)</h2>
-              <div className="big small">{formatMoney(realizedMonth.payout_minus_tax)}</div>
-              <div className="muted">Gross: {formatMoney(realizedMonth.gross)}</div>
-              <div className="muted">Withholding: {formatMoney(realizedMonth.withholding)}</div>
-              <div className="muted" style={{ marginTop: 4 }}>
-                Quarter-to-date: {formatMoney(realizedQuarter.payout_minus_tax)} | Year-to-date: {formatMoney(realizedYear.payout_minus_tax)}
+              <h2>Expected, next 12 months</h2>
+              <div className="big small">{formatMoney(expectedYear.payout_minus_tax)}</div>
+              <div className={expectedVsTrailingPct != null && expectedVsTrailingPct >= 0 ? "good" : "bad"}>
+                {expectedVsTrailingPct == null ? "—" : `${expectedVsTrailingPct >= 0 ? "+" : "-"}${Math.abs(expectedVsTrailingPct * 100).toFixed(0)}%`} vs trailing 12mo
               </div>
             </div>
-          </section>
-
-          <section className="grid g-mid" style={{ marginTop: 16 }}>
             <div className="card">
-              <h2>Monthly Buckets (Realized)</h2>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Month</th>
-                    <th className="right">Gross</th>
-                    <th className="right">Withholding</th>
-                    <th className="right">Net</th>
-                    <th className="right">Post-tax</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(monthSummary?.buckets ?? []).map((bucket) => (
-                    <tr key={bucket.bucket}>
-                      <td>{bucket.bucket}</td>
-                      <td className="right">{formatMoney(bucket.gross)}</td>
-                      <td className="right">{formatMoney(bucket.withholding)}</td>
-                      <td className="right">{formatMoney(bucket.net_received)}</td>
-                      <td className="right">{formatMoney(bucket.payout_minus_tax)}</td>
-                    </tr>
-                  ))}
-                  {monthSummary && monthSummary.buckets.length === 0 ? (
-                    <tr>
-                      <td className="muted" colSpan={5}>No dividends in selected range.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="card">
-              <h2>By Company (Realized, Selected Month)</h2>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Company</th>
-                    <th>Symbol</th>
-                    <th className="right">Gross</th>
-                    <th className="right">Withholding</th>
-                    <th className="right">Net</th>
-                    <th className="right">Yield</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {topCompanies.map((item) => (
-                    <tr key={`${item.asset_id ?? "na"}-${item.company}`}>
-                      <td>{item.company}</td>
-                      <td>{item.symbol}</td>
-                      <td className="right">{formatMoney(item.gross)}</td>
-                      <td className="right">{formatMoney(item.withholding)}</td>
-                      <td className="right">{formatMoney(item.net_received)}</td>
-                      <td className="right">{item.yield_pct == null ? "—" : `${item.yield_pct.toFixed(2)}%`}</td>
-                    </tr>
-                  ))}
-                  {topCompanies.length === 0 ? (
-                    <tr>
-                      <td className="muted" colSpan={6}>No company-level dividend records yet.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <section className="grid g-mid" style={{ marginTop: 16 }}>
-            <div className="card">
-              <h2>Expected Dividends (Holdings-Based)</h2>
-              <div className="muted">
-                Holdings considered: {expectedOverview?.holdings_considered ?? 0} | Assets estimated: {expectedOverview?.assets_with_actions ?? 0} | Yield snapshots used: {expectedOverview?.actions_evaluated ?? 0}
+              <h2>Portfolio coverage</h2>
+              <div className="big small">
+                {expectedOverview?.assets_with_actions ?? 0}/{expectedOverview?.holdings_considered ?? 0}
               </div>
-              <table className="table" style={{ marginTop: 12 }}>
-                <thead>
-                  <tr>
-                    <th>Period</th>
-                    <th className="right">Gross</th>
-                    <th className="right">Estimated Tax</th>
-                    <th className="right">After Tax</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>Month</td>
-                    <td className="right">{formatMoney(expectedMonth.gross)}</td>
-                    <td className="right">{formatMoney(expectedMonth.estimated_tax)}</td>
-                    <td className="right">{formatMoney(expectedMonth.payout_minus_tax)}</td>
-                  </tr>
-                  <tr>
-                    <td>Quarter</td>
-                    <td className="right">{formatMoney(expectedQuarter.gross)}</td>
-                    <td className="right">{formatMoney(expectedQuarter.estimated_tax)}</td>
-                    <td className="right">{formatMoney(expectedQuarter.payout_minus_tax)}</td>
-                  </tr>
-                  <tr>
-                    <td>Year</td>
-                    <td className="right">{formatMoney(expectedYear.gross)}</td>
-                    <td className="right">{formatMoney(expectedYear.estimated_tax)}</td>
-                    <td className="right">{formatMoney(expectedYear.payout_minus_tax)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-
-            <div className="card">
-              <h2>By Company (Expected)</h2>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Company</th>
-                    <th>Symbol</th>
-                    <th className="right">Shares</th>
-                    <th className="right">Yield</th>
-                    <th className="right">Price</th>
-                    <th className="right">Yearly Dividend</th>
-                    <th className="right">Quarterly Dividend</th>
-                    <th className="right">Monthly Dividend</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {expectedCompanies.map((item) => (
-                    <tr key={`${item.asset_id}-${item.symbol}`}>
-                      <td>{item.company}</td>
-                      <td>{item.symbol}</td>
-                      <td className="right">{formatNumber(item.shares)}</td>
-                      <td className="right">{item.yield_pct == null ? "—" : `${item.yield_pct.toFixed(2)}%`}</td>
-                      <td className="right">
-                        {item.price == null
-                          ? "—"
-                          : `${item.quote_currency ?? baseCurrency} ${formatNumber(item.price)}`}
-                      </td>
-                      <td className="right">{formatMoney(item.yearly_dividend)}</td>
-                      <td className="right">{formatMoney(item.quarterly_dividend)}</td>
-                      <td className="right">{formatMoney(item.monthly_dividend)}</td>
-                    </tr>
-                  ))}
-                  {expectedCompanies.length === 0 ? (
-                    <tr>
-                      <td className="muted" colSpan={8}>No expected dividend estimates found for selected range.</td>
-                    </tr>
-                  ) : null}
-                </tbody>
-              </table>
+              <div className="muted">holdings paying · {avgYieldPct == null ? "—" : `${avgYieldPct.toFixed(1)}%`} avg yield</div>
             </div>
           </section>
-        </>
+
+          <div className="card">
+            <div className="stockHoldingsHeader">
+              <h2>12-month dividend income</h2>
+              <div className="muted stockHoldingsMeta">Trailing total {formatMoney(realizedTrailing12.payout_minus_tax)}</div>
+            </div>
+            {trendPoints.length === 0 ? (
+              <div className="muted">No dividends in selected range.</div>
+            ) : (
+              <TrendBarChart points={trendPoints} ariaLabel="12-month dividend income" />
+            )}
+          </div>
+
+          <div className="card">
+            <div className="stockHoldingsHeader">
+              <h2>{companyTab === "realized" ? "Who paid you this month" : "Projected annual payers"}</h2>
+              <SegmentedToggle
+                ariaLabel="Realized or expected companies"
+                value={companyTab}
+                onChange={setCompanyTab}
+                options={[
+                  { value: "realized", label: "Realized" },
+                  { value: "expected", label: "Expected" },
+                ]}
+              />
+            </div>
+            <div className="listRows">
+              {companyTab === "realized" ? (
+                topCompanies.length === 0 ? (
+                  <div className="muted">No company-level dividend records yet.</div>
+                ) : (
+                  topCompanies.map((item) => (
+                    <div className="listRow" key={`${item.asset_id ?? "na"}-${item.company}`}>
+                      <div className="listRowMain">
+                        <span className="listRowTitle">
+                          {item.company}
+                          {item.yield_pct != null ? <span className="tag">{item.yield_pct.toFixed(2)}%</span> : null}
+                        </span>
+                        <span className="listRowMeta">
+                          <span>{item.symbol ?? "—"}</span>
+                          <span>{item.country ?? "—"}</span>
+                        </span>
+                      </div>
+                      <div className="listRowValue good">
+                        {formatMoney(item.payout_minus_tax)}
+                        <span className="listRowValueSecondary muted">
+                          Gross {formatMoney(item.gross)} · WHT {formatMoney(item.withholding)}
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )
+              ) : expectedCompanies.length === 0 ? (
+                <div className="muted">No expected dividend estimates found for selected range.</div>
+              ) : (
+                expectedCompanies.map((item) => (
+                  <div className="listRow" key={`${item.asset_id}-${item.symbol}`}>
+                    <div className="listRowMain">
+                      <span className="listRowTitle">
+                        {item.company}
+                        {item.yield_pct != null ? <span className="tag">{item.yield_pct.toFixed(2)}%</span> : null}
+                      </span>
+                      <span className="listRowMeta">
+                        <span>{item.symbol}</span>
+                        <span>{formatNumber(item.shares)} shares</span>
+                      </span>
+                    </div>
+                    <div className="listRowValue good">
+                      {formatMoney(item.yearly_dividend)}
+                      <span className="listRowValueSecondary muted">
+                        Qtly {formatMoney(item.quarterly_dividend)} · Mthly {formatMoney(item.monthly_dividend)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </PageShell>
   );

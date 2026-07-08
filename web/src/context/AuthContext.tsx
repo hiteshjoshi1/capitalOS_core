@@ -1,5 +1,5 @@
 import { createContext, useEffect, useMemo, useState } from "react";
-import { api, setAccessToken, setAuthFailureHandler, AuthSessionExpiredError } from "../lib/api";
+import { api, refreshAccessTokenNow, setAccessToken, setAuthFailureHandler } from "../lib/api";
 import type { AuthMe } from "../lib/api";
 
 type AuthContextValue = {
@@ -36,24 +36,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    // Route through the shared, deduped refreshAccessTokenNow() (same helper realtime.ts
+    // uses) rather than calling the endpoint directly. React 18 StrictMode double-invokes
+    // this effect in dev — and overlapping mounts/timers/tabs can do the same in prod — so
+    // without dedup, two concurrent /auth/refresh calls race on the same one-time-use
+    // refresh token. It also already clears the access token and notifies
+    // authFailureHandler on a definitive 401, so this effect just needs to react to the
+    // outcome, not duplicate that bookkeeping.
     let cancelled = false;
     (async () => {
+      const token = await refreshAccessTokenNow();
+      if (cancelled) return;
+      if (!token) {
+        // Definitive 401s already cleared user/token via authFailureHandler; transient
+        // errors (network down, 5xx) leave the session as-is and just stop loading, so
+        // the user sees the sign-in screen without being force-logged-out mid-session.
+        setLoading(false);
+        return;
+      }
       try {
-        const refreshed = await api.authRefresh();
-        setAccessToken(refreshed.access_token);
         const me = await api.authMe();
-        if (cancelled) return;
-        setUser(me);
-      } catch (err) {
-        if (!cancelled) {
-          if (err instanceof AuthSessionExpiredError) {
-            // Definitively invalid session: clear token and treat as signed out.
-            setAccessToken(null);
-            setUser(null);
-          }
-          // Transient errors (network down, 5xx): access token is already null on reload,
-          // just finish loading. The user will see the sign-in screen but was not force-logged out.
-        }
+        if (!cancelled) setUser(me);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -66,35 +69,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!user) return;
 
-    let stopped = false;
-
-    const refreshSession = async () => {
-      try {
-        const refreshed = await api.authRefresh();
-        if (!stopped) {
-          setAccessToken(refreshed.access_token);
-        }
-      } catch (err) {
-        if (!stopped && err instanceof AuthSessionExpiredError) {
-          setAccessToken(null);
-          setUser(null);
-        }
-      }
+    // Failure handling (clearing token/user on a definitive 401) is centralized in
+    // refreshAccessTokenNow()'s authFailureHandler notification — nothing to do here,
+    // and its in-flight dedup means an interval tick and a visibility change firing at
+    // the same moment share one request instead of racing two.
+    const refreshSession = () => {
+      void refreshAccessTokenNow();
     };
 
-    const intervalId = window.setInterval(() => {
-      void refreshSession();
-    }, SESSION_REFRESH_INTERVAL_MS);
+    const intervalId = window.setInterval(refreshSession, SESSION_REFRESH_INTERVAL_MS);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        void refreshSession();
+        refreshSession();
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
-      stopped = true;
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };

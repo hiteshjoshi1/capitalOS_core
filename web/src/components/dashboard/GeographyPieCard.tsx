@@ -73,7 +73,7 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
   return (
     <div className="card geographyPieCard">
       <div className="stockHoldingsHeader">
-        <h2>Geographic Exposure</h2>
+        <h2>Where the wealth is booked</h2>
         <div className="muted stockHoldingsMeta">{items.length} markets</div>
       </div>
 
@@ -102,36 +102,31 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
             <div className="muted geographyPieTotal">Overall mapped: {formatMoney(total)}</div>
           </div>
 
-          <div className="geographyBreakdownWrap">
-            <table className="table geographyBreakdownTable">
-              <thead>
-                <tr>
-                  <th>Geo</th>
-                  <th className="right">Overall %</th>
-                  <th className="right">Stocks/Funds</th>
-                  <th className="right">Cash</th>
-                  <th className="right">Crypto</th>
-                  <th className="right">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((item, idx) => (
-                  <tr key={item.country}>
-                    <td>
+          <div className="listRows">
+            {items.map((item, idx) => {
+              const breakdown = [
+                item.stocks_funds ? `Stocks ${formatMoney(item.stocks_funds)}` : null,
+                item.cash ? `Cash ${formatMoney(item.cash)}` : null,
+                item.crypto ? `Crypto ${formatMoney(item.crypto)}` : null,
+              ].filter(Boolean);
+              return (
+                <div className="listRow" key={item.country}>
+                  <div className="listRowMain">
+                    <span className="listRowTitle">
                       <span className="geographyLegendCountry">
                         <i style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }}></i>
                         {item.country}
                       </span>
-                    </td>
-                    <td className="right">{item.percent.toFixed(1)}%</td>
-                    <td className="right">{formatMoney(item.stocks_funds)}</td>
-                    <td className="right">{formatMoney(item.cash)}</td>
-                    <td className="right">{formatMoney(item.crypto)}</td>
-                    <td className="right">{formatMoney(item.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </span>
+                    <span className="listRowMeta">{breakdown.join(" · ") || "—"}</span>
+                  </div>
+                  <div className="listRowValue">
+                    {item.percent.toFixed(1)}%
+                    <span className="listRowValueSecondary muted">{formatMoney(item.total)}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </>
       )}

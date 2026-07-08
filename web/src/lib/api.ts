@@ -563,6 +563,8 @@ export type CreditCardTransaction = {
   amount: number;
   type: string;
   category: string | null;
+  resolved_category: string;
+  category_source: string;
   merchant_counterparty: string | null;
   notes: string | null;
 };

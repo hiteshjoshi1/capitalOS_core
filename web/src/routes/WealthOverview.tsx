@@ -6,36 +6,61 @@ import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
-import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
-type CompositionSlice = {
-  label: string;
-  percent: number;
-  value: number;
-  to: string;
-  toneClass: string;
-  deltaAbs?: number | null;
-  deltaPct?: number | null;
-  compareMonth?: string | null;
-};
+// Palette used for donut segments, matching the HTML design reference
+const DONUT_COLORS = [
+  "oklch(0.58 0.16 260)",
+  "oklch(0.55 0.13 160)",
+  "oklch(0.7 0.15 70)",
+  "oklch(0.55 0.18 320)",
+  "oklch(0.62 0.18 20)",
+  "oklch(0.62 0.13 190)",
+  "oklch(0.75 0.13 100)",
+  "oklch(0.58 0.14 290)",
+];
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
 const WEALTH_OVERVIEW_MONTH_STORAGE_KEY = "capitalos.selectedMonth.wealth";
 
-function snapshotPeriodFromBoundary(value?: string | null): string {
+function buildConicGradient(items: { percent: number }[]): string {
+  let offset = 0;
+  const parts = items.map((item, idx) => {
+    const next = offset + Math.max(0, item.percent);
+    const color = DONUT_COLORS[idx % DONUT_COLORS.length];
+    const part = `${color} ${offset.toFixed(2)}% ${next.toFixed(2)}%`;
+    offset = next;
+    return part;
+  });
+  if (offset < 100) {
+    parts.push(
+      `color-mix(in srgb, var(--line) 60%, transparent 40%) ${offset.toFixed(2)}% 100%`,
+    );
+  }
+  return `conic-gradient(${parts.join(", ")})`;
+}
+
+function formatAsOfDate(value?: string | null): string {
   if (!value) return "—";
-  const [yearRaw, monthRaw] = value.slice(0, 10).split("-");
-  const year = Number(yearRaw);
-  const month = Number(monthRaw);
-  if (!Number.isFinite(year) || !Number.isFinite(month) || month < 1 || month > 12) return "—";
-  const periodMonth = month === 1 ? 12 : month - 1;
-  const periodYear = month === 1 ? year - 1 : year;
-  return `${periodYear}-${String(periodMonth).padStart(2, "0")}`;
+  return value.slice(0, 10);
+}
+
+function formatMMDD(value?: string | null): string {
+  if (!value) return "—";
+  return value.slice(5, 10);
+}
+
+function formatMoneyShort(prefix: string, value?: number | null): string {
+  if (value == null) return "—";
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 1_000_000) return `${sign}${prefix} ${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}${prefix} ${(abs / 1_000).toFixed(0)}K`;
+  return `${sign}${prefix} ${abs.toLocaleString()}`;
 }
 
 export default function WealthOverview() {
@@ -46,6 +71,9 @@ export default function WealthOverview() {
   const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
   const [month, setMonth] = useSelectedMonth(WEALTH_OVERVIEW_MONTH_STORAGE_KEY);
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
+  const [holdingsView, setHoldingsView] = useState<"holdings" | "movers">("holdings");
+  const [showMobileControls, setShowMobileControls] = useState(false);
   const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
 
   const fetchDashboardData = useCallback(async () => {
@@ -54,11 +82,7 @@ export default function WealthOverview() {
       api.spendingSummary(month, baseCurrency),
       api.platformAllocation(month, baseCurrency),
     ]);
-    return {
-      summaryData,
-      spendingData,
-      platformAllocationData,
-    };
+    return { summaryData, spendingData, platformAllocationData };
   }, [baseCurrency, month]);
 
   useEffect(() => {
@@ -106,81 +130,57 @@ export default function WealthOverview() {
 
     const unsubscribe = subscribeToRealtimeTopic(PORTFOLIO_REFRESH_TOPIC, {
       onEvent: () => {
-        if (refreshTimer != null) {
-          window.clearTimeout(refreshTimer);
-        }
-        refreshTimer = window.setTimeout(() => {
-          void refreshSummary();
-        }, PORTFOLIO_REFRESH_DEBOUNCE_MS);
+        if (refreshTimer != null) window.clearTimeout(refreshTimer);
+        refreshTimer = window.setTimeout(
+          () => void refreshSummary(),
+          PORTFOLIO_REFRESH_DEBOUNCE_MS,
+        );
       },
     });
 
     return () => {
       cancelled = true;
-      if (refreshTimer != null) {
-        window.clearTimeout(refreshTimer);
-      }
+      if (refreshTimer != null) window.clearTimeout(refreshTimer);
       unsubscribe();
     };
   }, [fetchDashboardData]);
 
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  const formatShortDate = (value?: string | null) => (value ? value.slice(0, 10) : "—");
+    value == null
+      ? "—"
+      : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
   const currentNetWorth = summary?.current_net_worth ?? summary?.net_worth ?? null;
   const currentNetWorthAsOf = summary?.current_net_worth_as_of ?? summary?.net_worth_as_of ?? null;
   const currentFreshness = summary?.current_net_worth_freshness ?? null;
   const currentNetWorthTotal = currentNetWorth?.total ?? 0;
-  const stocksPct = currentNetWorthTotal ? ((currentNetWorth?.stocks_funds ?? 0) / currentNetWorthTotal) * 100 : 0;
-  const cryptoPct = currentNetWorthTotal ? ((currentNetWorth?.crypto ?? 0) / currentNetWorthTotal) * 100 : 0;
-  const cashPct = currentNetWorthTotal ? ((currentNetWorth?.cash ?? 0) / currentNetWorthTotal) * 100 : 0;
-  const currentFreshnessItems = useMemo(
-    () => [
-      { label: "Positions", value: currentFreshness?.positions_as_of ?? null },
-      { label: "Prices", value: currentFreshness?.market_data_as_of ?? null },
-      { label: "Crypto", value: currentFreshness?.crypto_as_of ?? null },
-    ].filter((item): item is { label: string; value: string } => item.value != null),
-    [currentFreshness],
+
+  const stocksPct = currentNetWorthTotal
+    ? ((currentNetWorth?.stocks_funds ?? 0) / currentNetWorthTotal) * 100
+    : 0;
+  const cryptoPct = currentNetWorthTotal
+    ? ((currentNetWorth?.crypto ?? 0) / currentNetWorthTotal) * 100
+    : 0;
+  const cashPct = currentNetWorthTotal
+    ? ((currentNetWorth?.cash ?? 0) / currentNetWorthTotal) * 100
+    : 0;
+
+  const assetClassItems = useMemo(
+    () =>
+      [
+        {
+          label: "Stocks & Funds",
+          value: currentNetWorth?.stocks_funds ?? 0,
+          percent: stocksPct,
+        },
+        { label: "Crypto", value: currentNetWorth?.crypto ?? 0, percent: cryptoPct },
+        { label: "Cash", value: currentNetWorth?.cash ?? 0, percent: cashPct },
+      ].filter((i) => i.percent > 0),
+    [currentNetWorth, stocksPct, cryptoPct, cashPct],
   );
 
-  const composition = useMemo<CompositionSlice[]>(
-    () => [
-      {
-        label: "Stocks & Funds",
-        percent: stocksPct,
-        value: currentNetWorth?.stocks_funds ?? 0,
-        to: "/holdings",
-        toneClass: "wealthSliceStocks",
-        deltaAbs: summary?.net_worth_component_change?.stocks_funds?.abs ?? null,
-        deltaPct: summary?.net_worth_component_change?.stocks_funds?.pct ?? null,
-        compareMonth: summary?.net_worth_component_change?.stocks_funds?.compare_month ?? null,
-      },
-      {
-        label: "Crypto",
-        percent: cryptoPct,
-        value: currentNetWorth?.crypto ?? 0,
-        to: "/crypto/holdings",
-        toneClass: "wealthSliceCrypto",
-        deltaAbs: summary?.net_worth_component_change?.crypto?.abs ?? null,
-        deltaPct: summary?.net_worth_component_change?.crypto?.pct ?? null,
-        compareMonth: summary?.net_worth_component_change?.crypto?.compare_month ?? null,
-      },
-      {
-        label: "Cash",
-        percent: cashPct,
-        value: currentNetWorth?.cash ?? 0,
-        to: "/cash",
-        toneClass: "wealthSliceCash",
-        deltaAbs: summary?.net_worth_component_change?.cash?.abs ?? null,
-        deltaPct: summary?.net_worth_component_change?.cash?.pct ?? null,
-        compareMonth: summary?.net_worth_component_change?.cash?.compare_month ?? null,
-      },
-    ],
-    [cashPct, cryptoPct, currentNetWorth, stocksPct, summary],
-  );
-  const platformPieItems = useMemo(
+  const platformItems = useMemo(
     () =>
       (platformAllocation?.items ?? []).map((item) => ({
         label: formatPlatformLabel(item.platform),
@@ -190,75 +190,50 @@ export default function WealthOverview() {
     [platformAllocation],
   );
 
-  const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
-  const topMovers = summary?.top_movers ?? null;
+  const activeAllocItems = allocView === "platform" ? platformItems : assetClassItems;
+  const allocTotal =
+    allocView === "platform"
+      ? (platformAllocation?.total ?? 0)
+      : (currentNetWorth?.total ?? 0);
+
   const prevMonthChange = summary?.net_worth_change?.vs_prev_month;
   const prevYearChange = summary?.net_worth_change?.vs_prev_year;
-  const netWorthAsOf = summary?.net_worth_as_of ?? null;
-  const snapshotBoundaryAt = summary?.net_worth_boundary_at ?? netWorthAsOf;
-  const snapshotPeriod = snapshotPeriodFromBoundary(snapshotBoundaryAt);
-  const snapshotCapturedAt = summary?.net_worth_snapshot_as_of ?? null;
-  const snapshotFreshnessStatus = summary?.net_worth_freshness_status ?? "missing";
-  const snapshotHasValue = snapshotFreshnessStatus !== "missing";
-  const snapshotStatusLabel =
-    snapshotFreshnessStatus === "exact"
-      ? "Completed snapshot"
-      : snapshotFreshnessStatus === "synthetic"
-        ? "Latest-known snapshot"
-        : "Snapshot missing";
-  const snapshotStatusClass =
-    snapshotFreshnessStatus === "exact"
-      ? "wealthSnapshotBadgeExact"
-      : snapshotFreshnessStatus === "synthetic"
-        ? "wealthSnapshotBadgeSynthetic"
-        : "wealthSnapshotBadgeMissing";
-  const snapshotFreshnessDescription =
-    snapshotFreshnessStatus === "exact"
-      ? "Computed at the configured boundary."
-      : snapshotFreshnessStatus === "synthetic"
-        ? "Computed from the latest known component values at or before the boundary."
-        : "No holdings data exists at or before the boundary.";
+  const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
+  const topMovers = summary?.top_movers ?? null;
 
-  const renderDelta = (label: string, abs: number, pct: number | null) => (
-    <div className="wealthDeltaPill">
-      <span className="wealthDeltaLabel">{label}</span>
-      <strong className={abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}>
-        {abs >= 0 ? "+" : "-"}
-        {formatMoney(Math.abs(abs))}
-        {pct == null ? "" : ` (${pct >= 0 ? "+" : "-"}${Math.abs(pct * 100).toFixed(1)}%)`}
-      </strong>
-    </div>
-  );
+  const freshnessLine = useMemo(() => {
+    const parts: string[] = [`As of ${formatAsOfDate(currentNetWorthAsOf)}`];
+    if (currentFreshness?.positions_as_of)
+      parts.push(`positions ${formatMMDD(currentFreshness.positions_as_of)}`);
+    if (currentFreshness?.market_data_as_of)
+      parts.push(`prices ${formatMMDD(currentFreshness.market_data_as_of)}`);
+    if (currentFreshness?.crypto_as_of)
+      parts.push(`crypto ${formatMMDD(currentFreshness.crypto_as_of)}`);
+    return parts.join(" · ");
+  }, [currentNetWorthAsOf, currentFreshness]);
 
-  const renderMoverRow = (row: NonNullable<DashboardSummary["top_movers"]>["gainers"][number]) => (
-    <div key={`${row.asset_class}-${row.symbol}`} className="wealthHoldingRow">
-      <div>
-        <strong>{row.symbol}</strong>
-        <span className="muted wealthHoldingMeta">{row.asset_class}</span>
-      </div>
-      <div className="wealthHoldingValue">
-        <strong className={row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}>
-          {row.delta_abs >= 0 ? "+" : "-"}
-          {formatMoney(Math.abs(row.delta_abs))}
-        </strong>
-        <span className="muted">
-          {row.delta_pct == null ? `vs ${row.compare_month}` : `${row.delta_pct >= 0 ? "+" : "-"}${Math.abs(row.delta_pct * 100).toFixed(1)}%`}
-        </span>
-      </div>
-    </div>
-  );
+  const mobileDateLabel = useMemo(() => {
+    const [yearStr, monStr] = month.split("-");
+    const year = Number(yearStr);
+    const mon = Number(monStr);
+    if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
+    const abbr = new Date(year, mon - 1, 1).toLocaleString("en", { month: "short" });
+    return `${abbr} ${year} · ${selectedBaseCurrency}`;
+  }, [month, selectedBaseCurrency]);
 
   return (
     <PageShell
       title="Wealth Overview"
-      subtitle="Portfolio composition, monthly momentum, and the most important balance-sheet signals."
-      headerActions={(
-        <>
+      subtitle="Portfolio composition and the most important balance-sheet signals."
+      headerActions={
+        /* coWealthMobileHiddenControls: on mobile these are replaced by the
+           in-hero date badge, so we hide them from the topbar */
+        <div className="coWealthMobileHiddenControls">
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{selectedBaseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={selectedBaseCurrency}
               onChange={(event) => setBaseCurrency(event.target.value)}
@@ -269,8 +244,8 @@ export default function WealthOverview() {
               <option value="INR">INR</option>
             </select>
           </label>
-        </>
-      )}
+        </div>
+      }
     >
       {state === "loading" ? <div className="card">Loading…</div> : null}
       {state === "error" ? (
@@ -282,225 +257,264 @@ export default function WealthOverview() {
 
       {state === "ready" && summary ? (
         <div className="wealthOverviewLayout">
-          <section className="wealthHeroGrid">
-            <article className="card wealthHeroCard">
-              <p className="wealthEyebrow">Current Net Worth</p>
-              <div className="wealthHeroValueRow">
-                <h2 className="wealthHeroValue">{formatMoney(currentNetWorth?.total, 2)}</h2>
+
+          {/* ── Hero card ─────────────────────────────────────────────── */}
+          <article className="coHeroCard">
+            <div className="coHeroCardHeader">
+              <p className="coHeroEyebrow">CURRENT NET WORTH</p>
+              {/* Mobile-only: compact date + currency badge */}
+              <button
+                type="button"
+                className="coHeroDateBadge"
+                aria-label={`Change month or currency. Currently ${mobileDateLabel}`}
+                aria-expanded={showMobileControls}
+                onClick={() => setShowMobileControls((v) => !v)}
+              >
+                {mobileDateLabel}
+              </button>
+            </div>
+            {/* Mobile-only: inline pickers, revealed by the badge */}
+            {showMobileControls ? (
+              <div className="coHeroMobileControls">
+                <MonthControl month={month} onMonthChange={setMonth} />
+                <label className="coPillBtn">
+                                    <span aria-hidden="true">{selectedBaseCurrency}</span>
+                  <select
+                    className="coPillBtnInput"
+                    aria-label="Base currency mobile"
+                    value={selectedBaseCurrency}
+                    onChange={(event) => setBaseCurrency(event.target.value)}
+                  >
+                    <option value="SGD">SGD</option>
+                    <option value="USD">USD</option>
+                    <option value="HKD">HKD</option>
+                    <option value="INR">INR</option>
+                  </select>
+                </label>
+              </div>
+            ) : null}
+            <div className="coHeroValueRow">
+              <span className="coHeroValue">{formatMoney(currentNetWorth?.total, 2)}</span>
+              {prevMonthChange ? (
+                <span
+                  className={`coChip${prevMonthChange.abs >= 0 ? " coChipPositive" : " coChipNegative"}`}
+                >
+                  {prevMonthChange.abs >= 0 ? "+" : "-"}
+                  {prevMonthChange.pct == null
+                    ? "—"
+                    : `${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%`}
+                </span>
+              ) : null}
+            </div>
+            <p className="coHeroFreshness">{freshnessLine}</p>
+            {(prevMonthChange || prevYearChange) ? (
+              <div className="coHeroDeltaRow">
                 {prevMonthChange ? (
-                  <span className={`wealthHeroChip ${prevMonthChange.abs >= 0 ? "wealthHeroChipPositive" : "wealthHeroChipNegative"}`}>
-                    {prevMonthChange.abs >= 0 ? "+" : "-"}
-                    {prevMonthChange.pct == null ? "—" : `${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%`}
-                  </span>
+                  <div className="coHeroDelta">
+                    <span className="coHeroDeltaLabel">VS LAST MONTH</span>
+                    <strong
+                      className={
+                        prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
+                      }
+                    >
+                      {prevMonthChange.abs >= 0 ? "+" : "-"}
+                      {formatMoney(Math.abs(prevMonthChange.abs))}
+                      {prevMonthChange.pct != null
+                        ? ` (${prevMonthChange.abs >= 0 ? "+" : "-"}${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%)`
+                        : ""}
+                    </strong>
+                  </div>
+                ) : null}
+                {prevYearChange ? (
+                  <div className="coHeroDelta">
+                    <span className="coHeroDeltaLabel">VS LAST YEAR</span>
+                    <strong
+                      className={
+                        prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
+                      }
+                    >
+                      {prevYearChange.abs >= 0 ? "+" : ""}
+                      {formatMoney(prevYearChange.abs)}
+                    </strong>
+                  </div>
                 ) : null}
               </div>
-              <p className="muted wealthAsOfLine">
-                Current net worth as of {formatShortDate(currentNetWorthAsOf)}
-              </p>
-              {currentFreshnessItems.length > 0 ? (
-                <div className="wealthFreshnessRow" aria-label="Current data freshness">
-                  {currentFreshnessItems.map((item) => (
-                    <div key={item.label} className="wealthFreshnessPill">
-                      <span className="wealthFreshnessLabel">{item.label}</span>
-                      <strong>{formatShortDate(item.value)}</strong>
+            ) : null}
+          </article>
+
+          {/* ── Allocation section ─────────────────────────────────────── */}
+          <section aria-labelledby="wealth-alloc-heading">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow" id="wealth-alloc-heading">
+                  ALLOCATION
+                </p>
+                <h2 className="coSectionTitle">Where the money sits</h2>
+              </div>
+              <div className="coSegmentedControl" role="group" aria-label="Allocation view">
+                <button
+                  type="button"
+                  className={`coSegmentedBtn${allocView === "platform" ? " coSegmentedBtnActive" : ""}`}
+                  onClick={() => setAllocView("platform")}
+                >
+                  By platform
+                </button>
+                <button
+                  type="button"
+                  className={`coSegmentedBtn${allocView === "asset_class" ? " coSegmentedBtnActive" : ""}`}
+                  onClick={() => setAllocView("asset_class")}
+                >
+                  By asset class
+                </button>
+              </div>
+            </div>
+
+            {activeAllocItems.length > 0 ? (
+              <div className="coAllocationCard">
+                <div
+                  className="coAllocationDonut"
+                  style={{ background: buildConicGradient(activeAllocItems) }}
+                  aria-label="Allocation donut chart"
+                >
+                  <div className="coAllocationInner">
+                    <span className="coAllocationTotalLabel">TOTAL</span>
+                    <strong className="coAllocationTotalValue">
+                      {formatMoneyShort(currencyPrefix, allocTotal)}
+                    </strong>
+                  </div>
+                </div>
+
+                <div className="coAllocationLegend">
+                  {activeAllocItems.map((item, idx) => (
+                    <div key={item.label} className="coAllocationRow">
+                      <div className="coAllocationRowLeft">
+                        <span
+                          className="coAllocationDot"
+                          style={{ background: DONUT_COLORS[idx % DONUT_COLORS.length] }}
+                          aria-hidden="true"
+                        />
+                        <span className="coAllocationName">{item.label}</span>
+                      </div>
+                      <div className="coAllocationRowRight">
+                        <span className="coAllocationValue">{formatMoney(item.value)}</span>
+                        <strong className="coAllocationPct">{item.percent.toFixed(1)}%</strong>
+                      </div>
                     </div>
                   ))}
                 </div>
-              ) : null}
-              <div className="wealthSnapshotPanel">
-                <div className="wealthSnapshotPanelHeader">
-                  <div>
-                    <p className="wealthSnapshotLabel">Snapshot context for {summary.as_of_month ?? month}</p>
-                    <strong className="wealthSnapshotValue">
-                      {snapshotHasValue ? formatMoney(summary.net_worth.total, 2) : "Missing"}
-                    </strong>
-                  </div>
-                  <span className={`wealthSnapshotBadge ${snapshotStatusClass}`}>{snapshotStatusLabel}</span>
-                </div>
-                <p className="muted wealthSnapshotMeta">
-                  {`Snapshot period ${snapshotPeriod} · Boundary ${formatShortDate(snapshotBoundaryAt)} · Source holdings ${formatShortDate(snapshotCapturedAt)}`}
-                </p>
-                <p className="muted wealthSnapshotNote">
-                  {`Snapshot day ${summary.snapshot_day ?? "—"}. ${snapshotFreshnessDescription}`}
-                </p>
               </div>
-              <div className="wealthDeltaRow" aria-label="Net worth changes">
-                {prevMonthChange ? renderDelta(`vs ${prevMonthChange.compare_month}`, prevMonthChange.abs, prevMonthChange.pct) : null}
-                {prevYearChange ? renderDelta(`vs ${prevYearChange.compare_month}`, prevYearChange.abs, prevYearChange.pct) : null}
-              </div>
-            </article>
+            ) : (
+              <p className="muted">No allocation data for this period.</p>
+            )}
           </section>
 
-          <section className="wealthSectionBlock" aria-labelledby="wealth-allocation-heading">
-            <div className="wealthSectionHeader">
-              <div>
-                <p className="wealthEyebrow" id="wealth-allocation-heading">Allocation</p>
-                <h2>Where the money sits</h2>
-              </div>
-              <span className="muted">Platform and asset-class view of current net worth</span>
-            </div>
-            <div className="wealthAllocationGrid">
-              <ExposurePieCard
-                title="Platform Allocation"
-                subtitle="Current net worth by broker, bank, and wallet platform"
-                items={platformPieItems}
-                totalLabel={formatMoney(platformAllocation?.total ?? 0)}
-                formatMoney={formatMoney}
-                ariaLabel="Platform net worth allocation pie chart"
-                className="wealthPlatformAllocationCard"
-              />
-            <article className="card wealthAllocationCard">
-              <div className="wealthAllocationHeader">
-                <p className="wealthEyebrow">Portfolio Composition</p>
-                <span className="wealthAllocationMeta">Percent of current net worth</span>
-              </div>
-              <div className="wealthAllocationRail" aria-label="Snapshot net worth composition">
-                {composition.map((slice) => (
-                  <span
-                    key={slice.label}
-                    className={`wealthAllocationSegment ${slice.toneClass}`}
-                    style={{ width: `${slice.percent}%` }}
-                  />
-                ))}
-              </div>
-              <div className="wealthCompositionGrid">
-                {composition.map((slice) => (
-                  <Link
-                    key={slice.label}
-                    aria-label={`${slice.label} composition`}
-                    className="wealthCompositionItem"
-                    to={slice.to}
-                  >
-                    <span className={`wealthCompositionDot ${slice.toneClass}`} aria-hidden="true" />
-                    <span className="wealthCompositionLabel">{slice.label}</span>
-                    <strong>{slice.percent.toFixed(1)}%</strong>
-                    <small>{formatMoney(slice.value)}</small>
-                  </Link>
-                ))}
-              </div>
-            </article>
-            </div>
-          </section>
-
-          <section className="wealthSectionBlock" aria-labelledby="wealth-components-heading">
-            <div className="wealthSectionHeader">
-              <div>
-                <p className="wealthEyebrow" id="wealth-components-heading">Components</p>
-                <h2>Open each balance-sheet surface</h2>
-              </div>
-            </div>
-          <section className="wealthSurfaceGrid">
-            {composition.map((slice) => (
-              <Link
-                key={slice.label}
-                aria-label={`${slice.label} details`}
-                className="card wealthSurfaceCard"
-                to={slice.to}
-              >
-                <p className="wealthEyebrow">{slice.label}</p>
-                <h2 className="wealthSurfaceValue">{formatMoney(slice.value)}</h2>
-                {slice.deltaAbs != null && slice.compareMonth ? (
-                  <p className="wealthSurfaceDelta">
-                    <span className={slice.deltaAbs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}>
-                      {slice.deltaAbs >= 0 ? "+" : "-"}
-                      {formatMoney(Math.abs(slice.deltaAbs))}
-                      {slice.deltaPct == null ? "" : ` (${slice.deltaPct >= 0 ? "+" : "-"}${Math.abs(slice.deltaPct * 100).toFixed(1)}%)`}
-                    </span>
-                    {` vs ${slice.compareMonth}`}
-                  </p>
-                ) : null}
-                <div className="wealthSurfaceFooter">
-                  <span>{slice.percent.toFixed(1)}% of current net worth</span>
-                  <span>Open details</span>
-                </div>
-              </Link>
-            ))}
-          </section>
-          </section>
-
-          <section className="wealthSectionBlock" aria-labelledby="wealth-signals-heading">
-            <div className="wealthSectionHeader">
-              <div>
-                <p className="wealthEyebrow" id="wealth-signals-heading">Signals</p>
-                <h2>Cash flow, risk, and movement</h2>
-              </div>
-            </div>
-          <section className="wealthDetailGrid">
-            <article className="card wealthDetailCard">
-              <p className="wealthEyebrow">Cash Flow</p>
-              <h2 className="wealthDetailTitle">{formatMoney(spendingSummary?.net)}</h2>
-              <p className="muted">
-                Income {formatMoney(spendingSummary?.income_total)} · Expenses {formatMoney(spendingSummary?.expense_total)} · Saved {spendingSummary?.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}
+          {/* ── Signals section ────────────────────────────────────────── */}
+          <section aria-labelledby="wealth-signals-heading">
+            <div className="coSectionHeaderSimple">
+              <p className="coEyebrow" id="wealth-signals-heading">
+                SIGNALS
               </p>
-              <Link className="wealthInlineLink" to="/cash-flow">Open cash flow workspace</Link>
-            </article>
+              <h2 className="coSectionTitle">Cash flow, risk, and movement</h2>
+            </div>
 
-            <article className="card wealthDetailCard">
-              <p className="wealthEyebrow">Liabilities</p>
-              <h2 className="wealthDetailTitle">{formatMoney(summary.net_worth.liabilities)}</h2>
-              <p className="muted">Outstanding obligations remain visible inside the Liabilities section overview.</p>
-              <Link className="wealthInlineLink" to="/liabilities">Open liabilities</Link>
-            </article>
+            <div className="coSignalsGrid">
+              <article className="coSignalCard">
+                <p className="coSignalEyebrow">CASH FLOW</p>
+                <p className="coSignalValue">{formatMoney(spendingSummary?.net)}</p>
+                <p className="coSignalMeta">
+                  {spendingSummary
+                    ? `Income ${formatMoney(spendingSummary.income_total)} · Expenses ${formatMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
+                    : "—"}
+                </p>
+                <Link className="wealthInlineLink" to="/cash-flow">
+                  Open cash flow
+                </Link>
+              </article>
 
-            <article className="card wealthDetailCard wealthDetailCardWide">
-              <div className="wealthDetailSplit">
-                <div>
-                  <p className="wealthEyebrow">Top Holdings</p>
-                  <h2 className="wealthDetailTitle">Largest positions</h2>
+              <article className="coSignalCard">
+                <p className="coSignalEyebrow">LIABILITIES</p>
+                <p className="coSignalValue">{formatMoney(summary.net_worth.liabilities)}</p>
+                <p className="coSignalMeta">Outstanding obligations vs current net worth.</p>
+                <Link className="wealthInlineLink" to="/liabilities">
+                  Open liabilities
+                </Link>
+              </article>
+            </div>
+
+            <article className="coHoldingsCard">
+              <div className="coHoldingsHeader">
+                <h3 className="coHoldingsTitle">Largest positions</h3>
+                <div className="coSegmentedControl" role="group" aria-label="Holdings view">
+                  <button
+                    type="button"
+                    className={`coSegmentedBtn${holdingsView === "holdings" ? " coSegmentedBtnActive" : ""}`}
+                    onClick={() => setHoldingsView("holdings")}
+                  >
+                    Holdings
+                  </button>
+                  <button
+                    type="button"
+                    className={`coSegmentedBtn${holdingsView === "movers" ? " coSegmentedBtnActive" : ""}`}
+                    onClick={() => setHoldingsView("movers")}
+                  >
+                    Movers
+                  </button>
                 </div>
-                <Link className="wealthInlineLink" to="/risk">Open risk view</Link>
               </div>
-              <div className="wealthHoldingsList">
-                {topHoldings.length > 0 ? (
-                  topHoldings.map((holding) => (
-                    <div key={holding.asset_id ?? holding.symbol} className="wealthHoldingRow">
-                      <div>
-                        <strong>{holding.symbol}</strong>
-                        <span className="muted wealthHoldingMeta">{holding.asset_class}</span>
+
+              <div className="coHoldingsList">
+                {holdingsView === "holdings" ? (
+                  topHoldings.length > 0 ? (
+                    topHoldings.map((h) => (
+                      <div key={h.asset_id ?? h.symbol} className="coHoldingRow">
+                        <div className="coHoldingLeft">
+                          <strong className="coHoldingSymbol">{h.symbol}</strong>
+                          <span className="coHoldingClass">{h.asset_class.toUpperCase()}</span>
+                        </div>
+                        <div className="coHoldingRight">
+                          <strong className="coHoldingValue">{formatMoney(h.value)}</strong>
+                          <span className="coHoldingPct">
+                            {h.percent_of_networth.toFixed(1)}%
+                          </span>
+                        </div>
                       </div>
-                      <div className="wealthHoldingValue">
-                        <strong>{formatMoney(holding.value)}</strong>
-                        <span className="muted">{holding.percent_of_networth.toFixed(1)}%</span>
+                    ))
+                  ) : (
+                    <p className="muted">No holdings returned for this period.</p>
+                  )
+                ) : topMovers ? (
+                  [
+                    ...(topMovers.gainers ?? []).slice(0, 2),
+                    ...(topMovers.detractors ?? []).slice(0, 2),
+                  ].map((row) => (
+                    <div
+                      key={`${row.asset_class}-${row.symbol}`}
+                      className="coHoldingRow"
+                    >
+                      <div className="coHoldingLeft">
+                        <strong className="coHoldingSymbol">{row.symbol}</strong>
+                        <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
+                      </div>
+                      <div className="coHoldingRight">
+                        <strong
+                          className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
+                        >
+                          {row.delta_abs >= 0 ? "+" : "-"}
+                          {formatMoney(Math.abs(row.delta_abs))}
+                        </strong>
+                        <span className="coHoldingPct">
+                          {row.delta_pct == null
+                            ? `vs ${row.compare_month}`
+                            : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                        </span>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <p className="muted">No holdings were returned for this month.</p>
+                  <p className="muted">No mover data for this period.</p>
                 )}
               </div>
             </article>
-
-            <article className="card wealthDetailCard wealthDetailCardWide">
-              <div className="wealthDetailSplit">
-                <div>
-                  <p className="wealthEyebrow">Top Movers</p>
-                  <h2 className="wealthDetailTitle">Gainers & detractors</h2>
-                </div>
-                {topMovers ? <span className="muted">{`vs ${topMovers.compare_month}`}</span> : null}
-              </div>
-              <div className="wealthMoversGrid">
-                <div className="wealthMoversColumn wealthMoversColumnPositive">
-                  <div className="wealthMoverSectionHeader">
-                    <p className="wealthMoverSectionLabel">Top gainers</p>
-                    <span className="wealthMoverBadge wealthMoverBadgePositive">Up</span>
-                  </div>
-                  <div className="wealthHoldingsList">
-                    {topMovers?.gainers?.length ? topMovers.gainers.map(renderMoverRow) : <p className="muted">No positive movers for this period.</p>}
-                  </div>
-                </div>
-                <div className="wealthMoversColumn wealthMoversColumnNegative">
-                  <div className="wealthMoverSectionHeader">
-                    <p className="wealthMoverSectionLabel">Top detractors</p>
-                    <span className="wealthMoverBadge wealthMoverBadgeNegative">Down</span>
-                  </div>
-                  <div className="wealthHoldingsList">
-                    {topMovers?.detractors?.length ? topMovers.detractors.map(renderMoverRow) : <p className="muted">No negative movers for this period.</p>}
-                  </div>
-                </div>
-              </div>
-            </article>
-
-          </section>
           </section>
         </div>
       ) : null}

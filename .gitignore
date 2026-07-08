@@ -108,3 +108,5 @@ tasks/private/
 tasks/*.local.md
 .task-cache/
 .task-flow/
+
+design_handoff_capitalos_wealth/

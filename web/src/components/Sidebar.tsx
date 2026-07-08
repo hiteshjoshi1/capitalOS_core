@@ -57,9 +57,6 @@ export default function Sidebar() {
             className={`sidebarLink sidebarPrimaryLink${activeSection?.id === section.id ? " sidebarLinkActive" : ""}`}
             to={section.to}
           >
-            <span className="material-symbols-outlined sidebarPrimaryIcon" aria-hidden="true">
-              {section.icon}
-            </span>
             <span className="sidebarPrimaryLabel">{section.label}</span>
           </Link>
         ))}

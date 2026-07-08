@@ -457,6 +457,7 @@ export default function CryptoWallets() {
         <div className="actions">
           <button className="btn" onClick={addAllowlist}>Add token</button>
         </div>
+        <div className="tableWrap">
         <table className="table" style={{ marginTop: 12 }}>
           <thead>
             <tr>
@@ -482,10 +483,12 @@ export default function CryptoWallets() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       <div className="card">
         <div className="cardTitle">Wallets</div>
+        <div className="tableWrap">
         <table className="table">
           <thead>
             <tr>
@@ -511,6 +514,7 @@ export default function CryptoWallets() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </PageShell>
   );

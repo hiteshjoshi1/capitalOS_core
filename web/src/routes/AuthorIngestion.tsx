@@ -1506,7 +1506,8 @@ export default function AuthorIngestion() {
                                 <summary className="muted" style={{ cursor: "pointer" }}>
                                   View outcomes
                                 </summary>
-                                <table className="dataTable" style={{ marginTop: "8px" }}>
+                                <div className="tableWrap" style={{ marginTop: "8px" }}>
+                                <table className="dataTable">
                                   <thead>
                                     <tr>
                                       <th>Key</th>
@@ -1532,6 +1533,7 @@ export default function AuthorIngestion() {
                                     ))}
                                   </tbody>
                                 </table>
+                                </div>
                               </details>
                             )}
                           </td>

@@ -173,23 +173,23 @@ test("navigates to cash overview", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Cash Overview" })).toBeVisible();
 });
 
-test("navigates via wealth overview exposure cards", async ({ page }) => {
+test("navigates via wealth section tabs", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
   await expect(page).toHaveURL(/\/wealth$/);
-  await expect(page.getByRole("link", { name: "Stocks & Funds details" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Stocks" })).toBeVisible();
 
-  await page.getByRole("link", { name: "Stocks & Funds details" }).click();
+  await page.getByRole("link", { name: "Stocks" }).click();
   await expect(page).toHaveURL(/\/holdings$/);
 
   await page.goto("/wealth");
-  await page.getByRole("link", { name: "Crypto details" }).click();
+  await page.getByRole("link", { name: "Crypto" }).click();
   await expect(page).toHaveURL(/\/crypto\/holdings$/);
 
   await page.waitForLoadState("domcontentloaded");
   await page.goto("/wealth", { waitUntil: "domcontentloaded" });
   await expect(page).toHaveURL(/\/wealth$/);
-  await page.getByRole("link", { name: "Cash details" }).click();
+  await page.getByRole("link", { name: "Cash", exact: true }).click();
   await expect(page).toHaveURL(/\/cash$/);
 });
 
@@ -213,5 +213,9 @@ test("loads dashboard shell on mobile breakpoint", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "Wealth Overview" })).toBeVisible();
-  await expect(page.getByLabel("Month")).toBeVisible();
+  const mobileDateBadge = page.getByRole("button", { name: /Change month or currency/ });
+  await expect(mobileDateBadge).toBeVisible();
+
+  await mobileDateBadge.click();
+  await expect(page.locator(".coHeroMobileControls").getByLabel("Month")).toBeVisible();
 });

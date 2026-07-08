@@ -5,7 +5,6 @@ import AllocationCard from "../components/dashboard/AllocationCard";
 import CreditCardCard from "../components/dashboard/CreditCardCard";
 import DashboardHeader from "../components/dashboard/DashboardHeader";
 import PlaceholderCard from "../components/dashboard/PlaceholderCard";
-import RiskCard from "../components/dashboard/RiskCard";
 
 const formatMoney = (value?: number) => (value == null ? "—" : `S$ ${value.toFixed(0)}`);
 
@@ -131,66 +130,5 @@ describe("dashboard components", () => {
 
     rerender(<PlaceholderCard title="Placeholder" description="Body" />);
     expect(screen.queryByText("More info")).not.toBeInTheDocument();
-  });
-
-  it("renders risk distribution table and partial-selection helper", () => {
-    const onSelectTopN = vi.fn();
-    render(
-      <RiskCard
-        riskLargest={{ symbol: "AAPL", percent: 22.1, hasData: true, state: "warn" }}
-        riskTopN={{
-          percent: 40,
-          hasData: true,
-          hasFullSelection: false,
-          state: "in_band",
-          selectedN: 5,
-          availableCount: 3,
-        }}
-        selectedTopN={5}
-        onSelectTopN={onSelectTopN}
-        hasRiskDistribution={true}
-        topNDistribution={[
-          { symbol: "AAPL", assetClass: "STOCK", value: 22000, percent: 22 },
-          { symbol: "MSFT", assetClass: "STOCK", value: 10000, percent: 10 },
-          { symbol: "GOOGL", assetClass: "STOCK", value: 8000, percent: 8 },
-        ]}
-        formatMoney={formatMoney}
-        cashPercent={15.5}
-      />,
-    );
-
-    expect(screen.getByTestId("risk-distribution-table")).toBeInTheDocument();
-    expect(screen.getByText("Showing 3 of requested 5 positions.")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Top 3" }));
-    expect(onSelectTopN).toHaveBeenCalledWith(3);
-  });
-
-  it("renders risk no-data fallback when holdings are unavailable", () => {
-    render(
-      <RiskCard
-        riskLargest={{ symbol: null, percent: 0, hasData: false, state: "muted" }}
-        riskTopN={{
-          percent: 0,
-          hasData: false,
-          hasFullSelection: false,
-          state: "muted",
-          selectedN: 5,
-          availableCount: 0,
-        }}
-        selectedTopN={5}
-        onSelectTopN={vi.fn()}
-        hasRiskDistribution={false}
-        topNDistribution={[]}
-        formatMoney={formatMoney}
-        cashPercent={0}
-      />,
-    );
-
-    expect(
-      screen.getByText("No holdings concentration data for this month or net worth is not positive."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText("Insufficient holdings data for full risk concentration analysis."),
-    ).toBeInTheDocument();
   });
 });

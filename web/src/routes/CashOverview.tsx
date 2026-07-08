@@ -5,11 +5,30 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
-import ValueTrendChart from "../components/ValueTrendChart";
+import HeroMetricCard from "../components/HeroMetricCard";
+import StackedBar from "../components/StackedBar";
+import TrendBarChart from "../components/TrendBarChart";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 const STABLECOINS = new Set(["USDC", "USDT"]);
+const STACKED_BAR_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8"];
+
+type DonutItem = { label: string; value: number; percent: number };
+
+function donutConicGradient(items: DonutItem[]): string {
+  let offset = 0;
+  const parts = items.map((item, idx) => {
+    const next = offset + Math.max(0, item.percent);
+    const part = `${STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length]} ${offset.toFixed(2)}% ${next.toFixed(2)}%`;
+    offset = next;
+    return part;
+  });
+  if (offset < 100) {
+    parts.push(`color-mix(in srgb, var(--line) 65%, transparent 35%) ${offset.toFixed(2)}% 100%`);
+  }
+  return `conic-gradient(${parts.join(", ")})`;
+}
 
 export default function CashOverview() {
   const [state, setState] = useState<LoadState>("idle");
@@ -52,6 +71,39 @@ export default function CashOverview() {
 
   const stablecoinTotal = stablecoins.reduce((acc, t) => acc + (t.value_base ?? 0), 0);
 
+  const accountItems = useMemo(
+    () => (cashDeposits?.items ?? []).map((item) => ({ label: item.source, value: item.value, percent: item.percent })),
+    [cashDeposits],
+  );
+
+  const currencySegments = useMemo(() => {
+    const breakdown = cashDeposits?.currency_breakdown ?? [];
+    const sum = breakdown.reduce((acc, c) => acc + Math.max(0, c.current_value), 0) || 1;
+    return breakdown.map((c, idx) => ({
+      key: c.currency,
+      label: c.currency,
+      percent: (Math.max(0, c.current_value) / sum) * 100,
+      color: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length],
+      valueLabel: `${formatMoney(c.current_value)} (${c.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(c.delta_abs))})`,
+    }));
+  }, [cashDeposits, currencyPrefix]);
+
+  const trendPoints = useMemo(
+    () =>
+      (cashDeposits?.trend ?? [])
+        .filter((point) => point.value != null)
+        .map((point) => ({
+          month: point.month,
+          value: point.value as number,
+          displayValue: formatCompactMoney(point.value),
+          tone: "neutral" as const,
+        })),
+    [cashDeposits, currencyPrefix],
+  );
+
+  const deltaPositive = (cashDeposits?.delta_abs ?? 0) >= 0;
+  const deltaPct = cashDeposits?.delta_pct;
+
   return (
     <PageShell
       title="Cash Overview"
@@ -61,10 +113,10 @@ export default function CashOverview() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{baseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={baseCurrency}
               onChange={(e) => setBaseCurrency(e.target.value)}
@@ -87,160 +139,97 @@ export default function CashOverview() {
       )}
 
       {state === "ready" && (
-        <>
-          <section className="grid" style={{ marginBottom: 16 }}>
-            <div className="card">
-              <div className="stockHoldingsHeader">
-                <h2>Cash Snapshot</h2>
-                <div className="muted stockHoldingsMeta">
-                  Current as of {cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}
-                </div>
-              </div>
-              <div className="split">
-                <div className="mini">
-                  <h3>Current total</h3>
-                  <div className="big small">{formatMoney(cashDeposits?.current_total)}</div>
-                </div>
-                <div className="mini">
-                  <h3>Snapshot total</h3>
-                  <div className="big small">{formatMoney(cashDeposits?.snapshot_total)}</div>
-                </div>
-                <div className="mini">
-                  <h3>Delta</h3>
-                  <div className={`big small ${(cashDeposits?.delta_abs ?? 0) >= 0 ? "good" : "bad"}`}>
-                    {cashDeposits?.delta_abs == null
-                      ? "—"
-                      : `${cashDeposits.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(cashDeposits.delta_abs))}`}
+        <div className="wealthOverviewLayout">
+          <HeroMetricCard
+            eyebrow="CURRENT CASH"
+            value={formatMoney(cashDeposits?.current_total)}
+            deltaChip={
+              deltaPct == null
+                ? null
+                : { text: `${deltaPositive ? "+" : "-"}${Math.abs(deltaPct * 100).toFixed(1)}%`, positive: deltaPositive }
+            }
+            insightText={`Snapshot ${cashDeposits?.snapshot_cash_as_of?.slice(0, 10) ?? "—"} vs. current ${cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}`}
+          />
+
+          <section>
+            <div className="cashFlowSectionHeading">
+              <p className="wealthEyebrow">Allocation</p>
+              <h2 className="cashFlowSectionTitle">Where the cash sits</h2>
+            </div>
+            {accountItems.length === 0 ? (
+              <div className="card muted">No cash deposits yet.</div>
+            ) : (
+              <div className="card cashFlowDonutLayout" style={{ padding: 28 }} aria-label="Cash by account">
+                <div className="cashFlowDonutChart" style={{ background: donutConicGradient(accountItems) }}>
+                  <div className="cashFlowDonutCenter">
+                    <span className="label">Total</span>
+                    <strong>{formatMoney(cashDeposits?.total)}</strong>
                   </div>
                 </div>
+                <div className="cashFlowLegendList">
+                  {accountItems.map((item, idx) => (
+                    <div className="cashFlowLegendRow" key={item.label}>
+                      <span className="cashFlowLegendLabel">
+                        <i style={{ background: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length] }} />
+                        <span className="cashFlowLegendText">{item.label}</span>
+                      </span>
+                      <span className="muted">
+                        {formatMoney(item.value)} <strong>{item.percent.toFixed(1)}%</strong>
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-
-            <div className="card">
-              <h2>Cash Deposits</h2>
-              <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Grouped by bank, broker, or wallet source</div>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Source</th>
-                      <th className="right">Value</th>
-                      <th className="right">% of Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashDeposits?.items.map((item) => (
-                      <tr key={item.source}>
-                        <td>{item.source}</td>
-                        <td className="right">{formatMoney(item.value)}</td>
-                        <td className="right">{item.percent.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</td>
-                      </tr>
-                    ))}
-                    {cashDeposits && cashDeposits.items.length === 0 && (
-                      <tr>
-                        <td className="muted" colSpan={3}>No cash deposits yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                  <tfoot>
-                    <tr>
-                      <th>Total</th>
-                      <th className="right">{formatMoney(cashDeposits?.total)}</th>
-                      <th className="right">{cashDeposits?.total ? "100%" : "0%"}</th>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </div>
+            )}
           </section>
 
-          <section className="grid g-mid">
-            <div className="card">
-              <h2>Currency Breakdown</h2>
-              <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>Current vs selected snapshot</div>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Currency</th>
-                      <th className="right">Current</th>
-                      <th className="right">Snapshot</th>
-                      <th className="right">Delta</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cashDeposits?.currency_breakdown?.map((c) => (
-                      <tr key={c.currency}>
-                        <td>{c.currency}</td>
-                        <td className="right">{formatMoney(c.current_value)}</td>
-                        <td className="right">{formatMoney(c.snapshot_value)}</td>
-                        <td className={`right ${c.delta_abs >= 0 ? "good" : "bad"}`}>
-                          {c.delta_abs >= 0 ? "+" : "-"}
-                          {formatMoney(Math.abs(c.delta_abs))}
-                        </td>
-                      </tr>
-                    ))}
-                    {cashDeposits?.currency_breakdown && cashDeposits.currency_breakdown.length === 0 && (
-                      <tr>
-                        <td className="muted" colSpan={4}>No cash balances yet.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+          <section>
+            <div className="cashFlowSectionHeading">
+              <p className="wealthEyebrow">Signals</p>
+              <h2 className="cashFlowSectionTitle">Currency mix and stablecoins</h2>
             </div>
+            <div className="grid g-mid">
+              <div className="card" style={{ padding: 24 }}>
+                <p className="cashFlowCardTitle">Currency exposure</p>
+                <StackedBar layout="rows" segments={currencySegments} ariaLabel="Currency mix" />
+              </div>
 
-            <div className="card">
-              <h2>Stablecoins</h2>
-              <div className="mini">
-                <div className="muted" style={{ fontSize: 12, marginBottom: 8 }}>USDC / USDT holdings</div>
+              <div className="card" style={{ padding: 24 }}>
+                <div className="cashFlowCardHeader" style={{ marginBottom: 6 }}>
+                  <p className="cashFlowCardTitle" style={{ margin: 0 }}>Stablecoins</p>
+                  <span className="muted">USDC / USDT</span>
+                </div>
                 <div className="big small">{formatMoney(stablecoinTotal)}</div>
-                <table className="table" style={{ marginTop: 8 }}>
-                  <thead>
-                    <tr>
-                      <th>Token</th>
-                      <th className="right">Qty</th>
-                      <th className="right">Value</th>
-                      <th>Chain</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {stablecoins.map((t) => (
-                      <tr key={`${t.symbol}-${t.chain}-${t.wallet_id ?? ""}`}>
-                        <td>{t.symbol}</td>
-                        <td className="right">{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</td>
-                        <td className="right">{formatMoney(t.value_base)}</td>
-                        <td className="muted">{t.chain.toUpperCase()}</td>
-                      </tr>
-                    ))}
-                    {stablecoins.length === 0 && (
-                      <tr>
-                        <td className="muted" colSpan={4}>No stablecoin balances found.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+                <div className="listRows" style={{ marginTop: 8 }}>
+                  {stablecoins.length === 0 ? (
+                    <p className="muted">No stablecoin balances found.</p>
+                  ) : (
+                    stablecoins.map((t) => (
+                      <div className="listRow" key={`${t.symbol}-${t.chain}-${t.wallet_id ?? ""}`}>
+                        <div className="listRowMain">
+                          <span className="listRowTitle">{t.symbol}</span>
+                          <span className="listRowMeta">
+                            <span>{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+                            <span>{t.chain.toUpperCase()}</span>
+                          </span>
+                        </div>
+                        <div className="listRowValue">{formatMoney(t.value_base)}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
-            </div>
-
-            <div className="card valueTrendCard valueTrendCardWide">
-              <div className="stockHoldingsHeader">
-                <h2>Six-Month Cash Trend</h2>
-                <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
-              </div>
-              <div className="valueTrendValue">
-                <span>Current cash value</span>
-                <strong>{formatMoney(cashDeposits?.current_total)}</strong>
-              </div>
-              <ValueTrendChart
-                points={cashDeposits?.trend ?? []}
-                ariaLabel="Six-month cash trend"
-                formatMoney={formatMoney}
-                formatCompactMoney={formatCompactMoney}
-              />
             </div>
           </section>
-        </>
+
+          <div className="card">
+            <div className="stockHoldingsHeader">
+              <h2>Six-month cash trend</h2>
+              <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
+            </div>
+            <TrendBarChart points={trendPoints} ariaLabel="Six-month cash trend" />
+          </div>
+        </div>
       )}
     </PageShell>
   );

@@ -170,35 +170,56 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
 
     token_hash = hash_refresh_token(refresh_token)
     now = datetime.now(tz=timezone.utc)
-    row = db.execute(
+
+    # Claim (revoke-for-rotation) the session in one atomic statement instead of a
+    # separate SELECT-then-UPDATE. Two requests racing on the same refresh token — e.g.
+    # React 18 StrictMode double-invoking an effect on mount, overlapping refresh timers,
+    # or two tabs reloading at once — would otherwise both pass a "is this still active?"
+    # SELECT before either commits its revoke, so the loser's later UPDATE affects zero
+    # rows and (previously) was treated as an invalid/replayed token and logged the user
+    # out. With a single UPDATE ... WHERE revoked_at IS NULL, only one caller can ever
+    # claim a given row; every other caller (whether it lost a true race or presented an
+    # already-rotated token) falls through to the grace-window recovery below.
+    # Plain UPDATE ... RETURNING (no CTE/JOIN) so this runs identically on Postgres and the
+    # SQLite engine used in tests — SQLite doesn't support data-modifying CTEs.
+    claimed_session = db.execute(
         text(
             """
-            SELECT
-              s.id AS session_id,
-              s.user_id,
-              u.username
-            FROM auth_sessions s
-            JOIN users u ON u.id = s.user_id
-            WHERE s.refresh_token_hash = :refresh_token_hash
-              AND s.revoked_at IS NULL
-              AND s.expires_at > :now
-              AND COALESCE(u.is_active, TRUE) = TRUE
-            LIMIT 1
+            UPDATE auth_sessions
+            SET revoked_at = :now, revoke_reason = 'rotation'
+            WHERE refresh_token_hash = :refresh_token_hash
+              AND revoked_at IS NULL
+              AND expires_at > :now
+            RETURNING id AS session_id, user_id
             """
         ),
         {"refresh_token_hash": token_hash, "now": now},
     ).mappings().one_or_none()
 
-    if row is None:
-        # Token not found as active. Check if it was recently rotated (concurrent refresh grace window).
+    claimed = None
+    if claimed_session is not None:
+        user_row = db.execute(
+            text("SELECT username, COALESCE(is_active, TRUE) AS is_active FROM users WHERE id = :user_id"),
+            {"user_id": int(claimed_session["user_id"])},
+        ).mappings().one_or_none()
+        if user_row is not None and bool(user_row["is_active"]):
+            claimed = {
+                "session_id": int(claimed_session["session_id"]),
+                "user_id": int(claimed_session["user_id"]),
+                "username": str(user_row["username"]),
+            }
+
+    if claimed is None:
+        # Not claimable: either genuinely invalid/expired, or another concurrent request
+        # already won the rotation race for this exact token moments ago. Check the grace
+        # window before treating this as a security incident.
         grace = _refresh_grace_seconds()
-        recovered = False
         if grace > 0:
             grace_cutoff = now - timedelta(seconds=grace)
             revoked_row = db.execute(
                 text(
                     """
-                    SELECT s.id AS session_id, s.user_id, s.revoke_reason, s.revoked_at, u.username
+                    SELECT s.user_id, u.username
                     FROM auth_sessions s
                     JOIN users u ON u.id = s.user_id
                     WHERE s.refresh_token_hash = :refresh_token_hash
@@ -213,7 +234,8 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
             ).mappings().one_or_none()
 
             if revoked_row is not None:
-                # Concurrent refresh: find and rotate the user's current active session.
+                # Concurrent refresh: find and rotate the user's current active session so
+                # this caller converges on the same session every other racer landed on.
                 user_id = int(revoked_row["user_id"])
                 username = str(revoked_row["username"])
                 active_session = db.execute(
@@ -247,46 +269,29 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
                         access_token, exp = create_access_token(user_id=user_id, username=username)
                         db.commit()
                         _set_refresh_cookie(response, next_refresh_token)
-                        recovered = True
                         return AuthTokenResponse(
                             access_token=access_token,
                             token_type="bearer",
                             expires_in=max(int((exp - now).total_seconds()), 1),
                         )
 
-        if not recovered:
-            db.execute(
-                text(
-                    """
-                    UPDATE auth_sessions
-                    SET revoked_at = :now, revoke_reason = 'security'
-                    WHERE refresh_token_hash = :refresh_token_hash
-                      AND revoked_at IS NULL
-                    """
-                ),
-                {"now": now, "refresh_token_hash": token_hash},
-            )
-            db.commit()
-            response.delete_cookie(refresh_cookie_name(), path="/")
-            raise HTTPException(status_code=401, detail="invalid or expired refresh token")
-
-    revoked = db.execute(
-        text(
-            """
-            UPDATE auth_sessions
-            SET revoked_at = :now, revoke_reason = 'rotation'
-            WHERE id = :session_id
-              AND revoked_at IS NULL
-            """
-        ),
-        {"now": now, "session_id": int(row["session_id"])},
-    ).rowcount
-    if revoked == 0:
+        db.execute(
+            text(
+                """
+                UPDATE auth_sessions
+                SET revoked_at = :now, revoke_reason = 'security'
+                WHERE refresh_token_hash = :refresh_token_hash
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"now": now, "refresh_token_hash": token_hash},
+        )
+        db.commit()
         response.delete_cookie(refresh_cookie_name(), path="/")
-        raise HTTPException(status_code=401, detail="invalid refresh token")
+        raise HTTPException(status_code=401, detail="invalid or expired refresh token")
 
-    user_id = int(row["user_id"])
-    username = str(row["username"])
+    user_id = int(claimed["user_id"])
+    username = str(claimed["username"])
     next_refresh_token = _create_refresh_session(db, user_id=user_id)
     access_token, exp = create_access_token(user_id=user_id, username=username)
     db.commit()

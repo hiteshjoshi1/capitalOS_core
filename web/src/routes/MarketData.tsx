@@ -96,6 +96,7 @@ export default function MarketData() {
                         <div className="big small">{exchange.diagnostics_summary.deferred}</div>
                       </div>
                     </div>
+                    <div className="tableWrap">
                     <table className="table" style={{ marginTop: 12 }}>
                       <thead>
                         <tr>
@@ -118,6 +119,7 @@ export default function MarketData() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -126,6 +128,7 @@ export default function MarketData() {
 
           <div className="card">
             <div className="cardTitle">Recent Runs</div>
+            <div className="tableWrap">
             <table className="table">
               <thead>
                 <tr>
@@ -155,6 +158,7 @@ export default function MarketData() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

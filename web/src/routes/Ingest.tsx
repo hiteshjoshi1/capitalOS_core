@@ -234,6 +234,7 @@ export default function Ingest() {
                 </div>
                 <div className="mini">
                   <h3>Preview (first 10)</h3>
+                  <div className="tableWrap">
                   <table className="table">
                     <thead>
                       <tr>
@@ -264,6 +265,7 @@ export default function Ingest() {
                       )}
                     </tbody>
                   </table>
+                  </div>
                 </div>
               </div>
             </div>
@@ -271,6 +273,7 @@ export default function Ingest() {
 
           <div className="card" style={{ marginTop: 14 }}>
             <div className="cardTitle">Recent Imports</div>
+            <div className="tableWrap">
             <table className="table">
               <thead>
                 <tr>
@@ -306,6 +309,7 @@ export default function Ingest() {
                 )}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}

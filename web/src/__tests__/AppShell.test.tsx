@@ -176,21 +176,22 @@ describe("AppShell", () => {
     expect(screen.getByRole("link", { name: "Map Transactions" })).toBeInTheDocument();
   });
 
-  it("renders liabilities tabs on liabilities routes", () => {
+  it("renders no sub-tabs on the merged liabilities page", () => {
     render(
       <ThemeProvider>
-        <MemoryRouter initialEntries={["/credit-cards"]}>
+        <MemoryRouter initialEntries={["/liabilities"]}>
           <Routes>
             <Route element={<AppShell />}>
-              <Route path="/credit-cards" element={<div>Cards</div>} />
+              <Route path="/liabilities" element={<div>Liabilities</div>} />
             </Route>
           </Routes>
         </MemoryRouter>
       </ThemeProvider>,
     );
 
-    expect(screen.getByRole("link", { name: "Credit Cards" })).toHaveClass("appShellTabActive");
-    expect(screen.getByRole("link", { name: "Loans" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Credit Cards" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Loans" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Liabilities tabs" })).toBeEmptyDOMElement();
   });
 
   it("renders wealth page controls inside the shell top bar", async () => {
@@ -211,11 +212,11 @@ describe("AppShell", () => {
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
   });
 
-  it("keeps sidebar width at 272px for shell layout stability", () => {
+  it("keeps sidebar width at 248px for shell layout stability", () => {
     const appCss = readFileSync(resolve(process.cwd(), "src/App.css"), "utf8");
     expect(appCss).toContain(".sidebar {");
-    expect(appCss).toContain("width: 272px;");
-    expect(appCss).toContain("min-width: 272px;");
+    expect(appCss).toContain("width: 248px;");
+    expect(appCss).toContain("min-width: 248px;");
   });
 
   it("renders content inside appShellMain alongside sidebar", () => {

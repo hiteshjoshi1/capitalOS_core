@@ -6,13 +6,19 @@ import {
   buildTopNDistribution,
   computeLargestPositionRisk,
   computeTopNConcentrationRisk,
+  formatLargestPosition,
+  formatRiskPercent,
+  riskStateClassName,
+  RISK_LARGEST_POSITION_WARN_PCT,
+  RISK_TOP5_TARGET_MAX_PCT,
+  RISK_TOP5_TARGET_MIN_PCT,
   type TopN,
 } from "../lib/risk";
 import "../App.css";
 import GeographyPieCard from "../components/dashboard/GeographyPieCard";
-import RiskCard from "../components/dashboard/RiskCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import SegmentedToggle from "../components/SegmentedToggle";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -69,10 +75,10 @@ export default function WealthRisk() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="pill">
-            <span>Base</span>
+          <label className="coPillBtn">
+                        <span aria-hidden="true">{selectedBaseCurrency}</span>
             <select
-              className="monthInput"
+              className="coPillBtnInput"
               aria-label="Base currency"
               value={selectedBaseCurrency}
               onChange={(event) => setBaseCurrency(event.target.value)}
@@ -95,22 +101,72 @@ export default function WealthRisk() {
       ) : null}
 
       {state === "ready" && summary ? (
-        <section className="grid wealthRiskLayout">
-          <RiskCard
-            riskLargest={riskLargest}
-            riskTopN={riskTopN}
-            selectedTopN={selectedTopN}
-            onSelectTopN={setSelectedTopN}
-            hasRiskDistribution={topNDistribution.length > 0}
-            topNDistribution={topNDistribution}
-            formatMoney={formatMoney}
-            cashPercent={cashPct}
-          />
-          <GeographyPieCard
-            exposure={geographyExposure}
-            formatMoney={formatMoney}
-          />
-        </section>
+        <div className="wealthOverviewLayout">
+          <section className="grid g-mid">
+            <div className="card">
+              <h2>Cash buffer</h2>
+              <div className="big small">{cashPct.toFixed(1)}%</div>
+              <div className="muted">{formatMoney(summary?.net_worth.cash)} of {formatMoney(netWorthTotal)} net worth</div>
+            </div>
+
+            <div className="card">
+              <h2>Largest position</h2>
+              <div className={`big small ${riskStateClassName(riskLargest.state)}`}>{formatLargestPosition(riskLargest)}</div>
+              <div className="muted">
+                Comfort threshold: <span className={riskStateClassName(riskLargest.state)}>{RISK_LARGEST_POSITION_WARN_PCT}%</span>
+              </div>
+            </div>
+
+            <div className="card">
+              <div className="stockHoldingsHeader">
+                <h2>{`Top ${selectedTopN} concentration`}</h2>
+                <SegmentedToggle
+                  ariaLabel="Top N positions"
+                  value={selectedTopN === 3 ? "3" : "5"}
+                  onChange={(v) => setSelectedTopN(v === "3" ? 3 : 5)}
+                  options={[
+                    { value: "3", label: "Top 3" },
+                    { value: "5", label: "Top 5" },
+                  ]}
+                />
+              </div>
+              <div className={`big small ${riskStateClassName(riskTopN.state)}`}>{formatRiskPercent(riskTopN.percent)}</div>
+              <div className="muted">
+                Target band: {RISK_TOP5_TARGET_MIN_PCT}–{RISK_TOP5_TARGET_MAX_PCT}%
+              </div>
+              {!riskTopN.hasFullSelection && riskTopN.hasData ? (
+                <div className="muted" style={{ marginTop: 6, fontSize: 12 }}>
+                  {`Showing ${riskTopN.availableCount} of requested ${riskTopN.selectedN} positions.`}
+                </div>
+              ) : null}
+            </div>
+          </section>
+
+          <div className="card">
+            <h2>Where the top positions sit</h2>
+            {topNDistribution.length > 0 ? (
+              <ul className="riskChartList">
+                {topNDistribution.map((item) => (
+                  <li className="riskChartRow" key={`${item.symbol}-${item.assetClass}`}>
+                    <span className="riskChartSymbol">{item.symbol}</span>
+                    <div className="riskChartTrack">
+                      <span
+                        className="riskChartFill"
+                        style={{ width: `${Math.min(100, item.percent)}%` }}
+                        title={`${item.symbol}: ${formatRiskPercent(item.percent)}`}
+                      ></span>
+                    </div>
+                    <span className="riskChartPercent">{formatMoney(item.value)} · {formatRiskPercent(item.percent)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="riskNoData">No holdings concentration data for this month or net worth is not positive.</div>
+            )}
+          </div>
+
+          <GeographyPieCard exposure={geographyExposure} formatMoney={formatMoney} />
+        </div>
       ) : null}
     </PageShell>
   );
