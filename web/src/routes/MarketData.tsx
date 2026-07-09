@@ -2,7 +2,15 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { MarketDataExchangeStatus, MarketDataRun } from "../lib/api";
 import PageShell from "../components/PageShell";
+import StatusPill from "../components/StatusPill";
 import "../App.css";
+
+function formatRunStarted(ts?: string | null): string {
+  if (!ts) return "—";
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
 
 export default function MarketData() {
   const [status, setStatus] = useState<MarketDataExchangeStatus[]>([]);
@@ -10,12 +18,19 @@ export default function MarketData() {
   const [loading, setLoading] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [hasSetInitialExpand, setHasSetInitialExpand] = useState<boolean>(false);
 
   const load = async () => {
     setError("");
     const [statusRes, runsRes] = await Promise.all([api.marketDataStatus(), api.marketDataRuns(20)]);
-    setStatus(statusRes.status ?? []);
+    const statusRows = statusRes.status ?? [];
+    setStatus(statusRows);
     setRuns(runsRes.runs ?? []);
+    if (!hasSetInitialExpand && statusRows.length > 0) {
+      setExpanded({ [statusRows[0].exchange_code]: true });
+      setHasSetInitialExpand(true);
+    }
   };
 
   useEffect(() => {
@@ -29,6 +44,7 @@ export default function MarketData() {
         setLoading(false);
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const onRefresh = async () => {
@@ -43,14 +59,27 @@ export default function MarketData() {
     }
   };
 
+  function toggleExpand(exchangeCode: string) {
+    setExpanded((current) => ({ ...current, [exchangeCode]: !current[exchangeCode] }));
+  }
+
+  const totals = status.reduce(
+    (acc, ex) => ({
+      fresh: acc.fresh + (ex.diagnostics_summary?.fresh ?? 0),
+      stale: acc.stale + (ex.diagnostics_summary?.stale ?? 0),
+      failed: acc.failed + (ex.diagnostics_summary?.failed ?? 0),
+      deferred: acc.deferred + (ex.diagnostics_summary?.deferred ?? 0),
+    }),
+    { fresh: 0, stale: 0, failed: 0, deferred: 0 },
+  );
+
   return (
     <PageShell
       title="Market Data"
-      subtitle="Daily stock price refresh status by exchange."
-      activeRoute="/market-data"
+      subtitle="Daily quote refresh status by exchange."
       headerActions={(
         <button className="btn" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? "Refreshing..." : "Refresh now"}
+          {refreshing ? "Refreshing…" : "Refresh all quotes"}
         </button>
       )}
     >
@@ -63,104 +92,119 @@ export default function MarketData() {
       )}
 
       {!loading && !error && (
-        <>
-          <div className="card">
-            <div className="cardTitle">Latest by Exchange</div>
-            {status.length === 0 ? (
-              <div className="muted">No runs yet.</div>
-            ) : (
-              <div className="grid g-mid">
-                {status.map((exchange) => (
-                  <div className="card" key={exchange.exchange_code}>
-                    <div className="stockHoldingsHeader">
-                      <h2>{exchange.exchange_code}</h2>
-                      <div className="muted stockHoldingsMeta">
-                        {exchange.provider ?? "—"} · {exchange.status ?? "idle"}
-                      </div>
-                    </div>
-                    <div className="split">
-                      <div className="mini">
-                        <h3>Fresh</h3>
-                        <div className="big small">{exchange.diagnostics_summary.fresh}</div>
-                      </div>
-                      <div className="mini">
-                        <h3>Stale</h3>
-                        <div className="big small">{exchange.diagnostics_summary.stale}</div>
-                      </div>
-                      <div className="mini">
-                        <h3>Failed</h3>
-                        <div className="big small">{exchange.diagnostics_summary.failed}</div>
-                      </div>
-                      <div className="mini">
-                        <h3>Deferred</h3>
-                        <div className="big small">{exchange.diagnostics_summary.deferred}</div>
-                      </div>
-                    </div>
-                    <div className="tableWrap">
-                    <table className="table" style={{ marginTop: 12 }}>
-                      <thead>
-                        <tr>
-                          <th>Symbol</th>
-                          <th>Status</th>
-                          <th>Trade date</th>
-                          <th>Source</th>
-                          <th>Reason</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {exchange.symbols.slice(0, 8).map((item) => (
-                          <tr key={`${exchange.exchange_code}-${item.asset_id}`}>
-                            <td>{item.symbol}</td>
-                            <td>{item.refresh_status} / {item.freshness_status}</td>
-                            <td>{item.latest_trade_date?.slice(0, 10) ?? "—"}</td>
-                            <td>{item.provider ?? item.source ?? "—"}</td>
-                            <td>{item.failure_reason ?? "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+        <div className="wealthOverviewLayout">
+          <div className="marketDataStatusChips">
+            <StatusPill tone="good" label={`${totals.fresh} fresh`} />
+            <StatusPill tone="warn" label={`${totals.stale} stale`} />
+            <StatusPill tone="neutral" label={`${totals.failed} failed`} />
+            <StatusPill tone="neutral" label={`${totals.deferred} deferred`} />
           </div>
 
-          <div className="card">
-            <div className="cardTitle">Recent Runs</div>
-            <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Started</th>
-                  <th>Exchange</th>
-                  <th>Provider</th>
-                  <th>Status</th>
-                  <th className="right">Requested</th>
-                  <th className="right">Upserted</th>
-                </tr>
-              </thead>
-              <tbody>
-                {runs.map((r) => (
-                  <tr key={r.id}>
-                    <td className="muted">{r.started_at ?? "—"}</td>
-                    <td>{r.exchange_code}</td>
-                    <td>{r.provider}</td>
-                    <td>{r.status}</td>
-                    <td className="right">{r.requested_symbols}</td>
-                    <td className="right">{r.upserted_rows}</td>
-                  </tr>
-                ))}
-                {runs.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="muted">No runs yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <section aria-label="Latest refresh status by exchange">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">By exchange</p>
+                <h2 className="coSectionTitle">Latest refresh status</h2>
+              </div>
             </div>
-          </div>
-        </>
+            <div className="card">
+              {status.length === 0 ? (
+                <p className="muted">No runs yet.</p>
+              ) : (
+                status.map((exchange) => {
+                  const isExpanded = !!expanded[exchange.exchange_code];
+                  return (
+                    <div className="marketDataExchange" key={exchange.exchange_code}>
+                      <div
+                        className="marketDataExchangeRow"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleExpand(exchange.exchange_code)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") toggleExpand(exchange.exchange_code);
+                        }}
+                      >
+                        <div className="marketDataExchangeMeta">
+                          <strong>{exchange.exchange_code}</strong>
+                          <span className="muted">{exchange.provider ?? "—"}</span>
+                          <StatusPill tone="neutral" label={exchange.status ?? "idle"} />
+                        </div>
+                        <div className="marketDataExchangeSummary">
+                          <span className="muted">
+                            {exchange.diagnostics_summary.fresh} fresh · {exchange.diagnostics_summary.stale} stale
+                          </span>
+                          <span className="marketDataChevron">{isExpanded ? "Hide symbols ▲" : "View symbols ▼"}</span>
+                        </div>
+                      </div>
+                      {isExpanded && (
+                        <div className="marketDataSymbolList">
+                          {exchange.symbols.map((item) => (
+                            <div className="marketDataSymbolRow" key={`${exchange.exchange_code}-${item.asset_id}`}>
+                              <span className="marketDataSymbolCode">{item.symbol}</span>
+                              <StatusPill
+                                tone={item.freshness_status === "fresh" ? "good" : "warn"}
+                                label={item.freshness_status === "fresh" ? "Fresh" : "Stale"}
+                              />
+                              <span className="muted marketDataSymbolMeta">
+                                {item.latest_trade_date?.slice(0, 10) ?? "—"} · {item.provider ?? item.source ?? "—"}
+                              </span>
+                              <span className="muted">{item.failure_reason ?? "Reason unavailable"}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </section>
+
+          <section aria-label="Recent runs">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">History</p>
+                <h2 className="coSectionTitle">Recent runs</h2>
+              </div>
+            </div>
+            <div className="card">
+              {runs.length === 0 ? (
+                <p className="muted">No runs yet.</p>
+              ) : (
+                <div className="marketDataRunsTableWrap">
+                  <table className="marketDataRunsTable">
+                    <thead>
+                      <tr>
+                        <th scope="col">Started</th>
+                        <th scope="col">Exchange</th>
+                        <th scope="col">Provider</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Rows</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {runs.map((r) => (
+                        <tr key={r.id}>
+                          <td className="muted marketDataRunStarted">{formatRunStarted(r.started_at)}</td>
+                          <td>
+                            <strong>{r.exchange_code}</strong>
+                          </td>
+                          <td className="muted marketDataRunProvider">{r.provider}</td>
+                          <td>
+                            <StatusPill tone="neutral" label={r.status ?? "—"} />
+                          </td>
+                          <td className="muted marketDataRunCounts">
+                            {r.requested_symbols} → {r.upserted_rows}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
       )}
     </PageShell>
   );

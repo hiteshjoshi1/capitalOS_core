@@ -17,5 +17,5 @@ test("happy path: dashboard to cash and market data", async ({ page }) => {
   await expect(page.getByText("Wealth Overview")).toBeVisible();
 
   await page.goto("/market-data");
-  await expect(page.getByRole("button", { name: "Refresh now" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Refresh all quotes" })).toBeVisible();
 });

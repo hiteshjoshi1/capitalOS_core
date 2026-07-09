@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -85,12 +86,69 @@ describe("MarketData", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("Latest by Exchange")).toBeInTheDocument();
+    expect(await screen.findByText("Latest refresh status")).toBeInTheDocument();
 
-    expect(screen.getByText("Recent Runs")).toBeInTheDocument();
+    expect(screen.getByText("Recent runs")).toBeInTheDocument();
     expect(screen.getAllByText("US").length).toBeGreaterThan(0);
     expect(screen.getByText("ADBE")).toBeInTheDocument();
     expect(screen.getByText("REGN")).toBeInTheDocument();
     expect(screen.getByText("rate limited")).toBeInTheDocument();
+
+    expect(screen.getByText("1 fresh")).toBeInTheDocument();
+    expect(screen.getByText("1 stale")).toBeInTheDocument();
+    expect(screen.getByText("1 failed")).toBeInTheDocument();
+    expect(screen.getByText("0 deferred")).toBeInTheDocument();
+  });
+
+  it("collapses the exchange row on click and shows a fallback for missing reasons", async () => {
+    mockApi.marketDataStatus.mockResolvedValueOnce({
+      status: [
+        {
+          provider: "IEX Cloud",
+          exchange_code: "NASDAQ",
+          status: "Idle",
+          diagnostics_summary: {
+            active_symbols: 1,
+            refreshed: 0,
+            fresh: 0,
+            stale: 1,
+            failed: 0,
+            deferred: 0,
+            missing: 0,
+          },
+          symbols: [
+            {
+              asset_id: 9,
+              symbol: "AAPL",
+              mapped_symbol: "AAPL.US",
+              latest_trade_date: "2026-03-01",
+              freshness_status: "stale",
+              refresh_status: "failed",
+              provider: "IEX Cloud",
+              source: "close",
+              failure_reason: null,
+            },
+          ],
+        },
+      ],
+    });
+    mockApi.marketDataRuns.mockResolvedValueOnce({ runs: [] });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <MarketData />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("Reason unavailable")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("NASDAQ"));
+    expect(screen.queryByText("AAPL")).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByText("NASDAQ"));
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
   });
 });

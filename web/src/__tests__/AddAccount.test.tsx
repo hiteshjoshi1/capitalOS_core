@@ -11,6 +11,7 @@ import type { AccountOptions, Platform } from "../lib/api";
 vi.mock("../lib/api", () => ({
   api: {
     platforms: vi.fn(),
+    accounts: vi.fn(),
     accountOptions: vi.fn(),
     platformOptions: vi.fn(),
     createAccount: vi.fn(),
@@ -53,6 +54,7 @@ describe("AddAccount", () => {
       { id: 1, code: "SGD", name: "Singapore Dollar", country: "Singapore" },
       { id: 2, code: "USD", name: "U.S. Dollar", country: "United States" },
     ]);
+    mockApi.accounts.mockResolvedValueOnce([]);
     mockApi.createAccount.mockResolvedValueOnce({
       id: 1,
       name: "DBS Savings",
@@ -62,6 +64,9 @@ describe("AddAccount", () => {
       currency: "SGD",
       country: "SG",
     });
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 1, name: "DBS Savings", platform: "CITI", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
 
     render(
       <ThemeProvider>
@@ -141,6 +146,7 @@ describe("AddAccount", () => {
       country: "IN",
       website: "https://www.example.com",
     });
+    mockApi.accounts.mockResolvedValueOnce([]);
 
     render(
       <ThemeProvider>
@@ -180,11 +186,34 @@ describe("AddAccount", () => {
     });
   }, 15000);
 
+  it("renders the linked accounts directory", async () => {
+    mockApi.platforms.mockResolvedValueOnce(platformsFixture);
+    mockApi.accountOptions.mockResolvedValueOnce(optionsFixture);
+    mockApi.platformOptions.mockResolvedValueOnce(platformOptionsFixture);
+    mockApi.currencies.mockResolvedValueOnce([]);
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 5, name: "UOB One", platform: "UOB", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <AddAccount />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("Linked accounts")).toBeInTheDocument();
+    expect(screen.getByText("UOB One")).toBeInTheDocument();
+    expect(screen.getByText("UOB · BANK · SGD")).toBeInTheDocument();
+  });
+
   it("shows load error when options fail", async () => {
     mockApi.platforms.mockResolvedValueOnce(platformsFixture);
     mockApi.accountOptions.mockRejectedValueOnce(new Error("No options"));
     mockApi.platformOptions.mockResolvedValueOnce(platformOptionsFixture);
     mockApi.currencies.mockResolvedValueOnce([]);
+    mockApi.accounts.mockResolvedValueOnce([]);
 
     render(
       <ThemeProvider>

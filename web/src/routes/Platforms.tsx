@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { Platform, PlatformOptions } from "../lib/api";
 import "../App.css";
+import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
+import SuccessBanner from "../components/SuccessBanner";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -82,9 +84,8 @@ export default function Platforms() {
 
   return (
     <PageShell
-      title="Platforms"
-      subtitle="Manage platform registry used by accounts and ingestion."
-      activeRoute="/platforms"
+      title="Add Platform"
+      subtitle="Maintain the directory of banks, brokers, and exchanges that powers imports and account metadata."
     >
       {state === "loading" && <div className="card">Loading…</div>}
 
@@ -96,7 +97,7 @@ export default function Platforms() {
       )}
 
       {state === "ready" && (
-        <section className="grid g-mid">
+        <div className="wealthOverviewLayout">
           <div className="card">
             <div className="cardTitle">New Platform</div>
             <PlatformDetailsForm
@@ -110,44 +111,32 @@ export default function Platforms() {
             {err ? (
               <div className="hint" role="alert">{err}</div>
             ) : null}
-            {success ? (
-              <div className="hint" role="status">{success}</div>
-            ) : null}
+            {success ? <SuccessBanner message={success} onDismiss={() => setSuccess("")} /> : null}
           </div>
 
-          <div className="card">
-            <div className="cardTitle">Registered Platforms</div>
-            <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Name</th>
-                  <th>Type</th>
-                  <th>Country</th>
-                  <th>Website</th>
-                </tr>
-              </thead>
-              <tbody>
-                {platforms.map((platform) => (
-                  <tr key={platform.id}>
-                    <td>{platform.code}</td>
-                    <td>{platform.name}</td>
-                    <td>{platform.platform_type}</td>
-                    <td>{platform.country}</td>
-                    <td className="muted">{platform.website ?? "—"}</td>
-                  </tr>
-                ))}
-                {platforms.length === 0 ? (
-                  <tr>
-                    <td className="muted" colSpan={5}>No platforms configured.</td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
+          <section aria-label="Registered platforms">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">DIRECTORY</p>
+                <h2 className="coSectionTitle">Registered platforms</h2>
+              </div>
             </div>
-          </div>
-        </section>
+            <div className="card">
+              {platforms.length === 0 ? (
+                <p className="muted">No platforms configured.</p>
+              ) : (
+                platforms.map((platform) => (
+                  <DirectoryListRow
+                    key={platform.id}
+                    title={platform.name}
+                    meta={`${platform.code} · ${platform.platform_type} · ${platform.country}`}
+                    right={<span className="muted">{platform.website ?? "—"}</span>}
+                  />
+                ))
+              )}
+            </div>
+          </section>
+        </div>
       )}
     </PageShell>
   );

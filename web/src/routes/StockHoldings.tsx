@@ -13,6 +13,7 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "pnl" | "percentNetWorth" | "quoteFreshness";
 
 const PAGE_SIZE = 20;
+const MOBILE_BREAKPOINT_PX = 900;
 const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns";
 const STOCK_COLUMN_OPTIONS: Array<{ key: StockColumnKey; label: string; align?: "right" }> = [
   { key: "shares", label: "Shares", align: "right" },
@@ -65,7 +66,16 @@ export default function StockHoldings() {
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<StockColumnKey, boolean>>(loadVisibleStockColumns);
+  const [isMobile, setIsMobile] = useState<boolean>(() =>
+    typeof window === "undefined" ? false : window.innerWidth <= MOBILE_BREAKPOINT_PX,
+  );
   const columnMenuRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT_PX);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Close the column menu when clicking outside it
   useEffect(() => {
@@ -163,6 +173,47 @@ export default function StockHoldings() {
       positive: pnl >= 0,
     };
   };
+  const formatMobilePnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
+    if (
+      holding.quantity == null
+      || holding.avg_cost == null
+      || holding.latest_price == null
+      || holding.latest_price <= 0
+      || holding.value == null
+    ) {
+      return { amount: "—", pct: null, positive: true };
+    }
+    const currentNativeValue = holding.quantity * holding.latest_price;
+    if (currentNativeValue <= 0) {
+      return { amount: "—", pct: null, positive: true };
+    }
+    const inferredFxToBase = holding.value / currentNativeValue;
+    const pnl = holding.quantity * (holding.latest_price - holding.avg_cost) * inferredFxToBase;
+    const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
+    return {
+      amount: `${pnl >= 0 ? "+" : "-"}${formatMoney(Math.abs(pnl))}`,
+      pct: pnlPct,
+      positive: pnl >= 0,
+    };
+  };
+  const formatGeoLabel = (geo?: string | null) => {
+    const normalized = (geo ?? "").toUpperCase();
+    const labels: Record<string, string> = {
+      HK: "Hong Kong",
+      IN: "India",
+      SG: "Singapore",
+      US: "United States",
+    };
+    return labels[normalized] ?? geo ?? "—";
+  };
+  const formatExchangeLabel = (holding: StockHoldingsSummary["top_holdings"][number]) =>
+    holding.exchange_code ?? holding.quote_currency ?? holding.asset_class;
+  const formatFreshnessLabel = (status?: string | null) => {
+    if (!status) {
+      return "Missing";
+    }
+    return `${status.slice(0, 1).toUpperCase()}${status.slice(1).toLowerCase()}`;
+  };
   const holdings = useMemo(() => summary?.top_holdings ?? [], [summary]);
   const visibleHoldings = holdings.slice(0, visibleCount);
   const visibleColumnCount = 1 + STOCK_COLUMN_OPTIONS.filter((option) => visibleColumns[option.key]).length;
@@ -194,12 +245,11 @@ export default function StockHoldings() {
     <PageShell
       title="Stock Holdings"
       subtitle="Current equity holdings with quote freshness and snapshot geography comparisons."
-      activeRoute="/holdings"
-      secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={
         <>
-          <button className="btn" onClick={onRefresh} disabled={refreshing}>
-            {refreshing ? "Refreshing..." : "Refresh now"}
+          <button className="btn stockHoldingsRefreshBtn" onClick={onRefresh} disabled={refreshing}>
+            <span className={`stockHoldingsRefreshDot${refreshing ? " stockHoldingsRefreshDotActive" : ""}`} aria-hidden="true" />
+            {refreshing ? "Refreshing..." : "Refresh quotes"}
           </button>
           <MonthControl month={month} onMonthChange={handleMonthChange} />
           <label className="coPillBtn">
@@ -340,74 +390,113 @@ export default function StockHoldings() {
               </div>
             </div>
             <div className="card stockHoldingsPrimaryCard">
-              <div className="stockHoldingsTableWrap">
-                <table className="table stockHoldingsTable">
-                  <thead>
-                    <tr>
-                      <th>Asset</th>
-                      {visibleColumns.shares && <th className="right">Shares</th>}
-                      {visibleColumns.purchasePrice && <th className="right">Purchase Price</th>}
-                      {visibleColumns.currentPrice && <th className="right">Current Price</th>}
-                      {visibleColumns.pnl && <th className="right">Profit &amp; Loss</th>}
-                      {visibleColumns.percentNetWorth && <th className="right">% NW</th>}
-                      {visibleColumns.quoteFreshness && <th>Quote freshness</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleHoldings.map((h, idx) => {
-                      const pnl = formatPnl(h);
-                      return (
-                        <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
-                          <td>
-                            <div className="stockHoldingsAssetCell">
-                              <div className="stockHoldingsSymbol">{h.symbol}</div>
-                              <div className="stockHoldingsAssetMeta">
-                                <span>{h.platform ?? "—"}</span>
-                                <span>{h.geo ?? "—"}</span>
-                              </div>
+              {isMobile ? (
+                <div className="stockHoldingsMobileList">
+                  {visibleHoldings.map((h, idx) => {
+                    const mobilePnl = formatMobilePnl(h);
+                    return (
+                      <article className="stockHoldingsMobileCard" key={h.asset_id ?? `${h.symbol}-${idx}`}>
+                        <div className="stockHoldingsMobileHeader">
+                          <div>
+                            <div className="stockHoldingsMobileTitleLine">
+                              <strong className="stockHoldingsMobileTitle">{h.name ?? h.symbol}</strong>
+                              <span className="stockHoldingsExchangePill">{formatExchangeLabel(h)}</span>
                             </div>
-                          </td>
-                          {visibleColumns.shares && (
-                            <td className="right stockHoldingsQuantityCell">{formatQuantity(h.quantity)}</td>
-                          )}
-                          {visibleColumns.purchasePrice && (
-                            <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
-                          )}
-                          {visibleColumns.currentPrice && (
-                            <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
-                          )}
-                          {visibleColumns.pnl && (
-                            <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`}>
-                              <div>{pnl.amount}</div>
-                              {pnl.pct == null ? null : <small>{pnl.pct >= 0 ? "+" : ""}{pnl.pct.toFixed(1)}%</small>}
-                            </td>
-                          )}
-                          {visibleColumns.percentNetWorth && (
-                            <td className="right stockHoldingsPercentCell">
-                              <div>{h.percent_of_networth.toFixed(1)}%</div>
-                              <small>{formatMoney(h.value)}</small>
-                            </td>
-                          )}
-                          {visibleColumns.quoteFreshness && (
-                            <td>
-                              <div>{h.quote_freshness_status ?? "missing"}</div>
-                              <small className="muted">
-                                {h.latest_trade_date?.slice(0, 10) ?? "—"}
-                                {h.price_provider ? ` · ${h.price_provider}` : ""}
-                              </small>
-                            </td>
-                          )}
-                        </tr>
-                      );
-                    })}
-                    {summary && holdings.length === 0 && (
+                            <div className="stockHoldingsMobileMeta">
+                              {formatPlatformLabel(h.platform ?? "—")} · {formatGeoLabel(h.geo)}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="stockHoldingsMobileMetrics">
+                          <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
+                            {formatFreshnessLabel(h.quote_freshness_status)}
+                          </span>
+                          <div className="stockHoldingsMobileValueBlock">
+                            <strong>{formatMoney(h.value)}</strong>
+                            <span>{h.percent_of_networth.toFixed(1)}% NW</span>
+                          </div>
+                          <div className={`stockHoldingsMobilePnlBlock ${mobilePnl.positive ? "good" : "bad"}`}>
+                            <strong>{mobilePnl.amount}</strong>
+                            {mobilePnl.pct == null ? null : <span>{mobilePnl.pct >= 0 ? "+" : ""}{mobilePnl.pct.toFixed(1)}%</span>}
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                  {summary && holdings.length === 0 && (
+                    <p className="muted">No holdings available.</p>
+                  )}
+                </div>
+              ) : (
+                <div className="stockHoldingsTableWrap">
+                  <table className="table stockHoldingsTable">
+                    <thead>
                       <tr>
-                        <td className="muted" colSpan={visibleColumnCount}>No holdings available.</td>
+                        <th>Asset</th>
+                        {visibleColumns.shares && <th className="right">Shares</th>}
+                        {visibleColumns.purchasePrice && <th className="right">Purchase Price</th>}
+                        {visibleColumns.currentPrice && <th className="right">Current Price</th>}
+                        {visibleColumns.pnl && <th className="right">Profit &amp; Loss</th>}
+                        {visibleColumns.percentNetWorth && <th className="right">% NW</th>}
+                        {visibleColumns.quoteFreshness && <th>Quote freshness</th>}
                       </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {visibleHoldings.map((h, idx) => {
+                        const pnl = formatPnl(h);
+                        return (
+                          <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
+                            <td>
+                              <div className="stockHoldingsAssetCell">
+                                <div className="stockHoldingsSymbol">{h.symbol}</div>
+                                <div className="stockHoldingsAssetMeta">
+                                  <span>{h.platform ?? "—"}</span>
+                                  <span>{h.geo ?? "—"}</span>
+                                </div>
+                              </div>
+                            </td>
+                            {visibleColumns.shares && (
+                              <td className="right stockHoldingsQuantityCell">{formatQuantity(h.quantity)}</td>
+                            )}
+                            {visibleColumns.purchasePrice && (
+                              <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
+                            )}
+                            {visibleColumns.currentPrice && (
+                              <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
+                            )}
+                            {visibleColumns.pnl && (
+                              <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`}>
+                                <div>{pnl.amount}</div>
+                                {pnl.pct == null ? null : <small>{pnl.pct >= 0 ? "+" : ""}{pnl.pct.toFixed(1)}%</small>}
+                              </td>
+                            )}
+                            {visibleColumns.percentNetWorth && (
+                              <td className="right stockHoldingsPercentCell">
+                                <div>{h.percent_of_networth.toFixed(1)}%</div>
+                                <small>{formatMoney(h.value)}</small>
+                              </td>
+                            )}
+                            {visibleColumns.quoteFreshness && (
+                              <td>
+                                <div>{h.quote_freshness_status ?? "missing"}</div>
+                                <small className="muted">
+                                  {h.latest_trade_date?.slice(0, 10) ?? "—"}
+                                  {h.price_provider ? ` · ${h.price_provider}` : ""}
+                                </small>
+                              </td>
+                            )}
+                          </tr>
+                        );
+                      })}
+                      {summary && holdings.length === 0 && (
+                        <tr>
+                          <td className="muted" colSpan={visibleColumnCount}>No holdings available.</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               {holdings.length > 0 ? (
                 <div className="stockHoldingsControls">
                   <button

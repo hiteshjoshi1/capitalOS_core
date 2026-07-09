@@ -287,4 +287,17 @@ describe("CryptoWallets route", () => {
     expect(await screen.findByText("No wallets added yet.")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
+
+  it("shows a desktop-only notice instead of the connect form on narrow viewports", async () => {
+    setEthereumProvider(undefined);
+    Object.defineProperty(window, "innerWidth", { value: 480, configurable: true, writable: true });
+
+    renderRoute();
+
+    expect(await screen.findByText(/desktop to add one/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect wallet" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add token" })).not.toBeInTheDocument();
+
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
+  });
 });

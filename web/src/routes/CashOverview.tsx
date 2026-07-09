@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { CashDeposits, CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
@@ -57,12 +57,18 @@ export default function CashOverview() {
   }, [month, baseCurrency]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  const formatCompactMoney = (value?: number | null) =>
-    value == null
-      ? "—"
-      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
+  const formatMoney = useCallback(
+    (value?: number | null, maximumFractionDigits = 0) =>
+      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
+    [currencyPrefix],
+  );
+  const formatCompactMoney = useCallback(
+    (value?: number | null) =>
+      value == null
+        ? "—"
+        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
+    [currencyPrefix],
+  );
 
   const stablecoins = useMemo(() => {
     const tokens = (cryptoSummary?.top_holdings ?? []).filter((t) => STABLECOINS.has((t.symbol || "").toUpperCase()));
@@ -86,7 +92,7 @@ export default function CashOverview() {
       color: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length],
       valueLabel: `${formatMoney(c.current_value)} (${c.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(c.delta_abs))})`,
     }));
-  }, [cashDeposits, currencyPrefix]);
+  }, [cashDeposits, formatMoney]);
 
   const trendPoints = useMemo(
     () =>
@@ -98,7 +104,7 @@ export default function CashOverview() {
           displayValue: formatCompactMoney(point.value),
           tone: "neutral" as const,
         })),
-    [cashDeposits, currencyPrefix],
+    [cashDeposits, formatCompactMoney],
   );
 
   const deltaPositive = (cashDeposits?.delta_abs ?? 0) >= 0;

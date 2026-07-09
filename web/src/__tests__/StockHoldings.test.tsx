@@ -50,6 +50,7 @@ const summaryFixture: StockHoldingsSummary = {
     {
       asset_id: 1,
       symbol: "700",
+      name: "Tencent Holdings",
       asset_class: "STOCK",
       value: 120000,
       percent_of_networth: 24,
@@ -59,6 +60,7 @@ const summaryFixture: StockHoldingsSummary = {
       quote_currency: "HKD",
       geo: "HK",
       platform: "IBKR",
+      exchange_code: "HKEX",
       latest_trade_date: "2026-03-01",
       quote_freshness_status: "fresh",
       price_provider: "eodhd",
@@ -66,6 +68,7 @@ const summaryFixture: StockHoldingsSummary = {
     {
       asset_id: 2,
       symbol: "INFY",
+      name: "Infosys",
       asset_class: "STOCK",
       value: 90000,
       percent_of_networth: 18,
@@ -75,6 +78,7 @@ const summaryFixture: StockHoldingsSummary = {
       quote_currency: "INR",
       geo: "IN",
       platform: "IBKR",
+      exchange_code: "NSE",
       latest_trade_date: "2026-02-27",
       quote_freshness_status: "stale",
       price_provider: "yahoo_finance",
@@ -99,6 +103,7 @@ describe("StockHoldings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
   });
 
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
@@ -166,6 +171,38 @@ describe("StockHoldings", () => {
     expect(screen.getAllByText("IN").length).toBeGreaterThan(0);
   });
 
+  it("renders top holdings as succinct responsive summary rows on mobile", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 480, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Shares" })).not.toBeInTheDocument();
+
+    const hkCard = screen.getByText("Tencent Holdings").closest(".stockHoldingsMobileCard");
+    expect(hkCard).not.toBeNull();
+    if (hkCard) {
+      const scoped = within(hkCard as HTMLElement);
+      expect(scoped.getByText("Tencent Holdings")).toBeInTheDocument();
+      expect(scoped.getByText("HKEX")).toBeInTheDocument();
+      expect(scoped.getByText("IBKR · Hong Kong")).toBeInTheDocument();
+      expect(scoped.getByText("Fresh")).toBeInTheDocument();
+      expect(scoped.getByText("S$ 120,000")).toBeInTheDocument();
+      expect(scoped.getByText("24.0% NW")).toBeInTheDocument();
+      expect(scoped.getByText("+S$ 21,319")).toBeInTheDocument();
+      expect(scoped.getByText("+21.6%")).toBeInTheDocument();
+      expect(scoped.queryByText("Shares")).not.toBeInTheDocument();
+      expect(scoped.queryByText("Purchase Price")).not.toBeInTheDocument();
+    }
+  });
+
   it("stores stock table column visibility in browser storage", async () => {
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
 
@@ -208,7 +245,7 @@ describe("StockHoldings", () => {
     );
 
     expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh now" }));
+    fireEvent.click(screen.getByRole("button", { name: "Refresh quotes" }));
 
     expect(await screen.findByText("Refreshing...")).toBeInTheDocument();
     await waitFor(() => {

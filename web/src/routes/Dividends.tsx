@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { DividendCompanyItem, DividendsByCompany, DividendsSummary, ExpectedDividendCompany, ExpectedDividendsOverview } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
@@ -56,19 +56,28 @@ export default function Dividends() {
   }, [fromMonth, month, baseCurrency]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = (value?: number, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  const formatCompactMoney = (value?: number | null) =>
-    value == null
-      ? "—"
-      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
+  const formatMoney = useCallback(
+    (value?: number, maximumFractionDigits = 0) =>
+      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
+    [currencyPrefix],
+  );
+  const formatCompactMoney = useCallback(
+    (value?: number | null) =>
+      value == null
+        ? "—"
+        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
+    [currencyPrefix],
+  );
   const formatNumber = (value?: number, maximumFractionDigits = 4) =>
     typeof value === "number" && Number.isFinite(value)
       ? value.toLocaleString(undefined, { maximumFractionDigits })
       : "—";
 
   const topCompanies: DividendCompanyItem[] = (companySummary?.items ?? []).slice(0, 20);
-  const expectedCompanies: ExpectedDividendCompany[] = expectedOverview?.companies ?? [];
+  const expectedCompanies: ExpectedDividendCompany[] = useMemo(
+    () => expectedOverview?.companies ?? [],
+    [expectedOverview?.companies],
+  );
   const monthKey = month;
   const yearKey = month.slice(0, 4);
   const quarterKey = (() => {
@@ -85,7 +94,7 @@ export default function Dividends() {
     const quarter = Math.floor((Math.max(1, monthNumber) - 1) / 3) + 1;
     return `${year}-Q${quarter}`;
   };
-  const realizedBuckets = monthSummary?.buckets ?? [];
+  const realizedBuckets = useMemo(() => monthSummary?.buckets ?? [], [monthSummary?.buckets]);
   const sumRealized = (predicate: (bucket: DividendsSummary["buckets"][number]) => boolean) =>
     realizedBuckets
       .filter(predicate)
@@ -127,7 +136,7 @@ export default function Dividends() {
         displayValue: formatCompactMoney(bucket.payout_minus_tax),
         tone: "neutral" as const,
       })),
-    [realizedBuckets, currencyPrefix],
+    [realizedBuckets, formatCompactMoney],
   );
 
   return (

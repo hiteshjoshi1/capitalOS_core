@@ -47,6 +47,7 @@ function capturedAuthFailureHandler(): (() => void) | null {
 describe("AuthProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
   });
 
   afterEach(() => {

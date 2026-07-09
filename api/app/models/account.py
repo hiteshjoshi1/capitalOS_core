@@ -1,5 +1,6 @@
-from sqlalchemy import BigInteger, Column, Text, Enum, ForeignKey
+from sqlalchemy import BigInteger, Column, DateTime, Text, Enum, ForeignKey
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from .base import Base
 
 # enum name must match DB enum: account_type
@@ -28,3 +29,5 @@ class Account(Base):
 
     # relationship (ensure Platform model uses back_populates="platform")
     platform_rel = relationship("Platform", back_populates="accounts")
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

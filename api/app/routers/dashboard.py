@@ -10,15 +10,20 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.auth_context import CurrentUser, account_scope_sql, require_current_user
+from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership, require_current_user
 from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
+from app.market_data.service import latest_status_by_exchange
 from app.schemas.dashboard import (
     BootstrapResponse,
     CashDepositsItem,
     CashCurrencyBreakdownItem,
     CashDepositsOut,
     DashboardSummaryResponse,
+    DataHubActivityItem,
+    DataHubImportHealth,
+    DataHubMarketData,
+    DataHubSummaryResponse,
     MiniTrendPoint,
     NetWorthChangeResponse,
     GeographyExposureItem,
@@ -828,6 +833,7 @@ def _top_holdings(
             agg[key] = {
                 "asset_id": row.get("asset_id"),
                 "symbol": row.get("symbol"),
+                "name": row.get("name"),
                 "asset_class": row.get("asset_class"),
                 "value": 0.0,
                 "quantity": 0.0,
@@ -842,7 +848,12 @@ def _top_holdings(
                 "price_source": row.get("price_source"),
                 "price_provider": _price_provider(row.get("price_source")),
                 "quote_freshness_status": _quote_freshness_status(row.get("latest_trade_date")),
+                "exchange_code": row.get("exchange_code"),
             }
+        if not agg[key].get("name") and row.get("name"):
+            agg[key]["name"] = row.get("name")
+        if not agg[key].get("exchange_code") and row.get("exchange_code"):
+            agg[key]["exchange_code"] = row.get("exchange_code")
         agg[key]["value"] += value
         quantity = float(row.get("quantity")) if row.get("quantity") is not None else None
         if quantity is not None:
@@ -891,6 +902,7 @@ def _top_holdings(
         _record({
             "asset_id": cr.get("asset_id"),
             "symbol": cr.get("symbol"),
+            "name": cr.get("name"),
             "asset_class": asset_class,
             "value": value,
             "quantity": cr.get("quantity"),
@@ -899,6 +911,7 @@ def _top_holdings(
             "quote_currency": quote_currency,
             "latest_trade_date": latest_trade_date,
             "price_source": price_source,
+            "exchange_code": cr.get("exchange_code"),
             "geo": _infer_country(
                 cr.get("symbol"),
                 cr.get("home_country"),
@@ -915,6 +928,7 @@ def _top_holdings(
         _record({
             "asset_id": None,
             "symbol": row.get("symbol"),
+            "name": row.get("symbol"),
             "asset_class": "CRYPTO",
             "value": value,
             "quantity": None,
@@ -923,6 +937,7 @@ def _top_holdings(
             "quote_currency": "USD",
             "latest_trade_date": None,
             "price_source": None,
+            "exchange_code": None,
             "geo": "US",
             "platform": "CRYPTO",
         })
@@ -2024,4 +2039,214 @@ def geography_exposure(
         base_currency=base_currency,
         total=payload["total"],
         items=[GeographyExposureItem(**item) for item in payload["items"]],
+    )
+
+
+def _wallet_scope_sql_for_summary(alias: str = "w") -> str:
+    if allow_legacy_null_ownership():
+        return f"({alias}.user_id = :current_user_id OR {alias}.user_id IS NULL)"
+    return f"{alias}.user_id = :current_user_id"
+
+
+def _relative_time_label(occurred_at: datetime) -> str:
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    delta = datetime.now(tz=timezone.utc) - occurred_at
+    seconds = max(0, delta.total_seconds())
+    if seconds < 3600:
+        minutes = max(1, int(seconds // 60))
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    if seconds < 86400:
+        hours = int(seconds // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = int(seconds // 86400)
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+@router.get("/data-hub-summary", response_model=DataHubSummaryResponse)
+def data_hub_summary(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    account_rows = db.execute(
+        text(
+            """
+            SELECT a.platform_id, a.currency
+            FROM accounts a
+            WHERE """
+            + account_scope_sql("a")
+        ),
+        {"current_user_id": current_user.id},
+    ).fetchall()
+    linked_accounts = len(account_rows)
+    platform_count = len({row[0] for row in account_rows if row[0] is not None})
+    currency_count = len({row[1] for row in account_rows if row[1] is not None})
+
+    pending_count_row = db.execute(
+        text(
+            """
+            SELECT COUNT(*)
+            FROM import_jobs ij
+            JOIN accounts a ON a.id = ij.account_id
+            WHERE ij.status NOT IN ('IMPORTED', 'FAILED')
+              AND """
+            + account_scope_sql("a")
+        ),
+        {"current_user_id": current_user.id},
+    ).fetchone()
+    pending_count = int(pending_count_row[0]) if pending_count_row else 0
+
+    last_import_row = db.execute(
+        text(
+            """
+            SELECT ij.platform, ij.created_at
+            FROM import_jobs ij
+            JOIN accounts a ON a.id = ij.account_id
+            WHERE """
+            + account_scope_sql("a")
+            + """
+            ORDER BY ij.created_at DESC
+            LIMIT 1
+            """
+        ),
+        {"current_user_id": current_user.id},
+    ).fetchone()
+
+    market_data_statuses = latest_status_by_exchange(db)
+    fresh_total = sum(int(ex.get("diagnostics_summary", {}).get("fresh", 0)) for ex in market_data_statuses)
+    stale_total = sum(int(ex.get("diagnostics_summary", {}).get("stale", 0)) for ex in market_data_statuses)
+
+    wallet_rows = db.execute(
+        text(
+            "SELECT label, chain FROM crypto_wallets w WHERE w.status = 'active' AND "
+            + _wallet_scope_sql_for_summary("w")
+            + " ORDER BY w.verified_at DESC"
+        ),
+        {"current_user_id": current_user.id},
+    ).fetchall()
+    connected_wallet_labels = [row[0] or row[1] for row in wallet_rows]
+
+    activity_rows: list[dict[str, Any]] = []
+    import_activity = db.execute(
+        text(
+            """
+            SELECT ij.platform, ij.original_filename, ij.created_at
+            FROM import_jobs ij
+            JOIN accounts a ON a.id = ij.account_id
+            WHERE """
+            + account_scope_sql("a")
+            + """
+            ORDER BY ij.created_at DESC
+            LIMIT 5
+            """
+        ),
+        {"current_user_id": current_user.id},
+    ).fetchall()
+    for platform, filename, created_at in import_activity:
+        if created_at is None:
+            continue
+        activity_rows.append(
+            {
+                "kind": "import",
+                "title": f"Imported {platform} statement",
+                "meta": filename or "",
+                "occurred_at": created_at,
+            }
+        )
+
+    market_activity = db.execute(
+        text(
+            """
+            SELECT exchange_code, provider, finished_at, upserted_rows
+            FROM market_data_runs
+            WHERE finished_at IS NOT NULL
+            ORDER BY finished_at DESC
+            LIMIT 5
+            """
+        )
+    ).fetchall()
+    for exchange_code, provider, finished_at, upserted_rows in market_activity:
+        if finished_at is None:
+            continue
+        activity_rows.append(
+            {
+                "kind": "market_data",
+                "title": f"Refreshed {exchange_code} market data",
+                "meta": f"{upserted_rows or 0} quotes upserted · {provider}",
+                "occurred_at": finished_at,
+            }
+        )
+
+    platform_activity = db.execute(
+        text(
+            """
+            SELECT name, platform_type, country, created_at
+            FROM platforms
+            WHERE created_at IS NOT NULL
+            ORDER BY created_at DESC
+            LIMIT 5
+            """
+        )
+    ).fetchall()
+    for name, platform_type, country, created_at in platform_activity:
+        if created_at is None:
+            continue
+        activity_rows.append(
+            {
+                "kind": "platform",
+                "title": f"Added platform {name}",
+                "meta": f"{platform_type.title()} · {country}",
+                "occurred_at": created_at,
+            }
+        )
+
+    wallet_activity = db.execute(
+        text(
+            "SELECT label, chain, verified_at FROM crypto_wallets w WHERE w.status = 'active' AND verified_at IS NOT NULL AND "
+            + _wallet_scope_sql_for_summary("w")
+            + " ORDER BY w.verified_at DESC LIMIT 5"
+        ),
+        {"current_user_id": current_user.id},
+    ).fetchall()
+    for label, chain, verified_at in wallet_activity:
+        if verified_at is None:
+            continue
+        activity_rows.append(
+            {
+                "kind": "wallet",
+                "title": f"Connected {label or chain} wallet",
+                "meta": chain,
+                "occurred_at": verified_at,
+            }
+        )
+
+    def _as_dt(value: Any) -> datetime:
+        parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed
+
+    activity_rows.sort(key=lambda row: _as_dt(row["occurred_at"]), reverse=True)
+
+    return DataHubSummaryResponse(
+        linked_accounts=linked_accounts,
+        platform_count=platform_count,
+        currency_count=currency_count,
+        import_health=DataHubImportHealth(
+            pending_count=pending_count,
+            last_import_platform=last_import_row[0] if last_import_row else None,
+            last_import_at=_as_dt(last_import_row[1]).isoformat() if last_import_row and last_import_row[1] else None,
+        ),
+        market_data=DataHubMarketData(fresh=fresh_total, stale=stale_total),
+        connected_wallet_count=len(connected_wallet_labels),
+        connected_wallet_labels=connected_wallet_labels,
+        recent_activity=[
+            DataHubActivityItem(
+                kind=row["kind"],
+                title=row["title"],
+                meta=row["meta"],
+                occurred_at=_relative_time_label(_as_dt(row["occurred_at"])),
+            )
+            for row in activity_rows[:10]
+        ],
     )

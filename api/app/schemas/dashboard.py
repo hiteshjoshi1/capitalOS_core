@@ -34,6 +34,7 @@ class CashFlow(BaseModel):
 class TopHolding(BaseModel):
     asset_id: Optional[int] = None
     symbol: str
+    name: Optional[str] = None
     asset_class: str
     value: float
     percent_of_networth: float
@@ -43,6 +44,7 @@ class TopHolding(BaseModel):
     quote_currency: Optional[str] = None
     geo: Optional[str] = None
     platform: Optional[str] = None
+    exchange_code: Optional[str] = None
     latest_trade_date: Optional[str] = None
     quote_age_days: Optional[int] = None
     price_source: Optional[str] = None
@@ -240,6 +242,35 @@ class CashCurrencyBreakdownItem(BaseModel):
     snapshot_value: float
     delta_abs: float
     delta_pct: Optional[float] = None
+
+
+class DataHubActivityItem(BaseModel):
+    kind: str
+    title: str
+    meta: str
+    occurred_at: str
+
+
+class DataHubImportHealth(BaseModel):
+    pending_count: int
+    last_import_platform: Optional[str] = None
+    last_import_at: Optional[str] = None
+
+
+class DataHubMarketData(BaseModel):
+    fresh: int
+    stale: int
+
+
+class DataHubSummaryResponse(BaseModel):
+    linked_accounts: int
+    platform_count: int
+    currency_count: int
+    import_health: DataHubImportHealth
+    market_data: DataHubMarketData
+    connected_wallet_count: int
+    connected_wallet_labels: List[str]
+    recent_activity: List[DataHubActivityItem]
 
 
 class BootstrapResponse(BaseModel):

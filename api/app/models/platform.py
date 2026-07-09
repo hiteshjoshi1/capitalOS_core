@@ -1,5 +1,6 @@
-from sqlalchemy import BigInteger, Column, Text, Enum
+from sqlalchemy import BigInteger, Column, DateTime, Text, Enum
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from .base import Base
 
 # IMPORTANT: This enum name must match the DB enum created by migration: platform_type
@@ -18,5 +19,6 @@ class Platform(Base):
     platform_type = Column(PlatformType, nullable=False)
     country = Column(Text, nullable=False)
     website = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     accounts = relationship("Account", back_populates="platform_rel")

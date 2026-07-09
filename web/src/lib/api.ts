@@ -275,6 +275,7 @@ export type DashboardSummary = {
   top_holdings: Array<{
     asset_id: number | null;
     symbol: string;
+    name?: string | null;
     asset_class: string;
     value: number;
     percent_of_networth: number;
@@ -284,6 +285,7 @@ export type DashboardSummary = {
     quote_currency?: string;
     geo?: string;
     platform?: string;
+    exchange_code?: string | null;
     latest_trade_date?: string | null;
     quote_age_days?: number | null;
     price_source?: string | null;
@@ -973,6 +975,31 @@ export type MarketDataExchangeStatus = Partial<MarketDataRun> & {
   symbols: MarketDataSymbolDiagnostic[];
 };
 
+export type DataHubActivityItem = {
+  kind: string;
+  title: string;
+  meta: string;
+  occurred_at: string;
+};
+
+export type DataHubSummary = {
+  linked_accounts: number;
+  platform_count: number;
+  currency_count: number;
+  import_health: {
+    pending_count: number;
+    last_import_platform?: string | null;
+    last_import_at?: string | null;
+  };
+  market_data: {
+    fresh: number;
+    stale: number;
+  };
+  connected_wallet_count: number;
+  connected_wallet_labels: string[];
+  recent_activity: DataHubActivityItem[];
+};
+
 export type UploadReminder = {
   account_id: number;
   account_name: string;
@@ -1636,6 +1663,7 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
   cashDeposits: (month: string, baseCurrency = "SGD") =>
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>
