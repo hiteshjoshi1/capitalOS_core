@@ -28,9 +28,9 @@ export const APP_SECTIONS: AppSection[] = [
     tabs: [
       { label: "Overview", to: "/wealth", exact: true },
       { label: "Stocks", to: "/holdings" },
-      { label: "Dividends", to: "/dividends" },
       { label: "Crypto", to: "/crypto/holdings" },
       { label: "Cash", to: "/cash" },
+      { label: "Dividends", to: "/dividends" },
       { label: "Risk", to: "/risk" },
     ],
   },

@@ -34,6 +34,72 @@ def test_current_anchor_uses_configured_local_timezone(monkeypatch):
     assert anchor.isoformat() == "2026-07-05T02:30:00+08:00"
 
 
+def test_data_hub_summary_composes_stats_and_activity(client: TestClient, seed_dashboard_data, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO import_jobs
+                  (id, account_id, platform, original_filename, stored_path, file_sha256, status, created_at, updated_at)
+                VALUES
+                  (1, 1, 'DBS', 'july-statement.csv', '/tmp/x', 'sha', 'IMPORTED', :recent, :recent),
+                  (2, 1, 'DBS', 'needs-mapping.csv', '/tmp/y', 'sha2', 'NEEDS_MAPPING', :older, :older)
+                """
+            ),
+            {
+                "recent": datetime(2026, 7, 6, tzinfo=timezone.utc),
+                "older": datetime(2026, 7, 1, tzinfo=timezone.utc),
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_data_runs
+                  (id, provider, exchange_code, trade_date, status, requested_symbols, received_rows, upserted_rows, missing_symbols, started_at, finished_at)
+                VALUES
+                  (1, 'ShareInvestor', 'SGX', '2026-07-06', 'completed', 27, 24, 24, 3, :started, :finished)
+                """
+            ),
+            {
+                "started": datetime(2026, 7, 6, 6, 0, tzinfo=timezone.utc),
+                "finished": datetime(2026, 7, 6, 6, 2, tzinfo=timezone.utc),
+            },
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at, verified_at)
+                VALUES ('11111111-1111-1111-1111-111111111111', 1, 'evm', 'Ethereum', '0xabc', 'Ledger', 'active', :ts, :ts)
+                """
+            ),
+            {"ts": datetime(2026, 7, 2, tzinfo=timezone.utc)},
+        )
+
+    resp = client.get("/dashboard/data-hub-summary")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["linked_accounts"] == 2
+    assert data["platform_count"] == 2
+    assert data["currency_count"] == 2
+    assert data["import_health"]["pending_count"] == 1
+    assert data["import_health"]["last_import_platform"] == "DBS"
+    assert data["market_data"]["fresh"] >= 0
+    # seed_dashboard_data also inserts its own "BTC Wallet" fixture wallet, so both show up.
+    assert data["connected_wallet_count"] == 2
+    assert "Ledger" in data["connected_wallet_labels"]
+
+    kinds = [item["kind"] for item in data["recent_activity"]]
+    assert "import" in kinds
+    assert "market_data" in kinds
+    assert "platform" in kinds
+    assert "wallet" in kinds
+    assert any(item["title"] == "Imported DBS statement" for item in data["recent_activity"])
+    assert any(item["title"] == "Refreshed SGX market data" for item in data["recent_activity"])
+    assert any(item["title"].startswith("Added platform") for item in data["recent_activity"])
+    assert any(item["title"] == "Connected Ledger wallet" for item in data["recent_activity"])
+
+
 def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     resp = client.get("/dashboard/summary?month=2026-02&compare=prev_month")
     assert resp.status_code == 200
@@ -1331,6 +1397,8 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
     data = resp.json()
     row = next(item for item in data["top_holdings"] if item["symbol"] == "700")
 
+    assert row["name"] == "Tencent"
+    assert row["exchange_code"] == "HKEX"
     assert row["geo"] == "HK"
     assert row["quantity"] == 30.0
     assert row["avg_cost"] == pytest.approx((100.0 * 10.0 + 200.0 * 20.0) / 30.0)

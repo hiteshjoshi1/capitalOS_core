@@ -1,13 +1,35 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type DragEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Account, ImportJobListItem } from "../lib/api";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import StatusPill from "../components/StatusPill";
 import { resolvePlatformParser } from "./ingestUtils";
 import type { SignatureDebug } from "./ingestUtils";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+
+function formatPreviewDate(ts?: string | null): string {
+  if (!ts) return "—";
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+function jobStatusMeta(status?: string | null): { tone: "good" | "warn" | "neutral"; label: string } {
+  if (status === "IMPORTED") return { tone: "good", label: "Completed" };
+  if (status === "NEEDS_MAPPING") return { tone: "warn", label: "Needs mapping" };
+  return { tone: "neutral", label: status ?? "—" };
+}
+
+function formatPreviewAmount(amount: unknown, currency: unknown): string {
+  const value = typeof amount === "number" ? amount : Number(amount);
+  if (!Number.isFinite(value)) return "—";
+  const prefix = value >= 0 ? "+" : "-";
+  const currencyLabel = typeof currency === "string" && currency ? currency : "";
+  return `${prefix}${currencyLabel ? `${currencyLabel} ` : ""}${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
 
 export default function Ingest() {
   const [searchParams] = useSearchParams();
@@ -18,6 +40,7 @@ export default function Ingest() {
   const [jobs, setJobs] = useState<ImportJobListItem[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
+  const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
   const [registering, setRegistering] = useState<boolean>(false);
@@ -89,10 +112,18 @@ export default function Ingest() {
     }
   }
 
+  function handleDrop(event: DragEvent<HTMLLabelElement>) {
+    event.preventDefault();
+    setDragActive(false);
+    const dropped = event.dataTransfer.files?.[0];
+    if (dropped) setFile(dropped);
+  }
+
   const reportData = report as {
     job_id?: number;
     status?: string;
     platform?: string;
+    original_filename?: string;
     parser_key?: string | null;
     format_signature?: string;
     signature_debug?: Record<string, unknown> | null;
@@ -103,7 +134,6 @@ export default function Ingest() {
       duplicates_skipped?: number;
     };
     validation_warnings?: string[];
-    section_summary?: Array<{ section: string; rows: number }>;
     preview_transactions?: Array<Record<string, unknown>>;
     error_message?: string | null;
   } | null;
@@ -111,12 +141,12 @@ export default function Ingest() {
     reportData?.platform,
     reportData?.signature_debug as SignatureDebug | undefined,
   );
+  const previewRows = reportData?.preview_transactions?.slice(0, 3) ?? [];
 
   return (
     <PageShell
-      title="CapitalOS — Import Statements"
-      subtitle="Upload a statement file. We will detect the format and show a report."
-      activeRoute="/ingest"
+      title="Import Statements"
+      subtitle="Upload a statement. We'll detect the format and show you what we found."
     >
       {state === "loading" && <div className="card">Loading…</div>}
 
@@ -128,7 +158,7 @@ export default function Ingest() {
       )}
 
       {state === "ready" && (
-        <>
+        <div className="wealthOverviewLayout">
           <div className="card">
             <div className="cardTitle">Upload Statement CSV</div>
             {accounts.length === 0 ? (
@@ -154,18 +184,31 @@ export default function Ingest() {
                     ))}
                   </select>
                 </label>
-                <label className="field">
+                <label
+                  className={`ingestDropzone${dragActive ? " ingestDropzoneActive" : ""}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragActive(true);
+                  }}
+                  onDragLeave={() => setDragActive(false)}
+                  onDrop={handleDrop}
+                >
                   <span className="label">Statement file</span>
+                  <p className="ingestDropzoneTitle">
+                    {file ? file.name : "Drag a statement here, or click to browse"}
+                  </p>
+                  <p className="ingestDropzoneHint">.csv · .xls · .xlsx</p>
                   <input
-                    className="input"
+                    className="ingestDropzoneInput"
                     type="file"
                     accept=".csv,.xls,.xlsx"
+                    aria-label="Statement file"
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
                 <div className="actions">
                   <button className="btn" disabled={!file || !accountId || uploading} onClick={onUpload}>
-                    {uploading ? "Uploading…" : "Upload CSV"}
+                    {uploading ? "Uploading…" : "Upload statement"}
                   </button>
                 </div>
                 {err && <div className="hint" role="alert">{err}</div>}
@@ -174,13 +217,35 @@ export default function Ingest() {
           </div>
 
           {reportData && (
-            <div className="card" style={{ marginTop: 14 }}>
-              <div className="cardTitle">Import Report</div>
-                <div className="formGrid">
-                  <div className="muted">Job #{reportData.job_id ?? "—"} · Status: {reportData.status ?? "—"}</div>
-                  <div className="muted">
-                    Platform: {reportData.platform ?? "—"} · Parser: {reportData.parser_key ?? "—"}
+            <section aria-label="Import report">
+              <div className="coSectionHeader">
+                <div>
+                  <p className="coEyebrow">Import report · job #{reportData.job_id ?? "—"}</p>
+                  <h2 className="coSectionTitle">
+                    {reportData.platform ?? "—"} · {reportData.original_filename ?? "—"}
+                  </h2>
+                </div>
+                <StatusPill {...jobStatusMeta(reportData.status)} />
+              </div>
+              <div className="card">
+                <div className="ingestStatChips">
+                  <StatusPill tone="neutral" label={`${reportData.counts?.rows_total ?? 0} rows`} />
+                  <StatusPill tone="neutral" label={`${reportData.counts?.transactions_parsed ?? 0} parsed`} />
+                  <StatusPill tone="good" label={`${reportData.counts?.transactions_inserted ?? 0} inserted`} />
+                  <StatusPill tone="warn" label={`${reportData.counts?.duplicates_skipped ?? 0} duplicates skipped`} />
+                </div>
+
+                {reportData.validation_warnings && reportData.validation_warnings.length > 0 && (
+                  <div className="ingestWarningStack">
+                    {reportData.validation_warnings.map((w, i) => (
+                      <div className="successBannerDot ingestWarningBanner" key={`${w}-${i}`}>
+                        <span className="ingestWarningDotIcon" aria-hidden="true" />
+                        <span>{w}</span>
+                      </div>
+                    ))}
                   </div>
+                )}
+
                 {reportData.status === "NEEDS_MAPPING" && (
                   <div className="mini">
                     <h3>Unknown format</h3>
@@ -201,117 +266,61 @@ export default function Ingest() {
                 {reportData.error_message && (
                   <div className="hint" role="alert">{reportData.error_message}</div>
                 )}
-                <div className="split">
-                  <div className="mini">
-                    <h3>Counts</h3>
-                    <div className="muted">Rows total: {reportData.counts?.rows_total ?? 0}</div>
-                    <div className="muted">Parsed: {reportData.counts?.transactions_parsed ?? 0}</div>
-                    <div className="muted">Inserted: {reportData.counts?.transactions_inserted ?? 0}</div>
-                    <div className="muted">Duplicates: {reportData.counts?.duplicates_skipped ?? 0}</div>
-                  </div>
-                  <div className="mini">
-                    <h3>Sections</h3>
-                    {reportData.section_summary?.length ? (
-                      reportData.section_summary.map((s) => (
-                        <div className="muted" key={s.section}>
-                          {s.section}: {s.rows}
-                        </div>
-                      ))
-                    ) : (
-                      <div className="muted">No section summary.</div>
-                    )}
-                  </div>
-                </div>
-                <div className="mini">
-                  <h3>Warnings</h3>
-                  {reportData.validation_warnings?.length ? (
-                    reportData.validation_warnings.map((w, i) => (
-                      <div className="muted" key={`${w}-${i}`}>{w}</div>
+
+                <div className="ingestPreview">
+                  <p className="ingestPreviewTitle">Preview — first 3 rows</p>
+                  {previewRows.length ? (
+                    previewRows.map((t, idx) => (
+                      <div className="listRow" key={`tx-${idx}`}>
+                        <span className="ingestPreviewDate">{formatPreviewDate(t.ts as string | null)}</span>
+                        <strong className="ingestPreviewMerchant">{String(t.merchant_counterparty ?? "—")}</strong>
+                        <span className="tag">{String(t.category ?? "—")}</span>
+                        <strong className="ingestPreviewAmount">{formatPreviewAmount(t.amount, t.currency)}</strong>
+                      </div>
                     ))
                   ) : (
-                    <div className="muted">No warnings.</div>
+                    <p className="muted">No preview available.</p>
                   )}
                 </div>
-                <div className="mini">
-                  <h3>Preview (first 10)</h3>
-                  <div className="tableWrap">
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>ts</th>
-                        <th>type</th>
-                        <th className="right">amount</th>
-                        <th>currency</th>
-                        <th>category</th>
-                        <th>merchant</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {reportData.preview_transactions?.length ? (
-                        reportData.preview_transactions.map((t, idx) => (
-                          <tr key={`tx-${idx}`}>
-                            <td className="muted">{String(t.ts ?? "—")}</td>
-                            <td>{String(t.type ?? "—")}</td>
-                            <td className="right">{String(t.amount ?? "—")}</td>
-                            <td>{String(t.currency ?? "—")}</td>
-                            <td className="muted">{String(t.category ?? "—")}</td>
-                            <td className="muted">{String(t.merchant_counterparty ?? "—")}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td className="muted" colSpan={6}>No preview available.</td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                  </div>
-                </div>
               </div>
-            </div>
+            </section>
           )}
 
-          <div className="card" style={{ marginTop: 14 }}>
-            <div className="cardTitle">Recent Imports</div>
-            <div className="tableWrap">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Status</th>
-                  <th>Platform</th>
-                  <th>Account</th>
-                  <th>File</th>
-                  <th>Created</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {jobs.map((j) => (
-                  <tr
-                    key={j.id}
-                    onClick={() => onLoadJob(j.id)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td>{j.id}</td>
-                    <td>{j.status}</td>
-                    <td>{j.platform}</td>
-                    <td>{j.account_id}</td>
-                    <td>{j.original_filename}</td>
-                    <td className="muted">{j.created_at ?? "—"}</td>
-                    <td className="right muted">{loadingJob === j.id ? "Loading…" : "View report"}</td>
-                  </tr>
-                ))}
-                {jobs.length === 0 && (
-                  <tr>
-                    <td className="muted" colSpan={7}>No import jobs yet.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+          <section aria-label="Recent imports">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">HISTORY</p>
+                <h2 className="coSectionTitle">Recent Imports</h2>
+              </div>
             </div>
-          </div>
-        </>
+            <div className="card">
+              {jobs.length === 0 ? (
+                <p className="muted">No import jobs yet.</p>
+              ) : (
+                jobs.map((j) => (
+                  <div
+                    className="listRow ingestJobRow"
+                    key={j.id}
+                    role="row"
+                    aria-label={`${j.id}`}
+                    onClick={() => onLoadJob(j.id)}
+                  >
+                    <div className="listRowMain">
+                      <div className="listRowTitle">{j.original_filename}</div>
+                      <div className="listRowMeta">
+                        {j.platform} · Account {j.account_id} · {formatPreviewDate(j.created_at)}
+                      </div>
+                    </div>
+                    <StatusPill
+                      tone={jobStatusMeta(j.status).tone}
+                      label={loadingJob === j.id ? "Loading…" : jobStatusMeta(j.status).label}
+                    />
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
       )}
     </PageShell>
   );

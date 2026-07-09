@@ -165,7 +165,7 @@ test("loads dashboard shell", async ({ page }) => {
   await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
   await expect(page.getByRole("link", { name: /^Import Statements$/ }).last()).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Refresh Stock Quotes$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Refresh Market Data$/ }).last()).toBeVisible();
 });
 
 test("navigates to cash overview", async ({ page }) => {

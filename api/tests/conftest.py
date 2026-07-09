@@ -428,7 +428,8 @@ def setup_db():
               account_type TEXT NOT NULL,
               currency TEXT NOT NULL,
               country TEXT,
-              platform_id INTEGER
+              platform_id INTEGER,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )
@@ -489,7 +490,8 @@ def setup_db():
               name TEXT NOT NULL,
               platform_type TEXT NOT NULL,
               country TEXT NOT NULL,
-              website TEXT
+              website TEXT,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """
         )

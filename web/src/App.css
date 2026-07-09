@@ -879,6 +879,135 @@ a.btn {
   font-variant-numeric: tabular-nums;
 }
 
+.stockHoldingsMobileList {
+  display: grid;
+  gap: 0;
+}
+
+.stockHoldingsMobileCard {
+  display: grid;
+  gap: 20px;
+  padding: 20px 0 22px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
+}
+
+.stockHoldingsMobileCard:last-child {
+  border-bottom: none;
+}
+
+.stockHoldingsMobileHeader {
+  min-width: 0;
+}
+
+.stockHoldingsMobileTitleLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stockHoldingsMobileTitle {
+  min-width: 0;
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 850;
+  line-height: 1.12;
+  overflow-wrap: anywhere;
+}
+
+.stockHoldingsExchangePill {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 2px 9px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent 16%);
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel2) 70%, transparent 30%);
+  font-size: 12px;
+  font-weight: 850;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.stockHoldingsMobileMeta {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.stockHoldingsFreshnessTag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-width: 82px;
+  padding: 5px 13px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 800;
+  text-transform: capitalize;
+  color: var(--muted);
+  background: var(--panel2);
+  white-space: nowrap;
+}
+
+.stockHoldingsFreshnessTagFresh {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 22%, transparent 78%);
+}
+
+.stockHoldingsFreshnessTagStale {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 20%, transparent 80%);
+}
+
+.stockHoldingsMobileMetrics {
+  display: grid;
+  grid-template-columns: minmax(76px, 0.8fr) minmax(100px, 1fr) minmax(108px, 1fr);
+  align-items: center;
+  gap: 12px;
+}
+
+.stockHoldingsMobileValueBlock,
+.stockHoldingsMobilePnlBlock {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  text-align: right;
+}
+
+.stockHoldingsMobileValueBlock strong,
+.stockHoldingsMobilePnlBlock strong {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 850;
+  line-height: 1.12;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.stockHoldingsMobileValueBlock span,
+.stockHoldingsMobilePnlBlock span {
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.15;
+  font-variant-numeric: tabular-nums;
+}
+
+.stockHoldingsMobilePnlBlock.good strong,
+.stockHoldingsMobilePnlBlock.good span {
+  color: var(--good);
+}
+
+.stockHoldingsMobilePnlBlock.bad strong,
+.stockHoldingsMobilePnlBlock.bad span {
+  color: var(--bad);
+}
+
 .stockHoldingsControls {
   margin-top: 18px;
   display: flex;
@@ -928,12 +1057,61 @@ a.btn {
 .valueTrendChart {
   display: grid;
   gap: 8px;
+  min-width: 0;
 }
 
 .valueTrendChart svg {
   width: 100%;
   min-height: 190px;
   overflow: visible;
+}
+
+.valueTrendBars {
+  display: grid;
+  align-items: end;
+  gap: 14px;
+  min-width: 0;
+  height: 178px;
+  padding-top: 4px;
+}
+
+.valueTrendBarItem {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  align-items: end;
+  justify-items: center;
+  gap: 7px;
+  min-width: 0;
+  height: 100%;
+}
+
+.valueTrendBarValue,
+.valueTrendBarMonth {
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.valueTrendBarTrack {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  min-height: 0;
+  height: 100%;
+}
+
+.valueTrendBar {
+  width: min(100%, 52px);
+  border-radius: 7px 7px 3px 3px;
+  background: var(--accent);
+  min-height: 8px;
+  box-shadow: inset 0 1px 0 color-mix(in srgb, white 24%, transparent 76%);
 }
 
 .valueTrendGridLine {
@@ -974,7 +1152,7 @@ a.btn {
 
 .valueTrendDataStrip {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(78px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 6px;
 }
 
@@ -1455,6 +1633,308 @@ a.btn {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
 }
 
+/* ── Import Statements: dropzone + report chips/preview ── */
+
+.ingestDropzone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  text-align: center;
+  border: 1.5px dashed var(--line);
+  border-radius: 14px;
+  padding: 34px 20px;
+  background: var(--panel);
+  cursor: pointer;
+}
+
+.ingestDropzoneActive {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel) 92%);
+}
+
+.ingestDropzoneTitle {
+  margin: 6px 0 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.ingestDropzoneHint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: ui-monospace, Menlo, monospace;
+}
+
+.ingestDropzoneInput {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.ingestStatChips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+
+.ingestWarningStack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.ingestWarningBanner {
+  color: var(--text);
+}
+
+.ingestWarningDotIcon {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--warn);
+  flex-shrink: 0;
+}
+
+.ingestPreview {
+  margin-top: 8px;
+}
+
+.ingestPreviewTitle {
+  margin: 0;
+  padding: 13px 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.ingestPreview .listRow {
+  gap: 14px;
+  flex-wrap: nowrap;
+}
+
+.ingestPreviewDate {
+  font-size: 13px;
+  color: var(--muted);
+  min-width: 50px;
+  flex-shrink: 0;
+}
+
+.ingestPreviewMerchant {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ingestPreviewAmount {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ingestJobRow {
+  cursor: pointer;
+}
+
+/* ── Add Crypto Wallets: mobile desktop-only connect notice ── */
+
+.cryptoMobileNotice {
+  border-style: dashed;
+  background: var(--panel2);
+}
+
+/* ── Market Data: status chips + expandable exchange rows ── */
+
+.marketDataStatusChips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.marketDataExchange {
+  border-bottom: 1px solid var(--line);
+}
+
+.marketDataExchange:last-child {
+  border-bottom: none;
+}
+
+.marketDataExchangeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 0;
+  cursor: pointer;
+  flex-wrap: wrap;
+}
+
+.marketDataExchangeMeta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.marketDataExchangeMeta strong {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--text);
+}
+
+.marketDataExchangeSummary {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.marketDataChevron {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.marketDataSymbolList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 0 14px 8px;
+}
+
+.marketDataSymbolRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 9px;
+  background: var(--panel);
+  flex-wrap: wrap;
+}
+
+.marketDataSymbolCode {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  width: 60px;
+}
+
+.marketDataSymbolMeta {
+  flex: 1;
+  min-width: 120px;
+}
+
+.marketDataRunsTableWrap {
+  overflow-x: auto;
+}
+
+.marketDataRunsTable {
+  width: 100%;
+  min-width: 620px;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.marketDataRunsTable th,
+.marketDataRunsTable td {
+  padding: 12px 16px 12px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.marketDataRunsTable th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.marketDataRunsTable td {
+  font-size: 13px;
+}
+
+.marketDataRunsTable th:nth-child(1),
+.marketDataRunsTable td:nth-child(1) {
+  width: 28%;
+}
+
+.marketDataRunsTable th:nth-child(2),
+.marketDataRunsTable td:nth-child(2) {
+  width: 14%;
+}
+
+.marketDataRunsTable th:nth-child(3),
+.marketDataRunsTable td:nth-child(3) {
+  width: 24%;
+}
+
+.marketDataRunsTable th:nth-child(4),
+.marketDataRunsTable td:nth-child(4) {
+  width: 18%;
+}
+
+.marketDataRunsTable th:nth-child(5),
+.marketDataRunsTable td:nth-child(5) {
+  width: 16%;
+}
+
+.marketDataRunsTable th:last-child,
+.marketDataRunsTable td:last-child {
+  padding-right: 0;
+}
+
+.marketDataRunsTable tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.marketDataRunStarted,
+.marketDataRunProvider,
+.marketDataRunCounts {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.marketDataRunCounts {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Stock Holdings: refresh-quotes live indicator dot ── */
+
+.stockHoldingsRefreshBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.stockHoldingsRefreshDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--good);
+  display: inline-block;
+}
+
+.stockHoldingsRefreshDotActive {
+  background: var(--warn);
+}
+
 /* ── Author Ingestion form/control system (reuses .field/.label/.hint tokens) ── */
 
 .formSection {
@@ -1559,6 +2039,55 @@ a.btn {
   border-radius: 12px;
   padding: 10px 12px;
   font-size: 13px;
+}
+
+.successBannerDot {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text);
+  padding: 11px 14px;
+}
+
+.successBannerDotIcon {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--good);
+  flex-shrink: 0;
+}
+
+/* ── StatusPill (generic Fresh/Stale/Completed/Verified/etc. pill) ── */
+
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.statusPill--good {
+  color: var(--good);
+  background: color-mix(in srgb, var(--good) 14%, transparent 86%);
+}
+
+.statusPill--warn {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 20%, transparent 80%);
+}
+
+.statusPill--bad {
+  color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 16%, transparent 84%);
+}
+
+.statusPill--neutral {
+  color: var(--muted);
+  background: var(--panel2);
+  border: 1px solid var(--line);
 }
 
 .urlInputList {
@@ -4864,6 +5393,74 @@ a.btn {
   color: var(--text);
 }
 
+/* ── Data Hub Overview: stat row + quick-action grid ── */
+
+.dataHubStatGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 16px;
+}
+
+.dataHubStatCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dataHubStatLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.dataHubStatValue {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.dataHubStatMeta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.dataHubActionGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.dataHubActionCard {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px;
+  background: var(--panel2);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-decoration: none;
+  box-shadow: 0 14px 30px var(--shadow);
+}
+
+.dataHubActionCard strong {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.dataHubActionCard span {
+  font-size: 12.5px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 /* ─── Segmented control (Platform/Asset class, Holdings/Movers) ──── */
 
 .coSegmentedControl {
@@ -5305,7 +5902,7 @@ html, body {
 
   /* ── Mobile topbar: two rows
      Row 1: [CapitalOS brand ────────────────] [theme + user]
-     Row 2: [Overview  Stocks  Dividends  Crypto  Cash  Risk ···]
+     Row 2: [Overview  Stocks  Crypto  Cash  Dividends  Risk ···]
   ────────────────────────────────────────────────────────────── */
   .appShellTopbar {
     display: flex;
@@ -5612,6 +6209,47 @@ html, body {
   .valueTrendCard {
     padding: 16px;
   }
+
+  .valueTrendBars {
+    gap: 8px;
+    height: 164px;
+  }
+
+  .valueTrendBarValue,
+  .valueTrendBarMonth {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 520px) {
+  .stockHoldingsMobileMetrics {
+    grid-template-columns: minmax(70px, 0.78fr) minmax(86px, 1fr) minmax(92px, 1fr);
+    gap: 8px;
+  }
+
+  .stockHoldingsMobileTitle {
+    font-size: 18px;
+  }
+
+  .stockHoldingsMobileMeta {
+    font-size: 14px;
+  }
+
+  .stockHoldingsFreshnessTag {
+    min-width: 70px;
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+
+  .stockHoldingsMobileValueBlock strong,
+  .stockHoldingsMobilePnlBlock strong {
+    font-size: 17px;
+  }
+
+  .stockHoldingsMobileValueBlock span,
+  .stockHoldingsMobilePnlBlock span {
+    font-size: 12px;
+  }
 }
 
 /* ─── Control Pills (month + currency) — matching HTML reference ──── */
@@ -5725,6 +6363,14 @@ html, body {
   .liabDueRow {
     display: flex;
     flex-wrap: wrap;
+  }
+
+  .ingestPreview .listRow {
+    flex-wrap: wrap;
+  }
+
+  .ingestPreviewMerchant {
+    white-space: normal;
   }
 }
 

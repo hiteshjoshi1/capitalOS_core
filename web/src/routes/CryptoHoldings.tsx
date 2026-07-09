@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
@@ -36,12 +36,18 @@ export default function CryptoHoldings() {
   }, [baseCurrency, month]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  const formatCompactMoney = (value?: number | null) =>
-    value == null
-      ? "—"
-      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
+  const formatMoney = useCallback(
+    (value?: number | null, maximumFractionDigits = 0) =>
+      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
+    [currencyPrefix],
+  );
+  const formatCompactMoney = useCallback(
+    (value?: number | null) =>
+      value == null
+        ? "—"
+        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
+    [currencyPrefix],
+  );
   const formatDate = (value?: string | null) => value?.slice(0, 10) ?? "—";
   const formatDelta = (value?: number | null, pct?: number | null) => {
     if (value == null) {
@@ -50,7 +56,7 @@ export default function CryptoHoldings() {
     return `${value >= 0 ? "+" : "-"}${formatMoney(Math.abs(value))}${pct == null ? "" : ` (${pct >= 0 ? "+" : "-"}${Math.abs(pct * 100).toFixed(1)}%)`}`;
   };
 
-  const allHoldings = summary?.top_holdings ?? [];
+  const allHoldings = useMemo(() => summary?.top_holdings ?? [], [summary?.top_holdings]);
   const visibleHoldings = useMemo(
     () => allHoldings.filter((h) => showDust || h.value_usd >= 10),
     [allHoldings, showDust],
@@ -70,7 +76,7 @@ export default function CryptoHoldings() {
           displayValue: formatCompactMoney(point.value),
           tone: "neutral" as const,
         })),
-    [summary, currencyPrefix],
+    [summary, formatCompactMoney],
   );
 
   const deltaPositive = (summary?.snapshot_delta_base ?? 0) >= 0;

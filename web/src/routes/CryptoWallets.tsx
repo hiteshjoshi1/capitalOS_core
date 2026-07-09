@@ -7,7 +7,10 @@ import bs58 from "bs58";
 import { api } from "../lib/api";
 import type { CryptoWallet, CryptoAllowlistItem } from "../lib/api";
 import "../App.css";
+import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
+
+const MOBILE_BREAKPOINT_PX = 900;
 
 const EVM_CHAIN_MAP: Record<number, string> = {
   1: "ethereum",
@@ -48,6 +51,14 @@ export default function CryptoWallets() {
   const [connectingEvm, setConnectingEvm] = useState<boolean>(false);
 
   const { publicKey, connected, signMessage, signTransaction, disconnect: disconnectSolana, wallet } = useWallet();
+
+  const [isMobile, setIsMobile] = useState<boolean>(() => window.innerWidth <= MOBILE_BREAKPOINT_PX);
+
+  useEffect(() => {
+    const handleResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT_PX);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const evmChain = useMemo(() => EVM_CHAIN_MAP[evmChainId] || "ethereum", [evmChainId]);
   const evmConnected = evmAddress.length > 0;
@@ -297,11 +308,11 @@ export default function CryptoWallets() {
 
   return (
     <PageShell
-      title="Crypto Wallets"
-      subtitle="Connect a wallet, sign a message, and verify ownership."
-      activeRoute="/crypto"
+      title="Add Crypto Wallets"
+      subtitle="Connect a wallet, sign a message, and verify ownership. Verification triggers ingestion."
       headerActions={<span className="pill">Wallets: {walletCount}</span>}
     >
+      <div className="wealthOverviewLayout">
       {error && (
         <div className="card error">
           <div className="cardTitle">Error</div>
@@ -316,6 +327,9 @@ export default function CryptoWallets() {
         </div>
       )}
 
+      <section aria-label="Connect a wallet and view connected wallets">
+      <div className="coExposureGrid">
+      {!isMobile ? (
       <div className="card">
         <div className="cardTitle">Add wallet</div>
         <div className="formGrid">
@@ -419,102 +433,92 @@ export default function CryptoWallets() {
             </button>
           )}
         </div>
-        <div className="hintTag">Verification triggers ingestion</div>
+        <div className="hintTag">Same sign-and-verify flow as today — just restyled.</div>
       </div>
+      ) : (
+      <div className="card cryptoMobileNotice">
+        <div className="cardTitle">Connect a wallet</div>
+        <p className="muted">
+          Connecting a new wallet needs a browser extension or hardware device — open Data Hub → Add Crypto Wallets
+          on desktop to add one. Your connected wallets are still visible below.
+        </p>
+      </div>
+      )}
 
+      <div className="card">
+        <div className="cardTitle">Connected wallets</div>
+        {wallets.length === 0 ? (
+          <p className="muted">No wallets added yet.</p>
+        ) : (
+          wallets.map((w) => (
+            <DirectoryListRow
+              key={w.id}
+              title={w.label ?? "—"}
+              meta={`${w.chain_type}:${w.chain} · ${w.address}`}
+              right={<span className="statusPill statusPill--good">{w.status}</span>}
+            />
+          ))
+        )}
+      </div>
+      </div>
+      </section>
+
+      <section aria-label="Token allowlist">
       <div className="card">
         <div className="cardTitle">Token Allowlist</div>
         <div className="muted" style={{ marginBottom: 8 }}>
           Only allowlisted ERC-20 contracts are priced and shown. We validate against CoinGecko before adding.
         </div>
-        <div className="formGrid">
-          <label className="field">
-            <span className="label">Chain</span>
-            <select
-              className="input"
-              value={allowChain}
-              onChange={(e) => setAllowChain(e.target.value)}
-            >
-              <option value="ethereum">Ethereum</option>
-              <option value="base">Base</option>
-              <option value="arbitrum">Arbitrum</option>
-              <option value="optimism">Optimism</option>
-              <option value="mantle">Mantle</option>
-              <option value="scroll">Scroll</option>
-              <option value="solana">Solana</option>
-            </select>
-          </label>
-          <label className="field">
-            <span className="label">Contract address</span>
-            <input
-              className="input"
-              value={allowContract}
-              onChange={(e) => setAllowContract(e.target.value)}
-              placeholder="0x..."
-            />
-          </label>
-        </div>
-        <div className="actions">
-          <button className="btn" onClick={addAllowlist}>Add token</button>
-        </div>
-        <div className="tableWrap">
-        <table className="table" style={{ marginTop: 12 }}>
-          <thead>
-            <tr>
-              <th>Symbol</th>
-              <th>Name</th>
-              <th>Chain</th>
-              <th>Contract</th>
-            </tr>
-          </thead>
-          <tbody>
-            {allowlist.map((item) => (
-              <tr key={item.id}>
-                <td>{item.symbol ?? "—"}</td>
-                <td>{item.name ?? "—"}</td>
-                <td className="muted">{item.chain}</td>
-                <td className="muted">{item.contract_address}</td>
-              </tr>
-            ))}
-            {allowlist.length === 0 && (
-              <tr>
-                <td className="muted" colSpan={4}>No allowlisted tokens yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        {!isMobile && (
+          <>
+            <div className="formGrid">
+              <label className="field">
+                <span className="label">Chain</span>
+                <select
+                  className="input"
+                  value={allowChain}
+                  onChange={(e) => setAllowChain(e.target.value)}
+                >
+                  <option value="ethereum">Ethereum</option>
+                  <option value="base">Base</option>
+                  <option value="arbitrum">Arbitrum</option>
+                  <option value="optimism">Optimism</option>
+                  <option value="mantle">Mantle</option>
+                  <option value="scroll">Scroll</option>
+                  <option value="solana">Solana</option>
+                </select>
+              </label>
+              <label className="field">
+                <span className="label">Contract address</span>
+                <input
+                  className="input"
+                  value={allowContract}
+                  onChange={(e) => setAllowContract(e.target.value)}
+                  placeholder="0x..."
+                />
+              </label>
+            </div>
+            <div className="actions">
+              <button className="btn" onClick={addAllowlist}>Add token</button>
+            </div>
+          </>
+        )}
+        <div style={{ marginTop: 12 }}>
+          {allowlist.length === 0 ? (
+            <p className="muted">No allowlisted tokens yet.</p>
+          ) : (
+            allowlist.map((item) => (
+              <DirectoryListRow
+                key={item.id}
+                title={item.symbol ?? "—"}
+                meta={item.name ?? "—"}
+                right={<span className="tag">{item.chain}</span>}
+              />
+            ))
+          )}
         </div>
       </div>
-
-      <div className="card">
-        <div className="cardTitle">Wallets</div>
-        <div className="tableWrap">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Label</th>
-              <th>Chain</th>
-              <th>Address</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {wallets.map((w) => (
-              <tr key={w.id}>
-                <td>{w.label ?? "—"}</td>
-                <td className="muted">{w.chain_type}:{w.chain}</td>
-                <td className="muted">{w.address}</td>
-                <td><span className="tag">{w.status}</span></td>
-              </tr>
-            ))}
-            {wallets.length === 0 && (
-              <tr>
-                <td className="muted" colSpan={4}>No wallets added yet.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-        </div>
+      </section>
       </div>
     </PageShell>
   );

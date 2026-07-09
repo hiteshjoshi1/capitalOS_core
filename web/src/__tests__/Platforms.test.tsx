@@ -36,9 +36,9 @@ describe("Platforms", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Platforms" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Add Platform" })).toBeInTheDocument();
     expect(screen.getByText("Interactive Brokers")).toBeInTheDocument();
-    expect(screen.getByText("IBKR")).toBeInTheDocument();
+    expect(screen.getByText("IBKR · BROKER · US")).toBeInTheDocument();
   });
 
   it("creates a platform and shows success", async () => {

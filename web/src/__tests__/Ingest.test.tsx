@@ -104,13 +104,12 @@ describe("Ingest", () => {
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
 
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
-    expect(await screen.findByText(/Job #10/)).toBeInTheDocument();
-    expect(screen.getByText(/Status: IMPORTED/)).toBeInTheDocument();
-    expect(screen.getByText("Rows total: 1")).toBeInTheDocument();
-    expect(screen.getByText("Parsed: 1")).toBeInTheDocument();
-    expect(screen.getByText("Inserted: 1")).toBeInTheDocument();
+    expect(await screen.findByText(/job #10/i)).toBeInTheDocument();
+    expect(screen.getByText("1 rows")).toBeInTheDocument();
+    expect(screen.getByText("1 parsed")).toBeInTheDocument();
+    expect(screen.getByText("1 inserted")).toBeInTheDocument();
   }, 15000);
 
   it("shows load error when initial fetch fails", async () => {
@@ -186,7 +185,7 @@ describe("Ingest", () => {
     await userEvent.selectOptions(screen.getByLabelText("Account"), "8");
     const file = new File(["data"], "test.csv", { type: "text/csv" });
     await userEvent.upload(screen.getByLabelText("Statement file"), file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
     expect(await screen.findByText("upload string failure")).toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("row", { name: /80/i }));
@@ -225,11 +224,10 @@ describe("Ingest", () => {
     await userEvent.selectOptions(screen.getByLabelText("Account"), "9");
     const file = new File(["data"], "uob.xls", { type: "application/vnd.ms-excel" });
     await userEvent.upload(screen.getByLabelText("Statement file"), file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
-    expect(await screen.findByText(/Job #—/)).toBeInTheDocument();
+    expect(await screen.findByText(/job #—/i)).toBeInTheDocument();
     expect(screen.getByText("format ambiguous")).toBeInTheDocument();
-    expect(screen.getByText("No section summary.")).toBeInTheDocument();
     expect(screen.getByText("row 3 ignored")).toBeInTheDocument();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
@@ -274,13 +272,13 @@ describe("Ingest", () => {
     const file = new File(["data"], "sharekhan.xls", { type: "application/vnd.ms-excel" });
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     const approve = await screen.findByRole("button", { name: "Approve as Sharekhan" });
     await userEvent.click(approve);
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(11, "sharekhan_holdings_xls_v1");
-    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
   it("loads a job report from recent imports", async () => {
@@ -328,7 +326,7 @@ describe("Ingest", () => {
     const row = await screen.findByRole("row", { name: /77/i });
     await userEvent.click(row);
 
-    expect(await screen.findByText(/Job #77/)).toBeInTheDocument();
+    expect(await screen.findByText(/job #77/i)).toBeInTheDocument();
     expect(mockApi.ingestJob).toHaveBeenCalledWith(77);
   });
 
@@ -372,13 +370,13 @@ describe("Ingest", () => {
     const file = new File(["data"], "dbs_vickers.xls", { type: "application/vnd.ms-excel" });
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     const approve = await screen.findByRole("button", { name: "Approve as DBS Vickers" });
     await userEvent.click(approve);
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(12, "dbs_vickers_holdings_xls_v1");
-    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
   it("shows approve button for Citi CC mapping", async () => {
@@ -421,13 +419,13 @@ describe("Ingest", () => {
     const file = new File(["data"], "citi_credit_card_sample.csv", { type: "text/csv" });
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     const approve = await screen.findByRole("button", { name: "Approve as Citi CC" });
     await userEvent.click(approve);
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(13, "citi_credit_card_csv_v1");
-    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
   it("shows approve button for UOB mapping when the account uses a legacy platform label", async () => {
@@ -470,13 +468,13 @@ describe("Ingest", () => {
     const file = new File(["data"], "uob_account.xls", { type: "application/vnd.ms-excel" });
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     const approve = await screen.findByRole("button", { name: "Approve as UOB" });
     await userEvent.click(approve);
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(14, "uob_account_xls_v1");
-    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
   it("shows approve button for UOB mapping when the signature headers match even if platform is generic", async () => {
@@ -530,13 +528,13 @@ describe("Ingest", () => {
     const file = new File(["data"], "uob_account.xls", { type: "application/vnd.ms-excel" });
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     const approve = await screen.findByRole("button", { name: "Approve as UOB" });
     await userEvent.click(approve);
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(15, "uob_account_xls_v1");
-    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
   it("shows approve button for UOB CC mapping when the signature headers match a card statement", async () => {
@@ -593,13 +591,13 @@ describe("Ingest", () => {
     const file = new File(["data"], "uob_credit_card.xls", { type: "application/vnd.ms-excel" });
     const input = screen.getByLabelText("Statement file") as HTMLInputElement;
     await userEvent.upload(input, file);
-    await userEvent.click(screen.getByRole("button", { name: "Upload CSV" }));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     const approve = await screen.findByRole("button", { name: "Approve as UOB CC" });
     await userEvent.click(approve);
 
     expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(16, "uob_credit_card_xls_v1");
-    expect(await screen.findByText(/Status: IMPORTED/)).toBeInTheDocument();
+    expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
   it("loads report from recent imports", async () => {
@@ -643,18 +641,20 @@ describe("Ingest", () => {
     );
 
     await screen.findByText("Recent Imports");
-    const row = screen.getByText("ibkr.csv").closest("tr");
+    const row = screen.getByText("ibkr.csv").closest('[role="row"]');
     expect(row).not.toBeNull();
     if (row) {
       await userEvent.click(row);
     }
 
-    expect(await screen.findByText(/Job #99/)).toBeInTheDocument();
-    const report = screen.getByText(/Status: IMPORTED/).closest(".card") as HTMLElement | null;
+    expect(await screen.findByText(/job #99/i)).toBeInTheDocument();
+    const report = screen.getByText(/job #99/i).closest("section") as HTMLElement | null;
     expect(report).not.toBeNull();
     if (report) {
       const scoped = within(report);
-      expect(scoped.getByText("Rows total: 2")).toBeInTheDocument();
+      expect(scoped.getByText("2 rows")).toBeInTheDocument();
+      expect(scoped.getByText("2 parsed")).toBeInTheDocument();
+      expect(scoped.getByText("2 inserted")).toBeInTheDocument();
     }
   });
 });

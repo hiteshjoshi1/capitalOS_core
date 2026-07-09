@@ -130,7 +130,7 @@ test("Operations nav includes Add Account and Platforms", async ({ page }) => {
   await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
   await expect(page.getByRole("link", { name: /^Add Accounts$/ }).last()).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Add a Platform$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Add Platforms$/ }).last()).toBeVisible();
 
   await page.getByRole("link", { name: /^Add Accounts$/ }).last().click();
   await expect(page).toHaveURL(/\/accounts\/new$/);
@@ -138,9 +138,9 @@ test("Operations nav includes Add Account and Platforms", async ({ page }) => {
 
   await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
-  await page.getByRole("link", { name: /^Add a Platform$/ }).last().click();
+  await page.getByRole("link", { name: /^Add Platforms$/ }).last().click();
   await expect(page).toHaveURL(/\/platforms$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Platforms" })).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1, name: "Add Platform" })).toBeVisible();
 });
 
 test("Platforms page creates and shows a new platform", async ({ page }) => {
@@ -155,7 +155,7 @@ test("Platforms page creates and shows a new platform", async ({ page }) => {
   await page.getByRole("button", { name: "Save platform" }).click();
 
   await expect(page.getByRole("status")).toContainText("Platform saved.");
-  const createdRow = page.locator("tbody tr").filter({ hasText: "DBS Bank" });
+  const createdRow = page.locator(".listRow").filter({ hasText: "DBS Bank" });
   await expect(createdRow).toContainText("DBS");
   await expect(createdRow).toContainText("DBS Bank");
 });

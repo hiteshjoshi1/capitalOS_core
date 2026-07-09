@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
+import type { Account, AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
 import "../App.css";
+import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
+import SuccessBanner from "../components/SuccessBanner";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -30,6 +32,7 @@ export default function AddAccount() {
   const [saving, setSaving] = useState<boolean>(false);
   const [success, setSuccess] = useState<string>("");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
+  const [accounts, setAccounts] = useState<Account[]>([]);
   const [options, setOptions] = useState<AccountOptions | null>(null);
   const [platformOptions, setPlatformOptions] = useState<PlatformOptions | null>(null);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
@@ -49,16 +52,18 @@ export default function AddAccount() {
     (async () => {
       try {
         setState("loading");
-        const [p, o, po, c] = await Promise.all([
+        const [p, o, po, c, a] = await Promise.all([
           api.platforms(),
           api.accountOptions(),
           api.platformOptions(),
           api.currencies(),
+          api.accounts(),
         ]);
         setPlatforms(p);
         setOptions(o);
         setPlatformOptions(po);
         setCurrencies(c);
+        setAccounts(a);
         setState("ready");
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -124,6 +129,8 @@ export default function AddAccount() {
       setForm(EMPTY_FORM);
       setCurrencySearch("");
       setCountrySearch("");
+      const refreshedAccounts = await api.accounts();
+      setAccounts(refreshedAccounts);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setErr(msg);
@@ -197,8 +204,7 @@ export default function AddAccount() {
   return (
     <PageShell
       title="Add Account"
-      subtitle="Create a new account linked to a platform."
-      activeRoute="/accounts/new"
+      subtitle="Create a new account linked to a platform, so new statements have the right destination."
     >
       {state === "loading" && <div className="card">Loading…</div>}
 
@@ -210,6 +216,7 @@ export default function AddAccount() {
       )}
 
       {state === "ready" && (
+        <div className="wealthOverviewLayout">
         <div className="card">
           <div className="cardTitle">Account Details</div>
           <form className="formGrid" onSubmit={onSubmit}>
@@ -285,56 +292,57 @@ export default function AddAccount() {
               </select>
             </label>
 
-            <label className="field">
-              <span className="label">Currency</span>
-              <input
-                className="input"
-                type="text"
-                list="currency-options"
-                value={currencySearch}
-                aria-label="Account Currency"
-                onChange={(e) => {
-                  const next = e.target.value.toUpperCase();
-                  setCurrencySearch(next);
-                  setForm((prev) => ({ ...prev, currency: next }));
-                }}
-                placeholder="Start typing to filter"
-                required
-              />
-              <datalist id="currency-options">
-                {filteredCurrencies.map((c) => (
-                  <option key={c.code} value={c.code}>
-                    {c.name ?? "Unknown"} ({c.country ?? "Unknown"})
-                  </option>
-                ))}
-              </datalist>
-              <span className="hint">Type to filter and select a currency.</span>
-            </label>
+            <div className="split">
+              <label className="field">
+                <span className="label">Currency</span>
+                <input
+                  className="input"
+                  type="text"
+                  list="currency-options"
+                  value={currencySearch}
+                  aria-label="Account Currency"
+                  onChange={(e) => {
+                    const next = e.target.value.toUpperCase();
+                    setCurrencySearch(next);
+                    setForm((prev) => ({ ...prev, currency: next }));
+                  }}
+                  placeholder="Start typing to filter"
+                  required
+                />
+                <datalist id="currency-options">
+                  {filteredCurrencies.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.name ?? "Unknown"} ({c.country ?? "Unknown"})
+                    </option>
+                  ))}
+                </datalist>
+                <span className="hint">Type to filter and select a currency.</span>
+              </label>
 
-            <label className="field">
-              <span className="label">Country</span>
-              <input
-                className="input"
-                type="text"
-                list="country-options"
-                value={countrySearch}
-                aria-label="Account Country"
-                onChange={(e) => {
-                  const next = e.target.value.toUpperCase();
-                  setCountrySearch(next);
-                  setForm((prev) => ({ ...prev, country: next }));
-                }}
-                placeholder="Start typing to filter"
-                required
-              />
-              <datalist id="country-options">
-                {filteredCountries.map((country) => (
-                  <option key={country} value={country} />
-                ))}
-              </datalist>
-              <span className="hint">Type to filter and select a country.</span>
-            </label>
-
+              <label className="field">
+                <span className="label">Country</span>
+                <input
+                  className="input"
+                  type="text"
+                  list="country-options"
+                  value={countrySearch}
+                  aria-label="Account Country"
+                  onChange={(e) => {
+                    const next = e.target.value.toUpperCase();
+                    setCountrySearch(next);
+                    setForm((prev) => ({ ...prev, country: next }));
+                  }}
+                  placeholder="Start typing to filter"
+                  required
+                />
+                <datalist id="country-options">
+                  {filteredCountries.map((country) => (
+                    <option key={country} value={country} />
+                  ))}
+                </datalist>
+                <span className="hint">Type to filter and select a country.</span>
+              </label>
+            </div>
 
             <div className="actions">
               <button className="btn" type="submit" disabled={!canSubmit || saving}>
@@ -348,11 +356,7 @@ export default function AddAccount() {
                 {err}
               </div>
             )}
-            {success && (
-              <div className="hint" role="status">
-                {success}
-              </div>
-            )}
+            {success && <SuccessBanner message={success} onDismiss={() => setSuccess("")} />}
           </form>
 
           {showPlatformForm && (
@@ -372,6 +376,30 @@ export default function AddAccount() {
             </div>
           )}
 
+        </div>
+
+        <section aria-label="Linked accounts">
+          <div className="coSectionHeader">
+            <div>
+              <p className="coEyebrow">DIRECTORY</p>
+              <h2 className="coSectionTitle">Linked accounts</h2>
+            </div>
+          </div>
+          <div className="card">
+            {accounts.length === 0 ? (
+              <p className="muted">No accounts yet.</p>
+            ) : (
+              accounts.map((a) => (
+                <DirectoryListRow
+                  key={a.id}
+                  title={a.name}
+                  meta={`${a.platform} · ${a.account_type} · ${a.currency}`}
+                  right={<span className="statusPill statusPill--good">Active</span>}
+                />
+              ))
+            )}
+          </div>
+        </section>
         </div>
       )}
     </PageShell>
