@@ -2195,7 +2195,7 @@ def data_hub_summary(
             {
                 "kind": "platform",
                 "title": f"Added platform {name}",
-                "meta": f"{platform_type.title()} · {country}",
+                "meta": f"{platform_type.replace('_', ' ').title()} · {country}",
                 "occurred_at": created_at,
             }
         )
