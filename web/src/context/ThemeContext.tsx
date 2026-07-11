@@ -17,7 +17,8 @@ export type Theme = "dark" | "light";
 export type AccentColor = "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
 
 export const ACCENT_SWATCHES: AccentColor[] = ["#0f7a5c", "#2b6ddb", "#8650d9", "#b5842a"];
-const DEFAULT_ACCENT: AccentColor = "#0f7a5c";
+export const DEFAULT_THEME: Theme = "dark";
+export const DEFAULT_ACCENT: AccentColor = "#0f7a5c";
 
 const THEME_STORAGE_KEY = "capitalos.theme";
 const ACCENT_STORAGE_KEY = "capitalos.accent";

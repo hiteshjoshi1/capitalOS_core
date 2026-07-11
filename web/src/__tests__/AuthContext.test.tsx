@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useContext } from "react";
 import { AuthContext, AuthProvider } from "../context/AuthContext";
-import { ThemeProvider } from "../context/ThemeContext";
+import { ThemeProvider, useTheme } from "../context/ThemeContext";
 
 const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
   mockApi: {
@@ -256,5 +256,52 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("user").textContent).toBe("demo");
     });
     // Should not throw — preferences failure is non-fatal
+  });
+
+  it("logout resets theme/accent to defaults so the next user gets a clean state", async () => {
+    // Simulate: user A (light theme) is logged in, then logs out.
+    // The theme should reset to dark (default) so user B doesn't inherit user A's theme.
+    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+    mockApi.authLogin.mockResolvedValueOnce({
+      access_token: "token-a",
+      token_type: "bearer",
+      expires_in: 3600,
+    });
+    mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "user_a", is_admin: false });
+    mockApi.getPreferences.mockResolvedValueOnce({ theme: "light", accent_color: "#2b6ddb" });
+    mockApi.authLogout.mockResolvedValueOnce({ status: "ok" });
+
+    function ThemeAndAuthConsumer() {
+      const { login, logout } = useContext(AuthContext);
+      const { theme } = useTheme();
+      return (
+        <div>
+          <div data-testid="theme">{theme}</div>
+          <button onClick={() => void login("user_a", "pass")}>login</button>
+          <button onClick={() => void logout()}>logout</button>
+        </div>
+      );
+    }
+
+    const user = userEvent.setup();
+    render(
+      <ThemeProvider>
+        <AuthProvider>
+          <ThemeAndAuthConsumer />
+        </AuthProvider>
+      </ThemeProvider>,
+    );
+
+    // Log in as user_a (light theme from server)
+    await user.click(screen.getByText("login"));
+    await waitFor(() => {
+      expect(screen.getByTestId("theme").textContent).toBe("light");
+    });
+
+    // Log out — theme must reset to default (dark)
+    await user.click(screen.getByText("logout"));
+    await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
+
+    expect(screen.getByTestId("theme").textContent).toBe("dark");
   });
 });

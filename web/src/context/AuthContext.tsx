@@ -3,6 +3,7 @@ import { api, refreshAccessTokenNow, setAccessToken, setAuthFailureHandler } fro
 import type { AuthMe } from "../lib/api";
 import { useTheme } from "./ThemeContext";
 import type { AccentColor, Theme } from "./ThemeContext";
+import { DEFAULT_ACCENT, DEFAULT_THEME } from "./ThemeContext";
 
 type AuthContextValue = {
   user: AuthMe | null;
@@ -150,6 +151,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         } finally {
           setAccessToken(null);
           setUser(null);
+          // Reset theme/accent to defaults so the next user starts from a clean
+          // visual state. The access token is already null here, so isAuthenticated()
+          // returns false and the effects will NOT send a PATCH to the server.
+          applyServerPreferences({ theme: DEFAULT_THEME, accent_color: DEFAULT_ACCENT });
         }
       },
     }),
