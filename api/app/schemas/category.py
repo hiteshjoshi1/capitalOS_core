@@ -88,6 +88,16 @@ class UnmappedTransactionOut(BaseModel):
     notes: str | None = None
 
 
+class CategoryOverrideBulkCreate(BaseModel):
+    transaction_ids: list[int]
+    category_id: int
+
+
+class CategoryOverrideBulkOut(BaseModel):
+    applied: int
+    transaction_ids: list[int]
+
+
 class BackfillResultOut(BaseModel):
     created: int
     updated: int

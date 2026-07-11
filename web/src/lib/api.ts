@@ -840,6 +840,16 @@ export type CategoryOverridePayload = {
   category_id: number;
 };
 
+export type CategoryOverrideBulkPayload = {
+  transaction_ids: number[];
+  category_id: number;
+};
+
+export type CategoryOverrideBulkResult = {
+  applied: number;
+  transaction_ids: number[];
+};
+
 export type CategoryResolution = {
   transaction_id: number;
   raw_category: string | null;
@@ -1738,6 +1748,11 @@ export const api = {
     ),
   categoryOverride: (payload: CategoryOverridePayload) =>
     req<CategoryResolution>("/categories/override", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  categoryOverrideBulk: (payload: CategoryOverrideBulkPayload) =>
+    req<CategoryOverrideBulkResult>("/categories/override-bulk", {
       method: "POST",
       body: JSON.stringify(payload),
     }),

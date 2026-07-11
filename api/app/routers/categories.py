@@ -12,6 +12,8 @@ from app.db.session import get_db
 from app.models.category import CategoryRule, CategoryTaxonomy
 from app.schemas.category import (
     BackfillResultOut,
+    CategoryOverrideBulkCreate,
+    CategoryOverrideBulkOut,
     CategoryOverrideCreate,
     CategoryResolutionOut,
     CategoryRuleCreate,
@@ -382,6 +384,69 @@ def apply_manual_override(
 
     db.commit()
     return CategoryResolutionOut(**resolve_category(db, payload.transaction_id))
+
+
+@router.post("/override-bulk", response_model=CategoryOverrideBulkOut)
+def apply_manual_override_bulk(
+    payload: CategoryOverrideBulkCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    if not payload.transaction_ids:
+        return CategoryOverrideBulkOut(applied=0, transaction_ids=[])
+
+    _validate_target_category(db, payload.category_id)
+
+    # Validate all transaction IDs in one query — ensures ownership and existence.
+    # Use IN with dynamic placeholders for SQLite+PostgreSQL compatibility.
+    id_params = {f"tid{i}": tid for i, tid in enumerate(payload.transaction_ids)}
+    in_clause = ", ".join(f":tid{i}" for i in range(len(payload.transaction_ids)))
+    found_rows = db.execute(
+        text(
+            f"""
+            SELECT t.id
+            FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE t.id IN ({in_clause})
+              AND """
+            + account_scope_sql("a")
+        ),
+        {**id_params, "current_user_id": current_user.id},
+    ).mappings().all()
+
+    found_ids = {int(row["id"]) for row in found_rows}
+    missing = set(payload.transaction_ids) - found_ids
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"transaction_id(s) not found: {sorted(missing)}",
+        )
+
+    now = datetime.now(tz=timezone.utc)
+    # Single atomic upsert for all transaction IDs. Loop is inside one commit so
+    # it is all-or-nothing. ON CONFLICT ... DO UPDATE is supported by both
+    # PostgreSQL and SQLite 3.24+.
+    for txn_id in payload.transaction_ids:
+        db.execute(
+            text(
+                """
+                INSERT INTO category_overrides (transaction_id, category_id, source, rule_id)
+                VALUES (:transaction_id, :category_id, 'manual', NULL)
+                ON CONFLICT (transaction_id) DO UPDATE SET
+                  category_id = EXCLUDED.category_id,
+                  source = 'manual',
+                  rule_id = NULL,
+                  updated_at = :updated_at
+                """
+            ),
+            {
+                "transaction_id": txn_id,
+                "category_id": payload.category_id,
+                "updated_at": now,
+            },
+        )
+    db.commit()
+    return CategoryOverrideBulkOut(applied=len(payload.transaction_ids), transaction_ids=payload.transaction_ids)
 
 
 @router.get("/resolve/{transaction_id}", response_model=CategoryResolutionOut)

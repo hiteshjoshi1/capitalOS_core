@@ -145,13 +145,9 @@ export default function CashFlowMapping() {
     });
 
     try {
-      // Applies the category to every transaction in the group via the existing
-      // single-transaction endpoint (see tasks/issue-192 for a proposed atomic
-      // bulk endpoint to replace this loop).
-      for (const transaction of group.transactions) {
-        await api.categoryOverride({ transaction_id: transaction.transaction_id, category_id: categoryId });
-      }
-      const appliedIds = new Set(group.transactions.map((t) => t.transaction_id));
+      const transactionIds = group.transactions.map((t) => t.transaction_id);
+      await api.categoryOverrideBulk({ transaction_ids: transactionIds, category_id: categoryId });
+      const appliedIds = new Set(transactionIds);
       setTransactions((current) => current.filter((t) => !appliedIds.has(t.transaction_id)));
     } catch (e: unknown) {
       setApplyErrors((current) => ({
