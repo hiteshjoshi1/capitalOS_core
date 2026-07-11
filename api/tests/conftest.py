@@ -505,6 +505,16 @@ def setup_db():
         )
         conn.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS user_preferences (
+              user_id INTEGER PRIMARY KEY,
+              theme TEXT NOT NULL DEFAULT 'dark',
+              accent_color TEXT NOT NULL DEFAULT '#0f7a5c',
+              updated_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS platforms (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               code TEXT NOT NULL UNIQUE,

@@ -84,7 +84,7 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
     for (const s of seriesDefs) vals.push(now[s.key] as number);
     if (vals.length === 0) return { lo: 0, hi: 1 };
     let min = Math.min(...vals, mode === "comp" ? 0 : Math.min(...vals));
-    let max = Math.max(...vals);
+    const max = Math.max(...vals);
     if (mode === "comp") min = Math.min(0, min);
     const pad = (max - min) * 0.1 || Math.abs(max) * 0.1 || 1;
     return { lo: min - (mode === "comp" ? 0 : pad), hi: max + pad };

@@ -45,3 +45,12 @@ class OAuthIdentity(Base):
     provider_subject = Column(Text, nullable=False)
     email = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    theme = Column(Text, nullable=False, default="dark")
+    accent_color = Column(Text, nullable=False, default="#0f7a5c")
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

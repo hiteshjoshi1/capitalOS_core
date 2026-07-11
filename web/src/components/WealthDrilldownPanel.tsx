@@ -56,18 +56,18 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
 
   useEffect(() => {
     let cancelled = false;
-    setMoversState("loading");
-    api
-      .netWorthTimelineMovers(month, baseCurrency, 8)
-      .then((data) => {
+    (async () => {
+      setMoversState("loading");
+      try {
+        const data = await api.netWorthTimelineMovers(month, baseCurrency, 8);
         if (!cancelled) {
           setMovers(data);
           setMoversState("ready");
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setMoversState("error");
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };
@@ -75,18 +75,22 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
 
   useEffect(() => {
     let cancelled = false;
-    setContextState("loading");
-    Promise.all([api.dividendsSummary(month, month, "month", baseCurrency), api.spendingSummary(month, baseCurrency)])
-      .then(([divData, spendData]) => {
+    (async () => {
+      setContextState("loading");
+      try {
+        const [divData, spendData] = await Promise.all([
+          api.dividendsSummary(month, month, "month", baseCurrency),
+          api.spendingSummary(month, baseCurrency),
+        ]);
         if (!cancelled) {
           setDividends(divData.buckets[0]?.net_received ?? 0);
           setNetCashFlow(spendData.net);
           setContextState("ready");
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setContextState("error");
-      });
+      }
+    })();
     return () => {
       cancelled = true;
     };

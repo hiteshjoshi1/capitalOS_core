@@ -213,9 +213,10 @@ test("loads dashboard shell on mobile breakpoint", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/");
   await expect(page.getByRole("heading", { level: 1, name: "Wealth Overview" })).toBeVisible();
-  const mobileDateBadge = page.getByRole("button", { name: /Change month or currency/ });
-  await expect(mobileDateBadge).toBeVisible();
+  await expect(page.getByRole("navigation", { name: "Mobile navigation" })).toBeVisible();
 
-  await mobileDateBadge.click();
-  await expect(page.locator(".coHeroMobileControls").getByLabel("Month")).toBeVisible();
+  const currencySelect = page.getByRole("combobox", { name: "Base currency" });
+  await expect(currencySelect).toBeVisible();
+  await currencySelect.selectOption("USD");
+  await expect(currencySelect).toHaveValue("USD");
 });

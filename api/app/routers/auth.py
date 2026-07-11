@@ -9,7 +9,18 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, require_current_user
 from app.db.session import get_db
-from app.schemas.auth import AuthMeResponse, AuthTokenResponse, LoginRequest, SignupRequest
+from app.schemas.auth import (
+    AuthMeResponse,
+    AuthTokenResponse,
+    DEFAULT_ACCENT_COLOR,
+    DEFAULT_THEME,
+    LoginRequest,
+    SignupRequest,
+    UserPreferencesResponse,
+    UserPreferencesPatchRequest,
+    VALID_ACCENT_COLORS,
+    VALID_THEMES,
+)
 from app.services.auth import (
     create_access_token,
     generate_refresh_token,
@@ -346,3 +357,88 @@ def me(current_user: CurrentUser = Depends(require_current_user), db: Session = 
         email=row["email"],
         is_admin=bool(row["is_admin"]),
     )
+
+
+@router.get("/preferences", response_model=UserPreferencesResponse)
+def get_preferences(
+    current_user: CurrentUser = Depends(require_current_user),
+    db: Session = Depends(get_db),
+):
+    row = db.execute(
+        text("SELECT theme, accent_color FROM user_preferences WHERE user_id = :user_id"),
+        {"user_id": current_user.id},
+    ).mappings().one_or_none()
+
+    if row is None:
+        now = datetime.now(tz=timezone.utc)
+        db.execute(
+            text(
+                """
+                INSERT INTO user_preferences (user_id, theme, accent_color, updated_at)
+                VALUES (:user_id, :theme, :accent_color, :now)
+                """
+            ),
+            {
+                "user_id": current_user.id,
+                "theme": DEFAULT_THEME,
+                "accent_color": DEFAULT_ACCENT_COLOR,
+                "now": now,
+            },
+        )
+        db.commit()
+        return UserPreferencesResponse(theme=DEFAULT_THEME, accent_color=DEFAULT_ACCENT_COLOR)
+
+    return UserPreferencesResponse(theme=str(row["theme"]), accent_color=str(row["accent_color"]))
+
+
+@router.patch("/preferences", response_model=UserPreferencesResponse)
+def patch_preferences(
+    payload: UserPreferencesPatchRequest,
+    current_user: CurrentUser = Depends(require_current_user),
+    db: Session = Depends(get_db),
+):
+    if payload.theme is not None and payload.theme not in VALID_THEMES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"theme must be one of: {', '.join(sorted(VALID_THEMES))}",
+        )
+    if payload.accent_color is not None and payload.accent_color not in VALID_ACCENT_COLORS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"accent_color must be one of: {', '.join(sorted(VALID_ACCENT_COLORS))}",
+        )
+
+    row = db.execute(
+        text("SELECT theme, accent_color FROM user_preferences WHERE user_id = :user_id"),
+        {"user_id": current_user.id},
+    ).mappings().one_or_none()
+
+    now = datetime.now(tz=timezone.utc)
+    if row is None:
+        new_theme = payload.theme if payload.theme is not None else DEFAULT_THEME
+        new_accent = payload.accent_color if payload.accent_color is not None else DEFAULT_ACCENT_COLOR
+        db.execute(
+            text(
+                """
+                INSERT INTO user_preferences (user_id, theme, accent_color, updated_at)
+                VALUES (:user_id, :theme, :accent_color, :now)
+                """
+            ),
+            {"user_id": current_user.id, "theme": new_theme, "accent_color": new_accent, "now": now},
+        )
+    else:
+        new_theme = payload.theme if payload.theme is not None else str(row["theme"])
+        new_accent = payload.accent_color if payload.accent_color is not None else str(row["accent_color"])
+        db.execute(
+            text(
+                """
+                UPDATE user_preferences
+                SET theme = :theme, accent_color = :accent_color, updated_at = :now
+                WHERE user_id = :user_id
+                """
+            ),
+            {"user_id": current_user.id, "theme": new_theme, "accent_color": new_accent, "now": now},
+        )
+
+    db.commit()
+    return UserPreferencesResponse(theme=new_theme, accent_color=new_accent)

@@ -4,18 +4,21 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   useState,
   type Dispatch,
   type ReactNode,
   type SetStateAction,
 } from "react";
 import { useEffect } from "react";
+import { api } from "../lib/api";
 
 export type Theme = "dark" | "light";
 export type AccentColor = "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
 
 export const ACCENT_SWATCHES: AccentColor[] = ["#0f7a5c", "#2b6ddb", "#8650d9", "#b5842a"];
-const DEFAULT_ACCENT: AccentColor = "#0f7a5c";
+export const DEFAULT_THEME: Theme = "dark";
+export const DEFAULT_ACCENT: AccentColor = "#0f7a5c";
 
 const THEME_STORAGE_KEY = "capitalos.theme";
 const ACCENT_STORAGE_KEY = "capitalos.accent";
@@ -73,6 +76,8 @@ type ThemeContextValue = {
   toggleTheme: () => void;
   accent: AccentColor;
   setAccent: Dispatch<SetStateAction<AccentColor>>;
+  /** Apply server-loaded preferences without triggering a PATCH back to the server. */
+  applyServerPreferences: (prefs: { theme: Theme; accent_color: AccentColor }) => void;
 };
 
 const fallbackSetTheme: Dispatch<SetStateAction<Theme>> = () => undefined;
@@ -85,6 +90,7 @@ const fallbackThemeContext: ThemeContextValue = {
   toggleTheme: () => undefined,
   accent: DEFAULT_ACCENT,
   setAccent: fallbackSetAccent,
+  applyServerPreferences: () => undefined,
 };
 
 const ThemeContext = createContext<ThemeContextValue>(fallbackThemeContext);
@@ -96,6 +102,28 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return initial;
   });
   const [accent, setAccent] = useState<AccentColor>(() => readStoredAccent());
+
+  // Tracks how many state changes originated from the server — those should not be
+  // PATCHed back (they're already persisted server-side). Decremented in each effect
+  // that runs as a result of applyServerPreferences(); a fallback setTimeout resets
+  // the counter to 0 for cases where the value didn't actually change (React bails out).
+  const serverSyncDepth = useRef(0);
+  const serverSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const applyServerPreferences = useCallback((prefs: { theme: Theme; accent_color: AccentColor }) => {
+    if (serverSyncTimer.current !== null) {
+      clearTimeout(serverSyncTimer.current);
+    }
+    serverSyncDepth.current += 2; // one decrement per effect (theme + accent)
+    setTheme(prefs.theme);
+    setAccent(prefs.accent_color);
+    // Safety reset: if values were unchanged React won't fire the effects, so ensure
+    // the counter is cleared after the current microtask queue drains.
+    serverSyncTimer.current = setTimeout(() => {
+      serverSyncDepth.current = 0;
+      serverSyncTimer.current = null;
+    }, 0);
+  }, []);
 
   const persistTheme = useCallback((nextTheme: Theme) => {
     if (typeof window === "undefined") {
@@ -112,14 +140,35 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyTheme(theme);
     persistTheme(theme);
+    if (serverSyncDepth.current > 0) {
+      serverSyncDepth.current = Math.max(0, serverSyncDepth.current - 1);
+      return;
+    }
+    if (api.isAuthenticated?.()) {
+      void api.patchPreferences?.({ theme }).catch(() => {});
+    }
   }, [persistTheme, theme]);
 
+  // Visual-only: re-apply accent CSS whenever accent or theme changes (theme affects
+  // the soft-blend percentage). Does NOT send a PATCH — theme changes must not trigger
+  // a redundant accent PATCH that races against the theme PATCH.
   useEffect(() => {
     applyAccent(accent, theme);
+  }, [accent, theme]);
+
+  // Persistence: localStorage write + server PATCH only when accent itself changes.
+  useEffect(() => {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
     }
-  }, [accent, theme]);
+    if (serverSyncDepth.current > 0) {
+      serverSyncDepth.current = Math.max(0, serverSyncDepth.current - 1);
+      return;
+    }
+    if (api.isAuthenticated?.()) {
+      void api.patchPreferences?.({ accent_color: accent }).catch(() => {});
+    }
+  }, [accent]);
 
   const value = useMemo(
     () => ({
@@ -129,8 +178,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       toggleTheme,
       accent,
       setAccent,
+      applyServerPreferences,
     }),
-    [accent, persistTheme, theme, toggleTheme],
+    [accent, applyServerPreferences, persistTheme, theme, toggleTheme],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
