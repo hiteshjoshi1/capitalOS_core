@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from datetime import date, datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Callable
@@ -35,6 +36,9 @@ from app.schemas.dashboard import (
     StockHoldingsResponse,
     StockExposureItem,
     StockExposureOut,
+    TopMovers,
+    WealthTimelineBackfillResponse,
+    WealthTimelineResponse,
 )
 from app.fx import get_rates
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
@@ -107,6 +111,19 @@ def _completed_snapshot_anchor_ts(month_start: datetime) -> datetime:
     if requested_anchor <= _current_anchor_ts():
         return requested_anchor
     return _anchor_ts(_add_months(month_start, -1))
+
+
+def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
+    """The anchor a "browse holdings as of {month}" view should use, and whether
+    it's live. The current (or any future) calendar month shows live data — the
+    freshest computable state, matching every other "current" view in the app.
+    Any past month shows that month's own completed snapshot boundary, not "now".
+    """
+    current_anchor = _current_anchor_ts()
+    current_month_start = current_anchor.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start >= current_month_start:
+        return current_anchor, True
+    return _anchor_ts(month_start), False
 
 
 def _effective_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> Optional[datetime]:
@@ -404,6 +421,34 @@ def _credit_card_liability_component(
     return liability, card_account_ids
 
 
+_CASH_FRESHNESS_BALANCE_TYPES = {"cash", "broker_cash", "bank_cash", "stablecoin_cash"}
+
+
+def _freshness_pair(items: list[tuple[str, Any]]) -> Dict[str, Any]:
+    """Most-recent and stalest data point across a set of (label, date) pairs.
+
+    Surfacing both instead of picking one aggregate means neither "your best
+    account" nor "your worst account" is hidden from the freshness signal.
+    """
+    dated = [(label, _iso_value(value)) for label, value in items]
+    dated = [(label, iso) for label, iso in dated if iso is not None]
+    if not dated:
+        return {
+            "most_recent_at": None,
+            "most_recent_label": None,
+            "stalest_at": None,
+            "stalest_label": None,
+        }
+    most_recent_label, most_recent_at = max(dated, key=lambda item: item[1])
+    stalest_label, stalest_at = min(dated, key=lambda item: item[1])
+    return {
+        "most_recent_at": most_recent_at,
+        "most_recent_label": most_recent_label,
+        "stalest_at": stalest_at,
+        "stalest_label": stalest_label,
+    }
+
+
 def _current_networth_state(db: Session, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     anchor = _current_anchor_ts()
     components = _networth_components(db, anchor, base_currency, current_user_id, price_overlay=True)
@@ -413,26 +458,44 @@ def _current_networth_state(db: Session, base_currency: str, current_user_id: in
         anchor_date=anchor.date(),
         include_nav_accounts=True,
     )
-    report_dates = [row.get("report_date") for row in rows if row.get("report_date") is not None]
-    market_data_as_of = min(report_dates) if report_dates else None
-    positions_as_of = _positions_coverage_as_of(db, anchor, current_user_id)
+    asset_ids = {int(row["asset_id"]) for row in rows if row.get("asset_id") is not None}
+    symbol_by_asset = {int(row["asset_id"]): row.get("symbol") for row in rows if row.get("asset_id") is not None}
+    live_prices = _latest_price_map(db, anchor, asset_ids)
+    stock_items = [
+        (symbol_by_asset.get(asset_id) or "Unknown", info.get("trade_date"))
+        for asset_id, info in live_prices.items()
+    ]
+
     crypto_valuation = latest_wallet_valuation(db, current_user_id)
-    crypto_as_of = crypto_valuation.get("holdings_as_of") or _crypto_snapshot_coverage_as_of(
+    crypto_items = [
+        (
+            wallet.get("label") or (wallet.get("address") or "")[:10] or wallet.get("chain") or "Wallet",
+            wallet.get("as_of_date"),
+        )
+        for wallet in crypto_valuation.get("wallets", [])
+        if wallet.get("as_of_date") is not None
+    ]
+
+    cash_rows = canonical_account_balance_rows(
         db,
-        anchor.date(),
-        current_user_id,
+        current_user_id=current_user_id,
+        anchor_date=anchor.date(),
     )
+    cash_items = [
+        (_display_source(row.get("platform")), row.get("as_of_date"))
+        for row in cash_rows
+        if str(row.get("balance_type") or "").lower() in _CASH_FRESHNESS_BALANCE_TYPES
+    ]
+
     cash_percent = round((components["cash"] / components["total"]) * 100, 2) if components["total"] > 0 else 0.0
     return {
         "anchor": anchor,
         "net_worth": _serialize_net_worth(components),
         "cash_percent": cash_percent,
         "freshness": {
-            "positions_as_of": _iso_value(positions_as_of),
-            "market_data_as_of": _iso_value(market_data_as_of),
-            "crypto_as_of": _iso_value(crypto_as_of),
-            "crypto_holdings_as_of": _iso_value(crypto_valuation.get("holdings_as_of")),
-            "crypto_price_as_of": _iso_value(crypto_valuation.get("price_as_of")),
+            "stocks": _freshness_pair(stock_items),
+            "crypto": _freshness_pair(crypto_items),
+            "cash": _freshness_pair(cash_items),
         },
     }
 
@@ -484,10 +547,19 @@ def _networth_components(
     current_user_id: int,
     *,
     price_overlay: bool = False,
-) -> Dict[str, float]:
-    """Compute reporting net worth components from canonical snapshots only."""
+    return_rows: bool = False,
+) -> Dict[str, float] | tuple[Dict[str, float], Dict[str, Any]]:
+    """Compute reporting net worth components from canonical snapshots only.
+
+    When return_rows=True, also returns the raw canonical rows this call fetched
+    (positions/nav/cash) so callers building a per-platform freshness breakdown
+    (the wealth rollup) don't have to re-issue the same queries.
+    """
     if anchor_ts is None:
-        return {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
+        empty = {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
+        if return_rows:
+            return empty, {"positions": [], "nav": [], "cash": []}
+        return empty
     canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
         db,
         current_user_id=current_user_id,
@@ -558,13 +630,241 @@ def _networth_components(
 
     liabilities = credit_card_liabilities
     total = cash + stocks_funds + crypto - liabilities
-    return {
+    result = {
         "cash": cash,
         "stocks_funds": stocks_funds,
         "crypto": crypto,
         "liabilities": liabilities,
         "total": total,
     }
+    if return_rows:
+        return result, {
+            "positions": canonical_pos_rows,
+            "nav": canonical_nav_rows,
+            "cash": canonical_cash_rows,
+        }
+    return result
+
+
+# ─── Wealth Timeline rollups (Phase 2) ──────────────────────────────────────
+#
+# wealth_monthly_rollups pre-aggregates one net-worth snapshot per
+# (user, month, base_currency) so the History page is a single indexed read
+# instead of recomputing _networth_components per month on every request.
+# Rows are written by _backfill_wealth_rollups, called from the timeline
+# endpoints below — never computed inline by a GET.
+
+_WEALTH_ROLLUP_CARRY_HORIZON_DAYS = 180
+_DAILY_CADENCE_PLATFORMS = {"IBKR", "CRYPTO", "COINBASE"}
+_DAILY_CADENCE_FRESH_DAYS = 3
+_MANUAL_CADENCE_FRESH_DAYS = 31
+
+
+def _platform_cadence_days(platform: str | None) -> int:
+    return _DAILY_CADENCE_FRESH_DAYS if (platform or "").upper() in _DAILY_CADENCE_PLATFORMS else _MANUAL_CADENCE_FRESH_DAYS
+
+
+def _freshness_bucket_and_days(
+    as_of: date | None,
+    anchor_date: date,
+    cadence_days: int,
+) -> tuple[str, Optional[int]]:
+    """Bucket one source's staleness at a historical anchor: fresh/carried/missing.
+
+    "stale" (a normally-daily source gone quiet) isn't distinguishable from
+    "carried" with only a single as_of date, so daily and manual sources share
+    this three-way bucket; the cadence threshold is what differs between them.
+    """
+    if as_of is None:
+        return "missing", None
+    days = (anchor_date - as_of).days
+    if days < 0:
+        return "missing", None
+    if days <= cadence_days:
+        return "fresh", days
+    if days <= _WEALTH_ROLLUP_CARRY_HORIZON_DAYS:
+        return "carried", days
+    return "missing", days
+
+
+def _platform_freshness_entries(
+    rows: Dict[str, Any],
+    anchor_date: date,
+    crypto_as_of: Optional[date],
+) -> list[dict[str, Any]]:
+    nav_account_ids = {
+        int(row["legacy_account_id"])
+        for row in rows.get("nav", [])
+        if row.get("legacy_account_id") is not None
+    }
+    latest_by_platform: Dict[str, date] = {}
+
+    def _note(platform: Optional[str], value: Any) -> None:
+        if value is None:
+            return
+        as_of = date.fromisoformat(value) if isinstance(value, str) else value
+        key = platform or "UNKNOWN"
+        if key not in latest_by_platform or as_of > latest_by_platform[key]:
+            latest_by_platform[key] = as_of
+
+    for row in rows.get("positions", []):
+        _note(row.get("platform"), row.get("report_date"))
+    for row in rows.get("nav", []):
+        _note(row.get("platform"), row.get("report_date"))
+    for row in rows.get("cash", []):
+        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
+            continue
+        _note(row.get("platform"), row.get("as_of_date"))
+
+    entries: list[dict[str, Any]] = []
+    for platform, as_of in latest_by_platform.items():
+        status, days_old = _freshness_bucket_and_days(as_of, anchor_date, _platform_cadence_days(platform))
+        entries.append({
+            "platform": platform,
+            "as_of": as_of.isoformat(),
+            "days_old": days_old,
+            "status": status,
+        })
+    if crypto_as_of is not None:
+        status, days_old = _freshness_bucket_and_days(crypto_as_of, anchor_date, _DAILY_CADENCE_FRESH_DAYS)
+        entries.append({
+            "platform": "CRYPTO",
+            "as_of": crypto_as_of.isoformat(),
+            "days_old": days_old,
+            "status": status,
+        })
+    entries.sort(key=lambda e: e["platform"])
+    return entries
+
+
+_FRESHNESS_STATUS_RANK = {"fresh": 0, "carried": 1, "stale": 2, "missing": 3}
+
+
+def _worst_freshness_status(entries: list[dict[str, Any]]) -> str:
+    if not entries:
+        return "missing"
+    return max((e["status"] for e in entries), key=lambda s: _FRESHNESS_STATUS_RANK.get(s, 3))
+
+
+def _wealth_rollup_row(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+) -> Dict[str, Any]:
+    """Compute one month's rollup row. Snapshot-consistent values only
+    (price_overlay=False) — the timeline never mixes live-priced "now" values
+    into a historical point; "now" is rendered as a separate provisional marker."""
+    components, rows = _networth_components(
+        db, anchor_ts, base_currency, current_user_id, price_overlay=False, return_rows=True,
+    )
+    crypto_as_of = _crypto_snapshot_coverage_as_of(db, anchor_ts.date(), current_user_id)
+    source_freshness = _platform_freshness_entries(rows, anchor_ts.date(), crypto_as_of)
+    return {
+        "anchor_date": anchor_ts.date(),
+        "components": components,
+        "source_freshness": source_freshness,
+        "freshness_status": _worst_freshness_status(source_freshness),
+    }
+
+
+def _upsert_wealth_rollup(
+    db: Session,
+    current_user_id: int,
+    month: str,
+    base_currency: str,
+    row: Dict[str, Any],
+) -> None:
+    components = row["components"]
+    # SQLite (used by the test suite) has no JSONB type or NOW(); Postgres gets
+    # the real cast, SQLite gets the plain bound string / a Python-side timestamp.
+    is_postgres = bool(db.bind and db.bind.dialect.name == "postgresql")
+    json_cast = "CAST(:source_freshness AS JSONB)" if is_postgres else ":source_freshness"
+    computed_at = datetime.now(tz=timezone.utc)
+    db.execute(
+        text(
+            f"""
+            INSERT INTO wealth_monthly_rollups
+              (user_id, month, anchor_date, base_currency, total, cash, stocks_funds, crypto,
+               liabilities, source_freshness, freshness_status, computed_at)
+            VALUES
+              (:user_id, :month, :anchor_date, :base_currency, :total, :cash, :stocks_funds, :crypto,
+               :liabilities, {json_cast}, :freshness_status, :computed_at)
+            ON CONFLICT (user_id, month, base_currency) DO UPDATE SET
+              anchor_date = EXCLUDED.anchor_date,
+              total = EXCLUDED.total,
+              cash = EXCLUDED.cash,
+              stocks_funds = EXCLUDED.stocks_funds,
+              crypto = EXCLUDED.crypto,
+              liabilities = EXCLUDED.liabilities,
+              source_freshness = EXCLUDED.source_freshness,
+              freshness_status = EXCLUDED.freshness_status,
+              computed_at = EXCLUDED.computed_at
+            """
+        ),
+        {
+            "user_id": current_user_id,
+            "month": month,
+            "anchor_date": row["anchor_date"],
+            "base_currency": base_currency,
+            "total": components["total"],
+            "cash": components["cash"],
+            "stocks_funds": components["stocks_funds"],
+            "crypto": components["crypto"],
+            "liabilities": components["liabilities"],
+            "source_freshness": json.dumps(row["source_freshness"]),
+            "freshness_status": row["freshness_status"],
+            "computed_at": computed_at,
+        },
+    )
+
+
+def _backfill_wealth_rollups(
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    months: int,
+) -> int:
+    current_month_start = _current_anchor_ts().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    written = 0
+    for offset in range(-(months - 1), 1):
+        month_start = _add_months(current_month_start, offset)
+        anchor = _completed_snapshot_anchor_ts(month_start)
+        row = _wealth_rollup_row(db, anchor, base_currency, current_user_id)
+        _upsert_wealth_rollup(db, current_user_id, month_start.strftime("%Y-%m"), base_currency, row)
+        written += 1
+    db.commit()
+    return written
+
+
+def _timeline_upload_markers(
+    db: Session,
+    current_user_id: int,
+    since_month_start: datetime,
+) -> Dict[str, list[str]]:
+    """Months where a manual statement import completed, for the timeline's
+    upload-marker ticks. Keyed by 'YYYY-MM' -> list of platform codes."""
+    rows = db.execute(
+        text(
+            """
+            SELECT ij.platform, ij.created_at
+            FROM import_jobs ij
+            JOIN accounts a ON a.id = ij.account_id
+            WHERE ij.status = 'IMPORTED'
+              AND ij.created_at >= :since
+              AND """
+            + account_scope_sql("a")
+        ),
+        {"since": since_month_start, "current_user_id": current_user_id},
+    ).mappings().all()
+    markers: Dict[str, set[str]] = {}
+    for row in rows:
+        created_at = _normalize_ts(row["created_at"])
+        if created_at is None:
+            continue
+        month_key = created_at.strftime("%Y-%m")
+        markers.setdefault(month_key, set()).add(str(row["platform"] or "").upper())
+    return {month: sorted(platforms) for month, platforms in markers.items()}
 
 
 def _geography(
@@ -1724,6 +2024,135 @@ def dashboard_net_worth_change(
     }
 
 
+@router.post("/net-worth-timeline/backfill", response_model=WealthTimelineBackfillResponse)
+def net_worth_timeline_backfill(
+    months: int = Query(36, ge=1, le=120, description="How many trailing months to (re)compute"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """(Re)compute and upsert wealth_monthly_rollups for the trailing N months.
+
+    Idempotent — safe to call repeatedly (e.g. after a new statement upload,
+    or from a "Refresh history" action) since every row is an upsert keyed on
+    (user, month, base_currency).
+    """
+    written = _backfill_wealth_rollups(db, current_user.id, base_currency, months)
+    return {"months_written": written, "base_currency": base_currency}
+
+
+@router.get("/net-worth-timeline", response_model=WealthTimelineResponse)
+def net_worth_timeline(
+    months: int = Query(24, ge=1, le=120),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Read-mostly: serves wealth_monthly_rollups directly (one indexed scan).
+
+    Only the current, still-open month is opportunistically refreshed inline
+    when stale — every earlier month is a pure read, so this endpoint never
+    pays for a full historical recompute (see _backfill_wealth_rollups for
+    that path, called explicitly by the frontend or an upload hook).
+    """
+    current_month_start = _current_anchor_ts().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    range_start = _add_months(current_month_start, -(months - 1))
+    current_month_key = current_month_start.strftime("%Y-%m")
+
+    existing_current = db.execute(
+        text(
+            "SELECT computed_at FROM wealth_monthly_rollups "
+            "WHERE user_id = :user_id AND month = :month AND base_currency = :base_currency"
+        ),
+        {"user_id": current_user.id, "month": current_month_key, "base_currency": base_currency},
+    ).mappings().first()
+    computed_at = _normalize_ts(existing_current["computed_at"]) if existing_current else None
+    needs_refresh = computed_at is None or (datetime.now(tz=timezone.utc) - computed_at) > timedelta(hours=6)
+    if needs_refresh:
+        anchor = _completed_snapshot_anchor_ts(current_month_start)
+        row = _wealth_rollup_row(db, anchor, base_currency, current_user.id)
+        _upsert_wealth_rollup(db, current_user.id, current_month_key, base_currency, row)
+        db.commit()
+
+    rollup_rows = db.execute(
+        text(
+            """
+            SELECT month, anchor_date, total, cash, stocks_funds, crypto, liabilities,
+                   source_freshness, freshness_status, computed_at
+            FROM wealth_monthly_rollups
+            WHERE user_id = :user_id AND base_currency = :base_currency AND month >= :from_month
+            ORDER BY month ASC
+            """
+        ),
+        {
+            "user_id": current_user.id,
+            "base_currency": base_currency,
+            "from_month": range_start.strftime("%Y-%m"),
+        },
+    ).mappings().all()
+
+    upload_markers = _timeline_upload_markers(db, current_user.id, range_start)
+
+    points = []
+    for row in rollup_rows:
+        source_freshness = row["source_freshness"]
+        if isinstance(source_freshness, str):
+            source_freshness = json.loads(source_freshness)
+        anchor_date = row["anchor_date"]
+        points.append({
+            "month": row["month"],
+            "anchor_date": anchor_date if isinstance(anchor_date, str) else anchor_date.isoformat(),
+            "total": float(row["total"]),
+            "cash": float(row["cash"]),
+            "stocks_funds": float(row["stocks_funds"]),
+            "crypto": float(row["crypto"]),
+            "liabilities": float(row["liabilities"]),
+            "source_freshness": source_freshness,
+            "freshness_status": row["freshness_status"],
+            "computed_at": _iso_value(row["computed_at"]),
+            "uploads": upload_markers.get(row["month"], []),
+        })
+
+    current_state = _current_networth_state(db, base_currency, current_user.id)
+
+    return {
+        "base_currency": base_currency,
+        "points": points,
+        "now": {
+            **current_state["net_worth"],
+            "as_of": current_state["anchor"].isoformat(),
+        },
+    }
+
+
+@router.get("/net-worth-timeline/{month}/movers", response_model=TopMovers)
+def net_worth_timeline_movers(
+    month: str,
+    base_currency: str = Query("SGD"),
+    limit: int = Query(5, ge=1, le=20),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Top movers within holdings for one rollup month vs. the prior month —
+    the drill-down's "what specifically moved" answer. Reuses the same
+    holdings-diff logic /summary already uses for the current month, just
+    parameterized by an arbitrary historical month; on-demand only (not
+    stored), so it stays out of the timeline read path's hot loop.
+    """
+    month_start = _parse_month(month)
+    anchor = _completed_snapshot_anchor_ts(month_start)
+    prev_month_start = _add_months(month_start, -1)
+    prev_anchor = _completed_snapshot_anchor_ts(prev_month_start)
+
+    nw = _networth_components(db, anchor, base_currency, current_user.id)
+    prev_nw = _networth_components(db, prev_anchor, base_currency, current_user.id)
+    current_holdings = _top_holdings(db, anchor, nw["total"], base_currency, current_user.id, limit=250)
+    prior_holdings = _top_holdings(db, prev_anchor, prev_nw["total"], base_currency, current_user.id, limit=250)
+    return _top_movers_from_holdings(
+        current_holdings, prior_holdings, prev_month_start.strftime("%Y-%m"), limit=limit
+    )
+
+
 @router.get("/summary", response_model=DashboardSummaryResponse)
 def dashboard_summary(
     month: str = Query(..., description="YYYY-MM"),
@@ -1888,40 +2317,45 @@ def stock_holdings_summary(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
+    # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
+    # is live "now" data (current/future month) or a completed historical boundary.
+    # stock_current_total/top_holdings/geography_breakdown/platform_breakdown are all
+    # anchored to that same point; stock_snapshot_total is the PRIOR month, for a
+    # stable "vs last month" comparison (not "vs whatever month happens to be picked").
     month_start = _parse_month(month)
-    anchor = _completed_snapshot_anchor_ts(month_start)
-    current_anchor = _current_anchor_ts()
+    effective_anchor, is_live = _effective_anchor_for_month(month_start)
+    compare_anchor = _anchor_ts(_add_months(month_start, -1))
     snapshot_day = _configured_snapshot_day()
     top_holdings_limit = _summary_top_holdings_limit()
-    as_of = _effective_as_of(db, anchor, current_user.id)
-    current_holdings_as_of = _positions_coverage_as_of(db, current_anchor, current_user.id)
-    reporting_as_of = anchor if as_of is not None else None
-    boundary_exact = as_of.date() == anchor.date() if as_of is not None else False
+    as_of = _effective_as_of(db, effective_anchor, current_user.id)
+    holdings_as_of = _positions_coverage_as_of(db, effective_anchor, current_user.id)
+    reporting_as_of = effective_anchor if as_of is not None else None
+    boundary_exact = as_of.date() == effective_anchor.date() if as_of is not None else False
     freshness_status = "exact" if boundary_exact else ("synthetic" if as_of is not None else "missing")
-    current_nw = _networth_components(db, current_anchor, base_currency, current_user.id, price_overlay=True)
+    nw = _networth_components(db, effective_anchor, base_currency, current_user.id, price_overlay=is_live)
     top = [
         row
         for row in _top_holdings(
             db,
-            current_anchor,
-            current_nw["total"],
+            effective_anchor,
+            nw["total"],
             base_currency,
             current_user.id,
             limit=top_holdings_limit,
-            price_overlay=True,
+            price_overlay=is_live,
         )
         if str(row.get("asset_class") or "").upper() in {"STOCK", "FUND"}
     ]
-    current_stock_exposure = _stock_exposure(
+    stock_exposure = _stock_exposure(
         db,
-        current_anchor,
+        effective_anchor,
         base_currency,
         current_user.id,
-        price_overlay=True,
+        price_overlay=is_live,
     )
-    snapshot_stock_exposure = _stock_exposure(db, anchor, base_currency, current_user.id)
-    geography_breakdown = _stock_geography_breakdown(current_stock_exposure, snapshot_stock_exposure)
-    platform_breakdown = _stock_platform_breakdown(current_stock_exposure, snapshot_stock_exposure)
+    compare_stock_exposure = _stock_exposure(db, compare_anchor, base_currency, current_user.id)
+    geography_breakdown = _stock_geography_breakdown(stock_exposure, compare_stock_exposure)
+    platform_breakdown = _stock_platform_breakdown(stock_exposure, compare_stock_exposure)
     quote_freshness_summary = _quote_freshness_summary(top)
     trend = [MiniTrendPoint(**point) for point in _stock_trend(db, month_start, base_currency, current_user.id)]
 
@@ -1929,17 +2363,19 @@ def stock_holdings_summary(
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": snapshot_day,
-        "current_holdings_as_of": current_holdings_as_of.isoformat() if current_holdings_as_of else None,
+        "is_live": is_live,
+        "compare_month": _add_months(month_start, -1).strftime("%Y-%m"),
+        "current_holdings_as_of": holdings_as_of.isoformat() if holdings_as_of else None,
         "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
-        "net_worth_snapshot_as_of": as_of.isoformat() if as_of else None,
-        "net_worth_boundary_at": anchor.isoformat(),
+        "net_worth_snapshot_as_of": _iso_value(_effective_as_of(db, compare_anchor, current_user.id)),
+        "net_worth_boundary_at": effective_anchor.isoformat(),
         "net_worth_boundary_exact": boundary_exact,
         "net_worth_freshness_status": freshness_status,
         "top_holdings": top,
         "geography_breakdown": geography_breakdown,
         "platform_breakdown": platform_breakdown,
-        "stock_current_total": current_stock_exposure["total"],
-        "stock_snapshot_total": snapshot_stock_exposure["total"],
+        "stock_current_total": stock_exposure["total"],
+        "stock_snapshot_total": compare_stock_exposure["total"],
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
     }
@@ -1970,15 +2406,20 @@ def cash_deposits(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
+    # "browse cash as of {month}" — effective_anchor/is_live decide whether this is
+    # live "now" data (current/future month) or a completed historical boundary.
+    # The "Where cash sits" breakdown (payload/items) and current_total both follow
+    # that same point; snapshot_total is the PRIOR month, for a stable "vs last
+    # month" comparison (not "vs whatever month happens to be picked").
     month_start = _parse_month(month)
-    anchor = _anchor_ts(month_start)
-    current_anchor = _current_anchor_ts()
-    payload = _cash_deposits(db, current_anchor, base_currency, current_user.id)
-    snapshot_balances = _cash_balances(db, anchor, base_currency, current_user.id) + _stablecoin_cash_balances(
-        db, anchor, base_currency, current_user.id
+    effective_anchor, is_live = _effective_anchor_for_month(month_start)
+    compare_anchor = _anchor_ts(_add_months(month_start, -1))
+    payload = _cash_deposits(db, effective_anchor, base_currency, current_user.id)
+    snapshot_balances = _cash_balances(db, compare_anchor, base_currency, current_user.id) + _stablecoin_cash_balances(
+        db, compare_anchor, base_currency, current_user.id
     )
-    current_balances = _cash_balances(db, current_anchor, base_currency, current_user.id) + _stablecoin_cash_balances(
-        db, current_anchor, base_currency, current_user.id
+    current_balances = _cash_balances(db, effective_anchor, base_currency, current_user.id) + _stablecoin_cash_balances(
+        db, effective_anchor, base_currency, current_user.id
     )
     current_total = _sum_balances(current_balances)
     snapshot_total = _sum_balances(snapshot_balances)
@@ -1989,8 +2430,10 @@ def cash_deposits(
         as_of_month=month,
         base_currency=base_currency,
         snapshot_day=_configured_snapshot_day(),
-        current_cash_as_of=_iso_value(_effective_as_of(db, current_anchor, current_user.id)),
-        snapshot_cash_as_of=_iso_value(_effective_as_of(db, anchor, current_user.id)),
+        is_live=is_live,
+        compare_month=_add_months(month_start, -1).strftime("%Y-%m"),
+        current_cash_as_of=_iso_value(_effective_as_of(db, effective_anchor, current_user.id)),
+        snapshot_cash_as_of=_iso_value(_effective_as_of(db, compare_anchor, current_user.id)),
         current_total=current_total,
         snapshot_total=snapshot_total,
         delta_abs=delta_abs,

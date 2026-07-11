@@ -413,17 +413,20 @@ def test_ibkr_flex_dashboard_uses_canonical_nav(client, db_engine, tmp_path, mon
         }
     ]
 
+    # month=2026-02 is a past month relative to real "now", so stock-holdings compares
+    # against January's boundary — no data seeded there, so snapshot_value is 0.
     stock_response = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=SGD")
     assert stock_response.status_code == 200
     stock_payload = stock_response.json()
+    assert stock_payload["is_live"] is False
     assert stock_payload["stock_current_total"] == pytest.approx(1353.5)
     assert stock_payload["platform_breakdown"] == [
         {
             "key": "IBKR",
             "current_value": 1353.5,
-            "snapshot_value": 1353.5,
-            "delta_abs": 0.0,
-            "delta_pct": 0.0,
+            "snapshot_value": 0.0,
+            "delta_abs": 1353.5,
+            "delta_pct": None,
             "percent": 100.0,
         }
     ]

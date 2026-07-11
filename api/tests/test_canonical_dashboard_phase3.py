@@ -708,17 +708,22 @@ def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
     assert platform_payload["items"][0]["platform"] == "IBKR"
     assert platform_payload["items"][0]["value"] == pytest.approx(4000.0)
 
+    # month=2026-02 is a past month (real "now" is well after this fixture's dates),
+    # so stock-holdings now reports Feb's own boundary as "current" and Jan's boundary
+    # (no seeded data) as the comparison — snapshot_value is legitimately 0 here, not
+    # a re-read of the same month.
     holdings_resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=USD")
     assert holdings_resp.status_code == 200
     holdings_payload = holdings_resp.json()
+    assert holdings_payload["is_live"] is False
     assert holdings_payload["stock_current_total"] == pytest.approx(3000.0)
     assert holdings_payload["platform_breakdown"] == [
         {
             "key": "IBKR",
             "current_value": 3000.0,
-            "snapshot_value": 3000.0,
-            "delta_abs": 0.0,
-            "delta_pct": 0.0,
+            "snapshot_value": 0.0,
+            "delta_abs": 3000.0,
+            "delta_pct": None,
             "percent": 100.0,
         }
     ]
@@ -881,11 +886,16 @@ def test_stock_holdings_current_value_uses_latest_quote_for_stale_upload_holding
             )
         )
 
-    resp = client.get("/dashboard/stock-holdings?month=2026-02&base_currency=SGD")
+    # Query the live/current month (matches the mocked "now" of 2026-03-01) so the
+    # hero re-prices the stale Feb 20 holding with the latest quote — that's what this
+    # test verifies. A past-month query would correctly show the unrepriced snapshot
+    # value instead (see test_stock_holdings_summary_follows_selected_month_not_always_current).
+    resp = client.get("/dashboard/stock-holdings?month=2026-03&base_currency=SGD")
     assert resp.status_code == 200
     payload = resp.json()
     holding = next(row for row in payload["top_holdings"] if row["symbol"] == "S68")
 
+    assert payload["is_live"] is True
     assert payload["stock_current_total"] == pytest.approx(1100.0)
     assert payload["stock_snapshot_total"] == pytest.approx(950.0)
     assert holding["value"] == pytest.approx(1100.0)

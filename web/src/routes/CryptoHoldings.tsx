@@ -84,7 +84,7 @@ export default function CryptoHoldings() {
   return (
     <PageShell
       title="Crypto Holdings"
-      subtitle="Detailed wallet, token, and chain-level exposure."
+      subtitle="Wallet, token, and chain-level exposure as of any month."
       activeRoute="/crypto/holdings"
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
@@ -118,13 +118,17 @@ export default function CryptoHoldings() {
       {state === "ready" && (
         <div className="wealthOverviewLayout">
           <HeroMetricCard
-            eyebrow="CURRENT CRYPTO VALUE"
+            eyebrow={summary?.is_live ? "CURRENT CRYPTO VALUE" : `CRYPTO VALUE — ${summary?.month ?? month}`}
             value={formatMoney(summary?.total_crypto_base)}
             deltaChip={{
               text: `${deltaPositive ? "+" : "-"}${summary?.snapshot_delta_pct == null ? "—" : Math.abs(summary.snapshot_delta_pct * 100).toFixed(1) + "%"}`,
               positive: deltaPositive,
             }}
-            insightText={`USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · Holdings as of ${formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)} (${holdingsFresh ? "fresh" : "stale"}) · Prices as of ${formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)} (${pricesFresh ? "fresh" : "stale"}${summary?.refresh_triggered ? ", refreshing" : ""})`}
+            insightText={
+              summary?.is_live
+                ? `USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · Holdings as of ${formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)} (${holdingsFresh ? "fresh" : "stale"}) · Prices as of ${formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)} (${pricesFresh ? "fresh" : "stale"}${summary?.refresh_triggered ? ", refreshing" : ""})`
+                : `USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · historical snapshot as of ${formatDate(summary?.as_of)} · vs ${summary?.compare_month ?? "last month"}`
+            }
           />
 
           <section>

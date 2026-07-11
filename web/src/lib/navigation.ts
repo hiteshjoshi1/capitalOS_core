@@ -32,6 +32,7 @@ export const APP_SECTIONS: AppSection[] = [
       { label: "Cash", to: "/cash" },
       { label: "Dividends", to: "/dividends" },
       { label: "Risk", to: "/risk" },
+      { label: "History", to: "/wealth/history" },
     ],
   },
   {

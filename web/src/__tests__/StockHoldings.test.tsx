@@ -21,6 +21,8 @@ const summaryFixture: StockHoldingsSummary = {
   as_of_month: "2026-02",
   base_currency: "SGD",
   snapshot_day: 6,
+  is_live: false,
+  compare_month: "2026-01",
   current_holdings_as_of: "2026-03-01T00:00:00+00:00",
   net_worth_as_of: "2026-03-01T00:00:00+00:00",
   net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
@@ -225,10 +227,13 @@ describe("StockHoldings", () => {
   });
 
   it("refreshes market data before reloading stock holdings", async () => {
+    // Refresh only makes sense for the live/current month — a disabled button on a
+    // historical month is covered separately below.
+    const liveFixture: StockHoldingsSummary = { ...summaryFixture, is_live: true };
     mockApi.marketDataRefreshNow.mockResolvedValueOnce({ status: "ok", exchanges: [] });
-    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
     mockApi.stockHoldingsSummary.mockResolvedValueOnce({
-      ...summaryFixture,
+      ...liveFixture,
       quote_freshness_summary: {
         fresh: 2,
         stale: 0,
@@ -252,6 +257,21 @@ describe("StockHoldings", () => {
       expect(mockApi.marketDataRefreshNow).toHaveBeenCalledTimes(1);
       expect(mockApi.stockHoldingsSummary).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("disables refresh quotes when viewing a historical (non-live) month", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...summaryFixture, is_live: false });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh quotes" })).toBeDisabled();
   });
 
   it("shows top 20 positions first and reveals more on Next", async () => {
