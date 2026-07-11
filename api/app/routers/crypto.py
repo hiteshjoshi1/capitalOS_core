@@ -537,6 +537,20 @@ def _month_window(end_month_start: datetime, months: int = 6) -> list[datetime]:
     return [_add_months(end_month_start, offset) for offset in range(-(months - 1), 1)]
 
 
+def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
+    """The anchor a "browse holdings as of {month}" view should use, and whether
+    it's live. The current (or any future) calendar month shows live data — the
+    freshest computable state; any past month shows that month's own completed
+    snapshot boundary, not "now". Mirrors dashboard.py's helper of the same name
+    (duplicated, not imported — this router keeps its own month/anchor helpers).
+    """
+    now = datetime.now(tz=timezone.utc)
+    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if month_start >= current_month_start:
+        return now, True
+    return _anchor_date(month_start), False
+
+
 def _iso_date_value(value: Any) -> str | None:
     if value is None:
         return None
@@ -639,62 +653,6 @@ def _latest_wallet_items(
     return [dict(row) for row in rows]
 
 
-def _latest_and_previous_wallet_items(db: Session, current_user_id: int) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    rows = db.execute(
-        text(
-            """
-            WITH ranked AS (
-              SELECT
-                s.id,
-                s.wallet_id,
-                s.as_of_date,
-                ROW_NUMBER() OVER (
-                  PARTITION BY s.wallet_id
-                  ORDER BY s.as_of_date DESC, s.fetched_at DESC NULLS LAST, s.id DESC
-                ) AS rn
-              FROM crypto_wallet_snapshots s
-              JOIN crypto_wallets w ON w.id = s.wallet_id
-              WHERE w.status = 'active'
-                AND """
-            + _wallet_scope_sql("w")
-            + """
-            )
-            SELECT
-              r.wallet_id,
-              r.as_of_date,
-              r.rn,
-              w.address,
-              w.label,
-              w.chain_type AS wallet_chain_type,
-              w.chain AS wallet_chain,
-              i.symbol,
-              i.chain,
-              i.chain_type,
-              i.normalized_amount,
-              i.price_usd,
-              i.value_usd
-            FROM ranked r
-            JOIN crypto_wallets w ON w.id = r.wallet_id
-            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = r.id
-            WHERE r.rn <= 2
-              AND """
-            + _wallet_scope_sql("w")
-            + """
-            """
-        ),
-        {"current_user_id": current_user_id},
-    ).mappings().all()
-    current_items: list[dict[str, Any]] = []
-    previous_items: list[dict[str, Any]] = []
-    for row in rows:
-        record = dict(row)
-        if int(record["rn"]) == 1:
-            current_items.append(record)
-        elif int(record["rn"]) == 2:
-            previous_items.append(record)
-    return current_items, previous_items
-
-
 def _crypto_total_and_freshness(wallet_rows: list[dict[str, Any]]) -> tuple[float, datetime | None, bool]:
     total_usd = 0.0
     last_refreshed = None
@@ -742,20 +700,29 @@ def crypto_summary(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
+    # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
+    # is live "now" data (current/future month) or a completed historical boundary.
+    # display_valuation/holdings/wallet_exposure/chain_exposure are all anchored to
+    # that same point; snapshot_* fields are the PRIOR month, for a stable "vs last
+    # month" comparison (not "vs whatever month happens to be picked").
     selected_month_start = _parse_month_start(month)
-    snapshot_anchor = _anchor_date(selected_month_start)
+    effective_anchor, is_live = _effective_anchor_for_month(selected_month_start)
+    compare_month_start = _add_months(selected_month_start, -1)
+    snapshot_anchor = _anchor_date(compare_month_start)
 
-    current_valuation = latest_wallet_valuation(db, current_user.id)
+    display_valuation = latest_wallet_valuation(
+        db, current_user.id, as_of_date=None if is_live else effective_anchor.date()
+    )
     snapshot_valuation = latest_wallet_valuation(db, current_user.id, as_of_date=snapshot_anchor.date())
-    wallet_rows = current_valuation["wallets"]
+    wallet_rows = display_valuation["wallets"]
     snapshot_wallet_rows = snapshot_valuation["wallets"]
-    current_items = current_valuation["items"]
-    _, previous_items = _latest_and_previous_wallet_items(db, current_user.id)
+    current_items = display_valuation["items"]
+    previous_items = snapshot_valuation["items"]
     snapshot_items = snapshot_valuation["items"]
 
     total_usd, last_refreshed, _ = _crypto_total_and_freshness(wallet_rows)
     snapshot_total_usd, _, _ = _crypto_total_and_freshness(snapshot_wallet_rows)
-    is_stale = bool(current_valuation["stale_holdings"] or current_valuation["stale_prices"])
+    is_stale = bool(display_valuation["stale_holdings"] or display_valuation["stale_prices"])
     rate = get_rates(datetime.now(tz=timezone.utc), base_currency, {"USD"}).get("USD", 1.0)
     total_base = total_usd * rate
     snapshot_total_base = snapshot_total_usd * rate
@@ -898,6 +865,13 @@ def crypto_summary(
 
     return {
         "month": selected_month_start.strftime("%Y-%m"),
+        "is_live": is_live,
+        "compare_month": compare_month_start.strftime("%Y-%m"),
+        # The anchor this view is actually computed at — deterministic, unlike
+        # holdings_as_of/price_as_of below (which are per-source provider
+        # metadata and can lag behind the anchor, e.g. a backfilled snapshot
+        # whose fetch timestamp doesn't match its as_of_date bucket).
+        "as_of": effective_anchor.isoformat(),
         "snapshot_day": _snapshot_day(),
         "snapshot_as_of": snapshot_as_of,
         "total_crypto_usd": total_usd,
@@ -930,12 +904,12 @@ def crypto_summary(
         "chain_exposure": chain_exposure,
         "wallet_chain_exposure": wallet_chain_exposure,
         "last_refreshed_at": last_refreshed.isoformat() if last_refreshed else None,
-        "holdings_as_of": current_valuation["holdings_as_of"].isoformat()
-        if current_valuation["holdings_as_of"]
+        "holdings_as_of": display_valuation["holdings_as_of"].isoformat()
+        if display_valuation["holdings_as_of"]
         else None,
-        "price_as_of": current_valuation["price_as_of"].isoformat() if current_valuation["price_as_of"] else None,
-        "stale_holdings": bool(current_valuation["stale_holdings"]),
-        "stale_prices": bool(current_valuation["stale_prices"]),
+        "price_as_of": display_valuation["price_as_of"].isoformat() if display_valuation["price_as_of"] else None,
+        "stale_holdings": bool(display_valuation["stale_holdings"]),
+        "stale_prices": bool(display_valuation["stale_prices"]),
         "is_stale": is_stale,
         "refresh_triggered": False,
     }

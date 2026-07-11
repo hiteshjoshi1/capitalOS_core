@@ -19,6 +19,12 @@
   --shadow: rgba(0, 0, 0, 0.5);
   --surface-glow: rgba(255, 255, 255, 0.03);
   --radius: 24px;
+  /* Wealth History chart series — validated categorical palette (dark surface) */
+  --wh-total: var(--text);
+  --wh-stocks: #4f8cff;
+  --wh-cash: #18a370;
+  --wh-crypto: #7d67ff;
+  --wh-spend: #c98500;
 }
 
 [data-theme="light"] {
@@ -42,6 +48,12 @@
   --shadow: rgba(31, 36, 33, 0.06);
   --surface-glow: rgba(15, 122, 92, 0.04);
   --radius: 22px;
+  /* Wealth History chart series — validated categorical palette (light surface) */
+  --wh-total: var(--text);
+  --wh-stocks: #2a6fd4;
+  --wh-cash: #128a5e;
+  --wh-crypto: #6a52e8;
+  --wh-spend: #b57a10;
 }
 
 body {
@@ -5516,16 +5528,6 @@ a.btn {
   margin-bottom: 0;
 }
 
-/* Mobile date/currency badge — hidden on desktop */
-.coHeroDateBadge {
-  display: none;
-}
-
-/* Inline controls revealed when badge is tapped — hidden on desktop */
-.coHeroMobileControls {
-  display: none;
-}
-
 .coHeroEyebrow {
   margin: 0 0 8px;
   font-size: 11px;
@@ -5577,6 +5579,100 @@ a.btn {
   line-height: 1.4;
 }
 
+/* Per-source freshness chips — replaces a single "As of ..." line so each
+   source's own staleness is visible instead of averaged away. */
+.coFreshnessRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.coFreshnessChip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: default;
+}
+
+.coFreshnessTooltip {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 210px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  font-size: 12px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-4px);
+  transition: opacity 120ms ease, transform 120ms ease;
+  pointer-events: none;
+}
+
+.coFreshnessChip:hover .coFreshnessTooltip,
+.coFreshnessChip:focus-visible .coFreshnessTooltip {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.coFreshnessTooltipRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+.coFreshnessTooltipRow span:first-child {
+  color: var(--muted);
+}
+
+.coFreshnessChip strong {
+  font-weight: 600;
+}
+
+.coFreshnessChip span {
+  color: var(--muted);
+}
+
+.coFreshnessChipCarried {
+  border-style: dashed;
+}
+
+.coFreshnessDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.coFreshnessDotFresh {
+  background: var(--good);
+}
+
+.coFreshnessDotCarried {
+  background: var(--warn);
+}
+
+.coFreshnessDotMissing {
+  background: var(--muted);
+}
+
 .coHeroDeltaRow {
   display: flex;
   gap: 28px;
@@ -5584,6 +5680,29 @@ a.btn {
   padding-top: 20px;
   border-top: 1px solid var(--line);
   flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Entry point into the Wealth Timeline History page */
+.coHeroHistoryTeaser {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.14s ease;
+}
+
+.coHeroHistoryTeaser:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 .coHeroDelta {
@@ -6052,47 +6171,10 @@ html, body {
     grid-column: span 1;
   }
 
-  /* Hide WealthOverview topbar controls on mobile — replaced by in-hero date badge */
-  .coWealthMobileHiddenControls {
-    display: none;
-  }
-
-  /* Other topbar actions (e.g. StockHoldings) wrap on mobile */
+  /* Topbar actions (e.g. WealthOverview's currency picker, StockHoldings) wrap on mobile */
   .appShellTopbarActions {
     flex-wrap: wrap;
     gap: 8px;
-  }
-
-  /* Show mobile date badge in hero card */
-  .coHeroDateBadge {
-    display: inline-flex;
-    align-items: center;
-    font-size: 11px;
-    font-weight: 600;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 5px 11px;
-    background: transparent;
-    color: var(--muted);
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-    transition: border-color 0.14s ease, color 0.14s ease;
-  }
-
-  .coHeroDateBadge:hover {
-    border-color: var(--accent);
-    color: var(--text);
-  }
-
-  /* Inline pickers panel revealed by badge tap */
-  .coHeroMobileControls {
-    display: flex;
-    gap: 10px;
-    flex-wrap: wrap;
-    margin-top: 14px;
-    padding-top: 14px;
-    border-top: 1px solid var(--line);
   }
 }
 
@@ -6175,11 +6257,6 @@ html, body {
 /* Table: remove redundant border on inner wrap for cleaner look */
 .stockHoldingsTableWrap {
   border-radius: 12px;
-}
-
-/* coWealthMobileHiddenControls: always visible on desktop */
-.coWealthMobileHiddenControls {
-  display: contents; /* transparent wrapper — children behave as if unwrapped */
 }
 
 @media (max-width: 980px) {
@@ -6608,4 +6685,590 @@ html, body {
   .liabLoanNextPayment {
     align-items: flex-start;
   }
+}
+
+/* ─── Wealth History (Phase 2 timeline) ──────────────────────────────── */
+
+.whFilters {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+}
+
+.whCard {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 20px 22px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
+  box-shadow: 0 14px 30px var(--shadow);
+  margin-bottom: 18px;
+}
+
+.whCardHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.whCardTitle {
+  font-weight: 600;
+  font-size: 15px;
+}
+
+.whCardMeta {
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.whStatValue {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.whRefreshBtn {
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.whRefreshBtn:hover {
+  border-color: var(--accent);
+}
+
+.whRefreshBtn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.whEmptyState {
+  text-align: left;
+}
+
+.whEmptyState p {
+  margin: 6px 0 14px;
+}
+
+/* Chart */
+
+.whChartWrap {
+  position: relative;
+}
+
+.whChartSvgHost {
+  position: relative;
+}
+
+.whChartSvgHost svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.whGridLine {
+  stroke: var(--line);
+  stroke-width: 1;
+}
+
+.whAxisLabel {
+  font-size: 11px;
+  fill: var(--muted);
+}
+
+.whAxisLabelNow {
+  fill: var(--accent);
+  font-weight: 600;
+}
+
+.whUploadMark {
+  fill: var(--warn);
+}
+
+.whDotRing {
+  fill: var(--panel);
+}
+
+.whNowDot {
+  fill: var(--panel);
+  stroke-width: 2;
+  stroke-dasharray: 2 2;
+}
+
+.whCrosshair {
+  stroke: var(--muted);
+  stroke-width: 1;
+  opacity: 0.5;
+}
+
+.whTooltip {
+  position: absolute;
+  top: 8px;
+  transform: translateX(12px);
+  background: var(--panel2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12.5px;
+  box-shadow: 0 10px 24px var(--shadow);
+  min-width: 200px;
+  max-width: 260px;
+  pointer-events: none;
+  z-index: 5;
+}
+
+.whTooltipTitle {
+  font-weight: 700;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+
+.whTooltipRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  color: var(--muted);
+}
+
+.whTooltipRow strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.whTooltipCarriedNote {
+  color: var(--warn);
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+.whTooltipUploadNote {
+  color: var(--muted);
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+
+/* Legend row */
+
+.whLegendRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+.whSeriesLegend {
+  display: flex;
+  gap: 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.whSeriesLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.whSeriesLegendKey {
+  display: inline-block;
+  width: 16px;
+  height: 0;
+  border-top: 2.5px solid;
+  border-radius: 2px;
+}
+
+.whHonestyLegend {
+  display: flex;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.whHonestyItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.whHonestyDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.whHonestyDotFresh {
+  background: var(--wh-total);
+}
+
+.whHonestyDotCarried {
+  background: transparent;
+  border: 2px solid var(--warn);
+}
+
+.whHonestyDotNow {
+  background: transparent;
+  border: 2px dashed var(--accent);
+}
+
+.whHonestyDiamond {
+  width: 8px;
+  height: 8px;
+  background: var(--warn);
+  display: inline-block;
+  transform: rotate(45deg);
+}
+
+/* Table view (accessible fallback for the chart) */
+
+.whTableView {
+  margin-top: 14px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.whTableView summary {
+  cursor: pointer;
+  color: var(--text);
+}
+
+.whTableScroll {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+.whTableScroll table {
+  border-collapse: collapse;
+  width: 100%;
+  font-variant-numeric: tabular-nums;
+}
+
+.whTableScroll th,
+.whTableScroll td {
+  text-align: right;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.whTableScroll th:first-child,
+.whTableScroll td:first-child {
+  text-align: left;
+}
+
+/* Secondary cards: dividends + income vs spending */
+
+.whGrid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.whBarChart {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  align-items: end;
+  gap: 6px;
+  height: 150px;
+}
+
+.whBarItem {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  gap: 6px;
+}
+
+.whBarTrack {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+}
+
+.whBarTrackPaired {
+  gap: 2px;
+}
+
+.whBar {
+  width: 60%;
+  min-height: 4px;
+  border-radius: 3px 3px 0 0;
+  background: var(--wh-cash);
+}
+
+.whBarChartPaired .whBar {
+  width: 45%;
+}
+
+.whBarDividend {
+  background: var(--wh-cash);
+}
+
+.whBarLabel {
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+@media (max-width: 980px) {
+  .whGrid2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ─── Wealth History Phase 3: attribution strip, outliers, drill-down ──── */
+
+.whLayout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 18px;
+  align-items: start;
+}
+
+.whLayoutMain {
+  min-width: 0;
+}
+
+@media (max-width: 980px) {
+  .whLayout {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Attribution strip */
+
+.whAttribDivider {
+  border-top: 1px solid var(--line);
+  margin: 16px 0 12px;
+}
+
+.whAttribHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.whAttribCol {
+  cursor: pointer;
+}
+
+.whAttribHitArea {
+  fill: transparent;
+}
+
+.whAttribCol:hover rect:not(.whAttribHitArea) {
+  opacity: 0.85;
+}
+
+.whAttribColSelected .whAttribHitArea {
+  fill: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+/* Outlier badge */
+
+.whOutlierBadge {
+  cursor: pointer;
+}
+
+.whOutlierBadge circle {
+  fill: var(--bad);
+}
+
+.whOutlierBadge text {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.whHonestyOutlierMark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--bad);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.whTooltipHint {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Drill-down panel */
+
+.whDrillPanel {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 18px 20px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
+  box-shadow: 0 14px 30px var(--shadow);
+  position: sticky;
+  top: 18px;
+}
+
+.whDrillHead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.whDrillHead h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.whDrillClose {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.whDrillClose:hover {
+  color: var(--text);
+}
+
+.whDrillDelta {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 8px 0 2px;
+}
+
+.whDrillPct {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.whDrillBanner {
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--warn) 55%, transparent);
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  margin: 10px 0;
+}
+
+.whWaterfall {
+  margin-top: 12px;
+}
+
+.whWfRow {
+  display: grid;
+  grid-template-columns: 92px 1fr 84px;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  margin: 7px 0;
+}
+
+.whWfLabel {
+  color: var(--muted);
+}
+
+.whWfTrack {
+  position: relative;
+  height: 14px;
+}
+
+.whWfTrack::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: var(--line);
+}
+
+.whWfBar {
+  position: absolute;
+  top: 0;
+  height: 14px;
+  border-radius: 4px;
+}
+
+.whWfVal {
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.whDrillSection {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+
+.whDrillSection h4 {
+  font: 700 11px "Inter", sans-serif;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.whMoverRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 4px 0;
+  gap: 10px;
+}
+
+.whMoverClass {
+  color: var(--muted);
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.whContextRow {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12.5px;
+}
+
+.whContextRow span:first-child {
+  color: var(--muted);
+}
+
+.whDrillSection .wealthInlineLink {
+  display: inline-block;
+  margin-top: 10px;
+  font-size: 12.5px;
 }

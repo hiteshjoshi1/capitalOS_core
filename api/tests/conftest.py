@@ -410,6 +410,27 @@ def _create_canonical_portfolio_tables(conn):
         ON account_balance_snapshots(account_id, as_of_date, currency, balance_type)
         WHERE authority_status = 'authoritative'
         """,
+        """
+        CREATE TABLE IF NOT EXISTS wealth_monthly_rollups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          user_id INTEGER NOT NULL,
+          month TEXT NOT NULL,
+          anchor_date DATE NOT NULL,
+          base_currency TEXT NOT NULL,
+          total NUMERIC NOT NULL,
+          cash NUMERIC NOT NULL,
+          stocks_funds NUMERIC NOT NULL,
+          crypto NUMERIC NOT NULL,
+          liabilities NUMERIC NOT NULL,
+          source_freshness TEXT NOT NULL DEFAULT '[]',
+          freshness_status TEXT NOT NULL DEFAULT 'missing',
+          computed_at TIMESTAMP
+        )
+        """,
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_wealth_monthly_rollups_user_month_currency
+        ON wealth_monthly_rollups(user_id, month, base_currency)
+        """,
     ):
         conn.exec_driver_sql(ddl)
 
@@ -897,6 +918,7 @@ def clear_db():
     with engine.begin() as conn:
         for table_name in (
         "account_balance_snapshots",
+            "wealth_monthly_rollups",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",

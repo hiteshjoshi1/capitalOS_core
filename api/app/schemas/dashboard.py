@@ -10,12 +10,17 @@ class NetWorth(BaseModel):
     liabilities: float
 
 
+class AssetClassFreshness(BaseModel):
+    most_recent_at: Optional[str] = None
+    most_recent_label: Optional[str] = None
+    stalest_at: Optional[str] = None
+    stalest_label: Optional[str] = None
+
+
 class NetWorthFreshness(BaseModel):
-    positions_as_of: Optional[str] = None
-    market_data_as_of: Optional[str] = None
-    crypto_as_of: Optional[str] = None
-    crypto_holdings_as_of: Optional[str] = None
-    crypto_price_as_of: Optional[str] = None
+    stocks: AssetClassFreshness
+    crypto: AssetClassFreshness
+    cash: AssetClassFreshness
 
 
 class GeographyItem(BaseModel):
@@ -136,6 +141,8 @@ class StockHoldingsResponse(BaseModel):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    is_live: bool = False
+    compare_month: Optional[str] = None
     current_holdings_as_of: Optional[str] = None
     net_worth_as_of: Optional[str] = None
     net_worth_snapshot_as_of: Optional[str] = None
@@ -177,6 +184,8 @@ class CashDepositsOut(BaseModel):
     as_of_month: Optional[str] = None
     base_currency: Optional[str] = None
     snapshot_day: Optional[int] = None
+    is_live: bool = False
+    compare_month: Optional[str] = None
     current_cash_as_of: Optional[str] = None
     snapshot_cash_as_of: Optional[str] = None
     current_total: Optional[float] = None
@@ -292,3 +301,44 @@ class BootstrapResponse(BaseModel):
     stock_exposure_total: float
     crypto_exposure_total: float
     cash_percent: float
+
+
+class WealthTimelineSourceFreshness(BaseModel):
+    platform: str
+    as_of: Optional[str] = None
+    days_old: Optional[int] = None
+    status: str
+
+
+class WealthTimelinePoint(BaseModel):
+    month: str
+    anchor_date: str
+    total: float
+    cash: float
+    stocks_funds: float
+    crypto: float
+    liabilities: float
+    source_freshness: List[WealthTimelineSourceFreshness]
+    freshness_status: str
+    computed_at: Optional[str] = None
+    uploads: List[str] = Field(default_factory=list)
+
+
+class WealthTimelineNow(BaseModel):
+    total: float
+    cash: float
+    stocks_funds: float
+    crypto: float
+    liabilities: float
+    as_of: Optional[str] = None
+
+
+class WealthTimelineResponse(BaseModel):
+    base_currency: str
+    points: List[WealthTimelinePoint]
+    now: WealthTimelineNow
+
+
+class WealthTimelineBackfillResponse(BaseModel):
+    months_written: int
+    base_currency: str

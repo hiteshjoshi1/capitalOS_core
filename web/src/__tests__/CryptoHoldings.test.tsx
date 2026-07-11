@@ -18,6 +18,8 @@ const mockApi = vi.mocked(api, true);
 
 const cryptoSummaryFixture: CryptoSummary = {
   month: "2026-02",
+  is_live: true,
+  compare_month: "2026-01",
   snapshot_day: 6,
   snapshot_as_of: "2026-02-06",
   total_crypto_usd: 8400,

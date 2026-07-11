@@ -113,7 +113,7 @@ export default function CashOverview() {
   return (
     <PageShell
       title="Cash Overview"
-      subtitle="Bank cash, broker cash, and stablecoin balances."
+      subtitle="Bank cash, broker cash, and stablecoin balances as of any month."
       activeRoute="/cash"
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
       headerActions={(
@@ -147,14 +147,14 @@ export default function CashOverview() {
       {state === "ready" && (
         <div className="wealthOverviewLayout">
           <HeroMetricCard
-            eyebrow="CURRENT CASH"
+            eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${cashDeposits?.as_of_month ?? month}`}
             value={formatMoney(cashDeposits?.current_total)}
             deltaChip={
               deltaPct == null
                 ? null
                 : { text: `${deltaPositive ? "+" : "-"}${Math.abs(deltaPct * 100).toFixed(1)}%`, positive: deltaPositive }
             }
-            insightText={`Snapshot ${cashDeposits?.snapshot_cash_as_of?.slice(0, 10) ?? "—"} vs. current ${cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"}`}
+            insightText={`As of ${cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"} · vs ${cashDeposits?.compare_month ?? "last month"} (${cashDeposits?.snapshot_cash_as_of?.slice(0, 10) ?? "—"})`}
           />
 
           <section>

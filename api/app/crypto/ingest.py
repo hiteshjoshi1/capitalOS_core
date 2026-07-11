@@ -208,7 +208,22 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                     }
                 )
         if chain_errors:
-            raise RuntimeError("Crypto wallet refresh incomplete: " + "; ".join(chain_errors))
+            if items:
+                # A single misbehaving chain (e.g. an unsupported/rate-limited L2) must
+                # not discard holdings already fetched from every other chain in the
+                # sweep — record what failed so it stays debuggable, keep the rest.
+                logger.warning(
+                    "crypto_wallet_partial_chains",
+                    extra={
+                        "wallet_id": wallet_id,
+                        "failed_chains": chain_errors,
+                        "succeeded_chains": [c for c in chains if not any(e.startswith(f"{c}:") for e in chain_errors)],
+                    },
+                )
+            else:
+                # Every chain failed — there's nothing to distinguish this from total
+                # provider outage, so refuse to persist a $0 snapshot over real history.
+                raise RuntimeError("Crypto wallet refresh incomplete: " + "; ".join(chain_errors))
     else:
         native, tokens, provider_name = fetch_wallet_holdings(wallet["chain_type"], wallet["chain"], wallet["address"])
         provider_names.add(provider_name)
@@ -277,6 +292,8 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
     source_versions["holdings_provider"] = ",".join(sorted(provider_names)) if provider_names else None
     source_versions["balances_provider"] = source_versions["holdings_provider"]
     source_versions["pricing_provider"] = source_versions["price_provider"]
+    if wallet["chain_type"] == "evm" and chain_errors:
+        source_versions["failed_chains"] = "; ".join(chain_errors)
     return SnapshotResult(total_usd=total_usd, items=items, source_versions=source_versions)
 
 

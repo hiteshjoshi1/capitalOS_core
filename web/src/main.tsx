@@ -19,6 +19,7 @@ import CashFlowDetail from "./routes/CashFlowDetail.tsx";
 import CashFlowMapping from "./routes/CashFlowMapping.tsx";
 import Alerts from "./routes/Alerts.tsx";
 import WealthOverview from "./routes/WealthOverview.tsx";
+import WealthHistory from "./routes/WealthHistory.tsx";
 import WealthRisk from "./routes/WealthRisk.tsx";
 import Dividends from "./routes/Dividends.tsx";
 import Companies from "./routes/Companies.tsx";
@@ -55,6 +56,7 @@ createRoot(document.getElementById("root")!).render(
                     <Route element={<AppShell />}>
                       <Route path="/" element={<App />} />
                       <Route path="/wealth" element={<WealthOverview />} />
+                      <Route path="/wealth/history" element={<WealthHistory />} />
                       <Route path="/wealth/cash-flow" element={<Navigate to="/cash-flow" replace />} />
                       <Route path="/risk" element={<WealthRisk />} />
                       <Route path="/dividends" element={<Dividends />} />

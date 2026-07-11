@@ -295,13 +295,20 @@ def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_
     assert "stock_snapshot_total" in data
     assert "quote_freshness_summary" in data
     assert "trend" in data
+    assert "is_live" in data
+    assert "compare_month" in data
 
 
-def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(client: TestClient, db_engine, monkeypatch):
+def test_stock_holdings_summary_follows_selected_month_not_always_current(
+    client: TestClient, db_engine, monkeypatch
+):
+    """The picker must be real: two different months return two different
+    holdings pictures, and "snapshot" means "the month before the one picked" —
+    not "whatever's true right now" — for any past month."""
     monkeypatch.setenv("QUOTE_STALE_DAYS", "10")
-    as_of_snapshot = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    as_of_current = datetime(2026, 5, 20, tzinfo=timezone.utc)
-    quote_trade_date = datetime(2026, 5, 1, tzinfo=timezone.utc).date()
+    # Month boundaries: April's own anchor is May 1; March's is April 1.
+    as_of_april_boundary = datetime(2026, 4, 1, tzinfo=timezone.utc)
+    as_of_may_boundary = datetime(2026, 5, 1, tzinfo=timezone.utc)
     monkeypatch.setattr("app.routers.dashboard._quote_age_days", lambda _trade_date: 1)
     with db_engine.begin() as conn:
         conn.execute(
@@ -331,62 +338,28 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
                 "(211, 'HKEX', '700', 'HKD', TRUE)"
             )
         )
-        conn.execute(
-            text(
-                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
-                "(210, :snapshot, 110, 'USD', 'finnhub_market', :quote_trade_date, 'US', 'AAPL'), "
-                "(211, :snapshot, 60, 'HKD', 'yfinance_market', :quote_trade_date, 'HKEX', '0700.HK')"
-            ),
-            {"snapshot": as_of_snapshot, "current": as_of_current, "quote_trade_date": quote_trade_date},
-        )
 
+    # April's boundary snapshot (what "April" compares against, and what "March" reports as current).
     seed_canonical_position_snapshot_for_test(
-        db_engine,
-        account_id=210,
-        asset_id=210,
-        as_of=as_of_snapshot,
-        quantity=10,
-        market_value_base=1100,
-        market_price=110,
-        cost_basis_base=900,
-        currency="USD",
-        platform_code="IBKR",
+        db_engine, account_id=210, asset_id=210, as_of=as_of_april_boundary,
+        quantity=10, market_value_base=1100, market_price=110, cost_basis_base=900,
+        currency="USD", platform_code="IBKR",
     )
     seed_canonical_position_snapshot_for_test(
-        db_engine,
-        account_id=211,
-        asset_id=211,
-        as_of=as_of_snapshot,
-        quantity=10,
-        market_value_base=600,
-        market_price=60,
-        cost_basis_base=450,
-        currency="HKD",
-        platform_code="IBKR",
+        db_engine, account_id=211, asset_id=211, as_of=as_of_april_boundary,
+        quantity=10, market_value_base=600, market_price=60, cost_basis_base=450,
+        currency="HKD", platform_code="IBKR",
+    )
+    # May's boundary snapshot (what "April" reports as current, and what "May" compares against).
+    seed_canonical_position_snapshot_for_test(
+        db_engine, account_id=210, asset_id=210, as_of=as_of_may_boundary,
+        quantity=20, market_value_base=2200, market_price=110, cost_basis_base=1900,
+        currency="USD", platform_code="IBKR",
     )
     seed_canonical_position_snapshot_for_test(
-        db_engine,
-        account_id=210,
-        asset_id=210,
-        as_of=as_of_current,
-        quantity=20,
-        market_value_base=2200,
-        market_price=110,
-        cost_basis_base=1900,
-        currency="USD",
-        platform_code="IBKR",
-    )
-    seed_canonical_position_snapshot_for_test(
-        db_engine,
-        account_id=211,
-        asset_id=211,
-        as_of=as_of_current,
-        quantity=5,
-        market_value_base=300,
-        market_price=60,
-        cost_basis_base=250,
-        currency="HKD",
-        platform_code="IBKR",
+        db_engine, account_id=211, asset_id=211, as_of=as_of_may_boundary,
+        quantity=5, market_value_base=300, market_price=60, cost_basis_base=250,
+        currency="HKD", platform_code="IBKR",
     )
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})
@@ -397,7 +370,9 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
 
     geography = {item["geography"]: item for item in data["geography_breakdown"]}
     platform = {item["key"]: item for item in data["platform_breakdown"]}
-    assert data["current_holdings_as_of"] == "2026-05-20T00:00:00+00:00"
+    assert data["is_live"] is False
+    assert data["compare_month"] == "2026-03"
+    assert data["current_holdings_as_of"] == "2026-05-01T00:00:00+00:00"
     assert data["stock_current_total"] == 2500.0
     assert data["stock_snapshot_total"] == 1700.0
     assert geography["US"]["current_value"] == 2200.0
@@ -412,6 +387,33 @@ def test_stock_holdings_summary_geography_breakdown_uses_current_vs_snapshot(cli
     assert platform["IBKR"]["percent"] == 100.0
     assert data["quote_freshness_summary"]["fresh"] == 2
     assert data["trend"][-1]["month"] == "2026-04"
+
+    # Picking March instead must show DIFFERENT data (April's boundary as "current",
+    # nothing before it as "snapshot") — proving the month picker genuinely changes
+    # what's shown, not just a delta chip.
+    march_resp = client.get("/dashboard/stock-holdings?month=2026-03&base_currency=USD")
+    assert march_resp.status_code == 200
+    march_data = march_resp.json()
+    assert march_data["is_live"] is False
+    assert march_data["stock_current_total"] == 1700.0
+    assert march_data["stock_current_total"] != data["stock_current_total"]
+
+
+def test_stock_holdings_summary_is_live_for_current_month(client: TestClient, seed_dashboard_data, monkeypatch):
+    fixed_now = datetime(2026, 7, 10, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now.astimezone(tz) if tz else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr("app.routers.dashboard.datetime", FixedDateTime)
+
+    resp = client.get("/dashboard/stock-holdings?month=2026-07&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["is_live"] is True
+    assert data["compare_month"] == "2026-06"
 
 
 def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, db_engine, monkeypatch):
@@ -915,8 +917,9 @@ def test_dashboard_cash_deposits_matches_cash_total(client: TestClient, seed_das
 
 
 def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestClient, db_engine, monkeypatch):
+    # Clean month boundaries: May's own anchor is June 1; April's is May 1.
     snapshot_as_of = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    current_as_of = datetime(2026, 5, 20, tzinfo=timezone.utc)
+    current_as_of = datetime(2026, 6, 1, tzinfo=timezone.utc)
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -974,14 +977,18 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _date, _base, symbols: {"SGD": 1.0, "USD": 1.5})
 
-    resp = client.get("/dashboard/cash-deposits?month=2026-04&base_currency=SGD")
+    # month=2026-05 is a past month; its own boundary (June 1) picks up the June-dated
+    # balances as "current", and April's boundary (May 1) as the "vs last month" compare.
+    resp = client.get("/dashboard/cash-deposits?month=2026-05&base_currency=SGD")
     assert resp.status_code == 200
     data = resp.json()
 
+    assert data["is_live"] is False
+    assert data["compare_month"] == "2026-04"
     assert data["current_total"] == 1650.0
     assert data["snapshot_total"] == 1300.0
     assert data["delta_abs"] == 350.0
-    assert data["trend"][-1] == {"month": "2026-04", "value": 1300.0}
+    assert data["trend"][-1] == {"month": "2026-05", "value": 1650.0}
     currency_breakdown = {item["currency"]: item for item in data["currency_breakdown"]}
     assert currency_breakdown["SGD"]["current_value"] == 1200.0
     assert currency_breakdown["SGD"]["snapshot_value"] == 1000.0
@@ -1736,6 +1743,12 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
                 """
             )
         )
+        conn.execute(
+            text(
+                "INSERT INTO prices (id, asset_id, ts, price, currency, source, trade_date) VALUES "
+                "(1, 1, '2026-03-09T21:00:00Z', 560, 'USD', 'finnhub', '2026-03-09')"
+            )
+        )
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
     monkeypatch.setattr(
@@ -1750,7 +1763,10 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
     assert body["net_worth_as_of"] == "2026-03-01T00:00:00+00:00"
     assert body["current_net_worth_as_of"] == "2026-03-10T00:00:00+00:00"
     assert body["current_net_worth"]["stocks_funds"] == body["net_worth"]["stocks_funds"] + 5000.0
-    assert body["current_net_worth_freshness"]["market_data_as_of"] == "2026-03-09"
+    stocks_freshness = body["current_net_worth_freshness"]["stocks"]
+    assert stocks_freshness["most_recent_at"] == "2026-03-09"
+    assert stocks_freshness["most_recent_label"] == "AAPL"
+    assert stocks_freshness["stalest_at"] == "2026-03-09"
 
 
 def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(client: TestClient, db_engine, monkeypatch):

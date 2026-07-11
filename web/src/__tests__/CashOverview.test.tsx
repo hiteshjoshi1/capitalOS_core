@@ -51,6 +51,8 @@ const cashDepositsFixture: CashDeposits = {
   as_of_month: "2026-02",
   base_currency: "SGD",
   snapshot_day: 6,
+  is_live: true,
+  compare_month: "2026-01",
   current_cash_as_of: "2026-02-21T00:00:00+00:00",
   snapshot_cash_as_of: "2026-02-06T00:00:00+00:00",
   current_total: 40000,

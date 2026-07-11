@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+import json
 from types import SimpleNamespace
 
 
@@ -395,19 +396,26 @@ def test_crypto_summary_exposes_snapshot_delta_and_refresh_movements(client: Tes
 
     monkeypatch.setattr("app.routers.crypto.get_rates", lambda *_args, **_kwargs: {"USD": 1.0})
 
-    resp = client.get("/crypto/summary?month=2026-04&base_currency=USD")
+    # May 2026 is a past month relative to real "now" — its own boundary (June 1)
+    # picks up the latest May snapshot (May 23, $3600); the comparison is against
+    # April's boundary (May 1, $3000), consistently "vs last month" rather than
+    # "vs whatever the second-most-recent raw snapshot happens to be".
+    resp = client.get("/crypto/summary?month=2026-05&base_currency=USD")
     assert resp.status_code == 200
     body = resp.json()
 
-    assert body["month"] == "2026-04"
+    assert body["month"] == "2026-05"
+    assert body["is_live"] is False
+    assert body["compare_month"] == "2026-04"
     assert body["snapshot_as_of"] == "2026-05-01"
+    assert body["total_crypto_base"] == 3600.0
     assert body["snapshot_total_base"] == 3000.0
     assert body["snapshot_delta_base"] == 600.0
-    assert body["trend"][-1] == {"month": "2026-04", "value": 3000.0}
+    assert body["trend"][-1] == {"month": "2026-05", "value": 3600.0}
     assert body["chain_exposure"][0]["chain"] == "ethereum"
     holding = body["top_holdings"][0]
-    assert holding["price_change_usd"] == 100.0
-    assert holding["value_change_base"] == 200.0
+    assert holding["price_change_usd"] == 300.0
+    assert holding["value_change_base"] == 600.0
     assert holding["snapshot_delta_base"] == 600.0
 
 
@@ -576,6 +584,57 @@ def test_refresh_wallet_snapshot_does_not_persist_partial_evm_snapshot(db_engine
     assert len(rows) == 1
     assert str(rows[0]["as_of_date"]) == "2026-07-03"
     assert float(rows[0]["total_usd"]) == 40000.0
+
+
+def test_refresh_wallet_snapshot_persists_when_one_of_several_chains_fails(db_engine, monkeypatch):
+    from app.crypto.adapters import NativeBalance
+
+    wallet_id = "wallet-partial-chains"
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, status, created_at)
+                VALUES (:wallet_id, 1, 'evm', 'ethereum', '0xmulti', 'active', :now)
+                """
+            ),
+            {"wallet_id": wallet_id, "now": datetime(2026, 7, 3, tzinfo=timezone.utc)},
+        )
+
+    monkeypatch.setenv("CRYPTO_EVM_CHAINS", "ethereum,mantle")
+    monkeypatch.setenv("CRYPTO_EVM_TOKEN_CHAINS", "ethereum,mantle")
+
+    def fake_fetch_wallet_holdings(chain_type, chain, address):
+        if chain == "mantle":
+            raise RuntimeError("Alchemy token balance fetch failed")
+        return (
+            NativeBalance(
+                symbol="ETH",
+                decimals=18,
+                raw_amount="1000000000000000000",
+                normalized_amount=1.0,
+                price_usd=3000.0,
+                value_usd=3000.0,
+            ),
+            [],
+            "alchemy",
+        )
+
+    monkeypatch.setattr("app.crypto.ingest.fetch_wallet_holdings", fake_fetch_wallet_holdings)
+
+    with Session(db_engine) as db:
+        refreshed = refresh_wallet_snapshot(db, wallet_id, user_id=1, automatic=True)
+
+    assert refreshed is True
+    with db_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT total_usd, source_versions FROM crypto_wallet_snapshots WHERE wallet_id = :wallet_id"),
+            {"wallet_id": wallet_id},
+        ).mappings().all()
+    assert len(rows) == 1
+    assert float(rows[0]["total_usd"]) == 3000.0
+    assert "mantle" in json.loads(rows[0]["source_versions"])["failed_chains"]
 
 
 def test_evm_provider_order_falls_back_from_moralis_to_alchemy(monkeypatch):

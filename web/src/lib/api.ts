@@ -378,6 +378,8 @@ export type StockHoldingsSummary = {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
+  is_live: boolean;
+  compare_month: string | null;
   current_holdings_as_of?: string | null;
   net_worth_as_of: string | null;
   net_worth_snapshot_as_of?: string | null;
@@ -655,6 +657,8 @@ export type CashDeposits = {
   as_of_month?: string | null;
   base_currency?: string | null;
   snapshot_day?: number | null;
+  is_live?: boolean;
+  compare_month?: string | null;
   current_cash_as_of?: string | null;
   snapshot_cash_as_of?: string | null;
   current_total?: number | null;
@@ -699,6 +703,9 @@ export type CryptoWalletInitResponse = {
 
 export type CryptoSummary = {
   month?: string;
+  is_live?: boolean;
+  compare_month?: string | null;
+  as_of?: string | null;
   snapshot_day?: number | null;
   snapshot_as_of?: string | null;
   total_crypto_usd: number;
@@ -843,12 +850,17 @@ export type NetWorthBreakdown = {
   liabilities: number;
 };
 
+export type AssetClassFreshness = {
+  most_recent_at?: string | null;
+  most_recent_label?: string | null;
+  stalest_at?: string | null;
+  stalest_label?: string | null;
+};
+
 export type NetWorthFreshness = {
-  positions_as_of?: string | null;
-  market_data_as_of?: string | null;
-  crypto_as_of?: string | null;
-  crypto_holdings_as_of?: string | null;
-  crypto_price_as_of?: string | null;
+  stocks: AssetClassFreshness;
+  crypto: AssetClassFreshness;
+  cash: AssetClassFreshness;
 };
 
 export type DashboardBootstrap = {
@@ -870,6 +882,64 @@ export type DashboardBootstrap = {
   stock_exposure_total: number;
   crypto_exposure_total: number;
   cash_percent: number;
+};
+
+export type WealthTimelineFreshnessStatus = "fresh" | "carried" | "stale" | "missing";
+
+export type WealthTimelineSourceFreshness = {
+  platform: string;
+  as_of: string | null;
+  days_old: number | null;
+  status: WealthTimelineFreshnessStatus;
+};
+
+export type WealthTimelinePoint = {
+  month: string;
+  anchor_date: string;
+  total: number;
+  cash: number;
+  stocks_funds: number;
+  crypto: number;
+  liabilities: number;
+  source_freshness: WealthTimelineSourceFreshness[];
+  freshness_status: WealthTimelineFreshnessStatus;
+  computed_at: string | null;
+  uploads: string[];
+};
+
+export type WealthTimeline = {
+  base_currency: string;
+  points: WealthTimelinePoint[];
+  now: {
+    total: number;
+    cash: number;
+    stocks_funds: number;
+    crypto: number;
+    liabilities: number;
+    as_of: string | null;
+  };
+};
+
+export type WealthTimelineBackfillResult = {
+  months_written: number;
+  base_currency: string;
+};
+
+export type WealthTopMover = {
+  asset_id: number | null;
+  symbol: string;
+  asset_class: string;
+  current_value: number;
+  previous_value: number;
+  delta_abs: number;
+  delta_pct: number | null;
+  compare_month: string;
+};
+
+export type WealthTopMovers = {
+  compare_month: string;
+  gainers: WealthTopMover[];
+  detractors: WealthTopMover[];
 };
 
 export type Currency = {
@@ -1633,6 +1703,17 @@ export const api = {
     req<DashboardBootstrap>(`/dashboard/bootstrap?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   dashboardNetWorthChange: (month: string, baseCurrency = "SGD", compare = "prev_month,prev_year") =>
     req<DashboardNetWorthChange>(`/dashboard/net-worth-change?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}&compare=${encodeURIComponent(compare)}`),
+  netWorthTimeline: (months: number, baseCurrency = "SGD") =>
+    req<WealthTimeline>(`/dashboard/net-worth-timeline?months=${encodeURIComponent(String(months))}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  netWorthTimelineBackfill: (months: number, baseCurrency = "SGD") =>
+    req<WealthTimelineBackfillResult>(
+      `/dashboard/net-worth-timeline/backfill?months=${encodeURIComponent(String(months))}&base_currency=${encodeURIComponent(baseCurrency)}`,
+      { method: "POST" },
+    ),
+  netWorthTimelineMovers: (month: string, baseCurrency = "SGD", limit = 5) =>
+    req<WealthTopMovers>(
+      `/dashboard/net-worth-timeline/${encodeURIComponent(month)}/movers?base_currency=${encodeURIComponent(baseCurrency)}&limit=${encodeURIComponent(String(limit))}`,
+    ),
   categories: () => req<CategoryTaxonomy[]>("/categories"),
   unmappedTransactions: (month: string, accountId?: number) =>
     req<UnmappedTransaction[]>(

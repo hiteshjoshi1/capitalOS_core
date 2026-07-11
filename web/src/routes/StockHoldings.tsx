@@ -244,10 +244,15 @@ export default function StockHoldings() {
   return (
     <PageShell
       title="Stock Holdings"
-      subtitle="Current equity holdings with quote freshness and snapshot geography comparisons."
+      subtitle="Equity holdings as of any month, with quote freshness and month-over-month comparisons."
       headerActions={
         <>
-          <button className="btn stockHoldingsRefreshBtn" onClick={onRefresh} disabled={refreshing}>
+          <button
+            className="btn stockHoldingsRefreshBtn"
+            onClick={onRefresh}
+            disabled={refreshing || summary?.is_live === false}
+            title={summary?.is_live === false ? "Refresh only applies to the current month" : undefined}
+          >
             <span className={`stockHoldingsRefreshDot${refreshing ? " stockHoldingsRefreshDotActive" : ""}`} aria-hidden="true" />
             {refreshing ? "Refreshing..." : "Refresh quotes"}
           </button>
@@ -283,9 +288,9 @@ export default function StockHoldings() {
           {/* ── Hero: stock value summary ─────────────────────────────── */}
           <article className="coHeroCard">
             <div className="coHeroCardHeader">
-              <p className="coHeroEyebrow">CURRENT STOCK VALUE</p>
+              <p className="coHeroEyebrow">{summary?.is_live ? "CURRENT STOCK VALUE" : `STOCK VALUE — ${summary?.as_of_month ?? month}`}</p>
               <span className="muted" style={{ fontSize: "12px" }}>
-                {summary?.as_of_month ?? month}
+                {summary?.is_live ? `as of ${summary?.net_worth_as_of?.slice(0, 10) ?? "—"}` : "historical snapshot"}
               </span>
             </div>
             <div className="coHeroValueRow">
@@ -302,7 +307,7 @@ export default function StockHoldings() {
             </div>
             {summary?.stock_snapshot_total != null ? (
               <p className="coHeroFreshness">
-                Snapshot {formatMoney(summary.stock_snapshot_total)} · {summary.net_worth_snapshot_as_of?.slice(0, 10) ?? "—"}
+                vs {summary.compare_month ?? "last month"}: {formatMoney(summary.stock_snapshot_total)}
                 {summary.quote_freshness_summary ? ` · ${summary.quote_freshness_summary.fresh} fresh · ${summary.quote_freshness_summary.stale} stale` : ""}
               </p>
             ) : null}
@@ -319,7 +324,7 @@ export default function StockHoldings() {
             <div className="coExposureGrid">
               <ExposurePieCard
                 title="Geography Breakdown"
-                subtitle={`Stock exposure · snapshot ${summary?.net_worth_snapshot_as_of?.slice(0, 10) ?? "—"}`}
+                subtitle={summary?.is_live ? "Stock exposure · current" : `Stock exposure · ${summary?.as_of_month ?? month}`}
                 items={geographyPieItems}
                 totalLabel={formatMoney(stockCurrentTotal)}
                 formatMoney={formatMoney}

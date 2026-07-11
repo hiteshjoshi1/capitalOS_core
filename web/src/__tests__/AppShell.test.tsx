@@ -15,6 +15,39 @@ import IntelligenceOverview from "../routes/IntelligenceOverview";
 
 vi.mock("../lib/api", () => ({
   api: {
+    dashboardBootstrap: vi.fn().mockResolvedValue({
+      as_of_month: "2026-02",
+      base_currency: "SGD",
+      snapshot_day: null,
+      current_net_worth_as_of: "2026-03-01T00:00:00+00:00",
+      current_net_worth: {
+        total: 100000,
+        cash: 25000,
+        stocks_funds: 50000,
+        crypto: 25000,
+        liabilities: -10000,
+      },
+      current_net_worth_freshness: {
+        stocks: { most_recent_at: "2026-03-01T00:00:00+00:00", most_recent_label: "AAPL", stalest_at: "2026-03-01T00:00:00+00:00", stalest_label: "AAPL" },
+        crypto: { most_recent_at: "2026-03-01", most_recent_label: "Wallet", stalest_at: "2026-03-01", stalest_label: "Wallet" },
+        cash: { most_recent_at: "2026-03-01", most_recent_label: "DBS", stalest_at: "2026-03-01", stalest_label: "DBS" },
+      },
+      net_worth_as_of: "2026-03-01T00:00:00+00:00",
+      net_worth_snapshot_as_of: "2026-02-06T00:00:00+00:00",
+      net_worth_boundary_at: "2026-03-01T00:00:00+00:00",
+      net_worth_boundary_exact: false,
+      net_worth_freshness_status: "synthetic",
+      net_worth: {
+        total: 100000,
+        cash: 25000,
+        stocks_funds: 50000,
+        crypto: 25000,
+        liabilities: -10000,
+      },
+      stock_exposure_total: 50000,
+      crypto_exposure_total: 25000,
+      cash_percent: 25,
+    }),
     dashboardSummary: vi.fn().mockResolvedValue({
       as_of_month: "2026-02",
       base_currency: "SGD",
@@ -194,7 +227,7 @@ describe("AppShell", () => {
     expect(screen.queryByRole("navigation", { name: "Liabilities tabs" })).toBeEmptyDOMElement();
   });
 
-  it("renders wealth page controls inside the shell top bar", async () => {
+  it("renders the wealth page currency control inside the shell top bar, with no month picker", async () => {
     render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/wealth"]}>
@@ -208,8 +241,9 @@ describe("AppShell", () => {
     );
 
     expect(await screen.findByRole("link", { name: "Overview" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Month")).toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
+    // Wealth Overview always shows the current month — there is no month picker.
+    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
   });
 
   it("keeps sidebar width at 248px for shell layout stability", () => {

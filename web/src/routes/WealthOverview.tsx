@@ -1,12 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { DashboardSummary, PlatformAllocation, SpendingSummary } from "../lib/api";
+import type { AssetClassFreshness, DashboardBootstrap, DashboardSummary, NetWorthFreshness, PlatformAllocation, SpendingSummary } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
-import { useSelectedMonth } from "../lib/selectedMonth";
+import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -25,7 +24,13 @@ const DONUT_COLORS = [
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
-const WEALTH_OVERVIEW_MONTH_STORAGE_KEY = "capitalos.selectedMonth.wealth";
+
+// Daily-refreshed sources (IBKR, Coinbase, market quotes) go "carried" once they
+// miss the cadence a live source implies; matches the backend's QUOTE_STALE_DAYS default.
+const DAILY_SOURCE_FRESH_DAYS = 3;
+// Bank/broker cash is manual-cadence (monthly-or-less uploads) — a much longer window
+// still counts as "fresh" for that kind of source.
+const MANUAL_SOURCE_FRESH_DAYS = 31;
 
 function buildConicGradient(items: { percent: number }[]): string {
   let offset = 0;
@@ -44,16 +49,6 @@ function buildConicGradient(items: { percent: number }[]): string {
   return `conic-gradient(${parts.join(", ")})`;
 }
 
-function formatAsOfDate(value?: string | null): string {
-  if (!value) return "—";
-  return value.slice(0, 10);
-}
-
-function formatMMDD(value?: string | null): string {
-  if (!value) return "—";
-  return value.slice(5, 10);
-}
-
 function formatMoneyShort(prefix: string, value?: number | null): string {
   if (value == null) return "—";
   const abs = Math.abs(value);
@@ -63,87 +58,168 @@ function formatMoneyShort(prefix: string, value?: number | null): string {
   return `${sign}${prefix} ${abs.toLocaleString()}`;
 }
 
+function ageInDays(iso?: string | null): number | null {
+  if (!iso) return null;
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return null;
+  return Math.max(0, Math.floor((Date.now() - ts) / 86_400_000));
+}
+
+function formatChipAsOf(iso?: string | null): string {
+  const days = ageInDays(iso);
+  if (days == null) return "no data";
+  if (days === 0) return "today";
+  if (days === 1) return "yesterday";
+  const label = new Date(iso as string).toLocaleString("en", { day: "numeric", month: "short" });
+  return `${label} · ${days}d`;
+}
+
+type FreshnessBucket = "fresh" | "carried" | "missing";
+
+function freshnessBucket(iso: string | null | undefined, freshDays: number): FreshnessBucket {
+  const days = ageInDays(iso);
+  if (days == null) return "missing";
+  return days <= freshDays ? "fresh" : "carried";
+}
+
+function AssetFreshnessChip({
+  label,
+  freshness,
+  freshDays,
+}: {
+  label: string;
+  freshness?: AssetClassFreshness | null;
+  freshDays: number;
+}) {
+  const mostRecentAt = freshness?.most_recent_at ?? null;
+  const stalestAt = freshness?.stalest_at ?? null;
+  // Worst case drives the warning dot — a fresh headline shouldn't hide a stale account.
+  const bucket = freshnessBucket(stalestAt ?? mostRecentAt, freshDays);
+  const hasSpread = Boolean(stalestAt && mostRecentAt && stalestAt !== mostRecentAt);
+  return (
+    <span className={`coFreshnessChip${bucket === "carried" ? " coFreshnessChipCarried" : ""}`} tabIndex={0}>
+      <span
+        className={`coFreshnessDot coFreshnessDot${bucket === "fresh" ? "Fresh" : bucket === "carried" ? "Carried" : "Missing"}`}
+        aria-hidden="true"
+      />
+      <strong>{label}</strong>
+      <span>{formatChipAsOf(mostRecentAt)}</span>
+      <span className="coFreshnessTooltip" role="tooltip">
+        <span className="coFreshnessTooltipRow">
+          <span>Most recent</span>
+          <strong>
+            {freshness?.most_recent_label ?? "—"} · {formatChipAsOf(mostRecentAt)}
+          </strong>
+        </span>
+        {hasSpread ? (
+          <span className="coFreshnessTooltipRow">
+            <span>Stalest</span>
+            <strong>
+              {freshness?.stalest_label ?? "—"} · {formatChipAsOf(stalestAt)}
+            </strong>
+          </span>
+        ) : null}
+      </span>
+    </span>
+  );
+}
+
 export default function WealthOverview() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
+  // Pinned once per page load — this page always shows the current month; there is
+  // no month selector here (see Wealth Timeline Phase 1 plan for why).
+  const month = useMemo(() => currentMonthYYYYMM(), []);
+
+  const [bootstrapState, setBootstrapState] = useState<LoadState>("idle");
+  const [bootstrapErr, setBootstrapErr] = useState<string>("");
+  const [bootstrap, setBootstrap] = useState<DashboardBootstrap | null>(null);
+
+  const [summaryState, setSummaryState] = useState<LoadState>("idle");
   const [summary, setSummary] = useState<DashboardSummary | null>(null);
+
+  const [spendingState, setSpendingState] = useState<LoadState>("idle");
   const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
+
+  const [platformState, setPlatformState] = useState<LoadState>("idle");
   const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
-  const [month, setMonth] = useSelectedMonth(WEALTH_OVERVIEW_MONTH_STORAGE_KEY);
+
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
   const [holdingsView, setHoldingsView] = useState<"holdings" | "movers">("holdings");
-  const [showMobileControls, setShowMobileControls] = useState(false);
-  const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
+  const selectedBaseCurrency = baseCurrency || bootstrap?.base_currency || "SGD";
 
-  const fetchDashboardData = useCallback(async () => {
-    const [summaryData, spendingData, platformAllocationData] = await Promise.all([
-      api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
-      api.spendingSummary(month, baseCurrency),
-      api.platformAllocation(month, baseCurrency),
-    ]);
-    return { summaryData, spendingData, platformAllocationData };
-  }, [baseCurrency, month]);
+  const fetchBootstrap = useCallback(async (silent = false) => {
+    if (!silent) setBootstrapState("loading");
+    try {
+      const data = await api.dashboardBootstrap(month, baseCurrency);
+      setBootstrap(data);
+      setBootstrapState("ready");
+    } catch (error: unknown) {
+      setBootstrapErr(error instanceof Error ? error.message : String(error));
+      setBootstrapState("error");
+    }
+  }, [month, baseCurrency]);
 
+  const fetchSummary = useCallback(async (silent = false) => {
+    if (!silent) setSummaryState("loading");
+    try {
+      const data = await api.dashboardSummary(month, "prev_month,prev_year", baseCurrency);
+      setSummary(data);
+      setSummaryState("ready");
+    } catch {
+      setSummaryState("error");
+    }
+  }, [month, baseCurrency]);
+
+  const fetchSpending = useCallback(async (silent = false) => {
+    if (!silent) setSpendingState("loading");
+    try {
+      const data = await api.spendingSummary(month, baseCurrency);
+      setSpendingSummary(data);
+      setSpendingState("ready");
+    } catch {
+      setSpendingState("error");
+    }
+  }, [month, baseCurrency]);
+
+  const fetchPlatform = useCallback(async (silent = false) => {
+    if (!silent) setPlatformState("loading");
+    try {
+      const data = await api.platformAllocation(month, baseCurrency);
+      setPlatformAllocation(data);
+      setPlatformState("ready");
+    } catch {
+      setPlatformState("error");
+    }
+  }, [month, baseCurrency]);
+
+  // First paint: bootstrap is the lean call, so the hero renders as soon as it
+  // resolves without waiting on the heavier summary/spending/platform calls.
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setState("loading");
-        setErr("");
-        const data = await fetchDashboardData();
-        if (cancelled) return;
-        setSummary(data.summaryData);
-        setSpendingSummary(data.spendingData);
-        setPlatformAllocation(data.platformAllocationData);
-        setState("ready");
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setErr(error instanceof Error ? error.message : String(error));
-        setState("error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchDashboardData]);
+    void fetchBootstrap();
+    void fetchSummary();
+    void fetchSpending();
+    void fetchPlatform();
+  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform]);
 
+  const refreshTimerRef = useRef<number | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    let refreshTimer: number | null = null;
-
-    const refreshSummary = async () => {
-      try {
-        const data = await fetchDashboardData();
-        if (cancelled) return;
-        setSummary(data.summaryData);
-        setSpendingSummary(data.spendingData);
-        setPlatformAllocation(data.platformAllocationData);
-        setErr("");
-        setState("ready");
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setErr(error instanceof Error ? error.message : String(error));
-        setState("error");
-      }
-    };
-
     const unsubscribe = subscribeToRealtimeTopic(PORTFOLIO_REFRESH_TOPIC, {
       onEvent: () => {
-        if (refreshTimer != null) window.clearTimeout(refreshTimer);
-        refreshTimer = window.setTimeout(
-          () => void refreshSummary(),
-          PORTFOLIO_REFRESH_DEBOUNCE_MS,
-        );
+        if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
+        refreshTimerRef.current = window.setTimeout(() => {
+          void fetchBootstrap(true);
+          void fetchSummary(true);
+          void fetchSpending(true);
+          void fetchPlatform(true);
+        }, PORTFOLIO_REFRESH_DEBOUNCE_MS);
       },
     });
 
     return () => {
-      cancelled = true;
-      if (refreshTimer != null) window.clearTimeout(refreshTimer);
+      if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
       unsubscribe();
     };
-  }, [fetchDashboardData]);
+  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform]);
 
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
@@ -151,9 +227,11 @@ export default function WealthOverview() {
       ? "—"
       : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
-  const currentNetWorth = summary?.current_net_worth ?? summary?.net_worth ?? null;
-  const currentNetWorthAsOf = summary?.current_net_worth_as_of ?? summary?.net_worth_as_of ?? null;
-  const currentFreshness = summary?.current_net_worth_freshness ?? null;
+  // Hero headline, freshness, liabilities, and the asset-class allocation view all
+  // come from bootstrap — none of them need to wait on the heavier summary call.
+  const currentNetWorth = bootstrap?.current_net_worth ?? bootstrap?.net_worth ?? null;
+  const currentNetWorthAsOf = bootstrap?.current_net_worth_as_of ?? bootstrap?.net_worth_as_of ?? null;
+  const currentFreshness: NetWorthFreshness | null = bootstrap?.current_net_worth_freshness ?? null;
   const currentNetWorthTotal = currentNetWorth?.total ?? 0;
 
   const stocksPct = currentNetWorthTotal
@@ -200,99 +278,47 @@ export default function WealthOverview() {
   const prevYearChange = summary?.net_worth_change?.vs_prev_year;
   const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
   const topMovers = summary?.top_movers ?? null;
-
-  const freshnessLine = useMemo(() => {
-    const parts: string[] = [`As of ${formatAsOfDate(currentNetWorthAsOf)}`];
-    if (currentFreshness?.positions_as_of)
-      parts.push(`positions ${formatMMDD(currentFreshness.positions_as_of)}`);
-    if (currentFreshness?.market_data_as_of)
-      parts.push(`prices ${formatMMDD(currentFreshness.market_data_as_of)}`);
-    if (currentFreshness?.crypto_as_of)
-      parts.push(`crypto ${formatMMDD(currentFreshness.crypto_as_of)}`);
-    return parts.join(" · ");
-  }, [currentNetWorthAsOf, currentFreshness]);
-
-  const mobileDateLabel = useMemo(() => {
-    const [yearStr, monStr] = month.split("-");
-    const year = Number(yearStr);
-    const mon = Number(monStr);
-    if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-    const abbr = new Date(year, mon - 1, 1).toLocaleString("en", { month: "short" });
-    return `${abbr} ${year} · ${selectedBaseCurrency}`;
-  }, [month, selectedBaseCurrency]);
+  const liabilities = bootstrap?.net_worth?.liabilities ?? null;
 
   return (
     <PageShell
       title="Wealth Overview"
       subtitle="Portfolio composition and the most important balance-sheet signals."
       headerActions={
-        /* coWealthMobileHiddenControls: on mobile these are replaced by the
-           in-hero date badge, so we hide them from the topbar */
-        <div className="coWealthMobileHiddenControls">
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{selectedBaseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={selectedBaseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
-        </div>
+        <label className="coPillBtn">
+          <span aria-hidden="true">{selectedBaseCurrency}</span>
+          <select
+            className="coPillBtnInput"
+            aria-label="Base currency"
+            value={selectedBaseCurrency}
+            onChange={(event) => setBaseCurrency(event.target.value)}
+          >
+            <option value="SGD">SGD</option>
+            <option value="USD">USD</option>
+            <option value="HKD">HKD</option>
+            <option value="INR">INR</option>
+          </select>
+        </label>
       }
     >
-      {state === "loading" ? <div className="card">Loading…</div> : null}
-      {state === "error" ? (
+      {bootstrapState === "loading" || bootstrapState === "idle" ? (
+        <div className="card">Loading…</div>
+      ) : null}
+      {bootstrapState === "error" ? (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{bootstrapErr}</pre>
         </div>
       ) : null}
 
-      {state === "ready" && summary ? (
+      {bootstrapState === "ready" && bootstrap ? (
         <div className="wealthOverviewLayout">
 
           {/* ── Hero card ─────────────────────────────────────────────── */}
           <article className="coHeroCard">
             <div className="coHeroCardHeader">
               <p className="coHeroEyebrow">CURRENT NET WORTH</p>
-              {/* Mobile-only: compact date + currency badge */}
-              <button
-                type="button"
-                className="coHeroDateBadge"
-                aria-label={`Change month or currency. Currently ${mobileDateLabel}`}
-                aria-expanded={showMobileControls}
-                onClick={() => setShowMobileControls((v) => !v)}
-              >
-                {mobileDateLabel}
-              </button>
             </div>
-            {/* Mobile-only: inline pickers, revealed by the badge */}
-            {showMobileControls ? (
-              <div className="coHeroMobileControls">
-                <MonthControl month={month} onMonthChange={setMonth} />
-                <label className="coPillBtn">
-                                    <span aria-hidden="true">{selectedBaseCurrency}</span>
-                  <select
-                    className="coPillBtnInput"
-                    aria-label="Base currency mobile"
-                    value={selectedBaseCurrency}
-                    onChange={(event) => setBaseCurrency(event.target.value)}
-                  >
-                    <option value="SGD">SGD</option>
-                    <option value="USD">USD</option>
-                    <option value="HKD">HKD</option>
-                    <option value="INR">INR</option>
-                  </select>
-                </label>
-              </div>
-            ) : null}
             <div className="coHeroValueRow">
               <span className="coHeroValue">{formatMoney(currentNetWorth?.total, 2)}</span>
               {prevMonthChange ? (
@@ -306,40 +332,56 @@ export default function WealthOverview() {
                 </span>
               ) : null}
             </div>
-            <p className="coHeroFreshness">{freshnessLine}</p>
-            {(prevMonthChange || prevYearChange) ? (
-              <div className="coHeroDeltaRow">
-                {prevMonthChange ? (
-                  <div className="coHeroDelta">
-                    <span className="coHeroDeltaLabel">VS LAST MONTH</span>
-                    <strong
-                      className={
-                        prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                      }
-                    >
-                      {prevMonthChange.abs >= 0 ? "+" : "-"}
-                      {formatMoney(Math.abs(prevMonthChange.abs))}
-                      {prevMonthChange.pct != null
-                        ? ` (${prevMonthChange.abs >= 0 ? "+" : "-"}${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%)`
-                        : ""}
-                    </strong>
-                  </div>
-                ) : null}
-                {prevYearChange ? (
-                  <div className="coHeroDelta">
-                    <span className="coHeroDeltaLabel">VS LAST YEAR</span>
-                    <strong
-                      className={
-                        prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                      }
-                    >
-                      {prevYearChange.abs >= 0 ? "+" : ""}
-                      {formatMoney(prevYearChange.abs)}
-                    </strong>
-                  </div>
-                ) : null}
-              </div>
+
+            <div className="coFreshnessRow" aria-label="Data freshness by asset class">
+              <AssetFreshnessChip label="Stocks" freshness={currentFreshness?.stocks} freshDays={DAILY_SOURCE_FRESH_DAYS} />
+              <AssetFreshnessChip label="Crypto" freshness={currentFreshness?.crypto} freshDays={DAILY_SOURCE_FRESH_DAYS} />
+              <AssetFreshnessChip label="Cash" freshness={currentFreshness?.cash} freshDays={MANUAL_SOURCE_FRESH_DAYS} />
+            </div>
+
+            {currentNetWorthAsOf ? (
+              <p className="coHeroFreshness">As of {currentNetWorthAsOf.slice(0, 10)}</p>
             ) : null}
+
+            <div className="coHeroDeltaRow">
+              {prevMonthChange ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">VS LAST MONTH</span>
+                  <strong
+                    className={
+                      prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
+                    }
+                  >
+                    {prevMonthChange.abs >= 0 ? "+" : "-"}
+                    {formatMoney(Math.abs(prevMonthChange.abs))}
+                    {prevMonthChange.pct != null
+                      ? ` (${prevMonthChange.abs >= 0 ? "+" : "-"}${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%)`
+                      : ""}
+                  </strong>
+                </div>
+              ) : summaryState === "loading" ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">VS LAST MONTH</span>
+                  <strong className="muted">…</strong>
+                </div>
+              ) : null}
+              {prevYearChange ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">VS LAST YEAR</span>
+                  <strong
+                    className={
+                      prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
+                    }
+                  >
+                    {prevYearChange.abs >= 0 ? "+" : ""}
+                    {formatMoney(prevYearChange.abs)}
+                  </strong>
+                </div>
+              ) : null}
+              <Link className="coHeroHistoryTeaser" to="/wealth/history">
+                View history →
+              </Link>
+            </div>
           </article>
 
           {/* ── Allocation section ─────────────────────────────────────── */}
@@ -369,7 +411,9 @@ export default function WealthOverview() {
               </div>
             </div>
 
-            {activeAllocItems.length > 0 ? (
+            {allocView === "platform" && platformState === "loading" ? (
+              <p className="muted">Loading allocation…</p>
+            ) : activeAllocItems.length > 0 ? (
               <div className="coAllocationCard">
                 <div
                   className="coAllocationDonut"
@@ -420,12 +464,18 @@ export default function WealthOverview() {
             <div className="coSignalsGrid">
               <article className="coSignalCard">
                 <p className="coSignalEyebrow">CASH FLOW</p>
-                <p className="coSignalValue">{formatMoney(spendingSummary?.net)}</p>
-                <p className="coSignalMeta">
-                  {spendingSummary
-                    ? `Income ${formatMoney(spendingSummary.income_total)} · Expenses ${formatMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
-                    : "—"}
-                </p>
+                {spendingState === "loading" ? (
+                  <p className="muted">Loading…</p>
+                ) : (
+                  <>
+                    <p className="coSignalValue">{formatMoney(spendingSummary?.net)}</p>
+                    <p className="coSignalMeta">
+                      {spendingSummary
+                        ? `Income ${formatMoney(spendingSummary.income_total)} · Expenses ${formatMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
+                        : "—"}
+                    </p>
+                  </>
+                )}
                 <Link className="wealthInlineLink" to="/cash-flow">
                   Open cash flow
                 </Link>
@@ -433,7 +483,7 @@ export default function WealthOverview() {
 
               <article className="coSignalCard">
                 <p className="coSignalEyebrow">LIABILITIES</p>
-                <p className="coSignalValue">{formatMoney(summary.net_worth.liabilities)}</p>
+                <p className="coSignalValue">{formatMoney(liabilities)}</p>
                 <p className="coSignalMeta">Outstanding obligations vs current net worth.</p>
                 <Link className="wealthInlineLink" to="/liabilities">
                   Open liabilities
@@ -463,7 +513,9 @@ export default function WealthOverview() {
               </div>
 
               <div className="coHoldingsList">
-                {holdingsView === "holdings" ? (
+                {summaryState === "loading" ? (
+                  <p className="muted">Loading holdings…</p>
+                ) : holdingsView === "holdings" ? (
                   topHoldings.length > 0 ? (
                     topHoldings.map((h) => (
                       <div key={h.asset_id ?? h.symbol} className="coHoldingRow">
