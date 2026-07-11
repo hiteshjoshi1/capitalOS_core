@@ -195,10 +195,12 @@ export default function WealthOverview() {
   // First paint: bootstrap is the lean call, so the hero renders as soon as it
   // resolves without waiting on the heavier summary/spending/platform calls.
   useEffect(() => {
-    void fetchBootstrap();
-    void fetchSummary();
-    void fetchSpending();
-    void fetchPlatform();
+    void (async () => {
+      void fetchBootstrap();
+      void fetchSummary();
+      void fetchSpending();
+      void fetchPlatform();
+    })();
   }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform]);
 
   const refreshTimerRef = useRef<number | null>(null);

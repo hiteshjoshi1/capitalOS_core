@@ -1,6 +1,8 @@
 import { createContext, useEffect, useMemo, useState } from "react";
 import { api, refreshAccessTokenNow, setAccessToken, setAuthFailureHandler } from "../lib/api";
 import type { AuthMe } from "../lib/api";
+import { useTheme } from "./ThemeContext";
+import type { AccentColor, Theme } from "./ThemeContext";
 
 type AuthContextValue = {
   user: AuthMe | null;
@@ -23,6 +25,7 @@ const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthMe | null>(null);
   const [loading, setLoading] = useState(true);
+  const { applyServerPreferences } = useTheme();
 
   useEffect(() => {
     setAuthFailureHandler(() => {
@@ -57,6 +60,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const me = await api.authMe();
         if (!cancelled) setUser(me);
+        // Fetch server preferences and apply them; fall back gracefully to localStorage.
+        try {
+          const prefs = await api.getPreferences();
+          if (!cancelled) {
+            applyServerPreferences({
+              theme: prefs.theme as Theme,
+              accent_color: prefs.accent_color as AccentColor,
+            });
+          }
+        } catch {
+          // Non-fatal: localStorage values remain as fallback
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -64,7 +79,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [applyServerPreferences]);
 
   useEffect(() => {
     if (!user) return;
@@ -101,6 +116,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAccessToken(login.access_token);
         const me = await api.authMe();
         setUser(me);
+        // Sync preferences after login
+        try {
+          const prefs = await api.getPreferences();
+          applyServerPreferences({
+            theme: prefs.theme as Theme,
+            accent_color: prefs.accent_color as AccentColor,
+          });
+        } catch {
+          // Non-fatal
+        }
       },
       signup: async (username: string, password: string, displayName?: string) => {
         await api.authSignup({ username, password, display_name: displayName });
@@ -108,6 +133,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setAccessToken(login.access_token);
         const me = await api.authMe();
         setUser(me);
+        // Sync preferences after signup (will create defaults server-side)
+        try {
+          const prefs = await api.getPreferences();
+          applyServerPreferences({
+            theme: prefs.theme as Theme,
+            accent_color: prefs.accent_color as AccentColor,
+          });
+        } catch {
+          // Non-fatal
+        }
       },
       logout: async () => {
         try {
@@ -118,7 +153,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [loading, user],
+    [applyServerPreferences, loading, user],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

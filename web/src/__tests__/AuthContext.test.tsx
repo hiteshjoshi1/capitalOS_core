@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useContext } from "react";
 import { AuthContext, AuthProvider } from "../context/AuthContext";
+import { ThemeProvider } from "../context/ThemeContext";
 
 const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
   mockApi: {
@@ -10,6 +11,7 @@ const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailu
     authLogin: vi.fn(),
     authSignup: vi.fn(),
     authLogout: vi.fn(),
+    getPreferences: vi.fn(),
   },
   mockRefreshAccessTokenNow: vi.fn(),
   mockSetAccessToken: vi.fn(),
@@ -36,6 +38,10 @@ function AuthConsumer() {
   );
 }
 
+function renderWithProviders(ui: React.ReactElement) {
+  return render(<ThemeProvider>{ui}</ThemeProvider>);
+}
+
 /** The real refreshAccessTokenNow() clears the token and notifies this handler on a
  * definitive 401 (see api.ts callRefreshEndpoint) — grab it so tests can fire that
  * same signal without re-mocking the network layer. */
@@ -48,6 +54,8 @@ describe("AuthProvider", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    // Default: getPreferences resolves with defaults (non-fatal if it fails)
+    mockApi.getPreferences.mockResolvedValue({ theme: "dark", accent_color: "#0f7a5c" });
   });
 
   afterEach(() => {
@@ -59,7 +67,7 @@ describe("AuthProvider", () => {
     mockRefreshAccessTokenNow.mockResolvedValueOnce("t");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -76,7 +84,7 @@ describe("AuthProvider", () => {
   it("does not call authMe when the mount-time refresh fails", async () => {
     mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -93,7 +101,7 @@ describe("AuthProvider", () => {
     mockRefreshAccessTokenNow.mockResolvedValue("token");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -115,7 +123,7 @@ describe("AuthProvider", () => {
     mockRefreshAccessTokenNow.mockResolvedValue("token");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -141,7 +149,7 @@ describe("AuthProvider", () => {
     // authFailureHandler, so AuthProvider just stops loading without clearing anyone.
     mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
 
-    render(
+    renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -166,7 +174,7 @@ describe("AuthProvider", () => {
     mockApi.authLogout.mockResolvedValueOnce({ status: "ok" });
 
     const user = userEvent.setup();
-    render(
+    renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -199,7 +207,7 @@ describe("AuthProvider", () => {
   it("registers and unregisters auth failure handler", async () => {
     mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
 
-    const { unmount } = render(
+    const { unmount } = renderWithProviders(
       <AuthProvider>
         <AuthConsumer />
       </AuthProvider>,
@@ -212,5 +220,41 @@ describe("AuthProvider", () => {
     unmount();
 
     expect(mockSetAuthFailureHandler).toHaveBeenLastCalledWith(null);
+  });
+
+  it("fetches and applies server preferences after successful auth bootstrap", async () => {
+    mockRefreshAccessTokenNow.mockResolvedValueOnce("token");
+    mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
+    mockApi.getPreferences.mockResolvedValueOnce({ theme: "light", accent_color: "#2b6ddb" });
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+
+    expect(mockApi.getPreferences).toHaveBeenCalledTimes(1);
+  });
+
+  it("handles getPreferences failure gracefully (falls back to localStorage)", async () => {
+    mockRefreshAccessTokenNow.mockResolvedValueOnce("token");
+    mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
+    mockApi.getPreferences.mockRejectedValueOnce(new Error("network error"));
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("loading").textContent).toBe("false");
+      expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+    // Should not throw — preferences failure is non-fatal
   });
 });

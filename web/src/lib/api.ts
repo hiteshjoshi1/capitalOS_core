@@ -230,6 +230,16 @@ export type AuthToken = {
   expires_in: number;
 };
 
+export type UserPreferences = {
+  theme: "dark" | "light";
+  accent_color: "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
+};
+
+export type UserPreferencesPatch = {
+  theme?: "dark" | "light";
+  accent_color?: "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
+};
+
 export type Account = {
   id: number;
   name: string;
@@ -1691,6 +1701,8 @@ async function rawRequest(path: string, init?: RequestInit, opts: RequestOptions
 
 export const api = {
   health: () => req<Health>("/health"),
+  /** Returns true when there is an in-memory access token (user is logged in). */
+  isAuthenticated: (): boolean => Boolean(accessTokenMemory),
   authSignup: (payload: { username: string; password: string; display_name?: string }) =>
     req<AuthMe>("/auth/signup", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
   authLogin: (payload: { username: string; password: string }) =>
@@ -1699,6 +1711,9 @@ export const api = {
     req<AuthToken>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
   authMe: () => req<AuthMe>("/auth/me"),
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
+  getPreferences: () => req<UserPreferences>("/auth/preferences"),
+  patchPreferences: (patch: UserPreferencesPatch) =>
+    req<UserPreferences>("/auth/preferences", { method: "PATCH", body: JSON.stringify(patch) }),
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
     req<DashboardBootstrap>(`/dashboard/bootstrap?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   dashboardNetWorthChange: (month: string, baseCurrency = "SGD", compare = "prev_month,prev_year") =>
