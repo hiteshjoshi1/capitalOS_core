@@ -240,3 +240,130 @@ def test_transfer_override_excludes_row_from_cash_flow_totals(
         item["merchant_counterparty"] != "Employer"
         for item in cash_flow["income"]["transactions"]
     )
+
+
+def _seed_bulk_override_data(db_engine) -> dict[str, int]:
+    """Seed an account + transactions for bulk-override tests; return category IDs."""
+    category_ids = _seed_category_reference_data(db_engine)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                """
+                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
+                  (90, 'Bulk Test Bank', 'DBS', 'BANK', 'SGD', 'SG')
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO transactions (
+                  id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes
+                ) VALUES
+                  (901, '2026-03-01 10:00:00+00:00', 90, -10, 'EXPENSE', 'SGD', NULL, 'NTUC', NULL),
+                  (902, '2026-03-02 10:00:00+00:00', 90, -15, 'EXPENSE', 'SGD', NULL, 'NTUC', NULL),
+                  (903, '2026-03-03 10:00:00+00:00', 90, -20, 'EXPENSE', 'SGD', NULL, 'NTUC', NULL),
+                  (904, '2026-03-04 10:00:00+00:00', 90, -25, 'EXPENSE', 'SGD', NULL, 'Grab', NULL)
+                """
+            )
+        )
+    return category_ids
+
+
+def test_bulk_override_happy_path(client: TestClient, db_engine):
+    category_ids = _seed_bulk_override_data(db_engine)
+    groceries_id = category_ids["rideshare"]
+
+    resp = client.post(
+        "/categories/override-bulk",
+        json={"transaction_ids": [901, 902, 903], "category_id": groceries_id},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == 3
+    assert sorted(body["transaction_ids"]) == [901, 902, 903]
+
+    # All three should no longer appear in the unmapped queue.
+    unmapped_resp = client.get("/categories/unmapped?month=2026-03")
+    assert unmapped_resp.status_code == 200
+    unmapped_ids = [row["transaction_id"] for row in unmapped_resp.json()]
+    assert 901 not in unmapped_ids
+    assert 902 not in unmapped_ids
+    assert 903 not in unmapped_ids
+    assert 904 in unmapped_ids  # untouched transaction still unmapped
+
+    # Verify each override resolves correctly.
+    for txn_id in [901, 902, 903]:
+        resolve_resp = client.get(f"/categories/resolve/{txn_id}")
+        assert resolve_resp.status_code == 200
+        resolution = resolve_resp.json()
+        assert resolution["source"] == "manual"
+        assert resolution["resolved_category"] is not None
+
+
+def test_bulk_override_empty_list(client: TestClient, db_engine):
+    _seed_bulk_override_data(db_engine)
+    resp = client.post(
+        "/categories/override-bulk",
+        json={"transaction_ids": [], "category_id": 101},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["applied"] == 0
+    assert body["transaction_ids"] == []
+
+
+def test_bulk_override_invalid_transaction_id(client: TestClient, db_engine):
+    category_ids = _seed_bulk_override_data(db_engine)
+    resp = client.post(
+        "/categories/override-bulk",
+        json={"transaction_ids": [901, 99999], "category_id": category_ids["rideshare"]},
+    )
+    assert resp.status_code == 400
+    assert "99999" in resp.json()["detail"]
+
+
+def test_bulk_override_invalid_category_id(client: TestClient, db_engine):
+    _seed_bulk_override_data(db_engine)
+    resp = client.post(
+        "/categories/override-bulk",
+        json={"transaction_ids": [901, 902], "category_id": 99999},
+    )
+    assert resp.status_code == 400
+
+
+def test_bulk_override_is_idempotent(client: TestClient, db_engine):
+    """Applying the same category twice must succeed and not duplicate rows."""
+    category_ids = _seed_bulk_override_data(db_engine)
+    payload = {"transaction_ids": [901, 902], "category_id": category_ids["rideshare"]}
+
+    first = client.post("/categories/override-bulk", json=payload)
+    assert first.status_code == 200
+    assert first.json()["applied"] == 2
+
+    second = client.post("/categories/override-bulk", json=payload)
+    assert second.status_code == 200
+    assert second.json()["applied"] == 2
+
+    # Still only one override row per transaction.
+    from sqlalchemy import text as sa_text
+    with db_engine.connect() as conn:
+        count = conn.execute(
+            sa_text("SELECT COUNT(*) FROM category_overrides WHERE transaction_id IN (901, 902)"),
+        ).scalar()
+    assert count == 2
+
+
+def test_bulk_override_does_not_affect_single_override_endpoint(client: TestClient, db_engine):
+    """The existing single-transaction endpoint must remain unaffected."""
+    category_ids = _seed_bulk_override_data(db_engine)
+    rideshare_id = category_ids["rideshare"]
+
+    resp = client.post(
+        "/categories/override",
+        json={"transaction_id": 904, "category_id": rideshare_id},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "manual"
+    assert body["transaction_id"] == 904

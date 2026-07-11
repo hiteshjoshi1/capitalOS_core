@@ -13,6 +13,7 @@ vi.mock("../lib/api", () => ({
     categories: vi.fn(),
     unmappedTransactions: vi.fn(),
     categoryOverride: vi.fn(),
+    categoryOverrideBulk: vi.fn(),
   },
 }));
 
@@ -89,6 +90,10 @@ describe("CashFlowMapping route", () => {
       rule_id: null,
       rule_name: null,
     });
+    mockApi.categoryOverrideBulk.mockResolvedValue({
+      applied: 2,
+      transaction_ids: [9001, 9002],
+    });
   });
 
   it("renders the unmapped queue grouped by merchant", async () => {
@@ -154,9 +159,12 @@ describe("CashFlowMapping route", () => {
     await user.click(screen.getByRole("button", { name: "Apply to all 2" }));
 
     await waitFor(() => {
-      expect(mockApi.categoryOverride).toHaveBeenCalledWith({ transaction_id: 9001, category_id: 2 });
-      expect(mockApi.categoryOverride).toHaveBeenCalledWith({ transaction_id: 9002, category_id: 2 });
+      expect(mockApi.categoryOverrideBulk).toHaveBeenCalledWith({
+        transaction_ids: [9001, 9002],
+        category_id: 2,
+      });
     });
+    expect(mockApi.categoryOverride).not.toHaveBeenCalled();
     await waitFor(() => {
       expect(screen.queryByText("NTUC FairPrice")).not.toBeInTheDocument();
     });
