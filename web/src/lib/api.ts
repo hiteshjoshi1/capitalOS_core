@@ -1048,6 +1048,7 @@ export type MarketDataSymbolDiagnostic = {
   freshness_status: string;
   refresh_status: string;
   failure_reason?: string | null;
+  reason_code?: "RATE_LIMITED" | "NO_TRADE_REPORTED" | "PROVIDER_ERROR" | "INVALID_PRICE" | null;
   attempt_status?: string | null;
 };
 

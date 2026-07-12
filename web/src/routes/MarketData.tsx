@@ -5,6 +5,13 @@ import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import "../App.css";
 
+const REASON_LABELS = {
+  RATE_LIMITED: "Rate limited",
+  NO_TRADE_REPORTED: "No trade reported",
+  PROVIDER_ERROR: "Provider error",
+  INVALID_PRICE: "Invalid price",
+} as const;
+
 function formatRunStarted(ts?: string | null): string {
   if (!ts) return "—";
   const date = new Date(ts);
@@ -148,7 +155,9 @@ export default function MarketData() {
                               <span className="muted marketDataSymbolMeta">
                                 {item.latest_trade_date?.slice(0, 10) ?? "—"} · {item.provider ?? item.source ?? "—"}
                               </span>
-                              <span className="muted">{item.failure_reason ?? "Reason unavailable"}</span>
+                              <span className="muted">
+                                {item.reason_code ? REASON_LABELS[item.reason_code] : item.failure_reason ?? "Reason unavailable"}
+                              </span>
                             </div>
                           ))}
                         </div>

@@ -5,8 +5,10 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
+from enum import Enum
 from typing import Any
 
+import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -33,6 +35,26 @@ EODHD_SUFFIX = {
     "HKEX": ".HK",
     "NSE": ".NS",
 }
+
+
+class MarketDataReasonCode(str, Enum):
+    RATE_LIMITED = "RATE_LIMITED"
+    NO_TRADE_REPORTED = "NO_TRADE_REPORTED"
+    PROVIDER_ERROR = "PROVIDER_ERROR"
+    INVALID_PRICE = "INVALID_PRICE"
+
+
+def _reason_code_for_exception(exc: Exception) -> MarketDataReasonCode:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, httpx.HTTPStatusError) and current.response.status_code == 429:
+            return MarketDataReasonCode.RATE_LIMITED
+        if type(current).__name__ == "YFRateLimitError":
+            return MarketDataReasonCode.RATE_LIMITED
+        current = current.__cause__ or current.__context__
+    return MarketDataReasonCode.PROVIDER_ERROR
 
 
 @dataclass
@@ -340,14 +362,15 @@ def _insert_item(
     price: float | None,
     currency: str | None,
     source_note: str | None,
+    reason_code: MarketDataReasonCode | None,
 ) -> None:
     db.execute(
         text(
             """
             INSERT INTO market_data_run_items
-              (run_id, asset_id, provider, exchange_code, symbol, trade_date, status, price, currency, source_note, created_at)
+              (run_id, asset_id, provider, exchange_code, symbol, trade_date, status, price, currency, source_note, reason_code, created_at)
             VALUES
-              (:run_id, :asset_id, :provider, :exchange_code, :symbol, :trade_date, :status, :price, :currency, :source_note, :created_at)
+              (:run_id, :asset_id, :provider, :exchange_code, :symbol, :trade_date, :status, :price, :currency, :source_note, :reason_code, :created_at)
             """
         ),
         {
@@ -361,6 +384,7 @@ def _insert_item(
             "price": price,
             "currency": currency,
             "source_note": source_note,
+            "reason_code": reason_code.value if reason_code is not None else None,
             "created_at": datetime.now(tz=timezone.utc),
         },
     )
@@ -684,7 +708,7 @@ def _latest_run_items(db: Session, exchange_code: str, asset_ids: set[int]) -> d
     rows = db.execute(
         text(
             f"""
-            SELECT i.asset_id, i.provider, i.symbol, i.status, i.trade_date, i.source_note, i.created_at
+            SELECT i.asset_id, i.provider, i.symbol, i.status, i.trade_date, i.source_note, i.reason_code, i.created_at
             FROM market_data_run_items i
             JOIN (
               SELECT asset_id, MAX(id) AS id
@@ -820,6 +844,7 @@ def _exchange_diagnostics(
                 "freshness_status": freshness_status,
                 "refresh_status": refresh_status,
                 "failure_reason": latest_item.get("source_note"),
+                "reason_code": latest_item.get("reason_code"),
                 "attempt_status": attempt_status or None,
             }
         )
@@ -931,6 +956,7 @@ def run_exchange_refresh(
         run_ids[provider_name] = run_id
 
         provider_error: str | None = None
+        provider_failures: dict[str, tuple[str, MarketDataReasonCode]] = {}
         quotes: dict[str, EodQuote] = {}
         for batch_symbols in _batched(provider_symbols, batch_size):
             try:
@@ -949,6 +975,9 @@ def run_exchange_refresh(
                 )
             except Exception as exc:  # noqa: BLE001
                 provider_error = str(exc)
+                reason_code = _reason_code_for_exception(exc)
+                for failed_symbol in batch_symbols:
+                    provider_failures[failed_symbol.upper()] = (provider_error, reason_code)
 
         upserted_rows = 0
         invalid_rows = 0
@@ -958,6 +987,7 @@ def run_exchange_refresh(
                 attempted_asset_ids.add(row.asset_id)
             quote = quotes.get(provider_symbol.upper())
             if quote is None:
+                failure = provider_failures.get(provider_symbol.upper())
                 for row in mapped_rows:
                     next_unresolved.append(row)
                     _insert_item(
@@ -971,7 +1001,8 @@ def run_exchange_refresh(
                         status="missing",
                         price=None,
                         currency=row.quote_currency,
-                        source_note=provider_error,
+                        source_note=failure[0] if failure else None,
+                        reason_code=failure[1] if failure else MarketDataReasonCode.NO_TRADE_REPORTED,
                     )
                 continue
 
@@ -993,6 +1024,7 @@ def run_exchange_refresh(
                         price=quote.close,
                         currency=(row.quote_currency or quote.currency or "USD").upper(),
                         source_note="missing/invalid price from provider",
+                        reason_code=MarketDataReasonCode.INVALID_PRICE,
                     )
                 continue
 
@@ -1024,6 +1056,7 @@ def run_exchange_refresh(
                         price=None,
                         currency=resolved_currency,
                         source_note="missing/invalid price from provider",
+                        reason_code=MarketDataReasonCode.INVALID_PRICE,
                     )
                     continue
                 upserted_rows += 1
@@ -1041,6 +1074,7 @@ def run_exchange_refresh(
                     price=quote.close,
                     currency=resolved_currency,
                     source_note=None if step_idx == 0 else "resolved via fallback",
+                    reason_code=None,
                 )
 
         missing_symbols = len(next_unresolved) + invalid_rows

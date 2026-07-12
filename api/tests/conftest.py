@@ -842,6 +842,7 @@ def setup_db():
               price REAL,
               currency TEXT,
               source_note TEXT,
+              reason_code TEXT,
               created_at TIMESTAMP
             )
             """
