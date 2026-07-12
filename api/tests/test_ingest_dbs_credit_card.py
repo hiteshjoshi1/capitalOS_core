@@ -75,8 +75,9 @@ def test_parse_dbs_credit_card_csv_fixture():
     type_counts = Counter(tx["type"] for tx in result.transactions)
     category_counts = Counter(tx["category"] for tx in result.transactions)
     assert type_counts == {"EXPENSE": 7, "FEE": 2, "TAX": 1, "INTEREST": 1}
+    # All 7 purchases are SHENG SIONG → classified as "Groceries" by merchant categorizer
     assert category_counts == {
-        "CreditCard::Purchase": 7,
+        "Groceries": 7,
         "CreditCard::Fee": 2,
         "CreditCard::Tax": 1,
         "CreditCard::Interest": 1,

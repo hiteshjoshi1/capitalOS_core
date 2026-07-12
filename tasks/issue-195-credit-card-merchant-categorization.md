@@ -82,5 +82,110 @@ _Automation appends structured logs here._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `deterministic_gates`
+**Workflow Status**: `waiting_for_human`
+
+## Workflow Snapshot
+- latest_outcome: Implemented per-merchant categorization for credit card transactions (Issue 195). Added a merchant_categorizer module that classifies purchase descriptions into friendly categories (Dining, Groceries, Transport, Subscriptions, Shopping, Travel, Utilities, Medical) at parse time. Updated all three credit card parsers to use it. Broadened /categories/unmapped to surface CreditCard::Purchase placeholders. Added a migration with Travel/Utilities taxonomy and 50+ merchant-pattern seed rules. Wired automatic backfill into the ingest upload endpoint. Updated existing tests and added a new test file.
+- next_action: All deterministic gates passed. Review the changes in the working tree, then run `make task-ship TASK=<task_file> THREAD_ID=<thread_id>` to commit, push, and open a PR.
+- pipeline_version: `v3`
+- provider_model: `copilot/claude-sonnet-4.6`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: Credit card purchases get a real per-merchant category at ingestion time
+- Acceptance criterion: /categories/unmapped surfaces uncategorized/placeholder-category card transactions
+- Acceptance criterion: Seed rules cover common recurring merchants for /categories/backfill
+- Acceptance criterion: LiabilitiesOverview Spend by category shows multiple categories
+- Acceptance criterion: Backend tests cover parser-level categorization, broadened unmapped filter, and backfill
+- Acceptance criterion: make verify passes
+
+## Prepare
+Checked out `feature/issue-195-credit-card-merchant-categorization` from `main` and verified task file exists.
+
+## Plan Summary
+1. Create merchant_categorizer.py with keyword-based rules. 2. Update three CC parsers to call it instead of hardcoding CreditCard::Purchase. 3. Broaden /categories/unmapped SQL filter to include creditcard::purchase. 4. Add migration 064 with Travel/Utilities taxonomy + 50+ merchant-pattern rules + bridge rules. 5. Auto-run apply_rules after successful ingest upload. 6. Update existing parser tests. 7. Add new test file covering all acceptance criteria.
+
+### Architecture Decisions
+- Decision 1a (confirmed): Parser-level classification via merchant_categorizer.py. Returns human-readable strings (Dining, Groceries, etc.) so resolved_category is immediately meaningful without backfill. Falls back to CreditCard::Purchase for unknowns.
+- Decision 2 (confirmed): /categories/unmapped now includes LOWER(TRIM(category)) = 'creditcard::purchase' in its filter so unrecognized card merchants appear in CashFlowMapping.tsx.
+- Decision 3 (confirmed): Migration 064 adds Travel/Utilities taxonomy + 50+ merchant-pattern rules + 8 bridge rules mapping parser-friendly names to taxonomy. Backfill is also auto-triggered on ingest.
+- Decision 4 (confirmed): No change to resolved_category COALESCE logic in spending.py. Friendly raw categories flow through automatically.
+
+### Acceptance Criteria
+- Credit card purchases get a real per-merchant category at ingestion time
+- /categories/unmapped surfaces uncategorized/placeholder-category card transactions
+- Seed rules cover common recurring merchants for /categories/backfill
+- LiabilitiesOverview Spend by category shows multiple categories
+- Backend tests cover parser-level categorization, broadened unmapped filter, and backfill
+- make verify passes
+
+### Planned Paths
+- `api/app/ingestion/parsers/merchant_categorizer.py`
+- `api/app/ingestion/parsers/uob_credit_card_xls_v1.py`
+- `api/app/ingestion/parsers/dbs_credit_card_csv_v1.py`
+- `api/app/ingestion/parsers/citi_credit_card_csv_v1.py`
+- `api/app/routers/categories.py`
+- `api/app/routers/ingest.py`
+- `migrations/064_credit_card_merchant_category_rules.sql`
+- `api/tests/test_ingest_uob_cc.py`
+- `api/tests/test_ingest_dbs_credit_card.py`
+- `api/tests/test_credit_card_merchant_categorization.py`
+
+## Build Summary
+Implemented per-merchant categorization for credit card transactions (Issue 195). Added a merchant_categorizer module that classifies purchase descriptions into friendly categories (Dining, Groceries, Transport, Subscriptions, Shopping, Travel, Utilities, Medical) at parse time. Updated all three credit card parsers to use it. Broadened /categories/unmapped to surface CreditCard::Purchase placeholders. Added a migration with Travel/Utilities taxonomy and 50+ merchant-pattern seed rules. Wired automatic backfill into the ingest upload endpoint. Updated existing tests and added a new test file.
+
+### Changed Files
+- `api/app/ingestion/parsers/citi_credit_card_csv_v1.py`
+- `api/app/ingestion/parsers/dbs_credit_card_csv_v1.py`
+- `api/app/ingestion/parsers/merchant_categorizer.py`
+- `api/app/ingestion/parsers/uob_credit_card_xls_v1.py`
+- `api/app/routers/categories.py`
+- `api/app/routers/ingest.py`
+- `api/tests/test_credit_card_merchant_categorization.py`
+- `api/tests/test_ingest_dbs_credit_card.py`
+- `api/tests/test_ingest_uob_cc.py`
+- `migrations/064_credit_card_merchant_category_rules.sql`
+- `tasks/issue-195-credit-card-merchant-categorization.md`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented per-merchant categorization for credit card transactions (Issue 195). Added a merchant_categorizer module that classifies purchase descriptions into friendly categories (Dining, Groceries, Transport, Subscriptions, Shopping, Travel, Utilities, Medical) at parse time. Updated all three credit card parsers to use it. Broadened /categories/unmapped to surface CreditCard::Purchase placeholders. Added a migration with Travel/Utilities taxonomy and 50+ merchant-pattern seed rules. Wired automatic backfill into the ingest upload endpoint. Updated existing tests and added a new test file.
+
+- semantic_intent_achieved: `True`
+- provider_model: `copilot/claude-sonnet-4.6`
+
+### Semantic Checks
+- `pass` Credit card purchases get a real per-merchant category at ingestion time (or via a backfill pass), not a single hardcoded placeholder: merchant_categorizer.py classifies known merchants at parse time; DBS fixture SHENG SIONG transactions now get category='Groceries' (confirmed by updated test_ingest_dbs_credit_card.py); UOB KOPITIAM transactions get category='Dining'
+- `pass` /categories/unmapped surfaces uncategorized/placeholder-category card transactions so they're reachable from CashFlowMapping.tsx: categories.py filter broadened to include LOWER(TRIM(t.category)) = 'creditcard::purchase'; test_unmapped_filter_surfaces_creditcard_purchase_placeholder confirms tx 901 (CreditCard::Purchase) appears and tx 902 (Dining) does not
+- `pass` Seed rules cover common recurring merchants (subscriptions, groceries, transport, dining) well enough that /categories/backfill meaningfully reduces the Uncategorized bucket: Migration 064 adds 50+ merchant-pattern rules + 8 bridge rules; test_backfill_resolves_creditcard_purchase_by_merchant_pattern confirms 3 of 4 transactions resolved (SHENG SIONG, NETFLIX, GRAB) leaving only SOME MYSTERY SHOP unmapped
+- `pass` LiabilitiesOverview Spend by category donut shows multiple categories for any account with more than one real merchant type: test_credit_card_transactions_endpoint_returns_multiple_categories confirms /spending/credit-card-transactions returns Groceries, Dining, Subscriptions as distinct resolved_category values for mixed-merchant account; no backfill needed since friendly names flow through raw category
+- `pass` Backend tests cover: parser-level categorization, broadened /categories/unmapped filter, and backfill matching against the new seed rules: test_credit_card_merchant_categorization.py: 44 parametrized tests for classify_merchant, 2 unmapped filter tests, 2 backfill tests, 1 endpoint test (49 total); all passing in Docker
+- `pass` make verify passes (lint + typecheck + test-backend + test-frontend): lint: pass (eslint clean, ruff skipped in image); typecheck: pass (tsc clean, mypy skipped); test-backend: 1086 passed; test-frontend: 271 passed
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
 <!-- MACHINE_RENDERED_END -->

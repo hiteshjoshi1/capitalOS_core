@@ -125,12 +125,32 @@ def ingest_upload(
             data_dir=data_dir,
         )
         report = run_ingestion(db=db, job_id=job.id, data_dir=data_dir)
+        if report.get("status") == "IMPORTED":
+            _backfill_account_categories(db, account_id)
         return report
     finally:
         try:
             os.remove(tmp_path)
         except OSError:
             pass
+
+
+def _backfill_account_categories(db: Session, account_id: int) -> None:
+    """Run rule-based category backfill for all transactions in an account.
+
+    Called automatically after a successful ingest so that seed rules resolve
+    merchant categories without requiring a separate manual backfill step.
+    """
+    from sqlalchemy import text as _text
+    from app.category_engine import apply_rules
+
+    tx_rows = db.execute(
+        _text("SELECT id FROM transactions WHERE account_id = :account_id"),
+        {"account_id": account_id},
+    ).fetchall()
+    tx_ids = [int(row[0]) for row in tx_rows]
+    if tx_ids:
+        apply_rules(db, tx_ids)
 
 
 @router.get("/jobs")
