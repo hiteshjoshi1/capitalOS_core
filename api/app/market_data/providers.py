@@ -20,6 +20,19 @@ class MarketDataProvider(Protocol):
         ...
 
 
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    current: BaseException | None = exc
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, httpx.HTTPStatusError) and current.response.status_code == 429:
+            return True
+        if type(current).__name__ == "YFRateLimitError":
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def _normalize_hk_yahoo_symbol(symbol: str) -> str:
     upper = (symbol or "").strip().upper()
     if not upper.endswith(".HK"):
@@ -106,6 +119,8 @@ class EODHDProvider(GenericMarketDataProvider):
                     currency=currency,
                 )
             except Exception as exc:  # noqa: BLE001
+                if _is_rate_limit_error(exc):
+                    raise
                 last_exc = exc
                 continue
         if not out and last_exc:
@@ -315,7 +330,9 @@ class EODDataProvider(GenericMarketDataProvider):
                 last_exc = exc
                 # Membership-level restrictions or not-found should not block later providers.
                 code = int(exc.response.status_code) if exc.response is not None else 0
-                if code in (401, 404, 429):
+                if code == 429:
+                    raise
+                if code in (401, 404):
                     if code == 401:
                         break
                 else:
@@ -324,7 +341,9 @@ class EODDataProvider(GenericMarketDataProvider):
                 last_exc = exc
             if idx < len(symbols) - 1 and sleep_ms > 0:
                 time.sleep(sleep_ms / 1000.0)
-        if not out and last_exc and not isinstance(last_exc, httpx.HTTPStatusError):
+        if not out and last_exc:
+            if isinstance(last_exc, httpx.HTTPStatusError) and last_exc.response.status_code == 404:
+                return out
             raise last_exc
         return out
 
@@ -398,6 +417,8 @@ class YahooProvider(GenericMarketDataProvider):
                         currency=currency,
                     )
             except Exception as exc:  # noqa: BLE001
+                if _is_rate_limit_error(exc):
+                    raise
                 last_exc = exc
             if i + batch_size < len(symbols) and sleep_ms > 0:
                 time.sleep(sleep_ms / 1000.0)
@@ -632,6 +653,8 @@ class YFinanceProvider(GenericMarketDataProvider):
                         currency=currency,
                     )
         except Exception as exc:  # noqa: BLE001
+            if _is_rate_limit_error(exc):
+                raise
             last_exc = exc
 
         # Fallback to per-symbol lookups only for symbols missing from batch result.
@@ -661,6 +684,8 @@ class YFinanceProvider(GenericMarketDataProvider):
                         currency=currency,
                     )
                 except Exception as exc:  # noqa: BLE001
+                    if _is_rate_limit_error(exc):
+                        raise
                     last_exc = exc
                 if idx < len(unresolved) - 1 and sleep_ms > 0:
                     time.sleep(sleep_ms / 1000.0)

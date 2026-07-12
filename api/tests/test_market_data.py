@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+import httpx
 import pytest
 from sqlalchemy import text
 
@@ -36,6 +37,18 @@ def test_yfinance_dividend_yield_subunit_uses_implied_anchor():
     value = provider._choose_reported_yield_rate(0.23, implied_yield=0.0021)
     assert value is not None
     assert value == pytest.approx(0.0023, rel=1e-9)
+
+
+@pytest.mark.parametrize("status_code", [429, 500])
+def test_eoddata_provider_surfaces_http_failures(monkeypatch, status_code):
+    request = httpx.Request("GET", "https://api.eoddata.com/Quote/Get/US/REGN")
+    response = httpx.Response(status_code, request=request)
+    monkeypatch.setattr(providers, "request_with_retry", lambda *args, **kwargs: response)
+
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        providers.EODDataProvider(api_key="test").fetch_prices(["REGN"], exchange_code="US")
+
+    assert exc_info.value.response.status_code == status_code
 
 
 def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
@@ -382,9 +395,9 @@ def test_market_data_status_surfaces_stale_and_failed_symbol_diagnostics(client,
             text(
                 """
                 INSERT INTO market_data_run_items
-                  (run_id, asset_id, provider, exchange_code, symbol, trade_date, status, price, currency, source_note, created_at)
+                  (run_id, asset_id, provider, exchange_code, symbol, trade_date, status, price, currency, source_note, reason_code, created_at)
                 VALUES
-                  (150, 150, 'finnhub', 'US', 'REGN', '2026-02-06', 'missing', NULL, 'USD', 'provider timeout', :ts)
+                  (150, 150, 'finnhub', 'US', 'REGN', '2026-02-06', 'missing', NULL, 'USD', 'provider timeout', 'PROVIDER_ERROR', :ts)
                 """
             ),
             {"ts": datetime(2026, 2, 6, tzinfo=timezone.utc)},
@@ -397,7 +410,72 @@ def test_market_data_status_surfaces_stale_and_failed_symbol_diagnostics(client,
     assert regn["freshness_status"] == "stale"
     assert regn["refresh_status"] == "failed"
     assert regn["failure_reason"] == "provider timeout"
+    assert regn["reason_code"] == "PROVIDER_ERROR"
     assert regn["latest_trade_date"] == "2026-02-01"
+
+
+@pytest.mark.parametrize(
+    "provider_name,provider_class",
+    [
+        ("eodhd", "EODHDProvider"),
+        ("finnhub", "FinnhubProvider"),
+        ("eoddata", "EODDataProvider"),
+        ("yfinance", "YFinanceProvider"),
+        ("yahoo", "YahooProvider"),
+    ],
+)
+@pytest.mark.parametrize(
+    "outcome,expected_code",
+    [("rate_limit", "RATE_LIMITED"), ("no_trade", "NO_TRADE_REPORTED")],
+)
+def test_market_data_classifies_provider_stale_reasons(
+    client,
+    db_engine,
+    monkeypatch,
+    provider_name,
+    provider_class,
+    outcome,
+    expected_code,
+):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(151, 'REGN', 'Regeneron', 'STOCK', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO market_symbol_map
+                  (asset_id, exchange_code, exchange_symbol, quote_currency, is_active,
+                   eodhd_symbol_override, yahoo_symbol_override)
+                VALUES (151, 'US', 'REGN', 'USD', 1, 'REGN', 'REGN')
+                """
+            )
+        )
+
+    def fake_fetch(self, symbols, exchange_code=None, trade_date=None):
+        if outcome == "no_trade":
+            return {}
+        request = httpx.Request("GET", "https://provider.example/quote")
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("429 Too Many Requests", request=request, response=response)
+
+    monkeypatch.setenv("STOCK_EXCHANGES", "US")
+    monkeypatch.setenv("STOCK_PROVIDER_CHAIN_US", provider_name)
+    monkeypatch.setattr(f"app.market_data.providers.{provider_class}.fetch_prices", fake_fetch)
+
+    refresh = client.post("/market-data/refresh-now")
+    assert refresh.status_code == 200
+    status = client.get("/market-data/status")
+    assert status.status_code == 200
+    regn = status.json()["status"][0]["symbols"][0]
+    assert regn["reason_code"] == expected_code
+    if outcome == "rate_limit":
+        assert regn["failure_reason"] == "429 Too Many Requests"
+    else:
+        assert regn["failure_reason"] is None
 
 
 def test_market_data_scheduler_uses_grouped_refresh_windows(monkeypatch):

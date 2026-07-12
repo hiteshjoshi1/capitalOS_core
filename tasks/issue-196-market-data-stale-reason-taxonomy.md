@@ -69,5 +69,110 @@ _Automation appends structured logs here._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-196-market-data-stale-reason-taxonomy`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.6-sol`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: market_data_run_items gains a reason_code column populated from a closed taxonomy for failed symbols.
+- Acceptance criterion: _exchange_diagnostics() exposes reason_code while preserving failure_reason from source_note.
+- Acceptance criterion: GET /market-data/status includes reason_code per symbol.
+- Acceptance criterion: Rate limited and No trade reported outcomes are distinguishable from generic provider errors.
+- Acceptance criterion: No existing fields are removed and source_note remains backward compatible.
+
+## Prepare
+Checked out `feature/issue-196-market-data-stale-reason-taxonomy` from `main` and verified task file exists.
+
+## Plan Summary
+Inspected provider behavior and refresh flow, added a constrained additive reason_code column, classified provider outcomes per symbol, exposed and rendered curated reasons, and completed all required verification gates.
+
+### Architecture Decisions
+- Use the closed values RATE_LIMITED, NO_TRADE_REPORTED, PROVIDER_ERROR, and INVALID_PRICE.
+- Persist reason_code alongside source_note, retaining source_note and failure_reason as raw debugging information.
+- Classify HTTP 429 and yfinance YFRateLimitError signals as RATE_LIMITED, successful calls without usable quotes as NO_TRADE_REPORTED, invalid values as INVALID_PRICE, and other exceptions as PROVIDER_ERROR.
+- Preserve provider failures per request batch so one batch error is not incorrectly assigned to symbols from another batch.
+- Render human-readable frontend labels from reason_code while falling back to legacy failure_reason values.
+
+### Acceptance Criteria
+- market_data_run_items gains a reason_code column populated from a closed taxonomy for failed symbols.
+- _exchange_diagnostics() exposes reason_code while preserving failure_reason from source_note.
+- GET /market-data/status includes reason_code per symbol.
+- Rate limited and No trade reported outcomes are distinguishable from generic provider errors.
+- No existing fields are removed and source_note remains backward compatible.
+
+### Planned Paths
+- `api/app/market_data/`
+- `api/tests/`
+- `migrations/`
+- `web/src/lib/api.ts`
+- `web/src/routes/MarketData.tsx`
+- `web/src/__tests__/MarketData.test.tsx`
+- `tasks/issue-196-market-data-stale-reason-taxonomy.md`
+
+## Build Summary
+Implemented per-symbol stale reason taxonomy across persistence, provider classification, status API diagnostics, frontend rendering, and tests.
+
+### Changed Files
+- `api/app/market_data/providers.py`
+- `api/app/market_data/service.py`
+- `api/tests/conftest.py`
+- `api/tests/test_market_data.py`
+- `migrations/065_market_data_stale_reason_code.sql`
+- `tasks/issue-196-market-data-stale-reason-taxonomy.md`
+- `web/src/__tests__/MarketData.test.tsx`
+- `web/src/lib/api.ts`
+- `web/src/routes/MarketData.tsx`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented per-symbol stale reason taxonomy across persistence, provider classification, status API diagnostics, frontend rendering, and tests.
+
+- semantic_intent_achieved: `True`
+- provider_model: `codex/gpt-5.6-sol`
+
+### Semantic Checks
+- `pass` market_data_run_items gains a reason_code column populated by a curated, closed set for every stale or failed symbol.: Migration 065 adds the column, backfills historical failed rows, constrains allowed values, and requires codes for missing or invalid statuses; the database invariant query found no uncoded failed rows.
+- `pass` _exchange_diagnostics() exposes reason_code and keeps failure_reason/source_note as raw debug text.: Latest run-item queries select both reason_code and source_note; diagnostics return reason_code separately while failure_reason remains sourced from source_note.
+- `pass` GET /market-data/status includes the new field.: Status endpoint tests assert reason_code values returned through GET /market-data/status for seeded, rate-limited, and no-trade cases.
+- `pass` Rate limited and No trade reported are reliably distinguishable from generic provider errors for current providers.: Parameterized tests cover both outcomes across EODHD, Finnhub, EODData, yfinance, and Yahoo; EODData additionally verifies real HTTP 429 and 500 propagation.
+- `pass` No existing fields are removed and source_note is unchanged for backward compatibility.: The schema change is additive, failure_reason remains present, raw exception text remains in source_note, frontend types only add reason_code, and all contract suites pass.
+
+### Risk Flags
+- Backend ruff and mypy were unavailable in the API image, so their portions were skipped by the successful Make targets.
+- The local Postgres database has a pre-existing collation-version mismatch warning.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-196-market-data-stale-reason-taxonomy`.
 <!-- MACHINE_RENDERED_END -->

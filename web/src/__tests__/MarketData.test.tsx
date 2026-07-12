@@ -56,6 +56,7 @@ describe("MarketData", () => {
               provider: "eodhd",
               source: "close",
               failure_reason: "rate limited",
+              reason_code: "RATE_LIMITED",
             },
           ],
         },
@@ -92,7 +93,7 @@ describe("MarketData", () => {
     expect(screen.getAllByText("US").length).toBeGreaterThan(0);
     expect(screen.getByText("ADBE")).toBeInTheDocument();
     expect(screen.getByText("REGN")).toBeInTheDocument();
-    expect(screen.getByText("rate limited")).toBeInTheDocument();
+    expect(screen.getByText("Rate limited")).toBeInTheDocument();
 
     expect(screen.getByText("1 fresh")).toBeInTheDocument();
     expect(screen.getByText("1 stale")).toBeInTheDocument();
