@@ -180,7 +180,9 @@ def _extract_foreign_currency(row: ParsedRow) -> tuple[str, str] | None:
     return match.group(1), match.group(2)
 
 
-def _classify(description: str, amount: float) -> tuple[str, str]:
+def _classify(description: str, amount: float, merchant_counterparty: str | None = None) -> tuple[str, str]:
+    from app.ingestion.parsers.merchant_categorizer import classify_merchant
+
     desc = description.upper()
     if any(keyword in desc for keyword in _PAYMENT_KEYWORDS):
         return "TRANSFER", "CreditCard::Payment"
@@ -190,7 +192,7 @@ def _classify(description: str, amount: float) -> tuple[str, str]:
         return "INTEREST", "CreditCard::Interest"
     if amount > 0:
         return "INCOME", "CreditCard::Refund"
-    return "EXPENSE", "CreditCard::Purchase"
+    return "EXPENSE", classify_merchant(description, merchant_counterparty)
 
 
 def _normalize_line(value: str) -> str:
@@ -282,7 +284,7 @@ def parse_uob_credit_card_xls(file_path: str) -> ParseResult:
         if merchant_counterparty.upper() == "PREVIOUS BALANCE" or local_amount == 0.0:
             continue
         amount = -local_amount
-        tx_type, category = _classify(row.description, amount)
+        tx_type, category = _classify(row.description, amount, merchant_counterparty)
         transactions.append(
             {
                 "ts": row.ts,

@@ -32,6 +32,8 @@ def _extract_foreign_currency(description: str) -> tuple[str, str] | None:
 
 
 def _classify(description: str, amount: float) -> tuple[str, str]:
+    from app.ingestion.parsers.merchant_categorizer import classify_merchant
+
     desc = description.upper()
     if "PAYMENT - THANK YOU" in desc:
         return "TRANSFER", "CreditCard::Payment"
@@ -41,7 +43,7 @@ def _classify(description: str, amount: float) -> tuple[str, str]:
         return "INTEREST", "CreditCard::Interest"
     if amount > 0:
         return "INCOME", "CreditCard::Refund"
-    return "EXPENSE", "CreditCard::Purchase"
+    return "EXPENSE", classify_merchant(description)
 
 
 def parse_citi_credit_card_csv(file_path: str, delimiter: str) -> ParseResult:

@@ -302,6 +302,7 @@ def list_unmapped_transactions(
             t.category IS NULL
             OR TRIM(t.category) = ''
             OR LOWER(TRIM(t.category)) = 'uncategorized'
+            OR LOWER(TRIM(t.category)) = 'creditcard::purchase'
           )
     """
     params: dict[str, object] = {"start": start, "end": end}

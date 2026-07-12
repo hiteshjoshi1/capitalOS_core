@@ -101,7 +101,15 @@ def test_parse_uob_credit_card_xls_fixture():
 
     assert result.transactions[0]["ts"].isoformat() == "2026-02-06T00:00:00+00:00"
     assert all(tx["currency"] == "SGD" for tx in result.transactions)
-    assert all(tx["category"] in {"CreditCard::Purchase", "CreditCard::Payment"} for tx in result.transactions)
+    # Parser now emits merchant-based categories (e.g. "Dining") for known merchants
+    # and "CreditCard::Purchase" for unknowns; "CreditCard::Payment" for transfers.
+    VALID_CATEGORIES = {
+        "CreditCard::Purchase", "CreditCard::Payment", "CreditCard::Fee",
+        "CreditCard::Interest", "CreditCard::Refund",
+        "Dining", "Groceries", "Transport", "Travel",
+        "Subscriptions", "Shopping", "Utilities", "Medical",
+    }
+    assert all(tx["category"] in VALID_CATEGORIES for tx in result.transactions)
 
     first_tx = result.transactions[0]
     assert first_tx["merchant_counterparty"] == "KOPITIAM FP APP PAYMENTS SINGAPORE SG"

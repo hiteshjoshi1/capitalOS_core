@@ -136,6 +136,8 @@ def _row_to_dict(headers: list[str], row: list[str]) -> dict[str, str]:
 
 
 def _classify(description: str, transaction_type: str, amount: float) -> tuple[str, str]:
+    from app.ingestion.parsers.merchant_categorizer import classify_merchant
+
     desc = description.upper()
     row_type = transaction_type.upper()
 
@@ -153,7 +155,7 @@ def _classify(description: str, transaction_type: str, amount: float) -> tuple[s
         return "INCOME", "CreditCard::Refund"
     if amount > 0:
         return "INCOME", "CreditCard::Credit"
-    return "EXPENSE", "CreditCard::Purchase"
+    return "EXPENSE", classify_merchant(description)
 
 
 def _build_notes(record: dict[str, str], metadata: dict[str, Any], posting_date: datetime | None) -> str | None:
