@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -54,7 +54,13 @@ describe("WealthRisk route", () => {
     expect(screen.getByText("15.0%")).toBeInTheDocument();
     expect(screen.getByText("AAPL — 22.0%")).toBeInTheDocument();
     expect(screen.getByText("Where the top positions sit")).toBeInTheDocument();
+    expect(screen.getByText("STOCK · S$ 22,000")).toBeInTheDocument();
+    expect(screen.getAllByText("22.0%").length).toBeGreaterThan(0);
     expect(screen.getByText("Where the wealth is booked")).toBeInTheDocument();
+    expect(screen.getByText("Mapped")).toBeInTheDocument();
+    expect(screen.getByText("S$ 100K")).toBeInTheDocument();
+    expect(screen.getByText("As of Feb 6, 2026")).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Geographic exposure pie chart" })).toBeInTheDocument();
     expect(screen.getByText(/Stocks S\$ 40,000/)).toBeInTheDocument();
   });
 
@@ -75,6 +81,29 @@ describe("WealthRisk route", () => {
 
     await user.click(screen.getByRole("button", { name: "Top 3" }));
     expect(await screen.findByText("Top 3 concentration")).toBeInTheDocument();
+  });
+
+  it("redraws geography exposure after selecting a different month", async () => {
+    mockApi.dashboardGeographyExposure
+      .mockResolvedValueOnce(geographyFixture)
+      .mockResolvedValueOnce({
+        ...geographyFixture,
+        total: 80000,
+        items: [{ country: "SG", stocks_funds: 30000, cash: 20000, crypto: 0, total: 50000, percent: 62.5 }],
+      });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <WealthRisk />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText(/Stocks S\$ 40,000/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2025-05" } });
+
+    await waitFor(() => expect(mockApi.dashboardGeographyExposure).toHaveBeenLastCalledWith("2025-05", "SGD"));
+    expect(await screen.findByText(/Stocks S\$ 30,000/)).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {

@@ -115,6 +115,7 @@ describe("Dividends", () => {
 
     expect(await screen.findByRole("heading", { name: "Dividends" })).toBeInTheDocument();
     expect(screen.getByText("REALIZED THIS MONTH")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "What's received vs. what's ahead" })).toBeInTheDocument();
     expect(screen.getByText("Expected, next 12 months")).toBeInTheDocument();
     expect(screen.getByText("Portfolio coverage")).toBeInTheDocument();
     expect(screen.getByText("12-month dividend income")).toBeInTheDocument();

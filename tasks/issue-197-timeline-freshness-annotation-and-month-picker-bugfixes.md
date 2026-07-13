@@ -91,5 +91,105 @@ _Automation appends structured logs here._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-197-timeline-freshness-annotation-and-month-picker-bugfixes`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.6-sol`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: Timeline tooltip and drill-down explain the different snapshot and upload clocks for a still-open month with uploads.
+- Acceptance criterion: Geography exposure uses the requested month's completed snapshot boundary and differs when historical holdings differ.
+- Acceptance criterion: Wealth Risk redraws geography exposure after its selected month changes.
+- Acceptance criterion: Backend and frontend tests pass with new regression coverage.
+
+## Prepare
+Checked out `feature/issue-197-timeline-freshness-annotation-and-month-picker-bugfixes` from `main` and verified task file exists.
+
+## Plan Summary
+Inspected the endpoint and timeline rendering paths, implemented minimal backend and frontend changes, added regression coverage, ran all required verification gates, fixed the single test-fixture failure, and audited the final diff.
+
+### Architecture Decisions
+- Upload markers remain assigned to their real calendar upload month.
+- The timeline tooltip and drill-down show the caveat for the current still-open month whenever uploads exist, using the existing anchor_date field.
+- Geography exposure now resolves the requested month through _completed_snapshot_anchor_ts while leaving stock-exposure and platform-allocation unchanged as explicitly out of scope.
+
+### Acceptance Criteria
+- Timeline tooltip and drill-down explain the different snapshot and upload clocks for a still-open month with uploads.
+- Geography exposure uses the requested month's completed snapshot boundary and differs when historical holdings differ.
+- Wealth Risk redraws geography exposure after its selected month changes.
+- Backend and frontend tests pass with new regression coverage.
+
+### Planned Paths
+- `api/app/routers/dashboard.py`
+- `api/tests/test_dashboard.py`
+- `web/src/components/WealthHistoryChart.tsx`
+- `web/src/components/WealthDrilldownPanel.tsx`
+- `web/src/__tests__/WealthHistoryChart.test.tsx`
+- `web/src/__tests__/WealthDrilldownPanel.test.tsx`
+- `web/src/__tests__/WealthRisk.test.tsx`
+
+## Build Summary
+Implemented timeline snapshot/upload clock caveats and fixed geography exposure month scoping.
+
+### Changed Files
+- `api/app/routers/dashboard.py`
+- `api/tests/test_dashboard.py`
+- `tasks/issue-197-timeline-freshness-annotation-and-month-picker-bugfixes.md`
+- `web/src/__tests__/WealthDrilldownPanel.test.tsx`
+- `web/src/__tests__/WealthHistoryChart.test.tsx`
+- `web/src/__tests__/WealthRisk.test.tsx`
+- `web/src/components/WealthDrilldownPanel.tsx`
+- `web/src/components/WealthHistoryChart.tsx`
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- None
+
+## Agent Run Summary
+Implemented timeline snapshot/upload clock caveats and fixed geography exposure month scoping.
+
+- semantic_intent_achieved: `True`
+- provider_model: `codex/gpt-5.6-sol`
+
+### Semantic Checks
+- `pass` Timeline tooltip and drill-down panel show a clear caveat for the current still-open month with uploads.: Dedicated WealthHistoryChart and WealthDrilldownPanel tests verify the caveat with anchor 2026-07-01 and an OCBC upload.
+- `pass` GET /dashboard/geography-exposure uses the requested historical snapshot boundary.: Backend regression verifies month 2026-05 returns SG exposure of 1000 while current month 2026-07 returns US exposure of 2000.
+- `pass` Wealth Risk geography pie chart changes when a different month is selected.: WealthRisk regression changes the month to 2025-05, verifies the API call, and observes rendered stocks exposure changing from S$40,000 to S$30,000.
+- `pass` Backend and frontend tests pass, including new geography month-scoping and timeline annotation tests.: Final runs passed with 1112 backend tests and 285 frontend tests, plus contract, smoke, E2E, build, lint, typecheck, and orchestration gates.
+
+### Risk Flags
+- backend_ruff_unavailable
+- backend_mypy_unavailable
+- pre_existing_task_journal_change_preserved
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-197-timeline-freshness-annotation-and-month-picker-bugfixes`.
 <!-- MACHINE_RENDERED_END -->

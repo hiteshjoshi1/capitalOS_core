@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { WealthTimelinePoint, WealthTopMovers } from "../lib/api";
+import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import type { ComponentDeltas, MonthFlags } from "../lib/wealthHistoryAnalysis";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -98,6 +99,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
 
   const delta = flags.delta;
   const pct = delta != null && prevPoint && prevPoint.total !== 0 ? (delta / prevPoint.total) * 100 : null;
+  const showSnapshotClockCaveat = month === currentMonthYYYYMM() && point.uploads.length > 0;
 
   const filteredMovers = movers
     ? {
@@ -118,6 +120,12 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
           ×
         </button>
       </div>
+
+      {showSnapshotClockCaveat ? (
+        <div className="whDrillBanner">
+          Uses data through {point.anchor_date}; recent uploads apply next month.
+        </div>
+      ) : null}
 
       {delta == null ? (
         <p className="muted">Start of available history.</p>
@@ -143,7 +151,6 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
               upload.
             </div>
           ) : null}
-
           {flags.componentDeltas ? (
             <div className="whWaterfall">
               {(Object.keys(flags.componentDeltas) as (keyof ComponentDeltas)[]).map((key) => {
