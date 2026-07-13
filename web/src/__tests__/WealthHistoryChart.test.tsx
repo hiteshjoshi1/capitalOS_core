@@ -142,4 +142,22 @@ describe("WealthHistoryChart", () => {
 
     vi.restoreAllMocks();
   });
+
+  it("explains the snapshot and upload clocks for the still-open month", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 13));
+    const svgRectMock = { left: 0, top: 0, width: 900, height: 320, right: 900, bottom: 320, x: 0, y: 0, toJSON: () => ({}) };
+    vi.spyOn(SVGElement.prototype, "getBoundingClientRect").mockReturnValue(svgRectMock as DOMRect);
+
+    const points = [point({ month: "2026-07", anchor_date: "2026-07-01", uploads: ["OCBC"] })];
+    const { container, getByText } = render(
+      <WealthHistoryChart points={points} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} />,
+    );
+
+    fireEvent.pointerMove(container.querySelector(".whChartSvgHost")!, { clientX: 260, clientY: 100 });
+    expect(getByText("Uses data through 2026-07-01; recent uploads apply next month.")).toBeInTheDocument();
+
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
 });

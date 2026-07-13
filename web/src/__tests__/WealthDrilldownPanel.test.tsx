@@ -163,6 +163,18 @@ describe("WealthDrilldownPanel", () => {
     expect(await screen.findByText("DBS, OCBC")).toBeInTheDocument();
   });
 
+  it("explains the snapshot and upload clocks for the still-open month", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 6, 13));
+    renderPanel({
+      month: "2026-07",
+      point: point({ month: "2026-07", anchor_date: "2026-07-01", uploads: ["OCBC"] }),
+    });
+
+    expect(screen.getByText("Uses data through 2026-07-01; recent uploads apply next month.")).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
   it("calls onClose when the close button is clicked", async () => {
     const { onClose } = renderPanel();
     fireEvent.click(await screen.findByRole("button", { name: "Close" }));

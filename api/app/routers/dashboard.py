@@ -2473,8 +2473,8 @@ def geography_exposure(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
-    _parse_month(month)
-    anchor = _current_anchor_ts()
+    month_start = _parse_month(month)
+    anchor = _completed_snapshot_anchor_ts(month_start)
     as_of = _effective_as_of(db, anchor, current_user.id)
     payload = _geography_exposure(db, anchor, base_currency, current_user.id, price_overlay=True)
     return GeographyExposureOut(

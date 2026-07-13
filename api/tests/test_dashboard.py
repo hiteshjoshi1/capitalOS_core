@@ -829,6 +829,89 @@ def test_dashboard_geography_exposure_breakdown_maps_crypto_to_us(client: TestCl
     assert by_country["SG"]["total"] == 30000.0
 
 
+def test_dashboard_geography_exposure_uses_requested_month_snapshot(client: TestClient, db_engine, monkeypatch):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(802, 'MONTHLYBROKER', 'Monthly Broker', 'BROKER', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country, platform_id) VALUES "
+                "(802, 'Monthly Broker', 'MONTHLYBROKER', 1, 'BROKER', 'USD', 'SG', 802)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(802, 'SGHIST', 'Singapore Historical', 'STOCK', 'USD', 'SG'), "
+                "(803, 'USCURR', 'United States Current', 'STOCK', 'USD', 'US')"
+            )
+        )
+
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=802,
+        asset_id=802,
+        as_of=datetime(2026, 5, 31, tzinfo=timezone.utc),
+        quantity=10,
+        market_value_base=1000,
+        market_price=100,
+        currency="USD",
+        platform_code="MONTHLYBROKER",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=802,
+        asset_id=803,
+        as_of=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        quantity=20,
+        market_value_base=2000,
+        market_price=100,
+        currency="USD",
+        platform_code="MONTHLYBROKER",
+    )
+
+    monkeypatch.setenv("SNAPSHOT_DAY", "1")
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 7, 15, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        "app.routers.dashboard.get_rates",
+        lambda _date, _base, symbols: {symbol: 1.0 for symbol in symbols},
+    )
+
+    historical = client.get("/dashboard/geography-exposure?month=2026-05&base_currency=USD")
+    current = client.get("/dashboard/geography-exposure?month=2026-07&base_currency=USD")
+
+    assert historical.status_code == 200
+    assert current.status_code == 200
+    assert historical.json()["as_of"] == "2026-05-31T00:00:00+00:00"
+    assert historical.json()["items"] == [
+        {
+            "country": "SG",
+            "stocks_funds": 1000.0,
+            "cash": 0.0,
+            "crypto": 0.0,
+            "total": 1000.0,
+            "percent": 100.0,
+        }
+    ]
+    assert current.json()["items"] == [
+        {
+            "country": "US",
+            "stocks_funds": 2000.0,
+            "cash": 0.0,
+            "crypto": 0.0,
+            "total": 2000.0,
+            "percent": 100.0,
+        }
+    ]
+
+
 def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: TestClient, db_engine, monkeypatch):
     from datetime import datetime, timezone
     from sqlalchemy import text

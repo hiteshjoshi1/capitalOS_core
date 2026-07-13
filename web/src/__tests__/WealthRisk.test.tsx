@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -75,6 +75,29 @@ describe("WealthRisk route", () => {
 
     await user.click(screen.getByRole("button", { name: "Top 3" }));
     expect(await screen.findByText("Top 3 concentration")).toBeInTheDocument();
+  });
+
+  it("redraws geography exposure after selecting a different month", async () => {
+    mockApi.dashboardGeographyExposure
+      .mockResolvedValueOnce(geographyFixture)
+      .mockResolvedValueOnce({
+        ...geographyFixture,
+        total: 80000,
+        items: [{ country: "SG", stocks_funds: 30000, cash: 20000, crypto: 0, total: 50000, percent: 62.5 }],
+      });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <WealthRisk />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText(/Stocks S\$ 40,000/)).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2025-05" } });
+
+    await waitFor(() => expect(mockApi.dashboardGeographyExposure).toHaveBeenLastCalledWith("2025-05", "SGD"));
+    expect(await screen.findByText(/Stocks S\$ 30,000/)).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {
