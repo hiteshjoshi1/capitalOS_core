@@ -67,6 +67,7 @@ export default function WealthRisk() {
   const riskLargest = computeLargestPositionRisk(holdings, netWorthTotal);
   const riskTopN = computeTopNConcentrationRisk(holdings, netWorthTotal, selectedTopN);
   const topNDistribution = buildTopNDistribution(holdings, netWorthTotal, selectedTopN);
+  const largestDisplayedPercent = Math.max(...topNDistribution.map((item) => item.percent), 0);
 
   return (
     <PageShell
@@ -142,28 +143,37 @@ export default function WealthRisk() {
             </div>
           </section>
 
-          <div className="card">
-            <h2>Where the top positions sit</h2>
+          <section className="card riskPositionsCard">
+            <div className="riskSectionHeader">
+              <div>
+                <div className="riskSectionEyebrow">Concentration</div>
+                <h2>Where the top positions sit</h2>
+              </div>
+              <div className="muted stockHoldingsMeta">Share of total net worth</div>
+            </div>
             {topNDistribution.length > 0 ? (
               <ul className="riskChartList">
                 {topNDistribution.map((item) => (
                   <li className="riskChartRow" key={`${item.symbol}-${item.assetClass}`}>
-                    <span className="riskChartSymbol">{item.symbol}</span>
+                    <span className="riskChartIdentity">
+                      <strong className="riskChartSymbol">{item.symbol}</strong>
+                      <span className="riskChartMeta">{item.assetClass} · {formatMoney(item.value)}</span>
+                    </span>
                     <div className="riskChartTrack">
                       <span
                         className="riskChartFill"
-                        style={{ width: `${Math.min(100, item.percent)}%` }}
+                        style={{ width: `${largestDisplayedPercent > 0 ? (item.percent / largestDisplayedPercent) * 100 : 0}%` }}
                         title={`${item.symbol}: ${formatRiskPercent(item.percent)}`}
                       ></span>
                     </div>
-                    <span className="riskChartPercent">{formatMoney(item.value)} · {formatRiskPercent(item.percent)}</span>
+                    <strong className="riskChartPercent">{formatRiskPercent(item.percent)}</strong>
                   </li>
                 ))}
               </ul>
             ) : (
               <div className="riskNoData">No holdings concentration data for this month or net worth is not positive.</div>
             )}
-          </div>
+          </section>
 
           <GeographyPieCard exposure={geographyExposure} formatMoney={formatMoney} />
         </div>

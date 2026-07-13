@@ -19,23 +19,18 @@ const PIE_COLORS = [
 type PieSlice = {
   item: GeographyExposure["items"][number];
   idx: number;
-  start: number;
   end: number;
-  mid: number;
 };
 
 function buildPieSlices(items: GeographyExposure["items"]): PieSlice[] {
   let offset = 0;
   return items.map((item, idx) => {
-    const start = offset;
-    const end = Math.min(100, start + Math.max(0, item.percent));
+    const end = Math.min(100, offset + Math.max(0, item.percent));
     offset = end;
     return {
       item,
       idx,
-      start,
       end,
-      mid: (start + end) / 2,
     };
   });
 }
@@ -54,26 +49,36 @@ function conicGradient(slices: PieSlice[]): string {
   return `conic-gradient(${parts.join(", ")})`;
 }
 
-function sliceLabelPosition(midPercent: number): { left: string; top: string } {
-  const angleDeg = (midPercent / 100) * 360 - 90;
-  const radians = (angleDeg * Math.PI) / 180;
-  const radius = 38;
-  const x = 50 + radius * Math.cos(radians);
-  const y = 50 + radius * Math.sin(radians);
-  return { left: `${x.toFixed(2)}%`, top: `${y.toFixed(2)}%` };
+function compactMappedTotal(total: number, currency: string | undefined): string {
+  const prefix = currency === "SGD" ? "S$" : currency ?? "";
+  const value = new Intl.NumberFormat(undefined, {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(total);
+  return `${prefix} ${value}`.trim();
+}
+
+function formatAsOf(asOf: string | null | undefined): string {
+  if (!asOf) return "Latest snapshot";
+  const date = new Date(asOf);
+  if (Number.isNaN(date.getTime())) return asOf;
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()];
+  return `As of ${month} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
 }
 
 export default function GeographyPieCard({ exposure, formatMoney }: GeographyPieCardProps) {
   const items = exposure?.items ?? [];
   const total = exposure?.total ?? 0;
   const slices = buildPieSlices(items);
-  const overallPercent = items.reduce((sum, item) => sum + (Number.isFinite(item.percent) ? item.percent : 0), 0);
   const pieStyle = items.length > 0 ? { background: conicGradient(slices) } : undefined;
 
   return (
-    <div className="card geographyPieCard">
-      <div className="stockHoldingsHeader">
-        <h2>Where the wealth is booked</h2>
+    <section className="card geographyPieCard">
+      <div className="riskSectionHeader">
+        <div>
+          <div className="riskSectionEyebrow">Geography</div>
+          <h2>Where the wealth is booked</h2>
+        </div>
         <div className="muted stockHoldingsMeta">{items.length} markets</div>
       </div>
 
@@ -81,55 +86,44 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
         <div className="muted">No geographic exposure data yet.</div>
       ) : (
         <>
-          <div className="geographyPieChartWrap">
-            <div className="geographyPieChart" style={pieStyle} aria-label="Geographic exposure pie chart">
-              {slices
-                .filter((slice) => slice.end > slice.start)
-                .map((slice) => (
-                  <span
-                    key={`slice-label-${slice.item.country}-${slice.idx}`}
-                    className="geographyPieSliceLabel"
-                    style={sliceLabelPosition(slice.mid)}
-                  >
-                    {slice.item.percent.toFixed(1)}%
-                  </span>
-                ))}
-              <div className="geographyPieCenter">
-                <div className="label">Geo</div>
-                <div className="val">{overallPercent.toFixed(1)}%</div>
+          <div className="geographyExposureLayout">
+            <div className="geographyPieChartWrap">
+              <div className="geographyPieChart" style={pieStyle} role="img" aria-label="Geographic exposure pie chart">
+                <div className="geographyPieCenter">
+                  <div className="label">Mapped</div>
+                  <div className="val">{compactMappedTotal(total, exposure?.base_currency)}</div>
+                </div>
               </div>
+              <div className="muted geographyPieTotal">{formatAsOf(exposure?.as_of)}</div>
             </div>
-            <div className="muted geographyPieTotal">Overall mapped: {formatMoney(total)}</div>
-          </div>
 
-          <div className="listRows">
-            {items.map((item, idx) => {
-              const breakdown = [
-                item.stocks_funds ? `Stocks ${formatMoney(item.stocks_funds)}` : null,
-                item.cash ? `Cash ${formatMoney(item.cash)}` : null,
-                item.crypto ? `Crypto ${formatMoney(item.crypto)}` : null,
-              ].filter(Boolean);
-              return (
-                <div className="listRow" key={item.country}>
-                  <div className="listRowMain">
-                    <span className="listRowTitle">
+            <div className="geographyLegendList">
+              {items.map((item, idx) => {
+                const breakdown = [
+                  item.stocks_funds ? `Stocks ${formatMoney(item.stocks_funds)}` : null,
+                  item.cash ? `Cash ${formatMoney(item.cash)}` : null,
+                  item.crypto ? `Crypto ${formatMoney(item.crypto)}` : null,
+                ].filter(Boolean);
+                return (
+                  <div className="geographyLegendRow" key={item.country}>
+                    <div className="geographyLegendMain">
                       <span className="geographyLegendCountry">
                         <i style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }}></i>
                         {item.country}
                       </span>
-                    </span>
-                    <span className="listRowMeta">{breakdown.join(" · ") || "—"}</span>
+                      <span className="geographyLegendMeta">{breakdown.join(" · ") || "—"}</span>
+                    </div>
+                    <div className="geographyLegendValue">
+                      <span>{formatMoney(item.total)}</span>
+                      <strong>{item.percent.toFixed(1)}%</strong>
+                    </div>
                   </div>
-                  <div className="listRowValue">
-                    {item.percent.toFixed(1)}%
-                    <span className="listRowValueSecondary muted">{formatMoney(item.total)}</span>
-                  </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         </>
       )}
-    </div>
+    </section>
   );
 }

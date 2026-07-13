@@ -142,7 +142,7 @@ export default function Dividends() {
   return (
     <PageShell
       title="Dividends"
-      subtitle="Realized cash-hit dividends + annualized expected dividends from holdings yield."
+      subtitle="Cash dividends received, and what your holdings are projected to pay next."
       activeRoute="/dividends"
       headerActions={(
         <>
@@ -188,38 +188,61 @@ export default function Dividends() {
             ]}
           />
 
-          <section className="grid g-mid">
-            <div className="card">
-              <h2>Expected, next 12 months</h2>
-              <div className="big small">{formatMoney(expectedYear.payout_minus_tax)}</div>
-              <div className={expectedVsTrailingPct != null && expectedVsTrailingPct >= 0 ? "good" : "bad"}>
-                {expectedVsTrailingPct == null ? "—" : `${expectedVsTrailingPct >= 0 ? "+" : "-"}${Math.abs(expectedVsTrailingPct * 100).toFixed(0)}%`} vs trailing 12mo
+          <section aria-labelledby="dividend-signals-heading">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">SIGNALS</p>
+                <h2 className="coSectionTitle" id="dividend-signals-heading">What's received vs. what's ahead</h2>
               </div>
             </div>
-            <div className="card">
-              <h2>Portfolio coverage</h2>
-              <div className="big small">
-                {expectedOverview?.assets_with_actions ?? 0}/{expectedOverview?.holdings_considered ?? 0}
-              </div>
-              <div className="muted">holdings paying · {avgYieldPct == null ? "—" : `${avgYieldPct.toFixed(1)}%`} avg yield</div>
+            <div className="dividendSignalGrid">
+              <article className="card dividendSignalCard">
+                <p className="dividendSignalLabel">Expected, next 12 months</p>
+                <p className="dividendSignalValue">{formatMoney(expectedYear.payout_minus_tax)}</p>
+                <p className="dividendSignalContext">
+                  <span className={expectedVsTrailingPct != null && expectedVsTrailingPct >= 0 ? "good" : "bad"}>
+                    {expectedVsTrailingPct == null ? "—" : `${expectedVsTrailingPct >= 0 ? "+" : "-"}${Math.abs(expectedVsTrailingPct * 100).toFixed(0)}%`}
+                  </span>{" "}
+                  vs trailing 12 months ({formatMoney(realizedTrailing12.payout_minus_tax)}), based on current holdings and yields.
+                </p>
+              </article>
+              <article className="card dividendSignalCard">
+                <p className="dividendSignalLabel">Portfolio coverage</p>
+                <p className="dividendSignalValue">
+                  {expectedOverview?.assets_with_actions ?? 0} / {expectedOverview?.holdings_considered ?? 0}
+                </p>
+                <p className="dividendSignalContext">
+                  Holdings currently paying a dividend · {avgYieldPct == null ? "—" : `${avgYieldPct.toFixed(1)}%`} average yield.
+                </p>
+              </article>
             </div>
           </section>
 
-          <div className="card">
-            <div className="stockHoldingsHeader">
-              <h2>12-month dividend income</h2>
+          <section className="dividendHistorySection" aria-labelledby="dividend-history-heading">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">HISTORY</p>
+                <h2 className="coSectionTitle" id="dividend-history-heading">12-month dividend income</h2>
+              </div>
               <div className="muted stockHoldingsMeta">Trailing total {formatMoney(realizedTrailing12.payout_minus_tax)}</div>
             </div>
-            {trendPoints.length === 0 ? (
-              <div className="muted">No dividends in selected range.</div>
-            ) : (
-              <TrendBarChart points={trendPoints} ariaLabel="12-month dividend income" />
-            )}
-          </div>
+            <div className="card dividendHistoryCard">
+              {trendPoints.length === 0 ? (
+                <div className="muted">No dividends in selected range.</div>
+              ) : (
+                <TrendBarChart points={trendPoints} ariaLabel="12-month dividend income" />
+              )}
+            </div>
+          </section>
 
-          <div className="card">
-            <div className="stockHoldingsHeader">
-              <h2>{companyTab === "realized" ? "Who paid you this month" : "Projected annual payers"}</h2>
+          <section aria-labelledby="dividend-companies-heading">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">COMPANIES</p>
+                <h2 className="coSectionTitle" id="dividend-companies-heading">
+                  {companyTab === "realized" ? "Who paid you this month" : "Projected annual payers"}
+                </h2>
+              </div>
               <SegmentedToggle
                 ariaLabel="Realized or expected companies"
                 value={companyTab}
@@ -230,7 +253,13 @@ export default function Dividends() {
                 ]}
               />
             </div>
-            <div className="listRows">
+            <div className="card dividendCompaniesCard">
+              <p className="dividendCompaniesContext">
+                {companyTab === "realized"
+                  ? "Cash dividends received in the selected month, after withholding tax."
+                  : "Annualized dividend estimates based on current holdings and available yields."}
+              </p>
+              <div className="listRows">
               {companyTab === "realized" ? (
                 topCompanies.length === 0 ? (
                   <div className="muted">No company-level dividend records yet.</div>
@@ -280,8 +309,9 @@ export default function Dividends() {
                   </div>
                 ))
               )}
+              </div>
             </div>
-          </div>
+          </section>
         </div>
       )}
     </PageShell>
