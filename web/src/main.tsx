@@ -70,6 +70,7 @@ createRoot(document.getElementById("root")!).render(
                       <Route path="/cash-flow/map-transactions" element={<CashFlowMapping />} />
                       <Route path="/cash-flow/mapping" element={<Navigate to="/cash-flow/map-transactions" replace />} />
                       <Route path="/liabilities" element={<LiabilitiesOverview />} />
+                      <Route path="/liabilities/credit-cards" element={<Navigate to="/liabilities" replace />} />
                       <Route path="/credit-cards" element={<Navigate to="/liabilities" replace />} />
                       <Route path="/loans" element={<Navigate to="/liabilities" replace />} />
                       <Route path="/intelligence" element={<IntelligenceOverview />} />

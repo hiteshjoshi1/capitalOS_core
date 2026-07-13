@@ -694,6 +694,19 @@ VALUES
   ((SELECT month_start FROM sm0) + interval '10 hour', (SELECT id FROM a WHERE name = 'DUMMY - DBS Savings'), 'TRANSFER', -120000, 'SGD', 'Transfer', 'IBKR Funding', 'DUMMY_XFER_IBKR_OUT', 'DUMMY_SEED', 'DUMMY'),
   ((SELECT month_start FROM sm0) + interval '10 hour 5 minute', (SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), 'TRANSFER', 90000, 'USD', 'Transfer', 'DBS Funding', 'DUMMY_XFER_IBKR_IN', 'DUMMY_SEED', 'DUMMY');
 
+-- Card charges: annual fee, finance charge, and GST, once at the current month —
+-- keeps the Credit Card Analytics "charges need attention" banner demonstrable.
+WITH a AS (SELECT id, name FROM accounts WHERE name LIKE 'DUMMY - %'),
+sm0 AS (SELECT month_start, day_cap FROM seed_months WHERE month_offset = 0)
+INSERT INTO transactions (ts, account_id, type, amount, currency, category, merchant_counterparty, platform_reference, notes, source)
+VALUES
+  ((SELECT month_start FROM sm0) + (LEAST(3, (SELECT day_cap FROM sm0)) - 1) * interval '1 day' + interval '9 hour',
+   (SELECT id FROM a WHERE name = 'DUMMY - DBS Credit Card'), 'FEE', -196.20, 'SGD', 'Fees', 'DBS Annual Membership Fee', 'DUMMY_CC_FEE', 'DUMMY_SEED', 'DUMMY'),
+  ((SELECT month_start FROM sm0) + (LEAST(2, (SELECT day_cap FROM sm0)) - 1) * interval '1 day' + interval '9 hour',
+   (SELECT id FROM a WHERE name = 'DUMMY - Citi Prestige'), 'INTEREST', -114.86, 'SGD', 'Interest', 'Finance charges', 'DUMMY_CC_INTEREST', 'DUMMY_SEED', 'DUMMY'),
+  ((SELECT month_start FROM sm0) + (LEAST(2, (SELECT day_cap FROM sm0)) - 1) * interval '1 day' + interval '9 hour 5 minute',
+   (SELECT id FROM a WHERE name = 'DUMMY - Citi Prestige'), 'TAX', -10.34, 'SGD', 'Tax', 'GST @ 9%', 'DUMMY_CC_TAX', 'DUMMY_SEED', 'DUMMY');
+
 -- Investment activity + dividend income across a few months
 WITH a AS (SELECT id, name FROM accounts WHERE name LIKE 'DUMMY - %'),
 ast AS (SELECT id, symbol, quote_currency FROM assets),

@@ -28,6 +28,9 @@ from app.schemas.spending import (
     CreditCardDetailOut,
     CreditCardTransactionItem,
     CreditCardRecurringPaymentItem,
+    CreditCardAnalyticsOut,
+    CreditCardAnalyticsCardItem,
+    CreditCardAnalyticsTrendPoint,
     SpendingSummaryOut,
 )
 
@@ -795,6 +798,164 @@ def _spend_by_account(
     return spend
 
 
+def _credit_card_analytics_rows(db: Session, start: datetime, end: datetime, current_user_id: int):
+    """Single bounded query over [start, end) for every EXPENSE_TYPES transaction on the
+    user's owned CREDIT_CARD accounts, with resolved category attached. Callers slice this
+    one result set by month bucket for the selected month, prior month, and trend window —
+    no repeated round trips per month."""
+    rows_q = text("""
+        SELECT
+          t.account_id,
+          a.name AS account_name,
+          COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
+          COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
+          t.ts,
+          t.amount,
+          t.type,
+          t.currency,
+          t.category,
+          COALESCE(ct.name, NULLIF(TRIM(t.category), ''), 'Uncategorized') AS resolved_category,
+          CASE
+            WHEN co.source IS NOT NULL THEN co.source
+            WHEN t.category IS NOT NULL
+                 AND TRIM(t.category) <> ''
+                 AND LOWER(TRIM(t.category)) <> 'uncategorized' THEN 'parser'
+            ELSE 'uncategorized'
+          END AS category_source,
+          t.merchant_counterparty,
+          t.notes
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
+        LEFT JOIN category_overrides co ON co.transaction_id = t.id
+        LEFT JOIN category_taxonomy ct ON ct.id = co.category_id
+        WHERE t.ts >= :start AND t.ts < :end
+          AND a.account_type = 'CREDIT_CARD'
+          AND """
+            + account_scope_sql("a")
+            + """
+          AND t.type IN ('EXPENSE','TAX','FEE','INTEREST')
+        ORDER BY t.ts DESC, t.id DESC
+    """)
+    return db.execute(
+        rows_q,
+        {"start": start, "end": end, "current_user_id": current_user_id},
+    ).mappings().all()
+
+
+def _cc_transaction_item(row, base_amount: float) -> CreditCardTransactionItem:
+    description = row["merchant_counterparty"] or row["resolved_category"] or row["category"] or "Transaction"
+    return CreditCardTransactionItem(
+        account_id=int(row["account_id"]),
+        account_name=row["account_name"],
+        card_name=row["card_name"],
+        issuer=row["issuer"],
+        ts=_tx_iso(row["ts"]),
+        description=description,
+        amount=base_amount,
+        type=row["type"],
+        category=row["category"],
+        resolved_category=row["resolved_category"],
+        category_source=row["category_source"],
+        merchant_counterparty=row["merchant_counterparty"],
+        notes=row["notes"],
+    )
+
+
+def _credit_card_recurring_payments(
+    db: Session,
+    current_user_id: int,
+    month: str,
+    base_currency: str,
+    lookback_start: datetime,
+    end: datetime,
+    account_id: int | None = None,
+) -> list[CreditCardRecurringPaymentItem]:
+    """Merchants charged in the selected month whose amount has stayed stable across
+    at least 3 of the trailing months — used as a recurring/subscription signal.
+    Optionally scoped to a single owned CREDIT_CARD account."""
+    recurring_q = text("""
+        SELECT
+          t.account_id,
+          a.name AS account_name,
+          COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
+          COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
+          t.ts,
+          t.amount,
+          t.currency,
+          t.merchant_counterparty
+        FROM transactions t
+        JOIN accounts a ON a.id = t.account_id
+        LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
+        WHERE t.ts >= :lookback_start AND t.ts < :end
+          AND a.account_type = 'CREDIT_CARD'
+          AND """
+            + account_scope_sql("a")
+            + """
+          AND t.type = 'EXPENSE'
+          AND COALESCE(TRIM(t.merchant_counterparty), '') <> ''"""
+            + (" AND t.account_id = :account_id" if account_id is not None else "")
+            + """
+        ORDER BY t.ts DESC, t.id DESC
+    """)
+    params = {"lookback_start": lookback_start, "end": end, "current_user_id": current_user_id}
+    if account_id is not None:
+        params["account_id"] = account_id
+    recurring_rows = db.execute(recurring_q, params).mappings().all()
+    recurring_currencies = {r["currency"] for r in recurring_rows if r["currency"]}
+    recurring_rates = get_rates(_parse_month(month), base_currency, recurring_currencies)
+
+    recurring_index: dict[tuple[int, str], dict] = {}
+    for row in recurring_rows:
+        merchant = str(row["merchant_counterparty"]).strip()
+        key = (int(row["account_id"]), merchant)
+        cur = (row["currency"] or base_currency).upper()
+        converted = float(row["amount"]) * recurring_rates.get(cur, 1.0)
+        record = recurring_index.setdefault(
+            key,
+            {
+                "account_id": int(row["account_id"]),
+                "account_name": row["account_name"],
+                "card_name": row["card_name"],
+                "issuer": row["issuer"],
+                "merchant_counterparty": merchant,
+                "months": set(),
+                "monthly_amounts": defaultdict(float),
+                "current_month_amount": 0.0,
+            },
+        )
+        month_key = _month_key(row["ts"])
+        amount = -converted
+        record["months"].add(month_key)
+        record["monthly_amounts"][month_key] += amount
+        if month_key == month:
+            record["current_month_amount"] += amount
+
+    recurring_payments: list[CreditCardRecurringPaymentItem] = []
+    for record in recurring_index.values():
+        months_present = len(record["months"])
+        current_month_amount = float(record["current_month_amount"])
+        if current_month_amount <= 0 or not _is_stable_recurring_charge(record["monthly_amounts"]):
+            continue
+        recurring_payments.append(
+            CreditCardRecurringPaymentItem(
+                account_id=record["account_id"],
+                account_name=record["account_name"],
+                card_name=record["card_name"],
+                issuer=record["issuer"],
+                merchant_counterparty=record["merchant_counterparty"],
+                months_present=months_present,
+                current_month_amount=current_month_amount,
+            )
+        )
+
+    recurring_payments.sort(
+        key=lambda item: (item.current_month_amount, item.merchant_counterparty.lower()),
+        reverse=True,
+    )
+    return recurring_payments
+
+
 def _credit_card_items(
     cards,
     spend_by_account: dict[int, float],
@@ -1094,83 +1255,7 @@ def credit_card_transactions(
         reverse=True,
     )[:5]
 
-    recurring_q = text("""
-        SELECT
-          t.account_id,
-          a.name AS account_name,
-          COALESCE(NULLIF(TRIM(cc.card_name), ''), a.name) AS card_name,
-          COALESCE(NULLIF(TRIM(cc.issuer), ''), a.platform) AS issuer,
-          t.ts,
-          t.amount,
-          t.currency,
-          t.merchant_counterparty
-        FROM transactions t
-        JOIN accounts a ON a.id = t.account_id
-        LEFT JOIN credit_card_accounts cc ON cc.account_id = t.account_id
-        WHERE t.ts >= :lookback_start AND t.ts < :end
-          AND a.account_type = 'CREDIT_CARD'
-          AND """
-            + account_scope_sql("a")
-            + """
-          AND t.type = 'EXPENSE'
-          AND COALESCE(TRIM(t.merchant_counterparty), '') <> ''
-        ORDER BY t.ts DESC, t.id DESC
-    """)
-    recurring_rows = db.execute(
-        recurring_q,
-        {"lookback_start": lookback_start, "end": end, "current_user_id": current_user.id},
-    ).mappings().all()
-    recurring_currencies = {r["currency"] for r in recurring_rows if r["currency"]}
-    recurring_rates = get_rates(start, base_currency, recurring_currencies)
-
-    recurring_index: dict[tuple[int, str], dict] = {}
-    for row in recurring_rows:
-        merchant = str(row["merchant_counterparty"]).strip()
-        key = (int(row["account_id"]), merchant)
-        cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * recurring_rates.get(cur, 1.0)
-        record = recurring_index.setdefault(
-            key,
-            {
-                "account_id": int(row["account_id"]),
-                "account_name": row["account_name"],
-                "card_name": row["card_name"],
-                "issuer": row["issuer"],
-                "merchant_counterparty": merchant,
-                "months": set(),
-                "monthly_amounts": defaultdict(float),
-                "current_month_amount": 0.0,
-            },
-        )
-        month_key = _month_key(row["ts"])
-        amount = -converted
-        record["months"].add(month_key)
-        record["monthly_amounts"][month_key] += amount
-        if month_key == month:
-            record["current_month_amount"] += amount
-
-    recurring_payments: list[CreditCardRecurringPaymentItem] = []
-    for record in recurring_index.values():
-        months_present = len(record["months"])
-        current_month_amount = float(record["current_month_amount"])
-        if current_month_amount <= 0 or not _is_stable_recurring_charge(record["monthly_amounts"]):
-            continue
-        recurring_payments.append(
-            CreditCardRecurringPaymentItem(
-                account_id=record["account_id"],
-                account_name=record["account_name"],
-                card_name=record["card_name"],
-                issuer=record["issuer"],
-                merchant_counterparty=record["merchant_counterparty"],
-                months_present=months_present,
-                current_month_amount=current_month_amount,
-            )
-        )
-
-    recurring_payments.sort(
-        key=lambda item: (item.current_month_amount, item.merchant_counterparty.lower()),
-        reverse=True,
-    )
+    recurring_payments = _credit_card_recurring_payments(db, current_user.id, month, base_currency, lookback_start, end)
 
     total_spend = sum(item.current_due for item in card_items)
     return CreditCardDetailOut(
@@ -1180,5 +1265,148 @@ def credit_card_transactions(
         cards=card_items,
         transactions=transactions,
         top_purchases=top_purchases,
+        recurring_payments=recurring_payments,
+    )
+
+
+@router.get("/credit-card-analytics", response_model=CreditCardAnalyticsOut)
+def credit_card_analytics(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    months: int = Query(12, ge=1, le=24),
+    account_id: int | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    start = _parse_month(month)
+    end = _month_end(start)
+    prior_start = _add_months(start, -1)
+    prior_month = _month_key(prior_start)
+    trend_start = _add_months(start, -(months - 1))
+    fetch_start = min(trend_start, prior_start)
+    recurring_lookback_start = _add_months(start, -2)
+
+    cards_raw = _credit_cards(db, current_user.id)
+    owned_account_ids = {int(c["account_id"]) for c in cards_raw}
+    if account_id is not None and account_id not in owned_account_ids:
+        # 404 rather than 403 — do not disclose whether the id exists for another user.
+        raise HTTPException(status_code=404, detail="Credit card not found")
+
+    rows = _credit_card_analytics_rows(db, fetch_start, end, current_user.id)
+    month_rates = _build_month_rate_map(rows, base_currency)
+
+    def base_amount(row) -> float:
+        return _row_base_amount(row, base_currency, month_rates)
+
+    def spend_amount(row) -> float:
+        # Stored transaction amounts are negative for outflows; spend is reported as a
+        # positive magnitude everywhere except the transaction/charge ledger rows, which
+        # preserve the original signed amount for consistency with
+        # /spending/credit-card-transactions.
+        return -base_amount(row)
+
+    def is_outflow(row) -> bool:
+        # A positive amount on an EXPENSE/FEE/TAX/INTEREST row is a credit/reversal
+        # (e.g. a waived late fee), not spend — excluded from every spend aggregate
+        # below, per the "exclude credits and refunds" spend definition. The full
+        # ledger still lists these rows for transparency.
+        return base_amount(row) < 0
+
+    selected_rows = [r for r in rows if _month_key(r["ts"]) == month]
+    prior_rows = [r for r in rows if _month_key(r["ts"]) == prior_month]
+    trend_rows = [r for r in rows if trend_start <= _parse_month(_month_key(r["ts"])) < end]
+
+    def in_scope(row) -> bool:
+        return account_id is None or int(row["account_id"]) == account_id
+
+    # The card filter rail always reflects every owned card's selected-month spend,
+    # independent of the requested account_id scope — only the aggregate/detail fields
+    # below are scoped.
+    spend_by_account: dict[int, float] = defaultdict(float)
+    count_by_account: dict[int, int] = defaultdict(int)
+    for row in selected_rows:
+        if not is_outflow(row):
+            continue
+        acct = int(row["account_id"])
+        spend_by_account[acct] += spend_amount(row)
+        if row["type"] == "EXPENSE":
+            count_by_account[acct] += 1
+
+    card_items = [
+        CreditCardAnalyticsCardItem(
+            account_id=int(c["account_id"]),
+            account_name=c["account_name"],
+            card_name=c["card_name"],
+            issuer=c["issuer"],
+            spend=spend_by_account.get(int(c["account_id"]), 0.0),
+            transaction_count=count_by_account.get(int(c["account_id"]), 0),
+            available_limit=(float(c["available_limit"]) if c["available_limit"] is not None else None),
+            available_limit_as_of=(
+                _tx_iso(c["available_limit_as_of"]) if c["available_limit_as_of"] is not None else None
+            ),
+            statement_day=int(c["statement_day"]),
+            due_day=int(c["due_day"]),
+            due_date=_clamp_day(start, int(c["due_day"])).date().isoformat(),
+        )
+        for c in cards_raw
+    ]
+
+    scoped_selected = [r for r in selected_rows if in_scope(r)]
+    scoped_prior = [r for r in prior_rows if in_scope(r)]
+    scoped_selected_outflows = [r for r in scoped_selected if is_outflow(r)]
+
+    total_spend = sum(spend_amount(r) for r in scoped_selected_outflows)
+    prior_month_spend = sum(spend_amount(r) for r in scoped_prior if is_outflow(r))
+    transaction_count = sum(1 for r in scoped_selected_outflows if r["type"] == "EXPENSE")
+
+    purchase_by_category: dict[str, float] = defaultdict(float)
+    purchase_spend = 0.0
+    for row in scoped_selected_outflows:
+        if row["type"] != "EXPENSE":
+            continue
+        amount = spend_amount(row)
+        purchase_spend += amount
+        category = row["resolved_category"] or "Uncategorized"
+        purchase_by_category[category] += amount
+    categories = _sorted_breakdown_items(purchase_by_category, purchase_spend)
+
+    charge_rows = [r for r in scoped_selected_outflows if r["type"] in ("FEE", "TAX", "INTEREST")]
+    charges = [_cc_transaction_item(r, base_amount(r)) for r in charge_rows]
+    charge_total = sum(spend_amount(r) for r in charge_rows)
+
+    # The transaction ledger itself stays unfiltered — credits/reversals still need to
+    # be visible there for a complete audit trail, even though they're excluded above.
+    transactions = [_cc_transaction_item(r, base_amount(r)) for r in scoped_selected]
+
+    trend_totals: dict[str, float] = defaultdict(float)
+    for row in trend_rows:
+        if not in_scope(row) or not is_outflow(row):
+            continue
+        trend_totals[_month_key(row["ts"])] += spend_amount(row)
+    trend: list[CreditCardAnalyticsTrendPoint] = []
+    for offset in range(months):
+        point_month = _month_key(_add_months(trend_start, offset))
+        trend.append(CreditCardAnalyticsTrendPoint(month=point_month, spend=trend_totals.get(point_month, 0.0)))
+
+    recurring_payments = _credit_card_recurring_payments(
+        db, current_user.id, month, base_currency, recurring_lookback_start, end, account_id=account_id
+    )
+
+    return CreditCardAnalyticsOut(
+        month=month,
+        base_currency=base_currency,
+        months=months,
+        account_id=account_id,
+        total_spend=total_spend,
+        transaction_count=transaction_count,
+        purchase_spend=purchase_spend,
+        prior_month=prior_month,
+        prior_month_spend=prior_month_spend,
+        cards=card_items,
+        charges=charges,
+        charge_total=charge_total,
+        categories=categories,
+        trend=trend,
+        transactions=transactions,
         recurring_payments=recurring_payments,
     )
