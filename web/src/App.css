@@ -7272,3 +7272,219 @@ html, body {
   margin-top: 10px;
   font-size: 12.5px;
 }
+
+/* ─── Credit Card Analytics (issue 198) ─────────────────────────────── */
+
+.ccFilterRail {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.ccFilterPill {
+  flex: 0 0 auto;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--muted);
+  font: 700 13px Inter, system-ui, sans-serif;
+  padding: 8px 16px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ccFilterPill[aria-pressed="true"] {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--line));
+  background: color-mix(in srgb, var(--accent) 16%, var(--panel));
+}
+
+.ccFilterDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.ccHeroGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(180px, 0.65fr));
+  gap: 14px;
+  margin-bottom: 18px;
+  align-items: stretch;
+}
+
+.ccChargeAlert {
+  margin-bottom: 18px;
+  padding: 17px 20px;
+  border: 1px solid color-mix(in srgb, var(--bad) 42%, var(--line));
+  border-radius: 15px;
+  background: color-mix(in srgb, var(--bad) 9%, var(--panel));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.ccChargeAlertTitle {
+  font-weight: 800;
+  color: var(--bad);
+  margin-bottom: 2px;
+}
+
+.ccChargeAlertMeta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ccChargeAlertAmount {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--bad);
+  white-space: nowrap;
+}
+
+.ccCardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.ccCardTile {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 20px;
+  min-height: 148px;
+  padding: 18px 20px;
+  border: 0;
+  border-radius: 18px;
+  color: #fff;
+  overflow: hidden;
+  isolation: isolate;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+}
+
+.ccCardTile::after {
+  content: "";
+  position: absolute;
+  inset: auto -40px -60px auto;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 0 0 26px rgba(255, 255, 255, 0.035);
+  z-index: -1;
+}
+
+.ccCardTileHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ccCardTileName {
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.ccCardTileIssuer {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  opacity: 0.72;
+}
+
+.ccCardTileTx {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 750;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  white-space: nowrap;
+}
+
+.ccCardTileFooter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.ccCardTileSpend {
+  font-size: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.ccCardTileSub {
+  font-size: 11px;
+  opacity: 0.76;
+}
+
+.ccCardTileAvailable {
+  font-size: 11px;
+  opacity: 0.78;
+  text-align: right;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ccCardTileAvailable strong {
+  font-size: 13px;
+  opacity: 1;
+}
+
+.ccGridMain {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.75fr);
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.ccChargesAndLedger {
+  display: grid;
+  grid-template-columns: minmax(280px, 0.7fr) minmax(0, 1.5fr);
+  gap: 14px;
+}
+
+@media (max-width: 1100px) {
+  .ccHeroGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+  .ccHeroGrid > :first-child {
+    grid-column: 1 / -1;
+  }
+  .ccGridMain,
+  .ccChargesAndLedger {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .ccHeroGrid {
+    grid-template-columns: 1fr;
+  }
+  .ccChargeAlert {
+    align-items: flex-start;
+  }
+  .ccChargeAlertAmount {
+    font-size: 18px;
+  }
+  .ccCardGrid {
+    grid-template-columns: 1fr;
+  }
+}

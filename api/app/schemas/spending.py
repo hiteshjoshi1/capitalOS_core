@@ -184,3 +184,41 @@ class CreditCardDetailOut(BaseModel):
     transactions: list[CreditCardTransactionItem]
     top_purchases: list[CreditCardTransactionItem]
     recurring_payments: list[CreditCardRecurringPaymentItem]
+
+
+class CreditCardAnalyticsCardItem(BaseModel):
+    account_id: int
+    account_name: str
+    card_name: str
+    issuer: str
+    spend: float
+    transaction_count: int
+    available_limit: float | None = None
+    available_limit_as_of: str | None = None
+    statement_day: int
+    due_day: int
+    due_date: str
+
+
+class CreditCardAnalyticsTrendPoint(BaseModel):
+    month: str
+    spend: float
+
+
+class CreditCardAnalyticsOut(BaseModel):
+    month: str
+    base_currency: str
+    months: int
+    account_id: int | None = None
+    total_spend: float
+    transaction_count: int
+    purchase_spend: float
+    prior_month: str
+    prior_month_spend: float
+    cards: list[CreditCardAnalyticsCardItem]
+    charges: list[CreditCardTransactionItem]
+    charge_total: float
+    categories: list[CashFlowBreakdownItem]
+    trend: list[CreditCardAnalyticsTrendPoint]
+    transactions: list[CreditCardTransactionItem]
+    recurring_payments: list[CreditCardRecurringPaymentItem]

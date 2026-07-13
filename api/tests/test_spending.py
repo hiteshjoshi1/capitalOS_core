@@ -446,3 +446,318 @@ def test_cash_flow_saved_vs_spent_answer_handles_negative_net_without_absurd_per
         "Saved 0.0% of inflows and spent 100.0% of them. "
         "Outflows exceeded inflows by 5500, which had to come from existing cash or other funding sources."
     )
+
+
+# ---------------------------------------------------------------------------
+# /spending/credit-card-analytics (issue 198)
+# ---------------------------------------------------------------------------
+
+CC_ANALYTICS_ACCOUNTS = {
+    "bank": 92000,  # non-credit-card account — must never appear in analytics
+    "amex": 92001,  # CREDIT_CARD, SGD, no credit_card_accounts metadata row
+    "dbs": 92002,  # CREDIT_CARD, USD, has credit_card_accounts metadata + available_limit
+    "other_user": 92003,  # CREDIT_CARD owned by a different user — isolation
+}
+
+
+def _seed_credit_card_analytics(db_engine) -> None:
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(92000, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG'), "
+                "(92001, 'Amex Platinum', 'AMEX', 'CREDIT_CARD', 'SGD', 'SG'), "
+                "(92002, 'DBS Card', 'DBS', 'CREDIT_CARD', 'USD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(92003, 'Other User Card', 'CITI', 'CREDIT_CARD', 'SGD', 'SG', 999)"
+            )
+        )
+        conn.execute(
+            text(
+                """
+                INSERT INTO credit_card_accounts
+                  (account_id, card_name, issuer, credit_limit, available_limit, available_limit_as_of, statement_day, due_day)
+                VALUES
+                  (92002, 'DBS Altitude', 'DBS', 10000, 5000, '2026-07-04 00:00:00+00:00', 20, 25)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                # Selected month 2026-07
+                "(92101, '2026-07-05 00:00:00+00:00', 92001, -120, 'EXPENSE', 'SGD', 'Groceries', 'NTUC', NULL), "
+                "(92102, '2026-07-10 00:00:00+00:00', 92001, -80, 'EXPENSE', 'SGD', 'Dining', 'Din Tai Fung', NULL), "
+                "(92103, '2026-07-02 00:00:00+00:00', 92001, -25, 'FEE', 'SGD', 'Fees', 'Annual Fee', NULL), "
+                "(92104, '2026-07-08 00:00:00+00:00', 92002, -200, 'EXPENSE', 'USD', 'Travel', 'Singapore Airlines', NULL), "
+                "(92105, '2026-07-10 00:00:00+00:00', 92002, -15, 'INTEREST', 'USD', 'Interest', 'Finance charges', NULL), "
+                "(92106, '2026-07-10 00:00:00+00:00', 92002, -3, 'TAX', 'USD', 'Tax', 'GST @ 9%', NULL), "
+                "(92107, '2026-07-15 00:00:00+00:00', 92002, 50, 'TRANSFER', 'USD', 'CreditCard::Payment', 'Payment', NULL), "
+                "(92108, '2026-07-06 00:00:00+00:00', 92000, -999, 'EXPENSE', 'SGD', 'Misc', 'Not a card', NULL), "
+                "(92109, '2026-07-06 00:00:00+00:00', 92003, -500, 'EXPENSE', 'SGD', 'Misc', 'Other user spend', NULL), "
+                # Prior month 2026-06
+                "(92110, '2026-06-05 00:00:00+00:00', 92001, -100, 'EXPENSE', 'SGD', 'Groceries', 'NTUC', NULL), "
+                "(92111, '2026-06-05 00:00:00+00:00', 92002, -50, 'EXPENSE', 'USD', 'Travel', 'Grab', NULL), "
+                # Trend / year-boundary points (window for months=12 ending 2026-07 starts 2025-08)
+                "(92112, '2025-08-05 00:00:00+00:00', 92001, -60, 'EXPENSE', 'SGD', 'Groceries', 'NTUC', NULL), "
+                "(92113, '2025-12-20 00:00:00+00:00', 92001, -40, 'EXPENSE', 'SGD', 'Groceries', 'NTUC', NULL), "
+                "(92114, '2026-01-05 00:00:00+00:00', 92001, -70, 'EXPENSE', 'SGD', 'Groceries', 'NTUC', NULL)"
+            )
+        )
+
+
+def test_credit_card_analytics_all_cards_reconciles_to_per_card_totals(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["month"] == "2026-07"
+    assert data["account_id"] is None
+    assert data["total_spend"] == pytest.approx(443.0)  # (120+80+25) + (200+15+3)
+    assert data["transaction_count"] == 3  # EXPENSE-only: 2 on Amex + 1 on DBS
+    assert data["purchase_spend"] == pytest.approx(400.0)  # 120+80+200
+
+    # Every owned CREDIT_CARD account is represented, non-card and other-user accounts are not.
+    by_account = {c["account_id"]: c for c in data["cards"]}
+    assert set(by_account) == {92001, 92002}
+    assert by_account[92001]["spend"] == pytest.approx(225.0)
+    assert by_account[92002]["spend"] == pytest.approx(218.0)
+    # Per-card spend reconciles exactly to the all-card total.
+    assert sum(c["spend"] for c in data["cards"]) == pytest.approx(data["total_spend"])
+
+
+def test_credit_card_analytics_missing_available_credit_is_null_not_zero(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    by_account = {c["account_id"]: c for c in resp.json()["cards"]}
+
+    amex = by_account[92001]
+    assert amex["available_limit"] is None
+    assert amex["available_limit_as_of"] is None
+
+    dbs = by_account[92002]
+    assert dbs["available_limit"] == 5000.0
+    assert dbs["available_limit_as_of"] == "2026-07-04T00:00:00+00:00"
+
+
+def test_credit_card_analytics_charges_extraction_and_total(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    data = resp.json()
+
+    assert data["charge_total"] == pytest.approx(43.0)  # 25 (FEE) + 15 (INTEREST) + 3 (TAX)
+    charge_types = sorted(c["type"] for c in data["charges"])
+    assert charge_types == ["FEE", "INTEREST", "TAX"]
+    # TRANSFER (the card payment) must never be classified as a charge.
+    assert all(c["type"] != "TRANSFER" for c in data["charges"])
+
+
+def test_credit_card_analytics_categories_reconcile_to_purchase_spend(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    data = resp.json()
+
+    categories = {c["label"]: c["amount"] for c in data["categories"]}
+    assert categories == {"Groceries": 120.0, "Dining": 80.0, "Travel": 200.0}
+    assert sum(categories.values()) == pytest.approx(data["purchase_spend"])
+    # Charges (FEE/INTEREST/TAX) must not leak into category totals.
+    assert "Fees" not in categories
+    assert "Interest" not in categories
+    assert "Tax" not in categories
+
+
+def test_credit_card_analytics_excludes_transfers_and_non_card_accounts(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    data = resp.json()
+
+    tx_types = {tx["type"] for tx in data["transactions"]}
+    assert "TRANSFER" not in tx_types
+    account_ids = {tx["account_id"] for tx in data["transactions"]}
+    assert 92000 not in account_ids  # BANK account
+    assert 92003 not in account_ids  # other user's card
+
+
+def test_credit_card_analytics_account_id_filter_scopes_every_section(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&account_id=92001")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["account_id"] == 92001
+    assert data["total_spend"] == pytest.approx(225.0)
+    assert data["prior_month_spend"] == pytest.approx(100.0)
+    assert data["transaction_count"] == 2
+    assert data["purchase_spend"] == pytest.approx(200.0)
+    assert {tx["account_id"] for tx in data["transactions"]} == {92001}
+    assert {c["account_id"] for c in data["charges"]} == {92001}
+    assert data["charge_total"] == pytest.approx(25.0)
+    # The card filter rail itself is always unscoped — every owned card still appears.
+    assert {c["account_id"] for c in data["cards"]} == {92001, 92002}
+
+
+def test_credit_card_analytics_prior_month_comparison_uses_same_expense_types(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    data = resp.json()
+
+    assert data["prior_month"] == "2026-06"
+    assert data["prior_month_spend"] == pytest.approx(150.0)  # 100 (Amex) + 50 (DBS)
+
+
+def test_credit_card_analytics_converts_non_base_currency_cards(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&account_id=92002")
+    assert resp.status_code == 200
+    data = resp.json()
+    # DBS card is USD-denominated; totals must still be expressed in the requested base currency.
+    assert data["base_currency"] == "SGD"
+    assert data["total_spend"] == pytest.approx(218.0)
+
+
+def test_credit_card_analytics_rejects_unowned_or_unknown_account_id(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    other_user_resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&account_id=92003")
+    assert other_user_resp.status_code == 404
+
+    unknown_resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&account_id=999999")
+    assert unknown_resp.status_code == 404
+
+
+def test_credit_card_analytics_trend_orders_twelve_months_across_a_year_boundary(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&months=12")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert len(data["trend"]) == 12
+    months = [p["month"] for p in data["trend"]]
+    assert months[0] == "2025-08"
+    assert months[-1] == "2026-07"
+    assert months == sorted(months)  # strictly chronological across the Dec -> Jan rollover
+
+    by_month = {p["month"]: p["spend"] for p in data["trend"]}
+    assert by_month["2025-08"] == pytest.approx(60.0)
+    assert by_month["2025-12"] == pytest.approx(40.0)
+    assert by_month["2026-01"] == pytest.approx(70.0)
+    assert by_month["2026-06"] == pytest.approx(150.0)
+    assert by_month["2026-07"] == pytest.approx(443.0)
+
+
+def test_credit_card_analytics_trend_scoped_to_selected_card(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&months=3&account_id=92001")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert len(data["trend"]) == 3
+    assert [p["month"] for p in data["trend"]] == ["2026-05", "2026-06", "2026-07"]
+    by_month = {p["month"]: p["spend"] for p in data["trend"]}
+    assert by_month["2026-06"] == pytest.approx(100.0)  # Amex only, not the DBS 50
+    assert by_month["2026-07"] == pytest.approx(225.0)  # Amex only, not the DBS 218
+
+
+def test_credit_card_analytics_month_boundary_excludes_adjacent_months(client: TestClient, db_engine):
+    _seed_credit_card_analytics(db_engine)
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-06&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_spend"] == pytest.approx(150.0)
+    assert data["prior_month"] == "2026-05"
+    assert data["prior_month_spend"] == pytest.approx(0.0)
+
+
+def test_credit_card_analytics_excludes_fee_reversals_and_credits_from_spend_but_keeps_them_in_the_ledger(
+    client: TestClient, db_engine
+):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(92200, 'Citibank Credit Card', 'CITI', 'CREDIT_CARD', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                # A real late fee, followed the same month by its reversal (a credit, not a charge).
+                "(92201, '2026-01-14 00:00:00+00:00', 92200, -100, 'FEE', 'SGD', 'Fees', 'LATE CHARGE FEE', NULL), "
+                "(92202, '2026-01-19 00:00:00+00:00', 92200, -16.92, 'INTEREST', 'SGD', 'Interest', 'BILLED FINANCE CHARGES', NULL), "
+                "(92203, '2026-01-20 00:00:00+00:00', 92200, 16.92, 'INTEREST', 'SGD', 'Interest', 'RTL INT CRED ADJ', NULL), "
+                "(92204, '2026-01-21 00:00:00+00:00', 92200, 100, 'FEE', 'SGD', 'Fees', 'LATE CHARGE FEE REVERSAL', NULL)"
+            )
+        )
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-01&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    # Only the two genuine outflows (-100 late fee, -16.92 finance charge) count as
+    # spend/charges; the +16.92 interest credit and +100 fee reversal are excluded
+    # from every aggregate.
+    assert data["charge_total"] == pytest.approx(116.92)
+    assert data["total_spend"] == pytest.approx(116.92)
+    charge_types = [(c["type"], c["amount"]) for c in data["charges"]]
+    assert sorted(charge_types) == sorted([("FEE", -100.0), ("INTEREST", -16.92)])
+
+    by_month = {p["month"]: p["spend"] for p in data["trend"]}
+    assert by_month["2026-01"] == pytest.approx(116.92)
+
+    # The full ledger still lists all four rows, including the credits, for a
+    # complete audit trail — only the aggregates exclude them.
+    assert len(data["transactions"]) == 4
+    amounts = sorted(tx["amount"] for tx in data["transactions"])
+    assert amounts == [-100.0, -16.92, 16.92, 100.0]
+
+
+def test_credit_card_analytics_includes_recurring_payments_scoped_by_card(client: TestClient, db_engine):
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
+                "(92300, 'Amex Platinum', 'AMEX', 'CREDIT_CARD', 'SGD', 'SG'), "
+                "(92301, 'DBS Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, ts, account_id, amount, type, currency, category, merchant_counterparty, notes) VALUES "
+                "(92310, '2026-05-08 00:00:00+00:00', 92300, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', NULL), "
+                "(92311, '2026-06-08 00:00:00+00:00', 92300, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', NULL), "
+                "(92312, '2026-07-08 00:00:00+00:00', 92300, -18, 'EXPENSE', 'SGD', 'Subscription', 'Netflix', NULL), "
+                "(92313, '2026-07-06 00:00:00+00:00', 92301, -4025, 'EXPENSE', 'SGD', 'Experiences', 'Yacht Charter', NULL)"
+            )
+        )
+
+    resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
+    assert resp.status_code == 200
+    data = resp.json()
+    recurring = {r["merchant_counterparty"]: r for r in data["recurring_payments"]}
+    assert "Netflix" in recurring
+    assert recurring["Netflix"]["months_present"] == 3
+    assert recurring["Netflix"]["current_month_amount"] == 18.0
+    assert recurring["Netflix"]["account_id"] == 92300
+    # A single one-off purchase is not recurring, regardless of size.
+    assert "Yacht Charter" not in recurring
+
+    # Scoping to the other card excludes Netflix entirely.
+    scoped_resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD&account_id=92301")
+    assert scoped_resp.status_code == 200
+    assert scoped_resp.json()["recurring_payments"] == []

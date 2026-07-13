@@ -603,6 +603,50 @@ export type CreditCardDetail = {
   recurring_payments: CreditCardRecurringPayment[];
 };
 
+export type CreditCardAnalyticsCard = {
+  account_id: number;
+  account_name: string;
+  card_name: string;
+  issuer: string;
+  spend: number;
+  transaction_count: number;
+  available_limit?: number | null;
+  available_limit_as_of?: string | null;
+  statement_day: number;
+  due_day: number;
+  due_date: string;
+};
+
+export type CreditCardAnalyticsTrendPoint = {
+  month: string;
+  spend: number;
+};
+
+export type CreditCardAnalyticsCategory = {
+  label: string;
+  amount: number;
+  percent: number;
+};
+
+export type CreditCardAnalytics = {
+  month: string;
+  base_currency: string;
+  months: number;
+  account_id: number | null;
+  total_spend: number;
+  transaction_count: number;
+  purchase_spend: number;
+  prior_month: string;
+  prior_month_spend: number;
+  cards: CreditCardAnalyticsCard[];
+  charges: CreditCardTransaction[];
+  charge_total: number;
+  categories: CreditCardAnalyticsCategory[];
+  trend: CreditCardAnalyticsTrendPoint[];
+  transactions: CreditCardTransaction[];
+  recurring_payments: CreditCardRecurringPayment[];
+};
+
 export type ImportJobListItem = {
   id: number;
   status: string;
@@ -1792,6 +1836,12 @@ export const api = {
     req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardTransactions: (month: string, baseCurrency = "SGD") =>
     req<CreditCardDetail>(`/spending/credit-card-transactions?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  creditCardAnalytics: (month: string, baseCurrency = "SGD", months = 12, accountId?: number | null) =>
+    req<CreditCardAnalytics>(
+      `/spending/credit-card-analytics?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}&months=${encodeURIComponent(String(months))}${
+        accountId != null ? `&account_id=${encodeURIComponent(String(accountId))}` : ""
+      }`,
+    ),
   ingestUpload: async (accountId: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
