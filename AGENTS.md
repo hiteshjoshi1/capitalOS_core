@@ -4,6 +4,9 @@ Purpose: Local-first AI-native personal finance + investing system
 Architecture: Postgres + FastAPI + React (Vite) in Docker
 Mode: Deterministic, verifiable, reproducible
 
+For Claude Code, `CLAUDE.md` is the canonical operational quickstart (run/verify
+commands, ports, gotchas); this file holds the durable principles and contract rules.
+
 ---
 
 # Core Principles
@@ -30,7 +33,7 @@ Mode: Deterministic, verifiable, reproducible
 
 - Docker installed
 - Docker Compose available
-- Node 18+
+- Node 22
 - Python 3.12 (only inside container)
 - Postgres 16 (Docker)
 - timeout 60m codex exec ...
@@ -103,7 +106,7 @@ After ANY frontend change:
 
 - Snapshot anchor day controlled via:
   SNAPSHOT_DAY env var
-- Default: 6
+- Default: 1
 - Effective snapshot = max(as_of) <= anchor
 
 Never change this logic silently.
@@ -176,10 +179,15 @@ No partial implementations.
 - CSV ingestion engine
 - Realized P&L engine
 - Valuation service
-- RAG intelligence layer
 - Portfolio attribution engine
 
 These belong to later modules.
+
+# Active Modules
+
+- RAG intelligence layer — built and active under `api/app/rag/`, `api/app/routers/rag.py`,
+  `api/app/routers/ai_sage.py`. Includes author ingestion, retrieval, AI Sage chat, and an
+  eval harness (`make rag-eval`). Not a future module — treat it as a first-class surface.
 
 ---
 

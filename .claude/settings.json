@@ -1,0 +1,57 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "allow": [
+      "Bash(make up)",
+      "Bash(make down)",
+      "Bash(make ps)",
+      "Bash(make logs)",
+      "Bash(make test-frontend *)",
+      "Bash(make test-backend)",
+      "Bash(make web-rebuild *)",
+      "Bash(make api-rebuild)",
+      "Bash(make db-migrate)",
+      "Bash(make lint)",
+      "Bash(make typecheck)",
+      "Bash(make verify)",
+      "Bash(make rag-eval*)",
+      "Bash(docker compose *)",
+      "Bash(docker exec -i capitalos-postgres psql -U capitalos -d capitalos -c *)",
+      "Bash(npx vitest *)",
+      "Bash(npx tsc *)",
+      "Bash(npx eslint *)",
+      "Bash(npx playwright *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(node *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\n\" http://localhost:8000/health --max-time 3)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\n\" http://localhost:5173 --max-time 3)",
+      "Bash(curl -s -o /dev/null -w *)",
+      "Bash(lsof -i :5173 -sTCP:LISTEN)",
+      "Bash(pkill -f \"vite --port 5174\")",
+      "Bash(command -v chromium-cli)",
+      "Bash(nohup npm run dev -- --port 5173)",
+      "Bash(disown)",
+      "Read(//private/tmp/**)",
+      "Skill(run)",
+      "Skill(verify)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR/.claude/hooks/pretooluse-guard.sh\"",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

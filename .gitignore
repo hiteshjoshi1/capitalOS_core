@@ -9,6 +9,12 @@ Thumbs.db
 *.swo
 
 #######################################
+# Claude Code (personal/local overrides only —
+# .claude/settings.json, hooks/, and skills/ are shared and tracked)
+#######################################
+.claude/settings.local.json
+
+#######################################
 # Environment Files
 #######################################
 .env
