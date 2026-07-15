@@ -4550,8 +4550,7 @@ a.btn {
 .aiSageSidebarHeader,
 .aiSageChatToolbar,
 .aiSageComposerFooter,
-.aiSageEvidenceCardHeader,
-.aiSageSearchHeader {
+.aiSageEvidenceCardHeader {
   display: flex;
   justify-content: space-between;
   gap: 12px;
@@ -4897,12 +4896,6 @@ a.btn {
   resize: vertical;
 }
 
-.aiSageSearchModal {
-  width: min(760px, 92vw);
-  display: grid;
-  gap: 14px;
-}
-
 .aiSageSidebarTools {
   display: grid;
   gap: 4px;
@@ -4953,24 +4946,69 @@ a.btn {
   display: block;
 }
 
-.aiSageSearchResults {
-  display: grid;
+.aiSageSidebarSearch {
+  position: relative;
+  display: flex;
+  align-items: center;
   gap: 8px;
-  max-height: 52vh;
-  overflow-y: auto;
+  padding: 0 4px;
 }
 
-.aiSageSearchResult {
+.aiSageSidebarSearch .aiSageSidebarActionIcon {
+  position: absolute;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.aiSageSidebarSearch .aiSageSidebarActionIcon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.aiSageSidebarSearchInput {
   width: 100%;
-  text-align: left;
+  padding: 9px 12px 9px 34px;
+  border-radius: 10px;
   border: 1px solid var(--line);
-  border-radius: 14px;
-  background: transparent;
-  color: inherit;
-  padding: 12px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+
+.aiSagePromptChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.aiSageLandingPromptRow {
+  justify-content: center;
+  width: min(620px, 100%);
+}
+
+.aiSagePromptChip {
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  padding: 9px 15px;
+}
+
+.aiSageChatGroup {
   display: grid;
-  gap: 6px;
-  cursor: pointer;
+  gap: 4px;
+}
+
+.aiSageChatGroupLabel {
+  padding: 4px 8px 6px;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
 }
 
 @media (max-width: 980px) {
@@ -5012,8 +5050,7 @@ a.btn {
   }
 
   .aiSageChatToolbar,
-  .aiSageComposerFooter,
-  .aiSageSearchHeader {
+  .aiSageComposerFooter {
     flex-direction: column;
   }
 
@@ -5138,6 +5175,14 @@ a.btn {
   margin: 0;
 }
 
+.authorLibraryGalleryIdentity h2 {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .authorLibraryPortraitFallback {
   display: grid;
   place-items: center;
@@ -5240,6 +5285,35 @@ a.btn {
 .authorLibraryReaderSurface {
   width: min(100%, 1180px);
   justify-self: center;
+}
+
+.authorLibraryGalleryMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.authorLibraryGalleryTag,
+.authorLibraryGalleryDocCount {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.authorLibrarySourceLinkButton {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 16px;
+  border-radius: 999px;
+  background: var(--text);
+  color: var(--bg);
+  text-decoration: none;
+  width: fit-content;
 }
 
 .authorLibraryReaderSurfaceFullscreen {
@@ -5724,7 +5798,8 @@ a.btn {
   color: var(--text);
 }
 
-.coSegmentedBtnActive {
+.coSegmentedBtnActive,
+.coSegmentedBtnActive:hover {
   background: var(--text);
   color: var(--bg);
 }
@@ -7709,4 +7784,406 @@ html, body {
   .ccCardGrid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Research section redesign (Overview, AI Sage, Author Library, Author Ingestion, Companies) */
+
+.researchPageMetaPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.researchPageMetaPillDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--good);
+  flex-shrink: 0;
+}
+
+.researchSectionHeader {
+  margin-bottom: 16px;
+}
+
+.researchActivityTabsRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Author Ingestion: author chips */
+.authorIngestionChipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.authorIngestionChip {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.authorIngestionChipActive {
+  background: var(--text);
+  color: var(--bg);
+  border-color: var(--text);
+}
+
+.authorIngestionChipDisabledTag {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+/* Author Ingestion: Sources / Jobs / Activity row lists */
+.researchActivityList {
+  display: flex;
+  flex-direction: column;
+}
+
+.researchActivityRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+
+.researchActivityRow:last-child {
+  border-bottom: none;
+}
+
+.researchActivityRowMain {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 220px;
+  flex: 1;
+}
+
+.researchActivityRowTitle {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+}
+
+.researchActivityRowMeta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.researchActivityRowActions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.researchJobRow {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.researchJobRow:last-child {
+  border-bottom: none;
+}
+
+.researchJobRowHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.researchJobRowFailure {
+  font-size: 12px;
+  color: var(--bad);
+  margin-top: 6px;
+}
+
+.researchJobOutcomesToggle {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+
+.researchJobOutcomes {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--panel2);
+}
+
+.researchJobOutcomeRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.researchJobOutcomeRow:last-child {
+  border-bottom: none;
+}
+
+.researchJobOutcomeKey {
+  font-size: 12.5px;
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+}
+
+.researchSectionLabel {
+  margin: 0 0 4px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.researchSectionHeading {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+/* Overview: stat row */
+.researchStatGrid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .researchStatGrid {
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  }
+}
+
+.researchStatCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px 22px;
+}
+
+.researchStatLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.researchStatValue {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.researchStatMeta {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+/* Overview: jump-in cards */
+.researchJumpGrid {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.researchJumpCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 24px;
+  text-decoration: none;
+}
+
+.researchJumpEyebrow {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.researchJumpTitle {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.researchJumpDescription {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.researchJumpCta {
+  margin-top: 4px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.researchJumpCardDisabled {
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  background: var(--panel2);
+  box-shadow: none;
+  opacity: 0.72;
+}
+
+.researchJumpCardDisabled .researchJumpEyebrow {
+  color: var(--muted);
+}
+
+.researchJumpCardDisabled .researchJumpCta {
+  color: var(--muted);
+}
+
+/* Companies: hero + preview */
+.researchHeroCard {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 48px 32px;
+  margin-bottom: 32px;
+}
+
+.researchHeroEyebrowPill {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.researchHeroHeadline {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  max-width: 36ch;
+}
+
+.researchHeroDescription {
+  margin: 0;
+  max-width: 52ch;
+  line-height: 1.6;
+}
+
+.researchHeroCta {
+  margin-top: 6px;
+}
+
+.researchHeroCta:disabled {
+  cursor: not-allowed;
+}
+
+.researchPreviewGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.researchPreviewCard {
+  border: 1px dashed var(--line);
+  border-radius: 16px;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel2);
+}
+
+.researchPreviewCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.researchPreviewCardHeaderText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.researchPreviewCardIcon {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--line);
+  flex-shrink: 0;
+}
+
+.researchPreviewCardName {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.researchPreviewCardTicker {
+  font-size: 11px;
+}
+
+.researchPreviewSkeletonBar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--line);
+  width: 100%;
+}
+
+.researchPreviewSkeletonBarShort {
+  width: 70%;
+}
+
+.researchPreviewCardTag {
+  font-size: 12px;
 }

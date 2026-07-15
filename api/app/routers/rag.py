@@ -25,7 +25,7 @@ from collections import defaultdict
 import logging
 import threading
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
@@ -35,6 +35,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.auth_context import CurrentUser, require_current_user
 from app.db.session import SessionLocal, get_db
+from app.models.ai_sage_chat import AISageChat
 from app.models.rag import RagAuthor, RagDocument, RagIngestionJob, RagSource, RealtimeEvent
 from app.rag.config import load_author_config, sync_authors_from_config
 from app.rag.discovery import discover_sources_for_author
@@ -1175,6 +1176,112 @@ def get_library_document(
         source_author_name=document.source.author.name if document.source and document.source.author else None,
         source_status=document.source.status if document.source else "unknown",
         created_at=document.created_at.isoformat() if document.created_at else None,
+    )
+
+
+class ResearchAiSageStatsOut(BaseModel):
+    chats_total: int
+    chats_today: int
+
+
+class ResearchAuthorCorpusStatsOut(BaseModel):
+    author_count: int
+    document_count: int
+
+
+class ResearchIngestionQueueStatsOut(BaseModel):
+    running_count: int
+    queued_count: int
+    failed_count: int
+    last_job_at: Optional[str] = None
+
+
+class ResearchSummaryOut(BaseModel):
+    ai_sage: ResearchAiSageStatsOut
+    author_corpus: ResearchAuthorCorpusStatsOut
+    ingestion_queue: ResearchIngestionQueueStatsOut
+
+
+def _research_coerce_dt(value: Any) -> datetime:
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
+def _research_relative_time_label(occurred_at: datetime) -> str:
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    delta = datetime.now(tz=timezone.utc) - occurred_at
+    seconds = max(0, delta.total_seconds())
+    if seconds < 60:
+        return "Just now"
+    if seconds < 3600:
+        minutes = max(1, int(seconds // 60))
+        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
+    if seconds < 86400:
+        hours = int(seconds // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = int(seconds // 86400)
+    if days == 1:
+        return "Yesterday"
+    return f"{days} days ago"
+
+
+@router.get("/research-summary", response_model=ResearchSummaryOut)
+def research_summary(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Aggregate stats + recent-activity feed for the Research section overview page."""
+    now = datetime.now(tz=timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    chats = (
+        db.query(AISageChat)
+        .filter(AISageChat.owner_user_id == current_user.id)
+        .order_by(AISageChat.last_activity_at.desc())
+        .all()
+    )
+    chats_today = sum(1 for chat in chats if _research_coerce_dt(chat.created_at) >= today_start)
+
+    documents = _library_documents_query(db, current_user).all()
+    author_ids = {_effective_author_id(doc) for doc in documents if _effective_author_id(doc)}
+
+    running_count = (
+        db.query(RagIngestionJob)
+        .filter(RagIngestionJob.user_id == current_user.id, RagIngestionJob.status == "running")
+        .count()
+    )
+    queued_count = (
+        db.query(RagIngestionJob)
+        .filter(RagIngestionJob.user_id == current_user.id, RagIngestionJob.status.in_(["pending", "queued"]))
+        .count()
+    )
+    failed_count = (
+        db.query(RagIngestionJob)
+        .filter(RagIngestionJob.user_id == current_user.id, RagIngestionJob.status == "failed")
+        .count()
+    )
+    last_job = (
+        db.query(RagIngestionJob)
+        .filter(RagIngestionJob.user_id == current_user.id)
+        .order_by(RagIngestionJob.created_at.desc())
+        .first()
+    )
+    last_job_at = (
+        _research_relative_time_label(_research_coerce_dt(last_job.created_at)) if last_job is not None else None
+    )
+
+    return ResearchSummaryOut(
+        ai_sage=ResearchAiSageStatsOut(chats_total=len(chats), chats_today=chats_today),
+        author_corpus=ResearchAuthorCorpusStatsOut(author_count=len(author_ids), document_count=len(documents)),
+        ingestion_queue=ResearchIngestionQueueStatsOut(
+            running_count=running_count,
+            queued_count=queued_count,
+            failed_count=failed_count,
+            last_job_at=last_job_at,
+        ),
     )
 
 

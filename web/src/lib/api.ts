@@ -1443,6 +1443,12 @@ export type RagIngestionActivity = {
   events: RealtimeEventEnvelope<RagAuthorIngestionEventPayload>[];
 };
 
+export type ResearchSummary = {
+  ai_sage: { chats_total: number; chats_today: number };
+  author_corpus: { author_count: number; document_count: number };
+  ingestion_queue: { running_count: number; queued_count: number; failed_count: number; last_job_at: string | null };
+};
+
 export type RagLibraryAuthor = {
   id: string;
   name: string;
@@ -2072,6 +2078,7 @@ export const api = {
     qs.set("limit", String(limit));
     return req<RagIngestionActivity>(`/rag/ingest/activity?${qs.toString()}`);
   },
+  researchSummary: () => req<ResearchSummary>("/rag/research-summary"),
   ragLibraryAuthors: () => req<RagLibraryAuthor[]>("/rag/library/authors"),
   ragAuthorLibrary: (authorId: string) =>
     req<RagAuthorLibrary>(`/rag/library/authors/${encodeURIComponent(authorId)}`),

@@ -9,11 +9,17 @@ import {
   type RagLibraryAuthor,
   type RagLibraryDocumentDetail,
   type RagLibraryDocumentSummary,
+  type RagLibraryGroup,
 } from "../lib/api";
 
 type RouteParams = {
   authorId?: string;
   documentId?: string;
+};
+
+type DecadeGroup = {
+  label: string;
+  documents: RagLibraryDocumentSummary[];
 };
 
 function authorRoute(authorId: string): string {
@@ -32,6 +38,36 @@ function authorInitials(name: string): string {
     .map((part) => part.charAt(0).toUpperCase())
     .join("");
   return initials || "?";
+}
+
+function authorTagLabel(author: Pick<RagLibraryAuthor, "collections" | "work_types">): string | null {
+  return author.collections[0] ?? author.work_types[0] ?? null;
+}
+
+function docCountLabel(count: number): string {
+  return `${count} document${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * Buckets exact-year groups into decades (e.g. "2020s") to match the Author
+ * Library redesign. Only meaningful when the backend grouped by publication
+ * year — other primary fields (collection, work_type, ...) keep their
+ * existing group/secondary-group structure.
+ */
+function groupDocumentsByDecade(groups: RagLibraryGroup[]): DecadeGroup[] {
+  const buckets = new Map<string, { order: number; documents: RagLibraryDocumentSummary[] }>();
+  for (const group of groups) {
+    const year = Number(group.value);
+    const hasYear = group.value != null && Number.isFinite(year);
+    const label = hasYear ? `${Math.floor(year / 10) * 10}s` : "Undated";
+    const order = hasYear ? Math.floor(year / 10) * 10 : -Infinity;
+    const bucket = buckets.get(label) ?? { order, documents: [] };
+    bucket.documents.push(...group.documents, ...group.secondary_groups.flatMap((secondary) => secondary.documents));
+    buckets.set(label, bucket);
+  }
+  return Array.from(buckets.entries())
+    .sort((a, b) => b[1].order - a[1].order)
+    .map(([label, bucket]) => ({ label, documents: bucket.documents }));
 }
 
 function AuthorPortrait({
@@ -182,6 +218,8 @@ export default function AuthorLibrary() {
   }, [documentId, isReader]);
 
   const groupedSections = library?.groups ?? [];
+  const isDecadeGrouping = library?.grouping.primary_field === "publication_year";
+  const decadeGroups = isDecadeGrouping && groupedSections.length ? groupDocumentsByDecade(groupedSections) : null;
   const authorName = library?.author.name ?? documentDetail?.author_name ?? "Author Library";
   const title = isGallery
     ? "Author Library"
@@ -189,11 +227,18 @@ export default function AuthorLibrary() {
       ? (documentDetail?.title ?? "Original source")
       : authorName;
 
+  const totalDocuments = authors.reduce((sum, author) => sum + author.document_count, 0);
+  const galleryStatPill = authors.length
+    ? `${docCountLabel(totalDocuments)} · ${authors.length} author${authors.length === 1 ? "" : "s"}`
+    : null;
+
   return (
     <PageShell
       title={title}
+      subtitle={isGallery ? "Browse authors, documents, and curated passages ingested into the corpus." : undefined}
       headerActions={(
         <div className="authorLibraryHeaderActions">
+          {isGallery && galleryStatPill ? <span className="researchPageMetaPill">{galleryStatPill}</span> : null}
           {!isGallery ? <Link className="btn" to="/author-library">All authors</Link> : null}
           {authorId && isReader ? (
             <Link className="btn" to={authorRoute(authorId)}>Back to library</Link>
@@ -229,21 +274,28 @@ export default function AuthorLibrary() {
 
             {authors.length ? (
               <section className="grid authorLibraryGallery" aria-label="Author gallery">
-                {authors.map((author) => (
-                  <Link
-                    key={author.id}
-                    className="card authorLibraryGalleryCard authorLibraryGalleryCardLink"
-                    aria-label={author.name}
-                    to={authorRoute(author.id)}
-                  >
-                    <div className="authorLibraryGalleryHeader">
-                      <AuthorPortrait author={author} className="authorLibraryGalleryPortrait" />
-                      <div className="authorLibraryGalleryIdentity">
-                        <h2>{author.name}</h2>
+                {authors.map((author) => {
+                  const tag = authorTagLabel(author);
+                  return (
+                    <Link
+                      key={author.id}
+                      className="card authorLibraryGalleryCard authorLibraryGalleryCardLink"
+                      aria-label={author.name}
+                      to={authorRoute(author.id)}
+                    >
+                      <div className="authorLibraryGalleryHeader">
+                        <AuthorPortrait author={author} className="authorLibraryGalleryPortrait" />
+                        <div className="authorLibraryGalleryIdentity">
+                          <h2>{author.name}</h2>
+                          <div className="authorLibraryGalleryMeta">
+                            {tag ? <span className="authorLibraryGalleryTag">{tag}</span> : null}
+                            <span className="authorLibraryGalleryDocCount">{docCountLabel(author.document_count)}</span>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </Link>
-                ))}
+                    </Link>
+                  );
+                })}
               </section>
             ) : null}
           </>
@@ -266,6 +318,15 @@ export default function AuthorLibrary() {
                       <AuthorPortrait author={library.author} />
                       <div className="authorLibraryGalleryIdentity">
                         <h2>{library.author.name}</h2>
+                        <div className="authorLibraryGalleryMeta">
+                          {(() => {
+                            const tag = authorTagLabel(library.author);
+                            return tag ? <span className="authorLibraryGalleryTag">{tag}</span> : null;
+                          })()}
+                          <span className="authorLibraryGalleryDocCount">
+                            {docCountLabel(library.author.document_count)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -277,7 +338,22 @@ export default function AuthorLibrary() {
                     <div className="muted">
                       Each title opens the original letter or article source. CapitalOS no longer renders ingested content inside the library.
                     </div>
-                    {groupedSections.length ? (
+                    {decadeGroups ? (
+                      <div className="authorLibraryGroupStack">
+                        {decadeGroups.map((group) => (
+                          <section key={group.label} className="authorLibraryGroup">
+                            <div className="authorLibraryGroupHeader">
+                              <h3>{group.label}</h3>
+                            </div>
+                            <div className="authorLibraryDocumentStack">
+                              {group.documents.map((document) => (
+                                <DocumentLinkCard key={document.id} authorId={authorId} document={document} />
+                              ))}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    ) : groupedSections.length ? (
                       <div className="authorLibraryGroupStack">
                         {groupedSections.map((group) => (
                           <section key={`${group.field}:${group.value}`} className="authorLibraryGroup">
@@ -356,8 +432,13 @@ export default function AuthorLibrary() {
                       Author Library now hands this document off to its original source instead of rendering extracted content inside CapitalOS.
                     </div>
                     {documentDetail.source_url ? (
-                      <a className="authorLibrarySourceLink" href={documentDetail.source_url} rel="noreferrer" target="_blank">
-                        Open source
+                      <a
+                        className="authorLibrarySourceLinkButton"
+                        href={documentDetail.source_url}
+                        rel="noreferrer"
+                        target="_blank"
+                      >
+                        Open source ↗
                       </a>
                     ) : (
                       <div className="muted">No source URL is stored for this document yet.</div>

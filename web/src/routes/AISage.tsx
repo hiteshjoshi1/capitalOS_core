@@ -20,13 +20,19 @@ import {
   type AISageChatDetail,
   type AISageChatEvidence,
   type AISageChatMessage,
-  type AISageChatSearchResult,
   type AISageChatSummary,
   type AISageStreamEvent,
 } from "../lib/api";
 
 const EVIDENCE_CONTEXT_TARGET_CHARS = 1200;
 const CHAT_ROW_TITLE_LIMIT = 50;
+
+const SUGGESTED_PROMPTS = [
+  "What's Howard Marks' latest thinking on risk?",
+  "Compare Buffett and Munger on moats",
+  "Summarize this week's ingested filings",
+  "What evidence do we have on payments consolidation?",
+];
 
 type PendingTurnIds = {
   userMessageId: string;
@@ -37,15 +43,14 @@ function readerRoute(authorId: string, documentId: string): string {
   return `/author-library/${encodeURIComponent(authorId)}/documents/${encodeURIComponent(documentId)}`;
 }
 
-function formatTimestamp(value: string): string {
-  const dt = new Date(value);
-  if (Number.isNaN(dt.getTime())) return value;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(dt);
+type ChatGroupLabel = "Today" | "Previous 7 days" | "Older";
+
+function chatGroupLabel(chat: AISageChatSummary, now: Date): ChatGroupLabel {
+  const reference = new Date(chat.last_activity_at || chat.created_at);
+  if (reference.toDateString() === now.toDateString()) return "Today";
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (now.getTime() - reference.getTime() < 7 * dayMs) return "Previous 7 days";
+  return "Older";
 }
 
 function normalizeEvidenceText(value: unknown): string {
@@ -157,10 +162,7 @@ export default function AISage() {
   const [query, setQuery] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [searchOpen, setSearchOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchResults, setSearchResults] = useState<AISageChatSearchResult[]>([]);
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [chatSummaries, setChatSummaries] = useState<AISageChatSummary[]>([]);
   const [chatsLoading, setChatsLoading] = useState(true);
   const [chatListError, setChatListError] = useState<string | null>(null);
@@ -228,47 +230,12 @@ export default function AISage() {
   }, [chatId]);
 
   useEffect(() => {
-    const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
-        event.preventDefault();
-        setSearchOpen(true);
-      }
-    };
-    document.addEventListener("keydown", handleShortcut);
-    return () => {
-      document.removeEventListener("keydown", handleShortcut);
-    };
-  }, []);
-
-  useEffect(() => {
     const closeMenus = () => setSidebarMenuChatId(null);
     document.addEventListener("click", closeMenus);
     return () => {
       document.removeEventListener("click", closeMenus);
     };
   }, []);
-
-  useEffect(() => {
-    if (!searchOpen || !searchQuery.trim()) {
-      setSearchResults([]);
-      return;
-    }
-    let active = true;
-    setSearchLoading(true);
-    void api.aiSageSearchChats(searchQuery)
-      .then((response) => {
-        if (active) setSearchResults(response.items);
-      })
-      .catch(() => {
-        if (active) setSearchResults([]);
-      })
-      .finally(() => {
-        if (active) setSearchLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [searchOpen, searchQuery]);
 
   useEffect(() => {
     const container = transcriptRef.current;
@@ -540,6 +507,25 @@ export default function AISage() {
   const showLanding = !activeChatLoading && !activeChatError && (!activeChat || activeChat.messages.length === 0);
   const mainPanelClassName = `aiSageMainPanel ${showLanding ? "aiSageMainPanelLanding" : "aiSageMainPanelThread"}`;
 
+  const chatGroups = useMemo(() => {
+    const query = sidebarSearchQuery.trim().toLowerCase();
+    const filtered = query
+      ? chatSummaries.filter((chat) => chat.title.toLowerCase().includes(query))
+      : chatSummaries;
+    const now = new Date();
+    const order: ChatGroupLabel[] = ["Today", "Previous 7 days", "Older"];
+    const buckets = new Map<ChatGroupLabel, AISageChatSummary[]>();
+    for (const chat of filtered) {
+      const label = chatGroupLabel(chat, now);
+      const list = buckets.get(label) ?? [];
+      list.push(chat);
+      buckets.set(label, list);
+    }
+    return order
+      .map((label) => ({ label, chats: buckets.get(label) ?? [] }))
+      .filter((group) => group.chats.length > 0);
+  }, [chatSummaries, sidebarSearchQuery]);
+
   return (
     <PageShell title="" hideHeader headerActions={headerActions} className="aiSagePageShell" fillHeight>
       <div className="aiSageWorkspace">
@@ -562,73 +548,88 @@ export default function AISage() {
               </SidebarActionIcon>
               <span>New chat</span>
             </button>
-            <button className="aiSageSidebarAction" type="button" onClick={() => setSearchOpen(true)}>
+            <div className="aiSageSidebarSearch">
               <SidebarActionIcon>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="11" cy="11" r="7" />
                   <path d="m20 20-3.5-3.5" />
                 </svg>
               </SidebarActionIcon>
-              <span>Search chats</span>
-            </button>
+              <input
+                className="aiSageSidebarSearchInput"
+                type="text"
+                value={sidebarSearchQuery}
+                onChange={(event) => setSidebarSearchQuery(event.target.value)}
+                placeholder="Search chats"
+                aria-label="Search chats"
+              />
+            </div>
           </div>
           {chatListError ? <div className="aiSageErrorState">{chatListError}</div> : null}
           {chatsLoading ? <div className="muted">Loading chats…</div> : null}
           {!chatsLoading && chatSummaries.length === 0 ? <div className="aiSageEmptySidebar">No chats yet.</div> : null}
           <div className="aiSageSidebarList" aria-label="Saved chats">
-            {chatSummaries.map((chat) => (
-              <article
-                key={chat.id}
-                className={`aiSageChatListItem ${chatId === chat.id ? "aiSageChatListItemActive" : ""}`}
-              >
-                <button
-                  type="button"
-                  className="aiSageChatListButton"
-                  onClick={() => {
-                    locallyCreatedChatIdRef.current = null;
-                    setSidebarOpen(false);
-                    setSidebarMenuChatId(null);
-                    navigate(`/ai-sage/chats/${chat.id}`);
-                  }}
-                >
-                  <span className="aiSageChatListTitle" title={chat.title}>
-                    {compactChatTitle(chat.title)}
-                  </span>
-                </button>
-                <div className="aiSageChatRowMenu">
-                  <button
-                    className="aiSageChatMenuButton"
-                    type="button"
-                    aria-label={`More actions for ${chat.title}`}
-                    aria-expanded={sidebarMenuChatId === chat.id}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSidebarMenuChatId((current) => (current === chat.id ? null : chat.id));
-                    }}
+            {chatGroups.map((group) => (
+              <div className="aiSageChatGroup" key={group.label}>
+                <div className="aiSageChatGroupLabel">{group.label}</div>
+                {group.chats.map((chat) => (
+                  <article
+                    key={chat.id}
+                    className={`aiSageChatListItem ${chatId === chat.id ? "aiSageChatListItemActive" : ""}`}
                   >
-                    ...
-                  </button>
-                  {sidebarMenuChatId === chat.id ? (
-                    <div className="aiSageChatMenuPanel" role="menu" onClick={(event) => event.stopPropagation()}>
-                      <button className="aiSageChatMenuItem" type="button" role="menuitem" disabled title="Coming soon">
-                        Share
-                      </button>
-                      <button className="aiSageChatMenuItem" type="button" role="menuitem" disabled title="Coming soon">
-                        Pin
-                      </button>
+                    <button
+                      type="button"
+                      className="aiSageChatListButton"
+                      onClick={() => {
+                        locallyCreatedChatIdRef.current = null;
+                        setSidebarOpen(false);
+                        setSidebarMenuChatId(null);
+                        navigate(`/ai-sage/chats/${chat.id}`);
+                      }}
+                    >
+                      <span className="aiSageChatListTitle" title={chat.title}>
+                        {compactChatTitle(chat.title)}
+                      </span>
+                    </button>
+                    <div className="aiSageChatRowMenu">
                       <button
-                        className="aiSageChatMenuItem aiSageChatMenuItemDanger"
+                        className="aiSageChatMenuButton"
                         type="button"
-                        role="menuitem"
-                        onClick={() => void handleDeleteChat(chat)}
+                        aria-label={`More actions for ${chat.title}`}
+                        aria-expanded={sidebarMenuChatId === chat.id}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setSidebarMenuChatId((current) => (current === chat.id ? null : chat.id));
+                        }}
                       >
-                        Delete
+                        ...
                       </button>
+                      {sidebarMenuChatId === chat.id ? (
+                        <div className="aiSageChatMenuPanel" role="menu" onClick={(event) => event.stopPropagation()}>
+                          <button className="aiSageChatMenuItem" type="button" role="menuitem" disabled title="Coming soon">
+                            Share
+                          </button>
+                          <button className="aiSageChatMenuItem" type="button" role="menuitem" disabled title="Coming soon">
+                            Pin
+                          </button>
+                          <button
+                            className="aiSageChatMenuItem aiSageChatMenuItemDanger"
+                            type="button"
+                            role="menuitem"
+                            onClick={() => void handleDeleteChat(chat)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
-                  ) : null}
-                </div>
-              </article>
+                  </article>
+                ))}
+              </div>
             ))}
+            {!chatsLoading && chatSummaries.length > 0 && chatGroups.length === 0 ? (
+              <div className="aiSageEmptySidebar">No chats match "{sidebarSearchQuery}".</div>
+            ) : null}
           </div>
         </aside>
 
@@ -651,6 +652,18 @@ export default function AISage() {
                 </div>
               </form>
               {validationError ? <div className="aiSageErrorState">{validationError}</div> : null}
+              <div className="aiSagePromptChipRow aiSageLandingPromptRow">
+                {SUGGESTED_PROMPTS.map((prompt) => (
+                  <button
+                    key={prompt}
+                    className="btn aiSagePromptChip"
+                    type="button"
+                    onClick={() => setQuery(prompt)}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
             </section>
           ) : null}
 
@@ -714,52 +727,6 @@ export default function AISage() {
           ) : null}
         </div>
       </div>
-
-      {searchOpen ? (
-        <div className="modalBackdrop" role="dialog" aria-modal="true" aria-label="Search AI Sage chats">
-          <div className="modal aiSageSearchModal">
-            <div className="aiSageSearchHeader">
-              <div>
-                <div className="cardTitle">Search chats</div>
-                <div className="muted">Searches chat titles and message text for your account only.</div>
-              </div>
-              <button className="btn" type="button" onClick={() => setSearchOpen(false)}>
-                Close
-              </button>
-            </div>
-            <input
-              autoFocus
-              className="formInput"
-              placeholder="Search chat history…"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-            />
-            <div className="aiSageSearchResults">
-              {searchLoading ? <div className="muted">Searching…</div> : null}
-              {!searchLoading && searchQuery.trim() && searchResults.length === 0 ? (
-                <div className="muted">No matches found.</div>
-              ) : null}
-              {searchResults.map((result) => (
-                <button
-                  key={`${result.chat_id}-${result.updated_at}`}
-                  type="button"
-                  className="aiSageSearchResult"
-                  onClick={() => {
-                    locallyCreatedChatIdRef.current = null;
-                    setSearchOpen(false);
-                    setSidebarOpen(false);
-                    navigate(`/ai-sage/chats/${result.chat_id}`);
-                  }}
-                >
-                  <strong>{result.title}</strong>
-                  <span className="muted">{result.snippet || "Open chat"}</span>
-                  <span className="muted">{formatTimestamp(result.updated_at)}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      ) : null}
 
       {sidebarOpen ? <button className="aiSageSidebarBackdrop" type="button" onClick={() => setSidebarOpen(false)} aria-label="Close chats drawer" /> : null}
     </PageShell>
