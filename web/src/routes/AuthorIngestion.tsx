@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import SegmentedToggle from "../components/SegmentedToggle";
+import StatusPill, { type StatusPillTone } from "../components/StatusPill";
 import { api } from "../lib/api";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import type {
@@ -127,13 +129,13 @@ function createFanoutDocumentDraft(index: number): FanoutDocumentDraft {
   };
 }
 
-function statusBadgeClass(status: string): string {
+function statusPillTone(status: string): StatusPillTone {
   if (status === "ingested" || status === "done" || status === "completed" || status === "created") {
-    return "statusBadge statusBadgeDone";
+    return "good";
   }
-  if (status === "failed" || status === "rejected") return "statusBadge statusBadgeFailed";
-  if (status === "running") return "statusBadge statusBadgeRunning";
-  return "statusBadge statusBadgePending";
+  if (status === "failed" || status === "rejected") return "bad";
+  if (status === "running") return "warn";
+  return "neutral";
 }
 
 function formatDatetime(iso: string | null | undefined): string {
@@ -263,8 +265,11 @@ function previewMetadataSummary(preview: RagFanoutPreview["documents"][number]):
   return keys.join(", ");
 }
 
+type ActivityTab = "sources" | "jobs" | "activity";
+
 export default function AuthorIngestion() {
   const [authorMode, setAuthorMode] = useState<AuthorMode>("select");
+  const [activityTab, setActivityTab] = useState<ActivityTab>("sources");
   const [authors, setAuthors] = useState<RagAuthor[]>([]);
   const [authorsLoading, setAuthorsLoading] = useState(false);
   const [selectedAuthorId, setSelectedAuthorId] = useState<string>("");
@@ -306,6 +311,7 @@ export default function AuthorIngestion() {
   const [activityError, setActivityError] = useState<string | null>(null);
   const [retryingSourceId, setRetryingSourceId] = useState<string | null>(null);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("disconnected");
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
   const selectedAuthorIdRef = useRef<string>("");
 
@@ -624,51 +630,55 @@ export default function AuthorIngestion() {
   const selectedAuthor = authors.find((author) => author.id === selectedAuthorId) ?? null;
 
   return (
-    <PageShell title="Author Ingestion">
+    <PageShell
+      title="Author Ingestion"
+      subtitle="Add and validate author sources, fan out logical documents, and monitor ingestion jobs for your research corpus."
+      headerActions={
+        <span className="researchPageMetaPill">
+          <span
+            className="researchPageMetaPillDot"
+            style={realtimeStatus !== "connected" ? { background: "var(--muted)" } : undefined}
+          />
+          {realtimeStatusMessage()}
+        </span>
+      }
+    >
       <div className="wrap">
         <section className="card" aria-label="Author selection">
           <h2 className="cardTitle">Author</h2>
           <div className="formRow">
             <label className="formLabel">Mode</label>
-            <div className="segmentedControl">
-              <button
-                type="button"
-                className={`btn${authorMode === "select" ? " btnPrimary" : ""}`}
-                onClick={() => setAuthorMode("select")}
-              >
-                Select Author
-              </button>
-              <button
-                type="button"
-                className={`btn${authorMode === "create" ? " btnPrimary" : ""}`}
-                onClick={() => setAuthorMode("create")}
-              >
-                Create Author
-              </button>
-            </div>
+            <SegmentedToggle
+              ariaLabel="Author mode"
+              value={authorMode}
+              onChange={setAuthorMode}
+              options={[
+                { value: "select", label: "Select Author" },
+                { value: "create", label: "Create Author" },
+              ]}
+            />
           </div>
 
           {authorMode === "select" && (
             <div className="formRow">
-              <label className="formLabel" htmlFor="authorSelect">
-                Author
-              </label>
+              <label className="formLabel">Author</label>
               {authorsLoading ? (
                 <span className="muted">Loading authors...</span>
               ) : (
-                <select
-                  id="authorSelect"
-                  className="formInput"
-                  value={selectedAuthorId}
-                  onChange={(e) => setSelectedAuthorId(e.target.value)}
-                >
-                  <option value="">— Select an author —</option>
+                <div className="authorIngestionChipRow" role="group" aria-label="Author">
                   {authors.map((author) => (
-                    <option key={author.id} value={author.id}>
-                      {author.name} ({author.id}){author.enabled ? "" : " [disabled]"}
-                    </option>
+                    <button
+                      key={author.id}
+                      type="button"
+                      className={`authorIngestionChip${selectedAuthorId === author.id ? " authorIngestionChipActive" : ""}`}
+                      aria-pressed={selectedAuthorId === author.id}
+                      onClick={() => setSelectedAuthorId(author.id)}
+                    >
+                      {author.name}
+                      {!author.enabled ? <span className="authorIngestionChipDisabledTag"> · disabled</span> : null}
+                    </button>
                   ))}
-                </select>
+                </div>
               )}
             </div>
           )}
@@ -827,19 +837,17 @@ export default function AuthorIngestion() {
             </div>
 
             <div className="formRow" style={{ marginTop: "12px" }}>
-              <label className="formLabel" htmlFor="sourceType">
-                Source Type
-              </label>
-              <select
-                id="sourceType"
-                className="formInput"
+              <label className="formLabel">Source Type</label>
+              <SegmentedToggle
+                ariaLabel="Source Type"
                 value={sourceType}
-                onChange={(e) => setSourceType(e.target.value)}
-              >
-                <option value="html">HTML</option>
-                <option value="pdf">PDF</option>
-                <option value="text">Plain Text</option>
-              </select>
+                onChange={setSourceType}
+                options={[
+                  { value: "html", label: "HTML" },
+                  { value: "pdf", label: "PDF" },
+                  { value: "text", label: "Plain Text" },
+                ]}
+              />
             </div>
 
             <details
@@ -1380,211 +1388,164 @@ export default function AuthorIngestion() {
         )}
 
         {selectedAuthorId && (
-          <section className="card" aria-label="Source status">
+          <section className="card" aria-label="Ingestion activity">
             <div className="cardTitleRow">
-              <h2 className="cardTitle">Sources</h2>
-              <button type="button" className="btn" onClick={() => void refreshSelectedAuthorActivity()}>
-                Refresh
-              </button>
+              <h2 className="cardTitle">Activity</h2>
+              <div className="researchActivityTabsRow">
+                <SegmentedToggle
+                  ariaLabel="Activity view"
+                  value={activityTab}
+                  onChange={setActivityTab}
+                  options={[
+                    { value: "sources", label: "Sources" },
+                    { value: "jobs", label: "Jobs" },
+                    { value: "activity", label: "Activity" },
+                  ]}
+                />
+                <button type="button" className="btn" onClick={() => void refreshSelectedAuthorActivity()}>
+                  Refresh
+                </button>
+              </div>
             </div>
             <p className="muted" style={{ marginBottom: "8px" }}>
               {realtimeStatusMessage()}
             </p>
             {activityError && <div className="error formRow">{activityError}</div>}
-            {sourcesLoading ? (
+
+            {activityTab === "sources" && (sourcesLoading ? (
               <div className="muted">Loading sources...</div>
             ) : sources.length === 0 ? (
               <div className="muted">No sources registered for this author yet.</div>
             ) : (
-              <div className="tableWrap">
-                <table className="dataTable">
-                  <thead>
-                    <tr>
-                      <th>URL</th>
-                      <th>Type</th>
-                      <th>Status</th>
-                      <th>Fanout</th>
-                      <th>Last Ingested</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sources.map((source) => {
-                      const sourceMode =
-                        typeof source.ingestion_config === "object" &&
-                        source.ingestion_config !== null &&
-                        "mode" in source.ingestion_config
-                          ? String(source.ingestion_config.mode)
-                          : "single_work";
-                      return (
-                        <tr key={source.id}>
-                          <td className="urlCell">
-                            {source.url ? (
-                              <a href={source.url} target="_blank" rel="noopener noreferrer" className="urlLink">
-                                {source.url.length > 60 ? `${source.url.slice(0, 60)}…` : source.url}
-                              </a>
-                            ) : (
-                              <span className="muted">manual</span>
-                            )}
-                          </td>
-                          <td>{source.source_type}</td>
-                          <td>
-                            <span className={statusBadgeClass(source.status)}>
-                              {STATUS_LABELS[source.status] ?? source.status}
-                            </span>
-                          </td>
-                          <td>{sourceMode === "fanout" ? "Compendium" : "Single work"}</td>
-                          <td className="muted">{formatDatetime(source.last_ingested_at)}</td>
-                          <td>
-                            {source.status === "failed" && source.url && (
-                              <button
-                                type="button"
-                                className="btn btnSmall"
-                                disabled={retryingSourceId === source.id}
-                                onClick={() => void handleRetry(source.id)}
-                              >
-                                {retryingSourceId === source.id ? "Retrying…" : "Retry"}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div className="researchActivityList">
+                {sources.map((source) => {
+                  const sourceMode =
+                    typeof source.ingestion_config === "object" &&
+                    source.ingestion_config !== null &&
+                    "mode" in source.ingestion_config
+                      ? String(source.ingestion_config.mode)
+                      : "single_work";
+                  return (
+                    <div className="researchActivityRow" key={source.id}>
+                      <div className="researchActivityRowMain">
+                        {source.url ? (
+                          <a href={source.url} target="_blank" rel="noopener noreferrer" className="researchActivityRowTitle urlLink">
+                            {source.url}
+                          </a>
+                        ) : (
+                          <span className="researchActivityRowTitle muted">manual</span>
+                        )}
+                        <span className="researchActivityRowMeta">
+                          {source.source_type} · {sourceMode === "fanout" ? "Compendium" : "Single work"} · Last ingested{" "}
+                          {formatDatetime(source.last_ingested_at)}
+                        </span>
+                      </div>
+                      <div className="researchActivityRowActions">
+                        <StatusPill tone={statusPillTone(source.status)} label={STATUS_LABELS[source.status] ?? source.status} />
+                        {source.status === "failed" && source.url && (
+                          <button
+                            type="button"
+                            className="btn btnSmall"
+                            disabled={retryingSourceId === source.id}
+                            onClick={() => void handleRetry(source.id)}
+                          >
+                            {retryingSourceId === source.id ? "Retrying…" : "Retry"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </section>
-        )}
+            ))}
 
-        {selectedAuthorId && (
-          <section className="card" aria-label="Ingestion job status">
-            <h2 className="cardTitle">Ingestion Jobs</h2>
-            {jobsLoading ? (
+            {activityTab === "jobs" && (jobsLoading ? (
               <div className="muted">Loading jobs...</div>
             ) : jobs.length === 0 ? (
               <div className="muted">No ingestion jobs for this author yet.</div>
             ) : (
-              <div className="tableWrap">
-                <table className="dataTable">
-                  <thead>
-                    <tr>
-                      <th>Job ID</th>
-                      <th>Source</th>
-                      <th>Status</th>
-                      <th>Logical docs</th>
-                      <th>Started</th>
-                      <th>Finished</th>
-                      <th>Failure Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jobs.map((job) => {
-                      const linkedSource = sources.find((source) => source.id === job.source_id);
-                      const outcomes = getLogicalDocumentOutcomes(job);
-                      return (
-                        <tr key={job.id}>
-                          <td className="muted monospace">{job.id.slice(0, 8)}…</td>
-                          <td className="urlCell">
-                            {linkedSource?.url ? (
-                              <span title={linkedSource.url}>
-                                {linkedSource.url.length > 40 ? `${linkedSource.url.slice(0, 40)}…` : linkedSource.url}
-                              </span>
-                            ) : (
-                              <span className="muted">{job.source_id.slice(0, 8)}…</span>
-                            )}
-                          </td>
-                          <td>
-                            <span className={statusBadgeClass(job.status)}>
-                              {STATUS_LABELS[job.status] ?? job.status}
-                            </span>
-                          </td>
-                          <td>
-                            <div>{logicalDocumentSummary(job)}</div>
-                            {outcomes.length > 0 && (
-                              <details style={{ marginTop: "8px" }}>
-                                <summary className="muted" style={{ cursor: "pointer" }}>
-                                  View outcomes
-                                </summary>
-                                <div className="tableWrap" style={{ marginTop: "8px" }}>
-                                <table className="dataTable">
-                                  <thead>
-                                    <tr>
-                                      <th>Key</th>
-                                      <th>Status</th>
-                                      <th>Author</th>
-                                      <th>Parent</th>
-                                      <th>Reason</th>
-                                    </tr>
-                                  </thead>
-                                  <tbody>
-                                    {outcomes.map((outcome) => (
-                                      <tr key={`${job.id}-${outcome.key}`}>
-                                        <td className="muted monospace">{outcome.key}</td>
-                                        <td>
-                                          <span className={statusBadgeClass(outcome.status)}>
-                                            {STATUS_LABELS[outcome.status] ?? outcome.status}
-                                          </span>
-                                        </td>
-                                        <td>{outcome.authorId ?? "—"}</td>
-                                        <td>{outcome.parentKey ?? "—"}</td>
-                                        <td>{outcome.failureCategory ?? outcome.error ?? "—"}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
+              <div className="researchActivityList">
+                {jobs.map((job) => {
+                  const linkedSource = sources.find((source) => source.id === job.source_id);
+                  const outcomes = getLogicalDocumentOutcomes(job);
+                  const expanded = expandedJobId === job.id;
+                  const failureText = job.failure_category ?? (job.error ? job.error.slice(0, 80) : null);
+                  return (
+                    <div className="researchJobRow" key={job.id}>
+                      <div className="researchJobRowHeader">
+                        <div className="researchActivityRowMain">
+                          <span className="researchActivityRowTitle">
+                            {linkedSource?.url || `Job ${job.id.slice(0, 8)}…`}
+                          </span>
+                          <span className="researchActivityRowMeta">
+                            {logicalDocumentSummary(job)} · Started {formatDatetime(job.started_at)} · Finished{" "}
+                            {formatDatetime(job.finished_at)}
+                          </span>
+                        </div>
+                        <StatusPill tone={statusPillTone(job.status)} label={STATUS_LABELS[job.status] ?? job.status} />
+                      </div>
+                      {failureText ? <div className="researchJobRowFailure">{failureText}</div> : null}
+                      {outcomes.length > 0 && (
+                        <>
+                          <button
+                            type="button"
+                            className="researchJobOutcomesToggle"
+                            onClick={() => setExpandedJobId((current) => (current === job.id ? null : job.id))}
+                          >
+                            {expanded ? "Hide outcomes" : `View outcomes (${outcomes.length})`}
+                          </button>
+                          {expanded && (
+                            <div className="researchJobOutcomes">
+                              {outcomes.map((outcome) => (
+                                <div className="researchJobOutcomeRow" key={`${job.id}-${outcome.key}`}>
+                                  <span className="researchJobOutcomeKey">{outcome.key}</span>
+                                  <div className="researchActivityRowActions">
+                                    {outcome.failureCategory || outcome.error ? (
+                                      <span className="muted" style={{ fontSize: "12px", color: "var(--bad)" }}>
+                                        {outcome.failureCategory ?? outcome.error}
+                                      </span>
+                                    ) : null}
+                                    <StatusPill
+                                      tone={statusPillTone(outcome.status)}
+                                      label={STATUS_LABELS[outcome.status] ?? outcome.status}
+                                    />
+                                  </div>
                                 </div>
-                              </details>
-                            )}
-                          </td>
-                          <td className="muted">{formatDatetime(job.started_at)}</td>
-                          <td className="muted">{formatDatetime(job.finished_at)}</td>
-                          <td className="error">{job.failure_category ?? (job.error ? job.error.slice(0, 80) : "—")}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-            )}
-          </section>
-        )}
+            ))}
 
-        {selectedAuthorId && (
-          <section className="card" aria-label="Ingestion activity">
-            <h2 className="cardTitle">Recent Activity</h2>
-            {events.length === 0 ? (
+            {activityTab === "activity" && (events.length === 0 ? (
               <div className="muted">No ingestion activity for this author yet.</div>
             ) : (
-              <div className="tableWrap">
-                <table className="dataTable">
-                  <thead>
-                    <tr>
-                      <th>When</th>
-                      <th>Event</th>
-                      <th>Item</th>
-                      <th>Status</th>
-                      <th>Failure Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {events.map((event) => (
-                      <tr key={event.id}>
-                        <td className="muted">{formatDatetime(event.created_at)}</td>
-                        <td>{EVENT_LABELS[event.event_name] ?? event.event_name}</td>
-                        <td className="urlCell">{eventSummary(event)}</td>
-                        <td>
-                          <span className={statusBadgeClass(event.status ?? "pending")}>
-                            {STATUS_LABELS[event.status ?? "pending"] ?? event.status ?? "Pending"}
-                          </span>
-                        </td>
-                        <td className="error">{eventFailureReason(event)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="researchActivityList">
+                {events.map((event) => {
+                  const failureReason = eventFailureReason(event);
+                  return (
+                    <div className="researchActivityRow" key={event.id}>
+                      <div className="researchActivityRowMain">
+                        <span className="researchActivityRowTitle">{EVENT_LABELS[event.event_name] ?? event.event_name}</span>
+                        <span className="researchActivityRowMeta">
+                          {eventSummary(event)} · {formatDatetime(event.created_at)}
+                          {failureReason !== "—" ? ` · ${failureReason}` : ""}
+                        </span>
+                      </div>
+                      <StatusPill
+                        tone={statusPillTone(event.status ?? "pending")}
+                        label={STATUS_LABELS[event.status ?? "pending"] ?? event.status ?? "Pending"}
+                      />
+                    </div>
+                  );
+                })}
               </div>
-            )}
+            ))}
           </section>
         )}
       </div>

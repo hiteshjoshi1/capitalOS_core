@@ -132,13 +132,14 @@ describe("AuthorIngestion page", () => {
     expect(screen.getByText(/Author Ingestion/i)).toBeInTheDocument();
   });
 
-  it("loads and shows author list", async () => {
+  it("loads and shows author list as clickable chips", async () => {
     renderAuthorIngestion();
     await waitFor(() => {
       expect(api.ragAuthors).toHaveBeenCalled();
     });
     await waitFor(() => {
-      expect(screen.getByRole("combobox")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Warren Buffett" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /Charlie Munger/ })).toBeInTheDocument();
     });
   });
 
@@ -160,7 +161,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /add another url/i })).toBeInTheDocument();
     });
@@ -170,7 +171,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.click(await screen.findByRole("button", { name: /add another url/i }));
     expect(screen.getAllByPlaceholderText(/https:\/\//i).length).toBeGreaterThanOrEqual(2);
   });
@@ -179,7 +180,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
 
     await waitFor(() => {
       expect(api.ragIngestionActivity).toHaveBeenCalledWith("warren_buffett", 100);
@@ -190,10 +191,11 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
 
-    expect(await screen.findByText(/Recent Activity/i)).toBeInTheDocument();
-    expect(screen.getByText(/Source ingested/i)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Activity" }));
+    expect(await screen.findByText(/Source ingested/i)).toBeInTheDocument();
     expect(screen.getAllByText(/https:\/\/example.com\/article-1/i).length).toBeGreaterThan(0);
   });
 
@@ -211,7 +213,7 @@ describe("AuthorIngestion page", () => {
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/new-article");
     await user.click(screen.getByRole("button", { name: /start ingestion/i }));
 
@@ -229,7 +231,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /add another url/i })).toBeInTheDocument());
 
     // The selective controls summary should exist but inputs should not be visible
@@ -241,7 +243,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
 
     expect(screen.getByLabelText(/compendium.*fanout/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /preview logical documents/i })).not.toBeInTheDocument();
@@ -276,7 +278,7 @@ describe("AuthorIngestion page", () => {
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.click(screen.getByLabelText(/compendium.*fanout/i));
     await user.clear(screen.getByLabelText(/logical key/i));
     await user.type(screen.getByLabelText(/logical key/i), "essay-a");
@@ -310,7 +312,7 @@ describe("AuthorIngestion page", () => {
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.click(screen.getByLabelText(/compendium.*fanout/i));
     await user.clear(screen.getByLabelText(/logical key/i));
     await user.type(screen.getByLabelText(/logical key/i), "child");
@@ -324,7 +326,7 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await waitFor(() => expect(screen.getByText(/advanced.*selective ingestion/i)).toBeInTheDocument());
 
     // Click the summary to expand
@@ -352,7 +354,7 @@ describe("AuthorIngestion page", () => {
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/selective-article");
 
     // Expand selective options
@@ -385,7 +387,7 @@ describe("AuthorIngestion page", () => {
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/no-selective");
     await user.click(screen.getByRole("button", { name: /start ingestion/i }));
 
@@ -413,7 +415,7 @@ describe("AuthorIngestion page", () => {
 
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
     await user.type(await screen.findByPlaceholderText(/https:\/\//i), "https://example.com/compendium");
     await user.click(screen.getByLabelText(/compendium.*fanout/i));
     await user.clear(screen.getByLabelText(/logical key/i));
@@ -503,8 +505,8 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
-    await screen.findByText(/Recent Activity/i);
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
+    await screen.findByText(/example.com\/article-1/i);
 
     await act(async () => {
       realtimeHandlers.onEvent?.({
@@ -528,6 +530,7 @@ describe("AuthorIngestion page", () => {
     });
 
     expect(await screen.findAllByText(/Failed/i)).not.toHaveLength(0);
+    await user.click(screen.getByRole("button", { name: "Activity" }));
     expect(screen.getByText(/timeout/i)).toBeInTheDocument();
   });
 
@@ -552,8 +555,10 @@ describe("AuthorIngestion page", () => {
     const user = userEvent.setup();
     renderAuthorIngestion();
     await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
-    await user.selectOptions(await screen.findByRole("combobox"), "warren_buffett");
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
 
+    await waitFor(() => expect(screen.getByRole("button", { name: "Jobs" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Jobs" }));
     expect(await screen.findByText(/1 Created \/ 1 Rejected/i)).toBeInTheDocument();
     await user.click(screen.getByText(/View outcomes/i));
     expect(screen.getByText("essay-a")).toBeInTheDocument();

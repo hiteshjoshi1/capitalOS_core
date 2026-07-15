@@ -83,6 +83,7 @@ authors:
 
   - id: howard_marks
     name: Howard Marks
+    photo_url: "https://upload.wikimedia.org/wikipedia/commons/8/8b/Howard_Marks_2.17.12_%28cropped%29.jpg"
     enabled: true
     domains: [investing, macro, credit, cycles]
     expertise_tags:
@@ -114,6 +115,7 @@ authors:
 
   - id: nick_sleep
     name: Nick Sleep
+    photo_url: "https://investorkurs.no/wp-content/uploads/2024/05/Nick-Sleep-2.png"
     enabled: true
     domains: [investing, business]
     expertise_tags:
@@ -585,6 +587,7 @@ authors:
 
   - id: jeff_bezos
     name: Jeff Bezos
+    photo_url: "https://upload.wikimedia.org/wikipedia/commons/9/9e/Jeff_Bezos_%28cropped%29.jpg"
     enabled: true
     domains: [business, operator, strategy]
     expertise_tags:

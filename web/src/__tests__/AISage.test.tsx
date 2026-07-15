@@ -189,7 +189,7 @@ describe("AISage workspace", () => {
     expect(screen.getByText("Hello Hitesh")).toBeInTheDocument();
     expect(document.querySelector(".aiSageMainPanelLanding")).not.toBeNull();
     expect(screen.getByRole("button", { name: "New chat" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Search chats" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Search chats" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Projects" })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Ask AI Sage anything")).toBeInTheDocument();
     expect(screen.queryByText("Saved for one year from your last user message.")).not.toBeInTheDocument();
