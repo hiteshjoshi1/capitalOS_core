@@ -5,6 +5,7 @@ Ties together: fetch → parse → chunk → embed → persist.
 
 Entry points:
   run_url_ingestion(source, db)    — for URL-based sources
+  run_pdf_bytes_ingestion(source, raw_bytes, db) — for uploaded PDF bytes
   run_manual_ingestion(source, text, db) — for manually supplied text/docs
 """
 
@@ -1085,6 +1086,102 @@ def run_manual_ingestion(
         )
     except Exception as exc:
         log.exception("Manual ingestion failed for source %s", source.id)
+        source.status = "failed"
+        _close_job(
+            db,
+            job,
+            success=False,
+            stats={},
+            error=str(exc),
+            failure_category=_classify_failure(exc, source.source_type),
+        )
+        _log_rag_lifecycle(
+            "rag_ingest_failed",
+            source=source,
+            job=job,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            error_class=exc.__class__.__name__,
+            reason=_classify_failure(exc, source.source_type),
+        )
+
+    if context is not None:
+        context.__exit__(None, None, None)
+    return job
+
+
+def run_pdf_bytes_ingestion(
+    source: RagSource,
+    raw_bytes: bytes,
+    db: Session,
+    *,
+    title: Optional[str] = None,
+    published_at=None,
+    filename: Optional[str] = None,
+) -> RagIngestionJob:
+    """
+    Ingest user-supplied PDF bytes without performing an HTTP fetch.
+
+    This is for source PDFs that cannot be fetched automatically because the
+    host blocks non-browser clients, but whose bytes are available from upload.
+    The raw bytes are persisted on the source (stored_file_bytes) so the
+    document can be opened/read later via GET /rag/sources/{id}/file, since
+    the original host may remain unreachable indefinitely.
+    The caller is responsible for committing the session.
+    """
+    context = job_context() if get_job_id() is None else None
+    if context is not None:
+        context.__enter__()
+    started = time.perf_counter()
+    job = _open_job(db, source)
+    source.status = "running"
+    _log_rag_lifecycle(
+        "rag_ingest_started",
+        source=source,
+        job=job,
+        duration_ms=0,
+    )
+
+    try:
+        source.source_type = "pdf"
+        source.hash = hashlib.sha256(raw_bytes).hexdigest()
+        source.stored_file_bytes = raw_bytes
+        source.stored_file_content_type = "application/pdf"
+        source.stored_file_filename = filename
+
+        parsed = parse(raw_bytes, "pdf")
+        _ensure_clean_text(parsed, "pdf")
+        structured = _prepare_parse_result(source, parsed)
+        _log_pdf_parser_path(source, structured)
+
+        success, stats, error, failure_category = _persist_logical_documents(
+            db,
+            source,
+            structured,
+            title=title,
+            published_at=published_at,
+        )
+        source.status = "ingested" if success else "failed"
+        if success:
+            source.last_ingested_at = _now()
+
+        _close_job(
+            db,
+            job,
+            success=success,
+            stats=stats,
+            error=error,
+            failure_category=failure_category,
+        )
+        _log_rag_lifecycle(
+            "rag_ingest_succeeded" if success else "rag_ingest_failed",
+            source=source,
+            job=job,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            stats=stats,
+            reason=failure_category,
+        )
+    except Exception as exc:
+        log.exception("PDF upload ingestion failed for source %s", source.id)
         source.status = "failed"
         _close_job(
             db,

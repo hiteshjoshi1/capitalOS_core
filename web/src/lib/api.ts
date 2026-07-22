@@ -1476,6 +1476,7 @@ export type RagLibraryDocumentSummary = {
   canonical_status: string | null;
   source_type: string;
   source_url: string | null;
+  stored_file_url: string | null;
   work_type: string | null;
   source_section: string | null;
   metadata: Record<string, unknown>;
@@ -1540,6 +1541,7 @@ export type RagLibraryDocumentDetail = {
   canonical_status: string | null;
   source_type: string;
   source_url: string | null;
+  stored_file_url: string | null;
   work_type: string | null;
   source_section: string | null;
   metadata: Record<string, unknown>;
@@ -2086,6 +2088,64 @@ export const api = {
     req<RagLibraryDocumentDetail>(`/rag/library/documents/${encodeURIComponent(documentId)}`),
   ragRetryIngestion: (sourceId: string) =>
     req<RagIngestionJobRecord>(`/rag/ingest/retry/${encodeURIComponent(sourceId)}`, { method: "POST" }),
+  ragIngestPdfUpload: async (params: {
+    authorId: string;
+    file: File;
+    sourceUrl?: string;
+    title?: string;
+    publishedAt?: string;
+  }) => {
+    const form = new FormData();
+    form.append("author_id", params.authorId);
+    form.append("file", params.file);
+    if (params.sourceUrl) form.append("source_url", params.sourceUrl);
+    if (params.title) form.append("title", params.title);
+    if (params.publishedAt) form.append("published_at", params.publishedAt);
+    const headers = buildHeaders(undefined, { includeJsonContentType: false });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/rag/ingest/pdf/upload`, {
+        method: "POST",
+        credentials: "include",
+        headers,
+        body: form,
+      });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(formatHttpError(res.status, text));
+    }
+    return res.json() as Promise<RagIngestionJobRecord>;
+  },
+
+  // stored_file_url from library responses is an API-relative path (e.g.
+  // /rag/sources/{id}/file) requiring the same Bearer-token auth as every
+  // other endpoint, so it can't be used as a plain <a href> — the browser
+  // won't attach the header on a top-level navigation. Fetch it as an
+  // authenticated blob instead; the caller is responsible for revoking the
+  // returned object URL (URL.revokeObjectURL) once it's no longer needed.
+  ragFetchSourceFileObjectUrl: async (storedFileUrl: string): Promise<string> => {
+    const headers = buildHeaders(undefined, { includeJsonContentType: false });
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}${storedFileUrl}`, {
+        credentials: "include",
+        headers,
+      });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : String(err);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      throw new Error(formatHttpError(res.status, text));
+    }
+    const blob = await res.blob();
+    return URL.createObjectURL(blob);
+  },
 };
 
 export async function streamAiSageChatMessage(

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import os
 import uuid
+import json
+from unittest.mock import patch
 
 import pytest
 
@@ -372,6 +374,203 @@ class TestFanoutConfigApis:
         assert sources_resp.status_code == 200, sources_resp.text
         updated = next(source for source in sources_resp.json() if source["id"] == source_id)
         assert updated["ingestion_config"]["documents"][0]["source_section"] == "Doc 1"
+
+
+class TestPdfUploadIngestion:
+    def test_pdf_upload_stores_source_url_and_ingestion_config(self, client):
+        from app.models.rag import RagIngestionJob
+
+        author = _make_author(client, id_suffix=f"pdf_{_uid()}")
+        captured = {}
+
+        def fake_run_pdf_bytes_ingestion(source, raw_bytes, db, *, title=None, published_at=None, filename=None):
+            captured["source_type"] = source.source_type
+            captured["source_url"] = source.url
+            captured["raw_bytes"] = raw_bytes
+            captured["title"] = title
+            captured["published_at"] = published_at.isoformat() if published_at else None
+            captured["filename"] = filename
+            source.hash = "fake-pdf-hash"
+            source.status = "ingested"
+            job = RagIngestionJob(
+                user_id=source.user_id,
+                source_id=source.id,
+                status="done",
+                stats_json={"documents_created": 1},
+            )
+            db.add(job)
+            db.flush()
+            return job
+
+        ingestion_config = {
+            "mode": "fanout",
+            "documents": [
+                {
+                    "key": "mauboussin-test",
+                    "title": "Mauboussin Test",
+                    "published_at": "2026-06-18",
+                    "publication_year": 2026,
+                    "collection": "Consilient Observer",
+                    "work_type": "article",
+                }
+            ],
+        }
+
+        with patch("app.routers.rag.run_pdf_bytes_ingestion", side_effect=fake_run_pdf_bytes_ingestion):
+            resp = client.post(
+                "/rag/ingest/pdf/upload",
+                data={
+                    "author_id": author["id"],
+                    "title": "Mauboussin Test",
+                    "published_at": "2026-06-18",
+                    "source_url": "https://www.morganstanley.com/example.pdf",
+                    "ingestion_config_json": json.dumps(ingestion_config),
+                },
+                files={"file": ("example.pdf", b"%PDF-1.7\nfake", "application/pdf")},
+            )
+
+        assert resp.status_code == 202, resp.text
+        body = resp.json()
+        assert body["status"] == "done"
+        assert captured == {
+            "source_type": "pdf",
+            "source_url": "https://www.morganstanley.com/example.pdf",
+            "raw_bytes": b"%PDF-1.7\nfake",
+            "title": "Mauboussin Test",
+            "published_at": "2026-06-18",
+            "filename": "example.pdf",
+        }
+
+        sources_resp = client.get(f"/rag/sources?author_id={author['id']}")
+        assert sources_resp.status_code == 200, sources_resp.text
+        source = next(source for source in sources_resp.json() if source["url"] == "https://www.morganstanley.com/example.pdf")
+        assert source["source_type"] == "pdf"
+        assert source["status"] == "ingested"
+        assert source["ingestion_config"]["documents"][0]["collection"] == "Consilient Observer"
+
+    def test_pdf_upload_rejects_non_pdf_bytes(self, client):
+        author = _make_author(client, id_suffix=f"pdf_bad_{_uid()}")
+        resp = client.post(
+            "/rag/ingest/pdf/upload",
+            data={"author_id": author["id"]},
+            files={"file": ("not.pdf", b"not a pdf", "application/pdf")},
+        )
+        assert resp.status_code == 422
+        assert "does not look like a PDF" in resp.json()["detail"]
+
+    def test_pdf_upload_reuses_existing_failed_source_by_url(self, client):
+        """
+        A URL that already failed automatic fetch (e.g. HTTP 403) should be
+        reused, not duplicated, when the user falls back to a manual upload
+        for that same URL — same dedupe behavior as ingest-urls.
+        """
+        author = _make_author(client, id_suffix=f"pdf_dedupe_{_uid()}")
+        blocked_url = "https://www.morganstanley.com/example-blocked.pdf"
+
+        register_resp = client.post(
+            f"/rag/authors/{author['id']}/ingest-urls",
+            json={"urls": [blocked_url], "source_type": "pdf"},
+        )
+        assert register_resp.status_code == 202, register_resp.text
+        original_source_id = register_resp.json()["sources"][0]["id"]
+
+        from app.models.rag import RagIngestionJob
+
+        def fake_run_pdf_bytes_ingestion(source, raw_bytes, db, **kwargs):
+            source.status = "ingested"
+            job = RagIngestionJob(user_id=source.user_id, source_id=source.id, status="done", stats_json={})
+            db.add(job)
+            db.flush()
+            return job
+
+        with patch(
+            "app.routers.rag.run_pdf_bytes_ingestion",
+            side_effect=fake_run_pdf_bytes_ingestion,
+        ):
+            upload_resp = client.post(
+                "/rag/ingest/pdf/upload",
+                data={"author_id": author["id"], "source_url": blocked_url},
+                files={"file": ("example.pdf", b"%PDF-1.7\nfake", "application/pdf")},
+            )
+        assert upload_resp.status_code == 202, upload_resp.text
+
+        sources_resp = client.get(f"/rag/sources?author_id={author['id']}")
+        matching = [s for s in sources_resp.json() if s["url"] == blocked_url]
+        assert len(matching) == 1, f"expected exactly one source for {blocked_url}, got {matching}"
+        assert matching[0]["id"] == original_source_id
+        assert matching[0]["source_type"] == "pdf"
+        assert matching[0]["status"] == "ingested"
+
+    def test_pdf_upload_persists_raw_bytes_for_later_retrieval(self, client):
+        """
+        The uploaded PDF bytes must survive ingestion so the document can be
+        opened later via GET /rag/sources/{id}/file — even when the host that
+        originally served it stays unreachable. Uses the real (unmocked)
+        run_pdf_bytes_ingestion so this exercises the actual persistence path,
+        not a stand-in.
+        """
+        author = _make_author(client, id_suffix=f"pdf_store_{_uid()}")
+        pdf_bytes = (
+            b"%PDF-1.4\n"
+            b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+            b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+            b"3 0 obj<</Type/Page/MediaBox[0 0 3 3]>>endobj\n"
+            b"xref\n0 4\n"
+            b"0000000000 65535 f \n"
+            b"0000000009 00000 n \n"
+            b"0000000058 00000 n \n"
+            b"0000000115 00000 n \n"
+            b"trailer<</Size 4/Root 1 0 R>>\n"
+            b"startxref\n190\n%%EOF"
+        )
+
+        upload_resp = client.post(
+            "/rag/ingest/pdf/upload",
+            data={"author_id": author["id"]},
+            files={"file": ("mauboussin.pdf", pdf_bytes, "application/pdf")},
+        )
+        assert upload_resp.status_code == 202, upload_resp.text
+        source_id = upload_resp.json()["source_id"]
+
+        file_resp = client.get(f"/rag/sources/{source_id}/file")
+        assert file_resp.status_code == 200, file_resp.text
+        assert file_resp.content == pdf_bytes
+        assert file_resp.headers["content-type"] == "application/pdf"
+        assert "mauboussin.pdf" in file_resp.headers["content-disposition"]
+
+    def test_get_source_file_404_when_no_stored_file(self, client):
+        """A URL-fetched source never has stored_file_bytes; the file route 404s."""
+        author = _make_author(client, id_suffix=f"pdf_nofile_{_uid()}")
+        register_resp = client.post(
+            f"/rag/authors/{author['id']}/ingest-urls",
+            json={"urls": [f"https://example.com/report-{_uid()}.html"], "source_type": "html"},
+        )
+        source_id = register_resp.json()["sources"][0]["id"]
+
+        resp = client.get(f"/rag/sources/{source_id}/file")
+        assert resp.status_code == 404
+
+    def test_get_source_file_404_for_another_users_source(self, client):
+        """Serving someone else's stored file 404s, same as every other per-source endpoint."""
+        from app.models.rag import RagSource
+
+        author = _make_author(client, id_suffix=f"pdf_other_{_uid()}")
+        with TestingSessionLocal() as db:
+            other_source = RagSource(
+                user_id=999,
+                author_id=author["id"],
+                source_type="pdf",
+                status="ingested",
+                stored_file_bytes=b"%PDF-1.4\nnot yours",
+                stored_file_content_type="application/pdf",
+                stored_file_filename="not-yours.pdf",
+            )
+            db.add(other_source)
+            db.commit()
+            other_source_id = other_source.id
+
+        resp = client.get(f"/rag/sources/{other_source_id}/file")
+        assert resp.status_code == 404
 
 
 # ─────────────────────────────────────────────────────────────────────────────

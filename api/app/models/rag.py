@@ -13,6 +13,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     JSON,
+    LargeBinary,
     String,
     Text,
     DateTime,
@@ -197,6 +198,9 @@ class RagSource(Base):
     ingestion_config = Column(_JsonBlob, nullable=True)  # optional deterministic fanout config
     last_ingested_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    stored_file_bytes = Column(LargeBinary, nullable=True)  # raw bytes for manually-uploaded files (e.g. PDF)
+    stored_file_content_type = Column(String, nullable=True)
+    stored_file_filename = Column(String, nullable=True)
 
     author = relationship("RagAuthor", back_populates="sources")
     documents = relationship("RagDocument", back_populates="source", cascade="all, delete-orphan")
