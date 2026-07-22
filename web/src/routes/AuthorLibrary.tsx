@@ -107,7 +107,10 @@ function DocumentLinkCard({
     </>
   );
 
-  if (document.source_url) {
+  // A stored file (uploaded PDF fallback) always routes through the internal
+  // reader page, even when a source_url is also present — the reader shows
+  // both "Open PDF" and "Open original source" so neither option is hidden.
+  if (!document.stored_file_url && document.source_url) {
     return (
       <a
         className="authorLibraryDocumentRow authorLibraryDocumentLink"
@@ -139,6 +142,23 @@ export default function AuthorLibrary() {
   const [documentDetail, setDocumentDetail] = useState<RagLibraryDocumentDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [openingStoredFile, setOpeningStoredFile] = useState(false);
+  const [storedFileError, setStoredFileError] = useState<string | null>(null);
+
+  async function handleOpenStoredFile(storedFileUrl: string) {
+    setOpeningStoredFile(true);
+    setStoredFileError(null);
+    try {
+      const objectUrl = await api.ragFetchSourceFileObjectUrl(storedFileUrl);
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      // Give the new tab a moment to actually load the blob before revoking.
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err: unknown) {
+      setStoredFileError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setOpeningStoredFile(false);
+    }
+  }
 
   useEffect(() => {
     if (!isGallery) return;
@@ -431,18 +451,40 @@ export default function AuthorLibrary() {
                     <div className="muted">
                       Author Library now hands this document off to its original source instead of rendering extracted content inside CapitalOS.
                     </div>
-                    {documentDetail.source_url ? (
-                      <a
-                        className="authorLibrarySourceLinkButton"
-                        href={documentDetail.source_url}
-                        rel="noreferrer"
-                        target="_blank"
-                      >
-                        Open source ↗
-                      </a>
-                    ) : (
+                    <div className="authorLibrarySourceLinkRow">
+                      {documentDetail.stored_file_url ? (
+                        <button
+                          type="button"
+                          className="authorLibrarySourceLinkButton"
+                          disabled={openingStoredFile}
+                          onClick={() => void handleOpenStoredFile(documentDetail.stored_file_url!)}
+                        >
+                          {openingStoredFile ? "Opening…" : "Open PDF ↗"}
+                        </button>
+                      ) : null}
+                      {documentDetail.source_url ? (
+                        <a
+                          className="authorLibrarySourceLinkButton"
+                          href={documentDetail.source_url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          Open original source ↗
+                        </a>
+                      ) : null}
+                    </div>
+                    {documentDetail.stored_file_url ? (
+                      <div className="muted" style={{ marginTop: "8px" }}>
+                        This PDF was uploaded manually because the original host blocked automatic fetching.
+                        {documentDetail.source_url
+                          ? " \"Open original source\" links to that host and may still fail — \"Open PDF\" opens CapitalOS's own stored copy."
+                          : ""}
+                      </div>
+                    ) : null}
+                    {!documentDetail.stored_file_url && !documentDetail.source_url ? (
                       <div className="muted">No source URL is stored for this document yet.</div>
-                    )}
+                    ) : null}
+                    {storedFileError ? <div className="error" style={{ marginTop: "8px" }}>{storedFileError}</div> : null}
                   </div>
                 </div>
               </div>

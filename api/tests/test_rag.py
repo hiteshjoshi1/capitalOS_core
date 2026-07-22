@@ -126,7 +126,10 @@ def sqlite_rag_db():
             hash TEXT,
             ingestion_config TEXT,
             last_ingested_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            stored_file_bytes BLOB,
+            stored_file_content_type TEXT,
+            stored_file_filename TEXT
         )
         """,
         """

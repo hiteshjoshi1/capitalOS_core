@@ -28,6 +28,8 @@
       "Bash(git commit *)",
       "Bash(node *)",
       "Bash(python3 *)",
+      "Bash(../.venv/bin/python -m pytest *)",
+      "Bash(.venv/bin/python -m pytest *)",
       "Bash(rm -f /private/tmp/*)",
       "Bash(rm -rf /private/tmp/*)",
       "Bash(mkdir -p *)",

@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -11,6 +12,7 @@ vi.mock("../lib/api", () => ({
     ragLibraryAuthors: vi.fn(),
     ragAuthorLibrary: vi.fn(),
     ragLibraryDocument: vi.fn(),
+    ragFetchSourceFileObjectUrl: vi.fn(),
   },
 }));
 
@@ -65,6 +67,7 @@ const LIBRARY: RagAuthorLibrary = {
               canonical_status: "canonical",
               source_type: "html",
               source_url: "https://example.com/1987-letter",
+              stored_file_url: null,
               work_type: "letter",
               source_section: "1987 Letter",
               metadata: { corpus_section: "Letters" },
@@ -98,6 +101,7 @@ const LIBRARY: RagAuthorLibrary = {
           canonical_status: "canonical",
           source_type: "text",
           source_url: null,
+          stored_file_url: null,
           work_type: "notes",
           source_section: "Working Notes",
           metadata: {},
@@ -130,6 +134,7 @@ const DOCUMENTS: Record<string, RagLibraryDocumentDetail> = {
     canonical_status: "canonical",
     source_type: "html",
     source_url: "https://example.com/1987-letter",
+    stored_file_url: null,
     work_type: "letter",
     source_section: "1987 Letter",
     metadata: { corpus_section: "Letters" },
@@ -156,10 +161,38 @@ const DOCUMENTS: Record<string, RagLibraryDocumentDetail> = {
     canonical_status: "canonical",
     source_type: "text",
     source_url: null,
+    stored_file_url: null,
     work_type: "notes",
     source_section: "Working Notes",
     metadata: {},
     char_count: 315,
+    parent_document: null,
+    child_documents: [],
+    source_author_id: "warren_buffett",
+    source_author_name: "Warren Buffett",
+    source_status: "ingested",
+    created_at: "2024-01-01T00:00:00Z",
+  },
+  "doc-uploaded-pdf": {
+    id: "doc-uploaded-pdf",
+    source_id: "src-uploaded-pdf",
+    title: "Opportunities and Expectations",
+    author_id: "warren_buffett",
+    author_name: "Warren Buffett",
+    published_at: null,
+    publication_year: 2005,
+    publication_label: "2005",
+    venue: null,
+    collection: null,
+    canonical_work_id: null,
+    canonical_status: "canonical",
+    source_type: "pdf",
+    source_url: "https://www.morganstanley.com/consilient-observer.pdf",
+    stored_file_url: "/rag/sources/src-uploaded-pdf/file",
+    work_type: "essay",
+    source_section: null,
+    metadata: {},
+    char_count: 900,
     parent_document: null,
     child_documents: [],
     source_author_id: "warren_buffett",
@@ -231,7 +264,7 @@ describe("AuthorLibrary", () => {
     expect(await screen.findByTestId("author-library-source-only")).toBeInTheDocument();
     expect(api.ragLibraryDocument).toHaveBeenCalledWith("doc-1987");
     expect(api.ragAuthorLibrary).not.toHaveBeenCalled();
-    expect(screen.getByRole("link", { name: /Open source/i })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: /Open original source/i })).toHaveAttribute(
       "href",
       "https://example.com/1987-letter",
     );
@@ -245,5 +278,28 @@ describe("AuthorLibrary", () => {
     expect(await screen.findByTestId("author-library-source-only")).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: /Open source/i })).not.toBeInTheDocument();
     expect(screen.getByText("No source URL is stored for this document yet.")).toBeInTheDocument();
+  });
+
+  it("offers both the stored PDF and the original source link for manually-uploaded documents", async () => {
+    vi.mocked(api.ragFetchSourceFileObjectUrl).mockResolvedValue("blob:mock-object-url");
+    const windowOpenSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+
+    renderAuthorLibrary("/author-library/warren_buffett/documents/doc-uploaded-pdf");
+
+    expect(await screen.findByTestId("author-library-source-only")).toBeInTheDocument();
+    const openPdfButton = screen.getByRole("button", { name: /Open PDF/i });
+    expect(
+      screen.getByRole("link", { name: /Open original source/i }),
+    ).toHaveAttribute("href", "https://www.morganstanley.com/consilient-observer.pdf");
+
+    const user = userEvent.setup();
+    await user.click(openPdfButton);
+
+    await waitFor(() => {
+      expect(api.ragFetchSourceFileObjectUrl).toHaveBeenCalledWith("/rag/sources/src-uploaded-pdf/file");
+    });
+    expect(windowOpenSpy).toHaveBeenCalledWith("blob:mock-object-url", "_blank", "noopener,noreferrer");
+
+    windowOpenSpy.mockRestore();
   });
 });

@@ -23,6 +23,7 @@ vi.mock("../lib/api", () => ({
     ragIngestUrls: vi.fn(),
     ragPreviewFanout: vi.fn(),
     ragRetryIngestion: vi.fn(),
+    ragIngestPdfUpload: vi.fn(),
   },
 }));
 
@@ -532,6 +533,92 @@ describe("AuthorIngestion page", () => {
     expect(await screen.findAllByText(/Failed/i)).not.toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Activity" }));
     expect(screen.getByText(/timeout/i)).toBeInTheDocument();
+  });
+
+  it("uploads a PDF as a fallback for a source that failed automatic fetch", async () => {
+    (api.ragIngestionActivity as ReturnType<typeof vi.fn>).mockResolvedValue({
+      topic: "author-ingestion",
+      sources: [{ ...MOCK_SOURCES[0], status: "failed" }],
+      jobs: MOCK_JOBS,
+      events: MOCK_EVENTS,
+    } satisfies RagIngestionActivity);
+    (api.ragIngestPdfUpload as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "job-upload-1",
+      source_id: MOCK_SOURCES[0].id,
+      batch_id: null,
+      status: "done",
+      failure_category: null,
+      error: null,
+      stats_json: {},
+      started_at: "2024-01-01T00:00:00",
+      finished_at: "2024-01-01T00:00:01",
+      created_at: "2024-01-01T00:00:00",
+    } satisfies RagIngestionJobRecord);
+
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
+    await screen.findByText(/example.com\/article-1/i);
+
+    const uploadLabel = screen.getByText(/Upload PDF instead/i);
+    const fileInput = uploadLabel.closest("label")!.querySelector('input[type="file"]') as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3])], "mauboussin.pdf", { type: "application/pdf" });
+
+    await user.upload(fileInput, file);
+
+    await waitFor(() => {
+      expect(api.ragIngestPdfUpload).toHaveBeenCalledWith({
+        authorId: "warren_buffett",
+        file,
+        sourceUrl: MOCK_SOURCES[0].url,
+      });
+    });
+    await waitFor(() => expect(api.ragIngestionActivity).toHaveBeenCalledTimes(2));
+  });
+
+  it("uploads a PDF directly without requiring a prior failed URL source", async () => {
+    (api.ragIngestPdfUpload as ReturnType<typeof vi.fn>).mockResolvedValue({
+      id: "job-standalone-1",
+      source_id: "src-standalone",
+      batch_id: null,
+      status: "done",
+      failure_category: null,
+      error: null,
+      stats_json: {},
+      started_at: "2024-01-01T00:00:00",
+      finished_at: "2024-01-01T00:00:01",
+      created_at: "2024-01-01T00:00:00",
+    } satisfies RagIngestionJobRecord);
+
+    const user = userEvent.setup();
+    renderAuthorIngestion();
+    await waitFor(() => expect(api.ragAuthors).toHaveBeenCalled());
+    await user.click(await screen.findByRole("button", { name: "Warren Buffett" }));
+
+    // No failed source exists in this test's fixture data, so the per-row
+    // "Upload PDF instead" fallback must not be present here.
+    expect(screen.queryByText(/Upload PDF instead/i)).not.toBeInTheDocument();
+
+    const fileInput = screen.getByLabelText(/^PDF file$/i) as HTMLInputElement;
+    const file = new File([new Uint8Array([1, 2, 3])], "mauboussin.pdf", { type: "application/pdf" });
+    await user.upload(fileInput, file);
+    await user.type(screen.getByLabelText(/title \(optional\)/i), "Opportunities and Expectations");
+    await user.type(
+      screen.getByLabelText(/source url \(optional\)/i),
+      "https://www.morganstanley.com/consilient-observer.pdf",
+    );
+    await user.click(screen.getByRole("button", { name: /upload & ingest pdf/i }));
+
+    await waitFor(() => {
+      expect(api.ragIngestPdfUpload).toHaveBeenCalledWith({
+        authorId: "warren_buffett",
+        file,
+        sourceUrl: "https://www.morganstanley.com/consilient-observer.pdf",
+        title: "Opportunities and Expectations",
+      });
+    });
+    expect(await screen.findByText(/Uploaded\. Ingestion Done/i)).toBeInTheDocument();
   });
 
   it("renders logical-document outcomes from ingestion jobs", async () => {

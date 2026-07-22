@@ -22,14 +22,15 @@ Endpoints:
 from __future__ import annotations
 
 from collections import defaultdict
+import json
 import logging
 import threading
 import uuid
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -53,6 +54,7 @@ from app.rag.ingestion.pipeline import (
     bulk_ingest_author,
     preview_url_ingestion,
     run_manual_ingestion,
+    run_pdf_bytes_ingestion,
     run_url_ingestion,
 )
 from app.rag.ingestion.selector import SelectiveIngestionOptions
@@ -417,6 +419,7 @@ class LibraryDocumentSummaryOut(BaseModel):
     canonical_status: Optional[str]
     source_type: str
     source_url: Optional[str]
+    stored_file_url: Optional[str] = None
     work_type: Optional[str]
     source_section: Optional[str]
     metadata: dict[str, Any]
@@ -483,6 +486,7 @@ class LibraryDocumentDetailOut(BaseModel):
     canonical_status: Optional[str]
     source_type: str
     source_url: Optional[str]
+    stored_file_url: Optional[str] = None
     work_type: Optional[str]
     source_section: Optional[str]
     metadata: dict[str, Any]
@@ -604,6 +608,19 @@ def _ingestion_config_to_dict(ingestion_config: Optional[IngestionConfigIn]) -> 
             for marker in ingestion_config.split_markers
         ]
     return config_payload
+
+
+def _parse_ingestion_config_form_json(value: Optional[str]) -> Optional[dict[str, Any]]:
+    if not value:
+        return None
+    try:
+        raw = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail=f"ingestion_config_json must be valid JSON: {exc.msg}") from exc
+    try:
+        return _ingestion_config_to_dict(IngestionConfigIn.model_validate(raw))
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
 
 def _ensure_ingestion_config_authors_exist(
@@ -732,6 +749,12 @@ def _source_type_label(doc: RagDocument) -> str:
 
 def _source_url(doc: RagDocument) -> Optional[str]:
     return doc.source.url if doc.source else None
+
+
+def _stored_file_url(doc: RagDocument) -> Optional[str]:
+    if not doc.source or not doc.source.stored_file_bytes:
+        return None
+    return f"/rag/sources/{doc.source_id}/file"
 
 
 def _metadata_scalar(value: Any) -> Optional[str]:
@@ -934,6 +957,7 @@ def _document_summary_out(doc: RagDocument) -> LibraryDocumentSummaryOut:
         canonical_status=doc.canonical_status,
         source_type=_source_type_label(doc),
         source_url=_source_url(doc),
+        stored_file_url=_stored_file_url(doc),
         work_type=doc.work_type,
         source_section=doc.source_section,
         metadata=doc.metadata_json or {},
@@ -1163,6 +1187,7 @@ def get_library_document(
         canonical_status=document.canonical_status,
         source_type=_source_type_label(document),
         source_url=_source_url(document),
+        stored_file_url=_stored_file_url(document),
         work_type=document.work_type,
         source_section=document.source_section,
         metadata=document.metadata_json or {},
@@ -1891,6 +1916,110 @@ async def ingest_manual_upload(
     job = run_manual_ingestion(source, text, db, title=title or file.filename, published_at=pa)
     db.commit()
     return _job_out(job)
+
+
+@router.post("/ingest/pdf/upload", response_model=JobOut, status_code=202)
+async def ingest_pdf_upload(
+    author_id: str = Form(...),
+    title: Optional[str] = Form(None),
+    published_at: Optional[str] = Form(None),
+    source_url: Optional[str] = Form(None),
+    ingestion_config_json: Optional[str] = Form(
+        None,
+        description="Optional IngestionConfigIn JSON, used to attach document metadata/fanout rules.",
+    ),
+    file: UploadFile = File(..., description="PDF file bytes to parse and ingest"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """
+    Upload a PDF and ingest it through the normal PDF parser.
+
+    Use this when a direct PDF URL is blocked by the source host but the user
+    has the PDF bytes available locally. source_url stores the original URL for
+    provenance without fetching it.
+    """
+    author = db.get(RagAuthor, author_id)
+    if not author:
+        raise HTTPException(status_code=404, detail=f"Author '{author_id}' not found.")
+
+    raw = await file.read()
+    if not raw.startswith(b"%PDF"):
+        raise HTTPException(status_code=422, detail="Uploaded file does not look like a PDF")
+
+    ingestion_config = _parse_ingestion_config_form_json(ingestion_config_json)
+    _ensure_ingestion_config_authors_exist(db, source_author_id=author_id, ingestion_config=ingestion_config)
+
+    normalized_url = source_url.strip() if source_url and source_url.strip() else None
+    source: Optional[RagSource] = None
+    if normalized_url:
+        # Reuse a previously-registered source for this URL (e.g. one that failed
+        # with a 403 on automatic fetch) instead of creating a duplicate row, same
+        # dedupe behavior as POST /rag/authors/{author_id}/ingest-urls.
+        source = (
+            db.query(RagSource)
+            .filter(
+                RagSource.author_id == author_id,
+                RagSource.url == normalized_url,
+                (RagSource.user_id == current_user.id) | (RagSource.user_id.is_(None)),
+            )
+            .first()
+        )
+    if source is not None:
+        source.source_type = "pdf"
+        source.status = "pending"
+        source.ingestion_config = ingestion_config
+    else:
+        source = RagSource(
+            user_id=current_user.id,
+            author_id=author_id,
+            url=normalized_url,
+            source_type="pdf",
+            status="pending",
+            ingestion_config=ingestion_config,
+        )
+        db.add(source)
+    db.flush()
+
+    from datetime import date as _date
+
+    pa = None
+    if published_at:
+        try:
+            pa = _date.fromisoformat(published_at)
+        except ValueError:
+            raise HTTPException(status_code=422, detail="published_at must be YYYY-MM-DD")
+
+    job = run_pdf_bytes_ingestion(
+        source, raw, db, title=title or file.filename, published_at=pa, filename=file.filename
+    )
+    db.commit()
+    return _job_out(job)
+
+
+@router.get("/sources/{source_id}/file")
+def get_source_file(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """
+    Serve the raw bytes of a manually-uploaded source file (e.g. a PDF
+    uploaded via /rag/ingest/pdf/upload as a fallback for a blocked host).
+
+    Sources ingested via URL fetch never populate stored_file_bytes, so this
+    404s for them — they're opened via their source_url instead.
+    """
+    source = _get_source_or_404(source_id, db, current_user)
+    if not source.stored_file_bytes:
+        raise HTTPException(status_code=404, detail="No stored file for this source")
+    return Response(
+        content=source.stored_file_bytes,
+        media_type=source.stored_file_content_type or "application/octet-stream",
+        headers={
+            "Content-Disposition": f'inline; filename="{source.stored_file_filename or "document.pdf"}"',
+        },
+    )
 
 
 @router.post("/ingest/retry/{source_id}", response_model=JobOut, status_code=202)

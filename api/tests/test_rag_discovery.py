@@ -128,7 +128,8 @@ def sqlite_session():
             source_type TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
             hash TEXT, selective_options TEXT, ingestion_config TEXT,
             last_ingested_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            stored_file_bytes BLOB, stored_file_content_type TEXT, stored_file_filename TEXT
         )""",
         """CREATE TABLE IF NOT EXISTS rag_ingestion_jobs (
             id TEXT PRIMARY KEY, user_id INTEGER, source_id TEXT NOT NULL, batch_id TEXT,

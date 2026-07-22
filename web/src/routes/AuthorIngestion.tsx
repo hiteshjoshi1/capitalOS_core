@@ -310,6 +310,14 @@ export default function AuthorIngestion() {
   const [events, setEvents] = useState<RealtimeEventEnvelope<RagAuthorIngestionEventPayload>[]>([]);
   const [activityError, setActivityError] = useState<string | null>(null);
   const [retryingSourceId, setRetryingSourceId] = useState<string | null>(null);
+  const [uploadingSourceId, setUploadingSourceId] = useState<string | null>(null);
+  const [pdfUploadFile, setPdfUploadFile] = useState<File | null>(null);
+  const [pdfUploadTitle, setPdfUploadTitle] = useState("");
+  const [pdfUploadSourceUrl, setPdfUploadSourceUrl] = useState("");
+  const [pdfUploadLoading, setPdfUploadLoading] = useState(false);
+  const [pdfUploadError, setPdfUploadError] = useState<string | null>(null);
+  const [pdfUploadResult, setPdfUploadResult] = useState<RagIngestionJobRecord | null>(null);
+  const [pdfUploadInputKey, setPdfUploadInputKey] = useState(0);
   const [realtimeStatus, setRealtimeStatus] = useState<RealtimeStatus>("disconnected");
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null);
 
@@ -552,6 +560,45 @@ export default function AuthorIngestion() {
       setActivityError(e instanceof Error ? e.message : String(e));
     } finally {
       setRetryingSourceId(null);
+    }
+  }
+
+  async function handlePdfUpload(sourceId: string, sourceUrl: string, file: File) {
+    if (!selectedAuthorId) return;
+    setUploadingSourceId(sourceId);
+    setActivityError(null);
+    try {
+      await api.ragIngestPdfUpload({ authorId: selectedAuthorId, file, sourceUrl });
+      await refreshSelectedAuthorActivity();
+    } catch (e: unknown) {
+      setActivityError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setUploadingSourceId(null);
+    }
+  }
+
+  async function handleStandalonePdfUpload() {
+    if (!selectedAuthorId || !pdfUploadFile) return;
+    setPdfUploadLoading(true);
+    setPdfUploadError(null);
+    setPdfUploadResult(null);
+    try {
+      const job = await api.ragIngestPdfUpload({
+        authorId: selectedAuthorId,
+        file: pdfUploadFile,
+        sourceUrl: pdfUploadSourceUrl.trim() || undefined,
+        title: pdfUploadTitle.trim() || undefined,
+      });
+      setPdfUploadResult(job);
+      setPdfUploadFile(null);
+      setPdfUploadTitle("");
+      setPdfUploadSourceUrl("");
+      setPdfUploadInputKey((key) => key + 1);
+      await refreshSelectedAuthorActivity();
+    } catch (e: unknown) {
+      setPdfUploadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPdfUploadLoading(false);
     }
   }
 
@@ -1384,6 +1431,73 @@ export default function AuthorIngestion() {
                 {ingestLoading ? "Submitting..." : "Submit & Start Ingestion"}
               </button>
             </div>
+
+            <div
+              className="formSection"
+              aria-label="Upload PDF directly"
+              style={{ marginTop: "20px", borderTop: "1px solid var(--border-color, #2b3340)", paddingTop: "16px" }}
+            >
+              <h3 className="cardTitle" style={{ fontSize: "16px" }}>Or upload a PDF directly</h3>
+              <p className="muted" style={{ marginBottom: "12px" }}>
+                Use this when a source blocks automatic fetching (e.g. bot protection). Download the PDF
+                yourself and upload it here — no URL fetch required, and you don't need to submit the URL first.
+              </p>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="pdfUploadFile">
+                  PDF file
+                </label>
+                <input
+                  key={pdfUploadInputKey}
+                  id="pdfUploadFile"
+                  type="file"
+                  accept="application/pdf"
+                  onChange={(e) => setPdfUploadFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="pdfUploadTitle">
+                  Title (optional)
+                </label>
+                <input
+                  id="pdfUploadTitle"
+                  className="formInput"
+                  type="text"
+                  placeholder="Defaults to the filename"
+                  value={pdfUploadTitle}
+                  onChange={(e) => setPdfUploadTitle(e.target.value)}
+                />
+              </div>
+              <div className="formRow">
+                <label className="formLabel" htmlFor="pdfUploadSourceUrl">
+                  Source URL (optional)
+                </label>
+                <input
+                  id="pdfUploadSourceUrl"
+                  className="formInput"
+                  type="url"
+                  placeholder="Optional — e.g. the URL that returned a 403"
+                  value={pdfUploadSourceUrl}
+                  onChange={(e) => setPdfUploadSourceUrl(e.target.value)}
+                />
+                <span className="formHint">Stored for provenance only — the URL itself is never fetched.</span>
+              </div>
+              {pdfUploadError && <div className="error formRow">{pdfUploadError}</div>}
+              {pdfUploadResult && (
+                <div className="successBanner formRow">
+                  ✓ Uploaded. Ingestion {STATUS_LABELS[pdfUploadResult.status] ?? pdfUploadResult.status}.
+                </div>
+              )}
+              <div className="formRow">
+                <button
+                  type="button"
+                  className="btn btnPrimary"
+                  disabled={!pdfUploadFile || pdfUploadLoading}
+                  onClick={() => void handleStandalonePdfUpload()}
+                >
+                  {pdfUploadLoading ? "Uploading..." : "Upload & Ingest PDF"}
+                </button>
+              </div>
+            </div>
           </section>
         )}
 
@@ -1443,14 +1557,33 @@ export default function AuthorIngestion() {
                       <div className="researchActivityRowActions">
                         <StatusPill tone={statusPillTone(source.status)} label={STATUS_LABELS[source.status] ?? source.status} />
                         {source.status === "failed" && source.url && (
-                          <button
-                            type="button"
-                            className="btn btnSmall"
-                            disabled={retryingSourceId === source.id}
-                            onClick={() => void handleRetry(source.id)}
-                          >
-                            {retryingSourceId === source.id ? "Retrying…" : "Retry"}
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              className="btn btnSmall"
+                              disabled={retryingSourceId === source.id}
+                              onClick={() => void handleRetry(source.id)}
+                            >
+                              {retryingSourceId === source.id ? "Retrying…" : "Retry"}
+                            </button>
+                            <label
+                              className="btn btnSmall"
+                              title="If the host blocks automatic fetching (e.g. HTTP 403), download the PDF yourself and upload it here instead."
+                            >
+                              {uploadingSourceId === source.id ? "Uploading…" : "Upload PDF instead"}
+                              <input
+                                type="file"
+                                accept="application/pdf"
+                                style={{ display: "none" }}
+                                disabled={uploadingSourceId === source.id}
+                                onChange={(event) => {
+                                  const file = event.target.files?.[0];
+                                  event.target.value = "";
+                                  if (file) void handlePdfUpload(source.id, source.url!, file);
+                                }}
+                              />
+                            </label>
+                          </>
                         )}
                       </div>
                     </div>
