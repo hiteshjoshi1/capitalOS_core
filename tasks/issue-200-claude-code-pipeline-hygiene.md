@@ -47,20 +47,44 @@ This is **Phase 2** of the Claude Code DX upgrade (see `tasks/issue-199-claude-c
 - [ ] Decide on `make verify-fast` vs. relying on the existing `verify` skill; implement or document the decision
 - [ ] Update `CLAUDE.md`/`verify` skill to match the new reality
 
-## Execution Journal (Mutable)
-- Current Stage: `not started`
-- Workflow Status: `blocked`
-- Provider/Model: `<provider>/<model>`
-- Last Updated: `2026-07-16`
+## Execution Journal (Codex Mutable)
+- Current Stage: `prepare`
+- Workflow Status: `failed`
+- Provider/Model: `codex/gpt-5.6-sol`
+- Last Updated: `2026-07-22`
+- Latest note: `The first workflow attempt stopped before agent execution because prepare added the missing machine-rendered markers and then git pull --rebase rejected the resulting unstaged task-file change.`
 
-## Deterministic Gate Results (Mutable)
+## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
 - `full backend suite (fresh, 2026-07-16)`: `pass` — `docker compose run --rm api pytest -q`, clean isolated run, 100% pass, exit 0, no `test_uob_*`/`test_ingest_uob_*` failures. Re-run at execution start to confirm still current.
 - `lint`: `<pass|fail|skip>` — `<notes>`
 - `typecheck`: `<pass|fail|skip>` — `<notes>`
 - `ci trigger`: `<pass|fail|skip>` — `<notes>`
+- `prepare`: `fail` — `The task file lacked the machine-rendered envelope; normalization now makes retries idempotent.`
 
-## Human Action Summary (Mutable)
-- Next expected action: `<command or decision>`
+## Extra Files Changed (Codex Mutable)
+_List all out-of-scope files with explicit rationale._
+- `None recorded.`
+
+## Permanently Failed / Gave Up (Codex Mutable)
+_Fill only if workflow stops without shipping._
+- Stop reason: `Not applicable — the prepare failure is recoverable and the workflow has not been abandoned.`
+- Attempted mitigations:
+  - `Normalized issues 200–202 to the current task template and required machine-rendered envelope.`
+- Suggested human action: `Retry the issue-200 task workflow from its feature branch.`
+
+## Human Action Summary (Codex Mutable)
+- Next expected action: `Retry make task-run for issue 200 with PROVIDER=codex and MODEL=gpt-5.6-sol.`
 - Open questions:
   - Does this repo already have a `requirements-dev.txt` convention, or should ruff/mypy go straight into `api/requirements.txt`? Check before assuming.
+- If PR raised but intent partial:
+  - unmet criteria: `To be populated by the workflow if applicable.`
+  - follow-up issue: `To be populated by the workflow if applicable.`
+
+## Automation Log (Mutable)
+_Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->
