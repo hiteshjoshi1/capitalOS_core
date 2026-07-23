@@ -243,11 +243,11 @@ ownership-reassign:
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
-	docker compose run --rm api sh -lc "if command -v ruff >/dev/null 2>&1; then ruff check app tests; else echo 'ruff not installed in api image; skipping backend lint'; fi"
+	docker compose run --rm api ruff check app tests
 
 typecheck: web-deps
 	cd $(WEB_DIR) && npx tsc -b --pretty false
-	docker compose run --rm api sh -lc "if command -v mypy >/dev/null 2>&1; then mypy app; else echo 'mypy not installed in api image; skipping backend typecheck'; fi"
+	docker compose run --rm api mypy app
 
 test-backend:
 	docker compose run --rm api pytest

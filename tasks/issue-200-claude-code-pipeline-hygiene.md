@@ -40,31 +40,44 @@ This is **Phase 2** of the Claude Code DX upgrade (see `tasks/issue-199-claude-c
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Run a fresh full backend suite and record the real current failure list (do this FIRST, before assuming the Phase 1 audit's numbers still hold)
-- [ ] Add ruff + mypy to the api image; minimal permissive config
+- [x] Run a fresh full backend suite and record the real current failure list (do this FIRST, before assuming the Phase 1 audit's numbers still hold)
+- [x] Add ruff + mypy to the api image; minimal permissive config
 - [x] Re-confirm the fresh run is still clean (done at doc-writing time, 2026-07-16: 100% pass, exit 0 — re-check once more at execution start since it visibly moved once already)
-- [ ] Flip CI trigger to `on: pull_request` (keep `workflow_dispatch`)
-- [ ] Decide on `make verify-fast` vs. relying on the existing `verify` skill; implement or document the decision
-- [ ] Update `CLAUDE.md`/`verify` skill to match the new reality
+- [x] Flip CI trigger to `on: pull_request` (keep `workflow_dispatch`)
+- [x] Decide on `make verify-fast` vs. relying on the existing `verify` skill; implement or document the decision
+- [x] Update `CLAUDE.md`/`verify` skill to match the new reality
 
 ## Execution Journal (Codex Mutable)
-- Current Stage: `prepare`
-- Workflow Status: `failed`
+- Current Stage: `verify`
+- Workflow Status: `passed`
 - Provider/Model: `codex/gpt-5.6-sol`
 - Last Updated: `2026-07-22`
-- Latest note: `The first workflow attempt stopped before agent execution because prepare added the missing machine-rendered markers and then git pull --rebase rejected the resulting unstaged task-file change.`
+- Latest note: `Implementation and the complete required verification matrix passed; ready for Ship to commit and raise the PR.`
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
 - `full backend suite (fresh, 2026-07-16)`: `pass` — `docker compose run --rm api pytest -q`, clean isolated run, 100% pass, exit 0, no `test_uob_*`/`test_ingest_uob_*` failures. Re-run at execution start to confirm still current.
-- `lint`: `<pass|fail|skip>` — `<notes>`
-- `typecheck`: `<pass|fail|skip>` — `<notes>`
-- `ci trigger`: `<pass|fail|skip>` — `<notes>`
+- `full backend suite (fresh, 2026-07-22)`: `pass` — `make test-backend`, 1122 passed, 4 skipped, exit 0; no UOB failures.
+- `backend tool availability`: `pass` — `docker compose run --rm api sh -lc "command -v ruff && command -v mypy"` resolved both tools under `/usr/local/bin`.
+- `lint`: `pass` — `make lint` visibly ran ESLint and `ruff check app tests`; ruff initially found two undefined names, both fixed, then reported `All checks passed!`.
+- `typecheck baseline`: `pass` — first mypy run measured 204 pre-existing errors in 33 of 137 modules; the explicit module baseline leaves 104 existing modules plus new modules checked by default and passes without globally disabling mypy.
+- `ci trigger`: `pass` — static inspection confirms both `pull_request` and `workflow_dispatch` under `.github/workflows/pr-validate.yml`; live PR triggering remains a post-ship check.
+- `verify-fast decision`: `pass` — deferred. The existing verify skill already provides genuinely targeted one-file commands for both stacks; a whole-suite Make target would duplicate `make verify`'s test scope and would not make a one-file inner loop faster.
+- `api-rebuild`: `pass` — final `make api-rebuild` rebuilt the image with ruff, mypy, the baseline config, and the two lint fixes, then restarted the API.
+- `contract-backend`: `pass` — `make contract-backend`, 3 passed.
+- `test-backend`: `pass` — final `make test-backend`, 1122 passed and 4 skipped.
+- `api-smoke`: `pass` — `make api-smoke`, `/health` returned `{"status":"ok"}` and the authenticated dashboard summary returned valid JSON.
+- `lint`: `pass` — final `make lint`, ESLint passed and ruff reported `All checks passed!`.
+- `typecheck`: `pass` — final `make typecheck`, TypeScript passed and mypy reported no issues in 137 source files under the recorded baseline.
+- `contract-frontend`: `pass` — `make contract-frontend`, 6 passed.
+- `test-frontend`: `pass` — `make test-frontend`, 292 passed across 44 files.
+- `e2e`: `pass` — first `make e2e` found one stale accessible-name assertion; after aligning it with the existing UI/unit-test wording, the required rerun passed all 19 tests.
+- `orch-test`: `pass` — `make orch-test`, 201 passed.
 - `prepare`: `fail` — `The task file lacked the machine-rendered envelope; normalization now makes retries idempotent.`
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._
-- `None recorded.`
+- `web/tests/e2e/author-library.spec.ts` — the mandated full-suite run exposed a stale exact accessible-name assertion (`Open source`) that no longer matched the established UI and unit-test wording (`Open original source`); updated only that assertion so the deterministic gate reflects current behavior.
 
 ## Permanently Failed / Gave Up (Codex Mutable)
 _Fill only if workflow stops without shipping._
@@ -74,9 +87,9 @@ _Fill only if workflow stops without shipping._
 - Suggested human action: `Retry the issue-200 task workflow from its feature branch.`
 
 ## Human Action Summary (Codex Mutable)
-- Next expected action: `Retry make task-run for issue 200 with PROVIDER=codex and MODEL=gpt-5.6-sol.`
+- Next expected action: `Ship may commit the verified feature branch and raise the PR; confirm the automatic pull_request workflow after push.`
 - Open questions:
-  - Does this repo already have a `requirements-dev.txt` convention, or should ruff/mypy go straight into `api/requirements.txt`? Check before assuming.
+  - None. No `requirements-dev.txt` convention exists, so the pinned tools use the existing `api/requirements.txt` image dependency path.
 - If PR raised but intent partial:
   - unmet criteria: `To be populated by the workflow if applicable.`
   - follow-up issue: `To be populated by the workflow if applicable.`
@@ -86,5 +99,123 @@ _Automation appends structured logs here._
 
 <!-- MACHINE_RENDERED_START -->
 ## Execution Journal
-_Not rendered yet._
+**Current Stage**: `done`
+**Workflow Status**: `shipped`
+
+## Workflow Snapshot
+- latest_outcome: Pushed branch `feature/issue-200-claude-code-pipeline-hygiene`.
+- next_action: No action required.
+- pipeline_version: `v3`
+- provider_model: `codex/gpt-5.6-sol`
+- retry_gate_pending: `no`
+
+## Active Requirements
+- Acceptance criterion: ruff and mypy are installed and executable in the API image.
+- Acceptance criterion: make lint and make typecheck visibly execute backend checks and pass.
+- Acceptance criterion: PR validation declares both pull_request and workflow_dispatch triggers.
+- Acceptance criterion: A fresh complete backend-suite result is recorded in the task document.
+- Acceptance criterion: The verify-fast decision and reasoning are recorded.
+- Acceptance criterion: CLAUDE.md and the verify skill reflect the current behavior.
+
+## Prepare
+Checked out `feature/issue-200-claude-code-pipeline-hygiene` from `main` and verified task file exists.
+
+## Plan Summary
+Established a fresh backend baseline, installed and configured ruff/mypy, made Makefile checks unconditional, enabled pull-request CI, documented the verify-fast deferral, repaired surfaced gate failures, and ran the complete verification matrix.
+
+### Architecture Decisions
+- Added pinned ruff and mypy dependencies to api/requirements.txt because the repository has no requirements-dev.txt convention.
+- Enabled high-value ruff correctness rules while deferring broad style enforcement.
+- Recorded mypy's 204-error backlog as an explicit 33-module baseline; the other 104 existing modules and new modules remain checked by default.
+- Deferred make verify-fast because the existing verify skill already provides genuinely targeted one-file commands; another whole-suite target would not improve the one-file loop.
+- Kept both pull_request and workflow_dispatch CI triggers.
+- Fixed the two genuine undefined-name errors exposed by ruff instead of suppressing them.
+
+### Acceptance Criteria
+- ruff and mypy are installed and executable in the API image.
+- make lint and make typecheck visibly execute backend checks and pass.
+- PR validation declares both pull_request and workflow_dispatch triggers.
+- A fresh complete backend-suite result is recorded in the task document.
+- The verify-fast decision and reasoning are recorded.
+- CLAUDE.md and the verify skill reflect the current behavior.
+
+### Planned Paths
+- `Makefile`
+- `api/Dockerfile`
+- `api/requirements.txt`
+- `api/pyproject.toml`
+- `api/app/rag/eval/cli.py`
+- `api/app/routers/crypto.py`
+- `.github/workflows/pr-validate.yml`
+- `CLAUDE.md`
+- `.claude/skills/verify/SKILL.md`
+- `tasks/issue-200-claude-code-pipeline-hygiene.md`
+
+## Build Summary
+Implemented Issue 200: backend lint/typecheck now execute, PR CI is automatic, stale guidance is corrected, and all required verification gates pass.
+
+### Changed Files
+- `.claude/skills/verify/SKILL.md`
+- `.github/workflows/pr-validate.yml`
+- `CLAUDE.md`
+- `Makefile`
+- `api/Dockerfile`
+- `api/app/rag/eval/cli.py`
+- `api/app/routers/crypto.py`
+- `api/pyproject.toml`
+- `api/requirements.txt`
+- `tasks/issue-200-claude-code-pipeline-hygiene.md`
+- `web/tests/e2e/author-library.spec.ts`
+
+### Extra Files Outside Planned Scope
+- `web/tests/e2e/author-library.spec.ts`: The mandated full-suite run exposed a stale accessible-name assertion expecting 'Open source' while the established UI and unit test use 'Open original source'; only that assertion was aligned. (source: `builder`)
+
+## Latest Verification
+- api-rebuild: PASS (exit 0)
+- contract-backend: PASS (exit 0)
+- test-backend: PASS (exit 0)
+- api-smoke: PASS (exit 0)
+- lint: PASS (exit 0)
+- typecheck: PASS (exit 0)
+- contract-frontend: PASS (exit 0)
+- test-frontend: PASS (exit 0)
+- e2e: PASS (exit 0)
+- orch-test: PASS (exit 0)
+
+## Extra Files Changed
+- `web/tests/e2e/author-library.spec.ts` — reason: The mandated full-suite run exposed a stale accessible-name assertion expecting 'Open source' while the established UI and unit test use 'Open original source'; only that assertion was aligned. (source: `builder`)
+
+## Agent Run Summary
+Implemented Issue 200: backend lint/typecheck now execute, PR CI is automatic, stale guidance is corrected, and all required verification gates pass.
+
+- semantic_intent_achieved: `True`
+- provider_model: `codex/gpt-5.6-sol`
+
+### Semantic Checks
+- `pass` Both ruff and mypy are installed in the API image.: The required command resolved both executables under /usr/local/bin.
+- `pass` make lint and make typecheck visibly execute backend checks and pass.: Final output contains ruff check app tests with All checks passed and mypy app with no issues in 137 files; no skip branch remains.
+- `partial` PR validation triggers on pull_request and retains workflow_dispatch.: Static inspection confirms both trigger keys in the workflow. Live dispatch requires Ship to push or open a PR, which this session was explicitly forbidden to do.
+- `pass` Fresh full backend result is recorded with all current failures resolved or justified.: Task evidence records 1122 passed and 4 skipped with no failures or UOB regressions.
+- `pass` The make verify-fast decision is recorded.: The task records an explicit deferral because the existing verify skill already supplies targeted one-file commands.
+- `pass` CLAUDE.md and the verify skill match the new behavior.: Both documents remove the obsolete silent-skip and UOB-failure claims and describe active backend tooling and its permissive baseline.
+
+### Risk Flags
+- Post-ship observation is still required to prove GitHub actually dispatches the pull_request workflow.
+- The explicit 33-module mypy debt baseline should be reduced in follow-up work.
+- Repeated API rebuilds missed Docker's large dependency-layer cache, indicating an existing build-performance issue outside this task.
+
+## Human Gate Decisions
+
+_No human gate decisions yet._
+
+## Review Cycles
+
+_No review cycles yet._
+
+## Rework Cycles
+
+_No rework cycles yet._
+
+## Ship Result
+Pushed branch `feature/issue-200-claude-code-pipeline-hygiene`.
 <!-- MACHINE_RENDERED_END -->
