@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 import time
+import base58
 import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Header

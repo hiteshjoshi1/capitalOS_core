@@ -12,15 +12,7 @@ from app.ingestion.signature import compute_format_signature
 
 def _fixture_path() -> Path:
     fixture_name = "ocbc_TransactionHistory_20260313165630.csv"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return Path("/app/data/fixtures") / fixture_name
+    return Path(__file__).resolve().parent / "fixtures" / fixture_name
 
 
 def _next_account_id(db) -> int:
@@ -30,9 +22,9 @@ def _next_account_id(db) -> int:
 def test_ocbc_parser_extracts_metadata():
     result = parse_ocbc_account_csv(str(_fixture_path()))
 
-    assert result.parser_meta["account_name"] == "360 Account 511-558900-001"
-    assert result.parser_meta["available_balance"] == 25136.91
-    assert result.parser_meta["ledger_balance"] == 25136.91
+    assert result.parser_meta["account_name"] == "360 Account 000-000000-001"
+    assert result.parser_meta["available_balance"] == 25000.0
+    assert result.parser_meta["ledger_balance"] == 25000.0
     assert result.parser_meta["currency"] == "SGD"
 
 
@@ -46,12 +38,12 @@ def test_ocbc_parser_extracts_transactions():
     assert first["ts"].date().isoformat() == "2026-03-10"
     assert first["amount"] == 7.27
     assert first["type"] == "INCOME"
-    assert first["merchant_counterparty"] == "BONUS INTEREST 360 SAVE BONUS"
+    assert first["merchant_counterparty"] == "BONUS INTEREST TEST"
 
     salary = next(tx for tx in result.transactions if tx["ts"].date().isoformat() == "2026-03-03")
-    assert salary["amount"] == 1500.0
+    assert salary["amount"] == 5000.0
     assert salary["type"] == "TRANSFER"
-    assert salary["merchant_counterparty"] == "IBG GIRO SI SALARY JOSHI HITESH OTHR"
+    assert salary["merchant_counterparty"] == "IBG GIRO SI SALARY SAMPLE EMPLOYEE OTHR"
 
     withdrawal = next(tx for tx in result.transactions if tx["merchant_counterparty"].startswith("CASH WITHDRAWAL"))
     assert withdrawal["amount"] == -100.0
@@ -62,7 +54,7 @@ def test_ocbc_parser_multiline_description(tmp_path: Path):
     fixture = tmp_path / "ocbc_multiline.csv"
     fixture.write_text(
         (
-            "Account details for:,360 Account 511-558900-001\n"
+            "Account details for:,360 Account 000-000000-001\n"
             "Available Balance,100.00\n"
             "Ledger Balance,100.00\n"
             "Transaction date,Value date,Description,Withdrawals(SGD),Deposits(SGD)\n"
@@ -97,14 +89,14 @@ def test_ocbc_parser_cash_position():
     assert len(result.positions) == 1
     assert result.positions[0]["asset_class"] == "CASH"
     assert result.positions[0]["currency"] == "SGD"
-    assert result.positions[0]["quantity"] == 25136.91
+    assert result.positions[0]["quantity"] == 25000.0
 
 
 def test_ocbc_parser_empty_file(tmp_path: Path):
     fixture = tmp_path / "ocbc_empty.csv"
     fixture.write_text(
         (
-            "Account details for:,360 Account 511-558900-001\n"
+            "Account details for:,360 Account 000-000000-001\n"
             "Available Balance,25,136.91\n"
             "Ledger Balance,25,136.91\n"
             "Transaction date,Value date,Description,Withdrawals(SGD),Deposits(SGD)\n"

@@ -1,0 +1,55 @@
+[tool.ruff]
+target-version = "py312"
+
+[tool.ruff.lint]
+# Start with correctness rules that can gate new changes without requiring a
+# repo-wide style cleanup. Broader lint adoption belongs in a follow-up.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+follow_imports = "skip"
+show_error_codes = true
+warn_unused_configs = true
+
+# Baseline measured on 2026-07-22: 204 pre-existing errors in these 33 modules.
+# Keep the debt explicit while checking the other 104 existing modules and all
+# new modules by default. Remove entries as each module is made type-clean.
+[[tool.mypy.overrides]]
+module = [
+    "app.auth_context",
+    "app.core.logging",
+    "app.crypto.adapters",
+    "app.crypto.ingest",
+    "app.crypto.providers",
+    "app.crypto.valuation",
+    "app.ingestion.parsers.sharekhan_holdings_xls_v1",
+    "app.ingestion.runner",
+    "app.ingestion.signature",
+    "app.market_data.providers",
+    "app.market_data.service",
+    "app.portfolio.ibkr_flex",
+    "app.portfolio.legacy_backfill",
+    "app.portfolio.parity_report",
+    "app.rag.concept_mode",
+    "app.rag.config",
+    "app.rag.eval.cli",
+    "app.rag.eval.runner",
+    "app.rag.ingestion.fanout",
+    "app.rag.ingestion.fetcher",
+    "app.rag.ingestion.parser",
+    "app.rag.ingestion.pipeline",
+    "app.rag.reranker",
+    "app.rag.retrieval",
+    "app.rag.retrieval_weighting",
+    "app.routers.alerts",
+    "app.routers.auth",
+    "app.routers.crypto",
+    "app.routers.dashboard",
+    "app.routers.dividends",
+    "app.routers.rag",
+    "app.routers.spending",
+    "app.services.ai_sage",
+]
+ignore_errors = true

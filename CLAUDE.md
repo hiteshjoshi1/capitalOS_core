@@ -20,17 +20,13 @@ Postgres 16 (pgvector) + FastAPI + React (Vite/TS), all in Docker via `docker-co
 - Frontend code: `cd web && npx vitest run <file>` (fast) or `npm test -- --run` (full).
 - New/changed migration: add `migrations/NNN_*.sql`, then `make db-migrate`
   (tracked in `schema_migrations`; safe to re-run, already-applied files are skipped).
-- `make verify` runs lint + typecheck + backend/frontend tests, but note the gap below.
+- `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
 - `/verify` and `/run` skills exist under `.claude/skills/` — prefer them over rediscovering this by hand.
 
 ## Known gaps (not regressions if you hit these)
-- `make lint` / `make typecheck` **silently skip the backend** — `ruff`/`mypy` aren't
-  installed in the api image, so only the frontend is actually checked today.
-- 13 tests under `test_uob_*` / `test_ingest_uob_*` fail in this environment (missing
-  `html5lib`/`openpyxl` in the api image) — pre-existing, unrelated to your change.
 - Postgres logs a "collation version mismatch" warning on every query — benign, ignore.
-- `.github/workflows/pr-validate.yml` is `workflow_dispatch` only — CI does not run
-  automatically on PRs yet.
+- The backend ruff/mypy baseline is intentionally permissive while the pre-existing
+  warning backlog is addressed incrementally; both tools run and fail on configured checks.
 
 ## Conventions
 - One `tasks/issue-NNN-<slug>.md` doc per unit of work (see `tasks/_template.md`).

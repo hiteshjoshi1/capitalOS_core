@@ -44,18 +44,40 @@ This is a **trimmed Phase 3** of the Claude Code DX upgrade (see `tasks/issue-19
 - [ ] Write `.claude/skills/ingestion/SKILL.md`
 - [ ] Update `CLAUDE.md`'s RAG section to cross-reference the new skills if it reads better that way
 
-## Execution Journal (Mutable)
+## Execution Journal (Codex Mutable)
 - Current Stage: `not started`
 - Workflow Status: `blocked`
 - Provider/Model: `<provider>/<model>`
 - Last Updated: `2026-07-16`
 
-## Deterministic Gate Results (Mutable)
+## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
 - `mcp query smoke test`: `<pass|fail|skip>` — `<notes>`
 
-## Human Action Summary (Mutable)
+## Extra Files Changed (Codex Mutable)
+_List all out-of-scope files with explicit rationale._
+- `None recorded.`
+
+## Permanently Failed / Gave Up (Codex Mutable)
+_Fill only if workflow stops without shipping._
+- Stop reason: `Not applicable — implementation has not started.`
+- Attempted mitigations:
+  - `None required.`
+- Suggested human action: `Run the issue-202 workflow when RAG/research tooling is prioritized.`
+
+## Human Action Summary (Codex Mutable)
 - Next expected action: `<command or decision>`
 - Open questions:
   - Which specific Postgres MCP server package to use — check what's current/maintained at execution time rather than trusting a name written down today.
   - Does the chosen MCP server need actual DB-level read-only credentials, or is "the server only ever issues SELECT" sufficient given this is a solo-dev local Postgres instance? Lean toward the simpler option unless there's a concrete reason not to.
+- If PR raised but intent partial:
+  - unmet criteria: `To be populated by the workflow if applicable.`
+  - follow-up issue: `To be populated by the workflow if applicable.`
+
+## Automation Log (Mutable)
+_Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->

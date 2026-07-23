@@ -148,7 +148,7 @@ test("direct document routes hand off to the original source instead of renderin
   await page.goto("/author-library/warren_buffett/documents/doc-1987");
 
   await expect(page.getByTestId("author-library-source-only")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Open source" })).toHaveAttribute("href", "https://example.com/1987-letter");
+  await expect(page.getByRole("link", { name: /Open original source/i })).toHaveAttribute("href", "https://example.com/1987-letter");
   await expect(page.getByText("Author Library now hands this document off to its original source instead of rendering extracted content inside CapitalOS.")).toBeVisible();
   await expect(page.getByText("Fallback reader text.")).toHaveCount(0);
 });

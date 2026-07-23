@@ -24,20 +24,19 @@ straight against it instead of rebuilding the api image every time:
 cd api && ../.venv/bin/python -m pytest tests/test_X.py -k name -q
 ```
 This is genuinely faster but **not a substitute** for the Docker-based run —
-the api image is the actual deployed environment (its installed deps can
-differ, e.g. the known `html5lib`/`openpyxl` gap below only shows up there).
+the api image is the actual deployed environment and its installed deps can differ.
 Use the local venv while iterating, then confirm with `make api-rebuild` +
 `make test-backend` before calling a backend change done.
 
-**Known-failing, not a regression**: 13 tests under `test_uob_*` / `test_ingest_uob_*` fail in this environment because `html5lib`/`openpyxl` aren't installed in the api image. If you see exactly these fail and nothing else, your change is clean.
-
-**Silent gap**: `make lint` / `make typecheck` do **not** actually check the backend today — `ruff`/`mypy` aren't installed in the api image, so those steps silently no-op for Python. Don't rely on them to catch backend issues; read the diff carefully instead (this is tracked as backlog work, not yet fixed).
+`make lint` and `make typecheck` run ruff and mypy inside the API image after the
+frontend checks. The initial Python baseline is intentionally permissive; configured
+correctness checks are enforced while broader pre-existing warnings are paid down.
 
 ## Frontend (`web/src/`)
 ```bash
 cd web && npx vitest run <file>       # fast, one file — prefer this for the inner loop
 cd web && npx vitest run              # full suite
-cd web && npx tsc -b --pretty false   # typecheck (this one DOES work, unlike the backend)
+cd web && npx tsc -b --pretty false   # typecheck
 cd web && npx eslint .
 ```
 
@@ -58,7 +57,7 @@ Golden queries live in `api/app/rag/eval/fixtures/rag_golden_queries.yaml`.
 
 ## Full gate (rarely needed for a single change)
 ```bash
-make verify   # lint + typecheck + backend/frontend tests — remember the lint/typecheck backend gap above
+make verify   # frontend/backend lint + typecheck + backend/frontend tests
 make test-all # also runs e2e + orchestration tests — slow, use sparingly
 ```
 

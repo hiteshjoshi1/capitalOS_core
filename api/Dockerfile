@@ -21,6 +21,7 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 COPY app /app/app
 COPY tests /app/tests
 COPY pytest.ini /app/pytest.ini
+COPY pyproject.toml /app/pyproject.toml
 
 EXPOSE 8000
 

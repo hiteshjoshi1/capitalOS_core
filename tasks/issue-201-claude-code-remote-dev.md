@@ -42,18 +42,40 @@ This is **Phase 4** of the Claude Code DX upgrade (see `tasks/issue-199-claude-c
 - [ ] Cross-reference `CLAUDE.md`
 - [ ] Manually verify both paths per "How To Test"
 
-## Execution Journal (Mutable)
+## Execution Journal (Codex Mutable)
 - Current Stage: `not started`
 - Workflow Status: `blocked`
 - Provider/Model: `<provider>/<model>`
 - Last Updated: `2026-07-16`
 
-## Deterministic Gate Results (Mutable)
+## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
 - `web path manual test`: `<pass|fail|skip>` — `<notes>`
 - `ssh/tmux path manual test`: `<pass|fail|skip>` — `<notes>`
 
-## Human Action Summary (Mutable)
+## Extra Files Changed (Codex Mutable)
+_List all out-of-scope files with explicit rationale._
+- `None recorded.`
+
+## Permanently Failed / Gave Up (Codex Mutable)
+_Fill only if workflow stops without shipping._
+- Stop reason: `Not applicable — implementation has not started.`
+- Attempted mitigations:
+  - `None required.`
+- Suggested human action: `Run the issue-201 workflow when remote-development setup is prioritized.`
+
+## Human Action Summary (Codex Mutable)
 - Next expected action: `<command or decision>`
 - Open questions:
   - Where should the doc actually live — new `docs/remote-dev.md`, or folded into `ReadMe.md`? Pick at execution time based on which reads better in context; not pre-decided here since it's a cosmetic call, not an architecture one.
+- If PR raised but intent partial:
+  - unmet criteria: `To be populated by the workflow if applicable.`
+  - follow-up issue: `To be populated by the workflow if applicable.`
+
+## Automation Log (Mutable)
+_Automation appends structured logs here._
+
+<!-- MACHINE_RENDERED_START -->
+## Execution Journal
+_Not rendered yet._
+<!-- MACHINE_RENDERED_END -->
