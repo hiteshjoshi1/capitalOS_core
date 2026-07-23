@@ -29,12 +29,7 @@ def test_signature_flat_csv(tmp_path: Path):
 
 def test_signature_ocbc_flat_csv_fixture():
     fixture_name = "ocbc_TransactionHistory_20260313165630.csv"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    fixture = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    fixture = Path(__file__).resolve().parent / "fixtures" / fixture_name
     sig, debug = compute_format_signature(str(fixture), platform_hint="OCBC")
 
     assert sig == "49291988f2110dd6431bf71a286f2192c98fba692608468006d052b33022423f"
@@ -50,8 +45,8 @@ def test_signature_ocbc_flat_csv_fixture():
 
 def test_signature_citi_cc_headerless_stable(tmp_path: Path):
     csv_content_one = (
-        "\"06/03/2026\",\"MERCHANT ONE SG\",\"-97.41\",\"\",\"'4147464004225540'\"\n"
-        "\"05/03/2026\",\"PAYMENT - THANK YOU\",\"100.00\",\"\",\"'4147464004225540'\"\n"
+        "\"06/03/2026\",\"MERCHANT ONE SG\",\"-97.41\",\"\",\"'4111111111111111'\"\n"
+        "\"05/03/2026\",\"PAYMENT - THANK YOU\",\"100.00\",\"\",\"'4111111111111111'\"\n"
     )
     csv_content_two = (
         "\"01/02/2026\",\"OTHER MERCHANT SG\",\"-12.30\",\"\",\"'9999888877776666'\"\n"

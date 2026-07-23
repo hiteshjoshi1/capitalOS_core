@@ -18,19 +18,11 @@ def _fixture_path() -> Path:
     candidates: list[Path] = []
     if override:
         candidates.append(Path(override))
-    candidates.extend([
-        # docker-compose api container mount.
-        Path("/app/data/fixtures") / fixture_name,
-        # Repo layout when running tests from host.
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        # Container tests copied to /app/tests (WORKDIR=/app).
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ])
+    candidates.append(Path(__file__).resolve().parent / "fixtures" / fixture_name)
     for candidate in candidates:
         if str(candidate) and candidate.exists():
             return candidate
-    # Return canonical container path for clearer failure messaging if still missing.
-    return Path("/app/data/fixtures") / fixture_name
+    return Path(__file__).resolve().parent / "fixtures" / fixture_name
 
 
 def test_parse_citi_credit_card_csv_fixture():
@@ -60,7 +52,7 @@ def test_parse_citi_credit_card_csv_fixture():
     fees = [tx for tx in result.transactions if "LATE CHARGE FEE" in tx["merchant_counterparty"]]
     assert len(fees) == 2
     assert {tx["type"] for tx in fees} == {"FEE"}
-    assert sorted(tx["amount"] for tx in fees) == [-100.0, 100.0]
+    assert sorted(tx["amount"] for tx in fees) == [-25.0, 25.0]
 
     interest = [
         tx
@@ -70,12 +62,17 @@ def test_parse_citi_credit_card_csv_fixture():
     ]
     assert len(interest) == 4
     assert {tx["type"] for tx in interest} == {"INTEREST"}
-    assert sorted(tx["amount"] for tx in interest) == [-88.31, -16.92, 16.92, 88.31]
+    assert sorted(tx["amount"] for tx in interest) == [-18.5, -7.25, 7.25, 18.5]
 
-    foreign_rows = [tx for tx in result.transactions if "OPENAI" in tx["merchant_counterparty"] or "FIREFLIES" in tx["merchant_counterparty"]]
+    foreign_rows = [
+        tx
+        for tx in result.transactions
+        if "TEST CLOUD SERVICE" in tx["merchant_counterparty"]
+        or "TEST MEETING SERVICE" in tx["merchant_counterparty"]
+    ]
     assert foreign_rows
     assert all("foreign_currency=USD" in (tx.get("notes") or "") for tx in foreign_rows)
-    assert all("card_number=4147464004225540" in (tx.get("notes") or "") for tx in result.transactions)
+    assert all("card_number=4111111111111111" in (tx.get("notes") or "") for tx in result.transactions)
 
 
 def test_citi_ingest_upload_and_idempotent(client: TestClient, db_engine):
@@ -130,7 +127,7 @@ def test_citi_ingest_upload_and_idempotent(client: TestClient, db_engine):
                 """
                 SELECT notes
                 FROM transactions
-                WHERE account_id = 500 AND merchant_counterparty LIKE 'OPENAI %'
+                WHERE account_id = 500 AND merchant_counterparty LIKE 'TEST CLOUD SERVICE %'
                 LIMIT 1
                 """
             )
@@ -140,4 +137,4 @@ def test_citi_ingest_upload_and_idempotent(client: TestClient, db_engine):
 
     assert isinstance(notes, str)
     assert "foreign_currency=USD 21.80" in notes
-    assert "card_number=4147464004225540" in notes
+    assert "card_number=4111111111111111" in notes

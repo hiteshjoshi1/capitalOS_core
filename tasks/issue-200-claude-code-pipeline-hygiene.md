@@ -103,7 +103,7 @@ _Automation appends structured logs here._
 **Workflow Status**: `shipped`
 
 ## Workflow Snapshot
-- latest_outcome: Pushed branch `feature/issue-200-claude-code-pipeline-hygiene`.
+- latest_outcome: Pushed branch `feature/issue-200-claude-code-pipeline-hygiene`. Created PR for feature/issue-200-claude-code-pipeline-hygiene.
 - next_action: No action required.
 - pipeline_version: `v3`
 - provider_model: `codex/gpt-5.6-sol`
@@ -217,5 +217,7 @@ _No review cycles yet._
 _No rework cycles yet._
 
 ## Ship Result
-Pushed branch `feature/issue-200-claude-code-pipeline-hygiene`.
+Pushed branch `feature/issue-200-claude-code-pipeline-hygiene`. Created PR for feature/issue-200-claude-code-pipeline-hygiene.
+
+- PR: https://github.com/hiteshjoshi1/capitalOS/pull/129
 <!-- MACHINE_RENDERED_END -->

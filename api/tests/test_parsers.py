@@ -197,13 +197,8 @@ def test_dbs_vickers_parser_html(tmp_path: Path):
 
 def test_ocbc_parser_extracts_fixture_rows():
     fixture_name = "ocbc_TransactionHistory_20260313165630.csv"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    fixture = next((candidate for candidate in candidates if candidate.exists()), candidates[0])
+    fixture = Path(__file__).resolve().parent / "fixtures" / fixture_name
     result = parse_ocbc_account_csv(str(fixture))
 
     assert len(result.transactions) == 20
-    assert result.positions[0]["quantity"] == 25136.91
+    assert result.positions[0]["quantity"] == 25000.0

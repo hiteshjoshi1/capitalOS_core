@@ -11,15 +11,7 @@ from app.ingestion.signature import compute_format_signature
 
 def _fixture_path() -> Path:
     fixture_name = "UOB_ACC_TXN_History_09032026225218.xls"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return Path("/app/data/fixtures") / fixture_name
+    return Path(__file__).resolve().parent / "fixtures" / fixture_name
 
 
 def _next_account_id(db) -> int:
@@ -254,11 +246,11 @@ def test_uob_ingested_data_appears_in_dashboard_and_cash_flow(client: TestClient
     assert cash_flow_resp.status_code == 200
     cash_flow = cash_flow_resp.json()
 
-    assert summary["net_worth"]["cash"] == 97923.51
-    assert summary["net_worth"]["total"] == 97923.51
-    assert summary["cash_flow"]["income"] == 4600.0
-    assert summary["cash_flow"]["expenses"] == 1294.92
-    assert cash_flow["income_total"] == 4600.0
-    assert cash_flow["expense_total"] == 1294.92
+    assert summary["net_worth"]["cash"] == 100000.0
+    assert summary["net_worth"]["total"] == 100000.0
+    assert summary["cash_flow"]["income"] == 5000.0
+    assert summary["cash_flow"]["expenses"] == 1200.0
+    assert cash_flow["income_total"] == 5000.0
+    assert cash_flow["expense_total"] == 1200.0
     assert cash_flow["income"]["transaction_count"] == 1
     assert cash_flow["expenses"]["transaction_count"] == 1

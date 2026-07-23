@@ -18,15 +18,7 @@ from app.ingestion.parsers.uob_account_xls_v1 import (
 
 def _fixture_path() -> Path:
     fixture_name = "UOB_ACC_TXN_History_09032026225218.xls"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return Path("/app/data/fixtures") / fixture_name
+    return Path(__file__).resolve().parent / "fixtures" / fixture_name
 
 
 def test_uob_parser_extracts_transactions_and_balance():
@@ -42,7 +34,7 @@ def test_uob_parser_extracts_transactions_and_balance():
         "INCOME": 1,
         "TRANSFER": 1,
     }
-    assert sorted(tx["amount"] for tx in result.transactions) == [-1294.92, -321.84, 4600.0]
+    assert sorted(tx["amount"] for tx in result.transactions) == [-1200.0, -300.0, 5000.0]
 
 
 def test_uob_parser_classifies_transfers():
@@ -53,7 +45,7 @@ def test_uob_parser_classifies_transfers():
     ]
     assert len(transfer_rows) == 1
     assert transfer_rows[0]["type"] == "TRANSFER"
-    assert transfer_rows[0]["amount"] == -321.84
+    assert transfer_rows[0]["amount"] == -300.0
 
 
 def test_uob_parser_extracts_cash_position():
@@ -65,9 +57,9 @@ def test_uob_parser_extracts_cash_position():
             "name": "SGD Cash",
             "asset_class": "CASH",
             "currency": "SGD",
-            "quantity": 97923.51,
+            "quantity": 100000.0,
             "avg_cost": 1.0,
-            "cost_basis_base": 97923.51,
+            "cost_basis_base": 100000.0,
             "as_of": result.positions[0]["as_of"],
         }
     ]
@@ -78,9 +70,9 @@ def test_uob_parser_date_parsing():
     result = parse_uob_account_xls(str(_fixture_path()))
 
     assert [tx["ts"].date().isoformat() for tx in result.transactions] == [
+        "2026-03-09",
+        "2026-03-06",
         "2026-03-04",
-        "2026-03-04",
-        "2026-03-02",
     ]
 
 
@@ -98,9 +90,9 @@ def test_uob_parser_handles_multiline_descriptions():
     result = parse_uob_account_xls(str(_fixture_path()))
 
     notes = [tx["notes"] for tx in result.transactions]
-    assert any("4265 884038083159" in (note or "") for note in notes)
-    assert any("NTUC MY FIRST SKOOL" in (note or "") for note in notes)
-    assert any("SI SALARY" in (note or "") for note in notes)
+    assert any("UOB CARD CENTRE TEST CARD" in (note or "") for note in notes)
+    assert any("SAMPLE EDUCATION CENTRE" in (note or "") for note in notes)
+    assert any("SALARY SAMPLE EMPLOYER" in (note or "") for note in notes)
 
 
 def test_uob_parser_merges_continuation_row_amounts_into_parent_transaction():

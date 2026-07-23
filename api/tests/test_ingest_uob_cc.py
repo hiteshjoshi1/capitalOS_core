@@ -14,15 +14,7 @@ from app.ingestion.signature import compute_format_signature
 
 def _fixture_path() -> Path:
     fixture_name = "UOB_CC_TXN_History_09032026222725.xls"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return Path("/app/data/fixtures") / fixture_name
+    return Path(__file__).resolve().parent / "fixtures" / fixture_name
 
 
 def _next_account_id(db) -> int:
@@ -112,10 +104,10 @@ def test_parse_uob_credit_card_xls_fixture():
     assert all(tx["category"] in VALID_CATEGORIES for tx in result.transactions)
 
     first_tx = result.transactions[0]
-    assert first_tx["merchant_counterparty"] == "KOPITIAM FP APP PAYMENTS SINGAPORE SG"
-    assert "card_number=4265884038083159" in (first_tx["notes"] or "")
+    assert first_tx["merchant_counterparty"] == "TEST CAFE SINGAPORE SG"
+    assert "card_number=4111111111111111" in (first_tx["notes"] or "")
     assert "posting_date=2026-02-09" in (first_tx["notes"] or "")
-    assert "reference=74508986038023037971165" in (first_tx["notes"] or "")
+    assert "reference=TEST000001" in (first_tx["notes"] or "")
 
     payment_rows = [tx for tx in result.transactions if tx["type"] == "TRANSFER"]
     assert len(payment_rows) == 1
@@ -126,8 +118,8 @@ def test_parse_uob_credit_card_xls_fixture():
     assert result.parser_meta == {
         "sheet_name": "Sheet0",
         "header_row_index": 9,
-        "account_number": "4265884038083159",
-        "account_type": "UOB ONE CARD",
+        "account_number": "4111111111111111",
+        "account_type": "UOB TEST CARD",
         "currency": "SGD",
         "statement_date": "2026-02-12T00:00:00+00:00",
         "statement_balance": 321.84,
@@ -188,10 +180,10 @@ def test_uob_cc_ingest_upload_and_idempotent(client: TestClient, db_engine):
     detail_resp = client.get("/spending/credit-card-transactions?month=2026-02&base_currency=SGD")
     assert detail_resp.status_code == 200
     detail_payload = detail_resp.json()
-    assert detail_payload["total_spend"] == 19.62
+    assert detail_payload["total_spend"] == 99.62
     assert detail_payload["cards"][0]["card_name"] == "UOB One Card"
-    assert detail_payload["transactions"][0]["description"] == "KOPITIAM FP APP PAYMENTS SINGAPORE SG"
-    assert detail_payload["top_purchases"][0]["description"] == "KOPITIAM FP APP PAYMENTS SINGAPORE SG"
+    assert detail_payload["transactions"][0]["description"] == "TEST CAFE SINGAPORE SG"
+    assert detail_payload["top_purchases"][0]["description"] == "NTUC FAIRPRICE TEST STORE"
     assert detail_payload["recurring_payments"] == []
 
     assert second.status_code == 200
@@ -213,7 +205,7 @@ def test_uob_cc_ingest_upload_and_idempotent(client: TestClient, db_engine):
                 SELECT notes
                 FROM transactions
                 WHERE account_id = :account_id
-                  AND merchant_counterparty = 'KOPITIAM FP APP PAYMENTS SINGAPORE SG'
+                  AND merchant_counterparty = 'TEST CAFE SINGAPORE SG'
                 LIMIT 1
                 """
             ),
@@ -224,5 +216,5 @@ def test_uob_cc_ingest_upload_and_idempotent(client: TestClient, db_engine):
 
     assert tx_count == 11
     assert isinstance(notes, str)
-    assert "card_number=4265884038083159" in notes
-    assert "reference=74508986038023037971165" in notes
+    assert "card_number=4111111111111111" in notes
+    assert "reference=TEST000001" in notes

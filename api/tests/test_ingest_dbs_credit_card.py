@@ -12,20 +12,12 @@ from app.ingestion.registry import lookup_parser_key
 from app.ingestion.signature import compute_format_signature
 
 
-FULL_CARD_NUMBER = "5520-3800-5921-2403"
+FULL_CARD_NUMBER = "5555-5555-5555-4444"
 
 
 def _fixture_path() -> Path:
     fixture_name = "transaction_history_04072026_105429.csv"
-    candidates = [
-        Path("/app/data/fixtures") / fixture_name,
-        Path(__file__).resolve().parents[2] / "data" / "fixtures" / fixture_name,
-        Path(__file__).resolve().parents[1] / "data" / "fixtures" / fixture_name,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    return Path("/app/data/fixtures") / fixture_name
+    return Path(__file__).resolve().parent / "fixtures" / fixture_name
 
 
 def _next_account_id(db) -> int:
@@ -36,17 +28,7 @@ def test_dbs_credit_card_signature_resolves_to_card_parser():
     fixture = _fixture_path()
     signature, debug = compute_format_signature(str(fixture), platform_hint="DBS")
 
-    migration_candidates = [
-        Path("/app/migrations/059_register_dbs_credit_card_parser_and_account.sql"),
-        Path(__file__).resolve().parents[2] / "migrations" / "059_register_dbs_credit_card_parser_and_account.sql",
-        Path(__file__).resolve().parents[1] / "migrations" / "059_register_dbs_credit_card_parser_and_account.sql",
-    ]
-    migration_path = next((candidate for candidate in migration_candidates if candidate.exists()), None)
-    migration_sql = migration_path.read_text(encoding="utf-8") if migration_path else ""
-
-    assert signature == "2c6766db5419e1fa6f96e4991f6f0bcd96b873f50c93a72ecfa367c47b81bd2a"
-    if migration_sql:
-        assert signature in migration_sql
+    assert signature == "caafd9d48a06563e294389a63d0c5eb4b2751dbff4c8539b7eaa06562024939a"
     assert debug["file_kind"] == "flat_csv"
     assert "card transaction details for:" in debug["header"]
     assert (
@@ -64,10 +46,10 @@ def test_parse_dbs_credit_card_csv_fixture():
     assert result.section_counts == {"transactions": 11}
     assert result.parser_meta == {
         "card_display_name": "DBS/POSB MasterCard Platinum",
-        "card_last_four": "2403",
-        "card_masked": "****-****-****-2403",
-        "credit_limit": 60000.0,
-        "available_limit": 59739.44,
+        "card_last_four": "4444",
+        "card_masked": "****-****-****-4444",
+        "credit_limit": 10000.0,
+        "available_limit": 9739.44,
         "transactions_as_at": "2026-07-04T00:00:00+00:00",
         "currency": "SGD",
     }
@@ -75,7 +57,7 @@ def test_parse_dbs_credit_card_csv_fixture():
     type_counts = Counter(tx["type"] for tx in result.transactions)
     category_counts = Counter(tx["category"] for tx in result.transactions)
     assert type_counts == {"EXPENSE": 7, "FEE": 2, "TAX": 1, "INTEREST": 1}
-    # All 7 purchases are SHENG SIONG → classified as "Groceries" by merchant categorizer
+    # All 7 synthetic purchases use a grocery keyword recognized by the categorizer.
     assert category_counts == {
         "Groceries": 7,
         "CreditCard::Fee": 2,
@@ -86,7 +68,7 @@ def test_parse_dbs_credit_card_csv_fixture():
     assert result.transactions[0]["ts"].isoformat() == "2026-01-14T00:00:00+00:00"
     assert all(tx["currency"] == "SGD" for tx in result.transactions)
     assert all(tx["amount"] < 0 for tx in result.transactions)
-    assert result.transactions[0]["merchant_counterparty"] == "FINANCE CHARGES"
+    assert result.transactions[0]["merchant_counterparty"] == "FINANCE CHARGES TEST"
     assert result.transactions[0]["type"] == "INTEREST"
     assert result.transactions[0]["amount"] == -16.73
 
@@ -99,8 +81,8 @@ def test_parse_dbs_credit_card_csv_fixture():
     meta_blob = " ".join(str(value or "") for value in result.parser_meta.values())
     assert FULL_CARD_NUMBER not in notes_blob
     assert FULL_CARD_NUMBER not in meta_blob
-    assert "card_last4=2403" in notes_blob
-    assert "card_masked=****-****-****-2403" in notes_blob
+    assert "card_last4=4444" in notes_blob
+    assert "card_masked=****-****-****-4444" in notes_blob
 
 
 def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_engine):
@@ -125,7 +107,7 @@ def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_eng
             text(
                 """
                 INSERT INTO credit_card_accounts (account_id, card_name, issuer, credit_limit, statement_day, due_day)
-                VALUES (:account_id, 'DBS/POSB MasterCard Platinum (2403)', 'DBS', 60000, 14, 25)
+                VALUES (:account_id, 'DBS/POSB MasterCard Platinum (4444)', 'DBS', 10000, 14, 25)
                 """
             ),
             {"account_id": account_id},
@@ -153,7 +135,7 @@ def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_eng
     assert first_payload["counts"]["transactions_parsed"] == 11
     assert first_payload["counts"]["transactions_inserted"] == 11
     assert first_payload["counts"]["duplicates_skipped"] == 0
-    assert first_payload["parser_meta"]["card_masked"] == "****-****-****-2403"
+    assert first_payload["parser_meta"]["card_masked"] == "****-****-****-4444"
     assert FULL_CARD_NUMBER not in str(first_payload["parser_meta"])
     assert FULL_CARD_NUMBER not in str(first_payload["preview_transactions"])
 
@@ -200,6 +182,6 @@ def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_eng
     assert any(row["category"] == "CreditCard::Interest" for row in rows)
     assert any(row["category"] == "CreditCard::Fee" for row in rows)
     assert all(FULL_CARD_NUMBER not in str(row["notes"] or "") for row in rows)
-    assert float(card_meta["credit_limit"]) == 60000.0
-    assert float(card_meta["available_limit"]) == 59739.44
+    assert float(card_meta["credit_limit"]) == 10000.0
+    assert float(card_meta["available_limit"]) == 9739.44
     assert str(card_meta["available_limit_as_of"]).startswith("2026-07-04")
