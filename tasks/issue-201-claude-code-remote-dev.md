@@ -37,40 +37,42 @@ This is **Phase 4** of the Claude Code DX upgrade (see `tasks/issue-199-claude-c
 <!-- IMMUTABLE_PLAN_END -->
 
 ## Task Checklist
-- [ ] Confirm current `claude.ai/code` web-sandbox capabilities/limits via `claude-code-guide` agent (do this before writing the doc, not after)
-- [ ] Write the remote-dev doc covering both paths
-- [ ] Cross-reference `CLAUDE.md`
-- [ ] Manually verify both paths per "How To Test"
+- [x] Confirm current `claude.ai/code` web-sandbox capabilities/limits via `claude-code-guide` agent (do this before writing the doc, not after)
+- [x] Write the remote-dev doc covering both paths
+- [x] Cross-reference `CLAUDE.md`
+- [ ] Manually verify both paths per "How To Test" — requires a physical phone; not something Claude Code can execute itself. Left for the user (see Human Action Summary).
 
 ## Execution Journal (Codex Mutable)
-- Current Stage: `not started`
-- Workflow Status: `blocked`
-- Provider/Model: `<provider>/<model>`
-- Last Updated: `2026-07-16`
+- Current Stage: `doc written, cross-referenced, awaiting manual device verification`
+- Workflow Status: `waiting_for_human`
+- Provider/Model: `claude-code/sonnet-5`
+- Last Updated: `2026-07-23`
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
-- `web path manual test`: `<pass|fail|skip>` — `<notes>`
-- `ssh/tmux path manual test`: `<pass|fail|skip>` — `<notes>`
+- `claude-code-guide capability check`: `pass` — confirmed sandbox isolation (no home-network path), GitHub-based clone/push, per-session throwaway Postgres/Docker, restricted-by-default outbound access; doc written to match, not assumed.
+- `web path manual test`: `skip` — requires an actual phone browser session against `claude.ai/code`; not executable from this environment.
+- `ssh/tmux path manual test`: `skip` — requires an actual phone, Tailscale account, and SSH client; not executable from this environment.
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._
-- `None recorded.`
+- `CLAUDE.md` — added a one-line "Remote dev" pointer section so the doc is discoverable from the operational quickstart, not just from `ReadMe.md`. In scope per the plan's "cross-reference CLAUDE.md" acceptance criterion.
+- `ReadMe.md` — added one link line next to the existing `ai-task-flow.md` reference, same doc-discoverability rationale.
 
 ## Permanently Failed / Gave Up (Codex Mutable)
 _Fill only if workflow stops without shipping._
-- Stop reason: `Not applicable — implementation has not started.`
+- Stop reason: `Not applicable — doc shipped; only the two manual device tests are outstanding.`
 - Attempted mitigations:
   - `None required.`
-- Suggested human action: `Run the issue-201 workflow when remote-development setup is prioritized.`
+- Suggested human action: `See Human Action Summary below.`
 
 ## Human Action Summary (Codex Mutable)
-- Next expected action: `<command or decision>`
+- Next expected action: Actually follow both paths from a phone per "How To Test" and confirm they work as documented (open `claude.ai/code` from a phone browser for a trivial read-only task; separately set up Tailscale + Termius + tmux and confirm `make up` + `curl localhost:8000/health` survives backgrounding the phone app).
 - Open questions:
-  - Where should the doc actually live — new `docs/remote-dev.md`, or folded into `ReadMe.md`? Pick at execution time based on which reads better in context; not pre-decided here since it's a cosmetic call, not an architecture one.
+  - None outstanding — doc location (`docs/workflows/remote-dev.md`, alongside the existing `ai-task-flow.md`) was decided at execution time per the plan's explicit "pick whichever fits" latitude.
 - If PR raised but intent partial:
-  - unmet criteria: `To be populated by the workflow if applicable.`
-  - follow-up issue: `To be populated by the workflow if applicable.`
+  - unmet criteria: The two manual "How To Test" device walkthroughs are unverified (see above) — everything else in Acceptance Criteria is complete.
+  - follow-up issue: Not needed unless manual verification surfaces an inaccuracy in the doc (e.g. product behavior differs from what `claude-code-guide` reported); fix in place if so.
 
 ## Automation Log (Mutable)
 _Automation appends structured logs here._

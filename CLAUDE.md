@@ -52,3 +52,8 @@ only (never ship this flag anywhere real).
 ## Config facts
 - `SNAPSHOT_DAY=1` (env var, see `.env`) — controls the monthly snapshot anchor day.
 - Node 22, Python 3.12 (inside container only).
+
+## Remote dev (phone/away from the home machine)
+See `docs/workflows/remote-dev.md` — `claude.ai/code` (web) for non-DB-dependent
+work, or Tailscale+SSH+tmux into the home machine for anything needing the live
+Postgres/containers.

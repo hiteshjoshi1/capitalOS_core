@@ -304,6 +304,9 @@ make task-v3-resume TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123 RESUM
 
 For complete workflow documentation, see [`docs/workflows/ai-task-flow.md`](docs/workflows/ai-task-flow.md).
 
+Driving Claude Code from a phone (no laptop in front of you)? See
+[`docs/workflows/remote-dev.md`](docs/workflows/remote-dev.md).
+
 ---
 
 ## Verification Commands
