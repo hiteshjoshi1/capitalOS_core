@@ -2,7 +2,7 @@
 
 AI Sage is the intelligence layer of CapitalOS. It turns a curated corpus of author material into a persistent research workspace with auditable retrieval, evidence-first answers, and direct links back to original source URLs.
 
-The high-level product PRD is [CapitalOS Decision Intelligence](../../PRD-CapitalOS-Decision-Intelligence.md). This document is the current source of truth for the AI Sage product shape and end-to-end pipeline.
+The high-level product PRD is [CapitalOS Decision Intelligence](../PRD/CapitalOS-Decision-Intelligence.md). This document is the current source of truth for the AI Sage product shape and end-to-end pipeline.
 
 Detailed architecture references:
 
