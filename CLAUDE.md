@@ -2,7 +2,7 @@
 
 Operational quickstart for Claude Code in this repo. For principles, API-contract
 rules, and coding standards, see `AGENTS.md`. For product vision, see `ReadMe.md`
-and the `PRD-*.md` docs.
+and the `docs/PRD/` docs.
 
 ## Stack
 Postgres 16 (pgvector) + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.

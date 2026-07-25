@@ -1,6 +1,6 @@
 -- Rich demo data seed for user "demo" (idempotent)
 -- Goal: broad portfolio + spending + crypto + ingest coverage for UI demos, for a
--- high-net-worth individual, with 6 months of trailing history so wealth/cash-flow/
+-- high-net-worth individual, with 12 months of trailing history so wealth/cash-flow/
 -- stock/crypto trend charts show real month-over-month movement.
 -- Run with: make db-seed-dummy
 
@@ -31,7 +31,7 @@ DELETE FROM market_dividend_yields WHERE source = 'DUMMY';
 DELETE FROM import_jobs WHERE original_filename LIKE 'DUMMY_%';
 
 -- ═══════════════════════════════════════════════════════════════════
--- Month scaffold: current month back to 5 months ago, used by every
+-- Month scaffold: current month back to 11 months ago, used by every
 -- time-series section below (cash, positions, crypto, transactions).
 -- Current month keeps the exact baseline values; older months are
 -- scaled down slightly so the trend charts show realistic growth
@@ -44,8 +44,8 @@ SELECT
   (date_trunc('month', CURRENT_DATE) - (gs || ' months')::interval)::date AS month_start,
   LEAST(6, CASE WHEN gs = 0 THEN EXTRACT(day FROM CURRENT_DATE)::int ELSE 6 END) AS day_cap,
   (1 - 0.03 * gs)::numeric AS growth_factor,
-  (ARRAY[1.15, 0.95, 1.05, 0.90, 1.10, 1.00])[gs + 1]::numeric AS discretionary_multiplier
-FROM generate_series(0, 5) AS gs;
+  (ARRAY[1.15, 0.95, 1.05, 0.90, 1.10, 1.00, 1.08, 0.92, 1.12, 0.97, 1.04, 0.88])[gs + 1]::numeric AS discretionary_multiplier
+FROM generate_series(0, 11) AS gs;
 
 -- snapshot date used for cash/position/crypto snapshots each month (day 6, or
 -- today if the current month hasn't reached the 6th yet)
@@ -132,7 +132,7 @@ ON CONFLICT (account_id) DO NOTHING;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Cash balance snapshots — one per month per cash account, scaled by
--- growth_factor so the 6-month trend shows a rising wealth trajectory.
+-- growth_factor so the 12-month trend shows a rising wealth trajectory.
 -- ═══════════════════════════════════════════════════════════════════
 WITH base(account_name, currency, balance_type, base_balance) AS (
   VALUES
@@ -358,7 +358,7 @@ DO UPDATE SET
   metadata_json = EXCLUDED.metadata_json,
   updated_at = NOW();
 
--- Latest prices used by dashboard valuation (current, single snapshot)
+-- Monthly price history used by dashboard valuation and market-data demos.
 WITH v(symbol, currency, price, exchange_code) AS (
   VALUES
     ('SGDMMF', 'SGD', 1.00, 'SGX'),
@@ -398,15 +398,16 @@ WITH v(symbol, currency, price, exchange_code) AS (
 INSERT INTO prices (asset_id, ts, trade_date, price, currency, exchange_code, provider_symbol, source)
 SELECT
   a.id,
-  (SELECT as_of_date FROM seed_months WHERE month_offset = 0)::timestamptz,
-  (SELECT as_of_date FROM seed_months WHERE month_offset = 0),
-  v.price,
+  sm.as_of_date::timestamptz,
+  sm.as_of_date,
+  ROUND(v.price * sm.growth_factor, 6),
   v.currency,
   v.exchange_code,
   v.symbol,
   'DUMMY'
 FROM v
 JOIN assets a ON a.symbol = v.symbol AND a.quote_currency = v.currency
+CROSS JOIN seed_months sm
 ON CONFLICT (asset_id, ts, currency, source) DO UPDATE
 SET trade_date = EXCLUDED.trade_date,
     price = EXCLUDED.price,
@@ -468,7 +469,7 @@ SET exchange_symbol = EXCLUDED.exchange_symbol,
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Crypto: three wallets across different chains/providers (no real
--- on-chain verification needed for demo), each with a 6-month
+-- on-chain verification needed for demo), each with a 12-month
 -- snapshot history scaled by the same growth curve as the rest of
 -- the portfolio.
 -- ═══════════════════════════════════════════════════════════════════
@@ -572,7 +573,7 @@ VALUES
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Transactions: HNW income + spending streams, repeated every month
--- for 6 months (recurring templates) plus month-varying discretionary
+-- for 12 months (recurring templates) plus month-varying discretionary
 -- spend, so Cash Flow / Liabilities / recurring-charge detection all
 -- have real month-over-month history.
 -- ═══════════════════════════════════════════════════════════════════
@@ -627,7 +628,11 @@ SELECT * FROM (VALUES
   ('DUMMY - Citi Prestige', 2, 'Shopping', 'Rolex Boutique', -22000::numeric, 8),
   ('DUMMY - Citi Prestige', 4, 'Experiences', 'Sothebys Auction House', -35000::numeric, 9),
   ('DUMMY - Amex Platinum', 0, 'Travel', 'NetJets Private Aviation', -18000::numeric, 8),
-  ('DUMMY - Amex Platinum', 3, 'Shopping', 'Chanel Boutique', -6200::numeric, 7)
+  ('DUMMY - Amex Platinum', 3, 'Shopping', 'Chanel Boutique', -6200::numeric, 7),
+  ('DUMMY - Amex Platinum', 6, 'Travel', 'Aman Tokyo', -12500::numeric, 8),
+  ('DUMMY - DBS Credit Card', 8, 'Experiences', 'Singapore Yacht Show', -7800::numeric, 9),
+  ('DUMMY - Citi Prestige', 10, 'Shopping', 'Patek Philippe Service Centre', -9800::numeric, 7),
+  ('DUMMY - Amex Platinum', 11, 'Travel', 'Six Senses Bhutan', -14500::numeric, 8)
 ) AS t(account_name, month_offset, category, merchant, amount, day_of_month);
 
 WITH ins_recurring AS (
@@ -686,13 +691,35 @@ ins_oneoff AS (
 )
 SELECT 1;
 
--- Transfers: funding IBKR from DBS savings, once at the current month
+-- Transfers: quarterly funding from DBS savings into IBKR across the year.
 WITH a AS (SELECT id, name FROM accounts WHERE name LIKE 'DUMMY - %'),
-sm0 AS (SELECT month_start, day_cap FROM seed_months WHERE month_offset = 0)
+sm AS (SELECT month_offset, month_start FROM seed_months WHERE month_offset IN (0, 3, 6, 9))
 INSERT INTO transactions (ts, account_id, type, amount, currency, category, merchant_counterparty, platform_reference, notes, source)
-VALUES
-  ((SELECT month_start FROM sm0) + interval '10 hour', (SELECT id FROM a WHERE name = 'DUMMY - DBS Savings'), 'TRANSFER', -120000, 'SGD', 'Transfer', 'IBKR Funding', 'DUMMY_XFER_IBKR_OUT', 'DUMMY_SEED', 'DUMMY'),
-  ((SELECT month_start FROM sm0) + interval '10 hour 5 minute', (SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'), 'TRANSFER', 90000, 'USD', 'Transfer', 'DBS Funding', 'DUMMY_XFER_IBKR_IN', 'DUMMY_SEED', 'DUMMY');
+SELECT
+  sm.month_start + interval '10 hour',
+  (SELECT id FROM a WHERE name = 'DUMMY - DBS Savings'),
+  'TRANSFER'::txn_type,
+  -120000,
+  'SGD',
+  'Transfer',
+  'IBKR Funding',
+  'DUMMY_XFER_IBKR_OUT_' || sm.month_offset,
+  'DUMMY_SEED',
+  'DUMMY'
+FROM sm
+UNION ALL
+SELECT
+  sm.month_start + interval '10 hour 5 minute',
+  (SELECT id FROM a WHERE name = 'DUMMY - IBKR Global'),
+  'TRANSFER'::txn_type,
+  90000,
+  'USD',
+  'Transfer',
+  'DBS Funding',
+  'DUMMY_XFER_IBKR_IN_' || sm.month_offset,
+  'DUMMY_SEED',
+  'DUMMY'
+FROM sm;
 
 -- Card charges: annual fee, finance charge, and GST, once at the current month —
 -- keeps the Credit Card Analytics "charges need attention" banner demonstrable.
@@ -707,10 +734,10 @@ VALUES
   ((SELECT month_start FROM sm0) + (LEAST(2, (SELECT day_cap FROM sm0)) - 1) * interval '1 day' + interval '9 hour 5 minute',
    (SELECT id FROM a WHERE name = 'DUMMY - Citi Prestige'), 'TAX', -10.34, 'SGD', 'Tax', 'GST @ 9%', 'DUMMY_CC_TAX', 'DUMMY_SEED', 'DUMMY');
 
--- Investment activity + dividend income across a few months
+-- Quarterly investment activity + dividend income across the full year.
 WITH a AS (SELECT id, name FROM accounts WHERE name LIKE 'DUMMY - %'),
 ast AS (SELECT id, symbol, quote_currency FROM assets),
-sm AS (SELECT month_offset, month_start, day_cap FROM seed_months WHERE month_offset IN (0, 2, 4))
+sm AS (SELECT month_offset, month_start, day_cap FROM seed_months WHERE month_offset IN (0, 3, 6, 9))
 INSERT INTO transactions (ts, account_id, type, amount, currency, asset_id, quantity, category, merchant_counterparty, platform_reference, notes, source)
 SELECT
   sm.month_start + (LEAST(16, sm.day_cap) - 1) * interval '1 day' + interval '13 hour',
@@ -746,8 +773,8 @@ INSERT INTO transfer_links (from_transaction_id, to_transaction_id)
 SELECT out_tx.id, in_tx.id
 FROM transactions out_tx
 JOIN transactions in_tx
-  ON out_tx.platform_reference = 'DUMMY_XFER_IBKR_OUT'
- AND in_tx.platform_reference = 'DUMMY_XFER_IBKR_IN'
+  ON out_tx.platform_reference LIKE 'DUMMY_XFER_IBKR_OUT_%'
+ AND in_tx.platform_reference = REPLACE(out_tx.platform_reference, 'DUMMY_XFER_IBKR_OUT_', 'DUMMY_XFER_IBKR_IN_')
 ON CONFLICT (from_transaction_id, to_transaction_id) DO NOTHING;
 
 DROP TABLE IF EXISTS seed_months;
