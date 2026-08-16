@@ -240,6 +240,19 @@ export default function StockHoldings() {
       })),
     [summary?.platform_breakdown],
   );
+  const geographyPerformanceItems = useMemo(
+    () => (summary?.geography_performance ?? [])
+      .filter((item) => item.current_value > 0 || item.snapshot_value > 0)
+      .sort((a, b) => b.delta_pct != null && a.delta_pct != null ? b.delta_pct - a.delta_pct : (b.delta_abs - a.delta_abs)),
+    [summary?.geography_performance],
+  );
+  const geographyPerformanceAsOfLabel = useMemo(() => {
+    const raw = summary?.geography_performance_as_of;
+    if (!raw) return null;
+    const parsed = new Date(raw);
+    if (Number.isNaN(parsed.getTime())) return null;
+    return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  }, [summary?.geography_performance_as_of]);
 
   return (
     <PageShell
@@ -338,6 +351,50 @@ export default function StockHoldings() {
                 formatMoney={formatMoney}
                 ariaLabel="Stock platform exposure pie chart"
               />
+            </div>
+          </section>
+
+          {/* ── Geography performance (separate from allocation above) ──── */}
+          <section aria-label="Stock geography performance">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">PERFORMANCE</p>
+                <h2 className="coSectionTitle">Geography Performance</h2>
+              </div>
+              {geographyPerformanceAsOfLabel ? (
+                <span className="muted" style={{ fontSize: "13px" }}>
+                  Since {geographyPerformanceAsOfLabel}
+                </span>
+              ) : null}
+            </div>
+            <div className="card">
+              {!summary?.is_live ? (
+                <p className="muted">Geography performance is only available for the current, live period — pick the current month to see it.</p>
+              ) : geographyPerformanceItems.length > 0 ? (
+                <div className="coHoldingsList">
+                  {geographyPerformanceItems.map((item) => (
+                    <div key={item.geography} className="coHoldingRow">
+                      <div className="coHoldingLeft">
+                        <strong className="coHoldingSymbol">{formatGeoLabel(item.geography)}</strong>
+                        <span className="coHoldingClass">{formatMoney(item.current_value)}</span>
+                      </div>
+                      <div className="coHoldingRight">
+                        <strong
+                          className={`coHoldingValue ${item.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
+                        >
+                          {item.delta_abs >= 0 ? "+" : "-"}
+                          {formatMoney(Math.abs(item.delta_abs))}
+                        </strong>
+                        <span className="coHoldingPct">
+                          {item.delta_pct == null ? "—" : `${item.delta_pct >= 0 ? "+" : ""}${(item.delta_pct * 100).toFixed(1)}%`}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="muted">No geography performance data yet.</p>
+              )}
             </div>
           </section>
 

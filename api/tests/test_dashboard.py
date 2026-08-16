@@ -1926,3 +1926,215 @@ def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(cli
     assert body["net_worth"]["stocks_funds"] == 1000.0
     assert body["current_net_worth_as_of"] == "2026-05-24T00:00:00+00:00"
     assert body["current_net_worth"]["stocks_funds"] == 2400.0
+
+
+def _seed_single_stock_with_two_daily_prices(
+    db_engine,
+    *,
+    account_id: int,
+    asset_id: int,
+    platform_id: int,
+    symbol: str,
+    today: str,
+    yesterday: str,
+    price_today: float,
+    price_yesterday: float,
+    quantity: float = 10,
+):
+    """One position (fixed quantity) plus two `prices` rows on consecutive trade_dates,
+    so price_overlay-driven lookups resolve to a different value per anchor date —
+    exercising day-over-day deltas without needing a second position snapshot import.
+    """
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(:platform_id, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            ),
+            {"platform_id": platform_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(:account_id, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', :platform_id)"
+            ),
+            {"account_id": account_id, "platform_id": platform_id},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(:asset_id, :symbol, :symbol, 'STOCK', 'USD', 'US')"
+            ),
+            {"asset_id": asset_id, "symbol": symbol},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(:asset_id, :yesterday_ts, :price_yesterday, 'USD', 'eodhd_bulk', :yesterday, 'US', :symbol), "
+                "(:asset_id, :today_ts, :price_today, 'USD', 'eodhd_bulk', :today, 'US', :symbol)"
+            ),
+            {
+                "asset_id": asset_id,
+                "yesterday": yesterday,
+                "yesterday_ts": f"{yesterday}T20:00:00+00:00",
+                "price_yesterday": price_yesterday,
+                "today": today,
+                "today_ts": f"{today}T20:00:00+00:00",
+                "price_today": price_today,
+                "symbol": symbol,
+            },
+        )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=account_id,
+        asset_id=asset_id,
+        as_of=datetime.strptime(yesterday, "%Y-%m-%d").replace(tzinfo=timezone.utc),
+        quantity=quantity,
+        market_value_base=quantity * price_yesterday,
+        market_price=price_yesterday,
+        cost_basis_base=quantity * price_yesterday,
+        currency="USD",
+        platform_code="IBKR",
+    )
+
+
+def test_stock_holdings_geography_performance_reflects_daily_price_change(
+    client: TestClient, db_engine, monkeypatch
+):
+    _seed_single_stock_with_two_daily_prices(
+        db_engine,
+        account_id=20301,
+        asset_id=20301,
+        platform_id=20301,
+        symbol="AAPL",
+        today="2026-07-10",
+        yesterday="2026-07-09",
+        price_today=220,
+        price_yesterday=200,
+    )
+
+    def fake_rates(_date, base, symbols):
+        assert base == "USD"
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
+    )
+
+    live_resp = client.get("/dashboard/stock-holdings?month=2026-07&base_currency=USD")
+    assert live_resp.status_code == 200
+    live_body = live_resp.json()
+    assert live_body["is_live"] is True
+    assert live_body["geography_performance_as_of"] is not None
+    us_perf = next(item for item in live_body["geography_performance"] if item["geography"] == "US")
+    assert us_perf["current_value"] == pytest.approx(2200.0)
+    assert us_perf["snapshot_value"] == pytest.approx(2000.0)
+    assert us_perf["delta_abs"] == pytest.approx(200.0)
+    assert us_perf["delta_pct"] == pytest.approx(0.1)
+
+    # A historical (non-live) month has no meaningful "since yesterday" comparison.
+    historical_resp = client.get("/dashboard/stock-holdings?month=2026-06&base_currency=USD")
+    assert historical_resp.status_code == 200
+    historical_body = historical_resp.json()
+    assert historical_body["is_live"] is False
+    assert historical_body["geography_performance"] == []
+    assert historical_body["geography_performance_as_of"] is None
+
+
+def test_net_worth_since_update_reflects_price_driven_delta(client: TestClient, db_engine, monkeypatch):
+    _seed_single_stock_with_two_daily_prices(
+        db_engine,
+        account_id=20302,
+        asset_id=20302,
+        platform_id=20302,
+        symbol="MSFT",
+        today="2026-07-10",
+        yesterday="2026-07-09",
+        price_today=110,
+        price_yesterday=100,
+    )
+
+    def fake_rates(_date, base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/net-worth-since-update?base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["net_worth_change"]["abs"] == pytest.approx(100.0)
+    assert body["net_worth_change"]["pct"] == pytest.approx(0.1)
+    assert body["component_change"]["stocks_funds"]["abs"] == pytest.approx(100.0)
+    assert body["component_change"]["cash"]["abs"] == pytest.approx(0.0)
+    gainers = body["top_movers"]["gainers"]
+    assert len(gainers) == 1
+    assert gainers[0]["symbol"] == "MSFT"
+    assert gainers[0]["delta_abs"] == pytest.approx(100.0)
+    assert body["top_movers"]["detractors"] == []
+
+
+def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, db_engine, monkeypatch):
+    """If the last price refresh is several days old, "now" and "yesterday" both
+    resolve to that same stale price — the delta must be 0, not a stale-vs-missing
+    mismatch or an error.
+    """
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(20303, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
+                "(20303, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 20303)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(20303, 'GOOG', 'GOOG', 'STOCK', 'USD', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO prices (asset_id, ts, price, currency, source, trade_date, exchange_code, provider_symbol) VALUES "
+                "(20303, '2026-07-05T20:00:00+00:00', 150, 'USD', 'eodhd_bulk', '2026-07-05', 'US', 'GOOG')"
+            )
+        )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=20303,
+        asset_id=20303,
+        as_of=datetime(2026, 7, 5, tzinfo=timezone.utc),
+        quantity=5,
+        market_value_base=750,
+        market_price=150,
+        cost_basis_base=750,
+        currency="USD",
+        platform_code="IBKR",
+    )
+
+    def fake_rates(_date, base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/net-worth-since-update?base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["net_worth_change"]["abs"] == pytest.approx(0.0)
+    assert body["top_movers"]["gainers"] == []
+    assert body["top_movers"]["detractors"] == []

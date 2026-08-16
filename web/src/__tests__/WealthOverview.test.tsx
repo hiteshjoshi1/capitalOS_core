@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -13,6 +13,7 @@ vi.mock("../lib/api", () => ({
     dashboardSummary: vi.fn(),
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
+    netWorthSinceUpdate: vi.fn(),
   },
 }));
 
@@ -153,6 +154,20 @@ describe("WealthOverview", () => {
         { platform: "DBS_VICKERS", platform_type: "BROKER", country: "SG", value: 0, percent: 0 },
       ],
     } as never);
+    mockApi.netWorthSinceUpdate.mockResolvedValue({
+      base_currency: "SGD",
+      current_as_of: "2026-05-15T12:00:00+00:00",
+      compare_as_of: "2026-05-14T12:00:00+00:00",
+      net_worth_change: {
+        abs: 0,
+        pct: null,
+        current_as_of: "2026-05-15T12:00:00+00:00",
+        compare_as_of: "2026-05-14T12:00:00+00:00",
+        compare_month: "2026-05-14T12:00:00+00:00",
+      },
+      component_change: {},
+      top_movers: null,
+    } as never);
   });
 
   it("always fetches the current month and never renders a month picker", async () => {
@@ -284,5 +299,81 @@ describe("WealthOverview", () => {
     expect(await screen.findByText("LIABILITIES")).toBeInTheDocument();
     expect(screen.getByText("Outstanding obligations vs current net worth.")).toBeInTheDocument();
     expect(screen.getByText("S$ 261")).toBeInTheDocument();
+  });
+
+  it("renders a since-last-update delta strip on the hero card", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    mockApi.netWorthSinceUpdate.mockResolvedValue({
+      base_currency: "SGD",
+      current_as_of: "2026-05-15T12:00:00+00:00",
+      compare_as_of: "2026-05-14T12:00:00+00:00",
+      net_worth_change: {
+        abs: 5,
+        pct: 0.05,
+        current_as_of: "2026-05-15T12:00:00+00:00",
+        compare_as_of: "2026-05-14T12:00:00+00:00",
+        compare_month: "2026-05-14T12:00:00+00:00",
+      },
+      component_change: {},
+      top_movers: null,
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/SINCE LAST UPDATE/)).toBeInTheDocument();
+    expect(screen.getByText("+S$ 5 (+5.0%)")).toBeInTheDocument();
+  });
+
+  it("shows today's movers when the Today tab is selected", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    mockApi.netWorthSinceUpdate.mockResolvedValue({
+      base_currency: "SGD",
+      current_as_of: "2026-05-15T12:00:00+00:00",
+      compare_as_of: "2026-05-14T12:00:00+00:00",
+      net_worth_change: {
+        abs: 5,
+        pct: 0.05,
+        current_as_of: "2026-05-15T12:00:00+00:00",
+        compare_as_of: "2026-05-14T12:00:00+00:00",
+        compare_month: "2026-05-14T12:00:00+00:00",
+      },
+      component_change: {},
+      top_movers: {
+        compare_month: "2026-05-14T12:00:00+00:00",
+        gainers: [
+          {
+            asset_id: 1,
+            symbol: "AAPL",
+            asset_class: "STOCK",
+            current_value: 110,
+            previous_value: 100,
+            delta_abs: 10,
+            delta_pct: 0.1,
+            compare_month: "2026-05-14T12:00:00+00:00",
+          },
+        ],
+        detractors: [],
+      },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("Largest positions")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Today" }));
+
+    expect(await screen.findByText("AAPL")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 10")).toBeInTheDocument();
   });
 });

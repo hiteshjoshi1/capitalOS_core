@@ -1,12 +1,21 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { DataHubSummary } from "../lib/api";
+import type { Account, DataHubSummary } from "../lib/api";
 import "../App.css";
 import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
+import StatusPill from "../components/StatusPill";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
+type RefreshStatus = "idle" | "running" | "done" | "error";
+
+type RefreshRowState = {
+  status: RefreshStatus;
+  message: string;
+};
+
+const REFRESH_IDLE: RefreshRowState = { status: "idle", message: "" };
 
 type QuickAction = {
   title: string;
@@ -26,13 +35,32 @@ export default function OperationsOverview() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [summary, setSummary] = useState<DataHubSummary | null>(null);
+  const [ibkrAccounts, setIbkrAccounts] = useState<Account[]>([]);
+  const [selectedIbkrAccountId, setSelectedIbkrAccountId] = useState<number | null>(null);
+
+  const [priceRefresh, setPriceRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
+  const [ibkrRefresh, setIbkrRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
+  const [cryptoRefresh, setCryptoRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
+
+  const reloadSummary = async () => {
+    try {
+      const data = await api.dataHubSummary();
+      setSummary(data);
+    } catch {
+      // Refresh buttons already surface their own errors — a failed reload here
+      // just leaves the stat cards stale, not worth a second error banner.
+    }
+  };
 
   useEffect(() => {
     (async () => {
       try {
         setState("loading");
-        const data = await api.dataHubSummary();
+        const [data, accounts] = await Promise.all([api.dataHubSummary(), api.accounts()]);
         setSummary(data);
+        const ibkr = accounts.filter((a) => a.platform === "IBKR");
+        setIbkrAccounts(ibkr);
+        if (ibkr.length > 0) setSelectedIbkrAccountId(ibkr[0].id);
         setState("ready");
       } catch (e: unknown) {
         setErr(e instanceof Error ? e.message : String(e));
@@ -40,6 +68,52 @@ export default function OperationsOverview() {
       }
     })();
   }, []);
+
+  const runPriceRefresh = async () => {
+    setPriceRefresh({ status: "running", message: "" });
+    try {
+      const result = await api.marketDataRefreshNow();
+      const exchangeCount = result.exchanges?.length ?? 0;
+      setPriceRefresh({ status: "done", message: `Refreshed ${exchangeCount} exchange${exchangeCount === 1 ? "" : "s"}.` });
+      await reloadSummary();
+    } catch (e: unknown) {
+      setPriceRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const runIbkrRefresh = async () => {
+    if (selectedIbkrAccountId == null) {
+      setIbkrRefresh({ status: "error", message: "No IBKR account found to refresh." });
+      return;
+    }
+    setIbkrRefresh({ status: "running", message: "" });
+    try {
+      const result = await api.ibkrFlexImportNow(selectedIbkrAccountId);
+      const counts = (result.counts as Record<string, number> | undefined) ?? {};
+      setIbkrRefresh({
+        status: "done",
+        message: `Imported ${counts.positions ?? 0} position${counts.positions === 1 ? "" : "s"}, ${counts.nav_snapshots ?? 0} NAV snapshot${counts.nav_snapshots === 1 ? "" : "s"}.`,
+      });
+      await reloadSummary();
+    } catch (e: unknown) {
+      setIbkrRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const runCryptoRefresh = async () => {
+    setCryptoRefresh({ status: "running", message: "" });
+    try {
+      const result = await api.cryptoRefreshNow();
+      const walletsRefreshed = (result.wallets_refreshed as number | undefined) ?? 0;
+      setCryptoRefresh({
+        status: "done",
+        message: `Queued refresh for ${walletsRefreshed} wallet${walletsRefreshed === 1 ? "" : "s"}.`,
+      });
+      await reloadSummary();
+    } catch (e: unknown) {
+      setCryptoRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
 
   const statCards = summary
     ? [
@@ -109,6 +183,66 @@ export default function OperationsOverview() {
                   <span>{action.desc}</span>
                 </Link>
               ))}
+            </div>
+          </section>
+
+          <section aria-label="Refresh data">
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">DATA SOURCES</p>
+                <h2 className="coSectionTitle">Refresh now</h2>
+              </div>
+            </div>
+            <div className="dataHubActionGrid">
+              <article className="card dataHubStatCard">
+                <p className="dataHubStatLabel">Price refresh</p>
+                <p className="muted">Pull the latest quotes across every configured exchange.</p>
+                <button className="btn" type="button" onClick={runPriceRefresh} disabled={priceRefresh.status === "running"}>
+                  {priceRefresh.status === "running" ? "Refreshing…" : "Refresh prices"}
+                </button>
+                {priceRefresh.status === "done" && <StatusPill tone="good" label={priceRefresh.message} />}
+                {priceRefresh.status === "error" && <StatusPill tone="warn" label={priceRefresh.message} />}
+              </article>
+
+              <article className="card dataHubStatCard">
+                <p className="dataHubStatLabel">IBKR refresh</p>
+                <p className="muted">Pull the latest Flex statement (positions, NAV, cash) for your IBKR account.</p>
+                {ibkrAccounts.length > 1 ? (
+                  <select
+                    className="coPillBtnInput"
+                    aria-label="IBKR account"
+                    value={selectedIbkrAccountId ?? ""}
+                    onChange={(e) => setSelectedIbkrAccountId(Number(e.target.value))}
+                  >
+                    {ibkrAccounts.map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+                <button
+                  className="btn"
+                  type="button"
+                  onClick={runIbkrRefresh}
+                  disabled={ibkrRefresh.status === "running" || ibkrAccounts.length === 0}
+                  title={ibkrAccounts.length === 0 ? "No IBKR account linked" : undefined}
+                >
+                  {ibkrRefresh.status === "running" ? "Refreshing…" : "Refresh IBKR"}
+                </button>
+                {ibkrRefresh.status === "done" && <StatusPill tone="good" label={ibkrRefresh.message} />}
+                {ibkrRefresh.status === "error" && <StatusPill tone="warn" label={ibkrRefresh.message} />}
+              </article>
+
+              <article className="card dataHubStatCard">
+                <p className="dataHubStatLabel">Crypto refresh</p>
+                <p className="muted">Queue a balance/price refresh for every connected wallet.</p>
+                <button className="btn" type="button" onClick={runCryptoRefresh} disabled={cryptoRefresh.status === "running"}>
+                  {cryptoRefresh.status === "running" ? "Refreshing…" : "Refresh crypto"}
+                </button>
+                {cryptoRefresh.status === "done" && <StatusPill tone="good" label={cryptoRefresh.message} />}
+                {cryptoRefresh.status === "error" && <StatusPill tone="warn" label={cryptoRefresh.message} />}
+              </article>
             </div>
           </section>
 

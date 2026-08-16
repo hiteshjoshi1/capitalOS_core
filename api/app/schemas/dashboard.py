@@ -114,6 +114,18 @@ class DashboardSummaryResponse(BaseModel):
         populate_by_name = True
 
 
+class NetWorthSinceUpdateResponse(BaseModel):
+    base_currency: str
+    current_as_of: Optional[str] = None
+    compare_as_of: Optional[str] = None
+    net_worth_change: NetWorthChange
+    component_change: Dict[str, NetWorthChange]
+    top_movers: Optional[TopMovers] = None
+
+    class Config:
+        populate_by_name = True
+
+
 class NetWorthChangeResponse(BaseModel):
     as_of_month: str
     base_currency: str
@@ -151,6 +163,8 @@ class StockHoldingsResponse(BaseModel):
     net_worth_freshness_status: Optional[str] = None
     top_holdings: List[TopHolding]
     geography_breakdown: list["StockGeographyBreakdownItem"] = []
+    geography_performance: list["StockGeographyBreakdownItem"] = []
+    geography_performance_as_of: Optional[str] = None
     platform_breakdown: list[StockBreakdownItem] = []
     stock_current_total: float = 0.0
     stock_snapshot_total: float = 0.0

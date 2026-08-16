@@ -404,6 +404,14 @@ export type StockHoldingsSummary = {
     delta_abs: number;
     delta_pct?: number | null;
   }>;
+  geography_performance?: Array<{
+    geography: string;
+    current_value: number;
+    snapshot_value: number;
+    delta_abs: number;
+    delta_pct?: number | null;
+  }>;
+  geography_performance_as_of?: string | null;
   platform_breakdown?: Array<{
     key: string;
     current_value: number;
@@ -1004,6 +1012,27 @@ export type WealthTopMovers = {
   compare_month: string;
   gainers: WealthTopMover[];
   detractors: WealthTopMover[];
+};
+
+export type NetWorthSinceUpdateChange = {
+  abs: number;
+  pct: number | null;
+  current_as_of: string | null;
+  compare_as_of: string | null;
+  compare_month: string;
+};
+
+export type NetWorthSinceUpdate = {
+  base_currency: string;
+  current_as_of: string | null;
+  compare_as_of: string | null;
+  net_worth_change: NetWorthSinceUpdateChange;
+  component_change: {
+    cash?: NetWorthSinceUpdateChange;
+    stocks_funds?: NetWorthSinceUpdateChange;
+    crypto?: NetWorthSinceUpdateChange;
+  };
+  top_movers: WealthTopMovers | null;
 };
 
 export type Currency = {
@@ -1827,6 +1856,8 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  netWorthSinceUpdate: (baseCurrency = "SGD") =>
+    req<NetWorthSinceUpdate>(`/dashboard/net-worth-since-update?base_currency=${encodeURIComponent(baseCurrency)}`),
   dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
   cashDeposits: (month: string, baseCurrency = "SGD") =>
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
@@ -1946,6 +1977,11 @@ export const api = {
     req<{ runs: MarketDataRun[] }>(`/market-data/runs?limit=${encodeURIComponent(String(limit))}`),
   marketDataRefreshNow: (adminKey?: string) =>
     req<{ status: string; exchanges: Array<Record<string, unknown>> }>("/market-data/refresh-now", {
+      method: "POST",
+      headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
+    }),
+  ibkrFlexImportNow: (accountId: number, adminKey?: string) =>
+    req<Record<string, unknown>>(`/portfolio/ibkr-flex/import-now?account_id=${encodeURIComponent(String(accountId))}`, {
       method: "POST",
       headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
     }),
