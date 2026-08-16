@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { AssetClassFreshness, DashboardBootstrap, DashboardSummary, NetWorthFreshness, PlatformAllocation, SpendingSummary } from "../lib/api";
+import type { AssetClassFreshness, DashboardBootstrap, DashboardSummary, NetWorthFreshness, NetWorthSinceUpdate, PlatformAllocation, SpendingSummary } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
@@ -142,9 +142,12 @@ export default function WealthOverview() {
   const [platformState, setPlatformState] = useState<LoadState>("idle");
   const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
 
+  const [sinceUpdateState, setSinceUpdateState] = useState<LoadState>("idle");
+  const [sinceUpdate, setSinceUpdate] = useState<NetWorthSinceUpdate | null>(null);
+
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
-  const [holdingsView, setHoldingsView] = useState<"holdings" | "movers">("holdings");
+  const [holdingsView, setHoldingsView] = useState<"holdings" | "movers" | "today">("holdings");
   const selectedBaseCurrency = baseCurrency || bootstrap?.base_currency || "SGD";
 
   const fetchBootstrap = useCallback(async (silent = false) => {
@@ -192,6 +195,17 @@ export default function WealthOverview() {
     }
   }, [month, baseCurrency]);
 
+  const fetchSinceUpdate = useCallback(async (silent = false) => {
+    if (!silent) setSinceUpdateState("loading");
+    try {
+      const data = await api.netWorthSinceUpdate(baseCurrency);
+      setSinceUpdate(data);
+      setSinceUpdateState("ready");
+    } catch {
+      setSinceUpdateState("error");
+    }
+  }, [baseCurrency]);
+
   // First paint: bootstrap is the lean call, so the hero renders as soon as it
   // resolves without waiting on the heavier summary/spending/platform calls.
   useEffect(() => {
@@ -200,8 +214,9 @@ export default function WealthOverview() {
       void fetchSummary();
       void fetchSpending();
       void fetchPlatform();
+      void fetchSinceUpdate();
     })();
-  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform]);
+  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform, fetchSinceUpdate]);
 
   const refreshTimerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -213,6 +228,7 @@ export default function WealthOverview() {
           void fetchSummary(true);
           void fetchSpending(true);
           void fetchPlatform(true);
+          void fetchSinceUpdate(true);
         }, PORTFOLIO_REFRESH_DEBOUNCE_MS);
       },
     });
@@ -221,7 +237,7 @@ export default function WealthOverview() {
       if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
       unsubscribe();
     };
-  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform]);
+  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform, fetchSinceUpdate]);
 
   const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
@@ -346,6 +362,29 @@ export default function WealthOverview() {
             ) : null}
 
             <div className="coHeroDeltaRow">
+              {sinceUpdate?.net_worth_change ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">
+                    SINCE LAST UPDATE{sinceUpdate.compare_as_of ? ` (${formatChipAsOf(sinceUpdate.compare_as_of)})` : ""}
+                  </span>
+                  <strong
+                    className={
+                      sinceUpdate.net_worth_change.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
+                    }
+                  >
+                    {sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}
+                    {formatMoney(Math.abs(sinceUpdate.net_worth_change.abs))}
+                    {sinceUpdate.net_worth_change.pct != null
+                      ? ` (${sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}${Math.abs(sinceUpdate.net_worth_change.pct * 100).toFixed(1)}%)`
+                      : ""}
+                  </strong>
+                </div>
+              ) : sinceUpdateState === "loading" ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
+                  <strong className="muted">…</strong>
+                </div>
+              ) : null}
               {prevMonthChange ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">VS LAST MONTH</span>
@@ -511,6 +550,13 @@ export default function WealthOverview() {
                   >
                     Movers
                   </button>
+                  <button
+                    type="button"
+                    className={`coSegmentedBtn${holdingsView === "today" ? " coSegmentedBtnActive" : ""}`}
+                    onClick={() => setHoldingsView("today")}
+                  >
+                    Today
+                  </button>
                 </div>
               </div>
 
@@ -536,36 +582,77 @@ export default function WealthOverview() {
                   ) : (
                     <p className="muted">No holdings returned for this period.</p>
                   )
-                ) : topMovers ? (
+                ) : holdingsView === "movers" ? (
+                  topMovers ? (
+                    [
+                      ...(topMovers.gainers ?? []).slice(0, 2),
+                      ...(topMovers.detractors ?? []).slice(0, 2),
+                    ].map((row) => (
+                      <div
+                        key={`${row.asset_class}-${row.symbol}`}
+                        className="coHoldingRow"
+                      >
+                        <div className="coHoldingLeft">
+                          <strong className="coHoldingSymbol">{row.symbol}</strong>
+                          <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
+                        </div>
+                        <div className="coHoldingRight">
+                          <strong
+                            className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
+                          >
+                            {row.delta_abs >= 0 ? "+" : "-"}
+                            {formatMoney(Math.abs(row.delta_abs))}
+                          </strong>
+                          <span className="coHoldingPct">
+                            {row.delta_pct == null
+                              ? `vs ${row.compare_month}`
+                              : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                          </span>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="muted">No mover data for this period.</p>
+                  )
+                ) : sinceUpdateState === "loading" ? (
+                  <p className="muted">Loading today's movers…</p>
+                ) : sinceUpdate?.top_movers ? (
                   [
-                    ...(topMovers.gainers ?? []).slice(0, 2),
-                    ...(topMovers.detractors ?? []).slice(0, 2),
-                  ].map((row) => (
-                    <div
-                      key={`${row.asset_class}-${row.symbol}`}
-                      className="coHoldingRow"
-                    >
-                      <div className="coHoldingLeft">
-                        <strong className="coHoldingSymbol">{row.symbol}</strong>
-                        <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
+                    ...(sinceUpdate.top_movers.gainers ?? []).slice(0, 3),
+                    ...(sinceUpdate.top_movers.detractors ?? []).slice(0, 2),
+                  ].length > 0 ? (
+                    [
+                      ...(sinceUpdate.top_movers.gainers ?? []).slice(0, 3),
+                      ...(sinceUpdate.top_movers.detractors ?? []).slice(0, 2),
+                    ].map((row) => (
+                      <div
+                        key={`today-${row.asset_class}-${row.symbol}`}
+                        className="coHoldingRow"
+                      >
+                        <div className="coHoldingLeft">
+                          <strong className="coHoldingSymbol">{row.symbol}</strong>
+                          <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
+                        </div>
+                        <div className="coHoldingRight">
+                          <strong
+                            className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
+                          >
+                            {row.delta_abs >= 0 ? "+" : "-"}
+                            {formatMoney(Math.abs(row.delta_abs))}
+                          </strong>
+                          <span className="coHoldingPct">
+                            {row.delta_pct == null
+                              ? "—"
+                              : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                          </span>
+                        </div>
                       </div>
-                      <div className="coHoldingRight">
-                        <strong
-                          className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
-                        >
-                          {row.delta_abs >= 0 ? "+" : "-"}
-                          {formatMoney(Math.abs(row.delta_abs))}
-                        </strong>
-                        <span className="coHoldingPct">
-                          {row.delta_pct == null
-                            ? `vs ${row.compare_month}`
-                            : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
-                        </span>
-                      </div>
-                    </div>
-                  ))
+                    ))
+                  ) : (
+                    <p className="muted">No movement since the last update.</p>
+                  )
                 ) : (
-                  <p className="muted">No mover data for this period.</p>
+                  <p className="muted">No mover data yet.</p>
                 )}
               </div>
             </article>

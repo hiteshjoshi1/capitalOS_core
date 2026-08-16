@@ -1,18 +1,30 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import OperationsOverview from "../routes/OperationsOverview";
 import { api } from "../lib/api";
-import type { DataHubSummary } from "../lib/api";
+import type { Account, DataHubSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     dataHubSummary: vi.fn(),
+    accounts: vi.fn(),
+    marketDataRefreshNow: vi.fn(),
+    ibkrFlexImportNow: vi.fn(),
+    cryptoRefreshNow: vi.fn(),
   },
 }));
 
 const mockApi = vi.mocked(api, true);
+
+const ibkrAccountFixture: Account = {
+  id: 9,
+  name: "IBKR",
+  platform: "IBKR",
+  account_type: "BROKER",
+  currency: "USD",
+};
 
 const summaryFixture: DataHubSummary = {
   linked_accounts: 6,
@@ -41,6 +53,11 @@ function renderPage() {
 }
 
 describe("OperationsOverview (Data Hub Overview)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.accounts.mockResolvedValue([ibkrAccountFixture]);
+  });
+
   it("renders live stat cards, quick actions, and recent activity", async () => {
     mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
     renderPage();
@@ -67,5 +84,35 @@ describe("OperationsOverview (Data Hub Overview)", () => {
     renderPage();
 
     await waitFor(() => expect(screen.getByText("No recent activity yet.")).toBeInTheDocument());
+  });
+
+  it("triggers price, IBKR, and crypto refreshes from the Refresh now section", async () => {
+    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
+    mockApi.marketDataRefreshNow.mockResolvedValue({ status: "completed", exchanges: [{}, {}] });
+    mockApi.ibkrFlexImportNow.mockResolvedValue({ counts: { positions: 14, nav_snapshots: 2 } });
+    mockApi.cryptoRefreshNow.mockResolvedValue({ status: "queued", wallets_refreshed: 4 });
+
+    renderPage();
+
+    expect(await screen.findByText("Refresh now")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh prices" }));
+    await waitFor(() => expect(screen.getByText("Refreshed 2 exchanges.")).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh IBKR" }));
+    await waitFor(() => expect(screen.getByText("Imported 14 positions, 2 NAV snapshots.")).toBeInTheDocument());
+    expect(mockApi.ibkrFlexImportNow).toHaveBeenCalledWith(9);
+
+    fireEvent.click(screen.getByRole("button", { name: "Refresh crypto" }));
+    await waitFor(() => expect(screen.getByText("Queued refresh for 4 wallets.")).toBeInTheDocument());
+  });
+
+  it("disables the IBKR refresh button when no IBKR account is linked", async () => {
+    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
+    mockApi.accounts.mockResolvedValue([]);
+    renderPage();
+
+    expect(await screen.findByText("Refresh now")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refresh IBKR" })).toBeDisabled();
   });
 });

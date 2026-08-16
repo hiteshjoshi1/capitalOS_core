@@ -311,4 +311,50 @@ describe("StockHoldings", () => {
     expect(await screen.findByText("25 of 25 positions")).toBeInTheDocument();
     expect(screen.getByText("POS25")).toBeInTheDocument();
   });
+
+  it("renders geography performance for the live period, separate from the allocation pie", async () => {
+    const liveFixture: StockHoldingsSummary = {
+      ...summaryFixture,
+      is_live: true,
+      geography_performance: [
+        { geography: "US", current_value: 50000, snapshot_value: 48000, delta_abs: 2000, delta_pct: 2000 / 48000 },
+        { geography: "HK", current_value: 120000, snapshot_value: 122000, delta_abs: -2000, delta_pct: -2000 / 122000 },
+      ],
+      geography_performance_as_of: "2026-03-01T09:00:00+00:00",
+    };
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Geography Performance")).toBeInTheDocument();
+    expect(screen.getByText("United States")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 2,000")).toBeInTheDocument();
+    expect(screen.getByText("Hong Kong")).toBeInTheDocument();
+    expect(screen.getByText("-S$ 2,000")).toBeInTheDocument();
+  });
+
+  it("shows a fallback message for geography performance on a historical (non-live) month", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...summaryFixture, is_live: false });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Geography Performance")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Geography performance is only available for the current, live period — pick the current month to see it.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

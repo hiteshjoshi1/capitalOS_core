@@ -27,6 +27,7 @@ from app.schemas.dashboard import (
     DataHubSummaryResponse,
     MiniTrendPoint,
     NetWorthChangeResponse,
+    NetWorthSinceUpdateResponse,
     GeographyExposureItem,
     GeographyExposureOut,
     PlatformAllocationItem,
@@ -104,6 +105,16 @@ def _anchor_ts(month_start: datetime) -> datetime:
 def _current_anchor_ts() -> datetime:
     tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
     return datetime.now(tz=tz).replace(microsecond=0)
+
+
+def _previous_update_anchor_ts(anchor_ts: datetime) -> datetime:
+    """One day before anchor_ts. Combined with the fact that price/NAV lookups
+    already resolve to "latest available at-or-before this anchor" (see
+    _latest_price_map, _effective_as_of), this yields the correct "since last
+    update" comparison point even when data is several days stale — both anchors
+    then resolve to the same underlying data point and the delta is correctly 0.
+    """
+    return anchor_ts - timedelta(days=1)
 
 
 def _completed_snapshot_anchor_ts(month_start: datetime) -> datetime:
@@ -2359,6 +2370,21 @@ def stock_holdings_summary(
     quote_freshness_summary = _quote_freshness_summary(top)
     trend = [MiniTrendPoint(**point) for point in _stock_trend(db, month_start, base_currency, current_user.id)]
 
+    geography_performance: list[dict[str, Any]] = []
+    geography_performance_as_of: Optional[str] = None
+    if is_live:
+        # Unlike the monthly compare_stock_exposure above (which relies on a distinct
+        # historical position/NAV snapshot per month boundary), a 1-day delta needs
+        # price_overlay=True on *both* sides so the movement reflects the anchor-scoped
+        # `prices` table (trade_date <= anchor) rather than a frozen snapshot value —
+        # otherwise accounts without a same-day re-import would always show a 0 delta.
+        day_compare_anchor = _previous_update_anchor_ts(effective_anchor)
+        day_compare_stock_exposure = _stock_exposure(
+            db, day_compare_anchor, base_currency, current_user.id, price_overlay=True
+        )
+        geography_performance = _stock_geography_breakdown(stock_exposure, day_compare_stock_exposure)
+        geography_performance_as_of = _iso_value(_effective_as_of(db, day_compare_anchor, current_user.id))
+
     return {
         "as_of_month": month,
         "base_currency": base_currency,
@@ -2373,11 +2399,82 @@ def stock_holdings_summary(
         "net_worth_freshness_status": freshness_status,
         "top_holdings": top,
         "geography_breakdown": geography_breakdown,
+        "geography_performance": geography_performance,
+        "geography_performance_as_of": geography_performance_as_of,
         "platform_breakdown": platform_breakdown,
         "stock_current_total": stock_exposure["total"],
         "stock_snapshot_total": compare_stock_exposure["total"],
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
+    }
+
+
+@router.get("/net-worth-since-update", response_model=NetWorthSinceUpdateResponse)
+def net_worth_since_update(
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Since-last-update net-worth delta: current live state vs. the last
+    available prior data point (not a fixed calendar day — if prices haven't
+    refreshed in days, both anchors resolve to the same data and the delta is 0).
+    """
+    top_holdings_limit = _summary_top_holdings_limit()
+    current_anchor = _current_anchor_ts()
+    compare_anchor = _previous_update_anchor_ts(current_anchor)
+    current_as_of = _effective_as_of(db, current_anchor, current_user.id)
+    compare_as_of = _effective_as_of(db, compare_anchor, current_user.id)
+    compare_label = compare_as_of.isoformat() if compare_as_of else "unknown"
+
+    # price_overlay=True on both sides (unlike the monthly comparisons elsewhere in
+    # this file) so the delta reflects the anchor-scoped `prices` table rather than a
+    # frozen position snapshot — see the matching comment in stock_holdings_summary.
+    current_nw = _networth_components(db, current_anchor, base_currency, current_user.id, price_overlay=True)
+    compare_nw = _networth_components(db, compare_anchor, base_currency, current_user.id, price_overlay=True)
+
+    def _change(current_value: float, previous_value: float) -> dict[str, Any]:
+        abs_change = current_value - previous_value
+        return {
+            "abs": abs_change,
+            "pct": (abs_change / previous_value) if previous_value > 0 else None,
+            "current_as_of": current_as_of.isoformat() if current_as_of else None,
+            "compare_as_of": compare_as_of.isoformat() if compare_as_of else None,
+            "compare_month": compare_label,
+        }
+
+    net_worth_change = _change(current_nw["total"], compare_nw["total"])
+    component_change = {
+        key: _change(current_nw[key], compare_nw[key])
+        for key in ("cash", "stocks_funds", "crypto")
+    }
+
+    snapshot_top = _top_holdings(
+        db,
+        current_anchor,
+        current_nw["total"],
+        base_currency,
+        current_user.id,
+        limit=max(top_holdings_limit, 250),
+        price_overlay=True,
+    )
+    prev_top = _top_holdings(
+        db,
+        compare_anchor,
+        compare_nw["total"],
+        base_currency,
+        current_user.id,
+        limit=max(top_holdings_limit, 250),
+        price_overlay=True,
+    )
+    top_movers = _top_movers_from_holdings(snapshot_top, prev_top, compare_label, limit=5)
+
+    return {
+        "base_currency": base_currency,
+        "current_as_of": current_as_of.isoformat() if current_as_of else None,
+        "compare_as_of": compare_as_of.isoformat() if compare_as_of else None,
+        "net_worth_change": net_worth_change,
+        "component_change": component_change,
+        "top_movers": top_movers,
     }
 
 
