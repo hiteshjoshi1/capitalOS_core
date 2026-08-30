@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.market_data.providers import EODDataProvider, EODHDProvider, FinnhubProvider, YahooProvider, YFinanceProvider, EodQuote
+from app.market_data.providers import EODHDProvider, FinnhubProvider, YahooProvider, YFinanceProvider, EodQuote
 
 
 YAHOO_SUFFIX = {
@@ -105,7 +105,7 @@ def _provider_chain(exchange_code: str) -> list[str]:
     else:
         raw = os.getenv("STOCK_PROVIDER_CHAIN_NON_US", "yfinance,yahoo")
     chain = [p.strip().lower() for p in raw.split(",") if p.strip()]
-    return [p for p in chain if p in {"finnhub", "eodhd", "eoddata", "yahoo", "yfinance"}]
+    return [p for p in chain if p in {"finnhub", "eodhd", "yahoo", "yfinance"}]
 
 
 
@@ -654,8 +654,6 @@ def _symbols_for_provider(provider_name: str, symbols: list[SymbolMapRow]) -> di
             symbol = row.eodhd_symbol
         elif provider_name == "finnhub":
             symbol = row.finnhub_symbol
-        elif provider_name == "eoddata":
-            symbol = row.exchange_symbol
         elif provider_name == "yfinance":
             symbol = row.yahoo_symbol
         else:
@@ -866,7 +864,6 @@ def _fetch_quotes(
     trade_date: date,
     eodhd: EODHDProvider,
     finnhub: FinnhubProvider,
-    eoddata: EODDataProvider,
     yfinance: YFinanceProvider,
     yahoo: YahooProvider,
 ) -> dict[str, EodQuote]:
@@ -874,8 +871,6 @@ def _fetch_quotes(
         return eodhd.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
     if provider_name == "finnhub":
         return finnhub.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
-    if provider_name == "eoddata":
-        return eoddata.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
     if provider_name == "yfinance":
         return yfinance.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
     return yahoo.fetch_prices(symbols, exchange_code=exchange_code, trade_date=trade_date)
@@ -891,7 +886,6 @@ def run_exchange_refresh(
     batch_size: int | None = None,
     eodhd: EODHDProvider | None = None,
     finnhub: FinnhubProvider | None = None,
-    eoddata: EODDataProvider | None = None,
     yfinance: YFinanceProvider | None = None,
     yahoo: YahooProvider | None = None,
 ) -> dict[str, Any]:
@@ -899,7 +893,6 @@ def run_exchange_refresh(
     trade_date = trade_date or datetime.now(tz=timezone.utc).date()
     eodhd = eodhd or EODHDProvider()
     finnhub = finnhub or FinnhubProvider()
-    eoddata = eoddata or EODDataProvider()
     yfinance = yfinance or YFinanceProvider()
     yahoo = yahoo or YahooProvider()
 
@@ -968,7 +961,6 @@ def run_exchange_refresh(
                         trade_date=trade_date,
                         eodhd=eodhd,
                         finnhub=finnhub,
-                        eoddata=eoddata,
                         yfinance=yfinance,
                         yahoo=yahoo,
                     )

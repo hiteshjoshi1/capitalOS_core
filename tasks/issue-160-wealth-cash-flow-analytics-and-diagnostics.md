@@ -196,12 +196,12 @@
 
 ## Deterministic Gate Results (Codex Mutable)
 _Append command-level evidence here._
-- `lint`: `pass` — `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_lint.log`
-- `typecheck`: `pass` — `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_typecheck.log`
-- `tests`: `pass` — `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_test-backend.log`, `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_contract-backend.log`, `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_test-frontend.log`, `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_contract-frontend.log`, `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_orch-test.log`
-- `e2e`: `pass` — `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_e2e.log`
-- `api-smoke`: `pass` — `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_api-smoke.log`
-- `policy-checks`: `pass` — `/Users/hiteshjoshi/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_api-rebuild.log`
+- `lint`: `pass` — `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_lint.log`
+- `typecheck`: `pass` — `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_typecheck.log`
+- `tests`: `pass` — `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_test-backend.log`, `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_contract-backend.log`, `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_test-frontend.log`, `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_contract-frontend.log`, `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_orch-test.log`
+- `e2e`: `pass` — `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_e2e.log`
+- `api-smoke`: `pass` — `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_api-smoke.log`
+- `policy-checks`: `pass` — `~/.copilot/session-state/9526429a-3b57-4c19-9aeb-b97c7c2c6879/files/issue-160-logs/make_api-rebuild.log`
 
 ## Extra Files Changed (Codex Mutable)
 _List all out-of-scope files with explicit rationale._

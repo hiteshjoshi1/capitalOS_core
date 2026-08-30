@@ -40,7 +40,7 @@ def test_render_execution_journal_includes_plan_approval_details() -> None:
     state.human_gate_decisions["plan_approval"] = HumanDecision(
         gate_type="plan_approval",
         decision="needs_fixes",
-        reviewer="Hitesh",
+        reviewer="TestReviewer",
         notes="Narrow scope to dashboard only.",
         questions=["Can this be split?"],
         response_requirements=["Tighten acceptance criteria"],
@@ -52,7 +52,7 @@ def test_render_execution_journal_includes_plan_approval_details() -> None:
     assert "## Human Gate Decisions" in rendered
     assert "### Plan Approval" in rendered
     assert "- decision: `needs_fixes`" in rendered
-    assert "- reviewer: `Hitesh`" in rendered
+    assert "- reviewer: `TestReviewer`" in rendered
     assert "- notes: Narrow scope to dashboard only." in rendered
     assert "Can this be split?" in rendered
     assert "Tighten acceptance criteria" in rendered
@@ -93,7 +93,7 @@ def test_render_execution_journal_includes_extra_files_context() -> None:
             extra_files_review=HumanDecision(
                 gate_type="extra_files_approval",
                 decision="approved",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Support file change is acceptable.",
             ),
             status="scope_approved",

@@ -5,7 +5,7 @@ rules, and coding standards, see `AGENTS.md`. For product vision, see `ReadMe.md
 and the `docs/PRD/` docs.
 
 ## Stack
-Postgres 16 (pgvector) + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
+Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 
 ## Run
 - `make up` — starts everything (postgres + api).
@@ -34,18 +34,6 @@ Postgres 16 (pgvector) + FastAPI + React (Vite/TS), all in Docker via `docker-co
 - Numbered, sequential `migrations/NNN_*.sql` — never edit an already-applied migration.
 - Never remove a field from an API response; only add. Keep TS types mirroring backend
   response shapes (see `AGENTS.md` § API Contract Rules).
-
-## RAG / research corpus
-- `config/rag_authors.yaml` is the source of truth for authors (id, domains, weight,
-  `photo_url`, etc.). It's **bind-mounted read-only** into the api container
-  (`./config:/app/config:ro`), so edits are live immediately — no rebuild needed.
-  Apply DB-side sync with `POST /rag/authors/sync-config` if you added/changed an author.
-- Eval harness: `make rag-eval`, `make rag-eval-compare`, `make rag-eval-drift`,
-  `make rag-eval-pdf-gate`. Golden queries: `api/app/rag/eval/fixtures/rag_golden_queries.yaml`.
-- Adding an author or ingesting a source: `/ingestion` skill covers the full flow
-  (config → sync-config → ingest-urls → selective/fanout → manual PDF-upload fallback).
-- Inspecting the corpus (doc counts, ownership, stuck jobs): `/corpus-inspect` skill —
-  use the read-only Postgres MCP server (`.mcp.json`) instead of ad hoc `docker exec psql`.
 
 ## Headless browser QA (screenshots)
 Playwright works, but the dev server (5173) and API (8000) are different origins and the

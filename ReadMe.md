@@ -94,36 +94,6 @@ Produces:
 - risk signals
 - sector trends
 
-### Module C — Investment Decision System (future)
-Provides structure for:
-
-- investment memos
-- checklists
-- decision logs
-- thesis tracking
-
-AI can assist with preparation, but humans retain judgment.
-
-### Module D — Feedback Loop (future)
-Tracks:
-
-- expected vs actual outcomes
-- root causes
-- recurring errors
-- winning patterns
-
-Designed to compound learning over time.
-
-### Module E — Public Thinking Layer (optional)
-Exports sanitized artifacts such as:
-
-- memos
-- post-mortems
-- mental models
-- process changes
-
-The emphasis is on reasoning, not performance signaling.
-
 ---
 
 ## Technology Stack
@@ -169,6 +139,44 @@ Optional, for AI workflow features:
 
 ---
 
+## Quickstart
+
+No environment variables are required to get running. Market data price
+refresh works out of the box (a free/keyless provider is the default
+fallback); crypto wallet tracking and IBKR auto-sync need their own API
+keys to work at all, but everything else is unaffected if you skip them —
+see [`docs/setup/api-keys.md`](docs/setup/api-keys.md) for exactly which
+keys unlock what, and where to get each one.
+
+```bash
+# 1. (optional) copy the env template if you want to add provider API keys
+cp .env.example .env
+
+# 2. build the images
+make build
+
+# 3. start Postgres + the API (and run migrations)
+make up
+make db-migrate
+
+# 4. (optional) seed rich demo data — net worth, spending, crypto, 12mo history
+make db-seed-dummy
+
+# 5. start the frontend dev server
+cd web && npm install && npm run dev
+```
+
+- **Frontend**: http://localhost:5173
+- **API**: http://localhost:8000 (health: `curl http://localhost:8000/health`, docs: `/docs`)
+- **Log in** with the seeded demo account — `demo` / `Test@1234` — or register a new
+  user from the signup screen and start tracking your own portfolio.
+
+Stop everything with `make down`. The reset target under Development
+Workflow below wipes the database — back up first, see
+[`docs/setup/backups.md`](docs/setup/backups.md).
+
+---
+
 ## Running the Application
 
 ### 1. Start local services
@@ -209,6 +217,33 @@ make db-migrate
 
 ```bash
 make db-seed-dummy
+```
+
+### 7. (Optional) Logs and observability
+
+A Grafana + Loki + Alloy stack ships in `docker-compose.yml` behind an `observability`
+profile, so it doesn't start with a plain `make up`. Bring it up with:
+
+```bash
+docker compose --profile observability up -d loki grafana alloy
+```
+
+- **Grafana**: http://localhost:3000 (login `admin` / `capitalos`, or override via
+  `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` in `.env`) — the Loki datasource is
+  pre-provisioned, so **Explore → Loki** shows live container logs immediately.
+- **Loki API** (for scripting/`curl`): http://localhost:3100
+
+Alloy tails every container's logs directly off the Docker socket and keeps any
+container whose Compose project name starts with `capitalos` (see
+`config/alloy/config.alloy`) — so it picks up `capitalos-api`/`capitalos-postgres`
+from the main stack as well as any `capitalos-oss-test-*` / dev/test stacks running
+alongside it, with no extra wiring per stack. Filter by the `container` or `service`
+label in Grafana to scope to one component.
+
+Stop just the observability stack (without touching Postgres/API) with:
+
+```bash
+docker compose --profile observability stop loki grafana alloy
 ```
 
 ---
@@ -393,9 +428,18 @@ make web-rebuild
 ### Resetting database
 
 ```bash
-# WARNING: This destroys all data
+# WARNING: This destroys all data — back up first: docs/setup/backups.md
 make db-reset
 ```
+
+### Backing up / restoring database
+
+```bash
+make db-backup                                    # writes backups/capitalos_<timestamp>.dump
+make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump
+```
+
+See [`docs/setup/backups.md`](docs/setup/backups.md) for automating this on a schedule.
 
 ---
 

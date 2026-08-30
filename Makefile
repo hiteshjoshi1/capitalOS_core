@@ -81,7 +81,10 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
+.PHONY: build up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
+
+build:
+	docker compose build
 
 up:
 	docker compose up -d
@@ -161,7 +164,25 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign
+.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore
+
+db-backup: db-wait
+	@mkdir -p backups
+	@ts=$$(date +%Y%m%d_%H%M%S); \
+	docker exec $(DB_CONTAINER) pg_dump -U $(DB_USER) -d $(DB_NAME) -F c -f /tmp/capitalos_backup.dump && \
+	docker cp $(DB_CONTAINER):/tmp/capitalos_backup.dump backups/capitalos_$${ts}.dump && \
+	docker exec $(DB_CONTAINER) rm -f /tmp/capitalos_backup.dump && \
+	echo "Backup written to backups/capitalos_$${ts}.dump"
+
+db-restore:
+	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump" && exit 2)
+	@test -f "$(BACKUP_FILE)" || (echo "Backup file not found: $(BACKUP_FILE)" && exit 2)
+	@echo "WARNING: this overwrites the current database ($(DB_NAME)) in $(DB_CONTAINER)."
+	@read -p "Type 'yes' to continue: " confirm; [ "$$confirm" = "yes" ] || (echo "Aborted." && exit 1)
+	docker cp $(BACKUP_FILE) $(DB_CONTAINER):/tmp/restore.dump
+	docker exec $(DB_CONTAINER) pg_restore -U $(DB_USER) -d $(DB_NAME) --clean --if-exists /tmp/restore.dump
+	docker exec $(DB_CONTAINER) rm -f /tmp/restore.dump
+	@echo "Restore complete."
 
 db-shell:
 	docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)
@@ -409,13 +430,13 @@ task-orch-smoke:
 .PHONY: task-approve-plan-example task-human-review-approve-example task-human-review-fix-example
 
 task-approve-plan-example:
-	@echo 'make task-approve-plan TASK=tasks/issue-123-example.md THREAD_ID=issue-123 RESUME_JSON='\''{"gate_type":"plan_approval","decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'\'''
+	@echo 'make task-approve-plan TASK=tasks/issue-123-example.md THREAD_ID=issue-123 RESUME_JSON='\''{"gate_type":"plan_approval","decision":"approved","reviewer":"YourName","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'\'''
 
 task-human-review-approve-example:
-	@echo 'make task-human-review TASK=tasks/issue-123-example.md THREAD_ID=issue-123 RESUME_JSON='\''{"decision":"approved","reviewer":"Hitesh","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'\'''
+	@echo 'make task-human-review TASK=tasks/issue-123-example.md THREAD_ID=issue-123 RESUME_JSON='\''{"decision":"approved","reviewer":"YourName","notes":"Looks good","questions":[],"response_requirements":[],"unresolved_comments":[]}'\'''
 
 task-human-review-fix-example:
-	@echo 'make task-human-review TASK=tasks/issue-123-example.md THREAD_ID=issue-123 RESUME_JSON='\''{"decision":"needs_fixes","reviewer":"Hitesh","notes":"Please address the routing issue","questions":["Was the edge case covered?"],"response_requirements":["Show the exact routing fix"],"unresolved_comments":["Do not ship until corrected"]}'\'''
+	@echo 'make task-human-review TASK=tasks/issue-123-example.md THREAD_ID=issue-123 RESUME_JSON='\''{"decision":"needs_fixes","reviewer":"YourName","notes":"Please address the routing issue","questions":["Was the edge case covered?"],"response_requirements":["Show the exact routing fix"],"unresolved_comments":["Do not ship until corrected"]}'\'''
 
 # ---- Cleanup helpers ----
 .PHONY: task-cache-clean orch-clean
@@ -427,7 +448,7 @@ orch-clean:
 	rm -rf .task-flow/
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
-.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test rag-eval rag-eval-compare rag-eval-seed rag-eval-pdf rag-eval-pdf-gate rag-eval-reranker-diagnose rag-eval-drift
+.PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test
 
 api-rebuild:
 	docker compose build api
@@ -469,29 +490,3 @@ crypto-smoke:
 		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
 		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
 	curl -sf -H "Authorization: Bearer $$TOKEN" "http://127.0.0.1:8000/crypto/summary?base_currency=USD" && echo
-
-# ── RAG evaluation harness ────────────────────────────────────────────────────
-
-rag-eval:
-	docker compose exec -T api python -m app.rag.eval.cli run --top-k $(or $(TOP_K),10)
-
-rag-eval-compare:
-	docker compose exec -T api python -m app.rag.eval.cli compare --a $(CONFIG_A) --b $(CONFIG_B) --top-k $(or $(TOP_K),10)
-
-rag-eval-seed:
-	docker compose exec -T api python -m app.rag.eval.cli seed --replace --file /app/app/rag/eval/fixtures/rag_golden_queries.yaml
-
-rag-eval-pdf:
-	docker compose exec -T api python -m app.rag.eval.cli run --label $(if $(LABEL),$(LABEL),pdf-eval) --source-type pdf $(if $(OUTPUT),--output $(OUTPUT),)
-
-rag-eval-pdf-gate:
-	@test -n "$(BASELINE_REPORT)" || (echo "Usage: make rag-eval-pdf-gate BASELINE_REPORT=data/<baseline-report>.json [LABEL=pdf-candidate]" && exit 2)
-	docker compose exec -T api python -m app.rag.eval.cli gate --baseline-report $(BASELINE_REPORT) --label $(if $(LABEL),$(LABEL),pdf-candidate) --source-type pdf
-
-rag-eval-reranker-diagnose:
-	docker compose exec -T -e RAG_RETRIEVAL_TRACE=$(or $(RAG_RETRIEVAL_TRACE),0) api python -m app.rag.eval.cli diagnose-reranker --top-k $(or $(TOP_K),10) --candidate-pool-size $(or $(CANDIDATE_POOL_SIZE),40) $(if $(SOURCE_TYPE),--source-type $(SOURCE_TYPE),) $(if $(INCLUDE_COHERE),--include-cohere,) $(foreach provider,$(PROVIDERS),--provider $(provider)) $(foreach mode,$(INPUT_MODES),--input-mode $(mode)) $(if $(QUERY_CONTAINS),--query-contains "$(QUERY_CONTAINS)",) $(if $(CACHE_PATH),--cache-path $(CACHE_PATH),) $(if $(OUTPUT),--output $(OUTPUT),)
-
-rag-eval-drift:
-	@test -n "$(OLD_REPORT)" || (echo "Usage: make rag-eval-drift OLD_REPORT=<path> NEW_REPORT=<path> [MAX_ROWS=20]" && exit 2)
-	@test -n "$(NEW_REPORT)" || (echo "Usage: make rag-eval-drift OLD_REPORT=<path> NEW_REPORT=<path> [MAX_ROWS=20]" && exit 2)
-	PYTHONPATH=api python3 -m app.rag.eval.drift --old $(OLD_REPORT) --new $(NEW_REPORT) --max-rows $(or $(MAX_ROWS),20)

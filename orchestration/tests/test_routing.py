@@ -63,7 +63,7 @@ def test_route_after_human_approval_step_advances_to_build_when_approved():
     state.human_gate_decisions["plan_approval"] = HumanDecision(
         gate_type="plan_approval",
         decision="approved",
-        reviewer="Hitesh",
+        reviewer="TestReviewer",
         notes="Approved",
     )
 
@@ -412,7 +412,7 @@ def test_route_after_human_review_to_ship():
         human_review=HumanReview(
             review_id="R1",
             decision="approved",
-            reviewer="Hitesh",
+            reviewer="TestReviewer",
             notes="ok",
         ),
         status="approved",
@@ -445,7 +445,7 @@ def test_route_after_human_review_scope_approved_reenters_agent_review_in_workfl
         extra_files_review=HumanDecision(
             gate_type="extra_files_approval",
             decision="approved",
-            reviewer="Hitesh",
+            reviewer="TestReviewer",
             notes="This support change is acceptable.",
         ),
         status="scope_approved",
@@ -478,7 +478,7 @@ def test_route_after_human_review_scope_approved_ends_in_step_mode():
         extra_files_review=HumanDecision(
             gate_type="extra_files_approval",
             decision="approved",
-            reviewer="Hitesh",
+            reviewer="TestReviewer",
             notes="This support change is acceptable.",
         ),
         status="scope_approved",
@@ -504,7 +504,7 @@ def test_route_after_human_review_to_rework():
         human_review=HumanReview(
             review_id="R1",
             decision="approved",
-            reviewer="Hitesh",
+            reviewer="TestReviewer",
             notes="still problems",
         ),
         status="needs_fixes",

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: pgvector/pgvector:pg16
+    image: postgres:16
     container_name: capitalos-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-capitalos}
@@ -16,8 +16,10 @@ services:
       context: ./api
     container_name: capitalos-api
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
+      DATABASE_URL: ${DATABASE_URL:-postgresql://capitalos:capitalos@postgres:5432/capitalos}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       LOG_FORMAT: ${LOG_FORMAT:-logfmt}
       DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-500}
@@ -30,6 +32,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
+      - ./api/app:/app/app
+    command: uvicorn app.main:app --host=0.0.0.0 --port=8000 --reload
 
   loki:
     image: grafana/loki:3.2.1

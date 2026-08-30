@@ -122,7 +122,7 @@ _No rework cycles yet._
 ## Permanently Failed / Gave Up
 - Stop reason: agent_run failed: All providers failed for v3 run: OpenAI Codex v0.107.0 (research preview)
 --------
-workdir: /Users/hiteshjoshi/apps/capitalos
+workdir: ~/apps/capitalos
 model: claude-sonnet-4.6
 provider: openai
 approval: never
@@ -141,7 +141,7 @@ Your responsibilities in this session:
 4) Return strict JSON only.
 
 Task file: tasks/issue-127-e2e-auth-fixes.md
-Repo root: /Users/hiteshjoshi/apps/capitalos
+Repo root: ~/apps/capitalos
 
 Task markdown:
 # Issue 127: e2e auth fixes

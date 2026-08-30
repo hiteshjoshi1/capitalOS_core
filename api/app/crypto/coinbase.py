@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 import httpx
 import jwt
@@ -17,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.crypto.ingest import SnapshotResult
 
-ADVANCED_TRADE_HOST = "api.coinbase.com"
 ADVANCED_TRADE_ACCOUNTS_PATH = "/api/v3/brokerage/accounts"
 DEFAULT_COINBASE_API_BASE = "https://api.coinbase.com"
 FIAT_CURRENCIES = {
@@ -208,7 +208,8 @@ def build_jwt(config: CoinbaseConfig, method: str, path: str) -> str:
         ) from exc
 
     now = int(time.time())
-    uri = f"{method.upper()} {ADVANCED_TRADE_HOST}{path}"
+    host = urlparse(config.api_base).netloc or urlparse(DEFAULT_COINBASE_API_BASE).netloc
+    uri = f"{method.upper()} {host}{path}"
     return jwt.encode(
         {
             "sub": config.key_id,

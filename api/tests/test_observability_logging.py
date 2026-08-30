@@ -25,8 +25,6 @@ from app.core.logging import (
 )
 from app.main import app as api_app
 from app.models.import_job import ImportJob
-from app.models.rag import RagQuery
-from app.rag.query_logger import log_query
 
 
 def _capture_logger(logger_name: str) -> tuple[logging.Logger, io.StringIO, logging.Handler, bool, int]:
@@ -79,8 +77,8 @@ def test_logfmt_formats_representative_fields() -> None:
 
 
 def test_logger_name_normalization_preserves_uvicorn_namespace() -> None:
-    assert normalize_logger_name("app.rag.query") == "capitalos.rag.query"
-    assert normalize_logger_name("api.app.routers.rag") == "capitalos.routers.rag"
+    assert normalize_logger_name("app.portfolio.scheduler") == "capitalos.portfolio.scheduler"
+    assert normalize_logger_name("api.app.routers.accounts") == "capitalos.routers.accounts"
     assert normalize_logger_name("capitalos.crypto") == "capitalos.crypto"
     assert normalize_logger_name("uvicorn.error") == "uvicorn.error"
 
@@ -416,20 +414,6 @@ def test_upload_ingestion_needs_mapping_branch_logs_warning(monkeypatch, db_engi
     assert "level=warning" in output
     assert "format_signature=sig-safe" in output
     assert "statement.csv" not in output
-
-
-def test_rag_query_log_attaches_active_request_id(db_engine) -> None:
-    token = bind_request_id("rag-req-1")
-    db = Session(db_engine)
-    try:
-        query_id = log_query(db, "what is capital allocation?", "concept")
-        assert query_id is not None
-        row = db.get(RagQuery, query_id)
-        assert row is not None
-        assert row.request_id == "rag-req-1"
-    finally:
-        db.close()
-        reset_request_id(token)
 
 
 def test_health_endpoint_emits_logfmt_request_log(client: TestClient) -> None:

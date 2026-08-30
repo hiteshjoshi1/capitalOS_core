@@ -193,13 +193,13 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
 
 ### Extra Files Approval
 - decision: `approved`
-- reviewer: `Hitesh Joshi`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-21T07:14:00.665114+00:00`
 - notes: Building the Langgraph pipeline, this is actually a pipeline build and test
 
 ### Extra Files Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-21T07:18:41.753311+00:00`
 - notes: NA
 - questions:
@@ -213,13 +213,13 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
 
 ### Extra Files Approval
 - decision: `approved`
-- reviewer: `Hitesh Joshi`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-21T14:02:29.186336+00:00`
 - notes: _none_
 
 ### Plan Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-20T09:52:42.085639+00:00`
 - notes: Approved
 
@@ -272,7 +272,7 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
 - `orchestration/tests/test_routing.py`: Orchestration framework changes - modified as part of pipeline execution (source: `builder`)
 - `orchestration/tests/test_verification.py`: Orchestration framework changes - new test file added as part of pipeline execution (source: `builder`)
 #### Extra Files Approval
-- reviewer: `Hitesh Joshi`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: Building the Langgraph pipeline, this is actually a pipeline build and test
 
@@ -290,7 +290,7 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
 - `.gitignore`: Builder could not infer why this out-of-scope file was changed. (source: `unknown`)
 - `Makefile`: Builder could not infer why this out-of-scope file was changed. (source: `unknown`)
 #### Extra Files Approval
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: NA
 - questions:
@@ -379,7 +379,7 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
   - No test exercises the fallback JOIN path (asset_id IS NULL on snapshot item with multiple matching crypto_assets rows) to detect the potential double-counting regression.
   - No frontend test (App.test.tsx) verifies that summary.cash_percent is forwarded to RiskCard's cashPercent prop and rendered as the first KPI row.
 #### Human Review
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: Address the remaining R6 issues before final approval.
 
@@ -400,7 +400,7 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
   - No test covering the MIN(base_asset) collision path in crypto_asset_fallback (same symbol, same chain, two crypto_assets rows with different base_asset values). The existing duplicate-asset test only covers NULL asset_id fallback, not conflicting base_asset values.
   - No test verifying that asset_id is null (not absent) in top_holdings for crypto rows in the API JSON response.
 #### Human Review
-- reviewer: `Hitesh Joshi`
+- reviewer: `Repo Owner`
 - decision: `needs_fixes`
 - notes: stock and crypto detail pages must stay separatecombining is only for dashboard risk/top-holdings/holdings must remain stock-only/crypto/holdings must remain crypto-only
 - questions:
@@ -422,7 +422,7 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
 #### Extra Files Outside Planned Scope
 - `orchestration/tests/test_prompts.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
 #### Extra Files Approval
-- reviewer: `Hitesh Joshi`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: _none_
 
@@ -445,7 +445,7 @@ Successfully implemented dashboard risk card fixes. The API now returns a `cash_
   - StockHoldings.test.tsx fixture contains no CRYPTO-class holding, so there is no explicit assertion that crypto items are excluded from the rendered table. A fixture row with asset_class='CRYPTO' and a negative assertion would close this gap.
   - No frontend test verifies that cashPercent prop is rendered by RiskCard when populated from summary.cash_percent.
 #### Human Review
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: _none_
 

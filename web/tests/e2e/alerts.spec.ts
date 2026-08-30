@@ -14,7 +14,6 @@ async function mockAlertsApis(page: Page, uploadReminders: object[] = []) {
     await route.fulfill({
       json: {
         upload_reminders: uploadReminders,
-        system_notifications: [],
         total_count: uploadReminders.length,
       },
     });

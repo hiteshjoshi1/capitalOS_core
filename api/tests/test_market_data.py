@@ -39,18 +39,6 @@ def test_yfinance_dividend_yield_subunit_uses_implied_anchor():
     assert value == pytest.approx(0.0023, rel=1e-9)
 
 
-@pytest.mark.parametrize("status_code", [429, 500])
-def test_eoddata_provider_surfaces_http_failures(monkeypatch, status_code):
-    request = httpx.Request("GET", "https://api.eoddata.com/Quote/Get/US/REGN")
-    response = httpx.Response(status_code, request=request)
-    monkeypatch.setattr(providers, "request_with_retry", lambda *args, **kwargs: response)
-
-    with pytest.raises(httpx.HTTPStatusError) as exc_info:
-        providers.EODDataProvider(api_key="test").fetch_prices(["REGN"], exchange_code="US")
-
-    assert exc_info.value.response.status_code == status_code
-
-
 def test_market_data_refresh_and_status(client, db_engine, monkeypatch):
     published_events = []
 
@@ -419,7 +407,6 @@ def test_market_data_status_surfaces_stale_and_failed_symbol_diagnostics(client,
     [
         ("eodhd", "EODHDProvider"),
         ("finnhub", "FinnhubProvider"),
-        ("eoddata", "EODDataProvider"),
         ("yfinance", "YFinanceProvider"),
         ("yahoo", "YahooProvider"),
     ],

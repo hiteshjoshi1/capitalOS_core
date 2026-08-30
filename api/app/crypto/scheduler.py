@@ -49,11 +49,23 @@ def _coinbase_user_id(db) -> int:
             raise RuntimeError(f"COINBASE_USERNAME={username!r} does not match an active user.")
         return int(row[0])
 
-    raw = os.getenv("COINBASE_USER_ID", os.getenv("AUTH_BYPASS_USER_ID", "1"))
-    try:
-        return int(raw)
-    except ValueError:
-        return 1
+    raw = os.getenv("COINBASE_USER_ID", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise RuntimeError(f"COINBASE_USER_ID={raw!r} is not a valid integer.") from exc
+
+    # No explicit target configured. Deliberately do NOT fall back to
+    # AUTH_BYPASS_USER_ID or a hardcoded default (e.g. user id 1, which is
+    # the seeded demo account) — that would silently sync real Coinbase
+    # holdings into whichever account happens to be user 1, including the
+    # public demo user in an open-source deployment.
+    raise RuntimeError(
+        "Coinbase is configured (COINBASE_KEY_ID/COINBASE_KEY_SECRET set) but neither "
+        "COINBASE_USERNAME nor COINBASE_USER_ID is set — refusing to guess which user "
+        "owns this Coinbase account. Set one of them in .env."
+    )
 
 
 def _ensure_configured_exchange_sources(db) -> None:
@@ -140,7 +152,19 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False) -> None:
     with job_context():
         db = next(get_db())
         try:
-            rows = _active_wallets(db, coinbase_only=coinbase_only)
+            try:
+                rows = _active_wallets(db, coinbase_only=coinbase_only)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception(
+                    "crypto_refresh_config_error",
+                    extra={
+                        "event": "crypto_refresh_config_error",
+                        "provider": "crypto",
+                        "platform": "crypto",
+                        "error_class": exc.__class__.__name__,
+                    },
+                )
+                return
             refreshed = 0
             skipped = 0
             logger.info(

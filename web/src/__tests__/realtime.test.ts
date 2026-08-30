@@ -39,7 +39,7 @@ function makeToken(expOffsetSeconds: number): string {
   const payload = b64url(
     JSON.stringify({
       sub: "2",
-      username: "hitesh",
+      username: "testuser",
       exp: Math.floor(Date.now() / 1000) + expOffsetSeconds,
       type: "access",
     }),
@@ -74,7 +74,7 @@ describe("realtime client", () => {
     setAccessToken(makeToken(-3600));
     const { subscribeToRealtimeTopic } = await import("../lib/realtime");
 
-    const unsubscribe = subscribeToRealtimeTopic("author-ingestion", {});
+    const unsubscribe = subscribeToRealtimeTopic("portfolio-refresh", {});
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
 

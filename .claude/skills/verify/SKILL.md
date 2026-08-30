@@ -47,14 +47,6 @@ make db-migrate
 ```
 Tracked in the `schema_migrations` table — safe to re-run, already-applied files are skipped automatically. Never edit an already-applied migration; add a new one instead. Any destructive migration content (`DROP TABLE`/`TRUNCATE`/`DELETE FROM` without `WHERE`) will be blocked by the repo's `PreToolUse` hook if run directly via `psql -c` — that's expected; put destructive intent in a reviewed migration file, not an ad hoc command.
 
-## RAG / research corpus
-```bash
-make rag-eval                 # eval harness against golden queries
-make rag-eval-compare CONFIG_A=... CONFIG_B=...
-make rag-eval-drift OLD_REPORT=... NEW_REPORT=...
-```
-Golden queries live in `api/app/rag/eval/fixtures/rag_golden_queries.yaml`.
-
 ## Full gate (rarely needed for a single change)
 ```bash
 make verify   # frontend/backend lint + typecheck + backend/frontend tests

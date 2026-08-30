@@ -190,7 +190,7 @@ def test_full_e2e_happy_path(tmp_path: Path, monkeypatch):
                 resume={
                     "gate_type": "v3_high_risk_review",
                     "decision": "approved",
-                    "reviewer": "Hitesh",
+                    "reviewer": "TestReviewer",
                     "notes": "ship it",
                     "questions": [],
                     "response_requirements": [],

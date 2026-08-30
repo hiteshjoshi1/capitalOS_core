@@ -23,7 +23,6 @@ vi.mock("../lib/api", () => ({
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     alertNotifications: vi.fn().mockResolvedValue({
       upload_reminders: [],
-      system_notifications: [],
       total_count: 0,
     }),
   },
@@ -259,7 +258,6 @@ describe("frontend contracts", () => {
     expect(within(sidebar).getByRole("link", { name: "Cash Flow" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("link", { name: "Liabilities" })).toBeInTheDocument();
     expect(within(sidebar).getByRole("link", { name: "Data Hub" })).toBeInTheDocument();
-    expect(within(sidebar).getByRole("link", { name: "Research" })).toBeInTheDocument();
     expect(within(sidebar).queryByRole("link", { name: "Dashboard" })).not.toBeInTheDocument();
     expect(screen.getByText("Wealth Content")).toBeInTheDocument();
   });

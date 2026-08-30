@@ -172,7 +172,7 @@ make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 {
   "gate_type": "v3_high_risk_review",
   "decision": "approved",
-  "reviewer": "Hitesh",
+  "reviewer": "YourName",
   "notes": "Reviewed and approved"
 }
 ```
@@ -183,7 +183,7 @@ make task-ship TASK=tasks/issue-123-my-feature.md THREAD_ID=issue-123
 {
   "gate_type": "v3_high_risk_review",
   "decision": "needs_fixes",
-  "reviewer": "Hitesh",
+  "reviewer": "YourName",
   "notes": "Risk remains too high; address findings"
 }
 ```

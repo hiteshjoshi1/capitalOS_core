@@ -295,7 +295,7 @@ def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch)
             text(
                 """
                 INSERT INTO users (id, username, display_name, is_active)
-                VALUES (2, 'hitesh', 'Hitesh', 1)
+                VALUES (2, 'testuser', 'Test User', 1)
                 """
             )
         )
@@ -316,7 +316,7 @@ def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch)
     monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
     monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
     monkeypatch.setenv("COINBASE_SCHEDULER_ENABLED", "auto")
-    monkeypatch.setenv("COINBASE_USERNAME", "hitesh")
+    monkeypatch.setenv("COINBASE_USERNAME", "testuser")
     monkeypatch.setenv("COINBASE_USER_ID", "1")
     monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
     monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)

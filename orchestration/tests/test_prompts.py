@@ -39,7 +39,7 @@ def test_rework_analysis_prompt_includes_review_findings_and_human_input():
             human_review=HumanReview(
                 review_id="R4",
                 decision="approved",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Proceed with another rework pass.",
                 response_requirements=["Address the SQL bug first."],
                 unresolved_comments=["Double-counting risk still looks unresolved."],
@@ -94,7 +94,7 @@ def test_rework_analysis_prompt_preserves_source_review_intent_through_scope_gat
             human_review=HumanReview(
                 review_id="R1",
                 decision="needs_fixes",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Update docs to the LangGraph workflow and keep the template aligned.",
                 response_requirements=["Keep the docs aligned with the latest orchestration flow."],
             ),
@@ -125,7 +125,7 @@ def test_rework_analysis_prompt_preserves_source_review_intent_through_scope_gat
                 {
                     "gate_type": "extra_files_approval",
                     "decision": "needs_fixes",
-                    "reviewer": "Hitesh",
+                    "reviewer": "TestReviewer",
                     "notes": "Template is okay, but the main docs still need fixing.",
                     "response_requirements": ["Document task-respond and current stage commands."],
                     "unresolved_comments": ["Do not lose the main documentation objective."],
@@ -194,7 +194,7 @@ def test_review_prompt_carries_forward_human_requirements_from_source_review():
             human_review=HumanReview(
                 review_id="R6",
                 decision="needs_fixes",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Keep stock and crypto detail pages separate.",
                 response_requirements=["Verify /holdings stays stock-only after rework."],
                 unresolved_comments=["Combining is only intended for dashboard risk."],
@@ -277,7 +277,7 @@ def test_review_prompt_includes_semantic_requirements_and_grounded_verification_
             human_review=HumanReview(
                 review_id="R6",
                 decision="needs_fixes",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Use the real Makefile behavior.",
                 response_requirements=["Describe task-respond as the primary interactive gate command."],
                 unresolved_comments=["Do not present JSON resume commands as the default operator path."],
@@ -336,7 +336,7 @@ def test_rework_prompts_carry_semantic_requirements_forward():
             human_review=HumanReview(
                 review_id="R7",
                 decision="needs_fixes",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Fix the docs semantically, not just by adding the command name.",
                 response_requirements=["Describe task-respond as an interactive human gate."],
                 unresolved_comments=["Do not stop at string presence."],

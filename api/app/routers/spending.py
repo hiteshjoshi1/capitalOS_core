@@ -181,7 +181,8 @@ def _cash_flow_rows(db: Session, start: datetime, end: datetime, current_user_id
             ELSE 'uncategorized'
           END AS category_source,
           t.merchant_counterparty,
-          t.notes
+          t.notes,
+          (SELECT display_name FROM users WHERE id = :current_user_id) AS owner_display_name
         FROM transactions t
         JOIN accounts a ON a.id = t.account_id
         LEFT JOIN category_overrides co ON co.transaction_id = t.id
@@ -213,9 +214,29 @@ def _is_transfer_resolved_category(row) -> bool:
     return resolved_code == "transfer" or parent_code == "transfer"
 
 
+def _name_word_set(value: str | None) -> set[str]:
+    return set(str(value or "").strip().lower().split())
+
+
+def _is_self_named_counterparty(row) -> bool:
+    """Catches deposits/transfers where the counterparty field is just the
+    account owner's own name (e.g. a counter/ATM cash deposit slip), which
+    are self-transfers between the owner's own accounts, not external income.
+    Requires an exact word-set match (ignoring word order) so it only fires
+    on bare-name counterparties and doesn't false-positive on merchant names
+    that merely contain one of the owner's name words.
+    """
+    own_name = _name_word_set(row.get("owner_display_name"))
+    if not own_name:
+        return False
+    return _name_word_set(row.get("merchant_counterparty")) == own_name
+
+
 def _is_explicit_source_transfer(row) -> bool:
     raw_category = str(row.get("raw_category") or "").strip().lower()
     if raw_category in EXPLICIT_TRANSFER_RAW_CATEGORIES:
+        return True
+    if _is_self_named_counterparty(row):
         return True
     text = " ".join(
         [

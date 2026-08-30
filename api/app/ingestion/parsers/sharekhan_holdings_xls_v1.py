@@ -48,23 +48,36 @@ def _is_html_file(path: str) -> bool:
         return False
 
 
+_HEADER_TOKENS = {"available qty", "qty", "hold value", "market value", "hold price", "market price", "scrip", "symbol", "isin"}
+
+
+def _header_hit_count(values: list[str]) -> int:
+    hit = 0
+    for v in values:
+        if not v:
+            continue
+        for t in _HEADER_TOKENS:
+            if t in v:
+                hit += 1
+                break
+    return hit
+
+
 def _find_header_row(df: pd.DataFrame) -> int | None:
-    tokens = {"available qty", "qty", "hold value", "market value", "hold price", "market price", "scrip", "symbol", "isin"}
     for idx, row in df.iterrows():
         values = [_clean_header(v) for v in row.tolist()]
         if not any(values):
             continue
-        hit = 0
-        for v in values:
-            if not v:
-                continue
-            for t in tokens:
-                if t in v:
-                    hit += 1
-                    break
-        if hit >= 2:
+        if _header_hit_count(values) >= 2:
             return int(idx)
     return None
+
+
+def _columns_look_like_header(columns: list) -> bool:
+    # Covers HTML tables whose header row uses <th> — pandas' read_html
+    # already promotes that to DataFrame.columns, so it never shows up as a
+    # data row for _find_header_row to scan.
+    return _header_hit_count([_clean_header(c) for c in columns]) >= 2
 
 
 def _select_sheet(xls: pd.ExcelFile) -> SheetSelection | None:
@@ -111,17 +124,25 @@ def _select_html_table(tables: list[pd.DataFrame]) -> tuple[pd.DataFrame, SheetS
         if raw.empty:
             continue
         header_row = _find_header_row(raw)
-        if header_row is None:
-            header_vals = [_clean_header(c) for c in raw.columns.tolist()]
-            selection = SheetSelection(name=f"HTML_TABLE_{idx}", header_row=0, columns=header_vals)
-            data = raw.reset_index(drop=True)
-            data.columns = [str(c).strip() for c in header_vals]
-        else:
+        if header_row is not None:
             header_vals = [_clean_header(c) for c in raw.loc[header_row].tolist()]
             selection = SheetSelection(name=f"HTML_TABLE_{idx}", header_row=header_row, columns=header_vals)
             data = raw.iloc[header_row + 1 :].reset_index(drop=True)
             data.columns = [str(c).strip() for c in header_vals]
-        return data, selection
+            return data, selection
+        if _columns_look_like_header(raw.columns.tolist()):
+            # Header used <th> — pandas already promoted it to real column
+            # names, so every row of `raw` is data (there's no header row to
+            # skip past).
+            header_vals = [_clean_header(c) for c in raw.columns.tolist()]
+            selection = SheetSelection(name=f"HTML_TABLE_{idx}", header_row=0, columns=header_vals)
+            data = raw.reset_index(drop=True)
+            data.columns = [str(c).strip() for c in header_vals]
+            return data, selection
+        # Neither a matching header row nor matching column names — this
+        # table isn't the holdings table (e.g. a title/customer-info table
+        # above the real one in Sharekhan's export). Keep looking.
+        continue
     return None
 
 

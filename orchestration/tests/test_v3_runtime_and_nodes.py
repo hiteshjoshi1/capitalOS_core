@@ -387,7 +387,7 @@ def test_deterministic_gates_high_risk_rejected_blocks(tmp_path, monkeypatch) ->
         lambda payload: {
             "gate_type": "v3_high_risk_review",
             "decision": "needs_fixes",
-            "reviewer": "Hitesh",
+            "reviewer": "TestReviewer",
             "notes": "Risk too high.",
         },
     )
@@ -420,7 +420,7 @@ def test_deterministic_gates_high_risk_approved_allows_completion(tmp_path, monk
         lambda payload: {
             "gate_type": "v3_high_risk_review",
             "decision": "approved",
-            "reviewer": "Hitesh",
+            "reviewer": "TestReviewer",
             "notes": "",
         },
     )
@@ -480,10 +480,10 @@ def test_deterministic_gates_high_risk_nested_decision_payload_is_normalized(tmp
         lambda payload: {
             "decision": {
                 "decision": "approved",
-                "reviewer": "Hitesh",
+                "reviewer": "TestReviewer",
                 "notes": "",
             },
-            "reviewer": "Hitesh",
+            "reviewer": "TestReviewer",
             "notes": "",
         },
     )

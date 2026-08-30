@@ -435,7 +435,7 @@ _Before running `task-rework`, add/update:_
   Attempt 2 failure: unchanged connection refused on both `http://localhost:8000/health` and `http://127.0.0.1:8000/health`.
 - Scoped auto-fix cycle
   Diagnostic actions: attempted `make up` to reassert the runtime before a final curl pass.
-  Outcome: Docker daemon access was denied by the sandbox (`operation not permitted` on `/Users/hiteshjoshi/.docker/run/docker.sock`). Stopped here and recorded the environment blocker.
+  Outcome: Docker daemon access was denied by the sandbox (`operation not permitted` on `~/.docker/run/docker.sock`). Stopped here and recorded the environment blocker.
 
 ## Automation Log (Mutable)
 - Audited the existing category-mapping implementation already present in the workspace against the approved issue-115 plan and acceptance criteria.
@@ -470,14 +470,14 @@ make test-backend attempt 2 failed unchanged. Scoped auto-fix stopped after targ
 
 ```text
 make test-backend failed on attempt 1 with exit code 2: make test-backend
-Failure log: /Users/hiteshjoshi/apps/capitalos/.task-cache/failures/20260315T063527Z_make-test-backend_attempt1.log
+Failure log: ~/apps/capitalos/.task-cache/failures/20260315T063527Z_make-test-backend_attempt1.log
 ```
 
 ### Retry Entry (2026-03-15T06:35:32Z)
 
 ```text
 make test-backend failed on attempt 2 with exit code 2: make test-backend
-Failure log: /Users/hiteshjoshi/apps/capitalos/.task-cache/failures/20260315T063532Z_make-test-backend_attempt2.log
+Failure log: ~/apps/capitalos/.task-cache/failures/20260315T063532Z_make-test-backend_attempt2.log
 ```
 
 ### Retry Entry (2026-03-15T06:41:54Z)
@@ -493,14 +493,14 @@ api/tests/test_uob_account_parser.py
 
 ```text
 make test-backend failed on attempt 1 with exit code 2: make test-backend
-Failure log: /Users/hiteshjoshi/apps/capitalos/.task-cache/failures/20260315T071447Z_make-test-backend_attempt1.log
+Failure log: ~/apps/capitalos/.task-cache/failures/20260315T071447Z_make-test-backend_attempt1.log
 ```
 
 ### Retry Entry (2026-03-15T07:14:51Z)
 
 ```text
 make test-backend failed on attempt 2 with exit code 2: make test-backend
-Failure log: /Users/hiteshjoshi/apps/capitalos/.task-cache/failures/20260315T071451Z_make-test-backend_attempt2.log
+Failure log: ~/apps/capitalos/.task-cache/failures/20260315T071451Z_make-test-backend_attempt2.log
 ```
 
 ### Retry Entry (2026-03-15T07:18:34Z)

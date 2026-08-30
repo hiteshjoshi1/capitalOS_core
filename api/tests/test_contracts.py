@@ -46,14 +46,3 @@ def test_dashboard_summary_contract_shape(client: TestClient, seed_dashboard_dat
         "value",
         "percent_of_networth",
     }.issubset(body["top_holdings"][0].keys())
-
-
-def test_ai_sage_chat_routes_are_in_openapi(client: TestClient):
-    resp = client.get("/openapi.json")
-    assert resp.status_code == 200
-    paths = resp.json()["paths"]
-    assert "/ai-sage/chats" in paths
-    assert "/ai-sage/chats/search" in paths
-    assert "/ai-sage/chats/{chat_id}" in paths
-    assert "/ai-sage/chats/{chat_id}/messages" in paths
-    assert "/ai-sage/chats/{chat_id}/messages/{message_id}/retry" in paths

@@ -11,7 +11,6 @@ import WealthOverview from "../routes/WealthOverview";
 import WealthRisk from "../routes/WealthRisk";
 import LiabilitiesOverview from "../routes/LiabilitiesOverview";
 import OperationsOverview from "../routes/OperationsOverview";
-import IntelligenceOverview from "../routes/IntelligenceOverview";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -144,7 +143,6 @@ vi.mock("../lib/api", () => ({
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     alertNotifications: vi.fn().mockResolvedValue({
       upload_reminders: [],
-      system_notifications: [],
       total_count: 0,
     }),
   },
@@ -280,7 +278,6 @@ describe("Placeholder route smoke tests", () => {
     { path: "/risk", component: <WealthRisk />, heading: "Wealth Risk" },
     { path: "/liabilities", component: <LiabilitiesOverview />, heading: "Liabilities" },
     { path: "/operations", component: <OperationsOverview />, heading: "Data Hub" },
-    { path: "/intelligence", component: <IntelligenceOverview />, heading: "Research" },
   ];
 
   routes.forEach(({ path, component, heading }) => {

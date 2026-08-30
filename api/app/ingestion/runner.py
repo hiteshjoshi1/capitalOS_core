@@ -658,6 +658,7 @@ def _report(
         },
         "validation_warnings": warnings or [],
         "preview_transactions": preview or [],
+        "preview_positions": (parser_meta or {}).get("preview_positions", []),
         "parser_meta": parser_meta or {},
         "signature_debug": signature_debug,
         "error_message": error,

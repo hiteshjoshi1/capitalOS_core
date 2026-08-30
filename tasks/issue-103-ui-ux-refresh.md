@@ -212,13 +212,13 @@ Implementation and verification suite completed successfully.
 
 ```text
 ✗ Check git log and changed files
-  $ cd /Users/hiteshjoshi/apps/capitalos && git --no-pager log --oneline -10 && echo "---" && git
+  $ cd ~/apps/capitalos && git --no-pager log --oneline -10 && echo "---" && git
   --no-pager diff main...HEAD --name-only 2>/dev/null || git --no-pager diff HEAD~5...HEAD
   --name-only
   Permission denied and could not request permission from user
 
 ✗ Check if dashboard components exist
-  $ cd /Users/hiteshjoshi/apps/capitalos && ls web/src/components/ 2>/dev/null && ls
+  $ cd ~/apps/capitalos && ls web/src/components/ 2>/dev/null && ls
   web/src/components/dashboard/ 2>/dev/null && echo "---" && ls web/src/__tests__/ 2>/dev/null
   Permission denied and could not request permission from user
 

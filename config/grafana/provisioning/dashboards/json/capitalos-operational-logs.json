@@ -251,40 +251,6 @@
       ],
       "title": "Snapshot Creation Outcomes",
       "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "loki",
-        "uid": "capitalos-loki"
-      },
-      "gridPos": {
-        "h": 7,
-        "w": 12,
-        "x": 12,
-        "y": 22
-      },
-      "id": 8,
-      "options": {
-        "dedupStrategy": "none",
-        "enableLogDetails": true,
-        "showTime": true,
-        "sortOrder": "Descending",
-        "wrapLogMessage": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "loki",
-            "uid": "capitalos-loki"
-          },
-          "editorMode": "code",
-          "expr": "{service=\"api\"} | logfmt | event=\"rag_ingest_failed\"",
-          "queryType": "range",
-          "refId": "A"
-        }
-      ],
-      "title": "RAG Ingestion Failures",
-      "type": "logs"
     }
   ],
   "refresh": "30s",

@@ -193,7 +193,7 @@ None blocking. All decisions are reversible via AD-7 rollback plan.
   - backend typecheck step reported: `mypy not installed in api image; skipping backend typecheck` (expected Makefile behavior).
 - `make test-backend`: FAIL after 3 retries (environment/sandbox)
   - error: Docker socket permission denied when trying `docker compose run --rm api pytest`
-  - message included `connect: operation not permitted` for `/Users/hiteshjoshi/.docker/run/docker.sock`.
+  - message included `connect: operation not permitted` for `~/.docker/run/docker.sock`.
 - `make test-frontend`: PASS
   - vitest: `6 passed`, `25 passed`.
 - Playwright config detected in `web/`, so `make e2e` was run: PASS

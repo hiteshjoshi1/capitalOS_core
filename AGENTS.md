@@ -183,12 +183,6 @@ No partial implementations.
 
 These belong to later modules.
 
-# Active Modules
-
-- RAG intelligence layer — built and active under `api/app/rag/`, `api/app/routers/rag.py`,
-  `api/app/routers/ai_sage.py`. Includes author ingestion, retrieval, AI Sage chat, and an
-  eval harness (`make rag-eval`). Not a future module — treat it as a first-class surface.
-
 ---
 
 # OpenAPI

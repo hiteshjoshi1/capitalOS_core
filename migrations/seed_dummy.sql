@@ -14,7 +14,7 @@ BEGIN
 END $$;
 
 UPDATE users
-SET display_name = 'Demo Joshi',
+SET display_name = 'Demo User',
     is_active = TRUE,
     updated_at = NOW()
 WHERE LOWER(username) = 'demo';

@@ -97,7 +97,7 @@ Successfully fixed markdown formatting in ReadMe.md and docs/workflows/ai-task-f
 
 ### Extra Files Approval
 - decision: `needs_fixes`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-21T15:37:26.128451+00:00`
 - notes: I am ok with the changed file as i asked for it, but the read me and ai task flow md is still old and not covering the latest make commands, I dont see task-respond anywhere. Why are we not updating the readme.md and aitaskflow md files
 - questions:
@@ -125,7 +125,7 @@ Successfully fixed markdown formatting in ReadMe.md and docs/workflows/ai-task-f
 
 ### Plan Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-21T15:04:13.996796+00:00`
 - notes: _none_
 
@@ -140,7 +140,7 @@ Successfully fixed markdown formatting in ReadMe.md and docs/workflows/ai-task-f
 - risk: `low`
 - summary: Pure documentation fix across two markdown files. ReadMe.md is now complete and untruncated, covering all make commands (up, down, api-rebuild, web-rebuild, db-reset, api-smoke, verify) and a Pipeline section linking to ai-task-flow.md. ai-task-flow.md has full ### headings for every pipeline stage, fenced bash blocks for all make/shell commands, fenced json blocks for resume payloads, and consistent bullet lists throughout. All seven acceptance criteria are satisfied by direct inspection.
 #### Human Review
-- reviewer: `Hitesh Joshi`
+- reviewer: `Repo Owner`
 - decision: `needs_fixes`
 - notes: The docs are stale, they contain old commands which are no longer there. Check the make file and update the readme and ai-task-flow.md. Also, the _template.md is old and has fields which are no longer being sued by the new pipeline. Can you fix the template file so it aligns with the latest pipeline changes in orchestration. the sh based pipeline is no longer in use. The readme and the ai-task flow should be updated to reflect that
 - response_requirements:
@@ -159,7 +159,7 @@ Successfully fixed markdown formatting in ReadMe.md and docs/workflows/ai-task-f
 #### Extra Files Outside Planned Scope
 - `tasks/_template.md`: Builder could not infer why this out-of-scope file was changed. (source: `unknown`)
 #### Extra Files Approval
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `needs_fixes`
 - notes: I am ok with the changed file as i asked for it, but the read me and ai task flow md is still old and not covering the latest make commands, I dont see task-respond anywhere. Why are we not updating the readme.md and aitaskflow md files
 - questions:

@@ -1,6 +1,6 @@
 # Remote Dev: Driving Claude Code on CapitalOS from a Phone
 
-CapitalOS is local-first by design (see `AGENTS.md`) — Postgres+pgvector, the
+CapitalOS is local-first by design (see `AGENTS.md`) — Postgres, the
 api container, and all seeded demo/dev data only exist on your home machine
 via `docker-compose.yml`. There's no hosted/staging copy. That means "drive
 Claude Code from my phone" splits into two genuinely different situations,

@@ -139,7 +139,7 @@ Implemented the upload-reminder alerts system end-to-end. Backend: new Pydantic 
 
 ### Plan Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-22T09:05:39.023491+00:00`
 - notes: Alerts are only consumed by UI and shouldleted by database 1 year after they are created
 

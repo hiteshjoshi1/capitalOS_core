@@ -1917,6 +1917,48 @@ def run_ibkr_flex_import_from_xml(
     }
 
 
+def _authorized_flex_user_id(db: Session) -> int:
+    """Resolve which single user is allowed to trigger/receive IBKR Flex imports.
+
+    IBKR_FLEX_TOKEN/IBKR_FLEX_QUERY_ID are one global set of credentials for
+    one real IBKR account, shared by every user in this deployment — there is
+    no per-user IBKR key. Without this check, any authenticated user with an
+    accounts row on platform 'IBKR' (including the seeded demo user) could
+    trigger a real import of that one shared account's data into their own
+    records. Require an explicit owner instead of trusting the caller.
+    """
+    username = os.getenv("IBKR_FLEX_USERNAME", "").strip()
+    if username:
+        row = db.execute(
+            text(
+                """
+                SELECT id
+                FROM users
+                WHERE LOWER(username) = LOWER(:username)
+                  AND COALESCE(is_active, TRUE) = TRUE
+                LIMIT 1
+                """
+            ),
+            {"username": username},
+        ).fetchone()
+        if row is None:
+            raise IbkrFlexConfigError(f"IBKR_FLEX_USERNAME={username!r} does not match an active user.")
+        return int(row[0])
+
+    raw = os.getenv("IBKR_FLEX_USER_ID", "").strip()
+    if raw:
+        try:
+            return int(raw)
+        except ValueError as exc:
+            raise IbkrFlexConfigError(f"IBKR_FLEX_USER_ID={raw!r} is not a valid integer.") from exc
+
+    raise IbkrFlexConfigError(
+        "IBKR Flex is configured (IBKR_FLEX_TOKEN/IBKR_FLEX_QUERY_ID set) but neither "
+        "IBKR_FLEX_USERNAME nor IBKR_FLEX_USER_ID is set — refusing to guess which user "
+        "owns this IBKR account. Set one of them in .env."
+    )
+
+
 def run_ibkr_flex_import_from_config(
     db: Session,
     *,
@@ -1924,6 +1966,12 @@ def run_ibkr_flex_import_from_config(
     legacy_account_id: int,
     cutover_date: date | None = None,
 ) -> dict[str, Any]:
+    authorized_user_id = _authorized_flex_user_id(db)
+    if current_user_id != authorized_user_id:
+        raise IbkrFlexConfigError(
+            f"User {current_user_id} is not authorized to trigger IBKR Flex import "
+            f"(configured owner is user {authorized_user_id})."
+        )
     max_attempts = int(os.getenv("IBKR_FLEX_MAX_ATTEMPTS", "5"))
     initial_backoff_seconds = float(
         _first_env_value("IBKR_FLEX_INITIAL_BACKOFF_SECONDS", "IBKR_FLEX_BACKOFF_SECONDS", default="2")

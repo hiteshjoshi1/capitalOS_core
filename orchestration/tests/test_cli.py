@@ -70,7 +70,7 @@ def test_make_step_state_reuses_existing_pipeline_state() -> None:
             "plan_approval": HumanDecision(
                 gate_type="plan_approval",
                 decision="approved",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Approved",
             )
         },
@@ -131,7 +131,7 @@ def test_make_step_state_ignores_latest_blank_checkpoint_and_recovers_approved_s
             "plan_approval": HumanDecision(
                 gate_type="plan_approval",
                 decision="approved",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Approved",
             )
         },
@@ -203,7 +203,7 @@ def test_build_interactive_resume_payload_for_approval() -> None:
     answers = iter(
         [
             "y",
-            "Hitesh",
+            "TestReviewer",
             "Looks good.",
             "",
         ]
@@ -217,7 +217,7 @@ def test_build_interactive_resume_payload_for_approval() -> None:
     assert payload == {
         "gate_type": "human_review",
         "decision": "approved",
-        "reviewer": "Hitesh",
+        "reviewer": "TestReviewer",
         "notes": "Looks good.",
         "questions": [],
         "required_checks": [],
@@ -231,7 +231,7 @@ def test_build_interactive_resume_payload_for_needs_fixes() -> None:
     answers = iter(
         [
             "n",
-            "Hitesh",
+            "TestReviewer",
             "Please fix the scope issue.",
             "Was SQLite considered? | Why was cash included?",
             "api.dashboard.summary_contract | state.human_review_restore_roundtrip",
@@ -248,7 +248,7 @@ def test_build_interactive_resume_payload_for_needs_fixes() -> None:
     assert payload == {
         "gate_type": "extra_files_approval",
         "decision": "needs_fixes",
-        "reviewer": "Hitesh",
+        "reviewer": "TestReviewer",
         "notes": "Please fix the scope issue.",
         "questions": ["Was SQLite considered?", "Why was cash included?"],
         "required_checks": ["api.dashboard.summary_contract", "state.human_review_restore_roundtrip"],
@@ -262,7 +262,7 @@ def test_build_interactive_resume_payload_for_build_retry_approval() -> None:
     answers = iter(
         [
             "y",
-            "Hitesh",
+            "TestReviewer",
             "",
             "",
             "2",
@@ -286,7 +286,7 @@ def test_build_interactive_resume_payload_for_build_retry_approval() -> None:
     assert payload == {
         "gate_type": "build_retry_approval",
         "decision": "approved",
-        "reviewer": "Hitesh",
+        "reviewer": "TestReviewer",
         "notes": "",
         "questions": [],
         "required_checks": [],
@@ -300,7 +300,7 @@ def test_build_interactive_resume_payload_prompts_for_response_requirements() ->
     answers = iter(
         [
             "n",
-            "Hitesh",
+            "TestReviewer",
             "Please address the regression.",
             "",
             "ui.dashboard.exposure_labels | ui.theme_toggle.accessible_name",

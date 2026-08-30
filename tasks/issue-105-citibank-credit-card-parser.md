@@ -128,7 +128,7 @@ Some descriptions embed foreign currency info (e.g., `"OPENAI *CHATGPT SUBSCR   
 ### AD-9: Date Parsing & Card Number Handling
 
 - Dates are in `DD/MM/YYYY` format → parsed into UTC datetime objects (consistent with DBS parser)
-- Card number (column 5, e.g., `'4147464004225540'`) → stripped of surrounding quotes, included in `notes`
+- Card number (column 5, e.g., `'4111111111111111'`) → stripped of surrounding quotes, included in `notes`
 - Full description kept as `merchant_counterparty` (trimmed whitespace, no location stripping — preserves auditability)
 
 ---
@@ -281,7 +281,7 @@ Some descriptions embed foreign currency info (e.g., `"OPENAI *CHATGPT SUBSCR   
 
 ### Decision 9: Card Number Handling
 
-Column 5 contains the card number (e.g., `'4147464004225540'`). The parser will:
+Column 5 contains the card number (e.g., `'4111111111111111'`). The parser will:
 - Strip surrounding quotes (both double and single)
 - Store it in `notes` alongside any foreign currency info for traceability
 - **Not** use it as a key for account lookup (the user selects the account at upload time)

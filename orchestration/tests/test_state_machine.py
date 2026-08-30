@@ -87,7 +87,7 @@ def test_get_rework_context_review_cycle_prefers_latest_substantive_review_over_
             extra_files_review=HumanDecision(
                 gate_type="extra_files_approval",
                 decision="needs_fixes",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Keep fixing the docs too.",
             ),
             status="needs_fixes",
@@ -136,7 +136,7 @@ def test_get_semantic_requirements_merges_acceptance_and_human_guidance():
             human_review=HumanReview(
                 review_id="R1",
                 decision="needs_fixes",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Fix semantics",
                 response_requirements=["Describe task-respond as the primary human-gate command."],
                 unresolved_comments=["Do not rely on string presence alone."],

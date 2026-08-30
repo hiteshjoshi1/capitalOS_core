@@ -51,12 +51,12 @@ describe("Auth screens", () => {
     const user = userEvent.setup();
     renderLogin();
 
-    await user.type(screen.getByLabelText("Username"), "hitesh");
+    await user.type(screen.getByLabelText("Username"), "testuser");
     await user.type(screen.getByLabelText("Password"), "password123");
     await user.click(screen.getByRole("button", { name: "Sign In" }));
 
     await waitFor(() => {
-      expect(mockLogin).toHaveBeenCalledWith("hitesh", "password123");
+      expect(mockLogin).toHaveBeenCalledWith("testuser", "password123");
     });
   });
 
@@ -65,7 +65,7 @@ describe("Auth screens", () => {
     const user = userEvent.setup();
     renderLogin();
 
-    await user.type(screen.getByLabelText("Username"), "hitesh");
+    await user.type(screen.getByLabelText("Username"), "testuser");
     await user.type(screen.getByLabelText("Password"), "wrong-password");
     await user.click(screen.getByRole("button", { name: "Sign In" }));
 
@@ -76,8 +76,8 @@ describe("Auth screens", () => {
     const user = userEvent.setup();
     renderSignup();
 
-    await user.type(screen.getByLabelText("Username"), "hitesh");
-    await user.type(screen.getByLabelText("Display Name"), "Hitesh");
+    await user.type(screen.getByLabelText("Username"), "testuser");
+    await user.type(screen.getByLabelText("Display Name"), "Test User");
     await user.type(screen.getByLabelText("Password"), "Password123!");
     await user.type(screen.getByLabelText("Confirm Password"), "Mismatch123!");
     await user.click(screen.getByRole("button", { name: "Create Account" }));

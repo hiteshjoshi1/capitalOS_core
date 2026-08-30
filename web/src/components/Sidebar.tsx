@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
-import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { APP_SECTIONS, UTILITY_NAV_ITEMS, findActiveSection, isNavItemActive } from "../lib/navigation";
 
 export default function Sidebar() {
@@ -22,22 +21,6 @@ export default function Sidebar() {
 
   useEffect(() => {
     hydrateAlertCount();
-  }, [hydrateAlertCount]);
-
-  useEffect(() => {
-    const unsubscribe = subscribeToRealtimeTopic("author-ingestion", {
-      onEvent: () => {
-        hydrateAlertCount();
-      },
-      onStatusChange: (status) => {
-        if (status === "connected") {
-          hydrateAlertCount();
-        }
-      },
-    });
-    return () => {
-      unsubscribe();
-    };
   }, [hydrateAlertCount]);
 
   return (

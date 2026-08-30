@@ -82,7 +82,7 @@ _Review output is appended here._
 
 ## Retry Log (Max 3)
 - Retry 1: `make lint`
-  - Initial failure: `ESLint: ENOENT: no such file or directory, scandir '/Users/hiteshjoshi/apps/capitalos/web/test-results'` while `make e2e` was running concurrently.
+  - Initial failure: `ESLint: ENOENT: no such file or directory, scandir '~/apps/capitalos/web/test-results'` while `make e2e` was running concurrently.
   - Action: reran `make lint` in isolation.
   - Result: pass.
 

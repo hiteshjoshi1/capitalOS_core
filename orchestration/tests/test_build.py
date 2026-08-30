@@ -36,7 +36,7 @@ def make_pipeline_state(tmp_path):
             "plan_approval": HumanDecision(
                 gate_type="plan_approval",
                 decision="approved",
-                reviewer="Hitesh",
+                reviewer="TestReviewer",
                 notes="Approved",
                 questions=[],
                 response_requirements=[],

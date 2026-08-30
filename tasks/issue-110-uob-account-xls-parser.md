@@ -170,7 +170,7 @@ Data rows:
   - signature debug should resolve to `file_kind=excel`, `header_row_index=7`, header `["transaction date","transaction description","withdrawal","deposit","available balance"]`
   - parsed transactions should be:
     - `2026-03-04` `EXPENSE` `-1294.92` `SGD` with notes including `NTUC MY FIRST SKOOL`
-    - `2026-03-04` `TRANSFER` `-321.84` `SGD` with notes including `UOB CARD CENTRE` and `4265 884038083159`
+    - `2026-03-04` `TRANSFER` `-321.84` `SGD` with notes including `UOB CARD CENTRE` and a masked card number
     - `2026-03-02` `INCOME` `4600.00` `SGD` with notes including `SI SALARY`
   - parsed cash position should be `SGD CASH 97601.67 as_of 2026-03-09`
   - direct ad hoc `docker compose run ... python` dump output was blocked by the sandbox after the main `make` runs, so the snapshot above is the exact shape asserted by the backend fixture tests rather than a raw console transcript

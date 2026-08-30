@@ -226,7 +226,7 @@ Implemented dashboard first-load latency improvements: (1) Added migration 029_d
 
 ### Extra Files Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-24T12:45:06.675896+00:00`
 - notes: I approve the extra files, it is a playwright test and should have been in scope
 
@@ -238,7 +238,7 @@ Implemented dashboard first-load latency improvements: (1) Added migration 029_d
 
 ### Plan Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-24T11:52:42.021231+00:00`
 - notes: _none_
 
@@ -287,7 +287,7 @@ Implemented dashboard first-load latency improvements: (1) Added migration 029_d
 #### Extra Files Outside Planned Scope
 - `web/tests/e2e/home.spec.ts`: Builder could not infer why this out-of-scope file was changed. (source: `unknown`)
 #### Extra Files Approval
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: I approve the extra files, it is a playwright test and should have been in scope
 
@@ -369,7 +369,7 @@ Implemented dashboard first-load latency improvements: (1) Added migration 029_d
   - AC: /health removed from blocking load path — VERIFIED. api.health() called as fire-and-forget: api.health().then((h) => { if (!cancelled) setHealth(h.status); }).catch(() => {}). Not awaited in Phase 1. Frontend test confirms health mock is called but does not block render.
   - AC: All existing routes preserved; /dashboard/bootstrap is additive — VERIFIED. /dashboard/summary, /dashboard/platform-allocation, /dashboard/stock-exposure, /dashboard/cash-deposits all remain unchanged in dashboard.py. Bootstrap is a new GET route at /bootstrap.
 #### Human Review
-- reviewer: `hitesh`
+- reviewer: `repo owner`
 - decision: `needs_fixes`
 - notes: The dashboard refactor is not complete yet. The first-paint sequencing improved, but total dashboard latency is still too high because overall dashboard work was not reduced enough.
 - response_requirements:
@@ -402,7 +402,7 @@ Implemented dashboard first-load latency improvements: (1) Added migration 029_d
   - AC9 (/health removed from blocking path): VERIFIED — App.tsx line 72: api.health().then(...).catch(() => {}) is non-blocking; bootstrap await completes before setBootstrapState('ready') regardless of health response.
   - AC10 (existing routes preserved, bootstrap additive): VERIFIED — /dashboard/summary and all other routes unchanged; /dashboard/bootstrap added at router.get('/bootstrap') with its own response_model.
 #### Human Review
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `needs_fixes`
 - notes: Fix the regression from skip_networth=true: Risk and Allocation by Geography must render real data, not empty results. skip_networth may omit only net_worth, net_worth_as_of, and net_worth_change; it must still compute the total needed for geography percentages and top_holdings/risk. Also finish the latency work: do not eagerly load all secondary panels immediately after bootstrap, keep /health and unmappedTransactions off the critical dashboard load path, and materially reduce duplicated backend work across bootstrap/summary/platform-allocation. Add tests proving skip_networth still returns non-empty geography and top_holdings when data exists, and that dashboard first paint is not blocked by those secondary requests. Finally on the UI front, Move the cash flow and expense cards down in the dashboard, bring stock, crypto and cash exposure cards up.
 - questions:
@@ -440,7 +440,7 @@ Implemented dashboard first-load latency improvements: (1) Added migration 029_d
   - R6 human requirement: No empty risk card / Allocation by Geography regression — VERIFIED: skip_networth=true path calls _networth_components for denominator; test_dashboard_summary_skip_networth asserts len(geography)>0 and len(top_holdings)>0 and all percent!=0.
   - R6 requirement: materially reduce duplicated backend work — PARTIALLY MET: _networth_components is called twice per full dashboard load (bootstrap + summary). The latency improvement is user-visible (phase 1 is fast), but server-side work is not reduced.
 #### Human Review
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `approved`
 - notes: _none_
 

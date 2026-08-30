@@ -35,7 +35,13 @@ yarn-error.log*
 # Docker
 #######################################
 docker-compose.override.yml
+docker-compose.oss-test.yml
 *.pid
+
+#######################################
+# Local DB backups (never commit real data)
+#######################################
+backups/
 
 #######################################
 # Python (FastAPI backend)

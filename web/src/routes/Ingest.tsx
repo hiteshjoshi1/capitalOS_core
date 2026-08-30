@@ -132,16 +132,28 @@ export default function Ingest() {
       transactions_parsed?: number;
       transactions_inserted?: number;
       duplicates_skipped?: number;
+      positions_parsed?: number;
+      canonical_positions_written?: number;
     };
     validation_warnings?: string[];
     preview_transactions?: Array<Record<string, unknown>>;
+    preview_positions?: Array<Record<string, unknown>>;
     error_message?: string | null;
   } | null;
   const platformParser = resolvePlatformParser(
     reportData?.platform,
     reportData?.signature_debug as SignatureDebug | undefined,
   );
-  const previewRows = reportData?.preview_transactions?.slice(0, 3) ?? [];
+  // Holdings-only parsers (Sharekhan, DBS Vickers, ...) always report 0
+  // transactions by design — they extract a positions snapshot, not
+  // transaction history. Fall back to position counts/preview so a
+  // successful holdings import doesn't look identical to a failed one.
+  const isPositionsImport = (reportData?.counts?.transactions_parsed ?? 0) === 0
+    && (reportData?.counts?.positions_parsed ?? 0) > 0;
+  const previewTransactionRows = reportData?.preview_transactions?.slice(0, 3) ?? [];
+  const previewPositionRows = reportData?.preview_positions?.slice(0, 3) ?? [];
+  const previewRows = previewTransactionRows.length ? previewTransactionRows : previewPositionRows;
+  const showingPositionsPreview = !previewTransactionRows.length && previewPositionRows.length > 0;
 
   return (
     <PageShell
@@ -230,8 +242,17 @@ export default function Ingest() {
               <div className="card">
                 <div className="ingestStatChips">
                   <StatusPill tone="neutral" label={`${reportData.counts?.rows_total ?? 0} rows`} />
-                  <StatusPill tone="neutral" label={`${reportData.counts?.transactions_parsed ?? 0} parsed`} />
-                  <StatusPill tone="good" label={`${reportData.counts?.transactions_inserted ?? 0} inserted`} />
+                  {isPositionsImport ? (
+                    <>
+                      <StatusPill tone="neutral" label={`${reportData.counts?.positions_parsed ?? 0} holdings parsed`} />
+                      <StatusPill tone="good" label={`${reportData.counts?.canonical_positions_written ?? 0} saved`} />
+                    </>
+                  ) : (
+                    <>
+                      <StatusPill tone="neutral" label={`${reportData.counts?.transactions_parsed ?? 0} parsed`} />
+                      <StatusPill tone="good" label={`${reportData.counts?.transactions_inserted ?? 0} inserted`} />
+                    </>
+                  )}
                   <StatusPill tone="warn" label={`${reportData.counts?.duplicates_skipped ?? 0} duplicates skipped`} />
                 </div>
 
@@ -268,16 +289,28 @@ export default function Ingest() {
                 )}
 
                 <div className="ingestPreview">
-                  <p className="ingestPreviewTitle">Preview — first 3 rows</p>
+                  <p className="ingestPreviewTitle">
+                    Preview — first 3 {showingPositionsPreview ? "holdings" : "rows"}
+                  </p>
                   {previewRows.length ? (
-                    previewRows.map((t, idx) => (
-                      <div className="listRow" key={`tx-${idx}`}>
-                        <span className="ingestPreviewDate">{formatPreviewDate(t.ts as string | null)}</span>
-                        <strong className="ingestPreviewMerchant">{String(t.merchant_counterparty ?? "—")}</strong>
-                        <span className="tag">{String(t.category ?? "—")}</span>
-                        <strong className="ingestPreviewAmount">{formatPreviewAmount(t.amount, t.currency)}</strong>
-                      </div>
-                    ))
+                    showingPositionsPreview ? (
+                      previewRows.map((p, idx) => (
+                        <div className="listRow" key={`pos-${idx}`}>
+                          <strong className="ingestPreviewMerchant">{String(p.symbol ?? "—")}</strong>
+                          <span className="tag">{String(p.quantity ?? "—")} units</span>
+                          <strong className="ingestPreviewAmount">{formatPreviewAmount(p.market_value, "")}</strong>
+                        </div>
+                      ))
+                    ) : (
+                      previewRows.map((t, idx) => (
+                        <div className="listRow" key={`tx-${idx}`}>
+                          <span className="ingestPreviewDate">{formatPreviewDate(t.ts as string | null)}</span>
+                          <strong className="ingestPreviewMerchant">{String(t.merchant_counterparty ?? "—")}</strong>
+                          <span className="tag">{String(t.category ?? "—")}</span>
+                          <strong className="ingestPreviewAmount">{formatPreviewAmount(t.amount, t.currency)}</strong>
+                        </div>
+                      ))
+                    )
                   ) : (
                     <p className="muted">No preview available.</p>
                   )}

@@ -234,13 +234,13 @@ Persistent left-sidebar AppShell with full IA navigation implemented; Dashboard 
 
 ### Extra Files Approval
 - decision: `approved`
-- reviewer: `hitesh joshi`
+- reviewer: `repo owner`
 - decided_at: `2026-03-26T12:59:56.400730+00:00`
 - notes: I approve the extra files, its pipeline changes
 
 ### Plan Approval
 - decision: `approved`
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decided_at: `2026-03-26T01:06:09.173006+00:00`
 - notes: I have added some new files which are out of scope, these are pipeline changes which had issues, also added caffeinate into the pipeline.
 
@@ -266,7 +266,7 @@ Persistent left-sidebar AppShell with full IA navigation implemented; Dashboard 
 - `orchestration/tests/test_prompts.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
 - `orchestration/tests/test_scope.py`: Likely workflow or pipeline support change required alongside the task implementation. (source: `inferred`)
 #### Extra Files Approval
-- reviewer: `hitesh joshi`
+- reviewer: `repo owner`
 - decision: `approved`
 - notes: I approve the extra files, its pipeline changes
 
@@ -424,7 +424,7 @@ Persistent left-sidebar AppShell with full IA navigation implemented; Dashboard 
   - PASS (per pipeline) — TypeScript compiles with no errors.
   - FAIL — Pipeline claims Vitest passes, but 6 of 12 Sidebar.test.tsx assertions contradict the implementation (section initialization + theme toggle aria-label). Pipeline PASS result is not consistent with source inspection.
 #### Human Review
-- reviewer: `hitesh`
+- reviewer: `repo owner`
 - decision: `needs_fixes`
 - notes: the dashboard light-theme UX matches data/fixtures/issue-121-dashboard-mockup.html as closely as practical within the current app, replacing the old Stock Exposure, Crypto Exposure, and Cash Exposure card presentation. Also fix the outstanding reviewer issues: Sidebar sections should not start fully open, the theme toggle must satisfy accessibility/test expectations, and all current Sidebar test and lint failures must be resolved. Make the code match the task log claims, keep the dashboard thin, preserve routes/API compatibility, avoid unrelated refactors, dark theme should be same as light but dark
 
@@ -486,7 +486,7 @@ Persistent left-sidebar AppShell with full IA navigation implemented; Dashboard 
 - findings:
   - Verification failed before review: test-backend: exit 2, e2e: exit 2
 #### Human Review
-- reviewer: `Hitesh`
+- reviewer: `Repo Owner`
 - decision: `needs_fixes`
 - notes: Remove unmappedTransactions from dashboard load. Dashboard should only show the Net Worth card with Stocks, Cash, Crypto, Cash Flow, and Liabilities inside that card. Remove the separate Stocks/Crypto/Cash/Cash Flow/Liabilities cards from Dashboard. Keep Action Queue for now. Move the Stocks/Cash/Crypto cards to Wealth Overview. Show Risk Concentration card in Wealth Overview.
 - response_requirements:

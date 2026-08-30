@@ -23,7 +23,7 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/health
 ```
 
 ## After a backend code change
-`make api-rebuild` (rebuilds the image + restarts the container) before the change is live. Config-only changes under `config/` do **not** need a rebuild — `./config` is bind-mounted read-only into the api container (see `docker-compose.yml`), so edits to e.g. `config/rag_authors.yaml` are live immediately.
+`make api-rebuild` (rebuilds the image + restarts the container) before the change is live. Config-only changes under `config/` do **not** need a rebuild — `./config` is bind-mounted read-only into the api container (see `docker-compose.yml`), so edits are live immediately.
 
 ## Driving it (don't just launch)
 
@@ -40,4 +40,4 @@ curl -s -o /dev/null -w "%{http_code}\n" http://localhost:8000/health
 
 ## Known gotchas
 - Postgres logs a "collation version mismatch" warning on every query via `docker compose exec` — benign, ignore it.
-- If a `docker compose exec -T api psql`/python one-liner is needed for a read-only check (e.g. inspecting `rag_sources` ownership), that's normal and fine; anything that mutates data belongs in a proper `migrations/NNN_*.sql` file instead (see the `verify` skill / `CLAUDE.md`).
+- If a `docker compose exec -T api psql`/python one-liner is needed for a read-only check (e.g. inspecting account ownership), that's normal and fine; anything that mutates data belongs in a proper `migrations/NNN_*.sql` file instead (see the `verify` skill / `CLAUDE.md`).

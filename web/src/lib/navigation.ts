@@ -7,7 +7,7 @@ export type NavItem = {
 };
 
 export type AppSection = {
-  id: "wealth" | "cashflow" | "liabilities" | "operations" | "intelligence";
+  id: "wealth" | "cashflow" | "liabilities" | "operations";
   label: string;
   icon: string;
   to: string;
@@ -67,21 +67,6 @@ export const APP_SECTIONS: AppSection[] = [
       { label: "Add Platforms", to: "/platforms" },
       { label: "Add Crypto Wallets", to: "/crypto", exact: true },
       { label: "Refresh Market Data", to: "/market-data" },
-    ],
-  },
-  {
-    id: "intelligence",
-    label: "Research",
-    icon: "insights",
-    to: "/intelligence",
-    matchPaths: ["/alerts"],
-    tabs: [
-      { label: "Overview", to: "/intelligence", exact: true },
-      { label: "AI Sage", to: "/ai-sage" },
-      { label: "Author Library", to: "/author-library" },
-      { label: "Author Ingestion", to: "/author-ingestion" },
-      { label: "Companies", to: "/companies" },
-      { label: "Alerts", to: "/alerts", hidden: true },
     ],
   },
 ];
