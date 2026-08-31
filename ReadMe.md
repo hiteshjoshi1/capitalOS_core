@@ -18,6 +18,26 @@ The project emphasizes correctness, traceability, and process over prediction.
 
 ---
 
+## Screenshots
+
+All screenshots below are the seeded demo account (`demo` / `Test@1234`) —
+dummy accounts, dummy wallets, fabricated balances. See
+[`docs/screenshots/`](docs/screenshots/) for the full set of every screen.
+
+**Wealth Overview** — net worth, allocation by platform, largest positions
+![Wealth Overview](docs/screenshots/03-wealth-overview.png)
+
+**Stock Holdings** — geography/platform exposure, six-month trend, positions
+![Stock Holdings](docs/screenshots/07-stock-holdings.png)
+
+**Cash Flow Overview** — inflows/outflows, savings rate, month-over-month
+![Cash Flow Overview](docs/screenshots/11-cash-flow-detail.png)
+
+**Crypto Holdings** — chain/wallet exposure, six-month trend, top holdings
+![Crypto Holdings](docs/screenshots/09-crypto-holdings.png)
+
+---
+
 ## Core Principles
 
 - **Local-first**: Runs on your machine.
