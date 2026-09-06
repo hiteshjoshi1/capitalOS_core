@@ -485,4 +485,7 @@ capitalos/
 
 ## License
 
-MIT
+AGPL-3.0. See [LICENSE](LICENSE) for the full text. This means anyone who
+modifies this code and runs it as a network service (e.g. a hosted/SaaS
+offering) must make their modified source available to users of that
+service — not just when they distribute the code.
