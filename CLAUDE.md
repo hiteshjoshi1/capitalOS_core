@@ -8,15 +8,20 @@ and the `docs/PRD/` docs.
 Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 
 ## Run
-- `make up` — starts everything (postgres + api).
+- `make up` — starts the **OSS stack** (postgres :5433 + api :8001) under compose project
+  `capitalos-oss-test`. This is the real-data stack (holds `hitesh`). The old default-project
+  stack (`capitalos`, API :8000, demo-only DB) is retired — don't start it.
 - Web: `cd web && npm run dev` → `http://localhost:5173`.
-- API: `http://localhost:8000` (health: `curl http://localhost:8000/health`).
+- API: `http://localhost:8001` (health: `curl http://localhost:8001/health`). The web app reaches it
+  via `web/.env.local` → `VITE_API_PORT=8001` (port only, so phone/Tailscale access still works).
 - Demo login: `demo` / `Test@1234`.
-- `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (destructive).
+- `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the real DB
+  volume**; now requires typing the project name — run `make db-backup` first).
 
 ## Verify (match to what changed)
 - Backend code: `make api-rebuild` then `make test-backend` (runs **inside Docker**:
-  `docker compose run --rm api pytest`). For one file: `docker compose run --rm api pytest tests/test_X.py`.
+  `docker compose run --rm api pytest`). For one file: `docker compose run --rm --no-deps api pytest tests/test_X.py`
+  (`--no-deps` so it doesn't start the retired default-project Postgres; tests use SQLite, no DB needed).
 - Frontend code: `cd web && npx vitest run <file>` (fast) or `npm test -- --run` (full).
 - New/changed migration: add `migrations/NNN_*.sql`, then `make db-migrate`
   (tracked in `schema_migrations`; safe to re-run, already-applied files are skipped).

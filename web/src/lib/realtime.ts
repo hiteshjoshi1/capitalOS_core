@@ -1,7 +1,11 @@
 import { getAccessToken, refreshAccessTokenNow, resolveApiBase } from "./api";
 import type { RealtimeEventEnvelope } from "./api";
 
-const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE as string | undefined);
+const API_BASE = resolveApiBase(
+  import.meta.env.VITE_API_BASE as string | undefined,
+  null,
+  import.meta.env.VITE_API_PORT as string | undefined,
+);
 
 type RealtimeStatus = "connecting" | "connected" | "disconnected";
 

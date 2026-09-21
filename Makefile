@@ -3,13 +3,20 @@ PROJECT=capitalos
 # ---- Config ----
 GIT_REMOTE?=origin
 BASE_BRANCH?=main
-DB_CONTAINER=capitalos-postgres
+# The OSS stack (API :8001, Postgres :5433) is the real source of truth. It is
+# the base compose file plus docker-compose.oss-test.yml, run under its own
+# compose project so it never mixes with the old default 'capitalos' project.
+COMPOSE_PROJECT=capitalos-oss-test
+COMPOSE=docker compose -p $(COMPOSE_PROJECT) -f docker-compose.yml -f docker-compose.oss-test.yml
+CORE_SERVICES=postgres api
+API_PORT=8001
+DB_CONTAINER=capitalos-oss-postgres
 DB_USER?=capitalos
 DB_NAME?=capitalos
 SMOKE_USER?=demo
 SMOKE_PASSWORD?=Test@1234
 
-API_CONTAINER=capitalos-api
+API_CONTAINER=capitalos-oss-test-api
 OBSERVABILITY_SERVICES=loki grafana alloy
 OBSERVABILITY_ENV_FILE=$(shell test -f config/observability.env && printf '%s' config/observability.env || printf '%s' config/observability.env.example)
 OBSERVABILITY_COMPOSE=docker compose --env-file $(OBSERVABILITY_ENV_FILE)
@@ -84,22 +91,22 @@ endef
 .PHONY: build up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
 
 build:
-	docker compose build
+	$(COMPOSE) build
 
 up:
-	docker compose up -d
+	$(COMPOSE) up -d $(CORE_SERVICES)
 
 down:
-	docker compose down
+	$(COMPOSE) down
 
 ps:
-	docker compose ps
+	$(COMPOSE) ps
 
 logs:
-	docker compose logs -f
+	$(COMPOSE) logs -f
 
 api-up:
-	docker compose up -d --build api
+	$(COMPOSE) up -d --build api
 
 web-up: web-deps
 	cd $(WEB_DIR) && npm run dev
@@ -123,7 +130,7 @@ grafana-url:
 	@echo "http://localhost:3000"
 
 openapi:
-	curl -s http://localhost:8000/openapi.json > openapi.json
+	curl -s http://localhost:$(API_PORT)/openapi.json > openapi.json
 	@echo "Wrote openapi.json"
 
 pr-open-if-ahead:
@@ -233,8 +240,11 @@ db-adopt-migrations: db-wait
 	@echo "Migration adoption complete."
 
 db-reset:
-	docker compose down -v
-	docker compose up -d
+	@echo "DANGER: this DELETES the database volume of compose project '$(COMPOSE_PROJECT)' (your real data)."
+	@echo "Run 'make db-backup' first if you want to keep anything."
+	@read -p "Type the project name '$(COMPOSE_PROJECT)' to continue: " confirm; [ "$$confirm" = "$(COMPOSE_PROJECT)" ] || (echo "Aborted." && exit 1)
+	$(COMPOSE) down -v
+	$(COMPOSE) up -d $(CORE_SERVICES)
 	$(MAKE) db-migrate
 
 db-seed-dummy: db-wait
@@ -257,24 +267,24 @@ db-query:
 
 ownership-reassign:
 	@test -n "$(TARGET_USER_ID)" || (echo "Usage: make ownership-reassign TARGET_USER_ID=<id> [APPLY=1]" && exit 2)
-	docker compose run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
+	$(COMPOSE) run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
 
 # ---- Quality gates ----
 .PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e test test-all verify
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
-	docker compose run --rm api ruff check app tests
+	$(COMPOSE) run --rm api ruff check app tests
 
 typecheck: web-deps
 	cd $(WEB_DIR) && npx tsc -b --pretty false
-	docker compose run --rm api mypy app
+	$(COMPOSE) run --rm api mypy app
 
 test-backend:
-	docker compose run --rm api pytest
+	$(COMPOSE) run --rm api pytest
 
 contract-backend:
-	docker compose run --rm api pytest tests/test_contracts.py -q
+	$(COMPOSE) run --rm api pytest tests/test_contracts.py -q
 
 test-frontend: web-deps
 	cd $(WEB_DIR) && npm test -- --run
@@ -451,42 +461,42 @@ orch-clean:
 .PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test
 
 api-rebuild:
-	docker compose build api
-	docker compose up -d api
+	$(COMPOSE) build api
+	$(COMPOSE) up -d api
 
 web-rebuild:
 	cd $(WEB_DIR) && npm run build
 
 api-shell:
-	docker compose exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"
+	$(COMPOSE) exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"
 
 web-test: test-frontend
 
 api-smoke:
-	docker compose exec -T api python -c "import json, urllib.request; base='http://localhost:8000'; print(urllib.request.urlopen(base + '/health').read().decode()); login_req=urllib.request.Request(base + '/auth/login', data=json.dumps({'username':'$(SMOKE_USER)','password':'$(SMOKE_PASSWORD)'}).encode(), headers={'Content-Type':'application/json'}, method='POST'); token=json.loads(urllib.request.urlopen(login_req).read().decode())['access_token']; summary_req=urllib.request.Request(base + '/dashboard/summary?month=2026-02', headers={'Authorization': 'Bearer ' + token}); print(urllib.request.urlopen(summary_req).read().decode())"
+	$(COMPOSE) exec -T api python -c "import json, urllib.request; base='http://localhost:8000'; print(urllib.request.urlopen(base + '/health').read().decode()); login_req=urllib.request.Request(base + '/auth/login', data=json.dumps({'username':'$(SMOKE_USER)','password':'$(SMOKE_PASSWORD)'}).encode(), headers={'Content-Type':'application/json'}, method='POST'); token=json.loads(urllib.request.urlopen(login_req).read().decode())['access_token']; summary_req=urllib.request.Request(base + '/dashboard/summary?month=2026-02', headers={'Authorization': 'Bearer ' + token}); print(urllib.request.urlopen(summary_req).read().decode())"
 
 api-test: test-backend
 
 api-coverage:
-	docker compose run --rm api pytest --cov=app --cov-report=term-missing
+	$(COMPOSE) run --rm api pytest --cov=app --cov-report=term-missing
 
 ingest-smoke:
 	@echo "Running ingest smoke..."
-	@TOKEN=$$(curl -sf -X POST http://127.0.0.1:8000/auth/login \
+	@TOKEN=$$(curl -sf -X POST http://127.0.0.1:$(API_PORT)/auth/login \
 		-H "Content-Type: application/json" \
 		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
 		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
-	ACCOUNT_ID=$$(curl -sf -H "Authorization: Bearer $$TOKEN" http://127.0.0.1:8000/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \
+	ACCOUNT_ID=$$(curl -sf -H "Authorization: Bearer $$TOKEN" http://127.0.0.1:$(API_PORT)/accounts | python3 - <<'PY'\nimport sys, json\ntry:\n    data = json.load(sys.stdin)\n    print(data[0]['id'] if data else '')\nexcept Exception:\n    print('')\nPY\n); \
 	if [ -z "$$ACCOUNT_ID" ]; then \
 		echo "No accounts found. Create an account first."; \
 		exit 1; \
 	fi; \
-	curl -sf -H "Authorization: Bearer $$TOKEN" -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://127.0.0.1:8000/ingest/ibkr?account_id=$$ACCOUNT_ID"; \
+	curl -sf -H "Authorization: Bearer $$TOKEN" -F "file=@data/fixtures/ibkr_activity_sample.csv" "http://127.0.0.1:$(API_PORT)/ingest/ibkr?account_id=$$ACCOUNT_ID"; \
 	echo
 
 crypto-smoke:
-	@TOKEN=$$(curl -sf -X POST http://127.0.0.1:8000/auth/login \
+	@TOKEN=$$(curl -sf -X POST http://127.0.0.1:$(API_PORT)/auth/login \
 		-H "Content-Type: application/json" \
 		-d "{\"username\":\"$(SMOKE_USER)\",\"password\":\"$(SMOKE_PASSWORD)\"}" | \
 		python3 -c 'import sys, json; print(json.load(sys.stdin)["access_token"])'); \
-	curl -sf -H "Authorization: Bearer $$TOKEN" "http://127.0.0.1:8000/crypto/summary?base_currency=USD" && echo
+	curl -sf -H "Authorization: Bearer $$TOKEN" "http://127.0.0.1:$(API_PORT)/crypto/summary?base_currency=USD" && echo

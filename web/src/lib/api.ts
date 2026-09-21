@@ -1,24 +1,27 @@
 export function resolveApiBase(
   rawApiBase?: string,
   locationLike?: { protocol?: string; hostname?: string } | null,
+  rawApiPort?: string,
 ): string {
   const explicit = rawApiBase?.trim();
   if (explicit) {
     return explicit.replace(/\/+$/, "");
   }
 
+  const port = rawApiPort?.trim() || "8000";
   const currentLocation =
     locationLike ?? (typeof window !== "undefined" ? window.location : null);
   const hostname = currentLocation?.hostname?.trim();
   const protocol = currentLocation?.protocol === "https:" ? "https:" : "http:";
   if (hostname) {
-    return `${protocol}//${hostname}:8000`;
+    return `${protocol}//${hostname}:${port}`;
   }
-  return "http://localhost:8000";
+  return `http://localhost:${port}`;
 }
 
 const RAW_API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
-const API_BASE = resolveApiBase(RAW_API_BASE);
+const RAW_API_PORT = import.meta.env.VITE_API_PORT as string | undefined;
+const API_BASE = resolveApiBase(RAW_API_BASE, null, RAW_API_PORT);
 let accessTokenMemory: string | null = null;
 let refreshInFlight: Promise<string | null> | null = null;
 let authFailureHandler: (() => void) | null = null;

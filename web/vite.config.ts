@@ -9,5 +9,10 @@ export default defineConfig({
     // which breaks reaching the dev server from other devices (e.g. over
     // Tailscale). Bind to all interfaces/both stacks instead.
     host: true,
+    // Vite 7 rejects requests whose Host header isn't localhost or a bare IP
+    // (DNS-rebinding protection). Tailscale MagicDNS names
+    // (<machine>.<tailnet>.ts.net) would get a 403, so allow that suffix only.
+    // Do NOT set this to `true` — it disables the check for every hostname.
+    allowedHosts: [".ts.net"],
   },
 });
