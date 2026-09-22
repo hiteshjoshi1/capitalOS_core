@@ -84,6 +84,8 @@ def _create_refresh_session(db: Session, *, user_id: int) -> str:
 
 @router.post("/signup", response_model=AuthMeResponse)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
+    if os.getenv("AUTH_ALLOW_SIGNUP", "1").strip().lower() in {"0", "false", "no", "off"}:
+        raise HTTPException(status_code=403, detail="Signup is disabled")
     username = payload.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="username is required")

@@ -181,7 +181,10 @@ def list_categories(db: Session = Depends(get_db)):
 
 
 @router.get("/rules", response_model=list[CategoryRuleOut])
-def list_rules(db: Session = Depends(get_db)):
+def list_rules(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     rows = db.execute(
         text(
             """
@@ -201,9 +204,11 @@ def list_rules(db: Session = Depends(get_db)):
               r.active
             FROM category_rules r
             JOIN category_taxonomy ct ON ct.id = r.target_category_id
+            WHERE r.user_id IS NULL OR r.user_id = :current_user_id
             ORDER BY r.priority, r.id
             """
-        )
+        ),
+        {"current_user_id": current_user.id},
     ).mappings().all()
     return [
         CategoryRuleOut(
@@ -226,8 +231,13 @@ def list_rules(db: Session = Depends(get_db)):
 
 
 @router.post("/rules", response_model=CategoryRuleOut)
-def create_rule(payload: CategoryRuleCreate, db: Session = Depends(get_db)):
+def create_rule(
+    payload: CategoryRuleCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
     data = _validate_rule_values(payload.model_dump())
+    data["user_id"] = current_user.id
     _validate_target_category(db, data["target_category_id"])
 
     rule = CategoryRule(**data)
@@ -237,11 +247,25 @@ def create_rule(payload: CategoryRuleCreate, db: Session = Depends(get_db)):
     return _rule_out(db, int(rule.id))
 
 
-@router.put("/rules/{rule_id}", response_model=CategoryRuleOut)
-def update_rule(rule_id: int, payload: CategoryRuleUpdate, db: Session = Depends(get_db)):
+def _get_writable_rule(db: Session, rule_id: int, current_user: CurrentUser) -> CategoryRule:
+    """A rule the caller may change: their own, or a shared system rule if they are an admin."""
     rule = db.query(CategoryRule).filter(CategoryRule.id == rule_id).one_or_none()
-    if rule is None:
+    # Another user's rule is indistinguishable from a missing one.
+    if rule is None or (rule.user_id is not None and rule.user_id != current_user.id):
         raise HTTPException(status_code=404, detail="rule not found")
+    if rule.user_id is None and not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="system rules can only be changed by an admin")
+    return rule
+
+
+@router.put("/rules/{rule_id}", response_model=CategoryRuleOut)
+def update_rule(
+    rule_id: int,
+    payload: CategoryRuleUpdate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    rule = _get_writable_rule(db, rule_id, current_user)
 
     data = _validate_rule_values(payload.model_dump(exclude_unset=True))
     if "target_category_id" in data and data["target_category_id"] is not None:
@@ -257,10 +281,12 @@ def update_rule(rule_id: int, payload: CategoryRuleUpdate, db: Session = Depends
 
 
 @router.delete("/rules/{rule_id}", response_model=CategoryRuleOut)
-def delete_rule(rule_id: int, db: Session = Depends(get_db)):
-    rule = db.query(CategoryRule).filter(CategoryRule.id == rule_id).one_or_none()
-    if rule is None:
-        raise HTTPException(status_code=404, detail="rule not found")
+def delete_rule(
+    rule_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    rule = _get_writable_rule(db, rule_id, current_user)
 
     rule.active = False
     rule.updated_at = datetime.now(tz=timezone.utc)

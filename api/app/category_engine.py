@@ -102,7 +102,10 @@ def apply_rules(db: Session, transaction_ids: list[int] | None = None) -> Backfi
               ORDER BY r.priority ASC, r.id ASC
             ) AS rule_rank
           FROM transactions t
-          JOIN category_rules r ON r.active = :active_true
+          LEFT JOIN accounts acct ON acct.id = t.account_id
+          JOIN category_rules r
+            ON r.active = :active_true
+           AND (r.user_id IS NULL OR r.user_id = acct.user_id)
           LEFT JOIN category_overrides manual_override
             ON manual_override.transaction_id = t.id
            AND manual_override.source = :manual_source
