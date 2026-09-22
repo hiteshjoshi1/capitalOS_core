@@ -626,6 +626,7 @@ def setup_db():
               max_amount REAL,
               target_category_id INTEGER NOT NULL,
               active INTEGER NOT NULL DEFAULT 1,
+              user_id INTEGER,
               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )

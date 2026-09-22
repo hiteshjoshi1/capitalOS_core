@@ -47,6 +47,8 @@ class CategoryRule(Base):
     max_amount = Column(Numeric(38, 18), nullable=True)
     target_category_id = Column(SqlId, ForeignKey("category_taxonomy.id"), nullable=False)
     active = Column(Boolean, nullable=False, default=True)
+    # NULL = shared system rule (admin-managed); otherwise the owning user.
+    user_id = Column(SqlId, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
