@@ -3,20 +3,30 @@ PROJECT=capitalos
 # ---- Config ----
 GIT_REMOTE?=origin
 BASE_BRANCH?=main
-# The OSS stack (API :8001, Postgres :5433) is the real source of truth. It is
-# the base compose file plus docker-compose.oss-test.yml, run under its own
-# compose project so it never mixes with the old default 'capitalos' project.
+# A local, git-ignored docker-compose.oss-test.yml selects the "OSS stack"
+# (API :8001, Postgres :5433, own volume). When present it is layered over the
+# base file under its own compose project so it never mixes with the default
+# 'capitalos' project. Without it (a fresh clone) everything uses the base
+# file as-is: API :8000, Postgres :5432.
+ifneq ($(wildcard docker-compose.oss-test.yml),)
 COMPOSE_PROJECT=capitalos-oss-test
 COMPOSE=docker compose -p $(COMPOSE_PROJECT) -f docker-compose.yml -f docker-compose.oss-test.yml
-CORE_SERVICES=postgres api
 API_PORT=8001
 DB_CONTAINER=capitalos-oss-postgres
+API_CONTAINER=capitalos-oss-test-api
+else
+COMPOSE_PROJECT=capitalos
+COMPOSE=docker compose
+API_PORT=8000
+DB_CONTAINER=capitalos-postgres
+API_CONTAINER=capitalos-api
+endif
+CORE_SERVICES=postgres api
 DB_USER?=capitalos
 DB_NAME?=capitalos
 SMOKE_USER?=demo
 SMOKE_PASSWORD?=Test@1234
 
-API_CONTAINER=capitalos-oss-test-api
 OBSERVABILITY_SERVICES=loki grafana alloy
 OBSERVABILITY_ENV_FILE=$(shell test -f config/observability.env && printf '%s' config/observability.env || printf '%s' config/observability.env.example)
 OBSERVABILITY_COMPOSE=docker compose --env-file $(OBSERVABILITY_ENV_FILE)
@@ -88,7 +98,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
 
 build:
 	$(COMPOSE) build
@@ -114,6 +124,10 @@ web-up: web-deps
 api-logs:
 	docker logs -f $(API_CONTAINER)
 
+# Host URL of the API for this checkout (8001 with the local OSS override, else 8000).
+api-url:
+	@echo http://127.0.0.1:$(API_PORT)
+
 observability-up:
 	$(OBSERVABILITY_COMPOSE) up -d $(OBSERVABILITY_SERVICES)
 
@@ -124,7 +138,7 @@ observability-logs:
 	$(OBSERVABILITY_COMPOSE) logs -f $(OBSERVABILITY_SERVICES)
 
 observability-smoke:
-	./scripts/observability-smoke.sh
+	API_COMPOSE="$(COMPOSE)" API_URL=http://127.0.0.1:$(API_PORT) ./scripts/observability-smoke.sh
 
 grafana-url:
 	@echo "http://localhost:3000"
