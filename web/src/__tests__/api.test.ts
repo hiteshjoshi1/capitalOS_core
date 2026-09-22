@@ -99,6 +99,14 @@ describe("resolveApiBase", () => {
     );
   });
 
+  it("uses VITE_API_PORT with the current hostname when VITE_API_BASE is unset", async () => {
+    const { resolveApiBase } = await import("../lib/api");
+    expect(
+      resolveApiBase(undefined, { protocol: "http:", hostname: "100.64.0.1" }, "8001"),
+    ).toBe("http://100.64.0.1:8001");
+    expect(resolveApiBase("http://localhost:9000", null, "8001")).toBe("http://localhost:9000");
+  });
+
   it("preserves explicit VITE_API_BASE overrides", async () => {
     const { resolveApiBase } = await import("../lib/api");
     expect(resolveApiBase("http://localhost:9000/")).toBe("http://localhost:9000");

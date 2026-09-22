@@ -1,7 +1,19 @@
 import { getAccessToken, refreshAccessTokenNow, resolveApiBase } from "./api";
 import type { RealtimeEventEnvelope } from "./api";
 
-const API_BASE = resolveApiBase(import.meta.env.VITE_API_BASE as string | undefined);
+const API_BASE = resolveApiBase(
+  import.meta.env.VITE_API_BASE as string | undefined,
+  null,
+  import.meta.env.VITE_API_PORT as string | undefined,
+);
+
+// The API base may be relative (e.g. "/api" behind the dev-server proxy), so
+// resolve it against the page URL before swapping http(s) for ws(s).
+export function buildRealtimeUrl(apiBase: string, pageUrl: string): URL {
+  const url = new URL(`${apiBase}/realtime/ws`, pageUrl);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url;
+}
 
 type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
@@ -65,7 +77,7 @@ class RealtimeClient {
     }
 
     this.notifyStatus("connecting");
-    const url = new URL(`${API_BASE.replace(/^http/i, "ws")}/realtime/ws`);
+    const url = buildRealtimeUrl(API_BASE, window.location.href);
     url.searchParams.set("access_token", token);
     this.socket = new WebSocket(url.toString());
     let opened = false;

@@ -7,7 +7,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capitalos}
       POSTGRES_DB: ${POSTGRES_DB:-capitalos}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
 
@@ -26,7 +26,7 @@ services:
       LOG_SAMPLE_RATE_HIGH_FREQ: ${LOG_SAMPLE_RATE_HIGH_FREQ:-0.10}
       UPLOAD_STALE_DAYS: ${UPLOAD_STALE_DAYS:-30}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       - postgres
     volumes:

@@ -21,7 +21,12 @@ API_URL=${API_URL:-http://127.0.0.1:8000}
 OBSERVABILITY_ENV=${OBSERVABILITY_ENV:-local}
 
 echo "Starting API and observability services..."
-docker compose --env-file "$ENV_FILE" up -d api loki grafana alloy
+# API_COMPOSE lets `make observability-smoke` start the API in the right compose
+# project (e.g. the OSS stack) instead of the default one. The observability
+# services always live in the default project.
+API_COMPOSE=${API_COMPOSE:-docker compose}
+$API_COMPOSE --env-file "$ENV_FILE" up -d api
+docker compose --env-file "$ENV_FILE" up -d loki grafana alloy
 
 echo "Waiting for Loki readiness..."
 attempt=1
