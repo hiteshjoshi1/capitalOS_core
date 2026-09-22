@@ -10,28 +10,27 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 ## Run
 - `make up` — starts postgres + api. With the local, git-ignored `docker-compose.oss-test.yml`
   present (this checkout) that is the **OSS stack** (postgres :5433 + api :8001, compose project
-  `capitalos-oss-test`): the real-data stack (holds `hitesh`). The old default-project stack
-  (`capitalos`, API :8000, demo-only DB) is retired — don't start it. Without that file (fresh
+  `capitalos-oss-test`). The default-project stack (`capitalos`, API :8000) is not used in
+  this checkout — don't start it. Without that file (fresh
   clone) it's the base stack on :5432 / :8000.
 - Web: `cd web && npm run dev` → `http://localhost:5173`.
 - API: `http://localhost:8001` (health: `curl http://127.0.0.1:8001/health`). `web/.env.local` sets
   `VITE_API_BASE=/api` + `VITE_API_PORT=8001`: the browser talks only to the Vite server, which
-  proxies `/api/*` to the API (works from a phone, where `localhost` would be the phone).
+  proxies `/api/*` to the API (works from other devices, where `localhost` would be that device).
 
 ## Network posture (dev)
 - Postgres and the API are published on `127.0.0.1` only (`docker-compose*.yml`).
 - Vite listens on all interfaces (`host: true`) but `web/vite.network.ts` drops any connection
   that isn't from localhost or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). `VITE_ALLOW_LAN=1`
   opens it to the local network. `*.ts.net` Host headers are allowed (`allowedHosts`).
-- Phone over Tailscale: `http://<tailscale-ip>:5173` (`tailscale ip -4`). Nothing else is exposed.
 - Demo login: `demo` / `Test@1234`.
-- `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the real DB
+- `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
   volume**; now requires typing the project name — run `make db-backup` first).
 
 ## Verify (match to what changed)
 - Backend code: `make api-rebuild` then `make test-backend` (runs **inside Docker**:
   `docker compose run --rm api pytest`). For one file: `docker compose run --rm --no-deps api pytest tests/test_X.py`
-  (`--no-deps` so it doesn't start the retired default-project Postgres; tests use SQLite, no DB needed).
+  (`--no-deps` so it doesn't start the default-project Postgres; tests use SQLite, no DB needed).
 - Frontend code: `cd web && npx vitest run <file>` (fast) or `npm test -- --run` (full).
 - New/changed migration: add `migrations/NNN_*.sql`, then `make db-migrate`
   (tracked in `schema_migrations`; safe to re-run, already-applied files are skipped).

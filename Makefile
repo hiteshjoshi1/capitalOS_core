@@ -254,7 +254,7 @@ db-adopt-migrations: db-wait
 	@echo "Migration adoption complete."
 
 db-reset:
-	@echo "DANGER: this DELETES the database volume of compose project '$(COMPOSE_PROJECT)' (your real data)."
+	@echo "DANGER: this DELETES the database volume of compose project '$(COMPOSE_PROJECT)'."
 	@echo "Run 'make db-backup' first if you want to keep anything."
 	@read -p "Type the project name '$(COMPOSE_PROJECT)' to continue: " confirm; [ "$$confirm" = "$(COMPOSE_PROJECT)" ] || (echo "Aborted." && exit 1)
 	$(COMPOSE) down -v

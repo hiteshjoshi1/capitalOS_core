@@ -20,7 +20,7 @@ export function isTrustedAddress(raw: string | null | undefined): boolean {
 }
 
 /**
- * The dev/preview server listens on every interface (`host: true`) so a phone
+ * The dev/preview server listens on every interface (`host: true`) so other devices
  * on the tailnet can reach it, but it should not serve anyone else on the
  * local network. This drops any TCP connection from outside localhost and the
  * tailnet before a single byte of HTTP or WebSocket traffic is handled.
