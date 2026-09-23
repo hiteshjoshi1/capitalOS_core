@@ -165,11 +165,18 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
         avg_price = _as_float(row.get(col_map.get("avg_price", ""), None))
         market_value = _as_float(row.get(col_map.get("market_value", ""), None))
         original_value = _as_float(row.get(col_map.get("original_value", ""), None))
+        last_price = _as_float(row.get(col_map.get("last_price", ""), None))
 
-        if market_value is None and avg_price is not None:
-            market_value = qty * avg_price
+        # True cost basis: prefer an explicit original-cost column, else derive
+        # from the average price paid. Never fall back to market value — that's
+        # today's price, not what was actually paid.
+        cost_basis = original_value if original_value is not None else (avg_price or 0.0) * qty
 
-        cost_basis = market_value if market_value is not None else (original_value if original_value is not None else 0.0)
+        # Current market value: prefer the sheet's own market-value column,
+        # else derive from a last/current price column, else fall back to the
+        # average price as a last resort (sheet has no live price at all).
+        if market_value is None:
+            market_value = qty * (last_price if last_price is not None else (avg_price or 0.0))
 
         key = symbol
         current = aggregated.get(key)
@@ -182,12 +189,14 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
                 "quantity": qty,
                 "avg_cost": avg_price,
                 "cost_basis_base": cost_basis,
+                "market_value_base": market_value,
                 "home_country": "SG",
                 "_avg_cost_total": (avg_price or 0.0) * qty,
             }
         else:
             current["quantity"] += qty
             current["cost_basis_base"] += cost_basis
+            current["market_value_base"] += market_value
             current["_avg_cost_total"] += (avg_price or 0.0) * qty
 
         rows_parsed += 1
@@ -199,13 +208,14 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
         avg_cost_total = entry.pop("_avg_cost_total", 0.0)
         if qty and avg_cost_total:
             entry["avg_cost"] = avg_cost_total / qty
+        entry["market_price"] = (entry["market_value_base"] / qty) if qty else None
         positions.append(entry)
         if len(preview) < 10:
             preview.append(
                 {
                     "symbol": entry["symbol"],
                     "quantity": entry["quantity"],
-                    "market_value": entry["cost_basis_base"],
+                    "market_value": entry["market_value_base"],
                 }
             )
 

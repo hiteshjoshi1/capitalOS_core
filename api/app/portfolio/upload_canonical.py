@@ -398,6 +398,62 @@ def _store_upload_raw_document(
     return raw_document_id
 
 
+def _get_or_create_asset(
+    db: Session,
+    *,
+    symbol: str,
+    currency: str,
+    name: str | None,
+    asset_class: str | None,
+    home_country: str | None,
+) -> int | None:
+    """Find (or create) the shared `assets` row for a symbol/currency pair.
+
+    Upload-parser instruments must link to this table — it's what the
+    market-data refresh job keys off of to fetch live quotes. An unlinked
+    broker_instrument can only ever show whatever price was in the last
+    uploaded file.
+    """
+    if not symbol or not currency:
+        return None
+
+    row = db.execute(
+        text("SELECT id FROM assets WHERE symbol = :symbol AND quote_currency = :currency LIMIT 1"),
+        {"symbol": symbol, "currency": currency},
+    ).fetchone()
+    if row:
+        return int(row[0])
+
+    is_sqlite = getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", "") == "sqlite"
+    insert_sql = (
+        """
+        INSERT OR IGNORE INTO assets (symbol, name, asset_class, quote_currency, home_country)
+        VALUES (:symbol, :name, :asset_class, :currency, :home_country)
+        """
+        if is_sqlite
+        else """
+        INSERT INTO assets (symbol, name, asset_class, quote_currency, home_country)
+        VALUES (:symbol, :name, :asset_class, :currency, :home_country)
+        ON CONFLICT (symbol, quote_currency) DO NOTHING
+        """
+    )
+    db.execute(
+        text(insert_sql),
+        {
+            "symbol": symbol,
+            "name": name or symbol,
+            "asset_class": (asset_class or "STOCK").upper(),
+            "currency": currency,
+            "home_country": home_country,
+        },
+    )
+    row = db.execute(
+        text("SELECT id FROM assets WHERE symbol = :symbol AND quote_currency = :currency LIMIT 1"),
+        {"symbol": symbol, "currency": currency},
+    ).fetchone()
+    return int(row[0]) if row else None
+
+
 def _ensure_upload_broker_instrument(
     db: Session,
     *,
@@ -406,6 +462,7 @@ def _ensure_upload_broker_instrument(
     currency: str,
     description: str | None,
     security_type: str | None,
+    home_country: str | None = None,
 ) -> int:
     """Upsert a broker_instrument record for an upload-parser position.
 
@@ -414,6 +471,14 @@ def _ensure_upload_broker_instrument(
     uploads of the same symbol produce the same instrument record.
     """
     synthetic_id = f"{symbol.upper()}_{currency.upper()}"
+    asset_id = _get_or_create_asset(
+        db,
+        symbol=symbol.upper(),
+        currency=currency.upper(),
+        name=description,
+        asset_class=security_type,
+        home_country=home_country,
+    )
 
     row = db.execute(
         text(
@@ -442,6 +507,7 @@ def _ensure_upload_broker_instrument(
                 SET symbol = COALESCE(:symbol, symbol),
                     description = COALESCE(:description, description),
                     security_type = COALESCE(:security_type, security_type),
+                    asset_id = COALESCE(asset_id, :asset_id),
                     updated_at = :updated_at
                 WHERE id = :instrument_id
                 """
@@ -450,6 +516,7 @@ def _ensure_upload_broker_instrument(
                 "symbol": symbol,
                 "description": description,
                 "security_type": security_type,
+                "asset_id": asset_id,
                 "updated_at": _now(),
                 "instrument_id": instrument_id,
             },
@@ -461,10 +528,10 @@ def _ensure_upload_broker_instrument(
             f"""
             INSERT INTO broker_instruments
               (platform_code, broker_instrument_id, symbol, description, security_type,
-               currency, metadata_json)
+               currency, asset_id, metadata_json)
             VALUES
               (:platform_code, :broker_instrument_id, :symbol, :description, :security_type,
-               :currency, {_platform_json_default(db)})
+               :currency, :asset_id, {_platform_json_default(db)})
             """
         ),
         {
@@ -474,6 +541,7 @@ def _ensure_upload_broker_instrument(
             "description": description,
             "security_type": security_type,
             "currency": currency.upper(),
+            "asset_id": asset_id,
         },
     )
     row = db.execute(
@@ -546,11 +614,28 @@ def _insert_upload_position_snapshots(
             currency=str(currency),
             description=pos.get("name"),
             security_type=pos.get("asset_class"),
+            home_country=pos.get("home_country"),
         )
 
         cost_basis_base = pos.get("cost_basis_base")
-        market_value_base = cost_basis_base if cost_basis_base is not None else Decimal("0")
         avg_cost = pos.get("avg_cost")
+        market_price = pos.get("market_price")
+        market_value_base = pos.get("market_value_base")
+
+        # market_price/market_value_base are the *current* price and value —
+        # kept distinct from avg_cost/cost_basis_base (what was actually paid)
+        # so P&L isn't computed by comparing cost basis against itself. Older
+        # parsers that don't report a live price fall back to treating cost
+        # basis as the best available estimate of current value.
+        if market_value_base is None:
+            if market_price is not None and quantity:
+                market_value_base = market_price * quantity
+            else:
+                market_value_base = cost_basis_base if cost_basis_base is not None else Decimal("0")
+        if market_price is None:
+            market_price = (market_value_base / quantity) if quantity else avg_cost
+        if cost_basis_base is None:
+            cost_basis_base = market_value_base
 
         db.execute(
             text(
@@ -574,7 +659,7 @@ def _insert_upload_position_snapshots(
                 "report_date": report_date,
                 "quantity": _db_decimal(quantity),
                 "currency": str(currency).upper(),
-                "market_price": _db_decimal(avg_cost),
+                "market_price": _db_decimal(market_price),
                 "market_value_local": _db_decimal(market_value_base),
                 "market_value_base": _db_decimal(market_value_base),
                 "cost_basis_local": _db_decimal(cost_basis_base),

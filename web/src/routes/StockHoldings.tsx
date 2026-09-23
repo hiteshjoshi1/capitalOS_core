@@ -215,6 +215,47 @@ export default function StockHoldings() {
     return `${status.slice(0, 1).toUpperCase()}${status.slice(1).toLowerCase()}`;
   };
   const holdings = useMemo(() => summary?.top_holdings ?? [], [summary]);
+  const escapeCsvValue = (value: string | number | null | undefined): string => {
+    if (value == null) return "";
+    const text = String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  const handleDownloadCsv = () => {
+    const rows = holdings.filter((h) => h.asset_class === "STOCK" || h.asset_class === "FUND");
+    const header = ["Symbol", "Name", "Quantity", "Buy Price", "Current Price", "Currency", "Profit/Loss", "P/L %"];
+    const lines = [header.map(escapeCsvValue).join(",")];
+    for (const h of rows) {
+      const hasPnlInputs = h.quantity != null && h.avg_cost != null && h.latest_price != null;
+      const pnl = hasPnlInputs ? h.quantity! * (h.latest_price! - h.avg_cost!) : null;
+      const pnlPct = hasPnlInputs && h.avg_cost! > 0
+        ? ((h.latest_price! - h.avg_cost!) / h.avg_cost!) * 100
+        : null;
+      lines.push(
+        [
+          h.symbol,
+          h.name ?? "",
+          h.quantity ?? "",
+          h.avg_cost ?? "",
+          h.latest_price ?? "",
+          h.quote_currency ?? "",
+          pnl != null ? pnl.toFixed(2) : "",
+          pnlPct != null ? pnlPct.toFixed(2) : "",
+        ]
+          .map(escapeCsvValue)
+          .join(","),
+      );
+    }
+    const blob = new Blob([lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const dateLabel = summary?.is_live ? new Date().toISOString().slice(0, 10) : (summary?.as_of_month ?? month);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `stock-holdings-${dateLabel}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
   const visibleHoldings = holdings.slice(0, visibleCount);
   const visibleColumnCount = 1 + STOCK_COLUMN_OPTIONS.filter((option) => visibleColumns[option.key]).length;
   const hasMore = visibleCount < holdings.length;
@@ -268,6 +309,14 @@ export default function StockHoldings() {
           >
             <span className={`stockHoldingsRefreshDot${refreshing ? " stockHoldingsRefreshDotActive" : ""}`} aria-hidden="true" />
             {refreshing ? "Refreshing..." : "Refresh quotes"}
+          </button>
+          <button
+            className="btn stockHoldingsDownloadBtn"
+            onClick={handleDownloadCsv}
+            disabled={holdings.length === 0}
+            title="Download currently held stocks as CSV"
+          >
+            Download CSV
           </button>
           <MonthControl month={month} onMonthChange={handleMonthChange} />
           <label className="coPillBtn">
