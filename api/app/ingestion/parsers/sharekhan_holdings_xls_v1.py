@@ -215,6 +215,8 @@ def parse_sharekhan_holdings_xls(file_path: str) -> ParseResult:
                 "quantity": qty,
                 "avg_cost": hold_price,
                 "cost_basis_base": cost_basis,
+                "market_price": market_price,
+                "market_value_base": market_value,
                 "home_country": "IN",
             }
         )
