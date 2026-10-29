@@ -30,6 +30,11 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - Demo login: `demo` / `Test@1234`.
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
   volume**; now requires typing the project name — run `make db-backup` first).
+- Backups (#41): `make db-backup` dumps **and proves it restores** (scratch-DB restore with exact
+  per-table counts from the dump's own snapshot). It runs daily at 03:00 via launchd
+  (`make backup-schedule`); `make backup-status` shows the newest verified backup and the
+  schedule. `make backup-prune KEEP=14` only removes verified backups beyond the newest 14, never
+  the older unmarked dumps. Restore: `make db-restore BACKUP_FILE=<dump>`.
 
 ## Verify (match to what changed)
 - Backend code: `make api-rebuild` then `make test-backend` (runs **inside Docker**:
