@@ -12,6 +12,8 @@ from app.db.session import get_db
 from app.schemas.auth import (
     AuthMeResponse,
     AuthTokenResponse,
+    ChangePasswordRequest,
+    ChangePasswordResponse,
     DEFAULT_ACCENT_COLOR,
     DEFAULT_THEME,
     LoginRequest,
@@ -30,6 +32,7 @@ from app.services.auth import (
     refresh_token_ttl_seconds,
     verify_password,
 )
+from app.services.passwords import set_user_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -335,6 +338,34 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
         db.commit()
     response.delete_cookie(refresh_cookie_name(), path="/")
     return {"status": "ok"}
+
+
+@router.post("/change-password", response_model=ChangePasswordResponse)
+def change_password(
+    payload: ChangePasswordRequest,
+    request: Request,
+    current_user: CurrentUser = Depends(require_current_user),
+    db: Session = Depends(get_db),
+):
+    # 400, not 401, for a wrong current password: a 401 means "signed out" to the web app.
+    row = db.execute(
+        text("SELECT password_hash FROM user_credentials WHERE user_id = :user_id"),
+        {"user_id": current_user.id},
+    ).mappings().one_or_none()
+    if row is None or not verify_password(payload.current_password, str(row["password_hash"])):
+        raise HTTPException(status_code=400, detail="Current password is incorrect")
+    if payload.new_password == payload.current_password:
+        raise HTTPException(status_code=400, detail="New password must be different from the current one")
+
+    signed_out = set_user_password(
+        db,
+        user_id=current_user.id,
+        new_password=payload.new_password,
+        revoke_reason="password_change",
+        keep_refresh_token=request.cookies.get(refresh_cookie_name()),
+    )
+    db.commit()
+    return ChangePasswordResponse(signed_out_sessions=signed_out)
 
 
 @router.get("/me", response_model=AuthMeResponse)
