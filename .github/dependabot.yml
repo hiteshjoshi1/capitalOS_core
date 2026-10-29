@@ -25,6 +25,16 @@ updates:
       pip-minor-patch:
         update-types: [minor, patch]
 
+  # Dev tooling for the LangGraph task workflow (make orch-bootstrap).
+  - package-ecosystem: pip
+    directory: /orchestration
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      orchestration-minor-patch:
+        update-types: [minor, patch]
+
   # API base image (python:3.12-slim).
   - package-ecosystem: docker
     directory: /api

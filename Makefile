@@ -322,6 +322,7 @@ verify: lint typecheck test-backend test-frontend
 
 orch-bootstrap:
 	$(PYTHON) -m venv "$(ORCH_VENV)"
+	"$(ORCH_PIP)" install --upgrade "pip>=26.2"
 	"$(ORCH_PIP)" install -r orchestration/requirements.txt
 
 orch-test:
