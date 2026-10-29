@@ -3,7 +3,8 @@ name: Security Scan
 # Image vulnerability scanning with Trivy (local twin: `make security-scan`).
 # - api-image: builds the runtime API image on a freshly pulled base and FAILS
 #   on fixable HIGH/CRITICAL findings.
-# - compose-images: third-party images pinned in docker-compose.yml; report only.
+# - compose-images: third-party images pinned in docker-compose.yml plus tool
+#   images from tools/Dockerfile (e.g. the MCP server); report only.
 # Results are uploaded to the repository's Security tab (code scanning is free
 # for public repositories). The weekly run catches new CVEs in unchanged images.
 on:
@@ -16,7 +17,6 @@ permissions:
   contents: read
 
 env:
-  TRIVY_IMAGE: aquasec/trivy:0.75.0
   TRIVY_FLAGS: --quiet --skip-version-check --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL
   # SARIF upload needs a token with security-events:write, which fork PRs don't get.
   CAN_UPLOAD: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
@@ -31,6 +31,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Resolve Trivy image (tools/Dockerfile)
+        run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
 
       - name: Cache Trivy DB
         uses: actions/cache@v4
@@ -72,10 +75,11 @@ jobs:
         uses: actions/checkout@v4
 
       - id: list
-        name: List third-party images from docker-compose.yml
+        name: List third-party images (docker-compose.yml + tools/Dockerfile)
         run: |
           images=$(docker compose -f docker-compose.yml --profile observability config --format json \
-            | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; print(json.dumps(sorted({v["image"] for v in s.values() if "image" in v and "build" not in v})))')
+            | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; extra=sys.argv[1:]; print(json.dumps(sorted({v["image"] for v in s.values() if "image" in v and "build" not in v} | set(extra))))' \
+              "$(scripts/tool-image.sh mcp-toolbox)")
           echo "images=$images" >> "$GITHUB_OUTPUT"
           echo "$images"
 
@@ -91,6 +95,12 @@ jobs:
       matrix:
         image: ${{ fromJSON(needs.list-compose-images.outputs.images) }}
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve Trivy image (tools/Dockerfile)
+        run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
+
       - name: Cache Trivy DB
         uses: actions/cache@v4
         with:

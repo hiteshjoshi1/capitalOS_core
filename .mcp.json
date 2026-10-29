@@ -4,8 +4,7 @@
       "command": "bash",
       "args": ["scripts/mcp-postgres.sh"],
       "env": {
-        "MCP_PG_NETWORK": "capitalos_default",
-        "DATABASE_URI": "postgresql://capitalos:capitalos@postgres:5432/capitalos"
+        "MCP_PG_NETWORK": "capitalos_default"
       }
     }
   }

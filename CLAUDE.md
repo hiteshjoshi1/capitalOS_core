@@ -55,6 +55,12 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - Never remove a field from an API response; only add. Keep TS types mirroring backend
   response shapes (see `AGENTS.md` § API Contract Rules).
 
+## Postgres MCP (`capitalos-postgres`)
+- Google MCP Toolbox (`--prebuilt postgres`, image pinned in `tools/Dockerfile`) via
+  `scripts/mcp-postgres.sh`. It connects as `capitalos_mcp_ro`: read-only at the DB level, and no
+  access to `user_credentials`/`auth_sessions`. Set it up once with `make db-create-mcp-role`
+  (password in `.env` as `MCP_DB_PASSWORD`), and re-run it after rotating the password.
+
 ## Headless browser QA (screenshots)
 Playwright works. With `web/.env.local` → `VITE_API_BASE=/api` (this checkout) everything is
 same-origin through the Vite proxy and no special flags are needed. If the web app calls the API

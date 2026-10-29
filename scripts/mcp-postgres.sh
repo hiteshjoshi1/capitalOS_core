@@ -1,17 +1,32 @@
 #!/bin/bash
-# Stdio launcher for the capitalos-postgres MCP server (crystaldba/postgres-mcp in Docker).
+# Stdio launcher for the capitalos-postgres MCP server: Google MCP Toolbox
+# (`--prebuilt postgres`) in Docker, connecting as the read-only role from
+# `make db-create-mcp-role`. The image reference lives in tools/Dockerfile.
 #
-# postgres-mcp does not exit when its stdin closes, and killing the `docker run`
-# client does not stop the container, so launching it directly leaks one running
-# container per Claude session. This wrapper names and labels the container,
-# removes it when this script or the owning Claude process goes away, and reaps
-# leftovers whose owner is no longer running.
+# Killing the `docker run` client does not stop the container, so launching it
+# directly can leak one running container per Claude session. This wrapper names
+# and labels the container, removes it when this script or the owning Claude
+# process goes away, and reaps leftovers whose owner is no longer running.
 #
-# Env: MCP_PG_NETWORK (docker network of the target Postgres), DATABASE_URI.
+# Env: MCP_PG_NETWORK (docker network of the target Postgres), MCP_PG_HOST,
+# MCP_PG_DATABASE, MCP_PG_USER, MCP_DB_PASSWORD (default: read from the repo .env).
 set -u
 
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+IMAGE=$("$ROOT/scripts/tool-image.sh" mcp-toolbox) || exit 1
 NETWORK=${MCP_PG_NETWORK:-capitalos_default}
-export DATABASE_URI=${DATABASE_URI:-postgresql://capitalos:capitalos@postgres:5432/capitalos}
+if [ -z "${MCP_DB_PASSWORD:-}" ] && [ -f "$ROOT/.env" ]; then
+  MCP_DB_PASSWORD=$(sed -n 's/^MCP_DB_PASSWORD=//p' "$ROOT/.env" | tail -1)
+fi
+if [ -z "${MCP_DB_PASSWORD:-}" ]; then
+  echo "mcp-postgres: MCP_DB_PASSWORD not set; run 'make db-create-mcp-role' first" >&2
+  exit 1
+fi
+export POSTGRES_HOST=${MCP_PG_HOST:-postgres}
+export POSTGRES_PORT=5432
+export POSTGRES_DATABASE=${MCP_PG_DATABASE:-capitalos}
+export POSTGRES_USER=${MCP_PG_USER:-capitalos_mcp_ro}
+export POSTGRES_PASSWORD=$MCP_DB_PASSWORD
 LABEL=capitalos.mcp-postgres
 OWNER=$PPID
 NAME="capitalos-mcp-pg-$$"
@@ -37,8 +52,11 @@ trap cleanup EXIT
 
 # Backgrounded + `wait` so a TERM is handled immediately instead of after the
 # (never-ending) foreground child; `<&0` keeps stdin attached to the MCP stream.
+# Same runtime hardening as the compose services (see docker-compose.yml).
 docker run -i --rm --name "$NAME" \
   --label "$LABEL=1" --label "$LABEL.owner=$OWNER" \
-  --network "$NETWORK" -e DATABASE_URI \
-  crystaldba/postgres-mcp --access-mode=restricted "$@" <&0 &
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true --pids-limit 128 \
+  --network "$NETWORK" \
+  -e POSTGRES_HOST -e POSTGRES_PORT -e POSTGRES_DATABASE -e POSTGRES_USER -e POSTGRES_PASSWORD \
+  "$IMAGE" --prebuilt postgres --stdio "$@" <&0 &
 wait $!

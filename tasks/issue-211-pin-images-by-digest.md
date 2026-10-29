@@ -10,9 +10,9 @@
   multi-arch **index** digest (`docker buildx imagetools inspect <ref>`), so arm64 (Mac) and amd64 (CI)
   both resolve. The Dependabot `docker` and `docker-compose` ecosystems update tag+digest together.
 - **Images Dependabot can't see** (in `run:` steps, the Makefile and `scripts/mcp-postgres.sh`):
-  collect them in `tools/images.Dockerfile`, one `FROM <image>:<tag>@sha256:… AS <name>` line each
-  (Trivy, the MCP image, actionlint). Add a Dependabot `docker` entry for `/tools`. The Makefile,
-  workflow and script read the reference from that file with a one-line `sed`, so there's one source of truth.
+  they live in `tools/Dockerfile` (added in issue 212), one `FROM <image>:<tag>@sha256:… AS <name>` line each
+  (Trivy, the MCP image); add actionlint there too. Dependabot already watches `/tools`. The Makefile,
+  workflow and script read references with `scripts/tool-image.sh`; this issue adds the digests.
 - GitHub Actions: pin `uses:` to full commit SHAs with a `# vX.Y.Z` comment. Dependabot
   `github-actions` updates SHAs and comments.
 - Free: all of this is Dependabot plus file edits.
