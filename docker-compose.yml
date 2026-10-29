@@ -1,12 +1,22 @@
+# Runtime hardening applied to every long-running service: no privilege
+# escalation via setuid binaries, no Linux capabilities, and a process cap.
+x-hardening: &hardening
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 512
+
 # Shared by the `api` service and the `api-dev` tooling service.
 x-api-common: &api-common
+  <<: *hardening
   # Non-root (the image's `app` user by default). On a Linux host whose user
   # isn't 10001, set CAPITALOS_UID/CAPITALOS_GID in .env so ./data stays writable.
   user: "${CAPITALOS_UID:-10001}:${CAPITALOS_GID:-10001}"
   env_file:
     - path: .env
       required: false
-  environment:
+  environment: &api-env
     DATABASE_URL: ${DATABASE_URL:-postgresql://capitalos:capitalos@postgres:5432/capitalos}
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     LOG_FORMAT: ${LOG_FORMAT:-logfmt}
@@ -22,8 +32,16 @@ x-api-common: &api-common
 
 services:
   postgres:
+    <<: *hardening
     image: postgres:16.15
     container_name: capitalos-postgres
+    # Runs straight as the image's postgres user (data dir is owned by 999), so
+    # the root entrypoint + gosu privilege drop and its capabilities aren't needed.
+    user: "999:999"
+    read_only: true
+    tmpfs:
+      - /tmp
+      - /var/run/postgresql:uid=999,gid=999
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-capitalos}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-capitalos}
@@ -39,6 +57,13 @@ services:
       context: ./api
       target: runtime
     container_name: capitalos-api
+    read_only: true
+    tmpfs:
+      - /tmp
+    environment:
+      <<: *api-env
+      # Writable home for library caches (e.g. yfinance) on the read-only root fs.
+      HOME: /tmp
     ports:
       - "127.0.0.1:8000:8000"
     command: uvicorn app.main:app --host=0.0.0.0 --port=8000 --reload
@@ -54,8 +79,14 @@ services:
       - tools
 
   loki:
+    <<: *hardening
     image: grafana/loki:3.7.9
     container_name: capitalos-loki
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - observability
     profiles:
       - observability
     command:
@@ -72,8 +103,14 @@ services:
       - loki-data:/loki
 
   grafana:
+    <<: *hardening
     image: grafana/grafana:12.4.14
     container_name: capitalos-grafana
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - observability
     profiles:
       - observability
     env_file:
@@ -93,26 +130,71 @@ services:
       - grafana-data:/var/lib/grafana
 
   alloy:
+    <<: *hardening
     image: grafana/alloy:v1.21.3
     container_name: capitalos-alloy
+    # The image defaults to root; with the socket proxy it needs no host access.
+    user: "473:473"
+    read_only: true
+    tmpfs:
+      - /tmp
+    networks:
+      - observability
+      - docker-api
     profiles:
       - observability
     command:
       - run
       - /etc/alloy/config.alloy
       - --server.http.listen-addr=0.0.0.0:12345
+      - --storage.path=/var/lib/alloy/data
     env_file:
       - path: ./config/observability.env.example
       - path: ./config/observability.env
         required: false
     depends_on:
       - loki
+      - docker-socket-proxy
     volumes:
       - ./config/alloy/config.alloy:/etc/alloy/config.alloy:ro
-      # Local-only observability tradeoff: read-only Docker socket access lets Alloy tail container logs.
+      # Log read positions survive restarts, so logs aren't re-shipped.
+      - alloy-data:/var/lib/alloy/data
+
+  # The only container with the Docker socket. It exposes a read-only subset of
+  # the Docker API (list/inspect containers, logs, events, networks) on an
+  # internal network that only Alloy joins; every write endpoint is refused.
+  docker-socket-proxy:
+    <<: *hardening
+    image: tecnativa/docker-socket-proxy:v0.5.0
+    container_name: capitalos-docker-socket-proxy
+    # Runs as root only to open the socket; no caps, read-only fs, internal network.
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp
+      - /var/lib/haproxy
+    profiles:
+      - observability
+    environment:
+      CONTAINERS: 1
+      NETWORKS: 1
+      EVENTS: 1
+      PING: 1
+      VERSION: 1
+      POST: 0
+    networks:
+      - docker-api
+    volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+
+networks:
+  # postgres + api stay on the project's default network (the MCP server joins it).
+  observability:
+  docker-api:
+    internal: true
 
 volumes:
   pgdata:
   loki-data:
   grafana-data:
+  alloy-data:
