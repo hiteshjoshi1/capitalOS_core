@@ -191,8 +191,17 @@ case "${1:-}" in
     compose --profile observability --profile tools down -v --remove-orphans
     git -C "$REPO" worktree remove --force "$TW"
     git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 || true
+    # The pushed test branch, once it's merged (gh's --delete-branch can't while its worktree exists).
+    if git -C "$REPO" ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; then
+      git -C "$REPO" fetch -q origin "$branch" main
+      if git -C "$REPO" merge-base --is-ancestor FETCH_HEAD origin/main 2>/dev/null; then
+        git -C "$REPO" push -q origin --delete "$branch" && echo "Deleted the merged remote branch $branch"
+      else
+        echo "Kept the remote branch $branch: it isn't merged into main"
+      fi
+    fi
     docker image ls --format '{{.Repository}}' | grep -x "$ISO_NAME-api\|$ISO_NAME-api-dev" | xargs -r docker image rm >/dev/null 2>&1 || true
-    echo "Dropped the test instance ($branch). A pushed test branch is deleted when its PR merges."
+    echo "Dropped the test instance ($branch)."
     ;;
   *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

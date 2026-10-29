@@ -69,6 +69,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && (scripts/status.sh 2>&1 || echo 'make status could not run; run it yourself before starting work.')"
+          }
+        ]
+      }
     ]
   }
 }
