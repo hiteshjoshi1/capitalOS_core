@@ -33,6 +33,8 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   that isn't from localhost or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). `VITE_ALLOW_LAN=1`
   opens it to the local network. `*.ts.net` Host headers are allowed (`allowedHosts`).
 - Demo login: `demo` / `Test@1234`.
+- Passwords: Settings → Change password (signs out your other sessions). Forgotten one:
+  `make user-set-password USERNAME=<name>` prompts for a new one and signs out all its sessions (#72).
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
   volume**; now requires typing the project name — run `make db-backup` first).
 - Backups (#41): `make db-backup` dumps **and proves it restores** (scratch-DB restore with exact

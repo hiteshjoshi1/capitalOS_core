@@ -233,6 +233,11 @@ export type AuthToken = {
   expires_in: number;
 };
 
+export type ChangePasswordResult = {
+  status: string;
+  signed_out_sessions: number;
+};
+
 export type UserPreferences = {
   theme: "dark" | "light";
   accent_color: "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
@@ -1329,6 +1334,8 @@ export const api = {
     req<AuthToken>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
   authMe: () => req<AuthMe>("/auth/me"),
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
+  changePassword: (payload: { current_password: string; new_password: string }) =>
+    req<ChangePasswordResult>("/auth/change-password", { method: "POST", body: JSON.stringify(payload) }),
   getPreferences: () => req<UserPreferences>("/auth/preferences"),
   patchPreferences: (patch: UserPreferencesPatch) =>
     req<UserPreferences>("/auth/preferences", { method: "PATCH", body: JSON.stringify(patch) }),
