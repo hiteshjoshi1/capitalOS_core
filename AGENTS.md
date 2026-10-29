@@ -60,6 +60,50 @@ second backlog, TODO list or roadmap file.
 
 - See the process rules below for sprints and merging.
 
+---
+
+# Process Rules (issue #43)
+
+These are Hitesh's standing instructions. **A new standing rule goes into this file in the same
+change that first applies it**: a rule kept only in one tool's private memory binds no other
+implementer. Precedence: Hitesh's word in the moment, then this file, then the rest of the docs.
+
+- **Sprints.** Propose a sprint as a list of board issues, each explained in one plain line, and
+  **wait for Hitesh's okay before working any of them**. An issue filed during a sprint waits for
+  the next sprint unless he okays it. (The 2026-10-29 sprint, #41–#47, was okayed: "implement
+  all of the things that you listed ... start on each one by one".)
+- **Merging.** A PR is merged only when Hitesh says so, and the word covers only the PRs it
+  names (or the sprint it okays). Never merge on your own judgement. Never commit to `main`.
+- **Status.** Follow the board flow in § Work Tracking. A merged item stays in Fixed-To Review;
+  only Hitesh moves it to Done. Feedback on review sends it back to In progress on the same
+  branch.
+- **Decisions.** A choice with real alternatives gets an entry in
+  [docs/decisions.md](docs/decisions.md) (D-n): what was chosen, what was rejected and why, and
+  the issue or PR. Link the D-n from the PR.
+- **Self-review before "done".** Re-read the change against the original ask and your own plan,
+  not only against the tests you wrote:
+  - Was the thing asked for built, or a narrower, safer-looking substitute?
+  - Every acceptance criterion in the issue, not only the ones the plan scoped in.
+  - **Siblings and side effects.** What else uses the thing you changed? (#38: hardening Postgres's
+    `/tmp` in #33 broke `db-backup`, which went through it.)
+  - **Never mask a failure.** No `cmd | tail` or `cmd | grep` where the exit status matters
+    (zsh: `${pipestatus}`; bash: `set -o pipefail`). A step that must succeed before the next is
+    checked, not assumed. (#38: a failing backup was piped into `tail`, and the restart went
+    ahead without it.)
+  - A claim without a test is a gap: "checked by hand" says so.
+- **Report faithfully.** A failed test, a skipped step, or a check done by hand rather than by a
+  test is said so, with the output.
+- **Check before asserting absence.** "Do we have X?" is a search of code, schema and docs, not
+  a recollection.
+- **Talking to Hitesh.** Explain every id and term in a plain line ("#45 (test a batch of PRs on
+  a separate instance)", never just "#45"). For a decision: what it is, what each answer
+  changes, and a recommendation.
+- **Supply chain.**
+  - Pin every image and Action by digest or SHA (`scripts/check-pinned-refs.sh`).
+  - Adopt a release only once it's at least two weeks old, unless it fixes an exploited issue.
+  - A new direct dependency is named to Hitesh, with what it does, who maintains it and when it
+    was last released, before it's added.
+
 
 ---
 

@@ -58,6 +58,8 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   one issue per unit of work; `scripts/board.sh list|add|move`. See `AGENTS.md` § Work Tracking.
 - One `tasks/issue-<n>-<slug>.md` doc per issue, where `<n>` is the GitHub issue number (see `tasks/_template.md`).
 - One feature branch + one PR per issue. **Never commit directly to `main`.**
+- **Sprints are okayed and PRs merged only on Hitesh's word**; self-review before "done"; real
+  choices go in `docs/decisions.md`. See `AGENTS.md` § Process Rules.
 - Numbered, sequential `migrations/NNN_*.sql` — never edit an already-applied migration.
 - Pin every image by `tag@sha256:` and every Action by commit SHA (`scripts/check-pinned-refs.sh`, run
   by `make lint`). Images used outside compose live in `tools/Dockerfile`. Dependabot bumps the pins.

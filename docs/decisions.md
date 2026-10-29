@@ -1,0 +1,19 @@
+# Decisions
+
+One entry per choice that had real alternatives: what was chosen, what was rejected and why.
+Newest last. Link an entry's id (D-n) from the PR that makes the choice (AGENTS.md § Process Rules).
+
+| Id | Date | Decision | Rejected, and why | Where |
+| --- | --- | --- | --- | --- |
+| **D-1** | 2026-10-29 | Release-age rule: adopt a new release (image, Action, tool) only once it's **≥ 2 weeks old**, unless it fixes an exploited issue. | Always-latest: a compromised or broken release is usually caught in its first days; two weeks lets that surface first. | #5, #31, #38 |
+| **D-2** | 2026-10-29 | **Grafana 12.4.14**, and Dependabot ignores Grafana majors. | Grafana 13.3.0: 39 HIGH / 7 CRITICAL fixable vs 3 / 0 (Trivy). Revisit in #50. | #5, #12 |
+| **D-3** | 2026-10-29 | Image scanning runs **Trivy as its Docker image** in CI and `make security-scan`. Fails on fixable HIGH/CRITICAL in our API image; third-party images are report-only. | The `trivy-action` GitHub Action: one more third-party code path in CI. Failing on third-party images: we can't patch them, so the gate would be permanently red. | #31 |
+| **D-4** | 2026-10-29 | API image: a shared base with `runtime` (non-root, no pip, no dev tools) and `dev` targets; tooling runs in the `api-dev` service. | One image for everything: ships pytest/ruff/mypy and tests to the running app. A separate Dockerfile: two places to keep the base in sync. | #31 |
+| **D-5** | 2026-10-29 | **Postgres runs directly as uid 999**, with no capabilities and a read-only root. | Root entrypoint + gosu with `CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER` added back: needed only to chown a data dir that is already owned by 999 (tested on a fresh volume and on a copy of the real one). | #33 |
+| **D-6** | 2026-10-29 | Docker socket via **`tecnativa/docker-socket-proxy` v0.5.0** (GET containers/events/networks only, internal network). | `wollomatic/socket-proxy` 1.13.1: 8 HIGH / 2 CRITICAL vs 6 / 0, newest release under two weeks old. Raw socket for Alloy: near-root on the host. | #33 |
+| **D-7** | 2026-10-29 | No container memory limits. | Per-service limits: ingestion (pandas) and Grafana have spiky memory, and a wrong cap OOM-kills the DB or API. `pids_limit` covers fork bombs. | #33 |
+| **D-8** | 2026-10-29 | Postgres MCP: **Google MCP Toolbox 1.14.0**, connecting as the read-only role `capitalos_mcp_ro` (no access to `user_credentials`/`auth_sessions`). | Postgres MCP Pro (`crystaldba`): no release since 2025-05, 214 HIGH / 12 CRITICAL, and it connected as a superuser. DBHub: fewer tools, 25 HIGH / 1 CRITICAL. Self-building Pro's frozen package: still unmaintained code. | #34 |
+| **D-9** | 2026-10-29 | Pin images by `tag@sha256` index digest and Actions by commit SHA, enforced by `check-pinned-refs.sh`; Dependabot bumps them. Base-image patches arrive as weekly Dependabot PRs. | Floating tags + `--pull`: patches land automatically but unreviewed and unreproducible, and a re-pointed tag silently changes what runs. | #38 |
+| **D-10** | 2026-10-29 | Backups are verified by restoring into a scratch DB and comparing **exact per-table counts taken in the dump's own snapshot** (`pg_dump --snapshot`). | Comparing with live counts after the dump: false failures while schedulers write (measured: snapshot 200,550 rows vs live 201,900 during one backup). Restore-only checks: they miss a dump that restores but is missing rows. | #48 |
+| **D-11** | 2026-10-29 | Prune removes only backups this tool verified, beyond the newest N; dumps without markers are never pruned. | Age-based prune of every dump: it would delete the 2026-08-28 dump, the only copy of that history. | #48 |
+| **D-12** | 2026-10-29 | **The GitHub issue number is the task id** (`tasks/issue-<n>-*`, `feature/issue-<n>-*`). | A separate id series as in InvestOS (B21, W14): the orchestration already parses `issue-<digits>`, and one number is easier to follow. | #51 |
