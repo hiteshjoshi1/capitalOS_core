@@ -37,7 +37,7 @@ describe("Platforms", () => {
     );
 
     expect(await screen.findByRole("heading", { name: "Add Platform" })).toBeInTheDocument();
-    expect(screen.getByText("Interactive Brokers")).toBeInTheDocument();
+    expect(await screen.findByText("Interactive Brokers")).toBeInTheDocument();
     expect(screen.getByText("IBKR · BROKER · US")).toBeInTheDocument();
   });
 

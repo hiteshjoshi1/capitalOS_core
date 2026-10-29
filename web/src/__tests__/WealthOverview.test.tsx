@@ -191,7 +191,7 @@ describe("WealthOverview", () => {
     // month preference — the page has no concept of a selectable month.
     expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
     expect(window.localStorage.getItem("capitalos.selectedMonth.wealth")).toBeNull();
-    expect(screen.getAllByText("DBS Vickers")).not.toHaveLength(0);
+    expect(await screen.findAllByText("DBS Vickers")).not.toHaveLength(0);
   });
 
   it("renders per-source freshness chips on the hero from bootstrap data", async () => {

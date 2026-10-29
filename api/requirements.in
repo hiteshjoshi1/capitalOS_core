@@ -1,0 +1,42 @@
+# Direct runtime dependencies. `make api-lock` compiles them, with every transitive
+# package, versions and hashes, into requirements.txt (what the image installs, #81).
+fastapi==0.162.0
+uvicorn[standard]==0.54.0
+SQLAlchemy==2.0.54
+psycopg2-binary==2.9.13
+pydantic==2.14.1
+python-dotenv==1.2.4
+python-multipart==0.0.32
+pandas==3.0.6
+openpyxl==3.1.5
+xlrd==2.0.2
+lxml==6.1.3
+httpx==0.28.1
+eth-account==0.14.0
+eth-utils==6.0.0
+eth-keys==0.8.0
+eth-abi==6.0.0
+pynacl==1.6.2
+base58==2.1.1
+APScheduler==3.11.3
+yfinance==1.7.0
+PyJWT==2.15.1
+cryptography==50.0.2
+argon2-cffi==25.1.0
+
+# Held back (D-1): transitive packages whose newest release was under 14 days old when the
+# lock was made. Pinned here, the lock uses them; Dependabot proposes newer ones after its
+# 14-day cooldown. python-dateutil 3.0 is a new major that pandas pulled in unreviewed.
+bitarray==3.12.2
+# Security fix, taken under 14 days (D-1 exception): GHSA-6q48-6c7w-9gw2, compromised emSign roots.
+certifi==2026.10.18
+curl-cffi==0.16.3
+platformdirs==4.13.0
+pycparser==3.11
+python-dateutil==2.9.0.post0
+pytz==2026.5
+soupsieve==3.0.3
+starlette==1.8.0
+tzdata==2026.5
+tzlocal==5.4.4
+websockets==17.2
