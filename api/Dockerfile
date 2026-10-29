@@ -4,7 +4,7 @@ WORKDIR /app
 ENV PYTHONPATH=/app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+RUN pip install --no-cache-dir --upgrade "pip>=26.2" && pip install --no-cache-dir -r /app/requirements.txt
 
 COPY app /app/app
 COPY tests /app/tests
