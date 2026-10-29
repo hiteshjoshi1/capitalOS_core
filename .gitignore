@@ -124,3 +124,7 @@ tasks/*.local.md
 design_handoff_capitalos_wealth/
 # Generated SBOMs (make sbom)
 sbom/
+
+# Test instance state (#45)
+.test-instance.state
+.test-instance-web.*

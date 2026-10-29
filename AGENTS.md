@@ -78,6 +78,20 @@ implementer. Precedence: Hitesh's word in the moment, then this file, then the r
   **wait for Hitesh's okay before working any of them**. An issue filed during a sprint waits for
   the next sprint unless he okays it. (The 2026-10-29 sprint, #41–#47, was okayed: "implement
   all of the things that you listed ... start on each one by one".)
+- **Nothing reaches main until Hitesh has tested it on the test instance** (#45, as in InvestOS
+  A43):
+  - A batch of PRs ready for review is built with `make test-instance PRS="<n> <n>"`, from the
+    main checkout. It merges `main` plus the PRs in order into a throwaway `test/<date>` branch
+    (never a long-lived develop branch) and runs `make verify`. It then serves the result as a
+    separate app with its own copy of the real data (newest **verified** backup, counts checked;
+    the batch's migrations are applied to the copy) and a red TEST banner, with schedulers off.
+  - A PR that fails the checks, or that Hitesh rejects, is dropped and the batch rebuilt without it.
+  - After his test: `make test-instance-pr` opens **one PR from `test/<date>` to `main`** that
+    `Closes` every issue in the batch. It's merged as tested, so main's tree is the tested tip
+    and no conflict is resolved twice; GitHub marks the batch's own PRs merged with it. Then
+    `make test-instance-drop`.
+  - If a change can't be seen on the test instance (e.g. it needs a scheduler or a live
+    broker), the issue's Fixed-To Review comment says so, and why.
 - **Merging.** A PR is merged only when Hitesh says so, and the word covers only the PRs it
   names (or the sprint it okays). Never merge on your own judgement. Never commit to `main`.
 - **Status.** Follow the board flow in § Work Tracking. A merged item stays in Fixed-To Review;
