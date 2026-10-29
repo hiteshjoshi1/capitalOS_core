@@ -158,7 +158,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build deploy deploy-plan deploy-status observability-running
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build deploy deploy-plan deploy-status observability-running
 
 build:
 	$(COMPOSE) build
@@ -195,6 +195,11 @@ api-logs:
 # a worktree's own port).
 api-url:
 	@echo http://127.0.0.1:$(API_PORT)
+
+# Where things stand (#47): board, open PRs, real stack, deploy, backups, worktrees.
+# Read-only; also shown at every Claude Code session start (.claude/settings.json).
+status:
+	@scripts/status.sh
 
 # Which stack this checkout drives (#44).
 where:
