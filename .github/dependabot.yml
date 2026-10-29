@@ -59,6 +59,9 @@ updates:
       # A Postgres major needs pg_upgrade / dump+restore of the data volume.
       - dependency-name: postgres
         update-types: ["version-update:semver-major"]
+      # Grafana 13.x scanned far worse than 12.4.x (issue 206); revisit majors by hand.
+      - dependency-name: grafana/grafana
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
