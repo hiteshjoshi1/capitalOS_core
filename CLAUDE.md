@@ -41,6 +41,14 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   schedule. `make backup-prune KEEP=14` only removes verified backups beyond the newest 14, never
   the older unmarked dumps. Restore: `make db-restore BACKUP_FILE=<dump>`.
 
+## Deploy (#46): installing merged main into the real app
+- `make deploy` in the main checkout (on `main`, clean tree), **never a bare `git pull`**. It runs:
+  a verified backup if new migrations come in, fast-forward, `make api-build`, `make db-migrate`,
+  `make up` (+ observability if it's running), then health checks. A failed migration is rolled
+  back, the code reset to the previous commit, and the backup named.
+- `make deploy-plan` (what would happen), `make deploy-status` (deployed commit, how far behind,
+  last deploys from `deployments.log`). Restart `make web-up` when it says web deps changed.
+
 ## Test instance (#45): a batch of PRs, tested before main
 From the main checkout:
 - `make test-instance PRS="54 61"`: merges `main` + the PRs into `test/<date>` (worktree
@@ -57,8 +65,8 @@ From the main checkout:
   `docker compose run --rm --build api-dev pytest`). For one file: `docker compose run --rm --build --no-deps api-dev pytest tests/test_X.py`
   (`--no-deps` so it doesn't start the default-project Postgres; tests use SQLite, no DB needed).
 - Frontend code: `cd web && npx vitest run <file>` (fast) or `npm test -- --run` (full).
-- New/changed migration: add `migrations/NNN_*.sql`, then `make db-migrate`
-  (tracked in `schema_migrations`; safe to re-run, already-applied files are skipped).
+- New/changed migration: add `migrations/NNN_*.sql` (no `BEGIN`/`COMMIT` of its own), then `make db-migrate`
+  (each file + its `schema_migrations` row in one transaction; stops at the first failure; already-applied files are skipped).
 - `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
 - Dependency or image change: `make security-scan` (Trivy; fails on fixable HIGH/CRITICAL in the
   runtime API image, reports compose images). CI twin: `.github/workflows/security-scan.yml`.
