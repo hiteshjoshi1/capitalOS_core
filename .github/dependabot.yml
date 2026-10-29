@@ -25,6 +25,16 @@ updates:
       pip-minor-patch:
         update-types: [minor, patch]
 
+  # Dev tooling for the LangGraph task workflow (make orch-bootstrap).
+  - package-ecosystem: pip
+    directory: /orchestration
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      orchestration-minor-patch:
+        update-types: [minor, patch]
+
   # API base image (python:3.12-slim).
   - package-ecosystem: docker
     directory: /api
@@ -48,6 +58,9 @@ updates:
     ignore:
       # A Postgres major needs pg_upgrade / dump+restore of the data volume.
       - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+      # Grafana 13.x scanned far worse than 12.4.x (issue 206); revisit majors by hand.
+      - dependency-name: grafana/grafana
         update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
