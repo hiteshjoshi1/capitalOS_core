@@ -69,7 +69,12 @@ newest_verified_backup() {
 
 serve() {
   say "Checks on the batch: make verify (lint, typecheck, backend + frontend tests)"
-  tmake verify
+  if ! tmake verify; then
+    echo
+    echo "The batch failed its checks, so nothing was served. Find the PR at fault (the output above),"
+    echo "then rebuild without it: make test-instance-drop && make test-instance PRS=\"<the others>\""
+    exit 4
+  fi
 
   local dump
   dump=$(newest_verified_backup)
