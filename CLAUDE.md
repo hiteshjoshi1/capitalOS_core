@@ -41,6 +41,17 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   schedule. `make backup-prune KEEP=14` only removes verified backups beyond the newest 14, never
   the older unmarked dumps. Restore: `make db-restore BACKUP_FILE=<dump>`.
 
+## Test instance (#45): a batch of PRs, tested before main
+From the main checkout:
+- `make test-instance PRS="54 61"`: merges `main` + the PRs into `test/<date>` (worktree
+  `../capitalOS-worktrees/test-instance`), runs `make verify`, restores the newest verified
+  backup there (counts checked), applies the batch's migrations, and serves it with a red TEST
+  banner: web **:5174** (also via Tailscale), API :8021, Postgres :5434. Schedulers are off.
+- A conflict stops and is named: resolve and commit in that worktree, then `make test-instance-start`.
+- `make test-instance-status`, then `make test-instance-pr` (one PR test/<date> → main, `Closes`
+  every batch issue), then `make test-instance-drop`.
+- Every worktree's `make web-up` shows an amber DEV banner the same way (`VITE_INSTANCE_LABEL`).
+
 ## Verify (match to what changed)
 - Backend code: `make api-rebuild` then `make test-backend` (runs **inside Docker**:
   `docker compose run --rm --build api-dev pytest`). For one file: `docker compose run --rm --build --no-deps api-dev pytest tests/test_X.py`

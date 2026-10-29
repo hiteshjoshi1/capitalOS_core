@@ -178,7 +178,7 @@ case "${1:-}" in
     [ -z "$(state_get pending)$(state_get conflict)" ] || die "the batch isn't fully merged yet"
     branch=$(git -C "$TW" branch --show-current)
     git -C "$TW" push -q -u origin "$branch"
-    body=$(printf 'The tested batch: main plus%s, merged in order and tested by Hitesh on the test instance (%s).\n\nMerging this PR merges the batch PRs as tested.\n\n%s\n' \
+    body=$(printf 'The tested batch: main plus%s, merged in order and served on the test instance (%s). Merge only after Hitesh has tested it there (AGENTS.md § Process Rules).\n\nMerging this PR merges the batch PRs as tested.\n\n%s\n' \
       "$(for p in $(state_get merged); do printf ' #%s' "$p"; done)" "$(state_get served)" "$(batch_issues)")
     gh pr create --base main --head "$branch" --title "Test batch $branch:$(for p in $(state_get merged); do printf ' #%s' "$p"; done)" --body "$body"
     ;;
