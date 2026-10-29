@@ -5,7 +5,7 @@ psycopg2-binary==2.9.13
 pydantic==2.14.1
 python-dotenv==1.2.4
 python-multipart==0.0.32
-pandas==2.2.3
+pandas==3.0.6
 openpyxl==3.1.5
 xlrd==2.0.2
 lxml==6.1.3

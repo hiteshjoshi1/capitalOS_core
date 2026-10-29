@@ -3,6 +3,7 @@
 # settings and open PRs immediately; the version updates below run weekly.
 # Minor/patch bumps are grouped per ecosystem to keep PR volume low; majors
 # arrive as individual PRs so they can be reviewed on their own.
+# cooldown: a release is proposed only once it's 14 days old (the release-age rule, D-1).
 version: 2
 updates:
   - package-ecosystem: npm
@@ -10,6 +11,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 10
     groups:
       npm-minor-patch:
@@ -20,10 +23,17 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
     open-pull-requests-limit: 10
     groups:
+      # eth-account/eth-keys minors need the eth-utils/eth-abi majors, so they move together (D-14).
+      eth:
+        patterns: ["eth-*"]
       pip-minor-patch:
         update-types: [minor, patch]
+        # A new SQLAlchemy series (2.1) is reviewed on its own (D-14).
+        exclude-patterns: ["sqlalchemy", "SQLAlchemy"]
 
   # Dev tooling for the LangGraph task workflow (make orch-bootstrap).
   - package-ecosystem: pip
@@ -31,6 +41,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
     groups:
       orchestration-minor-patch:
         update-types: [minor, patch]
@@ -41,6 +53,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
     ignore:
       # Python minor upgrades (3.12 -> 3.13) are a deliberate runtime change.
       - dependency-name: python
@@ -52,6 +66,8 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
     groups:
       compose-images:
         update-types: [minor, patch]
@@ -69,12 +85,16 @@ updates:
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
+    cooldown:
+      default-days: 14
     groups:
       actions:
         patterns: ["*"]
