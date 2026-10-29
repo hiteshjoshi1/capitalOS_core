@@ -448,3 +448,105 @@ def test_auth_refresh_cookie_name_is_per_instance(client, db_engine, monkeypatch
     refreshed = client.post("/auth/refresh", cookies={"capitalos_refresh_capitalos-test": instance_cookie})
     assert refreshed.status_code == 200
     assert _cookie_value(refreshed.headers.get("set-cookie", ""), "capitalos_refresh_capitalos-test")
+
+
+def _login(client, username: str, password: str):
+    return client.post("/auth/login", json={"username": username, "password": password})
+
+
+def test_change_password_keeps_this_session_and_signs_out_others(client, db_engine, monkeypatch):
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "0")
+    _insert_user_with_password(db_engine, user_id=910, username="pw_user", password="OldPass123!")
+
+    other = _login(client, "pw_user", "OldPass123!")
+    other_cookie = _cookie_value(other.headers.get("set-cookie", ""), "capitalos_refresh")
+    this = _login(client, "pw_user", "OldPass123!")
+    this_cookie = _cookie_value(this.headers.get("set-cookie", ""), "capitalos_refresh")
+    token = this.json()["access_token"]
+    client.cookies.clear()
+
+    changed = client.post(
+        "/auth/change-password",
+        json={"current_password": "OldPass123!", "new_password": "NewPass456!"},
+        headers={"Authorization": f"Bearer {token}"},
+        cookies={"capitalos_refresh": this_cookie},
+    )
+    assert changed.status_code == 200
+    assert changed.json() == {"status": "ok", "signed_out_sessions": 1}
+
+    assert _login(client, "pw_user", "OldPass123!").status_code == 401
+    assert _login(client, "pw_user", "NewPass456!").status_code == 200
+    client.cookies.clear()
+    assert client.post("/auth/refresh", cookies={"capitalos_refresh": other_cookie}).status_code == 401
+    assert client.post("/auth/refresh", cookies={"capitalos_refresh": this_cookie}).status_code == 200
+
+    with db_engine.begin() as conn:
+        algo = conn.execute(text("SELECT password_algo FROM user_credentials WHERE user_id = 910")).scalar_one()
+        reasons = conn.execute(
+            text("SELECT COUNT(*) FROM auth_sessions WHERE user_id = 910 AND revoke_reason = 'password_change'")
+        ).scalar_one()
+    assert algo == "argon2id"
+    assert int(reasons) == 1
+
+
+def test_change_password_rejects_bad_requests(client, db_engine, monkeypatch):
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    _insert_user_with_password(db_engine, user_id=911, username="pw_bad", password="OldPass123!")
+    token = _login(client, "pw_bad", "OldPass123!").json()["access_token"]
+    auth = {"Authorization": f"Bearer {token}"}
+
+    unauthenticated = client.post(
+        "/auth/change-password", json={"current_password": "OldPass123!", "new_password": "NewPass456!"}
+    )
+    assert unauthenticated.status_code == 401
+
+    wrong = client.post(
+        "/auth/change-password", json={"current_password": "Wrong123!", "new_password": "NewPass456!"}, headers=auth
+    )
+    assert wrong.status_code == 400  # not 401: the web app treats 401 as "signed out"
+    assert wrong.json()["detail"] == "Current password is incorrect"
+
+    same = client.post(
+        "/auth/change-password", json={"current_password": "OldPass123!", "new_password": "OldPass123!"}, headers=auth
+    )
+    assert same.status_code == 400
+
+    short = client.post(
+        "/auth/change-password", json={"current_password": "OldPass123!", "new_password": "short"}, headers=auth
+    )
+    assert short.status_code == 422
+
+    assert _login(client, "pw_bad", "OldPass123!").status_code == 200
+
+
+def test_set_password_script_resets_and_signs_out_everything(client, db_engine, monkeypatch, capsys):
+    from sqlalchemy.orm import sessionmaker
+
+    from app.scripts import set_password as script
+
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    _insert_user_with_password(db_engine, user_id=912, username="forgot_user", password="Forgotten1!")
+    assert _login(client, "forgot_user", "Forgotten1!").status_code == 200
+    monkeypatch.setattr(script, "SessionLocal", sessionmaker(bind=db_engine))
+
+    answers = iter(["Remembered1!", "Mismatch1!"])
+    monkeypatch.setattr(script.getpass, "getpass", lambda prompt="": next(answers))
+    monkeypatch.setattr("sys.argv", ["set_password", "FORGOT_USER"])
+    assert script.main() == 1
+    assert _login(client, "forgot_user", "Forgotten1!").status_code == 200
+
+    answers = iter(["Remembered1!", "Remembered1!"])
+    assert script.main() == 0
+    assert "signed out 2 session(s)" in capsys.readouterr().out
+    assert _login(client, "forgot_user", "Forgotten1!").status_code == 401
+    assert _login(client, "forgot_user", "Remembered1!").status_code == 200
+
+    monkeypatch.setattr("sys.argv", ["set_password", "nobody_here"])
+    assert script.main() == 1

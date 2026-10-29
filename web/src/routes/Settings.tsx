@@ -1,4 +1,5 @@
 import "../App.css";
+import ChangePasswordCard from "../components/ChangePasswordCard";
 import PageShell from "../components/PageShell";
 import { useTheme } from "../context/ThemeContext";
 
@@ -7,7 +8,7 @@ export default function Settings() {
 
   return (
     <PageShell title="Settings" subtitle="Application settings">
-      <div className="wrap">
+      <div className="wrap settingsStack">
         <div className="card placeholderCard settingsCard">
           <div className="cardTitle">Appearance</div>
           <p className="muted">Theme controls live here now instead of the app shell.</p>
@@ -15,6 +16,7 @@ export default function Settings() {
             {theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
           </button>
         </div>
+        <ChangePasswordCard />
       </div>
     </PageShell>
   );

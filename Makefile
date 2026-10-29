@@ -57,7 +57,7 @@ endif
 #   ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign db-create-mcp-role user-set-password \
 	observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -301,7 +301,13 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
+.PHONY: user-set-password db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
+
+# Forgotten password (#72): prompts for the new one (never on the command line) and signs
+# out every session of that user. In the main checkout this is the real app.
+user-set-password:
+	@test -n "$(USERNAME)" || { echo "Usage: make user-set-password USERNAME=<name>" >&2; exit 2; }
+	$(COMPOSE) exec api python -m app.scripts.set_password "$(USERNAME)"
 
 # Read-only role for the capitalos-postgres MCP server. Uses MCP_DB_PASSWORD from
 # .env, generating one there on first run (.env is git-ignored). Idempotent.

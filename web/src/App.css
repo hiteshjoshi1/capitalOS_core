@@ -3925,6 +3925,11 @@ a.btn {
   width: fit-content;
 }
 
+.settingsStack {
+  display: grid;
+  gap: 16px;
+}
+
 .wealthHoldingsList {
   display: grid;
   gap: 12px;
