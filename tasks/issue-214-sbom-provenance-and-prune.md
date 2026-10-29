@@ -36,8 +36,8 @@
 - [x] `make sbom` produces 10 CycloneDX files; `make sbom-find PKG=libssl` lists 8 images with versions.
 - [x] `verify-image`: cosign (signature) and Toolbox (provenance) → OK; unpinned ref → FAIL; unknown
       repo → FAIL; cosign checked against the wrong signer identity → rejected.
-- [ ] `make verify-images` all OK, including postgres/python provenance and the Trivy signature
-      (needs Docker Hub quota).
+- [x] `make verify-images` all OK on a dispatched CI run (40807272268): 7 OK (2 signatures, 2
+      docker-library provenance, 3 attestations) + 2 INFO (loki, grafana); SBOM artifact uploaded.
 - [x] `make docker-prune` dry run lists only unused images (sandbox build, `postgres:16-alpine`,
       old trivy) and excludes in-use and pinned images.
 - [x] actionlint and `check-pinned-refs.sh` pass.
