@@ -1,0 +1,13 @@
+# Test, lint and typecheck tools. Installed only in the `dev` image target
+# (compose service `api-dev`), never in the runtime image.
+-r requirements.in
+# Same versions as the runtime lock.
+-c requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+ruff==0.17.1
+mypy==2.4.0
+
+# Held back (D-1): transitive, newest release under 14 days old when locked.
+ast-serialize==0.13.0
+coverage==7.16.2

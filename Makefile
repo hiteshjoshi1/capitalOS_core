@@ -445,6 +445,36 @@ ownership-reassign:
 	$(COMPOSE) run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
 
 # ---- Quality gates ----
+# ---- Python lock files (#81) ----
+# requirements*.in hold our direct pins; these compile them, with every transitive package and
+# its hashes, into requirements*.txt (what the image and the orchestration venv install, with
+# --require-hashes). Existing pins are kept unless UPGRADE=1. Afterwards check-lock-age.py fails
+# on any transitive package under 14 days old (D-1; direct pins are reviewed one by one, and can
+# be security fixes). Needs network; the API lock runs in the API's own base image.
+.PHONY: api-lock orch-lock
+PIP_TOOLS_VERSION=7.6.2
+LOCK_PIP_VERSION=26.2.2
+API_PY_IMAGE=$(shell grep -m1 -o 'python:3.12-slim@sha256:[0-9a-f]*' api/Dockerfile)
+PIP_COMPILE_ARGS=-q --generate-hashes --strip-extras $(if $(UPGRADE),--upgrade)
+
+api-lock:
+	docker run --rm -v "$(CURDIR)/api:/work" -w /work -e CUSTOM_COMPILE_COMMAND="make api-lock" $(API_PY_IMAGE) sh -c '\
+		pip install -q --root-user-action=ignore "pip==$(LOCK_PIP_VERSION)" && \
+		pip install -q --root-user-action=ignore "pip-tools==$(PIP_TOOLS_VERSION)" && \
+		pip-compile $(PIP_COMPILE_ARGS) -o requirements.txt requirements.in && \
+		pip-compile $(PIP_COMPILE_ARGS) -o requirements-dev.txt requirements-dev.in'
+	scripts/check-lock-age.py api/requirements.txt api/requirements.in
+	scripts/check-lock-age.py api/requirements-dev.txt api/requirements-dev.in api/requirements.in
+
+# The orchestration venv runs on the host's Python ($(PYTHON)), so its lock is compiled there.
+orch-lock:
+	@tmp=$$(mktemp -d) && trap 'rm -r "$$tmp"' EXIT && \
+	$(PYTHON) -m venv "$$tmp/venv" && \
+	"$$tmp/venv/bin/pip" install -q "pip==$(LOCK_PIP_VERSION)" && \
+	"$$tmp/venv/bin/pip" install -q "pip-tools==$(PIP_TOOLS_VERSION)" && \
+	CUSTOM_COMPILE_COMMAND="make orch-lock" "$$tmp/venv/bin/pip-compile" $(PIP_COMPILE_ARGS) -o orchestration/requirements.txt orchestration/requirements.in
+	scripts/check-lock-age.py orchestration/requirements.txt orchestration/requirements.in
+
 .PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e test test-all verify
 
 lint: web-deps
@@ -485,7 +515,7 @@ verify: lint typecheck test-backend test-frontend
 orch-bootstrap:
 	$(PYTHON) -m venv "$(ORCH_VENV)"
 	"$(ORCH_PIP)" install --upgrade "pip>=26.2"
-	"$(ORCH_PIP)" install -r orchestration/requirements.txt
+	"$(ORCH_PIP)" install --require-hashes -r orchestration/requirements.txt
 
 orch-test:
 	$(call require_orch_runtime,orch-test)
