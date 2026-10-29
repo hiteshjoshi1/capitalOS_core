@@ -1,25 +1,11 @@
-import { createContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, refreshAccessTokenNow, setAccessToken, setAuthFailureHandler } from "../lib/api";
 import type { AuthMe } from "../lib/api";
 import { useTheme } from "./ThemeContext";
 import type { AccentColor, Theme } from "./ThemeContext";
 import { DEFAULT_ACCENT, DEFAULT_THEME } from "./ThemeContext";
-
-type AuthContextValue = {
-  user: AuthMe | null;
-  loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  signup: (username: string, password: string, displayName?: string) => Promise<void>;
-  logout: () => Promise<void>;
-};
-
-const AuthContext = createContext<AuthContextValue>({
-  user: null,
-  loading: false,
-  login: async () => {},
-  signup: async () => {},
-  logout: async () => {},
-});
+import { AuthContext } from "./authContextObject";
+import type { AuthContextValue } from "./authContextObject";
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
 
@@ -163,5 +149,3 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
-export { AuthContext };

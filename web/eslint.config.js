@@ -21,5 +21,10 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      // New in eslint-plugin-react-hooks 7.1 (#49). Six existing effects trip it; they're
+      // refactored in #60. Back to "error" once that lands.
+      'react-hooks/set-state-in-effect': 'warn',
+    },
   },
 ])

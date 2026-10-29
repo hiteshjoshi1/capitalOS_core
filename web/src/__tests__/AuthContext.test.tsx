@@ -2,7 +2,8 @@ import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useContext } from "react";
-import { AuthContext, AuthProvider } from "../context/AuthContext";
+import { AuthProvider } from "../context/AuthContext";
+import { AuthContext } from "../context/authContextObject";
 import { ThemeProvider, useTheme } from "../context/ThemeContext";
 
 const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
