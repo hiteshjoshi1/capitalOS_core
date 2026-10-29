@@ -125,3 +125,27 @@ jobs:
           sarif_file: image.sarif
           # Digest-free, so a Dependabot digest bump updates the same analysis.
           category: trivy-${{ matrix.image.name }}
+
+  # Weekly/on-demand only (not on PRs, to stay well under registry rate limits):
+  # CycloneDX SBOMs for every image as a 90-day artifact, plus provenance and
+  # signature checks for every pinned image (scripts/verify-image.sh).
+  sbom-and-provenance:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Verify provenance / signatures of pinned images
+        run: make verify-images
+
+      - name: Generate SBOMs
+        run: make sbom
+
+      - name: Upload SBOMs
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sbom-${{ github.run_id }}
+          path: sbom/*.cdx.json
+          retention-days: 90

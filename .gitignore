@@ -122,3 +122,5 @@ tasks/*.local.md
 .task-flow/
 
 design_handoff_capitalos_wealth/
+# Generated SBOMs (make sbom)
+sbom/

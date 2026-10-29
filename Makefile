@@ -501,6 +501,31 @@ security-scan:
 		echo "== $$img (report only)"; $(TRIVY) $$img | grep -E '^(Total:|[a-z].*\()' || true; \
 	done
 
+# ---- SBOMs, provenance, pruning (issue 214) ----
+# Every pinned third-party image plus the tool images.
+PINNED_IMAGES=$$(docker compose -f docker-compose.yml --profile observability config --images | grep -v -- '-api'; sed -n 's/^FROM \([^ ]*@sha256:[^ ]*\) AS .*/\1/p' tools/Dockerfile api/Dockerfile)
+.PHONY: sbom sbom-find verify-image verify-images docker-prune
+sbom:
+	docker build --target runtime -t $(SCAN_API_IMAGE) api
+	scripts/sbom.sh $(SCAN_API_IMAGE) $(PINNED_IMAGES)
+
+# Which images contain a package, e.g. make sbom-find PKG=openssl (run make sbom first).
+sbom-find:
+	@test -n "$(PKG)" || (echo "Usage: make sbom-find PKG=<package-name>" && exit 2)
+	@python3 -c 'import json,glob,sys; pkg=sys.argv[1].lower(); hits=[(f[5:-9], c.get("name"), c.get("version","")) for f in sorted(glob.glob("sbom/*.cdx.json")) for c in json.load(open(f)).get("components",[]) if pkg in (c.get("name") or "").lower()]; [print(f"{i:55} {n} {v}") for i,n,v in hits] or print("no image contains", sys.argv[1])' "$(PKG)"
+
+# Provenance/signature check for one ref (e.g. the new ref in a Dependabot PR) or all pinned images.
+verify-image:
+	@test -n "$(IMAGE)" || (echo "Usage: make verify-image IMAGE=<image:tag@sha256:digest>" && exit 2)
+	@scripts/verify-image.sh "$(IMAGE)"
+
+verify-images:
+	@rc=0; for ref in $(PINNED_IMAGES); do scripts/verify-image.sh "$$ref" || rc=1; done; exit $$rc
+
+# Lists unused images of repos this project pins (and old CapitalOS builds); APPLY=1 removes them.
+docker-prune:
+	@COMPOSE_PROJECT=$(COMPOSE_PROJECT) APPLY=$(APPLY) scripts/docker-prune.sh
+
 # ---- Existing smoke/utility targets (kept for compatibility) ----
 .PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test
 

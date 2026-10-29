@@ -57,6 +57,13 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - Never remove a field from an API response; only add. Keep TS types mirroring backend
   response shapes (see `AGENTS.md` § API Contract Rules).
 
+## Image supply chain (maintenance)
+- Before merging a Dependabot image bump: `make verify-image IMAGE=<new ref>` (signature or
+  provenance per `scripts/verify-image.sh`; a repo without a policy fails on purpose).
+- CVE triage: `make sbom` then `make sbom-find PKG=<name>` shows which images ship a package.
+- Monthly: `make docker-prune` (dry run) then `APPLY=1`; only touches unused images of repos we pin.
+- Docker Hub allows 100 anonymous manifest requests/hour/IP; `docker login` (free account) raises it.
+
 ## Postgres MCP (`capitalos-postgres`)
 - Google MCP Toolbox (`--prebuilt postgres`, image pinned in `tools/Dockerfile`) via
   `scripts/mcp-postgres.sh`. It connects as `capitalos_mcp_ro`: read-only at the DB level, and no
