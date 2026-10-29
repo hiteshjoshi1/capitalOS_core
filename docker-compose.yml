@@ -33,7 +33,7 @@ x-api-common: &api-common
 services:
   postgres:
     <<: *hardening
-    image: postgres:16.15
+    image: postgres:16.15@sha256:1beaa3084eee2676f20a9cd9928f0bf2c5bf674f8e49f81017912183d377c61c
     container_name: capitalos-postgres
     # Runs straight as the image's postgres user (data dir is owned by 999), so
     # the root entrypoint + gosu privilege drop and its capabilities aren't needed.
@@ -80,7 +80,7 @@ services:
 
   loki:
     <<: *hardening
-    image: grafana/loki:3.7.9
+    image: grafana/loki:3.7.9@sha256:0db216b630ae1f348a1584c67f3cead8b4c1fc839169a39501db664744158e28
     container_name: capitalos-loki
     read_only: true
     tmpfs:
@@ -104,7 +104,7 @@ services:
 
   grafana:
     <<: *hardening
-    image: grafana/grafana:12.4.14
+    image: grafana/grafana:12.4.14@sha256:ae509d9ae8c1021ca32ec370a9ca975d40165eda9fccd1e1102d317ff8787cd7
     container_name: capitalos-grafana
     read_only: true
     tmpfs:
@@ -131,7 +131,7 @@ services:
 
   alloy:
     <<: *hardening
-    image: grafana/alloy:v1.21.3
+    image: grafana/alloy:v1.21.3@sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4
     container_name: capitalos-alloy
     # The image defaults to root; with the socket proxy it needs no host access.
     user: "473:473"
@@ -165,7 +165,7 @@ services:
   # internal network that only Alloy joins; every write endpoint is refused.
   docker-socket-proxy:
     <<: *hardening
-    image: tecnativa/docker-socket-proxy:v0.5.0
+    image: tecnativa/docker-socket-proxy:v0.5.0@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
     container_name: capitalos-docker-socket-proxy
     # Runs as root only to open the socket; no caps, read-only fs, internal network.
     read_only: true

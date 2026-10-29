@@ -30,13 +30,13 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve Trivy image (tools/Dockerfile)
         run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
 
       - name: Cache Trivy DB
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/trivy-cache
           key: trivy-db-${{ github.run_id }}
@@ -54,7 +54,7 @@ jobs:
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD == 'true' && hashFiles('api-image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: api-image.sarif
           category: trivy-api-image
@@ -72,18 +72,19 @@ jobs:
       images: ${{ steps.list.outputs.images }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - id: list
         name: List third-party images (docker-compose.yml + tools/Dockerfile)
         run: |
           images=$(docker compose -f docker-compose.yml --profile observability config --format json \
-            | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; extra=sys.argv[1:]; print(json.dumps(sorted({v["image"] for v in s.values() if "image" in v and "build" not in v} | set(extra))))' \
+            | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; refs=sorted({v["image"] for v in s.values() if "image" in v and "build" not in v} | set(sys.argv[1:])); print(json.dumps([{"ref": r, "name": r.split("@")[0]} for r in refs]))' \
               "$(scripts/tool-image.sh mcp-toolbox)")
           echo "images=$images" >> "$GITHUB_OUTPUT"
           echo "$images"
 
   compose-images:
+    name: compose-images (${{ matrix.image.name }})
     needs: list-compose-images
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -96,30 +97,31 @@ jobs:
         image: ${{ fromJSON(needs.list-compose-images.outputs.images) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Resolve Trivy image (tools/Dockerfile)
         run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
 
       - name: Cache Trivy DB
-        uses: actions/cache@v4
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/trivy-cache
           key: trivy-db-${{ github.run_id }}-${{ strategy.job-index }}
           restore-keys: trivy-db-
 
-      - name: Scan ${{ matrix.image }} (report only)
+      - name: Scan ${{ matrix.image.name }} (report only)
         run: |
           # shellcheck disable=SC2086 # TRIVY_FLAGS is intentionally word-split
           docker run --rm -v "${{ runner.temp }}/trivy-cache:/root/.cache" -v "$PWD:/out" \
-            "$TRIVY_IMAGE" image $TRIVY_FLAGS --image-src remote --format sarif --output /out/image.sarif "${{ matrix.image }}"
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --image-src remote --format sarif --output /out/image.sarif "${{ matrix.image.ref }}"
           # shellcheck disable=SC2086
           docker run --rm -v "${{ runner.temp }}/trivy-cache:/root/.cache" \
-            "$TRIVY_IMAGE" image $TRIVY_FLAGS --image-src remote --table-mode detailed "${{ matrix.image }}"
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --image-src remote --table-mode detailed "${{ matrix.image.ref }}"
 
       - name: Upload SARIF
         if: always() && env.CAN_UPLOAD == 'true' && hashFiles('image.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v4
+        uses: github/codeql-action/upload-sarif@24c54180a607b1449ed407dd24f251e4e9147c8d # v4.38.3
         with:
           sarif_file: image.sarif
-          category: trivy-${{ matrix.image }}
+          # Digest-free, so a Dependabot digest bump updates the same analysis.
+          category: trivy-${{ matrix.image.name }}

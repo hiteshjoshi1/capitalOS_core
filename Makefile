@@ -203,20 +203,20 @@ db-create-mcp-role: db-wait
 
 db-backup: db-wait
 	@mkdir -p backups
-	@ts=$$(date +%Y%m%d_%H%M%S); \
-	docker exec $(DB_CONTAINER) pg_dump -U $(DB_USER) -d $(DB_NAME) -F c -f /tmp/capitalos_backup.dump && \
-	docker cp $(DB_CONTAINER):/tmp/capitalos_backup.dump backups/capitalos_$${ts}.dump && \
-	docker exec $(DB_CONTAINER) rm -f /tmp/capitalos_backup.dump && \
-	echo "Backup written to backups/capitalos_$${ts}.dump"
+	@# Streamed over stdout: the container's /tmp is a tmpfs, which `docker cp` can't read.
+	@ts=$$(date +%Y%m%d_%H%M%S); out=backups/capitalos_$${ts}.dump; \
+	if docker exec $(DB_CONTAINER) pg_dump -U $(DB_USER) -d $(DB_NAME) -F c > "$$out.part"; then \
+		mv "$$out.part" "$$out" && echo "Backup written to $$out"; \
+	else \
+		rm -f "$$out.part"; echo "Backup FAILED" >&2; exit 1; \
+	fi
 
 db-restore:
 	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump" && exit 2)
 	@test -f "$(BACKUP_FILE)" || (echo "Backup file not found: $(BACKUP_FILE)" && exit 2)
 	@echo "WARNING: this overwrites the current database ($(DB_NAME)) in $(DB_CONTAINER)."
 	@read -p "Type 'yes' to continue: " confirm; [ "$$confirm" = "yes" ] || (echo "Aborted." && exit 1)
-	docker cp $(BACKUP_FILE) $(DB_CONTAINER):/tmp/restore.dump
-	docker exec $(DB_CONTAINER) pg_restore -U $(DB_USER) -d $(DB_NAME) --clean --if-exists /tmp/restore.dump
-	docker exec $(DB_CONTAINER) rm -f /tmp/restore.dump
+	docker exec -i $(DB_CONTAINER) pg_restore -U $(DB_USER) -d $(DB_NAME) --clean --if-exists < $(BACKUP_FILE)
 	@echo "Restore complete."
 
 db-shell:
@@ -302,6 +302,7 @@ ownership-reassign:
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
+	scripts/check-pinned-refs.sh
 	$(COMPOSE) run --rm --build api-dev ruff check app tests
 
 typecheck: web-deps
