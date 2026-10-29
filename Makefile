@@ -158,7 +158,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where instance-drop
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop
 
 build:
 	$(COMPOSE) build
@@ -182,7 +182,7 @@ ifeq ($(CHECKOUT),worktree)
 # A worktree's web app talks only to the worktree's own API, through the Vite proxy, on
 # its own port (no web/.env.local needed).
 web-up: web-deps
-	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) npm run dev -- --port $(ISO_WEB_PORT) --strictPort
+	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) VITE_INSTANCE_LABEL="$(or $(INSTANCE_LABEL),DEV $(CURRENT_BRANCH))" npm run dev -- --port $(ISO_WEB_PORT) --strictPort
 else
 web-up: web-deps
 	cd $(WEB_DIR) && npm run dev
@@ -202,6 +202,24 @@ where:
 	@echo "project:  $(COMPOSE_PROJECT)$(if $(filter $(REAL_DATA_PROJECT),$(COMPOSE_PROJECT)),  <- REAL DATA,)"
 	@echo "api:      http://127.0.0.1:$(API_PORT)   db container: $(DB_CONTAINER)"
 	@$(if $(filter worktree,$(CHECKOUT)),echo "web:      http://localhost:$(ISO_WEB_PORT)   postgres: 127.0.0.1:$(ISO_PG_PORT)   grafana: :$(ISO_GRAFANA_PORT)",true)
+
+# The test instance (#45): a batch of PRs on a separate app with a copy of the real data,
+# tested by Hitesh before main. Run from the main checkout. See scripts/test-instance.sh.
+test-instance:
+	@test -n "$(PRS)" || (echo 'Usage: make test-instance PRS="<n> <n>"' && exit 2)
+	@scripts/test-instance.sh up $(PRS)
+
+test-instance-start:
+	@scripts/test-instance.sh start
+
+test-instance-status:
+	@scripts/test-instance.sh status
+
+test-instance-pr:
+	@scripts/test-instance.sh pr
+
+test-instance-drop:
+	@scripts/test-instance.sh drop
 
 # Remove a worktree's own instance with its volumes (#44). Only in a worktree: in the main
 # checkout this would delete the real data, so it refuses.

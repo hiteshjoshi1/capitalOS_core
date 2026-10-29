@@ -7,6 +7,7 @@ import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import "./index.css";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import App from "./App.tsx";
+import InstanceBanner from "./components/InstanceBanner.tsx";
 import AppShell from "./components/AppShell.tsx";
 import AddAccount from "./routes/AddAccount.tsx";
 import Ingest from "./routes/Ingest.tsx";
@@ -37,6 +38,7 @@ const solanaWallets = [new PhantomWalletAdapter()];
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
+    <InstanceBanner />
     <ConnectionProvider endpoint={solanaEndpoint}>
       <WalletProvider wallets={solanaWallets} autoConnect={true}>
         <WalletModalProvider>
