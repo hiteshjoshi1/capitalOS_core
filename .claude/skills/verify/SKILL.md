@@ -10,9 +10,9 @@ Match the command to what actually changed — don't run the whole suite for a o
 ## Backend (`api/app/`)
 ```bash
 make api-rebuild                      # rebuild image + restart container — required, code isn't hot-reloaded
-docker compose run --rm api pytest    # full backend suite (runs INSIDE Docker, not on the host)
-docker compose run --rm api pytest tests/test_X.py       # one file
-docker compose run --rm api pytest tests/test_X.py -k name  # one test
+docker compose run --rm --build api-dev pytest    # full backend suite (runs INSIDE Docker, not on the host)
+docker compose run --rm --build api-dev pytest tests/test_X.py       # one file
+docker compose run --rm --build api-dev pytest tests/test_X.py -k name  # one test
 ```
 `make test-backend` is equivalent to the full-suite form above.
 

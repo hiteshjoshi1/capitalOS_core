@@ -1,0 +1,7 @@
+# Test, lint and typecheck tools. Installed only in the `dev` image target
+# (compose service `api-dev`), never in the runtime image.
+-r requirements.txt
+pytest==9.2.0
+pytest-cov==7.1.0
+ruff==0.12.4
+mypy==1.16.1

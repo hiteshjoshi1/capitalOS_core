@@ -1,0 +1,115 @@
+name: Security Scan
+
+# Image vulnerability scanning with Trivy (local twin: `make security-scan`).
+# - api-image: builds the runtime API image on a freshly pulled base and FAILS
+#   on fixable HIGH/CRITICAL findings.
+# - compose-images: third-party images pinned in docker-compose.yml; report only.
+# Results are uploaded to the repository's Security tab (code scanning is free
+# for public repositories). The weekly run catches new CVEs in unchanged images.
+on:
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # Mondays 06:00 UTC, alongside Dependabot
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_IMAGE: aquasec/trivy:0.75.0
+  TRIVY_FLAGS: --quiet --skip-version-check --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL
+  # SARIF upload needs a token with security-events:write, which fork PRs don't get.
+  CAN_UPLOAD: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+
+jobs:
+  api-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/trivy-cache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Build runtime API image (fresh base)
+        run: docker build --pull --target runtime -t capitalos-api:scan api
+
+      - name: Scan (SARIF for the Security tab)
+        run: |
+          # shellcheck disable=SC2086 # TRIVY_FLAGS is intentionally word-split
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ runner.temp }}/trivy-cache:/root/.cache" -v "$PWD:/out" \
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --format sarif --output /out/api-image.sarif capitalos-api:scan
+
+      - name: Upload SARIF
+        if: always() && env.CAN_UPLOAD == 'true' && hashFiles('api-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: api-image.sarif
+          category: trivy-api-image
+
+      - name: Fail on fixable HIGH/CRITICAL
+        run: |
+          # shellcheck disable=SC2086 # TRIVY_FLAGS is intentionally word-split
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ runner.temp }}/trivy-cache:/root/.cache" \
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --table-mode detailed --exit-code 1 capitalos-api:scan
+
+  list-compose-images:
+    runs-on: ubuntu-latest
+    outputs:
+      images: ${{ steps.list.outputs.images }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: list
+        name: List third-party images from docker-compose.yml
+        run: |
+          images=$(docker compose -f docker-compose.yml --profile observability config --format json \
+            | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]; print(json.dumps(sorted({v["image"] for v in s.values() if "image" in v and "build" not in v})))')
+          echo "images=$images" >> "$GITHUB_OUTPUT"
+          echo "$images"
+
+  compose-images:
+    needs: list-compose-images
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.list-compose-images.outputs.images) }}
+    steps:
+      - name: Cache Trivy DB
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/trivy-cache
+          key: trivy-db-${{ github.run_id }}-${{ strategy.job-index }}
+          restore-keys: trivy-db-
+
+      - name: Scan ${{ matrix.image }} (report only)
+        run: |
+          # shellcheck disable=SC2086 # TRIVY_FLAGS is intentionally word-split
+          docker run --rm -v "${{ runner.temp }}/trivy-cache:/root/.cache" -v "$PWD:/out" \
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --image-src remote --format sarif --output /out/image.sarif "${{ matrix.image }}"
+          # shellcheck disable=SC2086
+          docker run --rm -v "${{ runner.temp }}/trivy-cache:/root/.cache" \
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --image-src remote --table-mode detailed "${{ matrix.image }}"
+
+      - name: Upload SARIF
+        if: always() && env.CAN_UPLOAD == 'true' && hashFiles('image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: image.sarif
+          category: trivy-${{ matrix.image }}
