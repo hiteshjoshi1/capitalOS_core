@@ -1,19 +1,10 @@
 {
   "mcpServers": {
     "capitalos-postgres": {
-      "command": "docker",
-      "args": [
-        "run",
-        "-i",
-        "--rm",
-        "--network",
-        "capitalos_default",
-        "-e",
-        "DATABASE_URI",
-        "crystaldba/postgres-mcp",
-        "--access-mode=restricted"
-      ],
+      "command": "bash",
+      "args": ["scripts/mcp-postgres.sh"],
       "env": {
+        "MCP_PG_NETWORK": "capitalos_default",
         "DATABASE_URI": "postgresql://capitalos:capitalos@postgres:5432/capitalos"
       }
     }

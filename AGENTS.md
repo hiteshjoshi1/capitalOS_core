@@ -95,7 +95,7 @@ After ANY backend change:
 2. curl $(make api-url)/health
 3. curl $(make api-url)/dashboard/summary?month=YYYY-MM
 
-(`make api-url` prints the API base for this checkout: `http://127.0.0.1:8001` when the
+(`make api-url` prints the API base for this checkout: `http://127.0.0.1:8011` when the
 local `docker-compose.oss-test.yml` override is present, otherwise `http://127.0.0.1:8000`.)
 
 After ANY frontend change:
@@ -190,7 +190,7 @@ These belong to later modules.
 
 # OpenAPI
 
-Spec available at (API base from `make api-url`; 8000 on a fresh clone, 8001 with the local OSS override):
+Spec available at (API base from `make api-url`; 8000 on a fresh clone, 8011 with the local OSS override):
 http://localhost:8000/openapi.json
 
 Interactive docs:
