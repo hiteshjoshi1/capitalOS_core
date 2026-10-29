@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16.15
     container_name: capitalos-postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-capitalos}
@@ -36,7 +36,7 @@ services:
     command: uvicorn app.main:app --host=0.0.0.0 --port=8000 --reload
 
   loki:
-    image: grafana/loki:3.2.1
+    image: grafana/loki:3.7.9
     container_name: capitalos-loki
     profiles:
       - observability
@@ -54,7 +54,7 @@ services:
       - loki-data:/loki
 
   grafana:
-    image: grafana/grafana:11.2.2
+    image: grafana/grafana:12.4.14
     container_name: capitalos-grafana
     profiles:
       - observability
@@ -75,7 +75,7 @@ services:
       - grafana-data:/var/lib/grafana
 
   alloy:
-    image: grafana/alloy:v1.4.3
+    image: grafana/alloy:v1.21.3
     container_name: capitalos-alloy
     profiles:
       - observability

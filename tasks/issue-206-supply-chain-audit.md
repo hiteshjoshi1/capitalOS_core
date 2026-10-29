@@ -50,15 +50,24 @@
 ### After
 - npm: 0. Python (`pip-audit`): 0. API image OS packages: 0 fixable HIGH/CRITICAL on Debian 13.7.
 
-### Residual (not fixed here)
-- Trivy flags `msgpack 1.1.2`, `urllib3 2.7.0`, `setuptools 70.3.0` — these are **pip's own vendored
-  copies** in the latest pip (26.2.2). Not importable by the app; only used by pip at build time.
-  The app's own urllib3 resolves to 2.8.0 (clean). Revisit when pip ships updated vendors.
-- Third-party compose images (fixable HIGH/CRITICAL, Trivy): local `postgres:16` 117/19 — the
-  local tag is a stale Mar 2026 pull; current upstream `postgres:16` is 25/2, so a `docker pull`
-  + container recreate fixes most of it. `grafana/grafana:11.2.2` 141/13, `grafana/loki:3.2.1` 59/3,
-  `grafana/alloy:v1.4.3` 74/4 are pinned old releases; bumping them needs observability config
-  testing, so it is a follow-up. All of these are bound to 127.0.0.1.
+### Images (follow-up commit, same PR)
+- API image: pip is uninstalled after requirements are installed, which removes the vendored
+  `msgpack`/`urllib3`/`setuptools` copies Trivy flagged. Nothing in the repo runs pip inside the image.
+  Result: **0** fixable HIGH/CRITICAL (OS + Python).
+- Compose pins (fixable HIGH/CRITICAL, Trivy, before → after):
+  - `postgres:16` (local tag from Mar 2026, 117/19) → `postgres:16.15` (25/2). Same major, so the
+    data directory is compatible. What remains is Go `stdlib` in the `gosu` entrypoint helper; no fixed
+    Debian image exists yet. An Alpine variant was rejected because musl collations differ.
+  - `grafana/loki:3.2.1` (59/3) → `3.7.9` (0/0).
+  - `grafana/alloy:v1.4.3` (74/4) → `v1.21.3` (0/0).
+  - `grafana/grafana:11.2.2` (141/13) → `12.4.14` (3/0). Chosen over 13.3.0, which has 39/7.
+- Observability smoke on fresh data, with the repo configs unchanged: Loki ready, Grafana 12.4.14
+  provisions the Loki datasource (health OK) and the operational-logs dashboard (7 panels,
+  `logs`/`timeseries` only), Alloy ready.
+
+### Residual
+- `postgres:16.15`: 25 high / 2 critical in `gosu`'s Go stdlib (entrypoint-only).
+- `grafana/grafana:12.4.14`: 3 high (go-jose, tempo libs). All of these bind to 127.0.0.1.
 
 ## Deterministic Gate Results
 - `lint`: pass — ruff (backend), eslint (frontend)
@@ -70,5 +79,5 @@
 ## Human Action Summary
 - Behaviour-relevant bumps to watch after deploy: `yfinance` 1.7 (live quote fetches are mocked
   in tests) and `PyJWT` 2.15 (auth tests pass).
-- `docker pull postgres:16` and recreate the postgres container at a convenient time.
-- Follow-up: bump Grafana/Loki/Alloy pins and run `make observability-smoke`.
+- Upgrading the running stack: back up the DB (`make db-backup`) and the grafana/loki volumes first.
+  Grafana migrates its SQLite DB on first start, and that migration can't be undone.
