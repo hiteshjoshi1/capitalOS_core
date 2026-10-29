@@ -4,14 +4,14 @@ PROJECT=capitalos
 GIT_REMOTE?=origin
 BASE_BRANCH?=main
 # A local, git-ignored docker-compose.oss-test.yml selects the "OSS stack"
-# (API :8001, Postgres :5433, own volume). When present it is layered over the
+# (API :8011, Postgres :5433, own volume). When present it is layered over the
 # base file under its own compose project so it never mixes with the default
 # 'capitalos' project. Without it (a fresh clone) everything uses the base
 # file as-is: API :8000, Postgres :5432.
 ifneq ($(wildcard docker-compose.oss-test.yml),)
 COMPOSE_PROJECT=capitalos-oss-test
 COMPOSE=docker compose -p $(COMPOSE_PROJECT) -f docker-compose.yml -f docker-compose.oss-test.yml
-API_PORT=8001
+API_PORT=8011
 DB_CONTAINER=capitalos-oss-postgres
 API_CONTAINER=capitalos-oss-test-api
 else
@@ -29,7 +29,8 @@ SMOKE_PASSWORD?=Test@1234
 
 OBSERVABILITY_SERVICES=loki grafana alloy
 OBSERVABILITY_ENV_FILE=$(shell test -f config/observability.env && printf '%s' config/observability.env || printf '%s' config/observability.env.example)
-OBSERVABILITY_COMPOSE=docker compose --env-file $(OBSERVABILITY_ENV_FILE)
+# Same project as COMPOSE, so observability runs alongside whichever stack is active.
+OBSERVABILITY_COMPOSE=$(COMPOSE) --env-file $(OBSERVABILITY_ENV_FILE)
 WEB_DIR=web
 WEB_PACKAGE_MANIFESTS=$(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 WEB_NODE_MODULES_STAMP=$(WEB_DIR)/node_modules/.install-stamp
@@ -124,7 +125,7 @@ web-up: web-deps
 api-logs:
 	docker logs -f $(API_CONTAINER)
 
-# Host URL of the API for this checkout (8001 with the local OSS override, else 8000).
+# Host URL of the API for this checkout (8011 with the local OSS override, else 8000).
 api-url:
 	@echo http://127.0.0.1:$(API_PORT)
 

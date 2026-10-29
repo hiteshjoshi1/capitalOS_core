@@ -12,7 +12,7 @@ make up          # starts postgres + api containers (docker compose, project cho
 cd web && npm run dev   # starts the Vite dev server (foreground; use run_in_background or nohup if you need it detached)
 ```
 
-- API: `make api-url` prints its base URL — `http://127.0.0.1:8001` in a checkout with the local `docker-compose.oss-test.yml` override (the local override stack), `http://127.0.0.1:8000` on a fresh clone. Health check: `curl $(make api-url)/health`. It is published on loopback only.
+- API: `make api-url` prints its base URL — `http://127.0.0.1:8011` in a checkout with the local `docker-compose.oss-test.yml` override (the local override stack), `http://127.0.0.1:8000` on a fresh clone. Health check: `curl $(make api-url)/health`. It is published on loopback only.
 - Web: `http://localhost:5173` (Vite will pick 5174+ if 5173 is already taken by another running session — check before assuming which port is live)
 - Demo login: username `demo`, password `Test@1234`
 - With `web/.env.local` setting `VITE_API_BASE=/api` the browser only talks to the Vite server, which proxies `/api/*` to the API. Call it directly with `$(make api-url)/…` from curl, or through the proxy as `http://localhost:5173/api/…`.
