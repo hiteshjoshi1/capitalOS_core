@@ -4,7 +4,7 @@
 # consumers read a reference with `scripts/tool-image.sh <stage-name>`.
 
 # capitalos-postgres MCP server (scripts/mcp-postgres.sh)
-FROM us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:1.14.0 AS mcp-toolbox
+FROM us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:1.14.0@sha256:dab91e25cbe7145d261df2978881c4e23e02238b42da3c72eea2df0a95aea797 AS mcp-toolbox
 
 # Image vulnerability scanner (make security-scan, .github/workflows/security-scan.yml)
-FROM aquasec/trivy:0.75.0 AS trivy
+FROM aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa AS trivy

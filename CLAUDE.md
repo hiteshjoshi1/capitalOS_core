@@ -52,6 +52,8 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - One `tasks/issue-NNN-<slug>.md` doc per unit of work (see `tasks/_template.md`).
 - One feature branch + one PR per issue. **Never commit directly to `main`.**
 - Numbered, sequential `migrations/NNN_*.sql` — never edit an already-applied migration.
+- Pin every image by `tag@sha256:` and every Action by commit SHA (`scripts/check-pinned-refs.sh`, run
+  by `make lint`). Images used outside compose live in `tools/Dockerfile`. Dependabot bumps the pins.
 - Never remove a field from an API response; only add. Keep TS types mirroring backend
   response shapes (see `AGENTS.md` § API Contract Rules).
 
