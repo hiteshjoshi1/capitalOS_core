@@ -180,7 +180,7 @@ async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {
       });
     } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`, { cause: err });
     }
   };
 
@@ -1428,7 +1428,7 @@ export const api = {
       });
     } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`, { cause: err });
     }
     if (!res.ok) {
       const text = await res.text();
@@ -1450,7 +1450,7 @@ export const api = {
       });
     } catch (err: unknown) {
       const reason = err instanceof Error ? err.message : String(err);
-      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`);
+      throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`, { cause: err });
     }
     if (!res.ok) {
       const text = await res.text();
