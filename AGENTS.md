@@ -26,6 +26,40 @@ commands, ports, gotchas); this file holds the durable principles and contract r
 13. Test every change
 14. Run unit tests and integration tests as per changes made
 
+---
+
+# Work Tracking (GitHub Issues + board)
+
+The backlog is the GitHub Project **[CapitalOS backlog](https://github.com/users/hiteshjoshi1/projects/2)**
+(issue #42): one GitHub issue per unit of work in `hiteshjoshi1/capitalOS_core`. Never keep a
+second backlog, TODO list or roadmap file.
+
+| Field | Values |
+| --- | --- |
+| **Status** | Next up, In progress, Fixed-To Review, Waiting on Hitesh, Backlog, Done |
+| **Priority** | P0 Data loss or wrong data, P1 High, P2 Medium, P3 Low |
+| **Size** | S (under a day), M (a few days), L (a week or more) |
+| **Kind** | Ops, Process, Feature, Bug, Security, Tech debt |
+
+- **Work with no issue gets an issue first**, with all four fields set:
+  `gh issue create ...` then `scripts/board.sh add <n> "Next up" P2 S Ops`.
+- **The issue number is the task id.** Spec and journal: `tasks/issue-<n>-<slug>.md` (from
+  `tasks/_template.md`, with its `Issue:` link). Branch: `feature/issue-<n>-<slug>`. The
+  orchestration (`make task-*`) parses this name. Docs `issue-201` to `issue-214` predate the board
+  and use their own legacy numbers.
+- **The PR description says `Closes #<n>`**, so the merge closes the issue.
+- **Status moves with the work** (`scripts/board.sh move <n> "<Status>"`):
+
+  | Status | When |
+  | --- | --- |
+  | Next up | Ready to be worked, in board order |
+  | In progress | On starting: the branch is cut |
+  | Fixed-To Review | On finishing: tests pass, the PR is open, and an issue comment says what changed, how it was checked, and what to look at |
+  | Waiting on Hitesh | Only Hitesh can decide or do the next step |
+  | Done | **Only Hitesh** moves an item here. A merged item stays in Fixed-To Review until he does. |
+
+- See the process rules below for sprints and merging.
+
 
 ---
 

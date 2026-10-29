@@ -1,5 +1,7 @@
 # Issue <id>: <title>
 
+Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/<id>
+
 ## Objective
 - Describe the business/user objective in 1-3 bullets.
 

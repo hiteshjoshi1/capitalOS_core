@@ -54,7 +54,9 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   warning backlog is addressed incrementally; both tools run and fail on configured checks.
 
 ## Conventions
-- One `tasks/issue-NNN-<slug>.md` doc per unit of work (see `tasks/_template.md`).
+- Work is tracked on the GitHub board ([CapitalOS backlog](https://github.com/users/hiteshjoshi1/projects/2)),
+  one issue per unit of work; `scripts/board.sh list|add|move`. See `AGENTS.md` § Work Tracking.
+- One `tasks/issue-<n>-<slug>.md` doc per issue, where `<n>` is the GitHub issue number (see `tasks/_template.md`).
 - One feature branch + one PR per issue. **Never commit directly to `main`.**
 - Numbered, sequential `migrations/NNN_*.sql` — never edit an already-applied migration.
 - Pin every image by `tag@sha256:` and every Action by commit SHA (`scripts/check-pinned-refs.sh`, run
