@@ -77,6 +77,11 @@ From the main checkout:
 - The backend ruff/mypy baseline is intentionally permissive while the pre-existing
   warning backlog is addressed incrementally; both tools run and fail on configured checks.
 
+## Session start
+- `make status` (also printed by the SessionStart hook): board items in progress / waiting /
+  for review, open PRs with CI, real-stack health, deployed vs origin/main, newest verified
+  backup's age, worktrees and the test instance. Read-only, about 2s; degrades when offline.
+
 ## Conventions
 - Work is tracked on the GitHub board ([CapitalOS backlog](https://github.com/users/hiteshjoshi1/projects/2)),
   one issue per unit of work; `scripts/board.sh list|add|move`. See `AGENTS.md` § Work Tracking.
