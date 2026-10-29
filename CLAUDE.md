@@ -29,12 +29,14 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 
 ## Verify (match to what changed)
 - Backend code: `make api-rebuild` then `make test-backend` (runs **inside Docker**:
-  `docker compose run --rm api pytest`). For one file: `docker compose run --rm --no-deps api pytest tests/test_X.py`
+  `docker compose run --rm --build api-dev pytest`). For one file: `docker compose run --rm --build --no-deps api-dev pytest tests/test_X.py`
   (`--no-deps` so it doesn't start the default-project Postgres; tests use SQLite, no DB needed).
 - Frontend code: `cd web && npx vitest run <file>` (fast) or `npm test -- --run` (full).
 - New/changed migration: add `migrations/NNN_*.sql`, then `make db-migrate`
   (tracked in `schema_migrations`; safe to re-run, already-applied files are skipped).
 - `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
+- Dependency or image change: `make security-scan` (Trivy; fails on fixable HIGH/CRITICAL in the
+  runtime API image, reports compose images). CI twin: `.github/workflows/security-scan.yml`.
 - `/verify` and `/run` skills exist under `.claude/skills/` — prefer them over rediscovering this by hand.
 
 ## Known gaps (not regressions if you hit these)

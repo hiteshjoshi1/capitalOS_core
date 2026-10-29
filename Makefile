@@ -289,17 +289,17 @@ ownership-reassign:
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
-	$(COMPOSE) run --rm api ruff check app tests
+	$(COMPOSE) run --rm --build api-dev ruff check app tests
 
 typecheck: web-deps
 	cd $(WEB_DIR) && npx tsc -b --pretty false
-	$(COMPOSE) run --rm api mypy app
+	$(COMPOSE) run --rm --build api-dev mypy app
 
 test-backend:
-	$(COMPOSE) run --rm api pytest
+	$(COMPOSE) run --rm --build api-dev pytest
 
 contract-backend:
-	$(COMPOSE) run --rm api pytest tests/test_contracts.py -q
+	$(COMPOSE) run --rm --build api-dev pytest tests/test_contracts.py -q
 
 test-frontend: web-deps
 	cd $(WEB_DIR) && npm test -- --run
@@ -473,11 +473,26 @@ task-cache-clean:
 orch-clean:
 	rm -rf .task-flow/
 
+# ---- Image security scan (local twin of .github/workflows/security-scan.yml) ----
+# Builds the runtime API image on a freshly pulled base and fails on fixable
+# HIGH/CRITICAL findings; compose images are reported but don't fail the target.
+TRIVY_IMAGE?=aquasec/trivy:0.75.0
+TRIVY=docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v capitalos-trivy-cache:/root/.cache $(TRIVY_IMAGE) image --quiet --skip-version-check --table-mode detailed --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL
+SCAN_API_IMAGE=capitalos-api:security-scan
+.PHONY: security-scan
+security-scan:
+	docker build --pull --target runtime -t $(SCAN_API_IMAGE) api
+	$(TRIVY) --exit-code 1 $(SCAN_API_IMAGE)
+	@for img in $$(docker compose -f docker-compose.yml --profile observability config --images | grep -v -- '-api'); do \
+		echo "== $$img (report only)"; $(TRIVY) $$img | grep -E '^(Total:|[a-z].*\()' || true; \
+	done
+
 # ---- Existing smoke/utility targets (kept for compatibility) ----
 .PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test
 
 api-rebuild:
-	$(COMPOSE) build api
+	# --pull refreshes python:3.12-slim so OS security patches land on every rebuild.
+	$(COMPOSE) build --pull api api-dev
 	$(COMPOSE) up -d api
 
 web-rebuild:
@@ -494,7 +509,7 @@ api-smoke:
 api-test: test-backend
 
 api-coverage:
-	$(COMPOSE) run --rm api pytest --cov=app --cov-report=term-missing
+	$(COMPOSE) run --rm --build api-dev pytest --cov=app --cov-report=term-missing
 
 ingest-smoke:
 	@echo "Running ingest smoke..."

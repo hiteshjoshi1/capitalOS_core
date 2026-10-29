@@ -1,3 +1,25 @@
+# Shared by the `api` service and the `api-dev` tooling service.
+x-api-common: &api-common
+  # Non-root (the image's `app` user by default). On a Linux host whose user
+  # isn't 10001, set CAPITALOS_UID/CAPITALOS_GID in .env so ./data stays writable.
+  user: "${CAPITALOS_UID:-10001}:${CAPITALOS_GID:-10001}"
+  env_file:
+    - path: .env
+      required: false
+  environment:
+    DATABASE_URL: ${DATABASE_URL:-postgresql://capitalos:capitalos@postgres:5432/capitalos}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    LOG_FORMAT: ${LOG_FORMAT:-logfmt}
+    DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-500}
+    LOG_SAMPLE_RATE_HIGH_FREQ: ${LOG_SAMPLE_RATE_HIGH_FREQ:-0.10}
+    UPLOAD_STALE_DAYS: ${UPLOAD_STALE_DAYS:-30}
+  depends_on:
+    - postgres
+  volumes:
+    - ./data:/app/data
+    - ./config:/app/config:ro
+    - ./api/app:/app/app:ro
+
 services:
   postgres:
     image: postgres:16.15
@@ -12,28 +34,24 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   api:
+    <<: *api-common
     build:
       context: ./api
+      target: runtime
     container_name: capitalos-api
-    env_file:
-      - path: .env
-        required: false
-    environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://capitalos:capitalos@postgres:5432/capitalos}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      LOG_FORMAT: ${LOG_FORMAT:-logfmt}
-      DB_SLOW_QUERY_MS: ${DB_SLOW_QUERY_MS:-500}
-      LOG_SAMPLE_RATE_HIGH_FREQ: ${LOG_SAMPLE_RATE_HIGH_FREQ:-0.10}
-      UPLOAD_STALE_DAYS: ${UPLOAD_STALE_DAYS:-30}
     ports:
       - "127.0.0.1:8000:8000"
-    depends_on:
-      - postgres
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config:ro
-      - ./api/app:/app/app
     command: uvicorn app.main:app --host=0.0.0.0 --port=8000 --reload
+
+  # Test/lint/typecheck tooling (`make test-backend`, `make lint`, `make typecheck`).
+  # Same config as `api`, built from the `dev` target; only started via `compose run`.
+  api-dev:
+    <<: *api-common
+    build:
+      context: ./api
+      target: dev
+    profiles:
+      - tools
 
   loki:
     image: grafana/loki:3.7.9
