@@ -1,4 +1,6 @@
 import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -25,7 +27,16 @@ from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
 
 
 
-app = FastAPI(title="CapitalOS API", version="0.1.0")
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    configure_logging()
+    start_scheduler()
+    start_market_scheduler()
+    start_portfolio_scheduler()
+    yield
+
+
+app = FastAPI(title="CapitalOS API", version="0.1.0", lifespan=_lifespan)
 
 _DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
@@ -76,11 +87,3 @@ app.include_router(portfolio_router)
 app.include_router(alerts_router)
 app.include_router(dividends_router)
 app.include_router(realtime_router)
-
-
-@app.on_event("startup")
-def _start_schedulers():
-    configure_logging()
-    start_scheduler()
-    start_market_scheduler()
-    start_portfolio_scheduler()

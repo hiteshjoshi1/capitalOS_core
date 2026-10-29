@@ -4,7 +4,11 @@ WORKDIR /app
 ENV PYTHONPATH=/app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r /app/requirements.txt
+# pip (and the urllib3/msgpack/setuptools copies vendored inside it) is only
+# needed to build the image, so it is uninstalled once requirements are in.
+RUN pip install --no-cache-dir --upgrade "pip>=26.2" \
+    && pip install --no-cache-dir -r /app/requirements.txt \
+    && pip uninstall -y pip
 
 COPY app /app/app
 COPY tests /app/tests
