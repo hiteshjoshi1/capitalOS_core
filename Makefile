@@ -350,10 +350,12 @@ db-shell:
 
 # Bounded wait, so a scheduled backup fails (and logs why) instead of hanging forever
 # when Docker or the database is down.
+# Over TCP: on a fresh volume the entrypoint runs a temporary socket-only server for initdb
+# and then restarts; a socket check passes too early and the next command hits the shutdown.
 DB_WAIT_SECONDS?=120
 db-wait:
 	@echo "Waiting for Postgres to be ready..."
-	@n=0; until docker exec $(DB_CONTAINER) pg_isready -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 ; do \
+	@n=0; until docker exec $(DB_CONTAINER) pg_isready -h 127.0.0.1 -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 ; do \
 		n=$$((n + 1)); \
 		if [ $$n -ge $(DB_WAIT_SECONDS) ]; then \
 			echo "Postgres ($(DB_CONTAINER)) not ready after $(DB_WAIT_SECONDS)s: is Docker running and the stack up (make up)?" >&2; exit 1; \
