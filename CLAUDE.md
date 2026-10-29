@@ -127,6 +127,9 @@ only (never ship this flag anywhere real).
 ## Config facts
 - `SNAPSHOT_DAY=1` (env var, see `.env`) — controls the monthly snapshot anchor day.
 - Node 22, Python 3.12 (inside container only).
+- Host runtimes (#91): CapitalOS's make targets use `.nvmrc`'s Node and a pinned CPython 3.13 in
+  `~/.capitalos/python` (`make host-tools` installs both; `make where` shows which are in use). The
+  machine-wide nvm default and Homebrew Python are shared with InvestOS: leave them alone.
 
 ## Remote dev (phone/away from the home machine)
 See `docs/workflows/remote-dev.md` — `claude.ai/code` (web) for non-DB-dependent

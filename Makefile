@@ -94,7 +94,19 @@ WEB_DIR=web
 WEB_PACKAGE_MANIFESTS=$(WEB_DIR)/package.json $(WEB_DIR)/package-lock.json
 WEB_NODE_MODULES_STAMP=$(WEB_DIR)/node_modules/.install-stamp
 
-PYTHON?=python3
+# Host runtimes (#91): CapitalOS's own Node and Python, so a security fix doesn't wait on the
+# machine-wide defaults (shared with other projects). `make host-tools` installs them: Node via
+# nvm (the shared default is left alone) and a uv-managed CPython in ~/.capitalos/python (no PATH
+# shims, invisible to other projects' uv). Without them, targets use node / python3 from PATH.
+NODE_VERSION:=$(shell cat .nvmrc 2>/dev/null)
+CAPITALOS_NODE_BIN:=$(HOME)/.nvm/versions/node/v$(NODE_VERSION)/bin
+ifneq ($(wildcard $(CAPITALOS_NODE_BIN)/node),)
+export PATH:=$(CAPITALOS_NODE_BIN):$(PATH)
+endif
+HOST_PYTHON_VERSION=3.13.16
+CAPITALOS_PYTHON_DIR=$(HOME)/.capitalos/python
+CAPITALOS_PYTHON:=$(firstword $(wildcard $(CAPITALOS_PYTHON_DIR)/cpython-$(HOST_PYTHON_VERSION)-*/bin/python3))
+PYTHON?=$(if $(CAPITALOS_PYTHON),$(CAPITALOS_PYTHON),python3)
 ORCH_VENV?=.venv-orch
 ORCH_PYTHON?=$(ORCH_VENV)/bin/python
 ORCH_PIP?=$(ORCH_VENV)/bin/pip
@@ -207,6 +219,17 @@ where:
 	@echo "project:  $(COMPOSE_PROJECT)$(if $(filter $(REAL_DATA_PROJECT),$(COMPOSE_PROJECT)),  <- REAL DATA,)"
 	@echo "api:      http://127.0.0.1:$(API_PORT)   db container: $(DB_CONTAINER)"
 	@$(if $(filter worktree,$(CHECKOUT)),echo "web:      http://localhost:$(ISO_WEB_PORT)   postgres: 127.0.0.1:$(ISO_PG_PORT)   grafana: :$(ISO_GRAFANA_PORT)",true)
+	@echo "runtimes: node $$(node --version) ($(if $(wildcard $(CAPITALOS_NODE_BIN)/node),CapitalOS,PATH: run make host-tools))   python $$($(PYTHON) -c 'import platform; print(platform.python_version())') ($(if $(CAPITALOS_PYTHON),CapitalOS,PATH: run make host-tools))"
+
+# Installs the host runtimes above (#91). nvm rewrites its lts/* aliases when it installs an LTS
+# release, which would move every other project's default; they're saved and put back.
+.PHONY: host-tools
+host-tools:
+	@bash -c 'set -e; export NVM_DIR="$${NVM_DIR:-$$HOME/.nvm}"; . "$$NVM_DIR/nvm.sh"; \
+		saved=$$(mktemp -d); cp -R "$$NVM_DIR/alias/." "$$saved/"; \
+		nvm install "$(NODE_VERSION)" >/dev/null; cp -R "$$saved/." "$$NVM_DIR/alias/"; rm -r "$$saved"; \
+		echo "node $(NODE_VERSION) ready; nvm default unchanged ($$(nvm version default))"'
+	UV_PYTHON_INSTALL_DIR="$(CAPITALOS_PYTHON_DIR)" uv python install --no-bin $(HOST_PYTHON_VERSION)
 
 # The test instance (#45): a batch of PRs on a separate app with a copy of the real data,
 # tested by Hitesh before main. Run from the main checkout. See scripts/test-instance.sh.
@@ -513,8 +536,8 @@ verify: lint typecheck test-backend test-frontend
 .PHONY: orch-bootstrap orch-test orch-coverage task-prepare task-plan task-build task-agent-review task-approve-plan task-human-review task-rework task-ship task-all task-resume task-respond task-export-state task-import-state task-restore-state task-salvage-plan task-state-show task-orch-smoke task-run task-status
 
 orch-bootstrap:
-	$(PYTHON) -m venv "$(ORCH_VENV)"
-	"$(ORCH_PIP)" install --upgrade "pip>=26.2"
+	$(PYTHON) -m venv --clear "$(ORCH_VENV)"
+	"$(ORCH_PIP)" install "pip==$(LOCK_PIP_VERSION)"
 	"$(ORCH_PIP)" install --require-hashes -r orchestration/requirements.txt
 
 orch-test:
