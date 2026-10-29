@@ -13,6 +13,8 @@ REQUIRED_TEST_SECTIONS = ("How To Test", "Verification Plan")
 
 DEFAULT_TEMPLATE = """# Issue {issue_id}: {title}
 
+Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/{issue_id}
+
 ## Objective
 - Define the problem clearly.
 
