@@ -82,7 +82,7 @@ serve() {
   say "Data: a copy of $dump"
   compose down -v --remove-orphans >/dev/null 2>&1 || true
   compose up -d postgres
-  for _ in $(seq 1 60); do docker exec "$ISO_NAME-postgres" pg_isready -q -U "$DB_USER" -d "$DB_NAME" && break; sleep 1; done
+  for _ in $(seq 1 60); do docker exec "$ISO_NAME-postgres" pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" && break; sleep 1; done
   docker exec -i "$ISO_NAME-postgres" pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl --exit-on-error <"$dump" \
     2> >(grep -vi collation >&2)
   # The copy must be exact before the batch touches it.

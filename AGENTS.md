@@ -92,6 +92,13 @@ implementer. Precedence: Hitesh's word in the moment, then this file, then the r
     `make test-instance-drop`.
   - If a change can't be seen on the test instance (e.g. it needs a scheduler or a live
     broker), the issue's Fixed-To Review comment says so, and why.
+- **A merge reaches the real app only by `make deploy`** in the main checkout (#46), never by a
+  bare `git pull`. It takes a verified backup when the update brings migrations, fast-forwards,
+  builds, migrates (each file atomically), recreates the stack and checks health. A failed
+  migration resets the code and names the backup. `make deploy-plan` shows what it would do.
+- **Migrations are atomic:** `make db-migrate` runs each file and its `schema_migrations` row in
+  one transaction, stopping at the first failure. New migrations must not contain their own
+  `BEGIN` / `COMMIT`.
 - **Merging.** A PR is merged only when Hitesh says so, and the word covers only the PRs it
   names (or the sprint it okays). Never merge on your own judgement. Never commit to `main`.
 - **Status.** Follow the board flow in § Work Tracking. A merged item stays in Fixed-To Review;

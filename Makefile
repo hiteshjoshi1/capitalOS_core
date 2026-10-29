@@ -56,7 +56,7 @@ endif
 #   real data. Work in a worktree instead (make worktree ISSUE=<n> SLUG=<slug>), or pass
 #   ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
-GUARDED_TARGETS=up down build api-up api-rebuild db-migrate db-reset db-restore db-adopt-migrations \
+GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
 	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign db-create-mcp-role \
 	observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
@@ -158,7 +158,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build deploy deploy-plan deploy-status observability-running
 
 build:
 	$(COMPOSE) build
@@ -350,10 +350,12 @@ db-shell:
 
 # Bounded wait, so a scheduled backup fails (and logs why) instead of hanging forever
 # when Docker or the database is down.
+# Over TCP: on a fresh volume the entrypoint runs a temporary socket-only server for initdb
+# and then restarts; a socket check passes too early and the next command hits the shutdown.
 DB_WAIT_SECONDS?=120
 db-wait:
 	@echo "Waiting for Postgres to be ready..."
-	@n=0; until docker exec $(DB_CONTAINER) pg_isready -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 ; do \
+	@n=0; until docker exec $(DB_CONTAINER) pg_isready -h 127.0.0.1 -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 ; do \
 		n=$$((n + 1)); \
 		if [ $$n -ge $(DB_WAIT_SECONDS) ]; then \
 			echo "Postgres ($(DB_CONTAINER)) not ready after $(DB_WAIT_SECONDS)s: is Docker running and the stack up (make up)?" >&2; exit 1; \
@@ -380,8 +382,9 @@ db-migrate: db-wait
 			continue; \
 		fi; \
 		echo "==> $$f"; \
-		docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < $$f; \
-		docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "INSERT INTO schema_migrations (filename) VALUES ('$$filename');" > /dev/null; \
+		{ cat "$$f"; printf "\nINSERT INTO schema_migrations (filename) VALUES ('%s');\n" "$$filename"; } | \
+			docker exec -i $(DB_CONTAINER) psql -q -1 -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) > /dev/null || { \
+			echo "Migration $$f FAILED: rolled back, not recorded; later migrations not run." >&2; exit 1; }; \
 	done
 	@echo "Migrations complete."
 
@@ -662,6 +665,25 @@ docker-prune:
 
 # ---- Existing smoke/utility targets (kept for compatibility) ----
 .PHONY: api-smoke api-test api-coverage ingest-smoke crypto-smoke api-rebuild web-rebuild api-shell web-test
+
+# Build the API images without restarting anything (deploy builds, migrates, then restarts).
+api-build:
+	$(COMPOSE) build --pull api api-dev
+
+# Install merged main into the real-data stack (#46): backup if migrating, migrate, rebuild,
+# health check. Main checkout on main only. See scripts/deploy.sh.
+deploy:
+	@scripts/deploy.sh $(COMMIT)
+
+deploy-plan:
+	@scripts/deploy.sh --plan $(FROM) $(TO)
+
+deploy-status:
+	@scripts/deploy.sh --status
+
+# Exit 0 when this checkout's own observability stack (its compose project) is running.
+observability-running:
+	@test -n "$$($(OBSERVABILITY_COMPOSE) ps -q --status running loki 2>/dev/null)"
 
 api-rebuild:
 	# --pull refreshes python:3.12-slim so OS security patches land on every rebuild.
