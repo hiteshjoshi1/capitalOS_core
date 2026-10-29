@@ -7,7 +7,7 @@
 FROM us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:1.14.0@sha256:dab91e25cbe7145d261df2978881c4e23e02238b42da3c72eea2df0a95aea797 AS mcp-toolbox
 
 # Image vulnerability scanner (make security-scan, .github/workflows/security-scan.yml)
-FROM aquasec/trivy:0.75.0@sha256:af6acf9a6b85dfe389a1941505c0ce9efef52a4719635e1a962f022a3d855daa AS trivy
+FROM aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7bac8db623eca6c06c AS trivy
 
 # Signature verification (scripts/verify-image.sh)
 FROM ghcr.io/sigstore/cosign/cosign:v3.1.3@sha256:9e5c2f2edc34351160407ca3416c61855bdf9403c3c5936e0f0be7fc261611b8 AS cosign
