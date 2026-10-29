@@ -72,6 +72,10 @@ From the main checkout:
 - New/changed migration: add `migrations/NNN_*.sql` (no `BEGIN`/`COMMIT` of its own), then `make db-migrate`
   (each file + its `schema_migrations` row in one transaction; stops at the first failure; already-applied files are skipped).
 - `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
+- Python dependency change: edit `api/requirements*.in` / `orchestration/requirements.in` (direct pins),
+  then `make api-lock` / `make orch-lock` regenerates the hashed lock `requirements*.txt` the image and venv
+  install with `--require-hashes` (#81). A transitive package under 14 days old fails the lock (and CI):
+  hold it back with an older pin in the `.in` file.
 - Dependency or image change: `make security-scan` (Trivy; fails on fixable HIGH/CRITICAL in the
   runtime API image, reports compose images). CI twin: `.github/workflows/security-scan.yml`.
 - `/verify` and `/run` skills exist under `.claude/skills/` — prefer them over rediscovering this by hand.

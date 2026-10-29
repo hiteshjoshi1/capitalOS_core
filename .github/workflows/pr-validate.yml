@@ -18,6 +18,12 @@ jobs:
         with:
           node-version: 22
 
+      - name: Python locks have no transitive package under 14 days old (D-1, #81)
+        run: |
+          scripts/check-lock-age.py api/requirements.txt api/requirements.in
+          scripts/check-lock-age.py api/requirements-dev.txt api/requirements-dev.in api/requirements.in
+          scripts/check-lock-age.py orchestration/requirements.txt orchestration/requirements.in
+
       - name: Ensure .env exists
         run: |
           if [ ! -f .env ]; then

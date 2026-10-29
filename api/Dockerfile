@@ -15,14 +15,15 @@ RUN groupadd --system --gid 10001 app \
     && useradd --system --uid 10001 --gid app --home-dir /app --no-create-home --shell /usr/sbin/nologin app
 
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir --upgrade "pip>=26.2" \
-    && pip install --no-cache-dir -r /app/requirements.txt
+# requirements.txt is a lock (every package, version and hash; `make api-lock`, #81).
+RUN pip install --no-cache-dir "pip==26.2.2" \
+    && pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 
 
 FROM base AS dev
 
 COPY requirements-dev.txt /app/requirements-dev.txt
-RUN pip install --no-cache-dir -r /app/requirements-dev.txt \
+RUN pip install --no-cache-dir --require-hashes -r /app/requirements-dev.txt \
     && pip uninstall -y pip
 
 COPY app /app/app

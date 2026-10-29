@@ -1,0 +1,26 @@
+# Direct dependencies of the task-flow tooling. `make orch-lock` compiles them into
+# requirements.txt with every transitive package and its hashes (#81).
+langgraph==1.2.17
+langgraph-checkpoint-sqlite==3.1.2
+pydantic==2.14.1
+python-dotenv==1.2.4
+pytest==9.2.0
+pytest-cov==7.1.0
+
+# Held back (D-1): transitive, newest release under 14 days old when locked.
+# Security fix, taken under 14 days (D-1 exception): GHSA-6q48-6c7w-9gw2, compromised emSign roots.
+certifi==2026.10.18
+coverage==7.16.2
+httpcore2==2.13.1
+httpx2==2.13.1
+jsonpatch==1.35
+jsonpointer==3.2.1
+langchain-core==1.6.10
+langchain-protocol==0.0.19
+langgraph-checkpoint==4.3.0
+langgraph-sdk==0.4.7
+langsmith==0.14.8
+ormsgpack==1.12.2
+uuid-utils==0.17.1
+websockets==16.1.1
+xxhash==4.0.1
