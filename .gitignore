@@ -128,3 +128,6 @@ sbom/
 # Test instance state (#45)
 .test-instance.state
 .test-instance-web.*
+
+# Deploy log (#46)
+deployments.log
