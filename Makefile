@@ -186,7 +186,20 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore
+.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore db-create-mcp-role
+
+# Read-only role for the capitalos-postgres MCP server. Uses MCP_DB_PASSWORD from
+# .env, generating one there on first run (.env is git-ignored). Idempotent.
+db-create-mcp-role: db-wait
+	@pw=$$(sed -n 's/^MCP_DB_PASSWORD=//p' .env 2>/dev/null | tail -1); \
+	if [ -z "$$pw" ]; then \
+		pw=$$(openssl rand -hex 24); \
+		printf '\n# Read-only DB password for the capitalos-postgres MCP server (make db-create-mcp-role)\nMCP_DB_PASSWORD=%s\n' "$$pw" >> .env; \
+		echo "Generated MCP_DB_PASSWORD in .env"; \
+	fi; \
+	MCP_DB_PASSWORD="$$pw" docker exec -i -e MCP_DB_PASSWORD $(DB_CONTAINER) \
+		psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/db-create-mcp-role.sql && \
+	echo "Role capitalos_mcp_ro is ready (read-only, no access to user_credentials/auth_sessions)."
 
 db-backup: db-wait
 	@mkdir -p backups
@@ -476,14 +489,14 @@ orch-clean:
 # ---- Image security scan (local twin of .github/workflows/security-scan.yml) ----
 # Builds the runtime API image on a freshly pulled base and fails on fixable
 # HIGH/CRITICAL findings; compose images are reported but don't fail the target.
-TRIVY_IMAGE?=aquasec/trivy:0.75.0
+TRIVY_IMAGE?=$(shell scripts/tool-image.sh trivy)
 TRIVY=docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v capitalos-trivy-cache:/root/.cache $(TRIVY_IMAGE) image --quiet --skip-version-check --table-mode detailed --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL
 SCAN_API_IMAGE=capitalos-api:security-scan
 .PHONY: security-scan
 security-scan:
 	docker build --pull --target runtime -t $(SCAN_API_IMAGE) api
 	$(TRIVY) --exit-code 1 $(SCAN_API_IMAGE)
-	@for img in $$(docker compose -f docker-compose.yml --profile observability config --images | grep -v -- '-api'); do \
+	@for img in $$(docker compose -f docker-compose.yml --profile observability config --images | grep -v -- '-api') $$(scripts/tool-image.sh mcp-toolbox); do \
 		echo "== $$img (report only)"; $(TRIVY) $$img | grep -E '^(Total:|[a-z].*\()' || true; \
 	done
 

@@ -63,6 +63,13 @@ updates:
       - dependency-name: grafana/grafana
         update-types: ["version-update:semver-major"]
 
+  # Images run outside compose (MCP server, Trivy): see tools/Dockerfile.
+  - package-ecosystem: docker
+    directory: /tools
+    schedule:
+      interval: weekly
+      day: monday
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
