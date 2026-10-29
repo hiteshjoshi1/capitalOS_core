@@ -1,0 +1,60 @@
+# Dependabot: automated dependency updates for every supply-chain surface in the
+# repo. Security updates (from Dependabot alerts) are enabled in the repository
+# settings and open PRs immediately; the version updates below run weekly.
+# Minor/patch bumps are grouped per ecosystem to keep PR volume low; majors
+# arrive as individual PRs so they can be reviewed on their own.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types: [minor, patch]
+
+  - package-ecosystem: pip
+    directory: /api
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      pip-minor-patch:
+        update-types: [minor, patch]
+
+  # API base image (python:3.12-slim).
+  - package-ecosystem: docker
+    directory: /api
+    schedule:
+      interval: weekly
+      day: monday
+    ignore:
+      # Python minor upgrades (3.12 -> 3.13) are a deliberate runtime change.
+      - dependency-name: python
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
+
+  # Postgres, Loki, Grafana, Alloy pins in docker-compose.yml.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      compose-images:
+        update-types: [minor, patch]
+    ignore:
+      # A Postgres major needs pg_upgrade / dump+restore of the data volume.
+      - dependency-name: postgres
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
