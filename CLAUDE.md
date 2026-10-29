@@ -13,6 +13,11 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   `capitalos-oss-test`). The default-project stack (`capitalos`, API :8000) is not used in
   this checkout — don't start it. Without that file (fresh
   clone) it's the base stack on :5432 / :8000.
+- **The main checkout stays on `main`** (it runs the real data, and its API reloads this checkout's
+  code). Stack-changing targets refuse there on any other branch (#44). Do feature work in a
+  worktree: `make worktree ISSUE=<n> SLUG=<slug>` → `../capitalOS-worktrees/issue-<n>-<slug>`,
+  where `make up` / `web-up` / `db-migrate` run an **isolated** stack (own project, containers,
+  ports and DB; `make where` prints them) and `make instance-drop` removes it.
 - Web: `cd web && npm run dev` → `http://localhost:5173`.
 - API: `http://localhost:8011` (health: `curl http://127.0.0.1:8011/health`). `web/.env.local` sets
   `VITE_API_BASE=/api` + `VITE_API_PORT=8011`: the browser talks only to the Vite server, which

@@ -3,13 +3,23 @@ PROJECT=capitalos
 # ---- Config ----
 GIT_REMOTE?=origin
 BASE_BRANCH?=main
-# A local, git-ignored docker-compose.oss-test.yml selects the "OSS stack"
-# (API :8011, Postgres :5433, own volume). When present it is layered over the
-# base file under its own compose project so it never mixes with the default
-# 'capitalos' project. Without it (a fresh clone) everything uses the base
-# file as-is: API :8000, Postgres :5432.
+# Which stack this checkout drives (#44).
+# - The main checkout: with the local, git-ignored docker-compose.oss-test.yml it is the
+#   "OSS stack", which holds the REAL data (API :8011, Postgres :5433, project
+#   capitalos-oss-test). Without it (a fresh clone) it is the base file as-is: API :8000,
+#   Postgres :5432.
+# - A git worktree: always an isolated instance of its own (docker-compose.isolated.yml):
+#   its own project, container names, ports and database. It never reads the OSS
+#   override, and explicit -p/-f beat any COMPOSE_PROJECT_NAME/COMPOSE_FILE from a
+#   copied .env.
+REAL_DATA_PROJECT=capitalos-oss-test
+GIT_DIR_ABS:=$(abspath $(shell git rev-parse --git-dir 2>/dev/null))
+GIT_COMMON_ABS:=$(abspath $(shell git rev-parse --git-common-dir 2>/dev/null))
+CURRENT_BRANCH:=$(shell git branch --show-current 2>/dev/null)
+ifeq ($(GIT_DIR_ABS),$(GIT_COMMON_ABS))
+CHECKOUT=main
 ifneq ($(wildcard docker-compose.oss-test.yml),)
-COMPOSE_PROJECT=capitalos-oss-test
+COMPOSE_PROJECT=$(REAL_DATA_PROJECT)
 COMPOSE=docker compose -p $(COMPOSE_PROJECT) -f docker-compose.yml -f docker-compose.oss-test.yml
 API_PORT=8011
 DB_CONTAINER=capitalos-oss-postgres
@@ -20,6 +30,55 @@ COMPOSE=docker compose
 API_PORT=8000
 DB_CONTAINER=capitalos-postgres
 API_CONTAINER=capitalos-api
+endif
+else
+CHECKOUT=worktree
+# Name and ports come from the worktree's directory, so they're stable per worktree and
+# differ between worktrees. Override ISO_NAME / ISO_*_PORT to choose them.
+ISO_NAME?=capitalos-wt-$(shell basename "$(CURDIR)" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9\n' '-' | sed 's/-*$$//')
+PORT_OFFSET:=$(shell printf '%s' "$(CURDIR)" | cksum | awk '{print 100 + $$1 % 400}')
+ISO_API_PORT?=$(shell echo $$((8000 + $(PORT_OFFSET))))
+ISO_PG_PORT?=$(shell echo $$((15000 + $(PORT_OFFSET))))
+ISO_GRAFANA_PORT?=$(shell echo $$((13000 + $(PORT_OFFSET))))
+ISO_LOKI_PORT?=$(shell echo $$((14000 + $(PORT_OFFSET))))
+ISO_WEB_PORT?=$(shell echo $$((5200 + $(PORT_OFFSET))))
+export ISO_NAME ISO_API_PORT ISO_PG_PORT ISO_GRAFANA_PORT ISO_LOKI_PORT
+COMPOSE_PROJECT=$(ISO_NAME)
+COMPOSE=COMPOSE_PROJECT_NAME= COMPOSE_FILE= docker compose -p $(COMPOSE_PROJECT) -f docker-compose.yml -f docker-compose.isolated.yml
+API_PORT=$(ISO_API_PORT)
+DB_CONTAINER=$(ISO_NAME)-postgres
+API_CONTAINER=$(ISO_NAME)-api
+endif
+
+# Guard (#44): targets that change the stack or its data.
+# - In the main checkout with the real-data stack: only on `main`. The API bind-mounts
+#   ./api/app with --reload, so a feature branch checked out there would run against the
+#   real data. Work in a worktree instead (make worktree ISSUE=<n> SLUG=<slug>), or pass
+#   ALLOW_BRANCH=1 deliberately.
+# - In a worktree: never the real-data project, containers or ports.
+GUARDED_TARGETS=up down build api-up api-rebuild db-migrate db-reset db-restore db-adopt-migrations \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign db-create-mcp-role \
+	observability-up observability-down observability-smoke
+ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
+ifeq ($(CHECKOUT),main)
+ifeq ($(COMPOSE_PROJECT),$(REAL_DATA_PROJECT))
+ifneq ($(CURRENT_BRANCH),main)
+ifneq ($(ALLOW_BRANCH),1)
+$(error Refusing '$(filter $(GUARDED_TARGETS),$(MAKECMDGOALS))': this checkout drives the REAL-data stack but is on '$(CURRENT_BRANCH)', not main. Its API runs this checkout's code. Work in a worktree (make worktree ISSUE=<n> SLUG=<slug>), or pass ALLOW_BRANCH=1 if you really mean it)
+endif
+endif
+endif
+else
+ifneq ($(filter $(REAL_DATA_PROJECT) capitalos,$(COMPOSE_PROJECT)),)
+$(error Refusing: a worktree must not drive project '$(COMPOSE_PROJECT)')
+endif
+ifneq ($(filter capitalos-oss-% capitalos-postgres capitalos-api,$(DB_CONTAINER) $(API_CONTAINER)),)
+$(error Refusing: a worktree must not use the containers '$(DB_CONTAINER)' / '$(API_CONTAINER)')
+endif
+ifneq ($(filter 8011 5433 8000 5432,$(ISO_API_PORT) $(ISO_PG_PORT)),)
+$(error Refusing: a worktree must not use the main stack's ports ($(ISO_API_PORT)/$(ISO_PG_PORT)))
+endif
+endif
 endif
 CORE_SERVICES=postgres api
 DB_USER?=capitalos
@@ -99,7 +158,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where instance-drop
 
 build:
 	$(COMPOSE) build
@@ -119,15 +178,48 @@ logs:
 api-up:
 	$(COMPOSE) up -d --build api
 
+ifeq ($(CHECKOUT),worktree)
+# A worktree's web app talks only to the worktree's own API, through the Vite proxy, on
+# its own port (no web/.env.local needed).
+web-up: web-deps
+	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) npm run dev -- --port $(ISO_WEB_PORT) --strictPort
+else
 web-up: web-deps
 	cd $(WEB_DIR) && npm run dev
+endif
 
 api-logs:
 	docker logs -f $(API_CONTAINER)
 
-# Host URL of the API for this checkout (8011 with the local OSS override, else 8000).
+# Host URL of the API for this checkout (8011 with the local OSS override, else 8000;
+# a worktree's own port).
 api-url:
 	@echo http://127.0.0.1:$(API_PORT)
+
+# Which stack this checkout drives (#44).
+where:
+	@echo "checkout: $(CHECKOUT) ($(CURRENT_BRANCH))"
+	@echo "project:  $(COMPOSE_PROJECT)$(if $(filter $(REAL_DATA_PROJECT),$(COMPOSE_PROJECT)),  <- REAL DATA,)"
+	@echo "api:      http://127.0.0.1:$(API_PORT)   db container: $(DB_CONTAINER)"
+	@$(if $(filter worktree,$(CHECKOUT)),echo "web:      http://localhost:$(ISO_WEB_PORT)   postgres: 127.0.0.1:$(ISO_PG_PORT)   grafana: :$(ISO_GRAFANA_PORT)",true)
+
+# Remove a worktree's own instance with its volumes (#44). Only in a worktree: in the main
+# checkout this would delete the real data, so it refuses.
+instance-drop:
+ifeq ($(CHECKOUT),worktree)
+	$(COMPOSE) --profile observability --profile tools down -v --remove-orphans
+else
+	@echo "Refusing: instance-drop only runs in a worktree (it deletes the instance's volumes)." >&2; exit 2
+endif
+
+# Start work on an issue in its own worktree (#44), so this checkout stays on main and the
+# real-data stack keeps running main's code: make worktree ISSUE=44 SLUG=branch-isolation
+WORKTREES_DIR?=$(abspath $(GIT_COMMON_ABS)/../../capitalOS-worktrees)
+worktree:
+	@test -n "$(ISSUE)" -a -n "$(SLUG)" || (echo "Usage: make worktree ISSUE=<n> SLUG=<slug>" && exit 2)
+	git fetch -q $(GIT_REMOTE)
+	git worktree add -b feature/issue-$(ISSUE)-$(SLUG) "$(WORKTREES_DIR)/issue-$(ISSUE)-$(SLUG)" $(GIT_REMOTE)/$(BASE_BRANCH)
+	@echo "Worktree ready: cd $(WORKTREES_DIR)/issue-$(ISSUE)-$(SLUG) && make where && make up"
 
 observability-up:
 	$(OBSERVABILITY_COMPOSE) up -d $(OBSERVABILITY_SERVICES)
@@ -326,17 +418,18 @@ ownership-reassign:
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
 	scripts/check-pinned-refs.sh
-	$(COMPOSE) run --rm --build api-dev ruff check app tests
+	scripts/test-checkout-guard.sh
+	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
 typecheck: web-deps
 	cd $(WEB_DIR) && npx tsc -b --pretty false
-	$(COMPOSE) run --rm --build api-dev mypy app
+	$(COMPOSE) run --rm --build --no-deps api-dev mypy app
 
 test-backend:
-	$(COMPOSE) run --rm --build api-dev pytest
+	$(COMPOSE) run --rm --build --no-deps api-dev pytest
 
 contract-backend:
-	$(COMPOSE) run --rm --build api-dev pytest tests/test_contracts.py -q
+	$(COMPOSE) run --rm --build --no-deps api-dev pytest tests/test_contracts.py -q
 
 test-frontend: web-deps
 	cd $(WEB_DIR) && npm test -- --run
@@ -571,7 +664,7 @@ api-smoke:
 api-test: test-backend
 
 api-coverage:
-	$(COMPOSE) run --rm --build api-dev pytest --cov=app --cov-report=term-missing
+	$(COMPOSE) run --rm --build --no-deps api-dev pytest --cov=app --cov-report=term-missing
 
 ingest-smoke:
 	@echo "Running ingest smoke..."

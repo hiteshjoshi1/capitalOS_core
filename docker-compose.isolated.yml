@@ -1,0 +1,32 @@
+# An isolated instance of the stack (#44, and the test instance in #45): every
+# container name and host port comes from the environment, so a worktree or the test
+# instance can never collide with, or reach, the real-data stack. Named volumes are
+# already scoped to the compose project, so each instance gets its own database.
+# Used only through the Makefile, which sets ISO_* and passes `-p` / `-f` explicitly
+# (so a copied .env's COMPOSE_PROJECT_NAME / COMPOSE_FILE can't redirect it).
+services:
+  postgres:
+    container_name: ${ISO_NAME:?set by the Makefile}-postgres
+    ports: !override
+      - "127.0.0.1:${ISO_PG_PORT:?}:5432"
+
+  api:
+    container_name: ${ISO_NAME:?}-api
+    ports: !override
+      - "127.0.0.1:${ISO_API_PORT:?}:8000"
+
+  loki:
+    container_name: ${ISO_NAME:?}-loki
+    ports: !override
+      - "127.0.0.1:${ISO_LOKI_PORT:?}:3100"
+
+  grafana:
+    container_name: ${ISO_NAME:?}-grafana
+    ports: !override
+      - "127.0.0.1:${ISO_GRAFANA_PORT:?}:3000"
+
+  alloy:
+    container_name: ${ISO_NAME:?}-alloy
+
+  docker-socket-proxy:
+    container_name: ${ISO_NAME:?}-docker-socket-proxy

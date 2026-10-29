@@ -47,6 +47,12 @@ second backlog, TODO list or roadmap file.
   `tasks/_template.md`, with its `Issue:` link). Branch: `feature/issue-<n>-<slug>`. The
   orchestration (`make task-*`) parses this name. Docs `issue-201` to `issue-214` predate the board
   and use their own legacy numbers.
+- **Work in a worktree, never on a branch in the main checkout** (#44). The real-data API
+  bind-mounts the main checkout's `./api/app` with `--reload`, so a branch checked out there runs
+  against the real data. Use `make worktree ISSUE=<n> SLUG=<slug>`; the main checkout stays on
+  `main`. A worktree gets its own isolated stack (`make where` shows its project and ports;
+  `make up`, `make web-up`, `make db-migrate` there touch only it; `make instance-drop` removes
+  it). In the main checkout, stack-changing targets refuse on any branch but `main`.
 - **The PR description says `Closes #<n>`**, so the merge closes the issue.
 - **Status moves with the work** (`scripts/board.sh move <n> "<Status>"`):
 
