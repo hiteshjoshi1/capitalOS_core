@@ -27,7 +27,7 @@ DB_NAME?=capitalos
 SMOKE_USER?=demo
 SMOKE_PASSWORD?=Test@1234
 
-OBSERVABILITY_SERVICES=loki grafana alloy
+OBSERVABILITY_SERVICES=loki grafana alloy docker-socket-proxy
 OBSERVABILITY_ENV_FILE=$(shell test -f config/observability.env && printf '%s' config/observability.env || printf '%s' config/observability.env.example)
 # Same project as COMPOSE, so observability runs alongside whichever stack is active.
 OBSERVABILITY_COMPOSE=$(COMPOSE) --env-file $(OBSERVABILITY_ENV_FILE)

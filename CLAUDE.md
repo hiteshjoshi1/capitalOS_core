@@ -20,6 +20,10 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 
 ## Network posture (dev)
 - Postgres and the API are published on `127.0.0.1` only (`docker-compose*.yml`).
+- Every service runs with `no-new-privileges`, `cap_drop: ALL` and a read-only root fs (tmpfs for
+  scratch). All are non-root except `docker-socket-proxy`, the only container with the Docker socket:
+  it exposes read-only container/event endpoints to Alloy on an internal network (`docker-api`).
+  Loki/Grafana/Alloy sit on an `observability` network that can't reach Postgres.
 - Vite listens on all interfaces (`host: true`) but `web/vite.network.ts` drops any connection
   that isn't from localhost or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). `VITE_ALLOW_LAN=1`
   opens it to the local network. `*.ts.net` Host headers are allowed (`allowedHosts`).

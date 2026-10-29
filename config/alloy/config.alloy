@@ -1,5 +1,5 @@
 discovery.docker "containers" {
-  host = "unix:///var/run/docker.sock"
+  host = "tcp://docker-socket-proxy:2375"
 }
 
 discovery.relabel "docker_logs" {
@@ -24,7 +24,7 @@ discovery.relabel "docker_logs" {
 }
 
 loki.source.docker "containers" {
-  host       = "unix:///var/run/docker.sock"
+  host       = "tcp://docker-socket-proxy:2375"
   targets    = discovery.relabel.docker_logs.output
   forward_to = [loki.write.local.receiver]
 }
