@@ -294,7 +294,7 @@ describe("CashFlowDetail route", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
 
     // Hero: value, delta chip, and the savings/burn insight sentence
-    expect(screen.getByText("Net cash flow this month")).toBeInTheDocument();
+    expect(await screen.findByText("Net cash flow this month")).toBeInTheDocument();
     expect(screen.getByText("+S$ 3,770")).toBeInTheDocument();
     expect(screen.getByText("-S$ 2,412 vs January")).toBeInTheDocument();
     expect(screen.getByText("Saved 30.2% of income · Burn rate 69.8%")).toBeInTheDocument();
@@ -330,7 +330,7 @@ describe("CashFlowDetail route", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
 
-    const hero = screen.getByText("Total inflows this month").closest("article") as HTMLElement;
+    const hero = (await screen.findByText("Total inflows this month")).closest("article") as HTMLElement;
     expect(within(hero).getByText("S$ 12,480")).toBeInTheDocument();
     expect(screen.getByText("Salary 96.2%, dividends 3.8%, transfers 0.0%.")).toBeInTheDocument();
 
@@ -346,7 +346,7 @@ describe("CashFlowDetail route", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Expenses" })).toBeInTheDocument();
 
-    const hero = screen.getByText("Total outflows this month").closest("article") as HTMLElement;
+    const hero = (await screen.findByText("Total outflows this month")).closest("article") as HTMLElement;
     expect(within(hero).getByText("S$ 8,710")).toBeInTheDocument();
     expect(screen.getByText(/Most outflows went to Rent/)).toBeInTheDocument();
 
@@ -409,7 +409,7 @@ describe("CashFlowDetail route", () => {
     renderRoute("/cash-flow/expenses");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Expenses" })).toBeInTheDocument();
-    expect(screen.getByText("Expense transactions (3)")).toBeInTheDocument();
+    expect(await screen.findByText("Expense transactions (3)")).toBeInTheDocument();
     expect(screen.getByText(/DBS Credit Card/)).toBeInTheDocument();
     expect(screen.getByText("SHENG SIONG")).toBeInTheDocument();
     expect(screen.getAllByText("CreditCard::Purchase").length).toBeGreaterThan(0);
@@ -422,7 +422,7 @@ describe("CashFlowDetail route", () => {
     renderRoute("/cash-flow");
 
     expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
-    expect(screen.getByLabelText("Cash reconciliation unavailable")).toBeInTheDocument();
+    expect(await screen.findByLabelText("Cash reconciliation unavailable")).toBeInTheDocument();
     expect(screen.getByText(/needs exact cash snapshots on 2026-01-31 and 2026-02-28/i)).toBeInTheDocument();
     expect(screen.queryByLabelText("Cash bridge chart")).not.toBeInTheDocument();
   });
@@ -436,8 +436,9 @@ describe("CashFlowDetail route", () => {
     expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
 
     // Category tag is read-only-looking by default; clicking it reveals the editor.
+    const editButton = await screen.findByRole("button", { name: "Edit category for transaction 2" });
     expect(screen.queryByLabelText("Select category for transaction 2")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Edit category for transaction 2" }));
+    await user.click(editButton);
 
     await user.selectOptions(screen.getByLabelText("Select category for transaction 2"), "151");
     await user.click(screen.getByLabelText("Save category for transaction 2"));
@@ -463,7 +464,7 @@ describe("CashFlowDetail route", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Income" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Edit category for transaction 2" }));
+    await user.click(await screen.findByRole("button", { name: "Edit category for transaction 2" }));
     await user.selectOptions(screen.getByLabelText("Select category for transaction 2"), "151");
     await user.click(screen.getByLabelText("Save category for transaction 2"));
 

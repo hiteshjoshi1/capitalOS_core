@@ -101,7 +101,7 @@ describe("CashFlowMapping route", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Map Transactions" })).toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
-    expect(screen.getByText("3 transactions across 2 merchants still need a category")).toBeInTheDocument();
+    expect(await screen.findByText("3 transactions across 2 merchants still need a category")).toBeInTheDocument();
     expect(screen.getByText("NTUC FairPrice")).toBeInTheDocument();
     expect(screen.getByText("Grab")).toBeInTheDocument();
     expect(screen.getByText((_, element) => element?.textContent === "2 transactions · S$ 42.5")).toBeInTheDocument();
