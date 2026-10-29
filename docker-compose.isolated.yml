@@ -21,6 +21,10 @@ services:
       COINBASE_SCHEDULER_ENABLED: "0"
       STOCK_PRICE_SCHEDULER_ENABLED: "0"
       IBKR_FLEX_SCHEDULER_ENABLED: "0"
+      # Browsers don't scope cookies by port, so every instance on localhost (or the same
+      # Tailscale IP) would share the real app's refresh cookie and log each other out
+      # (#65). Each instance gets its own; the real app keeps the default name.
+      AUTH_REFRESH_COOKIE_NAME: capitalos_refresh_${ISO_NAME:?}
 
   loki:
     container_name: ${ISO_NAME:?}-loki

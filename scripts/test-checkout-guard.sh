@@ -1,6 +1,6 @@
 #!/bin/bash
 # Tests for the checkout guard (#44), run by `make lint`. They only use dry runs and
-# parse-time checks (no Docker), in a throwaway clone with its own worktree, so they
+# parse-time checks (no containers), in a throwaway clone with its own worktree, so they
 # never touch this checkout's stack.
 set -euo pipefail
 # Run as `make lint` inside a worktree, the outer make exports that worktree's ISO_* (and
@@ -55,6 +55,13 @@ expect_refused "worktree onto the real API port: refused" "$W" up ISO_API_PORT=8
 expect_refused "worktree onto the real Postgres port: refused" "$W" up ISO_PG_PORT=5433
 expect_command "worktree: test tooling never starts Postgres (--no-deps)" "$W" 'run --rm --build --no-deps api-dev pytest' test-backend
 if make -s -C "$M" instance-drop >/dev/null 2>&1; then bad "main: instance-drop refused"; else ok "main: instance-drop refused"; fi
+# #65: an isolated instance has its own login cookie (parse-time `compose config`, no daemon).
+d="worktree: the API uses its own refresh cookie, not the real app's"
+if out=$(cd "$W" && ISO_NAME=capitalos-wt-wt ISO_API_PORT=1 ISO_PG_PORT=2 ISO_LOKI_PORT=3 ISO_GRAFANA_PORT=4 \
+  COMPOSE_PROJECT_NAME="" COMPOSE_FILE="" docker compose -p capitalos-wt-wt -f docker-compose.yml \
+  -f docker-compose.isolated.yml config api 2>&1) &&
+  printf '%s' "$out" | grep -q 'AUTH_REFRESH_COOKIE_NAME: capitalos_refresh_capitalos-wt-wt$'; then ok "$d"
+else bad "$d"; fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

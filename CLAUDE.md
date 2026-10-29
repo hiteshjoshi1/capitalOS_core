@@ -59,6 +59,8 @@ From the main checkout:
 - `make test-instance-status`, then `make test-instance-pr` (one PR test/<date> → main, `Closes`
   every batch issue), then `make test-instance-drop`.
 - Every worktree's `make web-up` shows an amber DEV banner the same way (`VITE_INSTANCE_LABEL`).
+- Each dev/test instance has its own login cookie (`capitalos_refresh_<instance>`; the real app keeps
+  `capitalos_refresh`). Browsers don't scope cookies by port, so a shared name logged each other out (#65).
 
 ## Verify (match to what changed)
 - Backend code: `make api-rebuild` then `make test-backend` (runs **inside Docker**:
