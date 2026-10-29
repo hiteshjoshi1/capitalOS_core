@@ -30,13 +30,13 @@ jobs:
       security-events: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve Trivy image (tools/Dockerfile)
         run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
 
       - name: Cache Trivy DB
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/trivy-cache
           key: trivy-db-${{ github.run_id }}
@@ -72,7 +72,7 @@ jobs:
       images: ${{ steps.list.outputs.images }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - id: list
         name: List third-party images (docker-compose.yml + tools/Dockerfile)
@@ -96,13 +96,13 @@ jobs:
         image: ${{ fromJSON(needs.list-compose-images.outputs.images) }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Resolve Trivy image (tools/Dockerfile)
         run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
 
       - name: Cache Trivy DB
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/trivy-cache
           key: trivy-db-${{ github.run_id }}-${{ strategy.job-index }}
