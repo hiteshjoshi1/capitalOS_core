@@ -421,3 +421,30 @@ def test_reassign_legacy_ownership_service(db_engine):
         assert int(owned_accounts) == 2
         assert int(owned_wallets) == 2
         assert int(owned_networth) == 2
+
+
+def test_auth_refresh_cookie_name_is_per_instance(client, db_engine, monkeypatch):
+    # Test and dev instances share the browser's localhost cookies with the real app (#65):
+    # each must use, rotate and clear only its own cookie, never the default one.
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
+    monkeypatch.setenv("AUTH_REFRESH_GRACE_SECONDS", "0")
+    monkeypatch.setenv("AUTH_REFRESH_COOKIE_NAME", "capitalos_refresh_capitalos-test")
+
+    _insert_user_with_password(db_engine, user_id=903, username="instance_user", password="InstancePass1!")
+    login = client.post("/auth/login", json={"username": "instance_user", "password": "InstancePass1!"})
+    assert login.status_code == 200
+    set_cookie = login.headers.get("set-cookie", "")
+    instance_cookie = _cookie_value(set_cookie, "capitalos_refresh_capitalos-test")
+    assert "capitalos_refresh=" not in set_cookie
+    client.cookies.clear()
+
+    # Only the real app's cookie (another instance's token): not ours, and not cleared.
+    foreign = client.post("/auth/refresh", cookies={"capitalos_refresh": "token-from-another-instance"})
+    assert foreign.status_code == 401
+    assert "capitalos_refresh=" not in foreign.headers.get("set-cookie", "")
+
+    refreshed = client.post("/auth/refresh", cookies={"capitalos_refresh_capitalos-test": instance_cookie})
+    assert refreshed.status_code == 200
+    assert _cookie_value(refreshed.headers.get("set-cookie", ""), "capitalos_refresh_capitalos-test")
