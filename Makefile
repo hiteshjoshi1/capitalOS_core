@@ -186,7 +186,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore db-create-mcp-role
+.PHONY: db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
 
 # Read-only role for the capitalos-postgres MCP server. Uses MCP_DB_PASSWORD from
 # .env, generating one there on first run (.env is git-ignored). Idempotent.
@@ -201,15 +201,31 @@ db-create-mcp-role: db-wait
 		psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/db-create-mcp-role.sql && \
 	echo "Role capitalos_mcp_ro is ready (read-only, no access to user_credentials/auth_sessions)."
 
+# Verified backups (#41): dump + exact snapshot counts, then a restore into a scratch DB
+# that must reproduce every table's row count. See scripts/db-backup.sh.
+DB_BACKUP=DB_CONTAINER=$(DB_CONTAINER) DB_USER=$(DB_USER) DB_NAME=$(DB_NAME) scripts/db-backup.sh
 db-backup: db-wait
-	@mkdir -p backups
-	@# Streamed over stdout: the container's /tmp is a tmpfs, which `docker cp` can't read.
-	@ts=$$(date +%Y%m%d_%H%M%S); out=backups/capitalos_$${ts}.dump; \
-	if docker exec $(DB_CONTAINER) pg_dump -U $(DB_USER) -d $(DB_NAME) -F c > "$$out.part"; then \
-		mv "$$out.part" "$$out" && echo "Backup written to $$out"; \
-	else \
-		rm -f "$$out.part"; echo "Backup FAILED" >&2; exit 1; \
-	fi
+	@$(DB_BACKUP) create
+
+db-backup-verify: db-wait
+	@test -n "$(BACKUP)" || (echo "Usage: make db-backup-verify BACKUP=backups/capitalos_<timestamp>.dump" && exit 2)
+	@$(DB_BACKUP) verify "$(BACKUP)"
+
+backup-prune:
+	@$(DB_BACKUP) prune $(or $(KEEP),14)
+
+backup-status:
+	@$(DB_BACKUP) status
+	@scripts/backup-schedule.sh status
+
+backup-schedule:
+	@scripts/backup-schedule.sh install
+
+backup-unschedule:
+	@scripts/backup-schedule.sh uninstall
+
+backup-now:
+	@scripts/backup-schedule.sh run
 
 db-restore:
 	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump" && exit 2)
@@ -222,9 +238,16 @@ db-restore:
 db-shell:
 	docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)
 
+# Bounded wait, so a scheduled backup fails (and logs why) instead of hanging forever
+# when Docker or the database is down.
+DB_WAIT_SECONDS?=120
 db-wait:
 	@echo "Waiting for Postgres to be ready..."
-	@until docker exec $(DB_CONTAINER) pg_isready -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 ; do \
+	@n=0; until docker exec $(DB_CONTAINER) pg_isready -U $(DB_USER) -d $(DB_NAME) > /dev/null 2>&1 ; do \
+		n=$$((n + 1)); \
+		if [ $$n -ge $(DB_WAIT_SECONDS) ]; then \
+			echo "Postgres ($(DB_CONTAINER)) not ready after $(DB_WAIT_SECONDS)s: is Docker running and the stack up (make up)?" >&2; exit 1; \
+		fi; \
 		sleep 1; \
 	done
 	@echo "Postgres is ready."
