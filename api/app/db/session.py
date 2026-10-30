@@ -11,9 +11,22 @@ import logging
 
 logger = logging.getLogger("capitalos.db")
 
+_BARE_POSTGRES_URL = re.compile(r"^postgres(?:ql)?://")
+
+
+def with_psycopg2_driver(url: str) -> str:
+    """Name the installed driver for a bare postgresql:// URL.
+
+    SQLAlchemy 2.1 maps a bare postgresql:// URL to psycopg 3, but the image installs
+    psycopg2 (#49), and existing .env / compose files use the bare form.
+    """
+    return _BARE_POSTGRES_URL.sub("postgresql+psycopg2://", url, count=1)
+
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL not set")
+DATABASE_URL = with_psycopg2_driver(DATABASE_URL)
 
 connect_args = {}
 if DATABASE_URL.startswith("sqlite"):

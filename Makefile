@@ -194,7 +194,7 @@ ifeq ($(CHECKOUT),worktree)
 # A worktree's web app talks only to the worktree's own API, through the Vite proxy, on
 # its own port (no web/.env.local needed).
 web-up: web-deps
-	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) VITE_INSTANCE_LABEL="$(or $(INSTANCE_LABEL),DEV $(CURRENT_BRANCH))" npm run dev -- --port $(ISO_WEB_PORT) --strictPort
+	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) VITE_INSTANCE_LABEL="$(or $(INSTANCE_LABEL),DEV $(CURRENT_BRANCH))" VITE_INSTANCE_REPO_URL="$(INSTANCE_REPO_URL)" npm run dev -- --port $(ISO_WEB_PORT) --strictPort
 else
 web-up: web-deps
 	cd $(WEB_DIR) && npm run dev
@@ -714,6 +714,12 @@ sbom:
 sbom-find:
 	@test -n "$(PKG)" || (echo "Usage: make sbom-find PKG=<package-name>" && exit 2)
 	@python3 -c 'import json,glob,sys; pkg=sys.argv[1].lower(); hits=[(f[5:-9], c.get("name"), c.get("version","")) for f in sorted(glob.glob("sbom/*.cdx.json")) for c in json.load(open(f)).get("components",[]) if pkg in (c.get("name") or "").lower()]; [print(f"{i:55} {n} {v}") for i,n,v in hits] or print("no image contains", sys.argv[1])' "$(PKG)"
+
+# Does a newer release of a pinned image clear its HIGH/CRITICAL findings? (#90, D-18). Such a
+# release goes in at once, without the 14-day wait; CI runs this weekly and opens an issue.
+.PHONY: image-fixes
+image-fixes:
+	scripts/image-fixes.py --trivy "$$(scripts/tool-image.sh trivy)" $(PINNED_IMAGES)
 
 # Provenance/signature check for one ref (e.g. the new ref in a Dependabot PR) or all pinned images.
 verify-image:

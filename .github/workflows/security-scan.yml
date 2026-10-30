@@ -126,6 +126,40 @@ jobs:
           # Digest-free, so a Dependabot digest bump updates the same analysis.
           category: trivy-${{ matrix.image.name }}
 
+  # Weekly/on-demand: does a newer release of a pinned image clear HIGH/CRITICAL findings?
+  # If so it goes in without the 14-day wait (D-18), so open (or update) an issue for it.
+  image-fixes:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check pinned images for releases that fix findings
+        id: check
+        run: |
+          set +e
+          make -s image-fixes > report.md
+          code=$?
+          set -e
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          cat report.md
+          [ "$code" -eq 0 ] || [ "$code" -eq 3 ] || exit "$code"
+          echo "fixes=$([ "$code" -eq 3 ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the issue
+        if: steps.check.outputs.fixes == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Security: newer image releases fix HIGH/CRITICAL findings"
+          n=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then gh issue comment "$n" --body-file report.md; else gh issue create --title "$title" --body-file report.md; fi
+
   # Weekly/on-demand only (not on PRs, to stay well under registry rate limits):
   # CycloneDX SBOMs for every image as a 90-day artifact, plus provenance and
   # signature checks for every pinned image (scripts/verify-image.sh).
