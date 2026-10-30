@@ -2,9 +2,12 @@
 """Release-age check for a pip lock file (#81, D-1).
 
 Fails when a package that only arrives transitively was uploaded less than --days ago.
-Direct pins (the `.in` files) are exempt: they are reviewed one by one, and a young one
-can be a deliberate security fix. Hold a young transitive package back by pinning an
-older version in the `.in` file, then `make api-lock` again.
+Direct pins (the `.in` files, above their "# Held back" section) are exempt: they are
+reviewed one by one, and a young one can be a deliberate security fix. Hold a young
+transitive package back by pinning an older version under "# Held back" in the `.in` file,
+then `make api-lock` again. Held-back pins are still checked (#94): a bump of one (e.g. by
+Dependabot) is a transitive package getting younger. The only way past it is a
+"D-1 exception" note on the pin's line or the comment line right above it.
 
     scripts/check-lock-age.py api/requirements.txt api/requirements.in [more .in files]
 
@@ -37,6 +40,31 @@ def pins(path: str) -> dict[str, str]:
     return found
 
 
+HELD_BACK = re.compile(r"^#\s*Held back\b", re.IGNORECASE)
+EXCEPTION = "D-1 exception"
+
+
+def exempt(path: str) -> set[str]:
+    """Names in an .in file that the age check skips: direct pins, and held-back pins
+    marked as a D-1 exception."""
+    names: set[str] = set()
+    held = False
+    comment = ""
+    with open(path) as fh:
+        for raw in fh:
+            line = raw.strip()
+            if HELD_BACK.match(line):
+                held = True
+            if line.startswith("#"):
+                comment = line
+                continue
+            match = PIN.match(line)
+            if match and (not held or EXCEPTION in line or EXCEPTION in comment):
+                names.add(normalize(match.group(1)))
+            comment = ""
+    return names
+
+
 def uploaded(name: str, version: str) -> datetime:
     with urllib.request.urlopen(f"https://pypi.org/pypi/{name}/{version}/json", timeout=30) as resp:
         files = json.load(resp)["urls"]
@@ -46,13 +74,13 @@ def uploaded(name: str, version: str) -> datetime:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("lock")
-    parser.add_argument("direct", nargs="+", help=".in files whose pins are exempt")
+    parser.add_argument("direct", nargs="+", help=".in files whose direct pins are exempt")
     parser.add_argument("--days", type=int, default=14)
     args = parser.parse_args()
 
     direct: set[str] = set()
     for path in args.direct:
-        direct |= set(pins(path))
+        direct |= exempt(path)
     cutoff = datetime.now(tz=timezone.utc) - timedelta(days=args.days)
 
     young = []
