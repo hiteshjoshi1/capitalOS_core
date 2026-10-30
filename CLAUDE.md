@@ -75,7 +75,8 @@ From the main checkout:
 - Python dependency change: edit `api/requirements*.in` / `orchestration/requirements.in` (direct pins),
   then `make api-lock` / `make orch-lock` regenerates the hashed lock `requirements*.txt` the image and venv
   install with `--require-hashes` (#81). A transitive package under 14 days old fails the lock (and CI):
-  hold it back with an older pin in the `.in` file.
+  hold it back with an older pin under `# Held back` in the `.in` file. Held-back pins are still age-checked
+  (#94); a deliberate security exception needs a `D-1 exception` note on or right above the pin.
 - Dependency or image change: `make security-scan` (Trivy; fails on fixable HIGH/CRITICAL in the
   runtime API image, reports compose images). CI twin: `.github/workflows/security-scan.yml`.
 - `/verify` and `/run` skills exist under `.claude/skills/` — prefer them over rediscovering this by hand.
