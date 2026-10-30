@@ -104,6 +104,9 @@ From the main checkout:
   response shapes (see `AGENTS.md` § API Contract Rules).
 
 ## Image supply chain (maintenance)
+- Fast security fixes (D-18): `make image-fixes` reports, per pinned image, whether the newest release in its
+  major line clears fixable HIGH/CRITICAL findings (CI runs it weekly and opens an issue). Such a release goes in
+  at once, without the 14-day wait: `make verify-image`, bump the pin, test instance.
 - Before merging a Dependabot image bump: `make verify-image IMAGE=<new ref>` (signature or
   provenance per `scripts/verify-image.sh`; a repo without a policy fails on purpose).
 - CVE triage: `make sbom` then `make sbom-find PKG=<name>` shows which images ship a package.
