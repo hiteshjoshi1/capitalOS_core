@@ -194,7 +194,7 @@ ifeq ($(CHECKOUT),worktree)
 # A worktree's web app talks only to the worktree's own API, through the Vite proxy, on
 # its own port (no web/.env.local needed).
 web-up: web-deps
-	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) VITE_INSTANCE_LABEL="$(or $(INSTANCE_LABEL),DEV $(CURRENT_BRANCH))" npm run dev -- --port $(ISO_WEB_PORT) --strictPort
+	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) VITE_INSTANCE_LABEL="$(or $(INSTANCE_LABEL),DEV $(CURRENT_BRANCH))" VITE_INSTANCE_REPO_URL="$(INSTANCE_REPO_URL)" npm run dev -- --port $(ISO_WEB_PORT) --strictPort
 else
 web-up: web-deps
 	cd $(WEB_DIR) && npm run dev

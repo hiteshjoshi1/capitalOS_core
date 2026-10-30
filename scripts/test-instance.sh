@@ -102,9 +102,11 @@ serve() {
 
   say "Web"
   stop_web
-  local label
+  local label repo_url
   label="TEST $(git -C "$TW" branch --show-current) · PRs$(for p in $(state_get merged); do printf ' #%s' "$p"; done)"
-  (cd "$TW" && nohup make -s web-up INSTANCE_LABEL="$label" >"$TW/.test-instance-web.log" 2>&1 & echo $! >"$TW/.test-instance-web.pid")
+  # The banner links each #N to its PR (#101).
+  repo_url=$(cd "$TW" && gh repo view --json url --jq .url 2>/dev/null || true)
+  (cd "$TW" && nohup make -s web-up INSTANCE_LABEL="$label" INSTANCE_REPO_URL="$repo_url" >"$TW/.test-instance-web.log" 2>&1 & echo $! >"$TW/.test-instance-web.pid")
   for _ in $(seq 1 90); do curl -sf -o /dev/null "http://127.0.0.1:$ISO_WEB_PORT/" && break; sleep 2; done
   curl -sf "http://127.0.0.1:$ISO_WEB_PORT/api/health" >/dev/null || die "the web app didn't come up (see $TW/.test-instance-web.log)"
   state_set served "$(date '+%F %T')"
