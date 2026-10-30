@@ -21,6 +21,10 @@ updates:
       # TypeScript 7 (the native port) isn't supported by typescript-eslint yet (D-16).
       - dependency-name: typescript
         update-types: ["version-update:semver-major"]
+      # @solana/web3.js 2+ is a rewrite on @solana/kit; every @solana/wallet-adapter-* release
+      # (the wallet connection the Crypto Wallets page uses) requires ^1.99 (#95).
+      - dependency-name: "@solana/web3.js"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: pip
     directory: /api
