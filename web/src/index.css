@@ -45,3 +45,8 @@ html[data-theme="light"] {
 .instanceBanner-test {
   background: #b91c1c;
 }
+.instanceBanner a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
