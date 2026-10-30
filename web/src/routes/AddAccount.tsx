@@ -83,7 +83,11 @@ export default function AddAccount() {
   const platformTypes = platformOptions?.platform_types ?? [];
   const platformCountries = platformOptions?.countries ?? [];
 
-  useEffect(() => {
+  // A newly selected platform (or a refreshed platforms list) prefills the country from the platform.
+  // Adjusted while rendering when `selectedPlatform` changes, rather than in an effect.
+  const [prevSelectedPlatform, setPrevSelectedPlatform] = useState(selectedPlatform);
+  if (selectedPlatform !== prevSelectedPlatform) {
+    setPrevSelectedPlatform(selectedPlatform);
     if (selectedPlatform) {
       setForm((prev) => ({
         ...prev,
@@ -91,7 +95,7 @@ export default function AddAccount() {
       }));
       setCountrySearch(selectedPlatform.country ?? "");
     }
-  }, [selectedPlatform]);
+  }
 
   const canSubmit =
     form.name.trim().length > 0 &&

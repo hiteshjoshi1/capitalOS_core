@@ -30,6 +30,10 @@ const EVM_CHAINS = [
   { id: 534352, name: "Scroll" },
 ] as const;
 
+function isLedgerWallet(wallet: { adapter?: { name?: string } } | null | undefined): boolean {
+  return (wallet?.adapter?.name?.toLowerCase() ?? "").includes("ledger");
+}
+
 type Eip1193Provider = {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
   on: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -45,12 +49,22 @@ export default function CryptoWallets() {
   const [status, setStatus] = useState<string>("");
   const [label, setLabel] = useState<string>("");
   const [chainType, setChainType] = useState<"evm" | "solana">("evm");
-  const [useHardwareSolana, setUseHardwareSolana] = useState<boolean>(false);
   const [evmAddress, setEvmAddress] = useState<string>("");
   const [evmChainId, setEvmChainId] = useState<number>(1);
   const [connectingEvm, setConnectingEvm] = useState<boolean>(false);
 
   const { publicKey, connected, signMessage, signTransaction, disconnect: disconnectSolana, wallet } = useWallet();
+
+  // Selecting a Ledger adapter ticks the hardware-wallet box; the user can still untick it. Adjusted while
+  // rendering when `wallet` changes (not in an effect), so the box is already right on the first paint.
+  const [useHardwareSolana, setUseHardwareSolana] = useState<boolean>(() => isLedgerWallet(wallet));
+  const [prevWallet, setPrevWallet] = useState(wallet);
+  if (wallet !== prevWallet) {
+    setPrevWallet(wallet);
+    if (isLedgerWallet(wallet)) {
+      setUseHardwareSolana(true);
+    }
+  }
 
   const [isMobile, setIsMobile] = useState<boolean>(() => window.innerWidth <= MOBILE_BREAKPOINT_PX);
 
@@ -75,22 +89,25 @@ export default function CryptoWallets() {
     setWallets(data);
   };
 
-  const loadAllowlist = async () => {
-    const data = await api.cryptoAllowlist();
-    setAllowlist(data);
-  };
-
   useEffect(() => {
-    loadWallets().catch((e) => setError(e?.message ?? String(e)));
-    loadAllowlist().catch((e) => setError(e?.message ?? String(e)));
+    // State is only set in the promise callbacks; `cancelled` drops responses that land after unmount.
+    let cancelled = false;
+    (async () => {
+      const data = await api.cryptoWallets();
+      if (!cancelled) setWallets(data);
+    })().catch((e) => {
+      if (!cancelled) setError(e?.message ?? String(e));
+    });
+    (async () => {
+      const data = await api.cryptoAllowlist();
+      if (!cancelled) setAllowlist(data);
+    })().catch((e) => {
+      if (!cancelled) setError(e?.message ?? String(e));
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
-
-  useEffect(() => {
-    const name = wallet?.adapter?.name?.toLowerCase() ?? "";
-    if (name.includes("ledger")) {
-      setUseHardwareSolana(true);
-    }
-  }, [wallet]);
 
   useEffect(() => {
     const provider = getEthereum();

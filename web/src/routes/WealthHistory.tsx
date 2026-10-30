@@ -8,7 +8,7 @@ import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
 import { computeMonthFlags, isGapPoint } from "../lib/wealthHistoryAnalysis";
 import "../App.css";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
+type LoadState = "loading" | "ready" | "error";
 
 const RANGE_OPTIONS: { label: string; months: number }[] = [
   { label: "6M", months: 6 },
@@ -45,72 +45,91 @@ export default function WealthHistory() {
   const [mode, setMode] = useState<WealthHistoryChartMode>("total");
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
 
-  const [timelineState, setTimelineState] = useState<LoadState>("idle");
+  // Everything starts loading: the fetch effects below only set state once a response arrives.
+  const [timelineState, setTimelineState] = useState<LoadState>("loading");
   const [timelineErr, setTimelineErr] = useState("");
   const [timeline, setTimeline] = useState<WealthTimeline | null>(null);
+  const [timelineReload, setTimelineReload] = useState(0);
   const [backfilling, setBackfilling] = useState(false);
 
-  const [dividendsState, setDividendsState] = useState<LoadState>("idle");
+  const [dividendsState, setDividendsState] = useState<LoadState>("loading");
   const [dividendBuckets, setDividendBuckets] = useState<DividendSummaryBucket[]>([]);
 
-  const [cashFlowState, setCashFlowState] = useState<LoadState>("idle");
+  const [cashFlowState, setCashFlowState] = useState<LoadState>("loading");
   const [cashFlowTrend, setCashFlowTrend] = useState<CashFlowTrendPoint[]>([]);
 
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
-  const fetchTimeline = useCallback(async () => {
+  // Range/currency changes refetch everything (back to loading) and invalidate any drill-down selection
+  // from the previous data. Adjusted while rendering, not in an effect, so no stale frame is committed.
+  const [prevInputs, setPrevInputs] = useState({ range, baseCurrency });
+  if (prevInputs.range !== range || prevInputs.baseCurrency !== baseCurrency) {
+    setPrevInputs({ range, baseCurrency });
     setTimelineState("loading");
-    try {
-      const data = await api.netWorthTimeline(range, baseCurrency);
-      setTimeline(data);
-      setTimelineState("ready");
-    } catch (error: unknown) {
-      setTimelineErr(error instanceof Error ? error.message : String(error));
-      setTimelineState("error");
-    }
-  }, [range, baseCurrency]);
-
-  const fetchDividends = useCallback(async () => {
     setDividendsState("loading");
-    try {
-      const fromMonth = shiftMonth(currentMonth(), -(range - 1));
-      const data = await api.dividendsSummary(fromMonth, currentMonth(), "month", baseCurrency);
-      setDividendBuckets(data.buckets);
-      setDividendsState("ready");
-    } catch {
-      setDividendsState("error");
-    }
-  }, [range, baseCurrency]);
-
-  const fetchCashFlow = useCallback(async () => {
     setCashFlowState("loading");
-    try {
-      const data = await api.cashFlowDetail(currentMonth(), baseCurrency);
-      setCashFlowTrend(data.analytics.trend);
-      setCashFlowState("ready");
-    } catch {
-      setCashFlowState("error");
-    }
-  }, [baseCurrency]);
+    setSelectedMonth(null);
+  }
+
+  // `ignore` drops a response that a newer request (or unmount) has superseded.
+  useEffect(() => {
+    let ignore = false;
+    void (async () => {
+      try {
+        const data = await api.netWorthTimeline(range, baseCurrency);
+        if (ignore) return;
+        setTimeline(data);
+        setTimelineState("ready");
+      } catch (error: unknown) {
+        if (ignore) return;
+        setTimelineErr(error instanceof Error ? error.message : String(error));
+        setTimelineState("error");
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [range, baseCurrency, timelineReload]);
 
   useEffect(() => {
-    void fetchTimeline();
-  }, [fetchTimeline]);
-
-  useEffect(() => {
-    void fetchDividends();
-    void fetchCashFlow();
-  }, [fetchDividends, fetchCashFlow]);
+    let ignore = false;
+    void (async () => {
+      try {
+        const fromMonth = shiftMonth(currentMonth(), -(range - 1));
+        const data = await api.dividendsSummary(fromMonth, currentMonth(), "month", baseCurrency);
+        if (ignore) return;
+        setDividendBuckets(data.buckets);
+        setDividendsState("ready");
+      } catch {
+        if (!ignore) setDividendsState("error");
+      }
+    })();
+    void (async () => {
+      try {
+        const data = await api.cashFlowDetail(currentMonth(), baseCurrency);
+        if (ignore) return;
+        setCashFlowTrend(data.analytics.trend);
+        setCashFlowState("ready");
+      } catch {
+        if (!ignore) setCashFlowState("error");
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, [range, baseCurrency]);
 
   const handleGenerateHistory = useCallback(async () => {
     setBackfilling(true);
     try {
       await api.netWorthTimelineBackfill(range, baseCurrency);
-      await fetchTimeline();
+      // Refetch the timeline through the effect above.
+      setTimelineState("loading");
+      setTimelineReload((n) => n + 1);
     } finally {
       setBackfilling(false);
     }
-  }, [range, baseCurrency, fetchTimeline]);
+  }, [range, baseCurrency]);
 
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : baseCurrency;
   const formatMoney = useCallback(
@@ -142,11 +161,6 @@ export default function WealthHistory() {
     if (!selectedFlags?.comparedToMonth) return null;
     return timeline?.points.find((p) => p.month === selectedFlags.comparedToMonth) ?? null;
   }, [timeline, selectedFlags]);
-
-  // Range/currency changes invalidate any drill-down selection from the previous data.
-  useEffect(() => {
-    setSelectedMonth(null);
-  }, [range, baseCurrency]);
 
   const dividendMax = useMemo(
     () => Math.max(1, ...dividendBuckets.map((b) => b.net_received)),
@@ -214,7 +228,7 @@ export default function WealthHistory() {
         </div>
       </div>
 
-      {timelineState === "loading" || timelineState === "idle" ? <div className="card">Loading…</div> : null}
+      {timelineState === "loading" ? <div className="card">Loading…</div> : null}
       {timelineState === "error" ? (
         <div className="card error">
           <div className="cardTitle">API error</div>
