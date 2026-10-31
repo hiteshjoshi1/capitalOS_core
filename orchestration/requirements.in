@@ -19,8 +19,8 @@ langchain-core==1.6.10
 langchain-protocol==0.0.19
 langgraph-checkpoint==4.3.0
 langgraph-sdk==0.4.7
-langsmith==0.14.8
-ormsgpack==1.12.2
+langsmith==0.14.11
+ormsgpack==1.13.0
 uuid-utils==0.17.1
 websockets==16.1.1
 xxhash==4.0.1
