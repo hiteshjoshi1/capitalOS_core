@@ -16,7 +16,8 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/49
 - [x] Batch 3 (one combined PR): recharts removed (never imported; #24), argon2-cffi 25 (#16), the eth group (#14, #15, #69), mypy 2 (#17), @types/node 26 (#20), eslint-config-prettier 10 (#21), globals 17 (#22), jest-dom 7 (#68), @types/bs58 removed (5.0.0 is a deprecated stub; #26), Trivy 0.76.0 (#71), codeql-action 4.39.0 (#39); pytz pinned to 2026.5 (2026.6 is 0 days old).
 - [x] Batch 4: eslint 10 + @eslint/js 10 (#23; `preserve-caught-error` fixed in api.ts), Vite 8 + @vitejs/plugin-react 6 (#27), TypeScript 6.0.3 instead of 7 (#28, D-16). jsdom 30 (#25) waits for a Node ≥ 22.22.2 decision.
 - [ ] Batch 5: dev tooling majors (TypeScript 7, eslint 10 + config packages, mypy 2, jsdom 30, plugin-react 6, @types/node 26, @types/bs58 5) with #60.
-- [ ] Batch 5: SQLAlchemy 2.1.4 (#88; 22 days, own series per D-14; greenlet no longer needed), cosign 3.1.4 (#70) and Trivy 0.76.1 under D-18 (`make image-fixes`: clear 20 and 2 HIGH).
+- [x] Batch 5: SQLAlchemy 2.1.4 (#88; 22 days, own series per D-14; greenlet no longer needed), cosign 3.1.4 (#70) and Trivy 0.76.1 under D-18 (`make image-fixes`: clear 20 and 2 HIGH). Merged via #103, deployed b33139b.
+- [ ] Batch 6: platformdirs 4.13.3 (#105; the held-back pin, now 15 days old), langsmith 0.14.11 + ormsgpack 1.13.0 (#104). Locks regenerated with `make api-lock` / `make orch-lock` instead of Dependabot's (it wrote `uvicorn[standard]`/`coverage[toml]` into the `--strip-extras` locks).
 - [ ] MCP Toolbox: 1.15.0 (#35) clears nothing; wait for a fixed release (#89).
 
 ## How To Test
@@ -28,4 +29,6 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/49
 - Batch 1 shipped 2026-10-29 (#62).
 - Batch 2 shipped 2026-10-29 (#67).
 - Batch 3 shipped 2026-10-29 (#79).
-- Batch 4 in progress on `feature/issue-49-batch-4`.
+- Batch 4 shipped 2026-10-29 (#85).
+- Batch 5 shipped 2026-10-30 (#103).
+- Batch 6 on `feature/issue-49-batch-6` (2026-10-31): `make verify`, `make orch-test` (201 passed), `make security-scan` clean.
