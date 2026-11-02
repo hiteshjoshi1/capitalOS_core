@@ -23,7 +23,7 @@ certifi==2026.10.18 \
     --hash=sha256:73191c47aaa79da394e8fee2dbc2ec827432cab56311122c9e47abf79e390f62 \
     --hash=sha256:b9995d97b64d0431a5af837d8ca8cd6238104d1f319f04bd93ea43124d6c861e
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   httpcore
     #   httpx
     #   requests
@@ -201,7 +201,7 @@ charset-normalizer==3.5.2 \
     --hash=sha256:fd1fbe0f116b6e55da77aca2c6ddcddcfac2186cbf78bdebf40fc156efca389d \
     --hash=sha256:fe9753dfee015c570d73df76f899f18444d41388bffcde097deba51c4fadbb9f
     # via requests
-coverage==7.16.2 \
+coverage[toml]==7.16.2 \
     --hash=sha256:00d3eb96e9988c45f50cccd1f1496571ac5c1f91386ac02c4d55516eeda19a24 \
     --hash=sha256:01c6908bc613b420c26c818fe948e1b97dfd041a53c98b01c63bd8321f5c9aae \
     --hash=sha256:066429634299e14dd2d511e1e85f8f9cecc500781f6b41907c0dd6f1baea7e63 \
@@ -324,7 +324,7 @@ coverage==7.16.2 \
     --hash=sha256:fb9d92ecfe2d5b494367c67f7446f8b75b68d8d0c8cf3bc3e6997478be25d9e2 \
     --hash=sha256:fd3d72233eb8b48acc94fa57d44e2d32ce8e7abed02882ccb6d855ccc4ed33ec
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   pytest-cov
 distro==1.9.0 \
     --hash=sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed \
@@ -344,7 +344,7 @@ httpcore2==2.13.1 \
     --hash=sha256:e0aa977abe17e69a3b820a24542a6fa88702676d83880b8d194dcd18408e5103 \
     --hash=sha256:e1e05d4f25f7d7d496bfb96748f6f4b67657b03da069b3a68c36069f3db73d0a
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   httpx2
 httpx==0.28.1 \
     --hash=sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc \
@@ -356,7 +356,7 @@ httpx2==2.13.1 \
     --hash=sha256:6dff50fabc270ee5fd25d845d0b078ed20564579744d6d962850975996d2f9a4 \
     --hash=sha256:e48744a19e3af5ee48313d0ce5fe941d5422fae5705ea922a4aabf94d7800dfa
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langsmith
 idna==3.20 \
     --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
@@ -374,19 +374,19 @@ jsonpatch==1.35 \
     --hash=sha256:417e05303ebf7aef98d3ebf1e1ae7e7a4de6ec57bc5d243cd3509eff650e959f \
     --hash=sha256:679ad08672b4663c7ef1e5f3331d940f5e7786661b9acc1530104be1638e7a4f
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langchain-core
-jsonpointer==3.2.1 \
-    --hash=sha256:47c846513b3a4ec46eecef1105207fba075e2a3659048e362bd7daff0fc33342 \
-    --hash=sha256:b19ee68644e9ffb51440448d8f7811af2b7406eea1db90603e93f5849323119a
+jsonpointer==3.3 \
+    --hash=sha256:1e9b099b883a4617561960f754879a1af62b6d2e0f4e4a8029e8326e923e6723 \
+    --hash=sha256:2d851da328132043289a03df1dbb1577b901ad9cd22911f515d17875fbc1773a
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   jsonpatch
-langchain-core==1.6.10 \
-    --hash=sha256:14341bdd8b42d0dd9a53dbbcd8b0599ab47b0c718c7caa12e3eb5c50b32cffcb \
-    --hash=sha256:3ad7a64eab150c1fea9f8a748b1c076aa1a960c5cf7c28d81a841a2f2dbffad1
+langchain-core==1.6.12 \
+    --hash=sha256:39b07aed976baac14c47b7a21e3c7d4073362bccf06cf8799c585dcc9548547d \
+    --hash=sha256:dc6b2a965c351b4cc94df1c80220bcf3c5472e14437d2186c8290ea22f4d0219
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langgraph
     #   langgraph-checkpoint
     #   langgraph-prebuilt
@@ -395,40 +395,40 @@ langchain-protocol==0.0.19 \
     --hash=sha256:4cdf879a492a35980fd859ae792d3c65458ccaae504e183c9a10d7eac1f0720f \
     --hash=sha256:79d90a1425122ac87e8052e2ec054fbd09c3edbf341bdfb6397112a495c7bf8c
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langchain-core
     #   langgraph-sdk
 langgraph==1.2.17 \
     --hash=sha256:311516e313abd5424596d6c5250507c89be2e1973cbe813061696728803b0e10 \
     --hash=sha256:e022a9fea64631fed946557a23f3fa5ac2ff38c72dcb999f426fc77d55ccde60
-    # via -r orchestration/requirements.in
+    # via -r requirements.in
 langgraph-checkpoint==4.3.0 \
     --hash=sha256:bedfafe2f997ded60e4fa593e79f56f436a6e45586392dc382aa810d0c751c64 \
     --hash=sha256:c75965d84cc2c1d549163e910a15bcb577758001b141619d05297c463280b018
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langgraph
     #   langgraph-checkpoint-sqlite
     #   langgraph-prebuilt
 langgraph-checkpoint-sqlite==3.1.2 \
     --hash=sha256:249640b84efd4872585a9ce596a63c2593e543f748341791591aeaf4c878329c \
     --hash=sha256:4e3f376fa6f192d6ad2a1a4643b039986f1593552ef870e9e45281575de6fbf2
-    # via -r orchestration/requirements.in
+    # via -r requirements.in
 langgraph-prebuilt==1.1.1 \
     --hash=sha256:f1b1a4772e7f9f15ba736411aad3877183ad40cd9349748df76bd2b9f58a83c7 \
     --hash=sha256:fae17c22562e501940eb7aa052a15c58a431febbabf33f8ad172e1b44354a7e4
     # via langgraph
-langgraph-sdk==0.4.7 \
-    --hash=sha256:6827560be31e38daae1514234e9aa12c345dd40d4d4b94aa1b443729bfccda69 \
-    --hash=sha256:a005c7ac662c318a3405e436e9effaa90c05343f9f4ae9e11dca19c9369727dd
+langgraph-sdk==0.4.8 \
+    --hash=sha256:6dd0c55d0d9040686716581c9e302c21c31ad6e2eebda0defc944a8bb38ec011 \
+    --hash=sha256:bef8ac54bdfe3ac2f7eba5be2f322dde296701b39e1c1aa403302f08d273fab5
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langgraph
 langsmith==0.14.11 \
     --hash=sha256:9ecca7633df228ef2c44563f7187e426b8a79e7c5c2351c5dd8c9074c61512e7 \
     --hash=sha256:d9e7ffe587e12ce51573cab654d02e84feb924d3b1f582274c4b1412ebeabf4c
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langchain-core
 orjson==3.13.0 \
     --hash=sha256:0526a3456db67b264c6d661b5f090077f326b6cd074d0ef53a72763595dec5d7 \
@@ -544,7 +544,7 @@ ormsgpack==1.13.0 \
     --hash=sha256:fc8eff22184cbfef56f0a4a6ca4fedc38174b2447ecef517fc050d6340546345 \
     --hash=sha256:ffa23ab2fe9188f24c3f68428a2cb61b37c8b7f103af75a4700ad199339d6bfc
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langgraph-checkpoint
 packaging==26.3 \
     --hash=sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79 \
@@ -563,7 +563,7 @@ pydantic==2.14.1 \
     --hash=sha256:9195d967ec791692a04438115466764fb8b9a27b31f14a760437694f40d6b454 \
     --hash=sha256:94f478203dd03404682a1ada216965651dd74b1d2d5ffd62e00e0837caab5c26
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langchain-core
     #   langgraph
     #   langsmith
@@ -714,16 +714,16 @@ pytest==9.2.0 \
     --hash=sha256:07acdcf88ec174f907dc01af70bf52d49b014bbab03faeeade31c96b18c2e588 \
     --hash=sha256:97c4f3b1f3c7414aa36465e09b8220f1d03627993bd51b1282e193753c80557b
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   pytest-cov
 pytest-cov==7.1.0 \
     --hash=sha256:30674f2b5f6351aa09702a9c8c364f6a01c27aae0c1366ae8016160d1efc56b2 \
     --hash=sha256:a0461110b7865f9a271aa1b51e516c9a95de9d696734a2f71e3e78f46e1d4678
-    # via -r orchestration/requirements.in
+    # via -r requirements.in
 python-dotenv==1.2.4 \
     --hash=sha256:42269a8a5b3fd54ffa6f3d84b18abed50064717576b4ecf03dc4a55d8aa04fdc \
     --hash=sha256:f0d53e69935a851c0dcc78f3ab7aaccd8cabef0b92382b576b824212902873c0
-    # via -r orchestration/requirements.in
+    # via -r requirements.in
 pyyaml==6.0.3 \
     --hash=sha256:00c4bdeba853cc34e7dd471f16b4114f4162dc03e6b7afcc2128711f0eca823c \
     --hash=sha256:0150219816b6a1fa26fb4699fb7daa9caf09eb1999f3b70fb6e786805e80375a \
@@ -945,7 +945,7 @@ uuid-utils==0.17.1 \
     --hash=sha256:f9f9f6835ab3163818156022c627eda60c38c874b369642b249b483384021743 \
     --hash=sha256:fa1a1c9a72ef9757176c069f7bd8014b7f4abf5f9930ec62b883dc864ba28092
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langchain-core
     #   langsmith
 websockets==16.1.1 \
@@ -1059,7 +1059,7 @@ websockets==16.1.1 \
     --hash=sha256:fce6c48559c86d1ac3632ccb1bebc7d5442fbe79bd9bb0e40379ee54be2a4051 \
     --hash=sha256:fd46fff7eb62c24804d234f0051c7a8ea81285ad63e0337d3dcf33ca82aee58a
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langgraph-sdk
     #   langsmith
 xxhash==4.0.1 \
@@ -1278,7 +1278,7 @@ xxhash==4.0.1 \
     --hash=sha256:ff48915bf1871a1f19f74c11834c6329443d306cedc0c05fe7fe617810422a80 \
     --hash=sha256:ffa44b4c7c5d0ffa31356b4428659516c0e47647825c74079a296b3857b6d99d
     # via
-    #   -r orchestration/requirements.in
+    #   -r requirements.in
     #   langgraph
     #   langsmith
 zstandard==0.25.0 \
