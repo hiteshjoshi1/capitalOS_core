@@ -31,12 +31,12 @@ bitarray==3.12.2
 # Security fix, taken under 14 days (D-1 exception): GHSA-6q48-6c7w-9gw2, compromised emSign roots.
 certifi==2026.10.18
 curl-cffi==0.16.3
-platformdirs==4.13.3
+platformdirs==4.13.5
 pycparser==3.11
 python-dateutil==2.9.0.post0
 pytz==2026.5
 soupsieve==3.0.3
-starlette==1.8.0
+starlette==1.9.0
 tzdata==2026.5
 tzlocal==5.4.4
 websockets==17.2
