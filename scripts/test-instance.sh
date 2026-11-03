@@ -6,7 +6,8 @@
 #                                       worktree); a conflict stops, named, for a person.
 #                                       Then `make verify`, then the stack restored from the
 #                                       newest VERIFIED backup (counts checked), the batch's
-#                                       migrations applied to that copy, and the app served
+#                                       migrations applied to that copy, the demo login enabled
+#                                       on it, and the app served
 #                                       with a TEST banner on its own ports.
 #   test-instance.sh start              after a conflict is resolved by hand in the worktree
 #                                       (and committed): the remaining PRs, then the rest of `up`.
@@ -105,6 +106,11 @@ serve() {
 
   say "The batch's migrations, on the copy"
   tmake db-migrate DB_CONTAINER="$ISO_NAME-postgres"
+  # The demo login is off on the real data (#152); turn it on in this copy only, for checks
+  # on the demo data (demo / Test@1234). Older batches without the target skip it.
+  if grep -q '^demo-enable:' "$TW/Makefile"; then
+    tmake demo-enable DB_CONTAINER="$ISO_NAME-postgres"
+  fi
 
   say "API"
   compose up -d --build api

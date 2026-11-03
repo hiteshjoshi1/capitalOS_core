@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.auth_context import CurrentUser, require_current_user
+from app.auth_context import CurrentUser, require_admin, require_current_user
 from app.db.session import get_db
 from app.models.currency import Currency
 from app.schemas.currency import CurrencyCreate, CurrencyOut
@@ -21,7 +21,7 @@ def list_currencies(
 def create_currency(
     payload: CurrencyCreate,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(require_current_user),
+    _: CurrentUser = Depends(require_admin),
 ):
     code = payload.code.strip().upper()
     name = payload.name.strip() if payload.name else None

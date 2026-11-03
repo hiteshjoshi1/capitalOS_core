@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_current_user
+from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_admin, require_current_user
 from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
 from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
@@ -993,7 +993,11 @@ def crypto_allowlist(db: Session = Depends(get_db)):
 
 
 @router.post("/allowlist")
-def crypto_allowlist_add(payload: AllowlistIn, db: Session = Depends(get_db)):
+def crypto_allowlist_add(
+    payload: AllowlistIn,
+    db: Session = Depends(get_db),
+    _: CurrentUser = Depends(require_admin),
+):
     chain = payload.chain.lower()
     contract = payload.contract_address.lower()
     if chain == "solana":

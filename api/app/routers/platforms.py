@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from app.auth_context import CurrentUser, require_current_user
+from app.auth_context import CurrentUser, require_admin, require_current_user
 from app.db.session import get_db
 from app.models.platform import Platform, PlatformType
 from app.schemas.platform import PlatformCreate, PlatformOut
@@ -39,7 +39,7 @@ def platform_options(
 def create_platform(
     payload: PlatformCreate,
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(require_current_user),
+    _: CurrentUser = Depends(require_admin),
 ):
     code = payload.code.strip().upper()
     name = payload.name.strip()

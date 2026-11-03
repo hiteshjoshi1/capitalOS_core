@@ -57,8 +57,8 @@ endif
 #   ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign ibkr-rebuild-snapshots db-create-mcp-role user-set-password \
-	observability-up observability-down observability-smoke
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots db-create-mcp-role \
+	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
 ifeq ($(COMPOSE_PROJECT),$(REAL_DATA_PROJECT))
@@ -83,6 +83,8 @@ endif
 CORE_SERVICES=postgres api
 DB_USER?=capitalos
 DB_NAME?=capitalos
+# The smoke targets sign in as demo: on a dev/test stack run `make demo-enable` first (#152),
+# elsewhere pass SMOKE_USER / SMOKE_PASSWORD.
 SMOKE_USER?=demo
 SMOKE_PASSWORD?=Test@1234
 
@@ -328,13 +330,43 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
 user-set-password:
 	@test -n "$(USERNAME)" || { echo "Usage: make user-set-password USERNAME=<name>" >&2; exit 2; }
 	$(COMPOSE) exec api python -m app.scripts.set_password "$(USERNAME)"
+
+# Accounts (#152). Signup is off by default (AUTH_ALLOW_SIGNUP), so the first account is made
+# here; ADMIN=1 makes it an admin. Admins may change shared data (platforms, currencies, token
+# allowlist, market-data refresh); everyone else gets a 403 there.
+user-create:
+	@test -n "$(USERNAME)" || { echo "Usage: make user-create USERNAME=<name> [ADMIN=1]" >&2; exit 2; }
+	$(COMPOSE) exec api python -m app.scripts.user_admin create "$(USERNAME)" $(if $(filter 1,$(ADMIN)),--admin,)
+
+user-grant-admin:
+	@test -n "$(USERNAME)" || { echo "Usage: make user-grant-admin USERNAME=<name>" >&2; exit 2; }
+	$(COMPOSE) exec -T api python -m app.scripts.user_admin grant-admin "$(USERNAME)"
+
+user-revoke-admin:
+	@test -n "$(USERNAME)" || { echo "Usage: make user-revoke-admin USERNAME=<name>" >&2; exit 2; }
+	$(COMPOSE) exec -T api python -m app.scripts.user_admin revoke-admin "$(USERNAME)"
+
+# The demo login (demo / Test@1234) is for dev and test stacks only (#152): migration 072
+# turns it off everywhere, this turns it back on. Refused on the real-data stack, whatever
+# DB_CONTAINER says.
+DEMO_REFUSED_CONTAINERS=capitalos-oss-postgres
+demo-enable: db-wait
+	@if [ "$(COMPOSE_PROJECT)" = "$(REAL_DATA_PROJECT)" ] || [ -n "$(filter $(DEMO_REFUSED_CONTAINERS),$(DB_CONTAINER))" ]; then \
+		echo "Refusing: the demo login (published password) is never enabled on the real-data stack ($(COMPOSE_PROJECT) / $(DB_CONTAINER))." >&2; exit 1; \
+	fi
+	@docker exec -i $(DB_CONTAINER) psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/demo-enable.sql > /dev/null
+	@echo "Demo login enabled on $(DB_CONTAINER): demo / Test@1234 (dev/test stacks only)."
+
+demo-disable: db-wait
+	@docker exec -i $(DB_CONTAINER) psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/demo-disable.sql > /dev/null
+	@echo "Demo login disabled on $(DB_CONTAINER)."
 
 # Read-only role for the capitalos-postgres MCP server. Uses MCP_DB_PASSWORD from
 # .env, generating one there on first run (.env is git-ignored). Idempotent.
@@ -459,7 +491,8 @@ db-clear-dummy: db-wait
 	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy_cleanup.sql
 	@echo "Dummy data removed."
 
-db-seed-demo: db-seed-dummy
+# Demo data plus the demo login (dev/test stacks; refused on the real-data stack).
+db-seed-demo: demo-enable db-seed-dummy
 
 db-clear-demo: db-clear-dummy
 

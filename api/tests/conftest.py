@@ -27,6 +27,7 @@ os.environ["INFERENCE_LLM_API_KEY"] = ""
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.base import Base  # noqa: E402
+from app.services.login_throttle import login_throttle  # noqa: E402
 from app.valuation_cache import clear_shared_cache  # noqa: E402
 from tests.fx_test_helpers import synthetic_frankfurter  # noqa: E402
 
@@ -971,6 +972,8 @@ def synthetic_fx_providers(monkeypatch):
 def clear_db():
     # Each test starts with an empty cross-request valuation cache (#147).
     clear_shared_cache()
+    # ... and no failed sign-ins counted against it (#152).
+    login_throttle.reset()
     with engine.begin() as conn:
         conn.exec_driver_sql("DELETE FROM fx_rates")
         for table_name in (

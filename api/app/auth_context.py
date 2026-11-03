@@ -104,3 +104,13 @@ def require_current_user(
         raise HTTPException(status_code=401, detail="Invalid authorization token")
 
     return resolve_current_user_from_access_token(db, token)
+
+
+ADMIN_ONLY_DETAIL = "Admin only: shared data (platforms, currencies, token allowlist, market refresh) needs an admin account (make user-grant-admin USERNAME=<name>)"
+
+
+def require_admin(current_user: CurrentUser = Depends(require_current_user)) -> CurrentUser:
+    """Shared-data writes (#152): data every user sees is changed only by an admin."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail=ADMIN_ONLY_DETAIL)
+    return current_user

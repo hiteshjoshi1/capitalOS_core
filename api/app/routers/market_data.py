@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.auth_context import CurrentUser, require_current_user
+from app.auth_context import CurrentUser, require_admin, require_current_user
 from app.core.logging import job_context
 from app.db.session import get_db
 from app.market_data.service import latest_status_by_exchange, list_runs, run_all_exchanges
@@ -19,6 +19,7 @@ logger = logging.getLogger("capitalos.market_data")
 
 
 def _validate_admin_key(x_admin_key: Optional[str]) -> None:
+    # On top of the admin account (#152): with a key configured, the header is needed too.
     configured = os.getenv("STOCK_ADMIN_KEY") or os.getenv("CRYPTO_ADMIN_KEY")
     if not configured:
         return
@@ -40,7 +41,7 @@ def market_data_runs(limit: int = Query(50, ge=1, le=500), db: Session = Depends
 def market_data_refresh_now(
     x_admin_key: Optional[str] = Header(None),
     db: Session = Depends(get_db),
-    current_user: CurrentUser = Depends(require_current_user),
+    current_user: CurrentUser = Depends(require_admin),
 ):
     _validate_admin_key(x_admin_key)
     started = time.perf_counter()
