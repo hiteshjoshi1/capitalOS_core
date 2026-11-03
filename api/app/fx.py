@@ -247,11 +247,31 @@ def _store_rows(rows: list[dict[str, Any]]) -> int:
         VALUES (:rate_date, :base, :quote, :rate, :source, :fetched_at)
         ON CONFLICT (rate_date, base, quote) DO UPDATE SET
           rate = excluded.rate, source = excluded.source, fetched_at = excluded.fetched_at
+        WHERE fx_rates.rate <> excluded.rate
+        RETURNING rate_date
         """
     )
+    changed: list[date] = []
     with engine.begin() as conn:
-        conn.execute(stmt, rows)
+        for row in rows:
+            hit = conn.execute(stmt, row).first()
+            if hit is not None:
+                changed.append(_as_rate_date(hit[0]))
+        if changed:
+            # A new or corrected rate for a past date changes stored History
+            # months from that date on (#138); today's rate marks nothing.
+            from app.wealth_rollup_dirty import mark_rollups_dirty
+
+            mark_rollups_dirty(conn, min(changed), reason="fx")  # type: ignore[arg-type]
     return len(rows)
+
+
+def _as_rate_date(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value)[:10])
 
 
 def _provider_once(name: str, start: date, end: date, fetch: Any) -> tuple[bool, list[dict[str, Any]]]:

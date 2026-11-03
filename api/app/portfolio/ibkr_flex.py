@@ -2221,7 +2221,13 @@ def run_ibkr_flex_import_from_xml(
         _mark_import_completed(db, import_run_id)
         # NAV, cash and positions were (re)written for these report dates: History
         # rows anchored on or after the earliest are recomputed (#138).
-        mark_rollups_dirty(db, min(_report_dates(statement)), account_id=legacy_account_id, reason="ibkr_flex")
+        _scopes = _fact_scopes(statement)
+        mark_rollups_dirty(
+            db,
+            min(_scopes.nav | _scopes.holdings | _scopes.metrics, default=statement.report_date_to),
+            account_id=legacy_account_id,
+            reason="ibkr_flex",
+        )
         _release_lock(db, broker_account_id, lock_owner)
         db.commit()
     except IbkrFlexImportError as exc:

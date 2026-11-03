@@ -417,3 +417,28 @@ def test_ibkr_flex_import_marks_from_the_new_authority_window(db_engine, tmp_pat
         assert dirty_state(db, 1)[0] == date(2026, 2, 20)
     finally:
         db.close()
+
+
+def test_new_or_corrected_past_fx_rate_marks_history_dirty_and_unchanged_rate_does_not(db_engine, monkeypatch):
+    """Batch integration of #138 and #139: storing a rate for a past date changes
+    History from that date on; re-storing the same rate (or today's) marks nothing."""
+    from app import fx
+
+    monkeypatch.setattr("app.wealth_rollup_dirty._utc_now", lambda: datetime(2026, 3, 10, tzinfo=timezone.utc))
+    row = {"rate_date": date(2026, 2, 1), "base": "EUR", "quote": "SGD", "rate": 1.45, "source": "frankfurter",
+           "fetched_at": datetime(2026, 3, 10, tzinfo=timezone.utc)}
+    with db_engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, display_name, is_active) VALUES (1, 'fx-user', 'FX', 1)"))
+    assert _dirty(db_engine) == (None, 0)
+
+    fx._store_rows([row])
+    assert _dirty(db_engine) == (date(2026, 2, 1), 1)
+
+    fx._store_rows([row])  # same rate again: nothing changed
+    assert _dirty(db_engine) == (date(2026, 2, 1), 1)
+
+    fx._store_rows([{**row, "rate": 1.46}])  # corrected rate
+    assert _dirty(db_engine) == (date(2026, 2, 1), 2)
+
+    fx._store_rows([{**row, "rate_date": date(2026, 3, 10)}])  # today: no stored month affected
+    assert _dirty(db_engine) == (date(2026, 2, 1), 2)
