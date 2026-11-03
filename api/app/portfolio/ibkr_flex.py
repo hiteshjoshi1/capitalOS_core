@@ -1943,45 +1943,77 @@ def _insert_cash_ledger_entries(
 ) -> None:
     is_postgres = bool(db.bind and db.bind.dialect.name == "postgresql")
     json_value = "CAST(:metadata_json AS JSONB)" if is_postgres else ":metadata_json"
-    # uq_portfolio_cash_ledger_activity rejects two lines with the same key, and one
-    # such pair would fail the whole import; lines without an IBKR transaction id
-    # (e.g. FX translation adjustments) can't be told apart anyway.
-    seen: set[tuple[Any, ...]] = set()
+    # Replace rules (#157):
+    # - A line with an IBKR transaction id is that transaction: every stored line
+    #   with the id is replaced by this report's lines with it, whatever their date,
+    #   amount or text (a re-issued line with edited text replaces, never doubles;
+    #   D-20 reads dividends from here). The same line listed twice in one report
+    #   is stored once (uq_portfolio_cash_ledger_activity_id).
+    # - Lines without an id can't be told apart from their values, so they are
+    #   counted: on a date the report covers, the stored lines with a key are
+    #   replaced by the report's lines with that key, as many as the report has
+    #   (two identical FX adjustments on one day are both kept).
+    replaced_ids: set[str] = set()
+    seen_id_lines: set[tuple[Any, ...]] = set()
+    replaced_idless_keys: set[tuple[Any, ...]] = set()
     for entry in entries:
-        key = (
-            entry.activity_date,
-            entry.currency,
-            entry.amount,
-            entry.activity_code or "",
-            entry.broker_activity_id or "",
-            entry.description or "",
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        db.execute(
-            text(
-                """
-                DELETE FROM portfolio_cash_ledger_entries
-                WHERE broker_account_id = :broker_account_id
-                  AND activity_date = :activity_date
-                  AND currency = :currency
-                  AND amount = :amount
-                  AND COALESCE(activity_code, '') = COALESCE(:activity_code, '')
-                  AND COALESCE(broker_activity_id, '') = COALESCE(:broker_activity_id, '')
-                  AND COALESCE(description, '') = COALESCE(:description, '')
-                """
-            ),
-            {
-                "broker_account_id": broker_account_id,
-                "activity_date": entry.activity_date,
-                "currency": entry.currency,
-                "amount": _db_decimal(entry.amount),
-                "activity_code": entry.activity_code,
-                "broker_activity_id": entry.broker_activity_id,
-                "description": entry.description,
-            },
-        )
+        activity_id = (entry.broker_activity_id or "").strip() or None
+        if activity_id is not None:
+            line = (
+                activity_id,
+                entry.activity_date,
+                entry.currency,
+                entry.amount,
+                entry.activity_code or "",
+                entry.description or "",
+            )
+            if line in seen_id_lines:
+                continue
+            seen_id_lines.add(line)
+            if activity_id not in replaced_ids:
+                replaced_ids.add(activity_id)
+                db.execute(
+                    text(
+                        """
+                        DELETE FROM portfolio_cash_ledger_entries
+                        WHERE broker_account_id = :broker_account_id
+                          AND broker_activity_id = :broker_activity_id
+                        """
+                    ),
+                    {"broker_account_id": broker_account_id, "broker_activity_id": activity_id},
+                )
+        else:
+            key = (
+                entry.activity_date,
+                entry.currency,
+                entry.amount,
+                entry.activity_code or "",
+                entry.description or "",
+            )
+            if key not in replaced_idless_keys:
+                replaced_idless_keys.add(key)
+                db.execute(
+                    text(
+                        """
+                        DELETE FROM portfolio_cash_ledger_entries
+                        WHERE broker_account_id = :broker_account_id
+                          AND activity_date = :activity_date
+                          AND currency = :currency
+                          AND amount = :amount
+                          AND COALESCE(activity_code, '') = COALESCE(:activity_code, '')
+                          AND COALESCE(broker_activity_id, '') = ''
+                          AND COALESCE(description, '') = COALESCE(:description, '')
+                        """
+                    ),
+                    {
+                        "broker_account_id": broker_account_id,
+                        "activity_date": entry.activity_date,
+                        "currency": entry.currency,
+                        "amount": _db_decimal(entry.amount),
+                        "activity_code": entry.activity_code,
+                        "description": entry.description,
+                    },
+                )
         db.execute(
             text(
                 f"""
@@ -2002,7 +2034,7 @@ def _insert_cash_ledger_entries(
                 "amount": _db_decimal(entry.amount),
                 "activity_code": entry.activity_code,
                 "description": entry.description,
-                "broker_activity_id": entry.broker_activity_id,
+                "broker_activity_id": activity_id,
                 "metadata_json": json.dumps({"security": entry.security} if entry.security else {}),
             },
         )
@@ -2044,8 +2076,22 @@ def _insert_trades(
     raw_document_id: int,
     trades: list[FlexTrade],
 ) -> None:
+    # A trade with an execution id is replaced by that id alone. Trades without one
+    # are counted (#157): the stored trades with the same values on that date are
+    # replaced once by all of this report's trades with them, so two identical
+    # fills both stay and a re-import doesn't double them.
+    replaced_idless_keys: set[tuple[Any, ...]] = set()
     for trade in trades:
         instrument_id = _optional_instrument_for_trade(db, trade)
+        idless_key = (
+            trade.trade_date,
+            instrument_id,
+            trade.currency,
+            trade.side,
+            trade.quantity,
+            trade.price,
+            trade.proceeds,
+        )
         if trade.broker_execution_id:
             db.execute(
                 text(
@@ -2057,12 +2103,14 @@ def _insert_trades(
                 ),
                 {"broker_account_id": broker_account_id, "broker_execution_id": trade.broker_execution_id},
             )
-        else:
+        elif idless_key not in replaced_idless_keys:
+            replaced_idless_keys.add(idless_key)
             db.execute(
                 text(
                     """
                     DELETE FROM portfolio_trades
                     WHERE broker_account_id = :broker_account_id
+                      AND COALESCE(broker_execution_id, '') = ''
                       AND trade_date = :trade_date
                       AND COALESCE(broker_instrument_id, 0) = COALESCE(:broker_instrument_id, 0)
                       AND COALESCE(currency, '') = COALESCE(:currency, '')
@@ -2109,7 +2157,9 @@ def _insert_trades(
                 "proceeds": _db_decimal(trade.proceeds),
                 "commission": _db_decimal(trade.commission),
                 "currency": trade.currency,
-                "broker_execution_id": trade.broker_execution_id,
+                # An empty ibExecID is no id: stored NULL so uq_portfolio_trades_execution
+                # doesn't treat two id-less fills as the same execution.
+                "broker_execution_id": trade.broker_execution_id or None,
             },
         )
 

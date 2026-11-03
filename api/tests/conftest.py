@@ -611,9 +611,14 @@ def setup_db():
               merchant_counterparty TEXT,
               platform_reference TEXT,
               notes TEXT,
-              source TEXT
+              source TEXT,
+              source_fingerprint TEXT
             )
             """
+        )
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_account_source_fingerprint "
+            "ON transactions(account_id, source_fingerprint) WHERE source_fingerprint IS NOT NULL"
         )
         conn.exec_driver_sql(
             """
@@ -791,7 +796,8 @@ def setup_db():
               merchant_counterparty TEXT,
               platform_reference TEXT,
               notes TEXT,
-              source TEXT
+              source TEXT,
+              source_fingerprint TEXT
             )
             """
         )
