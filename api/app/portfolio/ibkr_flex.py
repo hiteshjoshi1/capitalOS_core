@@ -1289,7 +1289,7 @@ def _ensure_broker_instrument_values(
 
 
 def _ensure_broker_instrument(db: Session, position: FlexPosition) -> int:
-    return _ensure_broker_instrument_values(
+    instrument_id = _ensure_broker_instrument_values(
         db,
         broker_instrument_id=position.broker_instrument_id,
         symbol=position.symbol,
@@ -1297,6 +1297,102 @@ def _ensure_broker_instrument(db: Session, position: FlexPosition) -> int:
         security_type=position.security_type,
         listing_exchange=position.listing_exchange,
         currency=position.currency,
+    )
+    _link_priced_asset(db, instrument_id, position)
+    return instrument_id
+
+
+# IBKR listing exchange -> (market_symbol_map exchange code, home country) (#124).
+_PRICE_JOB_EXCHANGES = {
+    "NYSE": ("US", "US"),
+    "NASDAQ": ("US", "US"),
+    "ARCA": ("US", "US"),
+    "NYSEARCA": ("US", "US"),
+    "AMEX": ("US", "US"),
+    "BATS": ("US", "US"),
+    "IEX": ("US", "US"),
+    "PINK": ("US", "US"),
+    "SEHK": ("HKEX", "HK"),
+    "SGX": ("SGX", "SG"),
+    "NSE": ("NSE", "IN"),
+}
+_PRICED_SECURITY_TYPES = {"STK": "STOCK", "ETF": "FUND", "FUND": "FUND"}
+
+
+def _asset_symbol_candidates(symbol: str, exchange_code: str) -> list[str]:
+    """IBKR spellings vs the app's: "BRK B" is "BRK-B"; HK "700" may be "0700"."""
+    base = symbol.strip().upper()
+    candidates = [base, base.replace(" ", "-"), base.replace(" ", ".")]
+    if exchange_code == "HKEX" and base.isdigit():
+        candidates += [base.zfill(4), base.lstrip("0") or base]
+    return list(dict.fromkeys(candidates))
+
+
+def _link_priced_asset(db: Session, instrument_id: int, position: FlexPosition) -> None:
+    """Every IBKR stock/ETF holding gets an `assets` row (linked from its broker
+    instrument) and a `market_symbol_map` entry, so the price job fetches its quote.
+    Before this only holdings that happened to have a seeded asset were priced (#124)."""
+    asset_class = _PRICED_SECURITY_TYPES.get(str(position.security_type or "").upper())
+    exchange = _PRICE_JOB_EXCHANGES.get(str(position.listing_exchange or "").upper())
+    if asset_class is None or exchange is None or not position.symbol or not position.currency:
+        return
+    exchange_code, home_country = exchange
+    currency = position.currency.upper()
+    linked = db.execute(
+        text("SELECT asset_id FROM broker_instruments WHERE id = :id"), {"id": instrument_id}
+    ).scalar()
+    asset_id = int(linked) if linked is not None else None
+    candidates = _asset_symbol_candidates(position.symbol, exchange_code)
+    if asset_id is None:
+        for candidate in candidates:
+            row = db.execute(
+                text("SELECT id FROM assets WHERE UPPER(symbol) = :symbol AND UPPER(quote_currency) = :currency LIMIT 1"),
+                {"symbol": candidate, "currency": currency},
+            ).fetchone()
+            if row:
+                asset_id = int(row[0])
+                break
+    if asset_id is None:
+        from app.portfolio.upload_canonical import _get_or_create_asset
+
+        asset_id = _get_or_create_asset(
+            db,
+            symbol=position.symbol.strip().upper().replace(" ", "-"),
+            currency=currency,
+            name=position.description,
+            asset_class=asset_class,
+            home_country=home_country,
+        )
+        if asset_id is None:
+            return
+    db.execute(
+        text("UPDATE broker_instruments SET asset_id = :asset_id WHERE id = :id AND asset_id IS NULL"),
+        {"asset_id": asset_id, "id": instrument_id},
+    )
+    has_map = db.execute(
+        text("SELECT 1 FROM market_symbol_map WHERE asset_id = :asset_id AND exchange_code = :exchange_code"),
+        {"asset_id": asset_id, "exchange_code": exchange_code},
+    ).fetchone()
+    if has_map:
+        return
+    asset_symbol = db.execute(text("SELECT symbol FROM assets WHERE id = :id"), {"id": asset_id}).scalar()
+    db.execute(
+        text(
+            """
+            INSERT INTO market_symbol_map
+              (asset_id, exchange_code, exchange_symbol, quote_currency, is_active, created_at, updated_at)
+            VALUES
+              (:asset_id, :exchange_code, :exchange_symbol, :quote_currency, TRUE, :now, :now)
+            ON CONFLICT DO NOTHING
+            """
+        ),
+        {
+            "asset_id": asset_id,
+            "exchange_code": exchange_code,
+            "exchange_symbol": str(asset_symbol or candidates[0]).upper(),
+            "quote_currency": currency,
+            "now": _now(),
+        },
     )
 
 
