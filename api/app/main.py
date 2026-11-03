@@ -27,6 +27,10 @@ from app.market_data.scheduler import start_scheduler as start_market_scheduler
 from app.market_data.scheduler import stop_scheduler as stop_market_scheduler
 from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
 from app.portfolio.scheduler import stop_scheduler as stop_portfolio_scheduler
+from app.auth_context import check_auth_bypass_config
+
+# Refuse to start with a login bypass that is not explicitly a test run (#153).
+check_auth_bypass_config()
 
 
 
@@ -34,6 +38,8 @@ from app.portfolio.scheduler import stop_scheduler as stop_portfolio_scheduler
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     configure_logging()
+    # Again after logging is configured, so the warning reaches the structured log.
+    check_auth_bypass_config()
     start_scheduler()
     start_market_scheduler()
     start_portfolio_scheduler()

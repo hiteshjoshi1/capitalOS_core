@@ -15,6 +15,8 @@ os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("IBKR_FLEX_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
+# The bypass is honoured only with this explicit test flag (#153).
+os.environ["AUTH_BYPASS_ALLOW"] = "test"
 os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
 os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "1"
 # Forced (not setdefault): a deployment's .env, which compose passes to the test
