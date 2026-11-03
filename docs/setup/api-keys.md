@@ -44,7 +44,14 @@ third-party site):
    - **Open Positions** — required whenever you hold anything
    - **Base Currency Exchange Rate** (conversion rates) — required if anything isn't already in your base currency
    - **Cash Report**, **Statement of Funds**, **Trades**, **Corporate Actions**
-3. Date period **Last 365 days** (or your preference), format **XML**, version 3.
+   - **Statement of Funds** is where CapitalOS reads dividends, payments in lieu and
+     withholding tax (`DIV`, `PIL`, `FRTAX`); Cash Transactions isn't needed.
+3. Date period **Last 30 Calendar Days**, format **XML**, version 3. Each daily import
+   re-reads the window, so days the app missed (laptop asleep or off) are filled in
+   on the next import without double counting. Avoid "Last Business Day" (a missed
+   day's cash events are lost) and "Last Month" (never covers the current month).
+   For a one-off backfill of older dividends, switch to **Last 365 Calendar Days**,
+   let one import run, then switch back.
 4. Save it → the **Query ID** shown in the list is `IBKR_FLEX_QUERY_ID`.
 5. **Settings** → **Flex Web Service** → generate a token → `IBKR_FLEX_TOKEN`.
    Tokens expire periodically; regenerate and update `.env` when that happens.

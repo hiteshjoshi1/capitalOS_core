@@ -170,7 +170,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build deploy deploy-plan deploy-status observability-running
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke logs-purge-secrets grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build deploy deploy-plan deploy-status observability-running
 
 build:
 	$(COMPOSE) build
@@ -275,6 +275,10 @@ observability-down:
 
 observability-logs:
 	$(OBSERVABILITY_COMPOSE) logs -f $(OBSERVABILITY_SERVICES)
+
+# Drop log lines that carried the IBKR Flex token from Loki and check the API log (#114).
+logs-purge-secrets:
+	OBSERVABILITY_COMPOSE="$(OBSERVABILITY_COMPOSE)" API_COMPOSE="$(COMPOSE)" ./scripts/logs-purge-secrets.sh
 
 observability-smoke:
 	API_COMPOSE="$(COMPOSE)" API_URL=http://127.0.0.1:$(API_PORT) ./scripts/observability-smoke.sh

@@ -466,47 +466,27 @@ def test_market_data_classifies_provider_stale_reasons(
 
 
 def test_market_data_scheduler_uses_grouped_refresh_windows(monkeypatch):
-    added_jobs = []
-
-    class DummyScheduler:
-        def __init__(self, timezone=None):
-            self.timezone = timezone
-
-        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
-            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
-
-        def start(self):
-            return None
-
-    monkeypatch.setattr(market_scheduler, "_scheduler", None)
-    monkeypatch.setattr(market_scheduler, "BackgroundScheduler", DummyScheduler)
     monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["US", "SGX", "HKEX", "NSE"])
-    monkeypatch.setattr(market_scheduler, "_latest_successful_run_finished_at", lambda: None)
-    monkeypatch.setenv("STOCK_PRICE_SCHEDULER_ENABLED", "1")
+    for name in ("STOCK_REFRESH_ASIA_CLOSE", "STOCK_REFRESH_US_CLOSE"):
+        monkeypatch.delenv(name, raising=False)
 
-    scheduler = market_scheduler.start_scheduler()
+    plan = market_scheduler._window_plan(["US", "SGX", "HKEX", "NSE"])
 
-    assert scheduler is not None
-    job_ids = {job["id"] for job in added_jobs}
-    assert "stock_refresh_startup_catchup" in job_ids
-    assert "stock_refresh_asia_close" in job_ids
-    assert "stock_refresh_us_close" in job_ids
-    catchup_job = next(job for job in added_jobs if job["id"] == "stock_refresh_startup_catchup")
-    assert catchup_job["kwargs"]["window_name"] == "startup_catchup"
-    assert catchup_job["kwargs"]["exchanges"] == ["US", "SGX", "HKEX", "NSE"]
-    asia_job = next(job for job in added_jobs if job["id"] == "stock_refresh_asia_close")
-    assert asia_job["kwargs"]["exchanges"] == ["SGX", "HKEX", "NSE"]
+    by_name = {name: (tz, hour, minute, exchanges) for name, tz, hour, minute, exchanges in plan}
+    assert by_name["asia_close"] == ("Asia/Singapore", 18, 45, ["SGX", "HKEX", "NSE"])
+    assert by_name["us_close"] == ("America/New_York", 17, 45, ["US"])
 
 
-def test_market_data_scheduler_skips_startup_catchup_when_prices_are_fresh(monkeypatch):
+def test_market_data_scheduler_registers_one_due_check(monkeypatch):
     added_jobs = []
+    created = {}
 
     class DummyScheduler:
-        def __init__(self, timezone=None):
-            self.timezone = timezone
+        def __init__(self, timezone=None, job_defaults=None):
+            created["job_defaults"] = job_defaults
 
-        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
-            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **extra):
+            added_jobs.append({"func": func, "id": id})
 
         def start(self):
             return None
@@ -514,19 +494,44 @@ def test_market_data_scheduler_skips_startup_catchup_when_prices_are_fresh(monke
     monkeypatch.setattr(market_scheduler, "_scheduler", None)
     monkeypatch.setattr(market_scheduler, "BackgroundScheduler", DummyScheduler)
     monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["US"])
-    monkeypatch.setattr(
-        market_scheduler,
-        "_latest_successful_run_finished_at",
-        lambda: datetime.now(tz=timezone.utc) - timedelta(hours=2),
-    )
     monkeypatch.setenv("STOCK_PRICE_SCHEDULER_ENABLED", "1")
 
-    scheduler = market_scheduler.start_scheduler()
+    assert market_scheduler.start_scheduler() is not None
+    assert created["job_defaults"]["misfire_grace_time"] is None
+    assert [job["id"] for job in added_jobs] == ["stock_refresh_due_check"]
 
-    assert scheduler is not None
-    job_ids = {job["id"] for job in added_jobs}
-    assert "stock_refresh_startup_catchup" not in job_ids
-    assert "stock_refresh_us_close" in job_ids
+
+def test_market_data_due_check_runs_only_windows_missed_since_their_close(monkeypatch):
+    from app.core import catchup
+
+    # 2026-11-03 08:00 SGT: the US close (17:45 New York, 2026-11-02) was slept
+    # through; the Asia close (18:45 SGT, 2026-11-02) ran on time.
+    now = datetime(2026, 11, 3, 0, 0, tzinfo=timezone.utc)
+    last = {
+        ("US",): datetime(2026, 10, 29, 12, 0, tzinfo=timezone.utc),
+        ("SGX", "HKEX"): datetime(2026, 11, 2, 10, 45, 30, tzinfo=timezone.utc),
+    }
+    ran = []
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is None else now.astimezone(tz)
+
+    monkeypatch.setattr(market_scheduler, "datetime", FrozenDatetime)
+    monkeypatch.setattr(market_scheduler, "_retry_gates", {})
+    monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["US", "SGX", "HKEX"])
+    monkeypatch.setattr(market_scheduler, "_latest_success_for_exchanges", lambda ex: last[tuple(ex)])
+    monkeypatch.setattr(market_scheduler, "_run_window", lambda name, ex: ran.append((name, ex)))
+    for name in ("STOCK_REFRESH_ASIA_CLOSE", "STOCK_REFRESH_US_CLOSE"):
+        monkeypatch.delenv(name, raising=False)
+
+    market_scheduler._run_due_windows()
+
+    assert ran == [("us_close", ["US"])]
+    # The run didn't move US's last success, so it counts as failed: wait to retry.
+    assert market_scheduler._retry_gates["us_close"].may_attempt(now + timedelta(minutes=5)) is False
+    assert isinstance(market_scheduler._retry_gates["us_close"], catchup.RetryGate)
 
 
 def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, monkeypatch):

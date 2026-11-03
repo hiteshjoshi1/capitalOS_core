@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import time
 import uuid
@@ -124,6 +125,9 @@ class FlexCashLedgerEntry:
     activity_code: str | None
     description: str | None
     broker_activity_id: str | None
+    # The security the cash line is about (dividend, withholding, trade), when any:
+    # conid, symbol, security_description, asset_category, listing_exchange.
+    security: dict[str, str] = field(default_factory=dict, compare=False, hash=False)
 
 
 @dataclass(frozen=True)
@@ -315,7 +319,13 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
     cash_rows = _iter(root, "CashReportCurrency")
     position_rows = _iter(root, "OpenPosition")
     fx_rows = _iter(root, "ConversionRate")
-    stmt_fund_rows = _iter(root, "StmtFunds")
+    # Real Flex XML nests <StatementOfFundsLine> rows in one <StmtFunds> section
+    # (#113: selecting "StmtFunds" itself matched only the empty container, so
+    # every cash line was dropped). Older fixtures used <StmtFunds ... amount=>.
+    stmt_fund_rows = [
+        *_iter(root, "StatementOfFundsLine"),
+        *[row for row in _iter(root, "StmtFunds") if _attr(row, "amount", "netCash") is not None],
+    ]
     trade_rows = _iter(root, "Trade")
     corporate_action_rows = _iter(root, "CorporateAction")
 
@@ -481,14 +491,29 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
         activity_date = _date(_attr(row, "date", "tradeDate", "reportDate"), to_date)
         if currency is None or amount is None or activity_date is None:
             continue
+        has_activity_text = _attr(row, "activityDescription") is not None
+        security = {
+            key: value
+            for key, value in (
+                ("conid", _attr(row, "conid")),
+                ("symbol", _attr(row, "symbol")),
+                # On a StatementOfFundsLine `description` is the security's name and
+                # `activityDescription` the cash event's own text.
+                ("security_description", _attr(row, "description") if has_activity_text else None),
+                ("asset_category", _attr(row, "assetCategory")),
+                ("listing_exchange", _attr(row, "listingExchange")),
+            )
+            if value
+        }
         cash_ledger_entries.append(
             FlexCashLedgerEntry(
                 activity_date=activity_date,
                 currency=currency,
                 amount=amount,
                 activity_code=_attr(row, "activityCode", "code"),
-                description=_attr(row, "description", "activityDescription"),
-                broker_activity_id=_attr(row, "transactionID", "transactionId", "id"),
+                description=_attr(row, "activityDescription", "description"),
+                broker_activity_id=_attr(row, "transactionID", "transactionId", "id") or None,
+                security=security,
             )
         )
 
@@ -564,8 +589,9 @@ class IbkrFlexClient:
         timeout_seconds: float = 30.0,
         user_agent: str | None = None,
     ) -> None:
-        if not token or not query_id:
-            raise IbkrFlexConfigError("IBKR Flex token and query id are required")
+        missing = [name for name, value in (("IBKR_FLEX_TOKEN", token), ("IBKR_FLEX_QUERY_ID", query_id)) if not value]
+        if missing:
+            raise IbkrFlexConfigError(f"IBKR Flex isn't set up: {' and '.join(missing)} missing in .env.")
         self._token = token
         self._query_id = query_id
         self._base_url = base_url.rstrip("/")
@@ -1492,7 +1518,24 @@ def _insert_cash_ledger_entries(
     raw_document_id: int,
     entries: list[FlexCashLedgerEntry],
 ) -> None:
+    is_postgres = bool(db.bind and db.bind.dialect.name == "postgresql")
+    json_value = "CAST(:metadata_json AS JSONB)" if is_postgres else ":metadata_json"
+    # uq_portfolio_cash_ledger_activity rejects two lines with the same key, and one
+    # such pair would fail the whole import; lines without an IBKR transaction id
+    # (e.g. FX translation adjustments) can't be told apart anyway.
+    seen: set[tuple[Any, ...]] = set()
     for entry in entries:
+        key = (
+            entry.activity_date,
+            entry.currency,
+            entry.amount,
+            entry.activity_code or "",
+            entry.broker_activity_id or "",
+            entry.description or "",
+        )
+        if key in seen:
+            continue
+        seen.add(key)
         db.execute(
             text(
                 """
@@ -1524,7 +1567,7 @@ def _insert_cash_ledger_entries(
                    activity_code, description, broker_activity_id, metadata_json)
                 VALUES
                   (:broker_account_id, :import_run_id, :raw_document_id, :activity_date, :currency, :amount,
-                   :activity_code, :description, :broker_activity_id, {_platform_json_default(db)})
+                   :activity_code, :description, :broker_activity_id, {json_value})
                 """
             ),
             {
@@ -1537,6 +1580,7 @@ def _insert_cash_ledger_entries(
                 "activity_code": entry.activity_code,
                 "description": entry.description,
                 "broker_activity_id": entry.broker_activity_id,
+                "metadata_json": json.dumps({"security": entry.security} if entry.security else {}),
             },
         )
 
@@ -1953,9 +1997,7 @@ def _authorized_flex_user_id(db: Session) -> int:
             raise IbkrFlexConfigError(f"IBKR_FLEX_USER_ID={raw!r} is not a valid integer.") from exc
 
     raise IbkrFlexConfigError(
-        "IBKR Flex is configured (IBKR_FLEX_TOKEN/IBKR_FLEX_QUERY_ID set) but neither "
-        "IBKR_FLEX_USERNAME nor IBKR_FLEX_USER_ID is set — refusing to guess which user "
-        "owns this IBKR account. Set one of them in .env."
+        "IBKR Flex isn't set up: IBKR_FLEX_USERNAME missing in .env (the user who owns the IBKR account)."
     )
 
 
@@ -1966,6 +2008,9 @@ def run_ibkr_flex_import_from_config(
     legacy_account_id: int,
     cutover_date: date | None = None,
 ) -> dict[str, Any]:
+    # Credentials first, so a missing token is reported as that (#121), not as a
+    # missing owner.
+    client = IbkrFlexClient.from_env()
     authorized_user_id = _authorized_flex_user_id(db)
     if current_user_id != authorized_user_id:
         raise IbkrFlexConfigError(
@@ -1977,7 +2022,7 @@ def run_ibkr_flex_import_from_config(
         _first_env_value("IBKR_FLEX_INITIAL_BACKOFF_SECONDS", "IBKR_FLEX_BACKOFF_SECONDS", default="2")
     )
     max_backoff_seconds = float(os.getenv("IBKR_FLEX_MAX_BACKOFF_SECONDS", "30"))
-    reference_code, xml_text = IbkrFlexClient.from_env().fetch_statement(
+    reference_code, xml_text = client.fetch_statement(
         max_attempts=max_attempts,
         initial_backoff_seconds=initial_backoff_seconds,
         max_backoff_seconds=max_backoff_seconds,

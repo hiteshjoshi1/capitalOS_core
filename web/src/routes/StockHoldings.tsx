@@ -302,15 +302,6 @@ export default function StockHoldings() {
       headerActions={
         <>
           <button
-            className="btn stockHoldingsRefreshBtn"
-            onClick={onRefresh}
-            disabled={refreshing || summary?.is_live === false}
-            title={summary?.is_live === false ? "Refresh only applies to the current month" : undefined}
-          >
-            <span className={`stockHoldingsRefreshDot${refreshing ? " stockHoldingsRefreshDotActive" : ""}`} aria-hidden="true" />
-            {refreshing ? "Refreshing..." : "Refresh quotes"}
-          </button>
-          <button
             className="btn stockHoldingsDownloadBtn"
             onClick={handleDownloadCsv}
             disabled={holdings.length === 0}
@@ -479,10 +470,19 @@ export default function StockHoldings() {
                 <p className="coEyebrow">POSITIONS</p>
                 <h2 className="coSectionTitle">Top Holdings</h2>
               </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: "13px" }}>
                   {visibleHoldings.length} of {holdings.length} positions
                 </span>
+                <button
+                  className="btn stockHoldingsRefreshBtn"
+                  onClick={onRefresh}
+                  disabled={refreshing || summary?.is_live === false}
+                  title={summary?.is_live === false ? "Refresh only applies to the current month" : undefined}
+                >
+                  <span className={`stockHoldingsRefreshDot${refreshing ? " stockHoldingsRefreshDotActive" : ""}`} aria-hidden="true" />
+                  {refreshing ? "Refreshing..." : "Refresh quotes"}
+                </button>
                 <details className="stockColumnMenu" ref={columnMenuRef}>
                   <summary className="btn stockColumnSummary">Columns</summary>
                   <div className="stockColumnPanel" aria-label="Visible stock columns">

@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.fx import get_rates
 from app.market_data.service import YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
+from app.portfolio.ledger_dividends import fetch_ledger_dividend_rows, ledger_covered_since
 from app.schemas.dividends import (
     DividendCompanyItemOut,
     DividendHistoryEventOut,
@@ -168,6 +169,7 @@ def _fetch_dividend_rows(
         f"""
         SELECT
           t.id,
+          t.account_id,
           t.ts,
           t.amount,
           t.currency,
@@ -209,7 +211,28 @@ def _fetch_dividend_rows(
         """
     )
     params["current_user_id"] = current_user_id
-    return [dict(r) for r in db.execute(q, params).mappings().all()]
+    transaction_rows = [dict(r) for r in db.execute(q, params).mappings().all()]
+
+    # IBKR Flex dividends live in the broker cash ledger (#113). For an account the
+    # ledger covers, its own lines replace `transactions` rows from that date on.
+    covered_since = ledger_covered_since(db, current_user_id)
+    rows = [row for row in transaction_rows if not _covered_by_ledger(row, covered_since)]
+    rows.extend(fetch_ledger_dividend_rows(db, start, end, current_user_id, asset_id=asset_id, symbol=symbol))
+    rows.sort(key=lambda row: (_row_ts(row["ts"]), str(row["id"])))
+    return rows
+
+
+def _row_ts(value: datetime | str) -> datetime:
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _covered_by_ledger(row: dict[str, Any], covered_since: dict[int, date]) -> bool:
+    account_id = row.get("account_id")
+    if account_id is None or int(account_id) not in covered_since:
+        return False
+    return _row_ts(row["ts"]).date() >= covered_since[int(account_id)]
 
 
 def _latest_asset_market_values(

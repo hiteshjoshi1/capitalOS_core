@@ -33,6 +33,16 @@ export ISO_GRAFANA_PORT=${TEST_GRAFANA_PORT:-3001} ISO_LOKI_PORT=${TEST_LOKI_POR
 DB_USER=capitalos DB_NAME=capitalos
 compose() { (cd "$TW" && COMPOSE_PROJECT_NAME="" COMPOSE_FILE="" docker compose -p "$ISO_NAME" -f docker-compose.yml -f docker-compose.isolated.yml "$@"); }
 tmake() { make -C "$TW" -s "$@"; }   # ISO_* are exported, so the worktree's make uses them
+# The main checkout's .env (API keys, IBKR Flex) so a batch's refreshes can be tested (#120).
+# Safe: compose() passes -p/-f explicitly (a COMPOSE_* line can't redirect it),
+# docker-compose.isolated.yml forces every scheduler off, and a DATABASE_URL in .env,
+# which could point the copy at the real database, is refused.
+link_env() {
+  [ -f "$REPO/.env" ] || { echo "No $REPO/.env: IBKR and market-data refreshes won't work on the test instance."; return 0; }
+  ! grep -qE '^[[:space:]]*(export[[:space:]]+)?DATABASE_URL=' "$REPO/.env" ||
+    die "$REPO/.env sets DATABASE_URL, which could point the test copy at the real database; remove it first"
+  [ -e "$TW/.env" ] || ln -s "$REPO/.env" "$TW/.env"
+}
 say() { printf '\n== %s\n' "$*"; }
 die() { printf 'test-instance: %s\n' "$*" >&2; exit 1; }
 state_get() { sed -n "s/^$1=//p" "$STATE" 2>/dev/null | tail -1; }
@@ -80,6 +90,7 @@ serve() {
   dump=$(newest_verified_backup)
   [ -n "$dump" ] || die "no verified backup in $BACKUP_DIR (make db-backup)"
   say "Data: a copy of $dump"
+  link_env
   compose down -v --remove-orphans >/dev/null 2>&1 || true
   compose up -d postgres
   for _ in $(seq 1 60); do docker exec "$ISO_NAME-postgres" pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" && break; sleep 1; done

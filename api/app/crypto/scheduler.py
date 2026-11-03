@@ -7,10 +7,10 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import text
 
+from app.core.catchup import JOB_DEFAULTS, RetryGate, check_interval_minutes, most_recent_due, run_is_due
 from app.core.logging import job_context
 from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
 from app.crypto.ingest import should_refresh
@@ -19,6 +19,7 @@ from app.db.session import get_db
 
 logger = logging.getLogger("capitalos.crypto")
 _scheduler: BackgroundScheduler | None = None
+_retry_gate = RetryGate()
 
 
 def _coinbase_enabled() -> bool:
@@ -128,26 +129,29 @@ def _latest_snapshot_freshness(db, wallet_id: str) -> tuple[datetime | None, dat
     return holdings_as_of, price_as_of
 
 
-def _wallet_refresh_due(db, wallet_id: str) -> bool:
+def _wallet_refresh_due(db, wallet_id: str, due: datetime | None = None) -> bool:
+    """With `due`: not refreshed since that scheduled time. Without: older than 24h."""
     holdings_as_of, price_as_of = _latest_snapshot_freshness(db, wallet_id)
+    if due is not None:
+        return run_is_due(holdings_as_of, due) or run_is_due(price_as_of, due)
     return should_refresh(holdings_as_of) or should_refresh(price_as_of)
 
 
-def _startup_catchup_due() -> bool:
+def _daily_due(now: datetime) -> datetime:
+    tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
+    hour = int(os.getenv("CRYPTO_REFRESH_HOUR_LOCAL", "0"))
+    return most_recent_due(now, hour, 0, tz)
+
+
+def _any_wallet_due(due: datetime) -> bool:
     db = next(get_db())
     try:
-        wallets = _active_wallets(db)
-        if not wallets:
-            return False
-        return any(_wallet_refresh_due(db, str(wallet["id"])) for wallet in wallets)
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("crypto_startup_catchup_check_failed", extra={"error_class": exc.__class__.__name__})
-        return True
+        return any(_wallet_refresh_due(db, str(wallet["id"]), due) for wallet in _active_wallets(db))
     finally:
         db.close()
 
 
-def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False) -> None:
+def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False, due: datetime | None = None) -> None:
     started = datetime.now(tz=timezone.utc)
     with job_context():
         db = next(get_db())
@@ -180,7 +184,7 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False) -> None:
             )
             for wallet in rows:
                 wallet_id = str(wallet["id"])
-                if only_stale and not _wallet_refresh_due(db, wallet_id):
+                if only_stale and not _wallet_refresh_due(db, wallet_id, due):
                     skipped += 1
                     continue
                 if refresh_wallet_snapshot(
@@ -207,12 +211,31 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False) -> None:
             db.close()
 
 
-def _refresh_all_wallets():
-    _refresh_wallets(only_stale=False)
-
-
 def _refresh_due_wallets():
     _refresh_wallets(only_stale=True)
+
+
+def _run_if_due() -> None:
+    """Every check interval: refresh wallets not refreshed since the most recent
+    daily refresh time, so a refresh missed while the Mac slept runs on wake (#112)."""
+    now = datetime.now(tz=timezone.utc)
+    due = _daily_due(now)
+    try:
+        if not _any_wallet_due(due):
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("crypto_due_check_failed", extra={"error_class": exc.__class__.__name__})
+        return
+    if not _retry_gate.may_attempt(now):
+        return
+    succeeded = False
+    try:
+        _refresh_wallets(only_stale=True, due=due)
+        succeeded = not _any_wallet_due(due)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("crypto_due_check_failed", extra={"error_class": exc.__class__.__name__})
+    finally:
+        _retry_gate.record(now, succeeded=succeeded)
 
 
 def start_scheduler() -> BackgroundScheduler | None:
@@ -222,26 +245,14 @@ def start_scheduler() -> BackgroundScheduler | None:
         return _scheduler
     if _scheduler:
         return _scheduler
-    tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
-    hour = int(os.getenv("CRYPTO_REFRESH_HOUR_LOCAL", "0"))
-    scheduler = BackgroundScheduler(timezone=tz)
+    scheduler = BackgroundScheduler(timezone=ZoneInfo("UTC"), job_defaults=JOB_DEFAULTS)
     scheduler.add_job(
-        _refresh_all_wallets,
-        CronTrigger(hour=hour, minute=0),
-        id="crypto_daily_refresh",
+        _run_if_due,
+        IntervalTrigger(minutes=check_interval_minutes()),
+        id="crypto_due_check",
         replace_existing=True,
-        max_instances=1,
-        coalesce=True,
+        next_run_time=datetime.now(tz=timezone.utc) + timedelta(seconds=5),
     )
-    if _startup_catchup_due():
-        scheduler.add_job(
-            _refresh_due_wallets,
-            DateTrigger(run_date=datetime.now(tz=timezone.utc) + timedelta(seconds=5)),
-            id="crypto_startup_catchup",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
     scheduler.start()
     _scheduler = scheduler
     return scheduler

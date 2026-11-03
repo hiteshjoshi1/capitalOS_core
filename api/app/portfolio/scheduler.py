@@ -7,16 +7,30 @@ from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import text
 
+from app.core.catchup import (
+    JOB_DEFAULTS,
+    RetryGate,
+    check_interval_minutes,
+    coerce_utc,
+    most_recent_due,
+    parse_hhmm,
+    run_is_due,
+)
 from app.core.logging import job_context
 from app.db.session import SessionLocal
 from app.portfolio.ibkr_flex import SOURCE_TYPE, run_ibkr_flex_import_from_config
 
 logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
 _scheduler: BackgroundScheduler | None = None
+_retry_gate = RetryGate()
+
+# IBKR builds day D's Flex statement a few hours after the US close, so a run at
+# 08:15 SGT (evening of D in New York) still gets D-1. 18:30 SGT (early morning
+# of D+1 in New York, EST or EDT) gets the latest completed trading day (#112).
+DEFAULT_SCHEDULE_TIME = (18, 30)
 
 
 def _cutover_date() -> date | None:
@@ -28,15 +42,7 @@ def _cutover_date() -> date | None:
 
 def _schedule_time() -> tuple[str, int, int]:
     tz_name = os.getenv("IBKR_FLEX_SCHEDULER_TZ", os.getenv("TZ", "Asia/Singapore"))
-    raw = os.getenv("IBKR_FLEX_SCHEDULER_TIME", "08:15")
-    hour, minute = 8, 15
-    if ":" in raw:
-        h, m = raw.split(":", 1)
-        try:
-            hour = int(h)
-            minute = int(m)
-        except ValueError:
-            pass
+    hour, minute = parse_hhmm(os.getenv("IBKR_FLEX_SCHEDULER_TIME"), DEFAULT_SCHEDULE_TIME)
     return tz_name, hour, minute
 
 
@@ -50,27 +56,6 @@ def _scheduler_enabled() -> bool:
     token = os.getenv("IBKR_FLEX_TOKEN") or os.getenv("IBKR_TOKEN")
     query_id = os.getenv("IBKR_FLEX_QUERY_ID") or os.getenv("IBKR_QUERY_ID")
     return bool(token and query_id)
-
-
-def _catchup_stale_after() -> timedelta:
-    raw = os.getenv("IBKR_FLEX_STALE_AFTER_HOURS", "24")
-    try:
-        hours = float(raw)
-    except ValueError:
-        hours = 24.0
-    return timedelta(hours=max(hours, 1.0))
-
-
-def _coerce_utc(value: object) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def _latest_completed_import_finished_at() -> datetime | None:
@@ -89,20 +74,9 @@ def _latest_completed_import_finished_at() -> datetime | None:
             ),
             {"source_type": SOURCE_TYPE},
         ).fetchone()
-        return _coerce_utc(row[0] if row else None)
+        return coerce_utc(row[0] if row else None)
     finally:
         db.close()
-
-
-def _startup_catchup_due() -> bool:
-    try:
-        latest = _latest_completed_import_finished_at()
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("ibkr_flex_last_run_check_failed", extra={"error": str(exc)})
-        return True
-    if latest is None:
-        return True
-    return datetime.now(tz=timezone.utc) - latest > _catchup_stale_after()
 
 
 def _active_accounts(db) -> list[dict]:
@@ -127,7 +101,8 @@ def _active_accounts(db) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _run_daily_imports() -> None:
+def _run_daily_imports() -> bool:
+    """Import every active IBKR Flex account. True when none failed."""
     with job_context():
         started = time.perf_counter()
         successes = 0
@@ -199,8 +174,40 @@ def _run_daily_imports() -> None:
                         "duration_ms": int((time.perf_counter() - started) * 1000),
                     },
                 )
+            return failures == 0
         finally:
             db.close()
+
+
+def _has_active_accounts() -> bool:
+    db = SessionLocal()
+    try:
+        return bool(_active_accounts(db))
+    finally:
+        db.close()
+
+
+def _run_if_due() -> None:
+    """Every check interval: import when no import has completed since the most
+    recent scheduled time (so a run missed while the Mac slept happens on wake)."""
+    now = datetime.now(tz=timezone.utc)
+    tz_name, hour, minute = _schedule_time()
+    due = most_recent_due(now, hour, minute, ZoneInfo(tz_name))
+    try:
+        if not run_is_due(_latest_completed_import_finished_at(), due):
+            return
+        if not _has_active_accounts():
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ibkr_flex_last_run_check_failed", extra={"error_class": exc.__class__.__name__})
+        return
+    if not _retry_gate.may_attempt(now):
+        return
+    succeeded = False
+    try:
+        succeeded = _run_daily_imports()
+    finally:
+        _retry_gate.record(now, succeeded=succeeded)
 
 
 def start_scheduler() -> BackgroundScheduler | None:
@@ -211,25 +218,14 @@ def start_scheduler() -> BackgroundScheduler | None:
     if _scheduler:
         return _scheduler
 
-    tz_name, hour, minute = _schedule_time()
-    scheduler = BackgroundScheduler(timezone=ZoneInfo("UTC"))
+    scheduler = BackgroundScheduler(timezone=ZoneInfo("UTC"), job_defaults=JOB_DEFAULTS)
     scheduler.add_job(
-        _run_daily_imports,
-        CronTrigger(hour=hour, minute=minute, timezone=ZoneInfo(tz_name)),
-        id="ibkr_flex_daily_import",
+        _run_if_due,
+        IntervalTrigger(minutes=check_interval_minutes()),
+        id="ibkr_flex_due_check",
         replace_existing=True,
-        max_instances=1,
-        coalesce=True,
+        next_run_time=datetime.now(tz=timezone.utc) + timedelta(seconds=5),
     )
-    if _startup_catchup_due():
-        scheduler.add_job(
-            _run_daily_imports,
-            DateTrigger(run_date=datetime.now(tz=timezone.utc) + timedelta(seconds=5)),
-            id="ibkr_flex_startup_catchup",
-            replace_existing=True,
-            max_instances=1,
-            coalesce=True,
-        )
     scheduler.start()
     _scheduler = scheduler
     return scheduler
