@@ -5,6 +5,7 @@ from typing import Any, Dict, List
 
 import pandas as pd
 
+from app.ingestion.as_of import find_stated_date, html_text_fragments, preamble_cells
 from app.ingestion.parsers import ParseResult
 
 @dataclass
@@ -121,6 +122,8 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
                 parser_meta={"sheet_name": None, "header_row_index": None},
             )
         df, selection = found
+        # The export's heading block states the holdings date (#141).
+        stated_as_of = find_stated_date(html_text_fragments(file_path))
     else:
         engine = _pick_engine(file_path)
         xls = pd.ExcelFile(file_path, engine=engine)
@@ -134,6 +137,7 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
                 section_counts={"rows_parsed": 0},
                 parser_meta={"sheet_name": sheet_name, "header_row_index": None},
             )
+        stated_as_of = find_stated_date(preamble_cells(df, header_row))
         df = pd.read_excel(xls, sheet_name=sheet_name, header=header_row)
         selection = TableSelection(name=sheet_name, header_row=header_row, columns=[_clean_header(c) for c in df.columns])
 
@@ -224,6 +228,8 @@ def parse_dbs_vickers_holdings_xls(file_path: str) -> ParseResult:
         "header_row_index": selection.header_row,
         "preview_positions": preview,
     }
+    if stated_as_of is not None:
+        meta["as_of"] = stated_as_of.isoformat()
     return ParseResult(
         transactions=[],
         positions=positions,

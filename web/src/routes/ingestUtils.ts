@@ -102,3 +102,22 @@ function hasDbsCreditCardMarker(header: unknown): boolean {
     .join(" ");
   return joined.includes("card transaction details for") && joined.includes("mastercard");
 }
+
+/** Today as YYYY-MM-DD in the browser's local timezone (not UTC, unlike toISOString). */
+export function todayLocalYYYYMMDD(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+export type AsOfSource = "file" | "user" | "fallback";
+
+/** How the import report says where its snapshot date came from (#141). */
+export function describeAsOf(asOfDate: string | null | undefined, source: string | null | undefined): string | null {
+  if (!asOfDate) return null;
+  if (source === "file") return `Dated ${asOfDate} (from the file)`;
+  if (source === "user") return `Dated ${asOfDate} (the date you chose; the file states none)`;
+  if (source === "fallback") return `Dated ${asOfDate} (upload day; the file states no date)`;
+  return `Dated ${asOfDate}`;
+}

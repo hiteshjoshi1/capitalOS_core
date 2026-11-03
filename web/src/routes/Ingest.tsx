@@ -5,7 +5,7 @@ import type { Account, ImportJobListItem } from "../lib/api";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
-import { resolvePlatformParser } from "./ingestUtils";
+import { describeAsOf, resolvePlatformParser, todayLocalYYYYMMDD } from "./ingestUtils";
 import type { SignatureDebug } from "./ingestUtils";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -40,6 +40,8 @@ export default function Ingest() {
   const [jobs, setJobs] = useState<ImportJobListItem[]>([]);
   const [accountId, setAccountId] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
+  // The statement's date, used only when the file states none of its own (#141).
+  const [asOf, setAsOf] = useState<string>(() => todayLocalYYYYMMDD());
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
@@ -70,7 +72,7 @@ export default function Ingest() {
     setUploading(true);
     setErr("");
     try {
-      const result = await api.ingestUpload(Number(accountId), file);
+      const result = await api.ingestUpload(Number(accountId), file, asOf || undefined);
       setReport(result as Record<string, unknown>);
       const refreshed = await api.ingestJobs();
       setJobs(refreshed);
@@ -86,7 +88,7 @@ export default function Ingest() {
     setRegistering(true);
     setErr("");
     try {
-      const result = await api.registerIngestSignature(jobId, parserKey);
+      const result = await api.registerIngestSignature(jobId, parserKey, asOf || undefined);
       setReport(result as Record<string, unknown>);
       const refreshed = await api.ingestJobs();
       setJobs(refreshed);
@@ -139,6 +141,12 @@ export default function Ingest() {
     preview_transactions?: Array<Record<string, unknown>>;
     preview_positions?: Array<Record<string, unknown>>;
     error_message?: string | null;
+    canonical_result?: {
+      report_date?: string;
+      as_of_date?: string;
+      as_of_source?: string;
+      as_of_note?: string;
+    } | null;
   } | null;
   const platformParser = resolvePlatformParser(
     reportData?.platform,
@@ -154,6 +162,8 @@ export default function Ingest() {
   const previewPositionRows = reportData?.preview_positions?.slice(0, 3) ?? [];
   const previewRows = previewTransactionRows.length ? previewTransactionRows : previewPositionRows;
   const showingPositionsPreview = !previewTransactionRows.length && previewPositionRows.length > 0;
+  const canonical = reportData?.canonical_result ?? null;
+  const asOfLabel = describeAsOf(canonical?.as_of_date ?? canonical?.report_date, canonical?.as_of_source);
 
   return (
     <PageShell
@@ -218,6 +228,18 @@ export default function Ingest() {
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
+                <label className="field">
+                  <span className="label">Statement date</span>
+                  <input
+                    className="input"
+                    type="date"
+                    aria-label="Statement date"
+                    value={asOf}
+                    max={todayLocalYYYYMMDD()}
+                    onChange={(e) => setAsOf(e.target.value)}
+                  />
+                  <span className="hint">Used when the file doesn't state its own date.</span>
+                </label>
                 <div className="actions">
                   <button className="btn" disabled={!file || !accountId || uploading} onClick={onUpload}>
                     {uploading ? "Uploading…" : "Upload statement"}
@@ -254,7 +276,9 @@ export default function Ingest() {
                     </>
                   )}
                   <StatusPill tone="warn" label={`${reportData.counts?.duplicates_skipped ?? 0} duplicates skipped`} />
+                  {asOfLabel && <StatusPill tone="neutral" label={asOfLabel} />}
                 </div>
+                {canonical?.as_of_note && <div className="hint">{canonical.as_of_note}</div>}
 
                 {reportData.validation_warnings && reportData.validation_warnings.length > 0 && (
                   <div className="ingestWarningStack">
