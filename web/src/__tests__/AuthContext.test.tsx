@@ -6,7 +6,7 @@ import { AuthProvider } from "../context/AuthContext";
 import { AuthContext } from "../context/authContextObject";
 import { ThemeProvider, useTheme } from "../context/ThemeContext";
 
-const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
+const { mockApi, mockRefreshAccessTokenNow, mockRefreshSessionNow, mockSetAccessToken, mockSetAuthFailureHandler } = vi.hoisted(() => ({
   mockApi: {
     authMe: vi.fn(),
     authLogin: vi.fn(),
@@ -15,6 +15,7 @@ const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailu
     getPreferences: vi.fn(),
   },
   mockRefreshAccessTokenNow: vi.fn(),
+  mockRefreshSessionNow: vi.fn(),
   mockSetAccessToken: vi.fn(),
   mockSetAuthFailureHandler: vi.fn(),
 }));
@@ -22,6 +23,7 @@ const { mockApi, mockRefreshAccessTokenNow, mockSetAccessToken, mockSetAuthFailu
 vi.mock("../lib/api", () => ({
   api: mockApi,
   refreshAccessTokenNow: mockRefreshAccessTokenNow,
+  refreshSessionNow: mockRefreshSessionNow,
   setAccessToken: mockSetAccessToken,
   setAuthFailureHandler: mockSetAuthFailureHandler,
 }));
@@ -37,6 +39,11 @@ function AuthConsumer() {
       <button onClick={() => void logout()}>logout</button>
     </div>
   );
+}
+
+/** A refresh response from a server that predates #146 (token only, no user/preferences). */
+function tokenOnlySession(token: string) {
+  return { access_token: token, token_type: "bearer", expires_in: 3600 };
 }
 
 function renderWithProviders(ui: React.ReactElement) {
@@ -65,7 +72,7 @@ describe("AuthProvider", () => {
   });
 
   it("loads session on mount when refresh succeeds", async () => {
-    mockRefreshAccessTokenNow.mockResolvedValueOnce("t");
+    mockRefreshSessionNow.mockResolvedValueOnce(tokenOnlySession("t"));
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
     renderWithProviders(
@@ -79,11 +86,11 @@ describe("AuthProvider", () => {
       expect(screen.getByTestId("loading").textContent).toBe("false");
       expect(screen.getByTestId("user").textContent).toBe("demo");
     });
-    expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(1);
+    expect(mockRefreshSessionNow).toHaveBeenCalledTimes(1);
   });
 
   it("does not call authMe when the mount-time refresh fails", async () => {
-    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+    mockRefreshSessionNow.mockResolvedValueOnce(null);
 
     renderWithProviders(
       <AuthProvider>
@@ -99,6 +106,7 @@ describe("AuthProvider", () => {
   });
 
   it("refreshes an active session when the tab becomes visible, deduped through one helper", async () => {
+    mockRefreshSessionNow.mockResolvedValueOnce(tokenOnlySession("token"));
     mockRefreshAccessTokenNow.mockResolvedValue("token");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
@@ -111,16 +119,18 @@ describe("AuthProvider", () => {
     await waitFor(() => {
       expect(screen.getByTestId("user").textContent).toBe("demo");
     });
-    expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(1);
+    expect(mockRefreshSessionNow).toHaveBeenCalledTimes(1);
+    expect(mockRefreshAccessTokenNow).not.toHaveBeenCalled();
 
     document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() => {
-      expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(2);
+      expect(mockRefreshAccessTokenNow).toHaveBeenCalledTimes(1);
     });
   });
 
   it("clears session when the auth-failure handler fires (definitive 401 during background refresh)", async () => {
+    mockRefreshSessionNow.mockResolvedValueOnce(tokenOnlySession("token"));
     mockRefreshAccessTokenNow.mockResolvedValue("token");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
 
@@ -148,7 +158,7 @@ describe("AuthProvider", () => {
     // refreshAccessTokenNow() resolves to null (not a thrown error) for transient
     // failures too — network/5xx errors are swallowed internally and never reach
     // authFailureHandler, so AuthProvider just stops loading without clearing anyone.
-    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+    mockRefreshSessionNow.mockResolvedValueOnce(null);
 
     renderWithProviders(
       <AuthProvider>
@@ -164,7 +174,7 @@ describe("AuthProvider", () => {
   });
 
   it("runs login/signup/logout flows and updates user", async () => {
-    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+    mockRefreshSessionNow.mockResolvedValueOnce(null);
     mockApi.authMe
       .mockResolvedValueOnce({ id: 11, username: "alice", is_admin: false })
       .mockResolvedValueOnce({ id: 12, username: "bob", is_admin: false });
@@ -206,7 +216,7 @@ describe("AuthProvider", () => {
   });
 
   it("registers and unregisters auth failure handler", async () => {
-    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+    mockRefreshSessionNow.mockResolvedValueOnce(null);
 
     const { unmount } = renderWithProviders(
       <AuthProvider>
@@ -224,7 +234,7 @@ describe("AuthProvider", () => {
   });
 
   it("fetches and applies server preferences after successful auth bootstrap", async () => {
-    mockRefreshAccessTokenNow.mockResolvedValueOnce("token");
+    mockRefreshSessionNow.mockResolvedValueOnce(tokenOnlySession("token"));
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
     mockApi.getPreferences.mockResolvedValueOnce({ theme: "light", accent_color: "#2b6ddb" });
 
@@ -242,7 +252,7 @@ describe("AuthProvider", () => {
   });
 
   it("handles getPreferences failure gracefully (falls back to localStorage)", async () => {
-    mockRefreshAccessTokenNow.mockResolvedValueOnce("token");
+    mockRefreshSessionNow.mockResolvedValueOnce(tokenOnlySession("token"));
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
     mockApi.getPreferences.mockRejectedValueOnce(new Error("network error"));
 
@@ -262,7 +272,7 @@ describe("AuthProvider", () => {
   it("logout resets theme/accent to defaults so the next user gets a clean state", async () => {
     // Simulate: user A (light theme) is logged in, then logs out.
     // The theme should reset to dark (default) so user B doesn't inherit user A's theme.
-    mockRefreshAccessTokenNow.mockResolvedValueOnce(null);
+    mockRefreshSessionNow.mockResolvedValueOnce(null);
     mockApi.authLogin.mockResolvedValueOnce({
       access_token: "token-a",
       token_type: "bearer",
@@ -304,5 +314,94 @@ describe("AuthProvider", () => {
     await act(async () => { await new Promise((r) => setTimeout(r, 50)); });
 
     expect(screen.getByTestId("theme").textContent).toBe("dark");
+  });
+
+  it("uses user + preferences from the refresh response: no /auth/me or /auth/preferences on cold load (#146)", async () => {
+    mockRefreshSessionNow.mockResolvedValueOnce({
+      ...tokenOnlySession("token"),
+      user: { id: 1, username: "demo", is_admin: false },
+      preferences: { theme: "light", accent_color: "#2b6ddb" },
+    });
+
+    function ThemeProbe() {
+      const { theme, accent } = useTheme();
+      return <div data-testid="theme">{`${theme} ${accent}`}</div>;
+    }
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthConsumer />
+        <ThemeProbe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+    expect(screen.getByTestId("theme").textContent).toBe("light #2b6ddb");
+    expect(mockRefreshSessionNow).toHaveBeenCalledTimes(1);
+    expect(mockApi.authMe).not.toHaveBeenCalled();
+    expect(mockApi.getPreferences).not.toHaveBeenCalled();
+  });
+
+  it("does not wait for preferences when the refresh response lacks them", async () => {
+    window.localStorage.setItem("capitalos.theme", "dark"); // the stored fallback
+    mockRefreshSessionNow.mockResolvedValueOnce({
+      ...tokenOnlySession("token"),
+      user: { id: 1, username: "demo", is_admin: false },
+    });
+    let resolvePrefs: (p: { theme: string; accent_color: string }) => void = () => undefined;
+    mockApi.getPreferences.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePrefs = resolve;
+      }),
+    );
+
+    function ThemeProbe() {
+      const { theme } = useTheme();
+      return <div data-testid="theme">{theme}</div>;
+    }
+
+    renderWithProviders(
+      <AuthProvider>
+        <AuthConsumer />
+        <ThemeProbe />
+      </AuthProvider>,
+    );
+
+    // Signed in and rendering while preferences are still pending.
+    await waitFor(() => {
+      expect(screen.getByTestId("loading").textContent).toBe("false");
+      expect(screen.getByTestId("user").textContent).toBe("demo");
+    });
+    expect(screen.getByTestId("theme").textContent).toBe("dark");
+
+    await act(async () => {
+      resolvePrefs({ theme: "light", accent_color: "#2b6ddb" });
+    });
+    expect(screen.getByTestId("theme").textContent).toBe("light");
+  });
+
+  it("login uses user + preferences from the login response", async () => {
+    mockRefreshSessionNow.mockResolvedValueOnce(null);
+    mockApi.authLogin.mockResolvedValueOnce({
+      ...tokenOnlySession("login-token"),
+      user: { id: 11, username: "alice", is_admin: false },
+      preferences: { theme: "light", accent_color: "#8650d9" },
+    });
+
+    const user = userEvent.setup();
+    renderWithProviders(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+    await user.click(await screen.findByText("login"));
+    await waitFor(() => {
+      expect(screen.getByTestId("user").textContent).toBe("alice");
+    });
+    expect(mockApi.authMe).not.toHaveBeenCalled();
+    expect(mockApi.getPreferences).not.toHaveBeenCalled();
+    expect(mockSetAccessToken).toHaveBeenCalledWith("login-token");
   });
 });
