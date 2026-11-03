@@ -1,7 +1,7 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
-import type { ReactElement } from "react";
+import { lazy, type ReactElement } from "react";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { ThemeProvider } from "../context/ThemeContext";
@@ -268,6 +268,37 @@ describe("AppShell", () => {
     const main = screen.getByRole("main");
     expect(main).toBeInTheDocument();
     expect(main).toContainElement(screen.getByTestId("page-content"));
+  });
+
+  it("keeps the shell on screen with a loading card while a lazy route loads (#145)", async () => {
+    let resolveRoute: (mod: { default: () => ReactElement }) => void = () => {};
+    const LazyPage = lazy(
+      () =>
+        new Promise<{ default: () => ReactElement }>((resolve) => {
+          resolveRoute = resolve;
+        }),
+    );
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/lazy-page"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/lazy-page" element={<LazyPage />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    const main = screen.getByRole("main");
+    expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
+    expect(main).toContainElement(screen.getByText("Loading…"));
+
+    await act(async () => {
+      resolveRoute({ default: () => <div>Lazy Page Content</div> });
+    });
+    expect(await screen.findByText("Lazy Page Content")).toBeInTheDocument();
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
   });
 });
 
