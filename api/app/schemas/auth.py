@@ -48,6 +48,18 @@ class UserPreferencesResponse(BaseModel):
     accent_color: str
 
 
+class AuthSessionResponse(AuthTokenResponse):
+    """Login/refresh response: the token plus who it belongs to and their preferences.
+
+    ``user`` and ``preferences`` are additive (#146) so a cold page load needs one round
+    trip instead of refresh -> /auth/me -> /auth/preferences. Optional so a client never
+    has to rely on them; the web app falls back to /auth/me and /auth/preferences.
+    """
+
+    user: AuthMeResponse | None = None
+    preferences: UserPreferencesResponse | None = None
+
+
 class UserPreferencesPatchRequest(BaseModel):
     theme: str | None = None
     accent_color: str | None = None

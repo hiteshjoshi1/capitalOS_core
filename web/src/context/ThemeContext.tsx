@@ -103,26 +103,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   });
   const [accent, setAccent] = useState<AccentColor>(() => readStoredAccent());
 
-  // Tracks how many state changes originated from the server — those should not be
-  // PATCHed back (they're already persisted server-side). Decremented in each effect
-  // that runs as a result of applyServerPreferences(); a fallback setTimeout resets
-  // the counter to 0 for cases where the value didn't actually change (React bails out).
-  const serverSyncDepth = useRef(0);
-  const serverSyncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The values the server is known to hold (last applied from it, or last PATCHed to it).
+  // The persistence effects skip the PATCH when the state already equals these, so
+  // applying server preferences never echoes them back. (#146: this replaced a
+  // counter + setTimeout(0) reset, which raced React's render when the preferences
+  // arrived outside an event handler and sent two redundant PATCHes on every load.)
+  const serverValues = useRef<{ theme: Theme | null; accent: AccentColor | null }>({ theme: null, accent: null });
 
   const applyServerPreferences = useCallback((prefs: { theme: Theme; accent_color: AccentColor }) => {
-    if (serverSyncTimer.current !== null) {
-      clearTimeout(serverSyncTimer.current);
-    }
-    serverSyncDepth.current += 2; // one decrement per effect (theme + accent)
+    serverValues.current = { theme: prefs.theme, accent: prefs.accent_color };
     setTheme(prefs.theme);
     setAccent(prefs.accent_color);
-    // Safety reset: if values were unchanged React won't fire the effects, so ensure
-    // the counter is cleared after the current microtask queue drains.
-    serverSyncTimer.current = setTimeout(() => {
-      serverSyncDepth.current = 0;
-      serverSyncTimer.current = null;
-    }, 0);
   }, []);
 
   const persistTheme = useCallback((nextTheme: Theme) => {
@@ -140,11 +131,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     applyTheme(theme);
     persistTheme(theme);
-    if (serverSyncDepth.current > 0) {
-      serverSyncDepth.current = Math.max(0, serverSyncDepth.current - 1);
-      return;
-    }
+    if (serverValues.current.theme === theme) return;
     if (api.isAuthenticated?.()) {
+      serverValues.current = { ...serverValues.current, theme };
       void api.patchPreferences?.({ theme }).catch(() => {});
     }
   }, [persistTheme, theme]);
@@ -161,11 +150,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(ACCENT_STORAGE_KEY, accent);
     }
-    if (serverSyncDepth.current > 0) {
-      serverSyncDepth.current = Math.max(0, serverSyncDepth.current - 1);
-      return;
-    }
+    if (serverValues.current.accent === accent) return;
     if (api.isAuthenticated?.()) {
+      serverValues.current = { ...serverValues.current, accent };
       void api.patchPreferences?.({ accent_color: accent }).catch(() => {});
     }
   }, [accent]);
