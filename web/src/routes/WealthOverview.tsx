@@ -520,6 +520,7 @@ export default function WealthOverview() {
                         ? `Income ${formatMoney(spendingSummary.income_total)} · Expenses ${formatMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
                         : "—"}
                     </p>
+                    <FxNote sources={[spendingSummary]} />
                   </>
                 )}
                 <Link className="wealthInlineLink" to="/cash-flow">

@@ -1,12 +1,14 @@
 from pydantic import BaseModel
 
+from app.schemas.fx import FxStatusFields
+
 
 class CategoryAmount(BaseModel):
     category: str
     amount: float
 
 
-class SpendingSummaryOut(BaseModel):
+class SpendingSummaryOut(FxStatusFields):
     month: str
     base_currency: str
     income_total: float
@@ -114,7 +116,7 @@ class CashFlowAnalyticsOut(BaseModel):
     answers: list[CashFlowDiagnosticAnswer]
 
 
-class CashFlowDetailOut(BaseModel):
+class CashFlowDetailOut(FxStatusFields):
     month: str
     base_currency: str
     income_total: float
@@ -143,7 +145,7 @@ class CreditCardItem(BaseModel):
     utilization: float | None
 
 
-class CreditCardSummaryOut(BaseModel):
+class CreditCardSummaryOut(FxStatusFields):
     month: str
     base_currency: str
     total_spend: float
@@ -176,7 +178,7 @@ class CreditCardRecurringPaymentItem(BaseModel):
     current_month_amount: float
 
 
-class CreditCardDetailOut(BaseModel):
+class CreditCardDetailOut(FxStatusFields):
     month: str
     base_currency: str
     total_spend: float
@@ -205,7 +207,7 @@ class CreditCardAnalyticsTrendPoint(BaseModel):
     spend: float
 
 
-class CreditCardAnalyticsOut(BaseModel):
+class CreditCardAnalyticsOut(FxStatusFields):
     month: str
     base_currency: str
     months: int

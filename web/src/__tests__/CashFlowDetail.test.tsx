@@ -325,6 +325,25 @@ describe("CashFlowDetail route", () => {
     expect(screen.queryByText("Income transactions (1)")).not.toBeInTheDocument();
   });
 
+  it("notes currencies left out of the totals for lack of an FX rate (#170)", async () => {
+    mockApi.cashFlowDetail.mockResolvedValue({
+      ...detailFixture,
+      fx_incomplete: true,
+      fx_missing_currencies: ["XYZ"],
+      fx_stale_currencies: [],
+    });
+    renderRoute("/cash-flow");
+
+    expect(await screen.findByRole("note")).toHaveTextContent("Excludes amounts in XYZ");
+  });
+
+  it("shows no FX note when every rate is known", async () => {
+    renderRoute("/cash-flow");
+
+    expect(await screen.findByText("Net cash flow this month")).toBeInTheDocument();
+    expect(screen.queryByTestId("fx-note")).not.toBeInTheDocument();
+  });
+
   it("renders the income tab with a hero, source composition, recurring split, and income transactions", async () => {
     renderRoute("/cash-flow/income");
 

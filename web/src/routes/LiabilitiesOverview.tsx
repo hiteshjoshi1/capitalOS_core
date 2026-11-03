@@ -8,6 +8,7 @@ import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
+import FxNote from "../components/FxNote";
 import DueStatusPill from "../components/DueStatusPill";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
@@ -263,6 +264,7 @@ export default function LiabilitiesOverview() {
               ))}
             </div>
 
+            <FxNote sources={[data]} />
             <section className="ccHeroGrid">
               <HeroMetricCard
                 eyebrow={`Spent in ${monthLabel(data.month)}`}
