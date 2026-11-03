@@ -20,9 +20,11 @@ from app.routers.alerts import router as alerts_router
 from app.routers.dividends import router as dividends_router
 from app.routers.realtime import router as realtime_router
 from app.core.logging import RequestIdMiddleware, configure_logging
-from app.crypto.scheduler import start_scheduler
+from app.crypto.scheduler import start_scheduler, stop_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
+from app.market_data.scheduler import stop_scheduler as stop_market_scheduler
 from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
+from app.portfolio.scheduler import stop_scheduler as stop_portfolio_scheduler
 
 
 
@@ -33,7 +35,13 @@ async def _lifespan(_app: FastAPI):
     start_scheduler()
     start_market_scheduler()
     start_portfolio_scheduler()
-    yield
+    try:
+        yield
+    finally:
+        # Stop new jobs firing while a reload or deploy shuts this process down (#135).
+        stop_portfolio_scheduler()
+        stop_market_scheduler()
+        stop_scheduler()
 
 
 app = FastAPI(title="CapitalOS API", version="0.1.0", lifespan=_lifespan)

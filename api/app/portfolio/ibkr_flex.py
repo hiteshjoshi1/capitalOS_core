@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,9 @@ PLATFORM_CODE = "IBKR"
 ALL_FACT_SCOPE = "all"
 DEFAULT_IBKR_FLEX_BASE_URL = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
 DEFAULT_IBKR_USER_AGENT = "curl/8.0"
+DEFAULT_IMPORT_LOCK_STALE_MINUTES = 30.0
+
+logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
 
 
 class IbkrFlexError(Exception):
@@ -977,28 +981,109 @@ def _create_import_run(
     return int(row[0])
 
 
+def import_lock_stale_after() -> timedelta:
+    """How old an import lock may get before a new import takes it over (#135).
+
+    A process killed mid-import (``uvicorn --reload``, a deploy, a crash) never
+    deletes its row; without a limit every later import would 409 forever.
+    """
+    raw = os.getenv("IBKR_IMPORT_LOCK_STALE_MINUTES", "").strip()
+    try:
+        minutes = float(raw) if raw else DEFAULT_IMPORT_LOCK_STALE_MINUTES
+    except ValueError:
+        minutes = DEFAULT_IMPORT_LOCK_STALE_MINUTES
+    if minutes <= 0:
+        minutes = DEFAULT_IMPORT_LOCK_STALE_MINUTES
+    return timedelta(minutes=minutes)
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip())
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _try_acquire_lock(db: Session, broker_account_id: int, source_type: str) -> str:
     owner = str(uuid.uuid4())
-    try:
-        db.execute(
+    now = _now()
+    inserted = db.execute(
+        text(
+            """
+            INSERT INTO portfolio_import_locks (broker_account_id, source_type, lock_owner, locked_at)
+            VALUES (:broker_account_id, :source_type, :lock_owner, :locked_at)
+            ON CONFLICT (broker_account_id) DO NOTHING
+            """
+        ),
+        {
+            "broker_account_id": broker_account_id,
+            "source_type": source_type,
+            "lock_owner": owner,
+            "locked_at": now,
+        },
+    )
+    if inserted.rowcount == 1:
+        db.flush()
+        return owner
+
+    existing = db.execute(
+        text(
+            """
+            SELECT lock_owner, locked_at
+            FROM portfolio_import_locks
+            WHERE broker_account_id = :broker_account_id
+            """
+        ),
+        {"broker_account_id": broker_account_id},
+    ).fetchone()
+    locked_at = _as_utc(existing[1]) if existing is not None else None
+    stale_after = import_lock_stale_after()
+    # A row with an unreadable timestamp can't be proven live, so it counts as stale.
+    if existing is not None and (locked_at is None or now - locked_at > stale_after):
+        # Compare-and-swap on the previous owner: if two imports race for the same
+        # stale row, exactly one UPDATE matches and the other is refused below.
+        taken = db.execute(
             text(
                 """
-                INSERT INTO portfolio_import_locks (broker_account_id, source_type, lock_owner, locked_at)
-                VALUES (:broker_account_id, :source_type, :lock_owner, :locked_at)
+                UPDATE portfolio_import_locks
+                SET lock_owner = :lock_owner, source_type = :source_type, locked_at = :locked_at
+                WHERE broker_account_id = :broker_account_id
+                  AND lock_owner = :previous_owner
                 """
             ),
             {
                 "broker_account_id": broker_account_id,
                 "source_type": source_type,
                 "lock_owner": owner,
-                "locked_at": _now(),
+                "locked_at": now,
+                "previous_owner": existing[0],
             },
         )
-        db.flush()
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
-        raise IbkrFlexImportInProgress("IBKR Flex import already in progress for this account") from exc
-    return owner
+        if taken.rowcount == 1:
+            db.flush()
+            logger.warning(
+                "ibkr_flex_stale_import_lock_taken_over",
+                extra={
+                    "event": "ibkr_flex_stale_import_lock_taken_over",
+                    "provider": "ibkr_flex",
+                    "platform": PLATFORM_CODE,
+                    "broker_account_id": broker_account_id,
+                    "lock_age_seconds": int((now - locked_at).total_seconds()) if locked_at else None,
+                    "stale_after_seconds": int(stale_after.total_seconds()),
+                },
+            )
+            return owner
+
+    db.rollback()
+    raise IbkrFlexImportInProgress("IBKR Flex import already in progress for this account")
 
 
 def _release_lock(db: Session, broker_account_id: int, owner: str) -> None:
