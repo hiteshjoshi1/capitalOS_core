@@ -29,7 +29,9 @@ from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_x
 from app.models.import_job import ImportJob
 from app.wealth_rollup_dirty import mark_rollups_dirty
 from app.portfolio.upload_canonical import (
+    CanonicalUploadFailure,
     is_canonical_upload_platform,
+    record_upload_canonical_failure,
     parser_canonical_target,
     run_upload_canonical_adapter,
     run_upload_balance_canonical_adapter,
@@ -577,6 +579,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
 
         # Guard: unregistered parser that emits positions must fail closed.
         if canonical_target is None and positions:
+            db.rollback()  # drop this upload's transactions (#136)
             job.status = "FAILED"
             job.error_message = (
                 f"canonical_adapter_missing: parser '{parser_key}' emits "
@@ -651,6 +654,19 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
         )
         return write_and_return(report)
     except Exception as exc:  # noqa: BLE001
+        # Roll back first (#136): transactions inserted and snapshots deleted by
+        # this upload must not be committed with the FAILED status below.
+        db.rollback()
+        failure = getattr(exc, "canonical_failure", None)
+        if isinstance(failure, CanonicalUploadFailure):
+            try:
+                record_upload_canonical_failure(db, failure, exc)
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                logger.exception(
+                    "upload_canonical_failure_not_recorded",
+                    extra={"event": "upload_canonical_failure_not_recorded", "job_db_id": job_id},
+                )
         job.status = "FAILED"
         job.error_message = str(exc)
         return write_and_return(_report(job, status="FAILED", error=str(exc), error_class=exc.__class__.__name__))

@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -813,6 +814,68 @@ def _resolve_report_date(parse_result: ParseResult) -> date:
     return date.today()
 
 
+@dataclass(frozen=True)
+class CanonicalUploadFailure:
+    """What a failed canonical upload needs to be recorded after a rollback (#136)."""
+
+    current_user_id: int
+    legacy_account_id: int
+    platform_code: str
+    source_kind: str
+    base_currency: str
+    report_date: date
+    stored_path: str
+    file_sha256: str
+
+
+def record_upload_canonical_failure(db: Session, failure: CanonicalUploadFailure, exc: BaseException) -> int:
+    """Record a failed upload run, its raw document and an error event.
+
+    Called after the caller rolled back the failed import, so none of the run's
+    facts (and none of the deletions) survive; only this evidence does. The
+    caller commits. Returns the import run id.
+    """
+    detail = str(exc).strip()
+    message = (f"{exc.__class__.__name__}: {detail}" if detail else exc.__class__.__name__)[:500]
+    broker_account_id = _ensure_broker_account(
+        db,
+        current_user_id=failure.current_user_id,
+        legacy_account_id=failure.legacy_account_id,
+        platform_code=failure.platform_code,
+        base_currency=failure.base_currency,
+    )
+    import_run_id = _create_upload_import_run(
+        db,
+        broker_account_id=broker_account_id,
+        legacy_account_id=failure.legacy_account_id,
+        platform_code=failure.platform_code,
+        source_kind=failure.source_kind,
+        report_date=failure.report_date,
+    )
+    raw_document_id = _store_upload_raw_document(
+        db,
+        import_run_id=import_run_id,
+        broker_account_id=broker_account_id,
+        platform_code=failure.platform_code,
+        source_kind=failure.source_kind,
+        stored_path=failure.stored_path,
+        file_sha256=failure.file_sha256,
+        report_date=failure.report_date,
+    )
+    _record_data_quality_event(
+        db,
+        broker_account_id=broker_account_id,
+        import_run_id=import_run_id,
+        raw_document_id=raw_document_id,
+        report_date=failure.report_date,
+        severity="error",
+        event_code="canonical_write_failed",
+        message=message,
+    )
+    _mark_import_run_failed(db, import_run_id, "canonical_write_failed", message)
+    return import_run_id
+
+
 def run_upload_canonical_adapter(
     db: Session,
     *,
@@ -896,12 +959,13 @@ def run_upload_canonical_adapter(
         report_date=report_date,
     )
 
-    # Idempotent fact replacement: clear existing canonical facts for this
-    # account + date before writing new ones.
-    _clear_existing_upload_position_facts(db, broker_account_id, report_date)
-
     positions_written = 0
     try:
+        # Idempotent fact replacement: clear existing canonical facts for this
+        # account + date before writing new ones. Inside the try so a failure
+        # here is recorded too; the caller rolls the deletion back (#136).
+        _clear_existing_upload_position_facts(db, broker_account_id, report_date)
+
         positions_written = _insert_upload_position_snapshots(
             db,
             broker_account_id=broker_account_id,
@@ -952,6 +1016,22 @@ def run_upload_canonical_adapter(
             message=str(exc),
         )
         _mark_import_run_failed(db, import_run_id, "canonical_write_failed", str(exc))
+        # The rows above share the caller's transaction, which must be rolled back
+        # to undo the deleted and half-written facts. This tells the caller how to
+        # record the failed run again afterwards (record_upload_canonical_failure).
+        try:
+            exc.canonical_failure = CanonicalUploadFailure(  # type: ignore[attr-defined]
+                current_user_id=current_user_id,
+                legacy_account_id=legacy_account_id,
+                platform_code=upper_platform,
+                source_kind=source_kind,
+                base_currency=base_currency,
+                report_date=report_date,
+                stored_path=stored_path,
+                file_sha256=file_sha256,
+            )
+        except AttributeError:
+            pass
         raise
 
     return {
