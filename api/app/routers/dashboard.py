@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership, require_current_user
 from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
-from app.market_data.service import freshness_counts_by_exchange
+from app.market_data.service import EMPTY_EXCHANGE_PROVIDER, freshness_counts_by_exchange
 from app.schemas.dashboard import (
     BootstrapResponse,
     CashDepositsItem,
@@ -3150,10 +3150,14 @@ def data_hub_summary(
             SELECT exchange_code, provider, finished_at, upserted_rows
             FROM market_data_runs
             WHERE finished_at IS NOT NULL
+              AND provider <> :empty_provider
             ORDER BY finished_at DESC
             LIMIT 5
             """
-        )
+        ),
+        # A 0-symbol run on an exchange with nothing held refreshed nothing (#137):
+        # it stays in /market-data/runs but isn't "Refreshed ... market data" activity.
+        {"empty_provider": EMPTY_EXCHANGE_PROVIDER},
     ).fetchall()
     for exchange_code, provider, finished_at, upserted_rows in market_activity:
         if finished_at is None:

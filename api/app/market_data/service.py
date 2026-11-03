@@ -296,6 +296,10 @@ def _backfill_symbol_map_for_exchange(db: Session, exchange_code: str) -> int:
 
 
 
+# market_data_runs.provider for a run that found no active symbols to fetch (#137).
+EMPTY_EXCHANGE_PROVIDER = "none"
+
+
 def _insert_run(db: Session, provider: str, exchange_code: str, trade_date: date) -> int:
     row = db.execute(
         text(
@@ -909,12 +913,22 @@ def run_exchange_refresh(
     symbols = all_symbols if full_coverage else all_symbols[:daily_limit]
     deferred_symbols = all_symbols[len(symbols) :] if not full_coverage else []
     if not symbols:
+        run_ids_empty: dict[str, int] = {}
+        if not all_symbols:
+            # Nothing to fetch on this exchange (#137): still record the run, as a
+            # 0-symbol success by provider "none", so the scheduler's done-check
+            # (a success row per exchange since the window's close) is satisfied
+            # and the window runs once a day, not every retry interval.
+            run_id = _insert_run(db, provider=EMPTY_EXCHANGE_PROVIDER, exchange_code=exchange_code, trade_date=trade_date)
+            _finish_run(db, run_id, status="success", requested_symbols=0, received_rows=0, upserted_rows=0, missing_symbols=0)
+            run_ids_empty[EMPTY_EXCHANGE_PROVIDER] = run_id
         diagnostics = _exchange_diagnostics(
             db,
             exchange_code,
             attempted_asset_ids=set(),
             deferred_asset_ids={row.asset_id for row in deferred_symbols},
         )
+        db.commit()
         return {
             "exchange_code": exchange_code,
             "trade_date": trade_date.isoformat(),
@@ -926,6 +940,7 @@ def run_exchange_refresh(
             "backfilled_symbols": backfilled_symbols,
             "status": "partial" if deferred_symbols else "success",
             "providers": [],
+            "run_ids": run_ids_empty,
             "daily_limit": daily_limit,
             "full_coverage": full_coverage,
             "batch_size": batch_size,
