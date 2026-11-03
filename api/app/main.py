@@ -21,6 +21,7 @@ from app.routers.dividends import router as dividends_router
 from app.routers.realtime import router as realtime_router
 from app.core.logging import RequestIdMiddleware, configure_logging
 from app.valuation_cache import ValuationCacheMiddleware
+from app.fx import FxNotesMiddleware
 from app.crypto.scheduler import start_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
 from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
@@ -74,6 +75,8 @@ if origins:
 app.add_middleware(RequestIdMiddleware)
 # Per-request (and, where safe, cross-request) valuation caching for GETs (#147).
 app.add_middleware(ValuationCacheMiddleware)
+# Per-request record of currencies valued without a (current) FX rate (#139).
+app.add_middleware(FxNotesMiddleware)
 
 app.include_router(health_router)
 app.include_router(auth_router)

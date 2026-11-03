@@ -28,6 +28,7 @@ from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.base import Base  # noqa: E402
 from app.valuation_cache import clear_shared_cache  # noqa: E402
+from tests.fx_test_helpers import synthetic_frankfurter  # noqa: E402
 
 connect_args = {}
 if os.environ["DATABASE_URL"].startswith("sqlite"):
@@ -871,6 +872,20 @@ def setup_db():
             """
         )
         _create_canonical_portfolio_tables(conn)
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS fx_rates (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              rate_date DATE NOT NULL,
+              base TEXT NOT NULL,
+              quote TEXT NOT NULL,
+              rate NUMERIC NOT NULL,
+              source TEXT NOT NULL,
+              fetched_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE (rate_date, base, quote)
+            )
+            """
+        )
     yield
     with engine.begin() as conn:
         for table_name in (
@@ -927,10 +942,27 @@ def setup_db():
 
 
 @pytest.fixture(autouse=True)
+def synthetic_fx_providers(monkeypatch):
+    """No test reaches a real FX provider: FX_DISABLE_REMOTE=1 blocks the HTTP
+    layer, and the provider functions answer from tests/fx_test_helpers.py's
+    SYNTHETIC_FX_PER_EUR instead (realistic, deliberately not 1.0).
+    open.er-api answers nothing, so a currency outside the table is missing."""
+    from app import fx
+
+    monkeypatch.setattr(fx, "_fetch_frankfurter", synthetic_frankfurter)
+    monkeypatch.setattr(fx, "_fetch_erapi", lambda: (datetime.now(tz=timezone.utc).date(), {}))
+    monkeypatch.setattr(fx, "remote_enabled", lambda: True)
+    fx._CACHE.clear()
+    yield
+    fx._CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
 def clear_db():
     # Each test starts with an empty cross-request valuation cache (#147).
     clear_shared_cache()
     with engine.begin() as conn:
+        conn.exec_driver_sql("DELETE FROM fx_rates")
         for table_name in (
         "account_balance_snapshots",
             "wealth_monthly_rollups",

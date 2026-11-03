@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from app.schemas.fx import FxStatusFields
+
 
 class DividendTotalsOut(BaseModel):
     gross: float
@@ -15,7 +17,7 @@ class DividendSummaryBucketOut(DividendTotalsOut):
     bucket: str
 
 
-class DividendSummaryOut(BaseModel):
+class DividendSummaryOut(FxStatusFields):
     from_month: str
     to_month: str
     period: str
@@ -34,7 +36,7 @@ class DividendCompanyItemOut(DividendTotalsOut):
     yield_pct: float | None
 
 
-class DividendsByCompanyOut(BaseModel):
+class DividendsByCompanyOut(FxStatusFields):
     from_month: str
     to_month: str
     base_currency: str
@@ -48,7 +50,7 @@ class DividendHistoryEventOut(DividendTotalsOut):
     month: str
 
 
-class DividendHistoryOut(BaseModel):
+class DividendHistoryOut(FxStatusFields):
     from_month: str
     to_month: str
     base_currency: str

@@ -42,7 +42,7 @@ from app.schemas.dashboard import (
     WealthTimelineBackfillResponse,
     WealthTimelineResponse,
 )
-from app.fx import get_rates
+from app.fx import fx_status, get_rates
 from app.valuation_cache import request_memo, valuation_cached
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.portfolio.canonical_reads import (
@@ -341,12 +341,12 @@ def _canonical_position_value(
         price_row = latest_prices.get(int(asset_id)) if asset_id is not None else None
         if price_row and quantity is not None and price_row.get("price") is not None:
             price_currency = str(price_row.get("currency") or row.get("quote_currency") or fallback_currency).upper()
-            return float(quantity or 0.0) * float(price_row["price"]) * rates.get(price_currency, 1.0)
+            return float(quantity or 0.0) * float(price_row["price"]) * rates.get(price_currency, 0.0)
     currency = _canonical_base_currency(row, fallback_currency)
     raw_value = row.get("snapshot_market_value_base")
     if raw_value is None:
         raw_value = row.get("cost_basis_base")
-    return float(raw_value or 0.0) * rates.get(currency, 1.0)
+    return float(raw_value or 0.0) * rates.get(currency, 0.0)
 
 
 def _latest_prices_for_positions(
@@ -463,7 +463,7 @@ def _nav_live_context(
 
 def _canonical_cash_value(row: Dict[str, Any], rates: Dict[str, float], fallback_currency: str) -> float:
     currency = _canonical_base_currency(row, fallback_currency)
-    return float(row.get("balance_base") or 0.0) * rates.get(currency, 1.0)
+    return float(row.get("balance_base") or 0.0) * rates.get(currency, 0.0)
 
 
 def _card_liability_transaction_start(anchor_ts: datetime) -> datetime:
@@ -537,14 +537,14 @@ def _credit_card_liability_component(
         account_id = int(row["account_id"])
         transaction_outstanding[account_id] = (
             transaction_outstanding.get(account_id, 0.0)
-            + (-float(row["amount"] or 0.0) * rates.get(currency, 1.0))
+            + (-float(row["amount"] or 0.0) * rates.get(currency, 0.0))
         )
 
     liability = 0.0
     for card in cards:
         account_id = int(card["account_id"])
         account_currency = str(card["account_currency"] or base_currency).upper()
-        rate = rates.get(account_currency, 1.0)
+        rate = rates.get(account_currency, 0.0)
         available_as_of = _normalize_ts(card["available_limit_as_of"])
         if (
             card["available_limit"] is not None
@@ -760,7 +760,7 @@ def _networth_asset_components(
     nav_deltas = _nav_live_price_deltas(nav_live_rows, nav_live_prices, rates, base_currency)
     for row in canonical_nav_rows:
         nav_currency = str(row["base_currency"] or base_currency).upper()
-        rate = rates.get(nav_currency, 1.0)
+        rate = rates.get(nav_currency, 0.0)
         cash_base = float(row["cash_base"] or 0.0)
         total_nav_base = float(row["total_nav_base"] or 0.0)
         cash += cash_base * rate
@@ -779,7 +779,7 @@ def _networth_asset_components(
     else:
         wallet_usd = float(latest_wallet_valuation(db, current_user_id, as_of_date=anchor_ts.date())["total_usd"])
     if wallet_usd:
-        usd_rate = rates.get("USD", 1.0)
+        usd_rate = rates.get("USD", 0.0)
         crypto += wallet_usd * usd_rate
     return {
         "cash": cash,
@@ -1103,7 +1103,7 @@ def _geography(
         if cash_base <= 0:
             continue
         nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value = cash_base * rates.get(nav_currency, 1.0)
+        value = cash_base * rates.get(nav_currency, 0.0)
         country = row.get("country") or "UNKNOWN"
         buckets[country] = buckets.get(country, 0.0) + value
     for row in canonical_cash_rows:
@@ -1156,7 +1156,7 @@ def _geography_exposure(
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
-    usd_rate = rates.get("USD", 1.0)
+    usd_rate = rates.get("USD", 0.0)
 
     buckets: Dict[str, Dict[str, float]] = {}
 
@@ -1177,7 +1177,7 @@ def _geography_exposure(
         if cash_base <= 0:
             continue
         nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value_base = cash_base * rates.get(nav_currency, 1.0)
+        value_base = cash_base * rates.get(nav_currency, 0.0)
         _bucket(row.get("country") or "UNKNOWN")["cash"] += value_base
 
     for row in canonical_cash_rows:
@@ -1422,7 +1422,7 @@ def _top_holdings(
             "platform": cr.get("platform"),
         })
 
-    usd_rate = rates.get("USD", 1.0)
+    usd_rate = rates.get("USD", 0.0)
     for row in crypto_rows:
         value = float(row.get("value") or 0.0) * usd_rate
         _record({
@@ -1710,7 +1710,7 @@ def _stablecoin_cash_balances(
     total_usd = sum(float(row.get("total_usd") or 0.0) for row in rows)
     if total_usd <= 0:
         return []
-    usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
+    usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 0.0)
     return [{"currency": "USD", "value": total_usd * usd_rate}]
 
 
@@ -1798,7 +1798,7 @@ def _cash_trend(
             stablecoin: list[dict[str, Any]] = []
             total_usd = stablecoin_usd.get(anchor.date(), 0.0)
             if total_usd > 0:
-                usd_rate = get_rates(anchor, base_currency, {"USD"}).get("USD", 1.0)
+                usd_rate = get_rates(anchor, base_currency, {"USD"}).get("USD", 0.0)
                 stablecoin = [{"currency": "USD", "value": total_usd * usd_rate}]
             value = _sum_balances(_cash_balances(db, anchor, base_currency, current_user_id) + stablecoin)
         points.append({"month": candidate_month.strftime("%Y-%m"), "value": value})
@@ -1890,7 +1890,7 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current
         {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
     if wallet_rows:
-        usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 1.0)
+        usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 0.0)
         for row in wallet_rows:
             if row["value_usd"] is None:
                 continue
@@ -1933,7 +1933,7 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
     expenses = 0.0
     for r in rows:
         cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates.get(cur, 1.0)
+        amount = float(r["amount"]) * rates.get(cur, 0.0)
         if r["type"] == "INCOME":
             income += amount
         elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):
@@ -2126,7 +2126,7 @@ def _platform_allocation(
         buckets[key] = buckets.get(key, 0.0) + value
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value = float(row.get("total_nav_base") or 0.0) * rates.get(nav_currency, 1.0)
+        value = float(row.get("total_nav_base") or 0.0) * rates.get(nav_currency, 0.0)
         value += nav_deltas.get(int(row["legacy_account_id"]), 0.0) if row.get("legacy_account_id") is not None else 0.0
         key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("country"))
         buckets[key] = buckets.get(key, 0.0) + value
@@ -2138,7 +2138,7 @@ def _platform_allocation(
         buckets[key] = buckets.get(key, 0.0) + value
     if wallet_usd:
         buckets[("CRYPTO", "WALLET_PROVIDER", None)] = buckets.get(("CRYPTO", "WALLET_PROVIDER", None), 0.0) + (
-            wallet_usd * rates.get("USD", 1.0)
+            wallet_usd * rates.get("USD", 0.0)
         )
     total = sum(buckets.values())
     items = []
@@ -2197,7 +2197,7 @@ def _stock_exposure(
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
         raw_stock_value = float(row.get("total_nav_base") or 0.0) - float(row.get("cash_base") or 0.0)
-        value = raw_stock_value * rates.get(nav_currency, 1.0) + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
+        value = raw_stock_value * rates.get(nav_currency, 0.0) + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
         if value <= 0:
             continue
         platform = row.get("platform") or "UNKNOWN"
@@ -2316,6 +2316,7 @@ def dashboard_bootstrap(
         "stock_exposure_total": stock_data["total"],
         "crypto_exposure_total": nw["crypto"],
         "cash_percent": cash_percent,
+        **fx_status(),
     }
 
 
@@ -2537,6 +2538,7 @@ def dashboard_summary(
             "top_holdings": top,
             "cash_balances": cash_balances,
             "cash_percent": cash_percent,
+            **fx_status(),
         })
 
     as_of, boundary_exact, freshness_status = _snapshot_freshness(db, anchor, current_user.id)
@@ -2656,6 +2658,7 @@ def dashboard_summary(
         "top_movers": top_movers,
         "cash_percent": cash_percent,
         "data_completeness_indicators": completeness_indicators if completeness_indicators else None,
+        **fx_status(),
     }
 
 
@@ -2744,6 +2747,7 @@ def stock_holdings_summary(
         "stock_snapshot_total": compare_stock_exposure["total"],
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
+        **fx_status(),
     }
 
 

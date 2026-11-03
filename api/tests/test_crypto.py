@@ -10,6 +10,7 @@ from nacl.signing import SigningKey
 import base58
 import base64
 import jwt
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
@@ -27,6 +28,7 @@ from app.crypto.coinbase import (
 )
 from app.crypto.ingest import SnapshotResult
 from app.crypto.refresh import refresh_wallet_snapshot
+from tests.fx_test_helpers import USD_SGD
 
 
 def test_crypto_wallet_init_and_verify(client: TestClient, monkeypatch):
@@ -93,7 +95,8 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
     assert resp.status_code == 200
     body = resp.json()
     assert body["total_crypto_usd"] == 123.45
-    assert body["total_crypto_base"] == 123.45
+    # USD -> SGD at the synthetic rate (#139), not 1:1.
+    assert body["total_crypto_base"] == pytest.approx(123.45 * USD_SGD)
     assert body["top5_holdings"][0]["symbol"] == "ETH"
 
 
@@ -394,8 +397,7 @@ def test_crypto_summary_exposes_snapshot_delta_and_refresh_movements(client: Tes
             )
         )
 
-    monkeypatch.setattr("app.routers.crypto.get_rates", lambda *_args, **_kwargs: {"USD": 1.0})
-
+    # base_currency=USD: USD->USD is 1.0 by definition, no FX involved.
     # May 2026 is a past month relative to real "now" — its own boundary (June 1)
     # picks up the latest May snapshot (May 23, $3600); the comparison is against
     # April's boundary (May 1, $3000), consistently "vs last month" rather than

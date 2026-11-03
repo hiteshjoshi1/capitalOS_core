@@ -23,8 +23,8 @@ Two layers, both behind one decorator, ``valuation_cached``:
    - its age is under ``VALUATION_CACHE_TTL_SECONDS`` (default 600), a safety net.
 
    Shared keys always contain ``current_user_id``, so one user's entry can't be
-   served to another. A result computed while FX had to fall back to a 1.0
-   default (``mark_degraded``) is not shared, so an FX outage isn't remembered.
+   served to another. A result computed while an FX rate was missing or stale
+   (``mark_degraded``, #139) is not shared, so an FX outage isn't remembered.
 
 Every hit returns a fresh copy (dicts/lists are cloned), so a caller mutating
 its result can't change what the next caller sees.
@@ -82,6 +82,8 @@ _RESULT_ENV_VARS = (
     "AUTH_ALLOW_LEGACY_NULL_OWNERSHIP",
     "FX_DISABLE_REMOTE",
     "FX_FALLBACK_RATES",
+    "FX_LOOKBACK_DAYS",
+    "FX_STALE_MAX_DAYS",
     "DASHBOARD_TOP_HOLDINGS_LIMIT",
 )
 
@@ -199,8 +201,9 @@ def current_scope() -> Optional[RequestScope]:
 
 
 def mark_degraded() -> None:
-    """Called when a computation fell back to a default (e.g. an FX rate of 1.0):
-    nothing computed in the rest of this request goes into the shared cache."""
+    """Called when a computation used incomplete inputs (e.g. a missing or stale
+    FX rate): nothing computed in the rest of this request goes into the shared
+    cache."""
     scope = _request_scope.get()
     if scope is not None:
         scope.degraded = True

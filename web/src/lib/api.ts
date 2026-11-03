@@ -258,7 +258,17 @@ export type Account = {
   country?: string | null;
 };
 
-export type DashboardSummary = {
+/** Additive FX fields (#139) on responses with base-currency totals.
+ * fx_incomplete: a value had no FX rate at all and is left out of the totals
+ * (never counted 1:1); fx_missing_currencies names those currencies.
+ * fx_stale_currencies: converted with a stored rate older than the lookback. */
+export type FxStatus = {
+  fx_incomplete?: boolean;
+  fx_missing_currencies?: string[];
+  fx_stale_currencies?: string[];
+};
+
+export type DashboardSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
   current_net_worth_as_of?: string | null;
@@ -397,7 +407,7 @@ export type DashboardNetWorthChange = {
   net_worth_change: DashboardSummary["net_worth_change"];
 };
 
-export type StockHoldingsSummary = {
+export type StockHoldingsSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
@@ -776,7 +786,7 @@ export type CryptoWalletInitResponse = {
   expires_at: string;
 };
 
-export type CryptoSummary = {
+export type CryptoSummary = FxStatus & {
   month?: string;
   is_live?: boolean;
   compare_month?: string | null;
@@ -948,7 +958,7 @@ export type NetWorthFreshness = {
   cash: AssetClassFreshness;
 };
 
-export type DashboardBootstrap = {
+export type DashboardBootstrap = FxStatus & {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
@@ -1209,7 +1219,7 @@ export type DividendSummaryBucket = DividendTotals & {
   bucket: string;
 };
 
-export type DividendsSummary = {
+export type DividendsSummary = FxStatus & {
   from_month: string;
   to_month: string;
   current_net_worth_as_of?: string | null;
@@ -1239,7 +1249,7 @@ export type DividendCompanyItem = {
   yield_pct: number | null;
 };
 
-export type DividendsByCompany = {
+export type DividendsByCompany = FxStatus & {
   from_month: string;
   to_month: string;
   base_currency: string;
@@ -1253,7 +1263,7 @@ export type DividendHistoryEvent = DividendTotals & {
   month: string;
 };
 
-export type DividendHistory = {
+export type DividendHistory = FxStatus & {
   from_month: string;
   to_month: string;
   base_currency: string;

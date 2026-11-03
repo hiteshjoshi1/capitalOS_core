@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 
+from app.schemas.fx import FxStatusFields
+
 
 class NetWorth(BaseModel):
     total: float
@@ -90,7 +92,7 @@ class TopMovers(BaseModel):
     detractors: List[TopMover]
 
 
-class DashboardSummaryResponse(BaseModel):
+class DashboardSummaryResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
@@ -155,7 +157,7 @@ class StockBreakdownItem(BaseModel):
     percent: float
 
 
-class StockHoldingsResponse(BaseModel):
+class StockHoldingsResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
@@ -302,7 +304,7 @@ class DataHubSummaryResponse(BaseModel):
     recent_activity: List[DataHubActivityItem]
 
 
-class BootstrapResponse(BaseModel):
+class BootstrapResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
