@@ -5229,6 +5229,41 @@ html, body {
   color: var(--text);
 }
 
+/* Month control + the "Past month" callout beside it (#127). The callout can't be
+   closed: it shows while a non-current month is chosen and goes when it isn't. */
+.monthControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monthControlOffMonth {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* Small arrow pointing at the month pill */
+.monthControlOffMonth::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: 50%;
+  transform: translateY(-50%);
+  border-style: solid;
+  border-width: 5px 6px 5px 0;
+  border-color: transparent var(--warn) transparent transparent;
+}
+
 /* The actual input/select: invisible overlay covering the whole pill */
 .coPillBtnInput {
   position: absolute;

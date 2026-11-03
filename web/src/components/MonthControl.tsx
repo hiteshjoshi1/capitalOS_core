@@ -1,5 +1,7 @@
 import { useRef } from "react";
 
+import { currentMonthYYYYMM } from "../lib/selectedMonth";
+
 type MonthControlProps = {
   month: string;
   onMonthChange: (month: string) => void;
@@ -35,31 +37,44 @@ export default function MonthControl({ month, onMonthChange }: MonthControlProps
     return false;
   };
 
+  // #127: while a month other than the current one is chosen, a small callout sits
+  // next to the pill. It has no close button: it goes only when the current month
+  // is chosen again.
+  const currentMonth = currentMonthYYYYMM();
+  const offMonthLabel = month < currentMonth ? "Past month" : month > currentMonth ? "Future month" : null;
+
   return (
-    <label
-      className="coPillBtn"
-      title="Change month"
-      onPointerDown={(event) => {
-        if (openMonthPicker()) {
-          event.preventDefault();
-        }
-      }}
-    >
-      <span aria-hidden="true">{formatMonthLabel(month)}</span>
-      <input
-        ref={inputRef}
-        className="coPillBtnInput"
-        aria-label="Month"
-        type="month"
-        value={month}
-        onChange={(event) => onMonthChange(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" || event.key === " ") {
+    <span className="monthControl">
+      <label
+        className="coPillBtn"
+        title="Change month"
+        onPointerDown={(event) => {
+          if (openMonthPicker()) {
             event.preventDefault();
-            openMonthPicker();
           }
         }}
-      />
-    </label>
+      >
+        <span aria-hidden="true">{formatMonthLabel(month)}</span>
+        <input
+          ref={inputRef}
+          className="coPillBtnInput"
+          aria-label="Month"
+          type="month"
+          value={month}
+          onChange={(event) => onMonthChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              openMonthPicker();
+            }
+          }}
+        />
+      </label>
+      {offMonthLabel && (
+        <span className="monthControlOffMonth" role="status">
+          {offMonthLabel}
+        </span>
+      )}
+    </span>
   );
 }
