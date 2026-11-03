@@ -229,3 +229,19 @@ def start_scheduler() -> BackgroundScheduler | None:
     scheduler.start()
     _scheduler = scheduler
     return scheduler
+
+
+def stop_scheduler() -> None:
+    """Stop firing jobs on API shutdown or reload (#135).
+
+    ``wait=False`` so a reload isn't held up by a running job; an import or
+    refresh cut short this way leaves a lock that the stale-lock rule takes over.
+    """
+    global _scheduler
+    scheduler, _scheduler = _scheduler, None
+    if scheduler is None:
+        return
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:  # noqa: BLE001 - shutdown must not block the others
+        logger.warning("scheduler_shutdown_failed", exc_info=True)
