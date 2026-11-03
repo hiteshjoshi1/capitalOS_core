@@ -267,6 +267,29 @@ def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
     return int(row[0]) if row else None
 
 
+# Extensions kept on the stored copy; parsers and format detection key on them.
+ALLOWED_UPLOAD_EXTENSIONS = frozenset({".csv", ".xls", ".xlsx", ".tsv", ".txt"})
+
+
+def stored_upload_name(original_filename: str | None) -> str:
+    """Fixed storage name for an upload: ``upload`` plus an allow-listed extension.
+
+    Only the extension of the client-supplied name is used (lowercased); anything
+    not on the allow-list is dropped, so the name is always ``upload`` or
+    ``upload.<ext>`` regardless of slashes, drive letters or ``..`` in the input.
+    """
+    base = (original_filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    ext = os.path.splitext(base)[1].lower()
+    return f"upload{ext}" if ext in ALLOWED_UPLOAD_EXTENSIONS else "upload"
+
+
+def _assert_inside(path: str, directory: str) -> None:
+    real_dir = os.path.realpath(directory)
+    real_path = os.path.realpath(path)
+    if os.path.commonpath([real_dir, real_path]) != real_dir or real_path == real_dir:
+        raise ValueError("Upload storage path escapes the job directory")
+
+
 def create_import_job(db: Session, account_id: int, platform: str, original_filename: str, upload_path: str, data_dir: str) -> ImportJob:
     job = ImportJob(
         account_id=account_id,
@@ -282,7 +305,9 @@ def create_import_job(db: Session, account_id: int, platform: str, original_file
 
     raw_dir = os.path.join(data_dir, "raw", str(job.id))
     os.makedirs(raw_dir, exist_ok=True)
-    stored_path = os.path.join(raw_dir, original_filename)
+    # The client-supplied name is metadata only; it never becomes part of a path.
+    stored_path = os.path.join(raw_dir, stored_upload_name(original_filename))
+    _assert_inside(stored_path, raw_dir)
     shutil.copyfile(upload_path, stored_path)
     file_sha = _sha256_file(stored_path)
 
