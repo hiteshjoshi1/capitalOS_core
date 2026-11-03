@@ -3,7 +3,7 @@
  * protected route renders. Uses the real api.ts / AuthProvider / ThemeProvider /
  * RequireAuth with only fetch stubbed.
  */
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 
@@ -83,7 +83,9 @@ describe("cold load auth (#146)", () => {
     expect(await screen.findByText("protected content")).toBeInTheDocument();
 
     expect(calls).toEqual([{ url: expect.stringMatching(/\/auth\/refresh$/), method: "POST" }]);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    // The server theme is applied in an effect after the first protected render; on a
+    // slow runner the assertion could run before it (flaked in CI), so wait for it.
+    await waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("light"));
     expect(window.localStorage.getItem("capitalos.accent")).toBe("#2b6ddb");
 
     // Applying server preferences must not echo a PATCH back, nor fetch anything else.
@@ -107,6 +109,6 @@ describe("cold load auth (#146)", () => {
       "/auth/me",
       "/auth/preferences",
     ]);
-    expect(document.documentElement.getAttribute("data-theme")).toBe("light");
+    await waitFor(() => expect(document.documentElement.getAttribute("data-theme")).toBe("light"));
   });
 });
