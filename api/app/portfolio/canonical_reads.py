@@ -35,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
+from app.valuation_cache import valuation_cached
 
 _IBKR_FLEX_SOURCE_KIND = "ibkr_flex_daily"
 _IBKR_FLEX_FACT_SCOPE = "all"
@@ -73,6 +74,7 @@ def has_canonical_position_snapshot_sql(account_id_col: str = "p.account_id") ->
     return _CANONICAL_POSITION_EXISTS_SQL.format(account_id_col=account_id_col)
 
 
+@valuation_cached(shared=True)
 def canonical_position_rows_by_legacy_account(
     db: Session,
     *,
@@ -477,6 +479,7 @@ def canonical_cash_rows_by_legacy_account(
     return [dict(r) for r in rows]
 
 
+@valuation_cached(shared=True)
 def canonical_account_balance_rows(
     db: Session,
     *,
@@ -720,6 +723,7 @@ def canonical_account_balance_rows(
     return [dict(r) for r in rows]
 
 
+@valuation_cached(shared=True)
 def canonical_snapshot_coverage_as_of(
     db: Session,
     *,
@@ -903,6 +907,7 @@ def canonical_snapshot_coverage_as_of(
     return row["as_of_date"]
 
 
+@valuation_cached(shared=True)
 def get_data_completeness_status(
     db: Session,
     *,

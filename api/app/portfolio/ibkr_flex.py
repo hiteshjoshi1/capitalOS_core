@@ -15,6 +15,7 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.valuation_cache import valuation_cached
 
 PARSER_VERSION = "ibkr_flex_v1"
 SOURCE_TYPE = "ibkr_flex_daily"
@@ -2133,6 +2134,7 @@ def run_ibkr_flex_import_from_config(
     )
 
 
+@valuation_cached(shared=True)
 def latest_authoritative_nav_by_legacy_account(
     db: Session,
     *,

@@ -12,6 +12,7 @@ from app.auth_context import allow_legacy_null_ownership
 from app.crypto.ingest import should_refresh
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order
+from app.valuation_cache import valuation_cached
 
 logger = logging.getLogger("capitalos.crypto.valuation")
 
@@ -98,6 +99,8 @@ def _ranked_snapshots_sql(as_of_filter: bool) -> str:
     )
 
 
+# Per request only: its stale_* flags are relative to the current time.
+@valuation_cached()
 def latest_wallet_valuation(
     db: Session,
     current_user_id: int,

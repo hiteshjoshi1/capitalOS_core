@@ -145,6 +145,19 @@ def _default_yahoo_symbol(exchange_symbol: str, exchange_code: str) -> str:
 
 
 
+def _resolved_exchange_symbol(row: Any) -> tuple[str, str | None]:
+    """(exchange code, ticker to quote) for a market_symbol_map row; no ticker
+    means the row is skipped."""
+    ex = str(row["exchange_code"]).strip().upper()
+    mapped_symbol = str(row["exchange_symbol"] or "").strip().upper()
+    asset_symbol = str(row.get("asset_symbol") or "").strip().upper()
+    # US maps can drift to company-name-like symbols; prefer canonical asset symbol when present.
+    asset_candidate = _ticker_candidate(asset_symbol)
+    mapped_candidate = _ticker_candidate(mapped_symbol)
+    sym = asset_candidate if ex == "US" and asset_candidate else mapped_candidate
+    return ex, sym
+
+
 def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[SymbolMapRow]:
     limit_clause = ""
     params: dict[str, Any] = {"exchange_code": exchange_code}
@@ -186,14 +199,7 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
 
     out: list[SymbolMapRow] = []
     for row in rows:
-        ex = str(row["exchange_code"]).strip().upper()
-        mapped_symbol = str(row["exchange_symbol"] or "").strip().upper()
-        asset_symbol = str(row.get("asset_symbol") or "").strip().upper()
-        # US maps can drift to company-name-like symbols; prefer canonical asset symbol when present.
-        asset_candidate = _ticker_candidate(asset_symbol)
-        mapped_candidate = _ticker_candidate(mapped_symbol)
-        sym = asset_candidate if ex == "US" and asset_candidate else mapped_candidate
-        ex = str(row["exchange_code"]).strip().upper()
+        ex, sym = _resolved_exchange_symbol(row)
         if not sym:
             continue
         eod_symbol = (row.get("eodhd_symbol_override") or _default_eodhd_symbol(sym, ex)).strip().upper()
@@ -1149,6 +1155,49 @@ def latest_status_by_exchange(db: Session) -> list[dict[str, Any]]:
         )
     return payload
 
+
+
+def freshness_counts_by_exchange(db: Session) -> dict[str, dict[str, int]]:
+    """{exchange: {"fresh", "stale", "missing"}} for the configured exchanges:
+    the diagnostics_summary freshness counts latest_status_by_exchange reports,
+    from one query instead of four per exchange (#147). Each active symbol's
+    freshness is the age of its newest dated price."""
+    exchanges = configured_exchanges()
+    counts = {ex: {"fresh": 0, "stale": 0, "missing": 0} for ex in exchanges}
+    if not exchanges:
+        return counts
+    params = {f"ex{i}": ex for i, ex in enumerate(exchanges)}
+    rows = db.execute(
+        text(
+            f"""
+            SELECT m.exchange_code,
+                   m.exchange_symbol,
+                   a.symbol AS asset_symbol,
+                   lp.latest_trade_date
+            FROM market_symbol_map m
+            JOIN assets a ON a.id = m.asset_id
+            LEFT JOIN (
+              SELECT asset_id, MAX(trade_date) AS latest_trade_date
+              FROM prices
+              WHERE trade_date IS NOT NULL
+              GROUP BY asset_id
+            ) lp ON lp.asset_id = m.asset_id
+            WHERE m.exchange_code IN ({",".join(f":ex{i}" for i in range(len(exchanges)))})
+              AND m.is_active = TRUE
+              AND a.asset_class IN ('STOCK', 'FUND')
+            """
+        ),
+        params,
+    ).mappings().all()
+    for row in rows:
+        if row["exchange_code"] not in counts:
+            continue
+        _ex, sym = _resolved_exchange_symbol(row)
+        if not sym:
+            continue
+        status, _age = _freshness_status(row["latest_trade_date"])
+        counts[row["exchange_code"]][status] += 1
+    return counts
 
 
 def list_runs(db: Session, limit: int = 50) -> list[dict[str, Any]]:

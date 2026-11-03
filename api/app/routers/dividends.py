@@ -256,9 +256,10 @@ def _latest_asset_market_values(
         return {}
     currencies: set[str] = set()
     price_by_asset: dict[int, tuple[float | None, str | None]] = {}
+    latest_prices = _latest_prices_for_assets(db, {int(row["asset_id"]) for row in holding_rows}, anchor_ts.date())
     for row in holding_rows:
         asset_id = int(row["asset_id"])
-        fallback_price, fallback_currency = _latest_price_for_asset(db, asset_id, anchor_ts.date())
+        fallback_price, fallback_currency = latest_prices.get(asset_id, (None, None))
         price_by_asset[asset_id] = (fallback_price, fallback_currency)
         if fallback_price is not None and fallback_currency:
             currencies.add(fallback_currency.upper())
@@ -582,56 +583,67 @@ def _load_expected_holdings(db: Session, anchor_ts: datetime, current_user_id: i
     return out
 
 
-def _quantity_on_date(
+def _quantities_on_date(
     db: Session,
-    asset_id: int,
+    holdings: list[dict[str, Any]],
     event_date: date,
-    snapshot_fallback: float,
     current_user_id: int,
-) -> float:
+) -> dict[int, float]:
+    """Shares held of each holding's asset on event_date: from BUY/SELL trades
+    when the asset has any, else the canonical snapshot quantity at that date,
+    else the holding's snapshot_quantity. One trades query and one snapshot read
+    for all holdings (#147; it used to be one of each per holding)."""
+    asset_ids = sorted({int(h["asset_id"]) for h in holdings})
+    if not asset_ids:
+        return {}
     cutoff = datetime.combine(event_date + timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
     trades = db.execute(
         text(
-            """
-            SELECT type, quantity
+            f"""
+            SELECT t.asset_id, t.type, t.quantity
             FROM transactions t
             JOIN accounts a ON a.id = t.account_id
-            WHERE t.asset_id = :asset_id
+            WHERE t.asset_id IN ({_int_list_sql(asset_ids)})
               AND t.ts < :cutoff
               AND t.type IN ('BUY', 'SELL')
               AND t.quantity IS NOT NULL
               AND """
             + account_scope_sql("a")
             + """
-            ORDER BY t.ts ASC, t.id ASC
+            ORDER BY t.asset_id ASC, t.ts ASC, t.id ASC
             """
         ),
-        {"asset_id": asset_id, "cutoff": cutoff, "current_user_id": current_user_id},
+        {"cutoff": cutoff, "current_user_id": current_user_id},
     ).mappings().all()
-    if trades:
-        qty = 0.0
-        for row in trades:
-            signed = abs(float(row.get("quantity") or 0.0))
-            if str(row.get("type") or "").upper() == "SELL":
-                qty -= signed
-            else:
-                qty += signed
-        return max(qty, 0.0)
+    from_trades: dict[int, float] = {}
+    for row in trades:
+        asset_id = int(row["asset_id"])
+        signed = abs(float(row.get("quantity") or 0.0))
+        if str(row.get("type") or "").upper() == "SELL":
+            signed = -signed
+        from_trades[asset_id] = from_trades.get(asset_id, 0.0) + signed
 
-    canonical_rows = canonical_position_rows_by_legacy_account(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=event_date,
-        include_nav_accounts=True,
-    )
-    snap_qty = sum(
-        float(row.get("quantity") or 0.0)
-        for row in canonical_rows
-        if row.get("asset_id") is not None and int(row["asset_id"]) == asset_id
-    )
-    if snap_qty > 0:
-        return snap_qty
-    return max(snapshot_fallback, 0.0)
+    snapshot_qty: dict[int, float] | None = None
+    out: dict[int, float] = {}
+    for holding in holdings:
+        asset_id = int(holding["asset_id"])
+        if asset_id in from_trades:
+            out[asset_id] = max(from_trades[asset_id], 0.0)
+            continue
+        if snapshot_qty is None:
+            snapshot_qty = {}
+            for row in canonical_position_rows_by_legacy_account(
+                db,
+                current_user_id=current_user_id,
+                anchor_date=event_date,
+                include_nav_accounts=True,
+            ):
+                if row.get("asset_id") is not None:
+                    key = int(row["asset_id"])
+                    snapshot_qty[key] = snapshot_qty.get(key, 0.0) + float(row.get("quantity") or 0.0)
+        snap_qty = snapshot_qty.get(asset_id, 0.0)
+        out[asset_id] = snap_qty if snap_qty > 0 else max(float(holding.get("snapshot_quantity") or 0.0), 0.0)
+    return out
 
 
 def _blank_expected_rollup() -> dict[str, float]:
@@ -660,54 +672,92 @@ def _expected_summary_from_buckets(period: str, buckets_raw: dict[str, dict[str,
     )
 
 
-def _latest_price_for_asset(db: Session, asset_id: int, anchor_date: date) -> tuple[float | None, str | None]:
-    row = db.execute(
-        text(
-            """
-            SELECT price, currency
-            FROM prices
-            WHERE asset_id = :asset_id
-              AND (
-                (trade_date IS NOT NULL AND trade_date <= :anchor_date)
-                OR trade_date IS NULL
-              )
-            ORDER BY
-              CASE WHEN trade_date IS NULL THEN 1 ELSE 0 END,
-              trade_date DESC NULLS LAST,
-              ts DESC
-            LIMIT 1
-            """
-        ),
-        {"asset_id": asset_id, "anchor_date": anchor_date},
-    ).mappings().one_or_none()
-    if not row:
-        return None, None
-    return float(row.get("price") or 0.0), (row.get("currency") or "").upper() or None
+def _int_list_sql(ids: Any) -> str:
+    """Inline a list of integer ids (ints only, so safe to format into SQL)."""
+    return ",".join(str(int(i)) for i in ids)
 
 
-def _latest_dividend_snapshot_for_asset(db: Session, asset_id: int, anchor_date: date) -> dict[str, Any] | None:
-    row = db.execute(
-        text(
-            """
-            SELECT yield_rate, annual_dividend_per_share, price, currency, as_of_date
-            FROM market_dividend_yields
-            WHERE asset_id = :asset_id
-              AND as_of_date <= :anchor_date
-              AND source <> 'DUMMY'
-            ORDER BY as_of_date DESC, updated_at DESC
-            LIMIT 1
-            """
-        ),
-        {"asset_id": asset_id, "anchor_date": anchor_date},
-    ).mappings().one_or_none()
-    if not row:
-        return None
+def _latest_row_per_asset_sql(
+    db: Session, asset_ids: list[int], *, table: str, columns: str, where: str, order_by: str
+) -> str:
+    """One row per asset id: the first `table` row (alias src) matching `where`,
+    ordered by `order_by`, the way a per-asset `... ORDER BY ... LIMIT 1` would.
+
+    Postgres runs it as LATERAL ... LIMIT 1 (an index lookup per asset); SQLite
+    (tests) has no LATERAL, so it ranks with ROW_NUMBER() over the same ORDER BY.
+    """
+    if db.get_bind().dialect.name == "postgresql":
+        values = ",".join(f"({int(i)})" for i in asset_ids)
+        return f"""
+            SELECT ids.asset_id, x.*
+            FROM (VALUES {values}) AS ids(asset_id)
+            CROSS JOIN LATERAL (
+              SELECT {columns}
+              FROM {table} src
+              WHERE src.asset_id = ids.asset_id AND {where}
+              ORDER BY {order_by}
+              LIMIT 1
+            ) x
+        """
+    return f"""
+        SELECT * FROM (
+          SELECT src.asset_id AS asset_id, {columns},
+                 ROW_NUMBER() OVER (PARTITION BY src.asset_id ORDER BY {order_by}) AS _rn
+          FROM {table} src
+          WHERE src.asset_id IN ({_int_list_sql(asset_ids)}) AND {where}
+        ) ranked
+        WHERE _rn = 1
+    """
+
+
+def _latest_prices_for_assets(
+    db: Session, asset_ids: set[int], anchor_date: date
+) -> dict[int, tuple[float | None, str | None]]:
+    """Per asset: the latest price at/before anchor_date (dated rows first,
+    then undated, newest ts first), as (price, currency)."""
+    ids = sorted(asset_ids)
+    if not ids:
+        return {}
+    sql = _latest_row_per_asset_sql(
+        db,
+        ids,
+        table="prices",
+        columns="src.price, src.currency",
+        where="((src.trade_date IS NOT NULL AND src.trade_date <= :anchor_date) OR src.trade_date IS NULL)",
+        order_by="CASE WHEN src.trade_date IS NULL THEN 1 ELSE 0 END, src.trade_date DESC NULLS LAST, src.ts DESC",
+    )
+    rows = db.execute(text(sql), {"anchor_date": anchor_date}).mappings().all()
     return {
-        "yield_rate": float(row.get("yield_rate") or 0.0),
-        "annual_dividend_per_share": float(row.get("annual_dividend_per_share") or 0.0),
-        "price": float(row.get("price") or 0.0),
-        "currency": (row.get("currency") or "").upper() or None,
-        "as_of_date": row.get("as_of_date"),
+        int(row["asset_id"]): (float(row.get("price") or 0.0), (row.get("currency") or "").upper() or None)
+        for row in rows
+    }
+
+
+def _latest_dividend_snapshots_for_assets(
+    db: Session, asset_ids: set[int], anchor_date: date
+) -> dict[int, dict[str, Any]]:
+    """Per asset: the latest non-demo dividend-yield snapshot at/before anchor_date."""
+    ids = sorted(asset_ids)
+    if not ids:
+        return {}
+    sql = _latest_row_per_asset_sql(
+        db,
+        ids,
+        table="market_dividend_yields",
+        columns="src.yield_rate, src.annual_dividend_per_share, src.price, src.currency, src.as_of_date",
+        where="src.as_of_date <= :anchor_date AND src.source <> 'DUMMY'",
+        order_by="src.as_of_date DESC, src.updated_at DESC",
+    )
+    rows = db.execute(text(sql), {"anchor_date": anchor_date}).mappings().all()
+    return {
+        int(row["asset_id"]): {
+            "yield_rate": float(row.get("yield_rate") or 0.0),
+            "annual_dividend_per_share": float(row.get("annual_dividend_per_share") or 0.0),
+            "price": float(row.get("price") or 0.0),
+            "currency": (row.get("currency") or "").upper() or None,
+            "as_of_date": row.get("as_of_date"),
+        }
+        for row in rows
     }
 
 
@@ -750,23 +800,21 @@ def expected_dividends_overview(
     company_rows: list[dict[str, Any]] = []
     assets_with_actions = 0
     actions_evaluated = 0
+    holding_asset_ids = {int(holding["asset_id"]) for holding in holdings}
+    shares_by_asset = _quantities_on_date(db, holdings, end_date_inclusive, current_user.id)
+    snapshots = _latest_dividend_snapshots_for_assets(db, holding_asset_ids, end_date_inclusive)
+    latest_prices = _latest_prices_for_assets(db, holding_asset_ids, end_date_inclusive)
     for holding in holdings:
-        shares = _quantity_on_date(
-            db,
-            int(holding["asset_id"]),
-            end_date_inclusive,
-            float(holding.get("snapshot_quantity") or 0.0),
-            current_user.id,
-        )
+        shares = shares_by_asset.get(int(holding["asset_id"]), 0.0)
         if shares <= 0:
             continue
 
-        snapshot = _latest_dividend_snapshot_for_asset(db, int(holding["asset_id"]), end_date_inclusive)
+        snapshot = snapshots.get(int(holding["asset_id"]))
         yield_rate = float(snapshot.get("yield_rate") or 0.0) if snapshot else 0.0
         cached_price = float(snapshot.get("price") or 0.0) if snapshot else 0.0
         cached_currency = (snapshot.get("currency") or "").upper() if snapshot else ""
 
-        fallback_price, fallback_currency = _latest_price_for_asset(db, int(holding["asset_id"]), end_date_inclusive)
+        fallback_price, fallback_currency = latest_prices.get(int(holding["asset_id"]), (None, None))
         price_quote = cached_price if cached_price > 0 else (float(fallback_price or 0.0))
         price_currency = cached_currency or (fallback_currency or "")
         currency = (price_currency or holding.get("quote_currency") or base_currency).upper()

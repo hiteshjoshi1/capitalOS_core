@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Optional, Dict, Any, List, Callable
 from zoneinfo import ZoneInfo
 
@@ -14,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership, require_current_user
 from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
-from app.market_data.service import latest_status_by_exchange
+from app.market_data.service import freshness_counts_by_exchange
 from app.schemas.dashboard import (
     BootstrapResponse,
     CashDepositsItem,
@@ -42,6 +43,7 @@ from app.schemas.dashboard import (
     WealthTimelineResponse,
 )
 from app.fx import get_rates
+from app.valuation_cache import request_memo, valuation_cached
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.portfolio.canonical_reads import (
     canonical_account_balance_rows,
@@ -103,8 +105,13 @@ def _anchor_ts(month_start: datetime) -> datetime:
 
 
 def _current_anchor_ts() -> datetime:
-    tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
-    return datetime.now(tz=tz).replace(microsecond=0)
+    """Now, in the app's timezone. Frozen for the length of a request (#147),
+    so every "live" value in one response is taken at the same instant."""
+    tz_name = os.getenv("TZ", "Asia/Singapore")
+    return request_memo(
+        ("dashboard._current_anchor_ts", tz_name),
+        lambda: datetime.now(tz=ZoneInfo(tz_name)).replace(microsecond=0),
+    )
 
 
 def _previous_update_anchor_ts(anchor_ts: datetime) -> datetime:
@@ -243,6 +250,7 @@ def _month_window(end_month_start: datetime, months: int = 6) -> list[datetime]:
     return [_add_months(end_month_start, offset) for offset in range(-(months - 1), 1)]
 
 
+@valuation_cached(date_args=("anchor_ts",))
 def _latest_price_map(db: Session, anchor_ts: datetime, asset_ids: set[int]) -> Dict[int, Dict[str, Any]]:
     if not asset_ids:
         return {}
@@ -285,6 +293,7 @@ def _positions_coverage_as_of(db: Session, anchor_ts: datetime, current_user_id:
     return _normalize_ts(as_of)
 
 
+@valuation_cached(shared=True)
 def _crypto_snapshot_coverage_as_of(db: Session, anchor_date: Any, current_user_id: int) -> Any:
     q = text(
         """
@@ -470,6 +479,7 @@ def _card_liability_transaction_start(anchor_ts: datetime) -> datetime:
     return month_start
 
 
+@valuation_cached()
 def _credit_card_liability_component(
     db: Session,
     anchor_ts: datetime,
@@ -671,26 +681,39 @@ def _infer_country(
     return "UNKNOWN"
 
 
-def _networth_components(
+def _credit_card_account_ids(db: Session, current_user_id: int) -> set[int]:
+    """The user's credit-card accounts: their balances are liabilities, not cash
+    (the same set _credit_card_liability_component returns)."""
+    rows = db.execute(
+        text(
+            """
+            SELECT a.id AS account_id
+            FROM accounts a
+            WHERE a.account_type = 'CREDIT_CARD'
+              AND """
+            + account_scope_sql("a")
+        ),
+        {"current_user_id": current_user_id},
+    ).mappings().all()
+    return {int(row["account_id"]) for row in rows}
+
+
+@valuation_cached(shared=True, date_args=("anchor_ts",))
+def _networth_asset_components(
     db: Session,
     anchor_ts: datetime,
     base_currency: str,
     current_user_id: int,
     *,
     price_overlay: bool = False,
-    return_rows: bool = False,
-) -> Dict[str, float] | tuple[Dict[str, float], Dict[str, Any]]:
-    """Compute reporting net worth components from canonical snapshots only.
+) -> Dict[str, Any]:
+    """Cash, stocks/funds and crypto at anchor_ts, plus the canonical rows read.
 
-    When return_rows=True, also returns the raw canonical rows this call fetched
-    (positions/nav/cash) so callers building a per-platform freshness breakdown
-    (the wealth rollup) don't have to re-issue the same queries.
+    Everything here depends on anchor_ts only through its date (canonical reads,
+    prices and FX are all by date), so it is cached by date (#147). Card
+    liabilities depend on the exact anchor time and are added by
+    _networth_components.
     """
-    if anchor_ts is None:
-        empty = {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
-        if return_rows:
-            return empty, {"positions": [], "nav": [], "cash": []}
-        return empty
     canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
         db,
         current_user_id=current_user_id,
@@ -729,12 +752,7 @@ def _networth_components(
     cash = 0.0
     stocks_funds = 0.0
     crypto = 0.0
-    credit_card_liabilities, credit_card_account_ids = _credit_card_liability_component(
-        db,
-        anchor_ts,
-        base_currency,
-        current_user_id,
-    )
+    credit_card_account_ids = _credit_card_account_ids(db, current_user_id)
     for r in canonical_pos_rows:
         asset_class = str(r["asset_class"] or "").upper()
         if asset_class in ("STOCK", "FUND"):
@@ -763,7 +781,50 @@ def _networth_components(
     if wallet_usd:
         usd_rate = rates.get("USD", 1.0)
         crypto += wallet_usd * usd_rate
+    return {
+        "cash": cash,
+        "stocks_funds": stocks_funds,
+        "crypto": crypto,
+        "rows": {
+            "positions": canonical_pos_rows,
+            "nav": canonical_nav_rows,
+            "cash": canonical_cash_rows,
+        },
+    }
 
+
+def _networth_components(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+    *,
+    price_overlay: bool = False,
+    return_rows: bool = False,
+) -> Dict[str, float] | tuple[Dict[str, float], Dict[str, Any]]:
+    """Compute reporting net worth components from canonical snapshots only.
+
+    When return_rows=True, also returns the raw canonical rows this call fetched
+    (positions/nav/cash) so callers building a per-platform freshness breakdown
+    (the wealth rollup) don't have to re-issue the same queries.
+    """
+    if anchor_ts is None:
+        empty = {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
+        if return_rows:
+            return empty, {"positions": [], "nav": [], "cash": []}
+        return empty
+    assets = _networth_asset_components(
+        db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay
+    )
+    credit_card_liabilities, _card_account_ids = _credit_card_liability_component(
+        db,
+        anchor_ts,
+        base_currency,
+        current_user_id,
+    )
+    cash = assets["cash"]
+    stocks_funds = assets["stocks_funds"]
+    crypto = assets["crypto"]
     liabilities = credit_card_liabilities
     total = cash + stocks_funds + crypto - liabilities
     result = {
@@ -774,11 +835,7 @@ def _networth_components(
         "total": total,
     }
     if return_rows:
-        return result, {
-            "positions": canonical_pos_rows,
-            "nav": canonical_nav_rows,
-            "cash": canonical_cash_rows,
-        }
+        return result, assets["rows"]
     return result
 
 
@@ -1003,6 +1060,7 @@ def _timeline_upload_markers(
     return {month: sorted(platforms) for month, platforms in markers.items()}
 
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _geography(
     db: Session,
     anchor_ts: datetime,
@@ -1069,6 +1127,7 @@ def _blank_geo_country_bucket() -> Dict[str, float]:
     return {"stocks_funds": 0.0, "cash": 0.0, "crypto": 0.0}
 
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _geography_exposure(
     db: Session,
     anchor_ts: datetime,
@@ -1190,6 +1249,7 @@ def _geography_exposure(
 
     return {"base_currency": base_currency, "total": grand_total, "items": items}
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _top_holdings(
     db: Session,
     anchor_ts: datetime,
@@ -1617,6 +1677,7 @@ def _cash_currency_breakdown(
     return items
 
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _stablecoin_cash_balances(
     db: Session,
     anchor_ts: datetime,
@@ -1653,26 +1714,98 @@ def _stablecoin_cash_balances(
     return [{"currency": "USD", "value": total_usd * usd_rate}]
 
 
+def _stablecoin_usd_by_date(db: Session, anchor_dates: list[date], current_user_id: int) -> Dict[date, float]:
+    """USDC/USDT held at each anchor date, in USD: per active wallet, the items
+    of its latest snapshot at/before that date (what _stablecoin_cash_balances
+    sums for one date), for several dates with two queries instead of one per
+    date (#147)."""
+    if not anchor_dates:
+        return {}
+    snapshot_dates = db.execute(
+        text(
+            """
+            SELECT DISTINCT s.wallet_id, s.as_of_date
+            FROM crypto_wallet_snapshots s
+            JOIN crypto_wallets w ON w.id = s.wallet_id
+            WHERE s.as_of_date <= :max_date
+              AND w.status = 'active'
+              AND """
+            + account_scope_sql("w")
+        ),
+        {"max_date": max(anchor_dates), "current_user_id": current_user_id},
+    ).mappings().all()
+    dates_by_wallet: Dict[Any, list[date]] = {}
+    for row in snapshot_dates:
+        as_of = _date_only(row["as_of_date"])
+        if as_of is not None:
+            dates_by_wallet.setdefault(row["wallet_id"], []).append(as_of)
+    # (wallet, snapshot date) used at each anchor date
+    used: Dict[date, set[tuple[Any, date]]] = {}
+    for anchor_date in anchor_dates:
+        used[anchor_date] = set()
+        for wallet_id, dates in dates_by_wallet.items():
+            eligible = [d for d in dates if d <= anchor_date]
+            if eligible:
+                used[anchor_date].add((wallet_id, max(eligible)))
+    needed = set().union(*used.values())
+    if not needed:
+        return {anchor_date: 0.0 for anchor_date in anchor_dates}
+    wallet_ids = sorted({w for w, _ in needed}, key=str)
+    wallet_list = ",".join(f":w{i}" for i in range(len(wallet_ids)))
+    date_list = sorted({d for _, d in needed})
+    params: Dict[str, Any] = {f"w{i}": wallet_id for i, wallet_id in enumerate(wallet_ids)}
+    params.update({f"d{i}": d for i, d in enumerate(date_list)})
+    rows = db.execute(
+        text(
+            f"""
+            SELECT s.wallet_id, s.as_of_date, SUM(i.value_usd) AS total_usd
+            FROM crypto_wallet_snapshots s
+            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+            WHERE s.wallet_id IN ({wallet_list})
+              AND s.as_of_date IN ({",".join(f":d{i}" for i in range(len(date_list)))})
+              AND UPPER(COALESCE(i.symbol, '')) IN ('USDC', 'USDT')
+            GROUP BY s.wallet_id, s.as_of_date
+            """
+        ),
+        params,
+    ).mappings().all()
+    by_snapshot = {(row["wallet_id"], _date_only(row["as_of_date"])): row["total_usd"] for row in rows}
+    out: Dict[date, float] = {}
+    for anchor_date in anchor_dates:
+        values = [by_snapshot[pair] for pair in used[anchor_date] if by_snapshot.get(pair) is not None]
+        # Postgres returns exact NUMERIC sums: add them exactly, as one SQL SUM would.
+        if values and all(isinstance(v, Decimal) for v in values):
+            out[anchor_date] = float(sum(values, Decimal(0)))
+        else:
+            out[anchor_date] = sum(float(v) for v in values)
+    return out
+
+
 def _cash_trend(
     db: Session,
     month_start: datetime,
     base_currency: str,
     current_user_id: int,
 ) -> list[dict[str, Any]]:
+    months = _month_window(month_start, months=6)
+    anchors = [_anchor_ts(candidate_month) for candidate_month in months]
+    stablecoin_usd = _stablecoin_usd_by_date(db, [anchor.date() for anchor in anchors], current_user_id)
     points: list[dict[str, Any]] = []
-    for candidate_month in _month_window(month_start, months=6):
-        anchor = _anchor_ts(candidate_month)
+    for candidate_month, anchor in zip(months, anchors):
         as_of = _effective_as_of(db, anchor, current_user_id)
         value = None
         if as_of is not None:
-            value = _sum_balances(
-                _cash_balances(db, anchor, base_currency, current_user_id)
-                + _stablecoin_cash_balances(db, anchor, base_currency, current_user_id)
-            )
+            stablecoin: list[dict[str, Any]] = []
+            total_usd = stablecoin_usd.get(anchor.date(), 0.0)
+            if total_usd > 0:
+                usd_rate = get_rates(anchor, base_currency, {"USD"}).get("USD", 1.0)
+                stablecoin = [{"currency": "USD", "value": total_usd * usd_rate}]
+            value = _sum_balances(_cash_balances(db, anchor, base_currency, current_user_id) + stablecoin)
         points.append({"month": candidate_month.strftime("%Y-%m"), "value": value})
     return points
 
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
     rows = canonical_account_balance_rows(
         db,
@@ -1711,6 +1844,7 @@ def _display_source(value: str | None) -> str:
     return text.lower().title()
 
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     buckets: Dict[str, float] = {}
 
@@ -1776,6 +1910,7 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current
         )
     return {"items": items, "total": total}
 
+@valuation_cached(shared=True)
 def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     q = text(
         """
@@ -2018,6 +2153,7 @@ def _platform_allocation(
         })
     return {"as_of": anchor_ts.isoformat(), "total": total, "items": items}
 
+@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _stock_exposure(
     db: Session,
     anchor_ts: datetime,
@@ -2854,9 +2990,9 @@ def data_hub_summary(
         {"current_user_id": current_user.id},
     ).fetchone()
 
-    market_data_statuses = latest_status_by_exchange(db)
-    fresh_total = sum(int(ex.get("diagnostics_summary", {}).get("fresh", 0)) for ex in market_data_statuses)
-    stale_total = sum(int(ex.get("diagnostics_summary", {}).get("stale", 0)) for ex in market_data_statuses)
+    market_freshness = freshness_counts_by_exchange(db)
+    fresh_total = sum(counts["fresh"] for counts in market_freshness.values())
+    stale_total = sum(counts["stale"] for counts in market_freshness.values())
 
     wallet_rows = db.execute(
         text(
