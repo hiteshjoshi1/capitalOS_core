@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { useState, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
 import Sidebar from "./Sidebar";
+import RouteFallback from "./RouteFallback";
 import { useAuth } from "../context/useAuth";
 import { useTheme } from "../context/ThemeContext";
 import { ShellHeaderProvider } from "../context/ShellHeaderContext";
@@ -97,7 +98,10 @@ export default function AppShell() {
           </header>
 
           <div key={location.pathname} className="appShellContent">
-            <Outlet />
+            {/* Routes are lazy chunks (#145): keep the shell up while one loads. */}
+            <Suspense fallback={<RouteFallback />}>
+              <Outlet />
+            </Suspense>
           </div>
         </ShellHeaderProvider>
       </main>
