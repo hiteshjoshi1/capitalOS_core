@@ -8,6 +8,9 @@ set -euo pipefail
 : "${OBSERVABILITY_COMPOSE:?set by make}"
 : "${API_COMPOSE:?set by make}"
 MATCH='FlexWebService'
+# Only the API calls IBKR. Matching every service also counted Loki's own logs of
+# these very queries (thousands of lines, no token in them).
+SELECTOR='{service="api"}'
 LOKI=http://loki:3100
 
 # Loki isn't published on the host; Grafana shares its network and has curl.
@@ -15,16 +18,16 @@ loki() { $OBSERVABILITY_COMPOSE exec -T grafana curl -fsS "$@"; }
 
 count_loki() {
   loki -G "$LOKI/loki/api/v1/query" \
-    --data-urlencode "query=sum(count_over_time({service=~\".+\"} |= \"$MATCH\" [30d]))" |
+    --data-urlencode "query=sum(count_over_time($SELECTOR |= \"$MATCH\" [30d]))" |
     sed -n 's/.*"value":\[[0-9.]*,"\([0-9]*\)"\].*/\1/p'
 }
 
 before=$(count_loki)
-echo "Loki lines matching $MATCH (last 30 days): ${before:-0}"
+echo "API lines in Loki matching $MATCH (last 30 days): ${before:-0}"
 if [ "${before:-0}" != "0" ]; then
   loki -X POST -G "$LOKI/loki/api/v1/delete" \
-    --data-urlencode "query={service=~\".+\"} |= \"$MATCH\"" \
-    --data-urlencode "start=0" \
+    --data-urlencode "query=$SELECTOR |= \"$MATCH\"" \
+    --data-urlencode "start=$(( $(date +%s) - 60 * 86400 ))" \
     --data-urlencode "end=$(date +%s)"
   echo "Delete request accepted. Loki applies it after its cancel period (24h by default);"
   echo "queries hide nothing until then. Pending requests: $LOKI/loki/api/v1/delete"
