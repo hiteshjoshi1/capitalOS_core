@@ -2138,3 +2138,124 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
     assert body["net_worth_change"]["abs"] == pytest.approx(0.0)
     assert body["top_movers"]["gainers"] == []
     assert body["top_movers"]["detractors"] == []
+
+
+# --- #133: comparisons for the open (current) month are like for like -------------
+# seed_dashboard_data: Feb-06 snapshots total 100000 (stocks 50000, crypto 20000,
+# cash 30000), Jan-06 snapshots total 90000. With SNAPSHOT_DAY=1 and the clock frozen
+# inside March, March is the open month: its own anchor (Apr 1) is in the future, so
+# it reports February's completed anchor (Mar 1) and must compare with January's (Feb 1).
+
+
+def _freeze_inside_march(monkeypatch):
+    monkeypatch.setenv("SNAPSHOT_DAY", "1")
+    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _d, _b, symbols: {s: 1.0 for s in symbols})
+    monkeypatch.setattr(
+        "app.routers.dashboard._current_anchor_ts",
+        lambda: datetime(2026, 3, 10, tzinfo=timezone.utc),
+    )
+
+
+def test_summary_current_month_compares_completed_anchor_with_the_one_before(
+    client: TestClient, seed_dashboard_data, monkeypatch
+):
+    _freeze_inside_march(monkeypatch)
+
+    resp = client.get("/dashboard/summary?month=2026-03&compare=prev_month,prev_year")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
+    assert body["net_worth"]["total"] == 100000.0
+
+    vs_month = body["net_worth_change"]["vs_prev_month"]
+    assert vs_month["abs"] == 10000.0
+    assert vs_month["compare_month"] == "2026-01"
+    # Twelve months before the month actually used (2026-02), not eleven.
+    assert body["net_worth_change"]["vs_prev_year"]["compare_month"] == "2025-02"
+
+    components = body["net_worth_component_change"]
+    assert components["stocks_funds"]["abs"] == 5000.0
+    assert components["crypto"]["abs"] == 5000.0
+    assert components["cash"]["abs"] == 0.0
+    assert components["cash"]["compare_month"] == "2026-01"
+
+    movers = body["top_movers"]
+    assert movers["compare_month"] == "2026-01"
+    assert any(m["symbol"] == "AAPL" and m["delta_abs"] == 5000.0 for m in movers["gainers"])
+
+
+def test_summary_current_net_worth_change_compares_live_with_latest_month_end(
+    client: TestClient, seed_dashboard_data, monkeypatch
+):
+    _freeze_inside_march(monkeypatch)
+
+    current = client.get("/dashboard/summary?month=2026-03&compare=prev_month,prev_year").json()
+    live_change = current["current_net_worth_change"]
+    live_total = current["current_net_worth"]["total"]
+
+    # Live (Mar 10) vs the latest completed month-end (February's anchor, Mar 1).
+    assert live_change["vs_prev_month"]["compare_month"] == "2026-02"
+    assert live_change["vs_prev_month"]["abs"] == pytest.approx(live_total - 100000.0)
+    assert live_change["vs_prev_month"]["current_as_of"] == "2026-03-10T00:00:00+00:00"
+    # ...and the same month-end one year earlier.
+    assert live_change["vs_prev_year"]["compare_month"] == "2025-02"
+    assert live_change["vs_prev_year"]["abs"] == pytest.approx(live_total)
+
+    # The headline is live whatever month is selected, so its comparison is too.
+    past = client.get("/dashboard/summary?month=2026-01&compare=prev_month,prev_year").json()
+    assert past["current_net_worth_change"] == live_change
+
+
+def test_net_worth_change_current_month_is_not_zero(client: TestClient, seed_dashboard_data, monkeypatch):
+    _freeze_inside_march(monkeypatch)
+
+    resp = client.get("/dashboard/net-worth-change?month=2026-03&compare=prev_month,prev_year")
+    assert resp.status_code == 200
+    changes = resp.json()["net_worth_change"]
+    assert changes["vs_prev_month"]["abs"] == 10000.0
+    assert changes["vs_prev_month"]["compare_month"] == "2026-01"
+    assert changes["vs_prev_year"]["compare_month"] == "2025-02"
+
+
+def test_timeline_movers_current_month_compares_completed_anchors(
+    client: TestClient, seed_dashboard_data, monkeypatch
+):
+    _freeze_inside_march(monkeypatch)
+
+    resp = client.get("/dashboard/net-worth-timeline/2026-03/movers?base_currency=SGD&limit=5")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["compare_month"] == "2026-01"
+    assert any(m["symbol"] == "AAPL" and m["delta_abs"] == 5000.0 for m in data["gainers"])
+
+
+def test_past_month_comparisons_unchanged_with_clock_inside_current_month(
+    client: TestClient, seed_dashboard_data, monkeypatch
+):
+    _freeze_inside_march(monkeypatch)
+
+    body = client.get("/dashboard/summary?month=2026-02&compare=prev_month,prev_year").json()
+    assert body["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
+    assert body["net_worth_change"]["vs_prev_month"]["abs"] == 10000.0
+    assert body["net_worth_change"]["vs_prev_month"]["compare_month"] == "2026-01"
+    assert body["net_worth_change"]["vs_prev_year"]["compare_month"] == "2025-02"
+    assert body["top_movers"]["compare_month"] == "2026-01"
+
+    movers = client.get("/dashboard/net-worth-timeline/2026-02/movers?base_currency=SGD").json()
+    assert movers["compare_month"] == "2026-01"
+
+
+@pytest.mark.parametrize(
+    ("snapshot_day", "now", "expected"),
+    [
+        ("1", datetime(2026, 3, 10, tzinfo=timezone.utc), "2026-02"),
+        ("1", datetime(2026, 3, 1, tzinfo=timezone.utc), "2026-02"),
+        # Before SNAPSHOT_DAY, last month's month-end anchor hasn't passed yet.
+        ("6", datetime(2026, 3, 3, tzinfo=timezone.utc), "2026-01"),
+        ("6", datetime(2026, 3, 6, tzinfo=timezone.utc), "2026-02"),
+    ],
+)
+def test_latest_completed_month_start(monkeypatch, snapshot_day, now, expected):
+    monkeypatch.setenv("SNAPSHOT_DAY", snapshot_day)
+    assert dashboard_router._latest_completed_month_start(now).strftime("%Y-%m") == expected

@@ -292,8 +292,11 @@ export default function WealthOverview() {
       ? (platformAllocation?.total ?? 0)
       : (currentNetWorth?.total ?? 0);
 
-  const prevMonthChange = summary?.net_worth_change?.vs_prev_month;
-  const prevYearChange = summary?.net_worth_change?.vs_prev_year;
+  // The hero headline is the live net worth, so its deltas are the live comparisons
+  // (live vs the latest completed month-end, and that month-end a year earlier), #133.
+  const heroChange = summary?.current_net_worth_change ?? summary?.net_worth_change;
+  const prevMonthChange = heroChange?.vs_prev_month;
+  const prevYearChange = heroChange?.vs_prev_year;
   const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
   const topMovers = summary?.top_movers ?? null;
   const liabilities = bootstrap?.net_worth?.liabilities ?? null;

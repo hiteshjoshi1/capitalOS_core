@@ -117,11 +117,32 @@ def _previous_update_anchor_ts(anchor_ts: datetime) -> datetime:
     return anchor_ts - timedelta(days=1)
 
 
+def _completed_snapshot_month_start(month_start: datetime) -> datetime:
+    """The month whose anchor a snapshot view of `month_start` actually uses.
+
+    A month whose own anchor has passed is "closed" and uses itself. The open
+    (current) month's anchor is still in the future, so it reports the previous
+    month's completed anchor instead (#133).
+    """
+    if _anchor_ts(month_start) <= _current_anchor_ts():
+        return month_start
+    return _add_months(month_start, -1)
+
+
 def _completed_snapshot_anchor_ts(month_start: datetime) -> datetime:
-    requested_anchor = _anchor_ts(month_start)
-    if requested_anchor <= _current_anchor_ts():
-        return requested_anchor
-    return _anchor_ts(_add_months(month_start, -1))
+    return _anchor_ts(_completed_snapshot_month_start(month_start))
+
+
+def _latest_completed_month_start(now: datetime) -> datetime:
+    """The latest month (UTC month start) whose anchor is at or before `now`.
+
+    Normally the month before `now`'s month; one further back while `now` is
+    before SNAPSHOT_DAY (that month-end's anchor hasn't passed yet).
+    """
+    month_start = _add_months(_parse_month(now.strftime("%Y-%m")), -1)
+    while _anchor_ts(month_start) > now:
+        month_start = _add_months(month_start, -1)
+    return month_start
 
 
 def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
@@ -1787,22 +1808,65 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
     return {"income": income, "expenses": expenses, "net": net, "savings_rate": savings_rate}
 
 
+def _cached_networth_components(
+    db: Session,
+    anchor: datetime,
+    base_currency: str,
+    current_user_id: int,
+    nw_cache: Optional[Dict[datetime, Dict[str, float]]],
+) -> Dict[str, float]:
+    """Snapshot-mode _networth_components, memoised per request by anchor."""
+    if nw_cache is None:
+        return _networth_components(db, anchor, base_currency, current_user_id)
+    if anchor not in nw_cache:
+        nw_cache[anchor] = _networth_components(db, anchor, base_currency, current_user_id)
+    return nw_cache[anchor]
+
+
+def _snapshot_compare_months(snapshot_month_start: datetime, compare_set: set[str]) -> Dict[str, datetime]:
+    """Comparison months for a value taken at `snapshot_month_start`'s anchor:
+    the completed anchor one month and twelve months before it (#133)."""
+    months: Dict[str, datetime] = {}
+    if "prev_month" in compare_set:
+        months["vs_prev_month"] = _add_months(snapshot_month_start, -1)
+    if "prev_year" in compare_set:
+        months["vs_prev_year"] = _add_months(snapshot_month_start, -12)
+    return months
+
+
+def _live_compare_months(now: datetime, compare_set: set[str]) -> Dict[str, datetime]:
+    """Comparison months for a live value at `now`: the latest completed
+    month-end (vs_prev_month) and the same month-end a year earlier (#133)."""
+    latest = _latest_completed_month_start(now)
+    months: Dict[str, datetime] = {}
+    if "prev_month" in compare_set:
+        months["vs_prev_month"] = latest
+    if "prev_year" in compare_set:
+        months["vs_prev_year"] = _add_months(latest, -12)
+    return months
+
+
 def _compute_net_worth_changes(
     db: Session,
-    month_start: datetime,
+    compare_months: Dict[str, datetime],
     as_of: datetime | None,
     current_value: float,
     base_currency: str,
-    compare_set: set[str],
     current_user_id: int,
     value_selector: Callable[[Dict[str, float]], float] = lambda nw: nw["total"],
+    nw_cache: Optional[Dict[datetime, Dict[str, float]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """`current_value` vs each comparison month's completed anchor. Build
+    `compare_months` with _snapshot_compare_months (a value taken at a month's
+    anchor) or _live_compare_months (a live value), so every comparison is
+    like for like (#133).
+    """
     changes: Dict[str, Dict[str, Any]] = {}
 
     def _delta(label: str, other_month_start: datetime):
         other_anchor = _anchor_ts(other_month_start)
         other_as_of = _effective_as_of(db, other_anchor, current_user_id)
-        other_nw = _networth_components(db, other_anchor, base_currency, current_user_id)
+        other_nw = _cached_networth_components(db, other_anchor, base_currency, current_user_id, nw_cache)
         prev_value = value_selector(other_nw)
 
         abs_change = current_value - prev_value
@@ -1816,10 +1880,8 @@ def _compute_net_worth_changes(
             "compare_month": other_month_start.strftime("%Y-%m"),
         }
 
-    if "prev_month" in compare_set:
-        _delta("vs_prev_month", _add_months(month_start, -1))
-    if "prev_year" in compare_set:
-        _delta("vs_prev_year", _add_months(month_start, -12))
+    for label, other_month_start in compare_months.items():
+        _delta(label, other_month_start)
 
     return changes
 
@@ -1831,11 +1893,14 @@ def _compute_component_changes(
     current_components: Dict[str, float],
     base_currency: str,
     current_user_id: int,
+    nw_cache: Optional[Dict[datetime, Dict[str, float]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """Per-component change vs the completed anchor one month before
+    `month_start` (the month the current components were taken at, #133)."""
     prior_month_start = _add_months(month_start, -1)
     prior_anchor = _anchor_ts(prior_month_start)
     prior_as_of = _effective_as_of(db, prior_anchor, current_user_id)
-    prior_components = _networth_components(db, prior_anchor, base_currency, current_user_id)
+    prior_components = _cached_networth_components(db, prior_anchor, base_currency, current_user_id, nw_cache)
 
     out: Dict[str, Dict[str, Any]] = {}
     for key in ("cash", "stocks_funds", "crypto"):
@@ -2134,11 +2199,10 @@ def dashboard_net_worth_change(
     compare_set = {c.strip() for c in compare.split(",") if c.strip()}
     changes = _compute_net_worth_changes(
         db=db,
-        month_start=month_start,
+        compare_months=_snapshot_compare_months(_completed_snapshot_month_start(month_start), compare_set),
         as_of=as_of,
         current_value=nw["total"],
         base_currency=base_currency,
-        compare_set=compare_set,
         current_user_id=current_user.id,
     )
     return {
@@ -2269,9 +2333,12 @@ def net_worth_timeline_movers(
     stored), so it stays out of the timeline read path's hot loop.
     """
     month_start = _parse_month(month)
-    anchor = _completed_snapshot_anchor_ts(month_start)
-    prev_month_start = _add_months(month_start, -1)
-    prev_anchor = _completed_snapshot_anchor_ts(prev_month_start)
+    # Like for like (#133): the anchor actually used vs the completed anchor one
+    # month before it. For the open month both used to resolve to the same date.
+    snapshot_month_start = _completed_snapshot_month_start(month_start)
+    anchor = _anchor_ts(snapshot_month_start)
+    prev_month_start = _add_months(snapshot_month_start, -1)
+    prev_anchor = _anchor_ts(prev_month_start)
 
     nw = _networth_components(db, anchor, base_currency, current_user.id)
     prev_nw = _networth_components(db, prev_anchor, base_currency, current_user.id)
@@ -2295,8 +2362,10 @@ def dashboard_summary(
     month_start = _parse_month(month)
     month_end = _add_months(month_start, 1)
 
-    # Snapshot anchor + effective snapshot timestamp
-    anchor = _completed_snapshot_anchor_ts(month_start)
+    # Snapshot anchor + effective snapshot timestamp. Comparisons are taken
+    # relative to the month whose anchor is actually used (#133).
+    snapshot_month_start = _completed_snapshot_month_start(month_start)
+    anchor = _anchor_ts(snapshot_month_start)
     snapshot_day = _configured_snapshot_day()
     top_holdings_limit = _summary_top_holdings_limit()
 
@@ -2362,30 +2431,44 @@ def dashboard_summary(
     cf = _cashflow(db, month_start, month_end, base_currency, current_user.id)
 
     compare_set = {c.strip() for c in compare.split(",") if c.strip()}
+    nw_cache: Dict[datetime, Dict[str, float]] = {anchor: nw}
     changes = _compute_net_worth_changes(
         db=db,
-        month_start=month_start,
+        compare_months=_snapshot_compare_months(snapshot_month_start, compare_set),
         as_of=as_of,
         current_value=nw["total"],
         base_currency=base_currency,
-        compare_set=compare_set,
         current_user_id=current_user.id,
+        nw_cache=nw_cache,
+    )
+    # The live headline (current_net_worth) vs the latest completed month-end
+    # anchor (vs_prev_month) and the one twelve months before it (vs_prev_year),
+    # independent of the selected month, like the headline itself (#133).
+    current_changes = _compute_net_worth_changes(
+        db=db,
+        compare_months=_live_compare_months(current_anchor, compare_set),
+        as_of=current_anchor,
+        current_value=current_nw["total"],
+        base_currency=base_currency,
+        current_user_id=current_user.id,
+        nw_cache=nw_cache,
     )
     component_changes = (
         _compute_component_changes(
             db=db,
-            month_start=month_start,
+            month_start=snapshot_month_start,
             as_of=as_of,
             current_components=nw,
             base_currency=base_currency,
             current_user_id=current_user.id,
+            nw_cache=nw_cache,
         )
         if "prev_month" in compare_set
         else None
     )
     top_movers = None
     if "prev_month" in compare_set:
-        prev_month_start = _add_months(month_start, -1)
+        prev_month_start = _add_months(snapshot_month_start, -1)
         prev_anchor = _anchor_ts(prev_month_start)
         snapshot_top = _top_holdings(
             db,
@@ -2395,7 +2478,7 @@ def dashboard_summary(
             current_user.id,
             limit=max(top_holdings_limit, 250),
         )
-        prev_components = _networth_components(db, prev_anchor, base_currency, current_user.id)
+        prev_components = _cached_networth_components(db, prev_anchor, base_currency, current_user.id, nw_cache)
         prev_top = _top_holdings(
             db,
             prev_anchor,
@@ -2432,6 +2515,7 @@ def dashboard_summary(
         "top_holdings": top,
         "cash_balances": cash_balances,
         "net_worth_change": changes if changes else None,
+        "current_net_worth_change": current_changes if current_changes else None,
         "net_worth_component_change": component_changes,
         "top_movers": top_movers,
         "cash_percent": cash_percent,

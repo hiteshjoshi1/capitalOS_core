@@ -334,6 +334,9 @@ export type DashboardSummary = {
       compare_month: string;
     };
   };
+  /** Live current_net_worth vs the latest completed month-end (vs_prev_month) and the
+   * same month-end a year earlier (vs_prev_year), whatever month was requested (#133). */
+  current_net_worth_change?: DashboardSummary["net_worth_change"];
   net_worth_component_change?: null | {
     cash?: {
       abs: number;

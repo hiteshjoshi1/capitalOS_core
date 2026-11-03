@@ -330,6 +330,37 @@ describe("WealthOverview", () => {
     expect(screen.getByText("+S$ 5 (+5.0%)")).toBeInTheDocument();
   });
 
+  it("shows the live comparisons next to the live headline (#133)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    const change = (abs: number, compareMonth: string) => ({
+      abs,
+      pct: null,
+      current_as_of: "2026-06-01T00:00:00+00:00",
+      compare_as_of: null,
+      compare_month: compareMonth,
+    });
+    mockApi.dashboardSummary.mockResolvedValue({
+      ...makeSummary(100),
+      // Snapshot-to-snapshot: what the requested month's snapshot changed by.
+      net_worth_change: { vs_prev_month: change(111, "2026-04"), vs_prev_year: change(222, "2025-05") },
+      // Live headline vs the latest completed month-end and that month-end a year earlier.
+      current_net_worth_change: { vs_prev_month: change(7, "2026-05"), vs_prev_year: change(9, "2025-05") },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    const monthLabel = await screen.findByText("VS LAST MONTH");
+    expect(monthLabel.parentElement).toHaveTextContent("+S$ 7");
+    expect(screen.getByText("VS LAST YEAR").parentElement).toHaveTextContent("+S$ 9");
+    expect(screen.queryByText(/S\$ 111/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/S\$ 222/)).not.toBeInTheDocument();
+  });
+
   it("shows today's movers when the Today tab is selected", async () => {
     mockSubscribe.mockImplementation(() => () => {});
     mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
