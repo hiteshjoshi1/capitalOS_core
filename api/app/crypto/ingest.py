@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from app.crypto.adapters import TokenBalance, NativeBalance
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order, fetch_wallet_holdings
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 
 SINGAPORE_TZ = ZoneInfo("Asia/Singapore")
@@ -380,6 +381,9 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
             },
         )
 
+    # A snapshot dated on/before a completed anchor (normally only on the
+    # snapshot day itself) changes that month's History row (#138).
+    mark_rollups_dirty(db, as_of, wallet_id=wallet_id, reason="crypto_snapshot")
     return snapshot_id
 
 

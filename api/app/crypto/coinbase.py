@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.crypto.ingest import SnapshotResult
+from app.wealth_rollup_dirty import mark_wallet_history_dirty
 
 ADVANCED_TRADE_ACCOUNTS_PATH = "/api/v3/brokerage/accounts"
 DEFAULT_COINBASE_API_BASE = "https://api.coinbase.com"
@@ -86,7 +87,7 @@ def ensure_coinbase_wallet(db: Session, user_id: int) -> str:
     existing = db.execute(
         text(
             """
-            SELECT id
+            SELECT id, user_id, status
             FROM crypto_wallets
             WHERE chain_type = 'exchange' AND chain = 'coinbase' AND address = :address
             """
@@ -94,6 +95,7 @@ def ensure_coinbase_wallet(db: Session, user_id: int) -> str:
         {"address": address},
     ).fetchone()
     if existing:
+        reactivated = existing[2] != "active" or existing[1] is None
         db.execute(
             text(
                 """
@@ -106,6 +108,8 @@ def ensure_coinbase_wallet(db: Session, user_id: int) -> str:
             ),
             {"id": existing[0], "user_id": user_id},
         )
+        if reactivated:
+            mark_wallet_history_dirty(db, existing[0], "coinbase_wallet_activated")
         db.commit()
         return str(existing[0])
 

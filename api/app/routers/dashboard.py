@@ -44,6 +44,7 @@ from app.schemas.dashboard import (
 )
 from app.fx import get_rates
 from app.valuation_cache import request_memo, valuation_cached
+from app.wealth_rollup_dirty import dirty_state, dirty_user_ids, settle_dirty_mark
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.portfolio.canonical_reads import (
     canonical_account_balance_rows,
@@ -844,8 +845,10 @@ def _networth_components(
 # wealth_monthly_rollups pre-aggregates one net-worth snapshot per
 # (user, month, base_currency) so the History page is a single indexed read
 # instead of recomputing _networth_components per month on every request.
-# Rows are written by _backfill_wealth_rollups, called from the timeline
-# endpoints below — never computed inline by a GET.
+# Only completed months (own anchor passed) are stored. Rows are written by
+# _refresh_wealth_rollups: forced by the backfill endpoint ("Generate history"),
+# and lazily by the timeline GET / scheduler hook for rows that went stale
+# (#138, app.wealth_rollup_dirty).
 
 _WEALTH_ROLLUP_CARRY_HORIZON_DAYS = 180
 _DAILY_CADENCE_PLATFORMS = {"IBKR", "CRYPTO", "COINBASE"}
@@ -967,6 +970,8 @@ def _upsert_wealth_rollup(
     month: str,
     base_currency: str,
     row: Dict[str, Any],
+    *,
+    input_generation: int = 0,
 ) -> None:
     components = row["components"]
     # SQLite (used by the test suite) has no JSONB type or NOW(); Postgres gets
@@ -979,10 +984,10 @@ def _upsert_wealth_rollup(
             f"""
             INSERT INTO wealth_monthly_rollups
               (user_id, month, anchor_date, base_currency, total, cash, stocks_funds, crypto,
-               liabilities, source_freshness, freshness_status, computed_at)
+               liabilities, source_freshness, freshness_status, computed_at, input_generation)
             VALUES
               (:user_id, :month, :anchor_date, :base_currency, :total, :cash, :stocks_funds, :crypto,
-               :liabilities, {json_cast}, :freshness_status, :computed_at)
+               :liabilities, {json_cast}, :freshness_status, :computed_at, :input_generation)
             ON CONFLICT (user_id, month, base_currency) DO UPDATE SET
               anchor_date = EXCLUDED.anchor_date,
               total = EXCLUDED.total,
@@ -992,7 +997,8 @@ def _upsert_wealth_rollup(
               liabilities = EXCLUDED.liabilities,
               source_freshness = EXCLUDED.source_freshness,
               freshness_status = EXCLUDED.freshness_status,
-              computed_at = EXCLUDED.computed_at
+              computed_at = EXCLUDED.computed_at,
+              input_generation = EXCLUDED.input_generation
             """
         ),
         {
@@ -1008,8 +1014,101 @@ def _upsert_wealth_rollup(
             "source_freshness": json.dumps(row["source_freshness"]),
             "freshness_status": row["freshness_status"],
             "computed_at": computed_at,
+            "input_generation": input_generation,
         },
     )
+
+
+def _rollup_month_completed(month_start: datetime) -> bool:
+    """A month gets a stored rollup row only once its own anchor has passed.
+    The still-open month is covered by the timeline's live "now" point (#138)."""
+    return _anchor_ts(month_start) <= _current_anchor_ts()
+
+
+def _delete_wealth_rollup(db: Session, current_user_id: int, month: str, base_currency: str) -> None:
+    db.execute(
+        text(
+            "DELETE FROM wealth_monthly_rollups "
+            "WHERE user_id = :user_id AND month = :month AND base_currency = :base_currency"
+        ),
+        {"user_id": current_user_id, "month": month, "base_currency": base_currency},
+    )
+
+
+def _refresh_wealth_rollups(
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    *,
+    months: Optional[list[str]] = None,
+    force: bool = False,
+) -> Dict[str, int]:
+    """Bring stored rollup rows up to date (#138). Commits only if it wrote.
+
+    For each month considered (``months``, or every stored month when None):
+    - not completed yet (its own anchor is in the future): a stored row is a
+      provisional one, written by the old rule at last month's anchor. Deleted.
+    - completed: (re)computed at its own anchor when ``force``; when missing
+      (only for ``months``, and only from the user's first stored month on, so
+      a read never generates history the user hasn't asked for); when stored at
+      another anchor (the old rule, or a SNAPSHOT_DAY change); or when a dirty
+      mark covers its anchor and the row predates that mark.
+    Then the user's dirty mark is settled (app.wealth_rollup_dirty).
+    """
+    dirty_from, generation = dirty_state(db, current_user_id)
+    stored = {
+        str(row["month"]): row
+        for row in db.execute(
+            text(
+                "SELECT month, anchor_date, input_generation FROM wealth_monthly_rollups "
+                "WHERE user_id = :user_id AND base_currency = :base_currency"
+            ),
+            {"user_id": current_user_id, "base_currency": base_currency},
+        ).mappings().all()
+    }
+    first_stored = min(stored) if stored else None
+    candidates = sorted(set(months) if months is not None else set(stored))
+
+    written = 0
+    deleted = 0
+    for month_key in candidates:
+        month_start = _parse_month(month_key)
+        row = stored.get(month_key)
+        if not _rollup_month_completed(month_start):
+            if row is not None:
+                _delete_wealth_rollup(db, current_user_id, month_key, base_currency)
+                deleted += 1
+            continue
+        anchor = _anchor_ts(month_start)
+        if row is None:
+            needed = force or (months is not None and first_stored is not None and month_key >= first_stored)
+        else:
+            needed = (
+                force
+                or _date_only(row["anchor_date"]) != anchor.date()
+                or (
+                    dirty_from is not None
+                    and anchor.date() >= dirty_from
+                    and int(row["input_generation"] or 0) < generation
+                )
+            )
+        if not needed:
+            continue
+        computed = _wealth_rollup_row(db, anchor, base_currency, current_user_id)
+        _upsert_wealth_rollup(
+            db, current_user_id, month_key, base_currency, computed, input_generation=generation,
+        )
+        written += 1
+
+    settled = settle_dirty_mark(db, current_user_id, generation) if (written or dirty_from is not None) else False
+    if written or deleted or settled:
+        db.commit()
+    return {"written": written, "deleted": deleted}
+
+
+def _trailing_month_keys(months: int) -> list[str]:
+    current_month_start = _parse_month(_current_anchor_ts().strftime("%Y-%m"))
+    return [_add_months(current_month_start, offset).strftime("%Y-%m") for offset in range(-(months - 1), 1)]
 
 
 def _backfill_wealth_rollups(
@@ -1018,15 +1117,33 @@ def _backfill_wealth_rollups(
     base_currency: str,
     months: int,
 ) -> int:
-    current_month_start = _current_anchor_ts().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    """Recompute every completed month of the trailing N (the "Generate
+    history" button). Returns the number of rows written."""
+    result = _refresh_wealth_rollups(
+        db, current_user_id, base_currency, months=_trailing_month_keys(months), force=True,
+    )
+    return result["written"]
+
+
+def refresh_dirty_wealth_rollups(db: Session) -> int:
+    """Scheduler hook (after IBKR Flex / crypto jobs): recompute every stale
+    stored row of every user with a pending dirty mark, in each base currency
+    that user has rows in. Returns the number of rows written."""
     written = 0
-    for offset in range(-(months - 1), 1):
-        month_start = _add_months(current_month_start, offset)
-        anchor = _completed_snapshot_anchor_ts(month_start)
-        row = _wealth_rollup_row(db, anchor, base_currency, current_user_id)
-        _upsert_wealth_rollup(db, current_user_id, month_start.strftime("%Y-%m"), base_currency, row)
-        written += 1
-    db.commit()
+    for user_id in dirty_user_ids(db):
+        currencies = [
+            str(row[0])
+            for row in db.execute(
+                text("SELECT DISTINCT base_currency FROM wealth_monthly_rollups WHERE user_id = :user_id"),
+                {"user_id": user_id},
+            ).fetchall()
+        ]
+        if not currencies:
+            if settle_dirty_mark(db, user_id, dirty_state(db, user_id)[1]):
+                db.commit()
+            continue
+        for currency in currencies:
+            written += _refresh_wealth_rollups(db, user_id, currency)["written"]
     return written
 
 
@@ -2377,31 +2494,20 @@ def net_worth_timeline(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
-    """Read-mostly: serves wealth_monthly_rollups directly (one indexed scan).
+    """Read-mostly: serves wealth_monthly_rollups (one indexed scan).
 
-    Only the current, still-open month is opportunistically refreshed inline
-    when stale — every earlier month is a pure read, so this endpoint never
-    pays for a full historical recompute (see _backfill_wealth_rollups for
-    that path, called explicitly by the frontend or an upload hook).
+    Before reading, rows in the range that are stale are recomputed inline
+    (#138): rows a dirty mark covers (an import changed data on or before their
+    anchor), rows stored at another anchor than their own, the newest completed
+    month(s) once they finish, and any provisional row of a month that hasn't
+    completed yet (deleted: the live "now" point covers the open month). With
+    nothing stale this is a pure read, with no writes.
     """
-    current_month_start = _current_anchor_ts().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    current_month_start = _parse_month(_current_anchor_ts().strftime("%Y-%m"))
     range_start = _add_months(current_month_start, -(months - 1))
     current_month_key = current_month_start.strftime("%Y-%m")
 
-    existing_current = db.execute(
-        text(
-            "SELECT computed_at FROM wealth_monthly_rollups "
-            "WHERE user_id = :user_id AND month = :month AND base_currency = :base_currency"
-        ),
-        {"user_id": current_user.id, "month": current_month_key, "base_currency": base_currency},
-    ).mappings().first()
-    computed_at = _normalize_ts(existing_current["computed_at"]) if existing_current else None
-    needs_refresh = computed_at is None or (datetime.now(tz=timezone.utc) - computed_at) > timedelta(hours=6)
-    if needs_refresh:
-        anchor = _completed_snapshot_anchor_ts(current_month_start)
-        row = _wealth_rollup_row(db, anchor, base_currency, current_user.id)
-        _upsert_wealth_rollup(db, current_user.id, current_month_key, base_currency, row)
-        db.commit()
+    _refresh_wealth_rollups(db, current_user.id, base_currency, months=_trailing_month_keys(months))
 
     rollup_rows = db.execute(
         text(
@@ -2450,6 +2556,8 @@ def net_worth_timeline(
         "now": {
             **current_state["net_worth"],
             "as_of": current_state["anchor"].isoformat(),
+            # The open month has no stored point; its upload ticks go on "now".
+            "uploads": upload_markers.get(current_month_key, []),
         },
     }
 

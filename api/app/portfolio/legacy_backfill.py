@@ -40,6 +40,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.wealth_rollup_dirty import ALL_HISTORY, mark_rollups_dirty
 from app.auth_context import account_scope_sql
 from app.fx import get_rates
 
@@ -1036,6 +1037,14 @@ def backfill_legacy_positions(
     result.data_quality_events_written += c_dqe
 
     if not dry_run:
+        if result.total_migrated:
+            # A one-off migration of historical rows: recompute all History (#138).
+            mark_rollups_dirty(
+                db,
+                ALL_HISTORY,
+                user_ids=[current_user_id] if current_user_id else None,
+                reason="legacy_backfill",
+            )
         db.commit()
 
     logger.info(

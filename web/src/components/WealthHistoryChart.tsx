@@ -1,7 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { WealthTimeline, WealthTimelinePoint } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
-import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import { computeMonthFlags, isCarriedPoint, isGapPoint } from "../lib/wealthHistoryAnalysis";
 
 export type WealthHistoryChartMode = "total" | "comp";
@@ -118,8 +117,8 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
 
   const hoverPoint = hoverIdx != null && hoverIdx < n ? points[hoverIdx] : null;
   const isHoverNow = hoverIdx === n;
-  const showSnapshotClockCaveat =
-    hoverPoint?.month === currentMonthYYYYMM() && hoverPoint.uploads.length > 0;
+  // The still-open month has no stored point (#138): its uploads sit on "now".
+  const nowUploads = now.uploads ?? [];
 
   return (
     <div className="whChartWrap">
@@ -167,6 +166,18 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
               </rect>
             ) : null,
           )}
+          {nowUploads.length > 0 ? (
+            <rect
+              x={xNow - 4}
+              y={M.t + innerH + 5}
+              width={8}
+              height={8}
+              transform={`rotate(45 ${xNow} ${M.t + innerH + 9})`}
+              className="whUploadMark"
+            >
+              <title>{`Upload this month: ${nowUploads.map(formatPlatformLabel).join(", ")}`}</title>
+            </rect>
+          ) : null}
 
           {seriesDefs.map((s) => (
             <g key={s.key}>
@@ -273,6 +284,9 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
                   <span>Total</span>
                   <strong>{formatMoney(now.total)}</strong>
                 </div>
+                {nowUploads.length > 0 ? (
+                  <div className="whTooltipRow">Uploaded this month: {nowUploads.map(formatPlatformLabel).join(", ")}</div>
+                ) : null}
               </>
             ) : hoverPoint ? (
               <>
@@ -333,11 +347,6 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
                     {onSelectMonth ? <div className="whTooltipHint">Click to inspect this month →</div> : null}
                   </>
                 )}
-                {showSnapshotClockCaveat ? (
-                  <div className="whTooltipCarriedNote">
-                    Uses data through {hoverPoint.anchor_date}; recent uploads apply next month.
-                  </div>
-                ) : null}
               </>
             ) : null}
           </div>
