@@ -2206,6 +2206,16 @@ a.btn {
   flex-shrink: 0;
 }
 
+/* A refresh error in Data Hub: wraps in full instead of a one-line pill (#121). */
+.dataHubRefreshError {
+  margin: 8px 0 0;
+  color: var(--warn);
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 /* ── StatusPill (generic Fresh/Stale/Completed/Verified/etc. pill) ── */
 
 .statusPill {

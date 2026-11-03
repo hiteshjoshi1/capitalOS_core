@@ -57,6 +57,7 @@ From the main checkout:
   `../capitalOS-worktrees/test-instance`), runs `make verify`, restores the newest verified
   backup there (counts checked), applies the batch's migrations, and serves it with a red TEST
   banner: web **:5174** (also via Tailscale), API :8021, Postgres :5434. Schedulers are off.
+  It links the main checkout's `.env` (API keys, IBKR Flex) so refreshes work; a `DATABASE_URL` there is refused (#120).
 - A conflict stops and is named: resolve and commit in that worktree, then `make test-instance-start`.
 - `make test-instance-status`, then `make test-instance-pr` (one PR test/<date> → main, `Closes`
   every batch issue), then `make test-instance-drop`.

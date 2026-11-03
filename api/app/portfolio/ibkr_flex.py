@@ -589,8 +589,9 @@ class IbkrFlexClient:
         timeout_seconds: float = 30.0,
         user_agent: str | None = None,
     ) -> None:
-        if not token or not query_id:
-            raise IbkrFlexConfigError("IBKR Flex token and query id are required")
+        missing = [name for name, value in (("IBKR_FLEX_TOKEN", token), ("IBKR_FLEX_QUERY_ID", query_id)) if not value]
+        if missing:
+            raise IbkrFlexConfigError(f"IBKR Flex isn't set up: {' and '.join(missing)} missing in .env.")
         self._token = token
         self._query_id = query_id
         self._base_url = base_url.rstrip("/")
@@ -1996,9 +1997,7 @@ def _authorized_flex_user_id(db: Session) -> int:
             raise IbkrFlexConfigError(f"IBKR_FLEX_USER_ID={raw!r} is not a valid integer.") from exc
 
     raise IbkrFlexConfigError(
-        "IBKR Flex is configured (IBKR_FLEX_TOKEN/IBKR_FLEX_QUERY_ID set) but neither "
-        "IBKR_FLEX_USERNAME nor IBKR_FLEX_USER_ID is set — refusing to guess which user "
-        "owns this IBKR account. Set one of them in .env."
+        "IBKR Flex isn't set up: IBKR_FLEX_USERNAME missing in .env (the user who owns the IBKR account)."
     )
 
 
@@ -2009,6 +2008,9 @@ def run_ibkr_flex_import_from_config(
     legacy_account_id: int,
     cutover_date: date | None = None,
 ) -> dict[str, Any]:
+    # Credentials first, so a missing token is reported as that (#121), not as a
+    # missing owner.
+    client = IbkrFlexClient.from_env()
     authorized_user_id = _authorized_flex_user_id(db)
     if current_user_id != authorized_user_id:
         raise IbkrFlexConfigError(
@@ -2020,7 +2022,7 @@ def run_ibkr_flex_import_from_config(
         _first_env_value("IBKR_FLEX_INITIAL_BACKOFF_SECONDS", "IBKR_FLEX_BACKOFF_SECONDS", default="2")
     )
     max_backoff_seconds = float(os.getenv("IBKR_FLEX_MAX_BACKOFF_SECONDS", "30"))
-    reference_code, xml_text = IbkrFlexClient.from_env().fetch_statement(
+    reference_code, xml_text = client.fetch_statement(
         max_attempts=max_attempts,
         initial_backoff_seconds=initial_backoff_seconds,
         max_backoff_seconds=max_backoff_seconds,

@@ -201,7 +201,9 @@ export default function OperationsOverview() {
                   {priceRefresh.status === "running" ? "Refreshing…" : "Refresh prices"}
                 </button>
                 {priceRefresh.status === "done" && <StatusPill tone="good" label={priceRefresh.message} />}
-                {priceRefresh.status === "error" && <StatusPill tone="warn" label={priceRefresh.message} />}
+                {priceRefresh.status === "error" && (
+                  <p className="dataHubRefreshError" role="alert">{priceRefresh.message}</p>
+                )}
               </article>
 
               <article className="card dataHubStatCard">
@@ -231,7 +233,9 @@ export default function OperationsOverview() {
                   {ibkrRefresh.status === "running" ? "Refreshing…" : "Refresh IBKR"}
                 </button>
                 {ibkrRefresh.status === "done" && <StatusPill tone="good" label={ibkrRefresh.message} />}
-                {ibkrRefresh.status === "error" && <StatusPill tone="warn" label={ibkrRefresh.message} />}
+                {ibkrRefresh.status === "error" && (
+                  <p className="dataHubRefreshError" role="alert">{ibkrRefresh.message}</p>
+                )}
               </article>
 
               <article className="card dataHubStatCard">
@@ -241,7 +245,9 @@ export default function OperationsOverview() {
                   {cryptoRefresh.status === "running" ? "Refreshing…" : "Refresh crypto"}
                 </button>
                 {cryptoRefresh.status === "done" && <StatusPill tone="good" label={cryptoRefresh.message} />}
-                {cryptoRefresh.status === "error" && <StatusPill tone="warn" label={cryptoRefresh.message} />}
+                {cryptoRefresh.status === "error" && (
+                  <p className="dataHubRefreshError" role="alert">{cryptoRefresh.message}</p>
+                )}
               </article>
             </div>
           </section>

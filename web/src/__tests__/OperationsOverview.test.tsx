@@ -107,6 +107,22 @@ describe("OperationsOverview (Data Hub Overview)", () => {
     await waitFor(() => expect(screen.getByText("Queued refresh for 4 wallets.")).toBeInTheDocument());
   });
 
+  it("shows a refresh error in full, as an alert (#121)", async () => {
+    const message =
+      "IBKR Flex isn't set up: IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID missing in .env.";
+    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
+    mockApi.accounts.mockResolvedValue([ibkrAccountFixture]);
+    mockApi.ibkrFlexImportNow.mockRejectedValue(new Error(message));
+    renderPage();
+
+    expect(await screen.findByText("Refresh now")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh IBKR" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(message);
+    expect(alert).toHaveClass("dataHubRefreshError");
+  });
+
   it("disables the IBKR refresh button when no IBKR account is linked", async () => {
     mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
     mockApi.accounts.mockResolvedValue([]);

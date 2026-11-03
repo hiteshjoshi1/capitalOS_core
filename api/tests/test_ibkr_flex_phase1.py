@@ -654,3 +654,32 @@ def test_ibkr_flex_due_check_waits_before_retrying_a_failed_run(monkeypatch):
 def test_ibkr_flex_default_schedule_is_after_ibkr_builds_the_prior_day():
     tz_name, hour, minute = portfolio_scheduler._schedule_time()
     assert (hour, minute) == (18, 30)
+
+
+def test_ibkr_import_now_names_the_missing_setting_with_503(client, db_engine, monkeypatch):
+    # #121: with nothing configured the error used to claim the token was set and
+    # complain about the username, as a 500.
+    _seed_ibkr_account(db_engine)
+    for name in ("IBKR_FLEX_TOKEN", "IBKR_TOKEN", "IBKR_FLEX_QUERY_ID", "IBKR_QUERY_ID", "IBKR_FLEX_USERNAME", "IBKR_FLEX_USER_ID"):
+        monkeypatch.delenv(name, raising=False)
+
+    response = client.post("/portfolio/ibkr-flex/import-now", params={"account_id": 300})
+
+    assert response.status_code == 503, response.text
+    detail = response.json()["detail"]
+    assert "IBKR_FLEX_TOKEN" in detail and "IBKR_FLEX_QUERY_ID" in detail
+    assert "USERNAME" not in detail
+    assert "is configured" not in detail
+
+
+def test_ibkr_import_now_asks_for_the_owner_only_when_credentials_are_set(client, db_engine, monkeypatch):
+    _seed_ibkr_account(db_engine)
+    monkeypatch.setenv("IBKR_FLEX_TOKEN", "token")
+    monkeypatch.setenv("IBKR_FLEX_QUERY_ID", "query")
+    monkeypatch.delenv("IBKR_FLEX_USERNAME", raising=False)
+    monkeypatch.delenv("IBKR_FLEX_USER_ID", raising=False)
+
+    response = client.post("/portfolio/ibkr-flex/import-now", params={"account_id": 300})
+
+    assert response.status_code == 503, response.text
+    assert "IBKR_FLEX_USERNAME" in response.json()["detail"]

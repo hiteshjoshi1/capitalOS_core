@@ -136,7 +136,7 @@ def import_ibkr_flex_now(
             )
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         except IbkrFlexConfigError as exc:
-            logger.exception(
+            logger.warning(
                 "ibkr_flex_refresh_failed",
                 extra={
                     "event": "ibkr_flex_refresh_failed",
@@ -147,7 +147,8 @@ def import_ibkr_flex_now(
                     "duration_ms": int((time.perf_counter() - started) * 1000),
                 },
             )
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+            # A setup problem on this server, not a crash: 503 with the message (#121).
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
         except IbkrFlexImportError as exc:
             logger.warning(
                 "ibkr_flex_refresh_failed",
