@@ -205,6 +205,39 @@ describe("StockHoldings", () => {
     }
   });
 
+  it.each([
+    ["desktop", 1024],
+    ["mobile", 480],
+  ])("explains an IBKR fallback price behind an i button (%s, #124)", async (_label, width) => {
+    Object.defineProperty(window, "innerWidth", { value: width, configurable: true, writable: true });
+    const [first, ...rest] = summaryFixture.top_holdings;
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...summaryFixture,
+      is_live: true,
+      top_holdings: [
+        { ...first, price_fallback_reason: "no_quote", latest_trade_date: "2026-10-30", quote_freshness_status: "stale" },
+        ...rest,
+      ],
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    const info = await screen.findByRole("button", { name: "Why is 700's price stale?" });
+    expect(screen.queryByRole("note")).not.toBeInTheDocument();
+    fireEvent.click(info);
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "Stale price for 700: taken from IBKR's statement of 2026-10-30, because the price job couldn't fetch a quote for it.",
+    );
+    // Only the fallback holding gets one.
+    expect(screen.getAllByRole("button", { name: /price stale\?/ })).toHaveLength(1);
+  });
+
   it("stores stock table column visibility in browser storage", async () => {
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
 

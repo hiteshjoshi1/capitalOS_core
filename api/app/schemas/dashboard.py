@@ -53,6 +53,9 @@ class TopHolding(BaseModel):
     latest_trade_date: Optional[str] = None
     quote_age_days: Optional[int] = None
     price_source: Optional[str] = None
+    # Set when a live view prices an IBKR holding at IBKR's statement price because
+    # the price job had no usable quote: no_quote | quote_older | quote_implausible (#124).
+    price_fallback_reason: Optional[str] = None
     price_provider: Optional[str] = None
     quote_freshness_status: Optional[str] = None
 

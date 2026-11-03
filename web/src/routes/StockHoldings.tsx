@@ -6,6 +6,7 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
+import PriceFallbackInfo from "../components/PriceFallbackInfo";
 import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 
@@ -522,6 +523,9 @@ export default function StockHoldings() {
                           <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
                             {formatFreshnessLabel(h.quote_freshness_status)}
                           </span>
+                          {h.price_fallback_reason && (
+                            <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} />
+                          )}
                           <div className="stockHoldingsMobileValueBlock">
                             <strong>{formatMoney(h.value)}</strong>
                             <span>{h.percent_of_networth.toFixed(1)}% NW</span>
@@ -573,7 +577,12 @@ export default function StockHoldings() {
                               <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.avg_cost, h.quote_currency)}</td>
                             )}
                             {visibleColumns.currentPrice && (
-                              <td className="right stockHoldingsPriceCell">{formatNativeMoney(h.latest_price, h.quote_currency)}</td>
+                              <td className="right stockHoldingsPriceCell">
+                                {formatNativeMoney(h.latest_price, h.quote_currency)}
+                                {h.price_fallback_reason && (
+                                  <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} />
+                                )}
+                              </td>
                             )}
                             {visibleColumns.pnl && (
                               <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`}>
