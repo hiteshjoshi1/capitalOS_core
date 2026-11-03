@@ -465,3 +465,26 @@ def test_httpx_request_log_never_contains_ibkr_flex_token() -> None:
     assert "1548865" not in output
     assert "5041435844" not in output
     assert "v=3" in output
+
+
+def test_configure_logging_silences_http_client_request_logs(monkeypatch) -> None:
+    # #114: the request URL (with IBKR's `t=` token) is never logged in the first
+    # place; redaction above is only the backstop.
+    import logging as std_logging
+
+    from app.core import logging as app_logging
+
+    monkeypatch.setattr(app_logging, "_configured", False)
+    root = std_logging.getLogger()
+    old_handlers, old_level = root.handlers[:], root.level
+    saved = {name: std_logging.getLogger(name).level for name in app_logging.QUIET_HTTP_LOGGERS}
+    try:
+        app_logging.configure_logging()
+        for name in app_logging.QUIET_HTTP_LOGGERS:
+            logger = std_logging.getLogger(name)
+            assert not logger.isEnabledFor(std_logging.INFO)
+            assert logger.isEnabledFor(std_logging.WARNING)
+    finally:
+        root.handlers, root.level = old_handlers, old_level
+        for name, level in saved.items():
+            std_logging.getLogger(name).setLevel(level)
