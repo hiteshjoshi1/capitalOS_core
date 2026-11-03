@@ -555,57 +555,102 @@ def test_ibkr_flex_scheduler_explicit_disable_wins(monkeypatch):
     assert _scheduler_enabled() is False
 
 
-def test_ibkr_flex_scheduler_adds_startup_catchup_when_import_is_stale(monkeypatch):
+def test_ibkr_flex_scheduler_registers_due_check_that_never_drops_late_runs(monkeypatch):
     added_jobs = []
+    created = {}
 
     class DummyScheduler:
-        def __init__(self, timezone=None):
-            self.timezone = timezone
+        def __init__(self, timezone=None, job_defaults=None):
+            created["job_defaults"] = job_defaults
 
-        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
-            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **extra):
+            added_jobs.append({"func": func, "trigger": trigger, "id": id, **extra})
 
         def start(self):
             return None
 
     monkeypatch.setattr(portfolio_scheduler, "_scheduler", None)
     monkeypatch.setattr(portfolio_scheduler, "BackgroundScheduler", DummyScheduler)
-    monkeypatch.setattr(portfolio_scheduler, "_latest_completed_import_finished_at", lambda: None)
     monkeypatch.setenv("IBKR_FLEX_SCHEDULER_ENABLED", "1")
 
     scheduler = portfolio_scheduler.start_scheduler()
 
     assert scheduler is not None
-    job_ids = {job["id"] for job in added_jobs}
-    assert "ibkr_flex_daily_import" in job_ids
-    assert "ibkr_flex_startup_catchup" in job_ids
+    assert created["job_defaults"]["misfire_grace_time"] is None
+    assert created["job_defaults"]["coalesce"] is True
+    assert [job["id"] for job in added_jobs] == ["ibkr_flex_due_check"]
+    job = added_jobs[0]
+    assert job["func"] is portfolio_scheduler._run_if_due
+    assert job["trigger"].interval == timedelta(minutes=5)
+    # The first check runs right after startup (the old startup catch-up).
+    assert job["next_run_time"] <= datetime.now(tz=timezone.utc) + timedelta(seconds=10)
 
 
-def test_ibkr_flex_scheduler_skips_startup_catchup_when_import_is_fresh(monkeypatch):
-    added_jobs = []
+def _patch_ibkr_due_check(monkeypatch, *, now, last_success, run_result=True):
+    from app.core import catchup
 
-    class DummyScheduler:
-        def __init__(self, timezone=None):
-            self.timezone = timezone
+    calls = []
+    monkeypatch.setenv("TZ", "Asia/Singapore")
+    monkeypatch.delenv("IBKR_FLEX_SCHEDULER_TZ", raising=False)
+    monkeypatch.delenv("IBKR_FLEX_SCHEDULER_TIME", raising=False)
+    monkeypatch.setattr(portfolio_scheduler, "_retry_gate", catchup.RetryGate())
+    monkeypatch.setattr(portfolio_scheduler, "_latest_completed_import_finished_at", lambda: last_success)
+    monkeypatch.setattr(portfolio_scheduler, "_has_active_accounts", lambda: True)
 
-        def add_job(self, func, trigger, kwargs=None, id=None, replace_existing=None, **_extra):
-            added_jobs.append({"func": func, "kwargs": kwargs, "id": id, "replace_existing": replace_existing})
+    def fake_run():
+        calls.append(datetime.now(tz=timezone.utc))
+        return run_result
 
-        def start(self):
-            return None
+    monkeypatch.setattr(portfolio_scheduler, "_run_daily_imports", fake_run)
 
-    monkeypatch.setattr(portfolio_scheduler, "_scheduler", None)
-    monkeypatch.setattr(portfolio_scheduler, "BackgroundScheduler", DummyScheduler)
-    monkeypatch.setattr(
-        portfolio_scheduler,
-        "_latest_completed_import_finished_at",
-        lambda: datetime.now(tz=timezone.utc) - timedelta(hours=2),
-    )
-    monkeypatch.setenv("IBKR_FLEX_SCHEDULER_ENABLED", "1")
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return now if tz is None else now.astimezone(tz)
 
-    scheduler = portfolio_scheduler.start_scheduler()
+    monkeypatch.setattr(portfolio_scheduler, "datetime", FrozenDatetime)
+    return calls
 
-    assert scheduler is not None
-    job_ids = {job["id"] for job in added_jobs}
-    assert "ibkr_flex_daily_import" in job_ids
-    assert "ibkr_flex_startup_catchup" not in job_ids
+
+def test_ibkr_flex_due_check_runs_on_wake_after_missed_schedule(monkeypatch):
+    # Default schedule is 18:30 SGT (10:30 UTC). The Mac slept through it on
+    # 2026-11-02 and wakes at 08:00 SGT on 2026-11-03: the import runs now.
+    now = datetime(2026, 11, 3, 0, 0, tzinfo=timezone.utc)
+    last_success = datetime(2026, 11, 1, 10, 31, tzinfo=timezone.utc)
+    calls = _patch_ibkr_due_check(monkeypatch, now=now, last_success=last_success)
+
+    portfolio_scheduler._run_if_due()
+
+    assert len(calls) == 1
+
+
+def test_ibkr_flex_due_check_is_a_noop_once_todays_run_happened(monkeypatch):
+    now = datetime(2026, 11, 3, 12, 0, tzinfo=timezone.utc)  # 20:00 SGT
+    last_success = datetime(2026, 11, 3, 10, 32, tzinfo=timezone.utc)  # 18:32 SGT
+    calls = _patch_ibkr_due_check(monkeypatch, now=now, last_success=last_success)
+
+    portfolio_scheduler._run_if_due()
+
+    assert calls == []
+
+
+def test_ibkr_flex_due_check_waits_before_retrying_a_failed_run(monkeypatch):
+    from app.core import catchup
+
+    now = datetime(2026, 11, 3, 11, 0, tzinfo=timezone.utc)
+    calls = _patch_ibkr_due_check(monkeypatch, now=now, last_success=None, run_result=False)
+    monkeypatch.delenv("SCHEDULER_RETRY_MINUTES", raising=False)
+
+    portfolio_scheduler._run_if_due()
+    assert len(calls) == 1
+
+    # Next check, 5 minutes later: still inside the 30-minute retry gap.
+    gate = portfolio_scheduler._retry_gate
+    assert gate.may_attempt(now + timedelta(minutes=5)) is False
+    assert gate.may_attempt(now + timedelta(minutes=30)) is True
+    assert isinstance(gate, catchup.RetryGate)
+
+
+def test_ibkr_flex_default_schedule_is_after_ibkr_builds_the_prior_day():
+    tz_name, hour, minute = portfolio_scheduler._schedule_time()
+    assert (hour, minute) == (18, 30)
