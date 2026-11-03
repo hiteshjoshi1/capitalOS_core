@@ -108,6 +108,9 @@ class DashboardSummaryResponse(BaseModel):
     top_holdings: List[TopHolding]
     cash_balances: List[CashBalance]
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
+    # Live current_net_worth vs the latest completed month-end anchor (vs_prev_month)
+    # and the anchor twelve months before it (vs_prev_year), #133.
+    current_net_worth_change: Optional[Dict[str, NetWorthChange]] = None
     net_worth_component_change: Optional[Dict[str, NetWorthChange]] = None
     top_movers: Optional[TopMovers] = None
     cash_percent: float
