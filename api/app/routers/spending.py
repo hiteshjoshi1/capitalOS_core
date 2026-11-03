@@ -302,7 +302,7 @@ def _row_base_amount(row, base_currency: str, month_rates: dict[str, dict[str, f
     month_key = _month_key(row["ts"])
     currency = (row["currency"] or base_currency).upper()
     rates = month_rates.get(month_key, {})
-    return float(row["amount"]) * rates.get(currency, 1.0)
+    return float(row["amount"]) * rates.get(currency, 0.0)
 
 
 def _row_features(row) -> str:
@@ -813,7 +813,7 @@ def _spend_by_account(
     spend: dict[int, float] = {}
     for row in spend_rows:
         cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * rates.get(cur, 1.0)
+        converted = float(row["amount"]) * rates.get(cur, 0.0)
         account_id = int(row["account_id"])
         spend[account_id] = spend.get(account_id, 0.0) + (-converted)
     return spend
@@ -931,7 +931,7 @@ def _credit_card_recurring_payments(
         merchant = str(row["merchant_counterparty"]).strip()
         key = (int(row["account_id"]), merchant)
         cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * recurring_rates.get(cur, 1.0)
+        converted = float(row["amount"]) * recurring_rates.get(cur, 0.0)
         record = recurring_index.setdefault(
             key,
             {
@@ -988,7 +988,7 @@ def _credit_card_items(
     items: list[CreditCardItem] = []
     for card in cards:
         account_currency = (card["account_currency"] or base_currency).upper()
-        rate = account_rates.get(account_currency, 1.0)
+        rate = account_rates.get(account_currency, 0.0)
         credit_limit = float(card["credit_limit"]) * rate
         available_limit = (
             float(card["available_limit"]) * rate
@@ -1046,7 +1046,7 @@ def spending_summary(
     expense_categories: dict[str, float] = {}
     for r in rows:
         cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates.get(cur, 1.0)
+        amount = float(r["amount"]) * rates.get(cur, 0.0)
         category = r["resolved_category"] or "Uncategorized"
         bucket = _cash_flow_bucket(r)
         if bucket == "income":
@@ -1098,7 +1098,7 @@ def cash_flow_detail(
 
     for row in rows:
         currency = (row["currency"] or base_currency).upper()
-        base_amount = float(row["amount"]) * rates.get(currency, 1.0)
+        base_amount = float(row["amount"]) * rates.get(currency, 0.0)
         item = CashFlowTransactionItem(
             transaction_id=int(row["transaction_id"]),
             ts=_tx_iso(row["ts"]),
@@ -1250,7 +1250,7 @@ def credit_card_transactions(
     transactions: list[CreditCardTransactionItem] = []
     for row in tx_rows:
         cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * tx_rates.get(cur, 1.0)
+        converted = float(row["amount"]) * tx_rates.get(cur, 0.0)
         description = row["merchant_counterparty"] or row["resolved_category"] or row["category"] or "Transaction"
         transactions.append(
             CreditCardTransactionItem(

@@ -46,6 +46,16 @@ AS_OF = datetime(2026, 1, 31, 0, 0, 0, tzinfo=timezone.utc)
 REPORT_DATE = date(2026, 1, 31)
 
 
+@pytest.fixture(autouse=True)
+def _stored_fx_rates():
+    """Store the synthetic FX rates up front (#139). The backfill converts inside
+    its own open write transaction; an on-demand FX fill writing fx_rates from
+    another connection would wait on SQLite's lock (Postgres has no such wait)."""
+    from app import fx
+
+    fx.fill_rates(date(2025, 1, 1), date.today())
+
+
 def _ts():
     return datetime.now(tz=timezone.utc).replace(microsecond=0)
 
@@ -1110,3 +1120,31 @@ def test_parity_report_sections_shape(db_session, seeded_db):
     # summary
     assert "parity_ok" in report["summary"]
     assert "anchor_date" in report["summary"]
+
+
+def test_backfill_skips_a_position_without_an_fx_rate(db_session, db_engine):
+    """#139: a position whose currency has no FX rate is skipped with a warning,
+    never written with a 1.0 rate."""
+    user_id, account_id, asset_id = 903, 9030, 9031
+    with db_engine.begin() as conn:
+        _seed_user(conn, user_id)
+        _seed_account(conn, account_id, user_id, platform="SHAREKHAN", currency="SGD")
+        _seed_asset(conn, asset_id, "ODDCO", "STOCK", "XYZ", "XX")
+        _seed_position(conn, 9401, account_id, asset_id, AS_OF, 10.0, 5.0, 50.0)
+
+    backfill_legacy_positions(db_session, current_user_id=user_id)
+    db_session.commit()
+
+    with db_engine.connect() as conn:
+        written = conn.execute(
+            text(
+                "SELECT COUNT(*) FROM portfolio_position_snapshots pps "
+                "JOIN broker_accounts ba ON ba.id = pps.broker_account_id WHERE ba.legacy_account_id = :a"
+            ),
+            {"a": account_id},
+        ).scalar_one()
+        events = conn.execute(
+            text("SELECT event_code FROM portfolio_data_quality_events WHERE event_code = 'backfill_skipped_missing_fx'")
+        ).fetchall()
+    assert written == 0
+    assert len(events) == 1

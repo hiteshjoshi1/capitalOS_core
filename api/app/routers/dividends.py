@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
-from app.fx import get_rates
+from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
 from app.market_data.service import YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.portfolio.ledger_dividends import fetch_ledger_dividend_rows, ledger_covered_since
@@ -276,7 +276,7 @@ def _latest_asset_market_values(
         else:
             currency = str(row.get("account_base_currency") or row.get("account_currency") or base_currency).upper()
             value = float(row.get("snapshot_market_value_base") or row.get("cost_basis_base") or 0.0)
-        converted = value * fx_rates.get(currency, 1.0)
+        converted = value * fx_rates.get(currency, 0.0)
         out[asset] = out.get(asset, 0.0) + converted
     return out
 
@@ -296,8 +296,11 @@ def _aggregate_dividend_data(
         empty = DividendTotalsOut(**_blank_rollup())
         return [], [], empty
 
+    # FX-date rule (#139): a dividend is a flow, so it converts at the rate of
+    # its own payment date, not the end of the range. One store read covers all
+    # the dates. A currency with no rate converts to 0 and the response says so.
     currencies = {(r.get("currency") or base_currency).upper() for r in rows}
-    fx_rates = get_rates(anchor_ts, base_currency, currencies)
+    rates_by_date = get_rates_by_date([r["ts"] for r in rows], base_currency, currencies)
     bucket_rollups: dict[str, dict[str, float]] = {}
     company_rollups: dict[tuple[int | None, str], dict[str, Any]] = {}
 
@@ -323,7 +326,7 @@ def _aggregate_dividend_data(
         )
 
         currency = (row.get("currency") or base_currency).upper()
-        amount_base = float(row.get("amount") or 0.0) * fx_rates.get(currency, 1.0)
+        amount_base = float(row.get("amount") or 0.0) * rates_by_date[rate_date(ts_value)].get(currency, 0.0)
         tax_rate = _resolved_tax_rate(country, assumed_tax_rate, country_rates)
 
         gross = 0.0
@@ -424,6 +427,7 @@ def dividends_summary(
         country_tax_rates=country_rates,
         buckets=buckets,
         totals=totals,
+        **fx_status(),
     )
 
 
@@ -460,6 +464,7 @@ def dividends_by_company(
         country_tax_rates=country_rates,
         items=items,
         totals=totals,
+        **fx_status(),
     )
 
 
@@ -525,6 +530,7 @@ def dividends_history(
         yield_pct=selected.get("yield_pct") if selected else None,
         events=events,
         totals=totals,
+        **fx_status(),
     )
 
 
@@ -848,7 +854,7 @@ def expected_dividends_overview(
     companies: list[ExpectedDividendCompanyOut] = []
     for row in company_rows:
         currency = (row.get("quote_currency") or base_currency).upper()
-        annual_gross_base = float(row["annual_gross_quote"]) * fx_rates.get(currency, 1.0)
+        annual_gross_base = float(row["annual_gross_quote"]) * fx_rates.get(currency, 0.0)
         country = row.get("country")
         tax_rate = _resolved_tax_rate(country, normalized_default_rate, country_rates)
         annual_estimated_tax = annual_gross_base * tax_rate

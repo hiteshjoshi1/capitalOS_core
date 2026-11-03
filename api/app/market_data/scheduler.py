@@ -20,6 +20,7 @@ from app.core.catchup import (
     run_is_due,
 )
 from app.core.logging import job_context
+from app import fx
 from app.db.session import SessionLocal
 from app.market_data.service import configured_exchanges, run_all_exchanges
 
@@ -151,6 +152,52 @@ def _run_window(window_name: str, exchanges: list[str]) -> None:
             db.close()
 
 
+_fx_retry_gate = RetryGate()
+
+
+def _fx_fill_schedule() -> tuple[ZoneInfo, int, int]:
+    """Daily FX fill (#139): after the ECB reference rates are published (~16:00
+    CET), 16:30 Europe/Berlin by default (`FX_DAILY_FILL`, HH:MM)."""
+    hour, minute = parse_hhmm(os.getenv("FX_DAILY_FILL"), (16, 30))
+    return ZoneInfo("Europe/Berlin"), hour, minute
+
+
+def _run_fx_fill_if_due() -> None:
+    """Every check interval: fill fx_rates when no provider row arrived since the
+    most recent scheduled time (sleep-proof catch-up, D-19 / #112)."""
+    if not fx.remote_enabled():
+        return
+    now = datetime.now(tz=timezone.utc)
+    tz, hour, minute = _fx_fill_schedule()
+    due = most_recent_due(now, hour, minute, tz)
+    try:
+        if not run_is_due(fx.last_fill_at(), due):
+            return
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("fx_fill_last_run_check_failed", extra={"error_class": exc.__class__.__name__})
+        return
+    if not _fx_retry_gate.may_attempt(now):
+        return
+    succeeded = False
+    with job_context():
+        started = time.perf_counter()
+        try:
+            answered = fx.fill_daily()
+            succeeded = not run_is_due(fx.last_fill_at(), due)
+            (logger.info if succeeded else logger.warning)(
+                "fx_fill_succeeded" if succeeded else "fx_fill_failed",
+                extra={
+                    "event": "fx_fill_succeeded" if succeeded else "fx_fill_failed",
+                    "provider": ",".join(name for name, ok in answered.items() if ok) or "none",
+                    "duration_ms": int((time.perf_counter() - started) * 1000),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("fx_fill_failed", extra={"event": "fx_fill_failed", "error_class": exc.__class__.__name__})
+        finally:
+            _fx_retry_gate.record(now, succeeded=succeeded)
+
+
 def start_scheduler() -> BackgroundScheduler | None:
     global _scheduler
     if os.getenv("STOCK_PRICE_SCHEDULER_ENABLED", "1") != "1":
@@ -168,6 +215,13 @@ def start_scheduler() -> BackgroundScheduler | None:
             replace_existing=True,
             next_run_time=datetime.now(tz=timezone.utc) + timedelta(seconds=5),
         )
+    scheduler.add_job(
+        _run_fx_fill_if_due,
+        IntervalTrigger(minutes=check_interval_minutes()),
+        id="fx_fill_due_check",
+        replace_existing=True,
+        next_run_time=datetime.now(tz=timezone.utc) + timedelta(seconds=10),
+    )
     scheduler.start()
     _scheduler = scheduler
     return scheduler

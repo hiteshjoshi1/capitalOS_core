@@ -5,6 +5,7 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
@@ -187,6 +188,7 @@ export default function Dividends() {
               { label: "YEAR-TO-DATE", value: formatMoney(realizedYear.payout_minus_tax), positive: true },
             ]}
           />
+          <FxNote sources={[monthSummary, companySummary]} />
 
           <section aria-labelledby="dividend-signals-heading">
             <div className="coSectionHeader">

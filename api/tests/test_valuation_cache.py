@@ -3,7 +3,6 @@ answers after a write, and never another user's data."""
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, text
@@ -125,6 +124,11 @@ def test_second_request_reuses_cached_valuation(
     client: TestClient, seed_dashboard_data, frozen_now, count_queries
 ):
     path = "/dashboard/summary?month=2026-03&base_currency=SGD&compare=prev_month,prev_year"
+    # The very first request fills fx_rates on demand (#139); that write rightly
+    # invalidates the shared cache. Measure once the rates are stored.
+    client.get(path)
+    valuation_cache.clear_shared_cache()
+    count_queries.clear()
     first = client.get(path)
     first_queries = len(count_queries)
     count_queries.clear()
@@ -248,90 +252,25 @@ def test_cached_values_are_copies():
         assert _helper(None, "k") == {"rows": [{"value": 1}]}
 
 
-def test_degraded_fx_result_is_not_shared(db_engine, monkeypatch):
-    monkeypatch.setenv("FX_DISABLE_REMOTE", "0")
-    monkeypatch.delenv("FX_FALLBACK_RATES", raising=False)
-    monkeypatch.setattr(fx, "_fetch_rates_frankfurter", lambda *_a, **_k: {"USD": 0.75})
-    monkeypatch.setattr(fx, "_fetch_rates_erapi", lambda *_a, **_k: {})
-    fx._CACHE.clear()
+def test_degraded_fx_result_is_not_shared(db_engine):
     calls = []
 
     @valuation_cached(shared=True)
     def _helper(db, current_user_id):  # noqa: ANN001
         calls.append(1)
-        # XYZ resolves nowhere: valued at 1.0, as before (#139).
-        return fx.get_rates(datetime(2026, 3, 1, tzinfo=timezone.utc), "SGD", {"USD", "XYZ"})
+        # XYZ resolves nowhere: left out and reported missing, never 1.0 (#139).
+        return dict(fx.get_rates(datetime(2026, 3, 1, tzinfo=timezone.utc), "SGD", {"USD", "XYZ"}))
 
     with Session(db_engine) as session:
         with request_scope() as scope:
-            assert _helper(session, 1)["XYZ"] == 1.0
+            assert "XYZ" not in _helper(session, 1)
             assert scope.degraded
         with request_scope():
             _helper(session, 1)
     assert len(calls) == 2  # the degraded result wasn't reused by the next request
 
 
-# ─── FX (#147) ───────────────────────────────────────────────────────────────
-
-
-@pytest.fixture()
-def fx_calls(monkeypatch):
-    monkeypatch.setenv("FX_DISABLE_REMOTE", "0")
-    monkeypatch.delenv("FX_FALLBACK_RATES", raising=False)
-    fx._CACHE.clear()
-    calls: list[tuple] = []
-    yield calls
-    fx._CACHE.clear()
-
-
-def test_fx_one_provider_call_per_date_whatever_the_currency_set(fx_calls, monkeypatch):
-    def fake_frankfurter(date_key, base, symbols_set=None):
-        fx_calls.append(("frankfurter", date_key, base, symbols_set))
-        return {"USD": 0.75, "HKD": 5.8, "INR": 62.0, "EUR": 0.68}
-
-    monkeypatch.setattr(fx, "_fetch_rates_frankfurter", fake_frankfurter)
-    day = datetime(2026, 3, 1, tzinfo=timezone.utc)
-    first = fx.get_rates(day, "SGD", {"USD"})
-    second = fx.get_rates(day, "SGD", {"USD", "HKD"})
-    third = fx.get_rates(day, "SGD", {"INR", "HKD", "EUR"})
-
-    assert len(fx_calls) == 1
-    assert fx_calls[0][3] is None  # asked for every currency at once
-    assert first == {"SGD": 1.0, "USD": pytest.approx(1 / 0.75)}
-    assert second["HKD"] == pytest.approx(1 / 5.8)
-    assert third["INR"] == pytest.approx(1 / 62.0)
-
-    fx.get_rates(datetime(2026, 2, 1, tzinfo=timezone.utc), "SGD", {"USD"})
-    assert len(fx_calls) == 2  # another date: one more call
-
-
-def test_fx_provider_failure_is_negative_cached(fx_calls, monkeypatch):
-    def failing(*args, **kwargs):
-        fx_calls.append(args)
-        raise httpx.ConnectError("down")
-
-    monkeypatch.setattr(fx, "_fetch_rates_frankfurter", failing)
-    monkeypatch.setattr(fx, "_fetch_rates_erapi", failing)
-    day = datetime(2026, 3, 1, tzinfo=timezone.utc)
-    for _ in range(3):
-        with pytest.raises(httpx.HTTPError):
-            fx.get_rates(day, "SGD", {"USD"})
-    assert len(fx_calls) == 2  # one try per provider, then remembered
-
-    monkeypatch.setattr(fx, "_NEGATIVE_TTL_SECONDS", 0)
-    with pytest.raises(httpx.HTTPError):
-        fx.get_rates(day, "SGD", {"USD"})
-    assert len(fx_calls) == 4  # after the negative TTL it tries again
-
-
-def test_fx_falls_back_to_erapi_for_currencies_frankfurter_lacks(fx_calls, monkeypatch):
-    monkeypatch.setattr(fx, "_fetch_rates_frankfurter", lambda date_key, base, symbols_set=None: (
-        {"USD": 0.75} if base == "SGD" else {"SGD": 1.5, "USD": 1.1}
-    ))
-    monkeypatch.setattr(fx, "_fetch_rates_erapi", lambda base, symbols_set=None: {"USD": 0.74, "TWD": 24.0})
-    rates = fx.get_rates(datetime(2026, 3, 1, tzinfo=timezone.utc), "SGD", {"USD", "TWD"})
-    assert rates["USD"] == pytest.approx(1 / 0.75)  # dated Frankfurter rate still wins
-    assert rates["TWD"] == pytest.approx(1 / 24.0)
+# FX provider/caching tests moved to test_fx.py with the rate table (#139).
 
 
 # ─── Batched reads (#147) ────────────────────────────────────────────────────

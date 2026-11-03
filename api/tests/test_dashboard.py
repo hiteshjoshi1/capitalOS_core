@@ -11,6 +11,14 @@ from tests.canonical_test_helpers import (
     seed_canonical_account_balance_for_test,
     seed_canonical_position_snapshot_for_test,
 )
+from tests.fx_test_helpers import USD_SGD
+
+# seed_dashboard_data (#139): cash 30,000 SGD and IBKR NAV 50,000 SGD (Jan 45,000)
+# are already in SGD; the crypto wallet is 20,000 USD (Jan 15,000 USD) and one
+# income is 999 USD, so they convert at the synthetic USD->SGD rate, not 1:1.
+SEED_NW = 30000.0 + 50000.0 + 20000.0 * USD_SGD
+SEED_PREV_NW = 30000.0 + 45000.0 + 15000.0 * USD_SGD
+SEED_INCOME = 5000.0 + 999.0 * USD_SGD
 
 
 def test_dashboard_invalid_month(client: TestClient):
@@ -115,24 +123,26 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert data["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
     assert data["net_worth_boundary_exact"] is False
     assert data["net_worth_freshness_status"] == "synthetic"
-    assert data["net_worth"]["total"] == 100000.0
-    assert data["cash_flow"]["income"] == 5999.0
+    assert data["net_worth"]["total"] == pytest.approx(SEED_NW)
+    assert data["cash_flow"]["income"] == pytest.approx(SEED_INCOME)
     assert data["cash_flow"]["expenses"] == 2100.0
-    assert data["cash_flow"]["net"] == 3899.0
-    assert data["cash_flow"]["savings_rate"] == pytest.approx(3899.0 / 5999.0, rel=1e-4)
-    assert data["cash_percent"] == 30.0
+    assert data["cash_flow"]["net"] == pytest.approx(SEED_INCOME - 2100.0)
+    assert data["cash_flow"]["savings_rate"] == pytest.approx((SEED_INCOME - 2100.0) / SEED_INCOME, rel=1e-4)
+    assert data["cash_percent"] == round(30000.0 / SEED_NW * 100, 2)
+    assert data["fx_incomplete"] is False
+    assert data["fx_missing_currencies"] == []
 
     top = data["top_holdings"]
     assert len(top) == 2
     assert top[0]["symbol"] == "AAPL"
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == 10000.0
-    assert changes["pct"] == 10000.0 / 90000.0
+    assert changes["abs"] == pytest.approx(SEED_NW - SEED_PREV_NW)
+    assert changes["pct"] == pytest.approx((SEED_NW - SEED_PREV_NW) / SEED_PREV_NW)
     component_changes = data["net_worth_component_change"]
     assert component_changes["cash"]["abs"] == 0.0
     assert component_changes["stocks_funds"]["abs"] == 5000.0
-    assert component_changes["crypto"]["abs"] == 5000.0
+    assert component_changes["crypto"]["abs"] == pytest.approx(5000.0 * USD_SGD)
     assert data["top_movers"]["compare_month"] == "2026-01"
     assert "gainers" in data["top_movers"]
     assert "detractors" in data["top_movers"]
@@ -156,8 +166,8 @@ def test_dashboard_net_worth_change_lightweight(client: TestClient, seed_dashboa
     assert "vs_prev_year" not in data["net_worth_change"]
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == 10000.0
-    assert changes["pct"] == 10000.0 / 90000.0
+    assert changes["abs"] == pytest.approx(SEED_NW - SEED_PREV_NW)
+    assert changes["pct"] == pytest.approx((SEED_NW - SEED_PREV_NW) / SEED_PREV_NW)
 
 
 def test_canonical_net_worth_ignores_legacy_position_roll_forward(db_engine, monkeypatch):
@@ -479,7 +489,6 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
         return {symbol: 1.0 for symbol in symbols}
 
     monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
-    monkeypatch.setattr("app.routers.crypto.get_rates", fake_rates)
 
     dashboard_resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert dashboard_resp.status_code == 200
@@ -635,7 +644,7 @@ def test_dashboard_top_holdings_include_cash_symbol(client: TestClient, seed_das
     assert len(cash_rows) == 0
     # Verify cash_percent is exposed and correctly computed
     assert "cash_percent" in data
-    assert data["cash_percent"] == 30.0
+    assert data["cash_percent"] == round(30000.0 / SEED_NW * 100, 2)
 
 
 def test_dashboard_summary_exposes_risk_fields_for_top_n_card(client: TestClient, seed_dashboard_data):
@@ -670,7 +679,7 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     assert set(by_platform) == {"IBKR", "DBS", "CRYPTO"}
     assert by_platform["IBKR"]["value"] == pytest.approx(50000.0)
     assert by_platform["DBS"]["value"] == pytest.approx(30000.0)
-    assert by_platform["CRYPTO"]["value"] == pytest.approx(20000.0)
+    assert by_platform["CRYPTO"]["value"] == pytest.approx(20000.0 * USD_SGD)
 
 
 def test_platform_allocation_prefers_account_platform_over_platform_id(client: TestClient, db_engine):

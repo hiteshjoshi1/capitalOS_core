@@ -7,6 +7,7 @@ import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import FxNote from "../components/FxNote";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -363,6 +364,7 @@ export default function WealthOverview() {
             {currentNetWorthAsOf ? (
               <p className="coHeroFreshness">As of {currentNetWorthAsOf.slice(0, 10)}</p>
             ) : null}
+            <FxNote sources={[bootstrap, summary]} />
 
             <div className="coHeroDeltaRow">
               {sinceUpdate?.net_worth_change ? (

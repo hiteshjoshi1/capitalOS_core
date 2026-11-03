@@ -105,13 +105,16 @@ def _json_default(db: Session) -> str:
     return "'{}'::jsonb" if dialect == "postgresql" else "'{}'"
 
 
-def _historical_fx_rate(*, report_date: date, base_currency: str, quote_currency: str) -> float:
+def _historical_fx_rate(*, report_date: date, base_currency: str, quote_currency: str) -> float | None:
+    """Value of 1 quote_currency in base_currency on report_date, or None when no
+    rate is known (#139: never assume 1.0; the caller skips the row)."""
     base = str(base_currency).upper()
     quote = str(quote_currency).upper()
     if not quote or quote == base:
         return 1.0
     rates = get_rates(datetime(report_date.year, report_date.month, report_date.day, tzinfo=timezone.utc), base, {quote})
-    return float(rates.get(quote, 1.0))
+    rate = rates.get(quote)
+    return float(rate) if rate else None
 
 
 def legacy_position_values_are_local(platform: str | None) -> bool:
@@ -741,6 +744,22 @@ def _backfill_stock_fund_positions(
             base_currency=account_currency,
             quote_currency=currency,
         )
+        if fx_rate_to_base is None:
+            if not dry_run:
+                _record_dqe(
+                    db,
+                    broker_account_id=None,
+                    import_run_id=None,
+                    report_date=report_date,
+                    severity="warning",
+                    event_code="backfill_skipped_missing_fx",
+                    message=(
+                        f"Legacy position id={pos_id} account={account_id} symbol={symbol} skipped: "
+                        f"no {currency}->{account_currency} FX rate on or before {report_date}."
+                    ),
+                )
+                dqe_written += 1
+            continue
 
         # Check for pre-existing authoritative coverage for this exact security.
         if _position_has_authoritative_snapshot(
@@ -924,6 +943,22 @@ def _backfill_cash_positions(
             base_currency=account_currency,
             quote_currency=currency,
         )
+        if fx_rate_to_base is None:
+            if not dry_run:
+                _record_dqe(
+                    db,
+                    broker_account_id=None,
+                    import_run_id=None,
+                    report_date=as_of_date,
+                    severity="warning",
+                    event_code="backfill_cash_skipped_missing_fx",
+                    message=(
+                        f"Legacy cash position id={pos_id} account={account_id} currency={currency} skipped: "
+                        f"no {currency}->{account_currency} FX rate on or before {as_of_date}."
+                    ),
+                )
+                dqe_written += 1
+            continue
         amounts = _legacy_cash_amounts(raw_value=balance, fx_rate_to_base=fx_rate_to_base, platform=platform)
 
         # Check for pre-existing authoritative cash row

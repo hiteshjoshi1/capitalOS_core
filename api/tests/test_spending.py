@@ -3,6 +3,12 @@ import pytest
 from sqlalchemy import text
 
 from tests.canonical_test_helpers import seed_canonical_account_balance_for_test
+from tests.fx_test_helpers import USD_SGD
+
+# _seed_credit_card_analytics: the DBS card is USD (#139), so its amounts convert
+# at the synthetic USD->SGD rate: July 200 + 15 + 3 USD, June 50 USD.
+DBS_JUL = 218.0 * USD_SGD
+DBS_JUN = 50.0 * USD_SGD
 
 
 def test_spending_summary(client: TestClient, seed_spending_data):
@@ -519,15 +525,15 @@ def test_credit_card_analytics_all_cards_reconciles_to_per_card_totals(client: T
 
     assert data["month"] == "2026-07"
     assert data["account_id"] is None
-    assert data["total_spend"] == pytest.approx(443.0)  # (120+80+25) + (200+15+3)
+    assert data["total_spend"] == pytest.approx(225.0 + DBS_JUL)  # (120+80+25) SGD + (200+15+3) USD
     assert data["transaction_count"] == 3  # EXPENSE-only: 2 on Amex + 1 on DBS
-    assert data["purchase_spend"] == pytest.approx(400.0)  # 120+80+200
+    assert data["purchase_spend"] == pytest.approx(200.0 + 200.0 * USD_SGD)  # 120+80 SGD + 200 USD
 
     # Every owned CREDIT_CARD account is represented, non-card and other-user accounts are not.
     by_account = {c["account_id"]: c for c in data["cards"]}
     assert set(by_account) == {92001, 92002}
     assert by_account[92001]["spend"] == pytest.approx(225.0)
-    assert by_account[92002]["spend"] == pytest.approx(218.0)
+    assert by_account[92002]["spend"] == pytest.approx(DBS_JUL)
     # Per-card spend reconciles exactly to the all-card total.
     assert sum(c["spend"] for c in data["cards"]) == pytest.approx(data["total_spend"])
 
@@ -553,7 +559,7 @@ def test_credit_card_analytics_charges_extraction_and_total(client: TestClient, 
     resp = client.get("/spending/credit-card-analytics?month=2026-07&base_currency=SGD")
     data = resp.json()
 
-    assert data["charge_total"] == pytest.approx(43.0)  # 25 (FEE) + 15 (INTEREST) + 3 (TAX)
+    assert data["charge_total"] == pytest.approx(25.0 + 18.0 * USD_SGD)  # 25 SGD (FEE) + 15 + 3 USD (INTEREST, TAX)
     charge_types = sorted(c["type"] for c in data["charges"])
     assert charge_types == ["FEE", "INTEREST", "TAX"]
     # TRANSFER (the card payment) must never be classified as a charge.
@@ -567,7 +573,7 @@ def test_credit_card_analytics_categories_reconcile_to_purchase_spend(client: Te
     data = resp.json()
 
     categories = {c["label"]: c["amount"] for c in data["categories"]}
-    assert categories == {"Groceries": 120.0, "Dining": 80.0, "Travel": 200.0}
+    assert categories == {"Groceries": 120.0, "Dining": 80.0, "Travel": pytest.approx(200.0 * USD_SGD)}
     assert sum(categories.values()) == pytest.approx(data["purchase_spend"])
     # Charges (FEE/INTEREST/TAX) must not leak into category totals.
     assert "Fees" not in categories
@@ -614,7 +620,7 @@ def test_credit_card_analytics_prior_month_comparison_uses_same_expense_types(cl
     data = resp.json()
 
     assert data["prior_month"] == "2026-06"
-    assert data["prior_month_spend"] == pytest.approx(150.0)  # 100 (Amex) + 50 (DBS)
+    assert data["prior_month_spend"] == pytest.approx(100.0 + DBS_JUN)  # 100 SGD (Amex) + 50 USD (DBS)
 
 
 def test_credit_card_analytics_converts_non_base_currency_cards(client: TestClient, db_engine):
@@ -625,7 +631,8 @@ def test_credit_card_analytics_converts_non_base_currency_cards(client: TestClie
     data = resp.json()
     # DBS card is USD-denominated; totals must still be expressed in the requested base currency.
     assert data["base_currency"] == "SGD"
-    assert data["total_spend"] == pytest.approx(218.0)
+    assert data["total_spend"] == pytest.approx(DBS_JUL)
+    assert data["total_spend"] != pytest.approx(218.0)  # not counted 1:1
 
 
 def test_credit_card_analytics_rejects_unowned_or_unknown_account_id(client: TestClient, db_engine):
@@ -655,8 +662,8 @@ def test_credit_card_analytics_trend_orders_twelve_months_across_a_year_boundary
     assert by_month["2025-08"] == pytest.approx(60.0)
     assert by_month["2025-12"] == pytest.approx(40.0)
     assert by_month["2026-01"] == pytest.approx(70.0)
-    assert by_month["2026-06"] == pytest.approx(150.0)
-    assert by_month["2026-07"] == pytest.approx(443.0)
+    assert by_month["2026-06"] == pytest.approx(100.0 + DBS_JUN)
+    assert by_month["2026-07"] == pytest.approx(225.0 + DBS_JUL)
 
 
 def test_credit_card_analytics_trend_scoped_to_selected_card(client: TestClient, db_engine):
@@ -679,7 +686,7 @@ def test_credit_card_analytics_month_boundary_excludes_adjacent_months(client: T
     resp = client.get("/spending/credit-card-analytics?month=2026-06&base_currency=SGD")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["total_spend"] == pytest.approx(150.0)
+    assert data["total_spend"] == pytest.approx(100.0 + DBS_JUN)
     assert data["prior_month"] == "2026-05"
     assert data["prior_month_spend"] == pytest.approx(0.0)
 
