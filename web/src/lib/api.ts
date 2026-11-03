@@ -1024,6 +1024,8 @@ export type WealthTimeline = {
     crypto: number;
     liabilities: number;
     as_of: string | null;
+    /** Platforms with a statement import in the still-open month (#138). */
+    uploads: string[];
   };
 };
 

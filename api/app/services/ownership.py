@@ -6,6 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.wealth_rollup_dirty import ALL_HISTORY, mark_rollups_dirty
+
 
 @dataclass
 class OwnershipReassignResult:
@@ -70,6 +72,10 @@ def reassign_legacy_ownership(db: Session, *, target_user_id: int, dry_run: bool
         {"target_user_id": target_user_id},
     ).rowcount or 0
 
+    if accounts_updated or wallets_updated or networth_updated:
+        # Unowned data was visible to every user (legacy mode) and now belongs
+        # to one: everyone's History changes, at every date (#138).
+        mark_rollups_dirty(db, ALL_HISTORY, reason="ownership_reassigned")
     db.commit()
     return OwnershipReassignResult(
         accounts_updated=int(accounts_updated),

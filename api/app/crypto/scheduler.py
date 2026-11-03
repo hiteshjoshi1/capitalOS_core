@@ -16,6 +16,7 @@ from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
 from app.crypto.ingest import should_refresh
 from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
+from app.wealth_rollup_dirty import refresh_dirty_rollups_after_job
 
 logger = logging.getLogger("capitalos.crypto")
 _scheduler: BackgroundScheduler | None = None
@@ -194,6 +195,8 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False, due: date
                     automatic=True,
                 ):
                     refreshed += 1
+            if refreshed:
+                refresh_dirty_rollups_after_job(db, "crypto_refresh")
             logger.info(
                 "crypto_refresh_succeeded",
                 extra={

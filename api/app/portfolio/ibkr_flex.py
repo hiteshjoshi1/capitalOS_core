@@ -17,6 +17,7 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 from app.valuation_cache import valuation_cached
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 PARSER_VERSION = "ibkr_flex_v1"
 SOURCE_TYPE = "ibkr_flex_daily"
@@ -895,7 +896,8 @@ def _ensure_broker_account(
     return int(row[0])
 
 
-def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: date) -> None:
+def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: date) -> bool:
+    """Create the Flex authority window if missing. True when it was created."""
     exists = db.execute(
         text(
             """
@@ -916,7 +918,7 @@ def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: 
         },
     ).fetchone()
     if exists:
-        return
+        return False
     db.execute(
         text(
             """
@@ -933,6 +935,7 @@ def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: 
             "effective_from": cutover_date,
         },
     )
+    return True
 
 
 def _create_import_run(
@@ -2182,7 +2185,9 @@ def run_ibkr_flex_import_from_xml(
         broker_account_id=statement.broker_account_id,
         base_currency=statement.base_currency,
     )
-    _ensure_authority_window(db, broker_account_id, effective_cutover_date)
+    if _ensure_authority_window(db, broker_account_id, effective_cutover_date):
+        # A new authority window changes which source counts from its date on (#138).
+        mark_rollups_dirty(db, effective_cutover_date, account_id=legacy_account_id, reason="ibkr_flex_authority")
     lock_owner = _try_acquire_lock(db, broker_account_id, SOURCE_TYPE)
     db.commit()
 
@@ -2214,6 +2219,9 @@ def run_ibkr_flex_import_from_xml(
             cutover_date=effective_cutover_date,
         )
         _mark_import_completed(db, import_run_id)
+        # NAV, cash and positions were (re)written for these report dates: History
+        # rows anchored on or after the earliest are recomputed (#138).
+        mark_rollups_dirty(db, min(_report_dates(statement)), account_id=legacy_account_id, reason="ibkr_flex")
         _release_lock(db, broker_account_id, lock_owner)
         db.commit()
     except IbkrFlexImportError as exc:

@@ -428,7 +428,17 @@ def _create_canonical_portfolio_tables(conn):
           liabilities NUMERIC NOT NULL,
           source_freshness TEXT NOT NULL DEFAULT '[]',
           freshness_status TEXT NOT NULL DEFAULT 'missing',
-          computed_at TIMESTAMP
+          computed_at TIMESTAMP,
+          input_generation INTEGER NOT NULL DEFAULT 0
+        )
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS wealth_rollup_dirty (
+          user_id INTEGER PRIMARY KEY,
+          from_date DATE,
+          generation INTEGER NOT NULL DEFAULT 0,
+          marked_at TIMESTAMP,
+          reason TEXT
         )
         """,
         """
@@ -934,6 +944,7 @@ def clear_db():
         for table_name in (
         "account_balance_snapshots",
             "wealth_monthly_rollups",
+            "wealth_rollup_dirty",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",

@@ -27,6 +27,7 @@ from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_
 from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
 from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_xls
 from app.models.import_job import ImportJob
+from app.wealth_rollup_dirty import mark_rollups_dirty
 from app.portfolio.upload_canonical import (
     is_canonical_upload_platform,
     parser_canonical_target,
@@ -166,6 +167,10 @@ def _persist_credit_card_limit_metadata(
     available_limit_as_of = _normalize_datetime(parser_meta.get("transactions_as_at"))
     if credit_limit is None or available_limit is None or available_limit_as_of is None:
         return
+    previous = db.execute(
+        text("SELECT available_limit_as_of FROM credit_card_accounts WHERE account_id = :account_id"),
+        {"account_id": account_id},
+    ).fetchone()
     db.execute(
         text(
             """
@@ -183,6 +188,12 @@ def _persist_credit_card_limit_metadata(
             "available_limit_as_of": available_limit_as_of,
         },
     )
+    if previous is not None:
+        # Anchors from the earlier of the old and new limit dates on read these
+        # limits (the old one stops applying, the new one starts) (#138).
+        previous_as_of = _normalize_datetime(previous[0])
+        changed_from = min(available_limit_as_of, previous_as_of) if previous_as_of else available_limit_as_of
+        mark_rollups_dirty(db, changed_from, account_id=account_id, reason="credit_card_limits")
 
 
 def _resolve_position_as_of(pos: Dict[str, Any], parser_meta: Dict[str, Any], parsed: list[dict[str, Any]]) -> datetime:
@@ -444,6 +455,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
 
         inserted = 0
         duplicates = 0
+        earliest_inserted_ts: datetime | None = None
 
         for tx in parsed:
             fp = _fingerprint(job.account_id, tx)
@@ -541,6 +553,15 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                 },
             )
             inserted += 1
+            tx_ts = _normalize_datetime(tx["ts"])
+            if tx_ts is not None and (earliest_inserted_ts is None or tx_ts < earliest_inserted_ts):
+                earliest_inserted_ts = tx_ts
+
+        # Card transactions feed the card liability at every anchor up to two
+        # months after them (#138). Other accounts' transactions don't feed
+        # net worth (it's read from canonical snapshots, marked below).
+        if earliest_inserted_ts is not None and _is_credit_card_account(db, int(job.account_id)):
+            mark_rollups_dirty(db, earliest_inserted_ts, account_id=int(job.account_id), reason="card_transactions")
 
         # --- Canonical adapter (Phase 5) ---
         # For every parser that emits positions, canonical write is now the
@@ -633,6 +654,14 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
         job.status = "FAILED"
         job.error_message = str(exc)
         return write_and_return(_report(job, status="FAILED", error=str(exc), error_class=exc.__class__.__name__))
+
+
+def _is_credit_card_account(db: Session, account_id: int) -> bool:
+    row = db.execute(
+        text("SELECT account_type FROM accounts WHERE id = :account_id"),
+        {"account_id": account_id},
+    ).fetchone()
+    return bool(row) and str(row[0] or "").upper() == "CREDIT_CARD"
 
 
 def _get_account_user_id(db: Session, account_id: int) -> int:

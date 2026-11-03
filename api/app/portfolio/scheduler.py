@@ -22,6 +22,7 @@ from app.core.catchup import (
 from app.core.logging import job_context
 from app.db.session import SessionLocal
 from app.portfolio.ibkr_flex import SOURCE_TYPE, run_ibkr_flex_import_from_config
+from app.wealth_rollup_dirty import refresh_dirty_rollups_after_job
 
 logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
 _scheduler: BackgroundScheduler | None = None
@@ -174,6 +175,8 @@ def _run_daily_imports() -> bool:
                         "duration_ms": int((time.perf_counter() - started) * 1000),
                     },
                 )
+            if successes:
+                refresh_dirty_rollups_after_job(db, "ibkr_flex")
             return failures == 0
         finally:
             db.close()

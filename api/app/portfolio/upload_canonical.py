@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.ingestion.parsers.base import ParseResult
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 UPLOAD_ADAPTER_VERSION = "upload_canonical_v1"
 
@@ -935,6 +936,9 @@ def run_upload_canonical_adapter(
             )
 
         _mark_import_run_completed(db, import_run_id)
+        # Facts (or an authority window) dated report_date: History rows
+        # anchored on or after it are recomputed (#138).
+        mark_rollups_dirty(db, report_date, account_id=legacy_account_id, reason=f"upload_{upper_platform.lower()}")
 
     except Exception as exc:
         _record_data_quality_event(
@@ -1165,6 +1169,9 @@ def run_upload_balance_canonical_adapter(
             source_row_hash=row_hash,
         )
         balances_written += 1
+
+    if balances_written:
+        mark_rollups_dirty(db, as_of_date, account_id=account_id, reason="upload_account_balance")
 
     return {
         "status": "CANONICAL_IMPORTED",

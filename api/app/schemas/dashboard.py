@@ -351,6 +351,8 @@ class WealthTimelineNow(BaseModel):
     crypto: float
     liabilities: float
     as_of: Optional[str] = None
+    # Platforms with a statement import this (still open) month (#138).
+    uploads: List[str] = Field(default_factory=list)
 
 
 class WealthTimelineResponse(BaseModel):

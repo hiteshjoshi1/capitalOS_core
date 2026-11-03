@@ -30,6 +30,7 @@ from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refre
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.crypto.valuation import latest_wallet_valuation
 from app.fx import get_rates
+from app.wealth_rollup_dirty import mark_wallet_history_dirty
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
 
@@ -369,7 +370,7 @@ def wallet_verify(
 
     wallet = db.execute(
         text(
-            "SELECT id, user_id FROM crypto_wallets WHERE chain_type = :chain_type AND chain = :chain AND address = :address"
+            "SELECT id, user_id, status FROM crypto_wallets WHERE chain_type = :chain_type AND chain = :chain AND address = :address"
         ),
         {
             "chain_type": payload.chain_type,
@@ -388,6 +389,8 @@ def wallet_verify(
             ),
             {"id": wallet_id, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         )
+        if wallet["status"] != "active" or wallet_owner is None:
+            mark_wallet_history_dirty(db, wallet_id, "crypto_wallet_activated")
     else:
         row = db.execute(
             text(
@@ -455,7 +458,7 @@ def wallet_verify_onchain(
 
     wallet = db.execute(
         text(
-            "SELECT id, user_id FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
+            "SELECT id, user_id, status FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
         ),
         {"address": normalized_address},
     ).mappings().one_or_none()
@@ -468,6 +471,8 @@ def wallet_verify_onchain(
             text("UPDATE crypto_wallets SET status = 'active', verified_at = :now, user_id = COALESCE(user_id, :current_user_id) WHERE id = :id"),
             {"id": wallet_id, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         )
+        if wallet["status"] != "active" or wallet_owner is None:
+            mark_wallet_history_dirty(db, wallet_id, "crypto_wallet_activated")
     else:
         row = db.execute(
             text(

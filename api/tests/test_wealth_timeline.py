@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.routers.dashboard import (
     _backfill_wealth_rollups,
-    _current_anchor_ts,
     _networth_components,
     _platform_freshness_entries,
     _upsert_wealth_rollup,
@@ -120,82 +119,84 @@ def test_upsert_wealth_rollup_is_idempotent(db_engine):
     assert float(rows[0][0]) == 250.0
 
 
-def test_backfill_writes_requested_month_count(db_engine, monkeypatch):
+def test_backfill_writes_completed_months_only(db_engine, monkeypatch):
+    """The open month isn't stored (#138): "now" covers it."""
+    monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.routers.dashboard._current_anchor_ts", lambda: datetime(2026, 7, 13, tzinfo=timezone.utc))
     db = Session(bind=db_engine)
     try:
         written = _backfill_wealth_rollups(db, 1, "SGD", months=6)
         rows = db.execute(
-            text("SELECT month FROM wealth_monthly_rollups WHERE user_id = 1 AND base_currency = 'SGD' ORDER BY month")
+            text(
+                "SELECT month, anchor_date FROM wealth_monthly_rollups "
+                "WHERE user_id = 1 AND base_currency = 'SGD' ORDER BY month"
+            )
         ).fetchall()
     finally:
         db.close()
 
-    assert written == 6
-    assert len(rows) == 6
-    current_month = _current_anchor_ts().strftime("%Y-%m")
-    assert rows[-1][0] == current_month
+    assert written == 5
+    assert [r[0] for r in rows] == ["2026-02", "2026-03", "2026-04", "2026-05", "2026-06"]
+    assert str(rows[-1][1])[:10] == "2026-07-01"  # June at its own anchor
 
 
 def test_net_worth_timeline_endpoint_returns_points_with_upload_marker(client: TestClient, db_engine, monkeypatch):
+    monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.routers.dashboard._current_anchor_ts", lambda: datetime(2026, 7, 13, tzinfo=timezone.utc))
     _seed_platform_account(db_engine, account_id=960, platform="IBKR", asset_id=960, symbol="GOOGL")
     seed_canonical_position_snapshot_for_test(
         db_engine, account_id=960, asset_id=960, as_of=date(2026, 6, 5),
         quantity=2, market_value_base=4000.0, market_price=2000.0, platform_code="IBKR",
     )
-    current_month = _current_anchor_ts().strftime("%Y-%m")
     with db_engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO import_jobs (account_id, platform, original_filename, stored_path, file_sha256, status, created_at, updated_at) "
-                "VALUES (960, 'IBKR', 'stmt.csv', '/tmp/x', 'sha', 'IMPORTED', :now, :now)"
-            ),
-            {"now": _current_anchor_ts()},
-        )
+        for created_at in (datetime(2026, 6, 20, tzinfo=timezone.utc), datetime(2026, 7, 2, tzinfo=timezone.utc)):
+            conn.execute(
+                text(
+                    "INSERT INTO import_jobs (account_id, platform, original_filename, stored_path, file_sha256, status, created_at, updated_at) "
+                    "VALUES (960, 'IBKR', 'stmt.csv', '/tmp/x', 'sha', 'IMPORTED', :now, :now)"
+                ),
+                {"now": created_at},
+            )
 
     backfill_resp = client.post("/dashboard/net-worth-timeline/backfill?months=3&base_currency=SGD")
     assert backfill_resp.status_code == 200
-    assert backfill_resp.json()["months_written"] == 3
+    assert backfill_resp.json()["months_written"] == 2  # May, June; July is open
 
     resp = client.get("/dashboard/net-worth-timeline?months=3&base_currency=SGD")
     assert resp.status_code == 200
     data = resp.json()
 
     assert data["base_currency"] == "SGD"
-    months = [p["month"] for p in data["points"]]
-    assert months == sorted(months)
-    assert current_month in months
+    assert [p["month"] for p in data["points"]] == ["2026-05", "2026-06"]
     assert "now" in data and "total" in data["now"]
+    assert data["now"]["uploads"] == ["IBKR"]  # July's upload sits on "now"
 
-    current_point = next(p for p in data["points"] if p["month"] == current_month)
-    assert current_point["uploads"] == ["IBKR"]
-    assert current_point["total"] > 0
-    assert any(s["platform"] == "IBKR" for s in current_point["source_freshness"])
+    june = next(p for p in data["points"] if p["month"] == "2026-06")
+    assert june["uploads"] == ["IBKR"]
+    assert june["total"] > 0
+    assert any(s["platform"] == "IBKR" for s in june["source_freshness"])
 
 
 def test_net_worth_timeline_read_endpoint_does_not_recompute_past_months(client: TestClient, db_engine, monkeypatch):
-    """The read endpoint must stay a pure scan for anything but the current month —
-    that's the whole point of pre-aggregating. Prove it by poisoning an old row's
-    computed value directly in the DB and confirming a plain GET doesn't touch it."""
+    """The read endpoint must stay a pure scan for rows that aren't stale —
+    that's the whole point of pre-aggregating. Prove it by poisoning stored
+    rows directly in the DB and confirming a plain GET doesn't touch them."""
     monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
     assert client.post("/dashboard/net-worth-timeline/backfill?months=6&base_currency=SGD").status_code == 200
 
-    past_month = _current_anchor_ts().strftime("%Y-%m")
     with db_engine.begin() as conn:
         conn.execute(
-            text(
-                "UPDATE wealth_monthly_rollups SET total = 999999999 "
-                "WHERE user_id = 1 AND base_currency = 'SGD' AND month != :current"
-            ),
-            {"current": past_month},
+            text("UPDATE wealth_monthly_rollups SET total = 999999999 WHERE user_id = 1 AND base_currency = 'SGD'")
         )
 
     resp = client.get("/dashboard/net-worth-timeline?months=6&base_currency=SGD")
     assert resp.status_code == 200
-    older_points = [p for p in resp.json()["points"] if p["month"] != past_month]
-    assert older_points, "expected at least one non-current month in range"
-    assert all(p["total"] == 999999999 for p in older_points)
+    points = resp.json()["points"]
+    assert points, "expected stored months in range"
+    # Nothing is dirty and every row sits at its own anchor: a pure read.
+    assert all(p["total"] == 999999999 for p in points)
 
 
 def test_net_worth_timeline_movers_endpoint_diffs_two_historical_anchors(client: TestClient, db_engine, monkeypatch):
