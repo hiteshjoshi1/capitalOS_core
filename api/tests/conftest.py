@@ -27,6 +27,7 @@ os.environ["INFERENCE_LLM_API_KEY"] = ""
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.base import Base  # noqa: E402
+from app.valuation_cache import clear_shared_cache  # noqa: E402
 
 connect_args = {}
 if os.environ["DATABASE_URL"].startswith("sqlite"):
@@ -927,6 +928,8 @@ def setup_db():
 
 @pytest.fixture(autouse=True)
 def clear_db():
+    # Each test starts with an empty cross-request valuation cache (#147).
+    clear_shared_cache()
     with engine.begin() as conn:
         for table_name in (
         "account_balance_snapshots",
