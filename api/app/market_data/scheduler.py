@@ -7,16 +7,25 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from sqlalchemy import text
+from apscheduler.triggers.interval import IntervalTrigger
+from sqlalchemy import bindparam, text
 
+from app.core.catchup import (
+    JOB_DEFAULTS,
+    RetryGate,
+    check_interval_minutes,
+    coerce_utc,
+    most_recent_due,
+    parse_hhmm,
+    run_is_due,
+)
 from app.core.logging import job_context
 from app.db.session import SessionLocal
 from app.market_data.service import configured_exchanges, run_all_exchanges
 
 logger = logging.getLogger("capitalos.market_data")
 _scheduler: BackgroundScheduler | None = None
+_retry_gates: dict[str, RetryGate] = {}
 
 _DEFAULT_WINDOWS = {
     "asia_close": ("Asia/Singapore", 18, 45, ("NSE", "HKEX", "SGX")),
@@ -26,65 +35,77 @@ _DEFAULT_WINDOWS = {
 
 def _window_schedule(window_name: str) -> tuple[str, int, int]:
     tz, hour, minute, _ = _DEFAULT_WINDOWS[window_name]
-    raw = os.getenv(f"STOCK_REFRESH_{window_name.upper()}")
-    if raw and ":" in raw:
-        h, m = raw.split(":", 1)
-        try:
-            hour = int(h)
-            minute = int(m)
-        except ValueError:
-            pass
+    hour, minute = parse_hhmm(os.getenv(f"STOCK_REFRESH_{window_name.upper()}"), (hour, minute))
     return tz, hour, minute
 
 
-def _catchup_stale_after() -> timedelta:
-    raw = os.getenv("STOCK_REFRESH_STALE_AFTER_HOURS", "24")
-    try:
-        hours = float(raw)
-    except ValueError:
-        hours = 24.0
-    return timedelta(hours=max(hours, 1.0))
-
-
-def _coerce_utc(value: object) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if not isinstance(value, datetime):
-        return None
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _latest_successful_run_finished_at() -> datetime | None:
+def _latest_success_for_exchanges(exchanges: list[str]) -> datetime | None:
+    """The oldest of each exchange's newest successful run: a window has run once
+    every one of its exchanges has. None if any exchange never succeeded."""
     db = SessionLocal()
     try:
-        row = db.execute(
+        rows = db.execute(
             text(
                 """
-                SELECT MAX(finished_at)
+                SELECT exchange_code, MAX(finished_at) AS finished_at
                 FROM market_data_runs
                 WHERE status IN ('success', 'partial')
                   AND finished_at IS NOT NULL
+                  AND exchange_code IN :exchanges
+                GROUP BY exchange_code
                 """
-            )
-        ).fetchone()
-        return _coerce_utc(row[0] if row else None)
+            ).bindparams(bindparam("exchanges", expanding=True)),
+            {"exchanges": list(exchanges)},
+        ).fetchall()
     finally:
         db.close()
+    latest = {str(row[0]): coerce_utc(row[1]) for row in rows}
+    if any(latest.get(exchange) is None for exchange in exchanges):
+        return None
+    return min(value for value in latest.values() if value is not None)
 
 
-def _startup_catchup_due() -> bool:
-    try:
-        latest = _latest_successful_run_finished_at()
-    except Exception as exc:  # noqa: BLE001
-        logger.exception("stock_refresh_last_run_check_failed", extra={"error": str(exc)})
-        return True
-    if latest is None:
-        return True
-    return datetime.now(tz=timezone.utc) - latest > _catchup_stale_after()
+def _window_plan(exchanges: list[str]) -> list[tuple[str, str, int, int, list[str]]]:
+    """(window name, tz, hour, minute, exchanges) for every configured exchange:
+    the grouped close windows, then a 00:05 local fallback for the rest."""
+    plan: list[tuple[str, str, int, int, list[str]]] = []
+    scheduled: set[str] = set()
+    for window_name, (_tz, _hour, _minute, members) in _DEFAULT_WINDOWS.items():
+        window_exchanges = [exchange for exchange in exchanges if exchange in members]
+        if not window_exchanges:
+            continue
+        tz_name, hour, minute = _window_schedule(window_name)
+        plan.append((window_name, tz_name, hour, minute, window_exchanges))
+        scheduled.update(window_exchanges)
+    for exchange in exchanges:
+        if exchange not in scheduled:
+            plan.append((f"{exchange.lower()}_fallback", os.getenv("TZ", "UTC"), 0, 5, [exchange]))
+    return plan
+
+
+def _run_due_windows() -> None:
+    """Every check interval: refresh each window whose exchanges haven't all had a
+    successful run since the window's most recent scheduled time (#112)."""
+    now = datetime.now(tz=timezone.utc)
+    for window_name, tz_name, hour, minute, window_exchanges in _window_plan(configured_exchanges()):
+        due = most_recent_due(now, hour, minute, ZoneInfo(tz_name))
+        try:
+            if not run_is_due(_latest_success_for_exchanges(window_exchanges), due):
+                continue
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stock_refresh_last_run_check_failed", extra={"error_class": exc.__class__.__name__})
+            continue
+        gate = _retry_gates.setdefault(window_name, RetryGate())
+        if not gate.may_attempt(now):
+            continue
+        succeeded = False
+        try:
+            _run_window(window_name, window_exchanges)
+            succeeded = not run_is_due(_latest_success_for_exchanges(window_exchanges), due)
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("stock_refresh_due_check_failed", extra={"error_class": exc.__class__.__name__})
+        finally:
+            gate.record(now, succeeded=succeeded)
 
 
 def _run_window(window_name: str, exchanges: list[str]) -> None:
@@ -138,47 +159,15 @@ def start_scheduler() -> BackgroundScheduler | None:
     if _scheduler:
         return _scheduler
 
-    scheduler = BackgroundScheduler(timezone=ZoneInfo("UTC"))
-    exchanges = configured_exchanges()
-    scheduled: set[str] = set()
-
-    if exchanges and _startup_catchup_due():
+    scheduler = BackgroundScheduler(timezone=ZoneInfo("UTC"), job_defaults=JOB_DEFAULTS)
+    if configured_exchanges():
         scheduler.add_job(
-            _run_window,
-            DateTrigger(run_date=datetime.now(tz=timezone.utc) + timedelta(seconds=5)),
-            kwargs={"window_name": "startup_catchup", "exchanges": exchanges},
-            id="stock_refresh_startup_catchup",
+            _run_due_windows,
+            IntervalTrigger(minutes=check_interval_minutes()),
+            id="stock_refresh_due_check",
             replace_existing=True,
-            max_instances=1,
-            coalesce=True,
+            next_run_time=datetime.now(tz=timezone.utc) + timedelta(seconds=5),
         )
-
-    for window_name, (_tz_name, _hour, _minute, members) in _DEFAULT_WINDOWS.items():
-        window_exchanges = [exchange for exchange in exchanges if exchange in members]
-        if not window_exchanges:
-            continue
-        tz_name, hour, minute = _window_schedule(window_name)
-        scheduler.add_job(
-            _run_window,
-            CronTrigger(hour=hour, minute=minute, timezone=ZoneInfo(tz_name)),
-            kwargs={"window_name": window_name, "exchanges": window_exchanges},
-            id=f"stock_refresh_{window_name}",
-            replace_existing=True,
-        )
-        scheduled.update(window_exchanges)
-
-    for exchange in exchanges:
-        if exchange in scheduled:
-            continue
-        tz_name = os.getenv("TZ", "UTC")
-        scheduler.add_job(
-            _run_window,
-            CronTrigger(hour=0, minute=5, timezone=ZoneInfo(tz_name)),
-            kwargs={"window_name": f"{exchange.lower()}_fallback", "exchanges": [exchange]},
-            id=f"stock_refresh_{exchange.lower()}",
-            replace_existing=True,
-        )
-
     scheduler.start()
     _scheduler = scheduler
     return scheduler
