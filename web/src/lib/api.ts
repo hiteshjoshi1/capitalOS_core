@@ -478,7 +478,7 @@ export type StockHoldingsSummary = FxStatus & {
   }>;
 };
 
-export type SpendingSummary = {
+export type SpendingSummary = FxStatus & {
   month: string;
   base_currency: string;
   income_total: number;
@@ -586,7 +586,7 @@ export type CashFlowAnalytics = {
   answers: CashFlowDiagnosticAnswer[];
 };
 
-export type CashFlowDetail = {
+export type CashFlowDetail = FxStatus & {
   month: string;
   base_currency: string;
   income_total: number;
@@ -599,7 +599,7 @@ export type CashFlowDetail = {
   expenses: CashFlowDetailSection;
 };
 
-export type CreditCardSummary = {
+export type CreditCardSummary = FxStatus & {
   month: string;
   base_currency: string;
   total_spend: number;
@@ -646,7 +646,7 @@ export type CreditCardRecurringPayment = {
   current_month_amount: number;
 };
 
-export type CreditCardDetail = {
+export type CreditCardDetail = FxStatus & {
   month: string;
   base_currency: string;
   total_spend: number;
@@ -681,7 +681,7 @@ export type CreditCardAnalyticsCategory = {
   percent: number;
 };
 
-export type CreditCardAnalytics = {
+export type CreditCardAnalytics = FxStatus & {
   month: string;
   base_currency: string;
   months: number;

@@ -42,7 +42,7 @@ from app.schemas.dashboard import (
     WealthTimelineBackfillResponse,
     WealthTimelineResponse,
 )
-from app.fx import fx_status, get_rates
+from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
 from app.valuation_cache import request_memo, valuation_cached
 from app.wealth_rollup_dirty import dirty_state, dirty_user_ids, settle_dirty_mark
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
@@ -2027,11 +2027,21 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current
         )
     return {"items": items, "total": total}
 
+
+def _cashflow_rate_date(value: Any) -> date:
+    """A transaction's FX date: its UTC date (naive timestamps are UTC)."""
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value)
+        value = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return rate_date(value)
+
+
 @valuation_cached(shared=True)
 def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     q = text(
         """
         SELECT
+          t.ts,
           t.type,
           t.amount,
           t.currency
@@ -2044,13 +2054,17 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
         """
     )
     rows = db.execute(q, {"start": start, "end": end, "current_user_id": current_user_id}).mappings().all()
-    currencies = {r["currency"] for r in rows if r["currency"]}
-    rates = get_rates(start, base_currency, currencies)
+    # Each flow converts at the rate of its own date (D-30, #170), one store read
+    # for the month; a missing rate leaves the row out (never 1.0) and is noted
+    # for the response's fx_status (and keeps this result out of the shared cache).
+    currencies = {(r["currency"] or base_currency).upper() for r in rows}
+    row_dates = [_cashflow_rate_date(r["ts"]) for r in rows]
+    rates_by_date = get_rates_by_date(row_dates, base_currency, currencies) if rows else {}
     income = 0.0
     expenses = 0.0
-    for r in rows:
+    for r, day in zip(rows, row_dates):
         cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates.get(cur, 0.0)
+        amount = float(r["amount"]) * rates_by_date.get(day, {}).get(cur, 0.0)
         if r["type"] == "INCOME":
             income += amount
         elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):
