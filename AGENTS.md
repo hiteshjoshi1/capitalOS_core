@@ -101,6 +101,10 @@ implementer. Precedence: Hitesh's word in the moment, then this file, then the r
   `BEGIN` / `COMMIT`.
 - **Merging.** A PR is merged only when Hitesh says so, and the word covers only the PRs it
   names (or the sprint it okays). Never merge on your own judgement. Never commit to `main`.
+- **Merge means deploy.** Hitesh's okay to merge includes installing it: run `make deploy` in the
+  main checkout straight after the merge, check its health output, and report it as merged *and*
+  deployed. Don't stop at the merge or ask separately. (2026-11-03: "if you merge you deploy,
+  otherwise whats the point of just merge".)
 - **Status.** Follow the board flow in § Work Tracking. A merged item stays in Fixed-To Review;
   only Hitesh moves it to Done. Feedback on review sends it back to In progress on the same
   branch.
