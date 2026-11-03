@@ -5,7 +5,7 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, List
 
 from sqlalchemy import text
@@ -331,19 +331,23 @@ def create_import_job(db: Session, account_id: int, platform: str, original_file
     return job
 
 
-def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
+def run_ingestion(db: Session, job_id: int, data_dir: str, as_of: date | None = None) -> dict:
+    """Parse and import an uploaded file. ``as_of`` is the user's date for a
+    file that states none of its own (#141)."""
     context = job_context() if get_job_id() is None else None
     if context is not None:
         context.__enter__()
     started = time.perf_counter()
     try:
-        return _run_ingestion_with_context(db, job_id, data_dir, started)
+        return _run_ingestion_with_context(db, job_id, data_dir, started, as_of)
     finally:
         if context is not None:
             context.__exit__(None, None, None)
 
 
-def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started: float) -> dict:
+def _run_ingestion_with_context(
+    db: Session, job_id: int, data_dir: str, started: float, as_of: date | None = None
+) -> dict:
     job = db.query(ImportJob).filter(ImportJob.id == job_id).one()
     report_path = os.path.join(data_dir, "reports", f"{job.id}.json")
     logger.info(
@@ -609,6 +613,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                 stored_path=job.stored_path,
                 file_sha256=job.file_sha256,
                 is_ibkr_flex_cutover_active=flex_cutover,
+                user_as_of=as_of,
             )
             canonical_positions_written = (canonical_result or {}).get("counts", {}).get("positions", 0)
 
@@ -618,6 +623,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                 account_id=int(job.account_id),
                 import_job_id=int(job.id),
                 parse_result=result,
+                user_as_of=as_of,
             )
             canonical_balances_written = (canonical_result or {}).get("counts", {}).get("balances", 0)
 

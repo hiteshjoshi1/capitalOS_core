@@ -16,6 +16,7 @@ Key design decisions:
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import uuid
 from datetime import date, datetime, timezone
@@ -25,6 +26,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.ingestion.as_of import AsOfSource, as_of_metadata, resolve_upload_as_of
 from app.ingestion.parsers.base import ParseResult
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
@@ -89,6 +91,12 @@ def _db_decimal(value: float | Decimal | None) -> str | None:
 def _platform_json_default(db: Session) -> str:
     dialect_name = getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", "sqlite")
     return "'{}'::jsonb" if dialect_name == "postgresql" else "'{}'"
+
+
+def _json_param_sql(db: Session, name: str) -> str:
+    """SQL for a bound JSON metadata parameter (a JSON string) on either dialect."""
+    dialect_name = getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", "sqlite")
+    return f"CAST(:{name} AS jsonb)" if dialect_name == "postgresql" else f":{name}"
 
 
 def _source_kind_for_platform(platform_code: str) -> str | None:
@@ -295,6 +303,7 @@ def _create_upload_import_run(
     platform_code: str,
     source_kind: str,
     report_date: date,
+    metadata: dict[str, Any] | None = None,
 ) -> int:
     db.execute(
         text(
@@ -304,10 +313,11 @@ def _create_upload_import_run(
                started_at, report_date_from, report_date_to, parser_version, metadata_json)
             VALUES
               (:broker_account_id, :legacy_account_id, :platform_code, :source_type, 'upload', 'started',
-               :started_at, :report_date, :report_date, :parser_version, {_platform_json_default(db)})
+               :started_at, :report_date, :report_date, :parser_version, {_json_param_sql(db, "metadata_json")})
             """
         ),
         {
+            "metadata_json": json.dumps(metadata or {}, sort_keys=True),
             "broker_account_id": broker_account_id,
             "legacy_account_id": legacy_account_id,
             "platform_code": platform_code,
@@ -792,25 +802,10 @@ def _mark_import_run_failed(db: Session, import_run_id: int, code: str, message:
     )
 
 
-def _resolve_report_date(parse_result: ParseResult) -> date:
-    """Derive the canonical report_date from parser metadata or fall back to today."""
-    meta = parse_result.parser_meta or {}
-    for key in ("statement_period_end", "report_date", "statement_date", "as_of"):
-        val = meta.get(key)
-        if val is not None:
-            if hasattr(val, "date"):
-                return val.date()
-            if hasattr(val, "year"):
-                return val
-            try:
-                from datetime import datetime as dt
-                parsed = dt.fromisoformat(str(val))
-                return parsed.date()
-            except (ValueError, TypeError):
-                continue
-
-    # Fall back to today as the snapshot date
-    return date.today()
+def _resolve_report_date(parse_result: ParseResult, user_as_of: date | None = None) -> tuple[date, AsOfSource]:
+    """The canonical report_date and its source: the file's own date, else the
+    user's ``as_of``, else today in the app timezone (#141)."""
+    return resolve_upload_as_of(parse_result.parser_meta, user_as_of)
 
 
 def run_upload_canonical_adapter(
@@ -823,6 +818,7 @@ def run_upload_canonical_adapter(
     stored_path: str,
     file_sha256: str,
     is_ibkr_flex_cutover_active: bool = False,
+    user_as_of: date | None = None,
 ) -> dict[str, Any]:
     """Adapt an upload ParseResult into canonical portfolio facts.
 
@@ -840,6 +836,8 @@ def run_upload_canonical_adapter(
         file_sha256: SHA-256 of the upload file (for content-hash dedup).
         is_ibkr_flex_cutover_active: When True, IBKR uploads produce
             reference-only canonical facts instead of authoritative facts.
+        user_as_of: The as-of date chosen with the upload; used when the file
+            states no date of its own (#141).
 
     Returns:
         Dict with canonical write result metadata.
@@ -850,7 +848,8 @@ def run_upload_canonical_adapter(
         return {"status": "skipped", "reason": f"platform {upper_platform} has no canonical upload adapter"}
 
     positions = parse_result.positions or []
-    report_date = _resolve_report_date(parse_result)
+    report_date, as_of_source = _resolve_report_date(parse_result, user_as_of)
+    as_of_meta = as_of_metadata(report_date, as_of_source, user_as_of)
 
     # Determine authority_status
     if upper_platform in _AUTHORITATIVE_PLATFORMS:
@@ -884,6 +883,7 @@ def run_upload_canonical_adapter(
         platform_code=upper_platform,
         source_kind=source_kind,
         report_date=report_date,
+        metadata=as_of_meta,
     )
     raw_document_id = _store_upload_raw_document(
         db,
@@ -966,6 +966,7 @@ def run_upload_canonical_adapter(
         "counts": {
             "positions": positions_written,
         },
+        **as_of_meta,
     }
 
 
@@ -973,43 +974,13 @@ def run_upload_canonical_adapter(
 # Canonical balance adapter for bank/account parsers (Phase 5)
 # ---------------------------------------------------------------------------
 
-def _resolve_balance_date(parse_result: ParseResult) -> date:
-    """Derive the canonical as_of_date for a bank/account balance snapshot.
+def _resolve_balance_date(parse_result: ParseResult, user_as_of: date | None = None) -> tuple[date, AsOfSource]:
+    """The canonical as_of_date for a bank/account balance snapshot and its source.
 
-    Checks parser_meta keys in priority order, then falls back to today.
+    The file's own date (parser_meta, then a dated balance row), else the
+    user's ``as_of``, else today in the app timezone (#141).
     """
-    meta = parse_result.parser_meta or {}
-    for key in ("statement_period_end", "report_date", "statement_date", "as_of"):
-        val = meta.get(key)
-        if val is None:
-            continue
-        if hasattr(val, "date"):
-            return val.date()
-        if hasattr(val, "year"):
-            return val
-        try:
-            from datetime import datetime as _dt
-            parsed = _dt.fromisoformat(str(val))
-            return parsed.date()
-        except (ValueError, TypeError):
-            continue
-
-    # Try the positions themselves for an as_of value
-    for pos in (parse_result.positions or []):
-        pos_as_of = pos.get("as_of")
-        if pos_as_of is not None:
-            if hasattr(pos_as_of, "date"):
-                return pos_as_of.date()
-            if hasattr(pos_as_of, "year"):
-                return pos_as_of
-            try:
-                from datetime import datetime as _dt2
-                parsed2 = _dt2.fromisoformat(str(pos_as_of))
-                return parsed2.date()
-            except (ValueError, TypeError):
-                pass
-
-    return date.today()
+    return resolve_upload_as_of(parse_result.parser_meta, user_as_of, parse_result.positions)
 
 
 def _source_row_hash_for_balance(account_id: int, as_of_date: date, currency: str, balance: float) -> str:
@@ -1029,6 +1000,7 @@ def _write_account_balance_snapshot(
     balance_base: float,
     balance_type: str,
     source_row_hash: str,
+    metadata: dict[str, Any] | None = None,
 ) -> None:
     """Upsert a single authoritative account balance snapshot.
 
@@ -1043,11 +1015,11 @@ def _write_account_balance_snapshot(
                 INSERT INTO account_balance_snapshots
                   (account_id, import_job_id, as_of_date, currency, balance_type,
                    balance_local, balance_base, fx_rate_to_base, authority_status,
-                   source_kind, source_row_hash)
+                   source_kind, source_row_hash, metadata_json)
                 VALUES
                   (:account_id, :import_job_id, :as_of_date, :currency, :balance_type,
                    :balance_local, :balance_base, 1, 'authoritative',
-                   :source_kind, :source_row_hash)
+                   :source_kind, :source_row_hash, CAST(:metadata_json AS jsonb))
                 ON CONFLICT (account_id, as_of_date, currency, balance_type)
                   WHERE authority_status = 'authoritative'
                 DO UPDATE SET
@@ -1055,6 +1027,7 @@ def _write_account_balance_snapshot(
                   balance_base = EXCLUDED.balance_base,
                   import_job_id = EXCLUDED.import_job_id,
                   source_row_hash = EXCLUDED.source_row_hash,
+                  metadata_json = EXCLUDED.metadata_json,
                   updated_at = now()
                 """
             ),
@@ -1068,6 +1041,7 @@ def _write_account_balance_snapshot(
                 "balance_base": _db_decimal(balance_base),
                 "source_kind": _BALANCE_SOURCE_KIND,
                 "source_row_hash": source_row_hash,
+                "metadata_json": json.dumps(metadata or {}, sort_keys=True),
             },
         )
     else:
@@ -1096,11 +1070,11 @@ def _write_account_balance_snapshot(
                 INSERT INTO account_balance_snapshots
                   (account_id, import_job_id, as_of_date, currency, balance_type,
                    balance_local, balance_base, fx_rate_to_base, authority_status,
-                   source_kind, source_row_hash)
+                   source_kind, source_row_hash, metadata_json)
                 VALUES
                   (:account_id, :import_job_id, :as_of_date, :currency, :balance_type,
                    :balance_local, :balance_base, 1, 'authoritative',
-                   :source_kind, :source_row_hash)
+                   :source_kind, :source_row_hash, :metadata_json)
                 """
             ),
             {
@@ -1113,6 +1087,7 @@ def _write_account_balance_snapshot(
                 "balance_base": _db_decimal(balance_base),
                 "source_kind": _BALANCE_SOURCE_KIND,
                 "source_row_hash": source_row_hash,
+                "metadata_json": json.dumps(metadata or {}, sort_keys=True),
             },
         )
 
@@ -1123,6 +1098,7 @@ def run_upload_balance_canonical_adapter(
     account_id: int,
     import_job_id: int | None,
     parse_result: ParseResult,
+    user_as_of: date | None = None,
 ) -> dict[str, Any]:
     """Adapt bank/account upload ParseResult into canonical account_balance_snapshots.
 
@@ -1142,7 +1118,8 @@ def run_upload_balance_canonical_adapter(
         p for p in (parse_result.positions or [])
         if (p.get("asset_class") or "").upper() in ("CASH", "") or not p.get("asset_class")
     ]
-    as_of_date = _resolve_balance_date(parse_result)
+    as_of_date, as_of_source = _resolve_balance_date(parse_result, user_as_of)
+    as_of_meta = as_of_metadata(as_of_date, as_of_source, user_as_of)
     balances_written = 0
 
     for pos in positions:
@@ -1167,6 +1144,7 @@ def run_upload_balance_canonical_adapter(
             balance_base=balance_base,
             balance_type="bank_cash",
             source_row_hash=row_hash,
+            metadata=as_of_meta,
         )
         balances_written += 1
 
@@ -1177,8 +1155,8 @@ def run_upload_balance_canonical_adapter(
         "status": "CANONICAL_IMPORTED",
         "adapter": "account_balance",
         "account_id": account_id,
-        "as_of_date": as_of_date.isoformat(),
         "counts": {
             "balances": balances_written,
         },
+        **as_of_meta,
     }

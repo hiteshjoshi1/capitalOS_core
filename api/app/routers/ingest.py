@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import os
 import tempfile
-from datetime import date
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
+from datetime import date, timedelta
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.clock import app_today
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.ingestion.runner import create_import_job, run_ingestion
@@ -20,6 +21,8 @@ router = APIRouter(prefix="/ingest", tags=["ingest"], dependencies=[Depends(requ
 
 class RegisterPayload(BaseModel):
     parser_key: str
+    # The upload's as-of date, re-sent when a NEEDS_MAPPING upload is approved (#141).
+    as_of: date | None = None
 
 
 def _data_dir() -> str:
@@ -143,7 +146,7 @@ def _require_account_platform(db: Session, account_id: int, current_user_id: int
 def _reject_ibkr_manual_upload_after_flex_cutover(db: Session, account_id: int, platform: str) -> None:
     if str(platform or "").upper() != "IBKR":
         return
-    if is_ibkr_flex_cutover_active(db, account_id, on_date=date.today()):
+    if is_ibkr_flex_cutover_active(db, account_id, on_date=app_today()):
         raise HTTPException(
             status_code=409,
             detail="Manual IBKR uploads are disabled after IBKR Flex cutover. Use /portfolio/ibkr-flex/import-now.",
@@ -186,15 +189,26 @@ def ingest_ibkr(
             pass
 
 
+def _check_as_of(as_of: date | None) -> None:
+    # One day of slack: the browser's local "today" can be ahead of the app timezone.
+    if as_of is not None and as_of > app_today() + timedelta(days=1):
+        raise HTTPException(status_code=400, detail="as_of can't be in the future")
+
+
 @router.post("/upload")
 def ingest_upload(
     account_id: int = Query(...),
     file: UploadFile = File(...),
+    as_of: date | None = Form(
+        None,
+        description="The statement's as-of date (YYYY-MM-DD), used when the file states none of its own (#141).",
+    ),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
+    _check_as_of(as_of)
 
     platform = _require_account_platform(db, account_id, current_user.id)
     _reject_ibkr_manual_upload_after_flex_cutover(db, account_id, platform)
@@ -213,7 +227,7 @@ def ingest_upload(
             upload_path=tmp_path,
             data_dir=data_dir,
         )
-        report = run_ingestion(db=db, job_id=job.id, data_dir=data_dir)
+        report = run_ingestion(db=db, job_id=job.id, data_dir=data_dir, as_of=as_of)
         if report.get("status") == "IMPORTED":
             _backfill_account_categories(db, account_id)
         return report
@@ -342,6 +356,7 @@ def register_job_signature(
     _require_account_platform(db, int(job.account_id), current_user.id)
     if not job.format_signature:
         raise HTTPException(status_code=400, detail="Job has no format_signature")
+    _check_as_of(payload.as_of)
     register_signature(db, job.format_signature, payload.parser_key, 1)
-    report = run_ingestion(db=db, job_id=job.id, data_dir=_data_dir())
+    report = run_ingestion(db=db, job_id=job.id, data_dir=_data_dir(), as_of=payload.as_of)
     return report
