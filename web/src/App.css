@@ -2216,6 +2216,44 @@ a.btn {
   overflow-wrap: anywhere;
 }
 
+/* IBKR price fallback "i" on a holding (#124): the note opens inline so table
+   scrolling never clips it. */
+.priceFallbackInfo {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  vertical-align: middle;
+  margin-left: 6px;
+}
+
+.priceFallbackInfoBtn {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--warn);
+  background: transparent;
+  color: var(--warn);
+  font: italic 600 11px/16px Georgia, serif;
+  cursor: pointer;
+}
+
+.priceFallbackInfoBtn:focus-visible {
+  outline: 2px solid var(--warn);
+  outline-offset: 2px;
+}
+
+.priceFallbackInfoNote {
+  display: block;
+  max-width: 240px;
+  margin-top: 6px;
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  white-space: normal;
+}
+
 /* ── StatusPill (generic Fresh/Stale/Completed/Verified/etc. pill) ── */
 
 .statusPill {

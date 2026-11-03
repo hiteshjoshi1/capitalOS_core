@@ -332,6 +332,105 @@ def _latest_prices_for_positions(
     return _latest_price_map(db, anchor_ts, asset_ids)
 
 
+# ─── Live prices for IBKR (NAV-snapshot) holdings (#124) ─────────────────────
+# IBKR's Flex report is the source of truth for what is held (quantity, cost,
+# cash). For the *price* of a holding in a live view, the price job's quote wins
+# whenever it is at least as recent as IBKR's report; IBKR's own statement price
+# is the fallback, and the holding says why.
+IBKR_PRICE_FALLBACK_NO_QUOTE = "no_quote"  # the price job has no quote for it
+IBKR_PRICE_FALLBACK_OLDER_QUOTE = "quote_older"  # its newest quote predates IBKR's report
+IBKR_PRICE_FALLBACK_IMPLAUSIBLE = "quote_implausible"  # over 2x off IBKR's value: likely a wrong symbol/currency
+_IMPLAUSIBLE_QUOTE_RATIO = 2.0
+
+
+def _date_only(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _nav_row_live_price(
+    row: Dict[str, Any],
+    latest_prices: Dict[int, Dict[str, Any]],
+    rates: Dict[str, float],
+    base_currency: str,
+) -> tuple[Optional[Dict[str, Any]], Optional[str], float, float]:
+    """For one IBKR (NAV-snapshot) position in a live view:
+    (quote to use or None, fallback reason or None, live value, IBKR snapshot value)."""
+    snapshot_value = _canonical_position_value(row, rates, base_currency)
+    asset_id = row.get("asset_id")
+    quote = latest_prices.get(int(asset_id)) if asset_id is not None else None
+    if not quote or quote.get("price") is None or row.get("quantity") is None:
+        return None, IBKR_PRICE_FALLBACK_NO_QUOTE, snapshot_value, snapshot_value
+    quote_date = _date_only(quote.get("trade_date"))
+    report_date = _date_only(row.get("report_date"))
+    if quote_date is not None and report_date is not None and quote_date < report_date:
+        return None, IBKR_PRICE_FALLBACK_OLDER_QUOTE, snapshot_value, snapshot_value
+    live_value = _canonical_position_value(row, rates, base_currency, {int(asset_id): quote})
+    if snapshot_value > 0 and live_value > 0:
+        ratio = live_value / snapshot_value
+        if ratio > _IMPLAUSIBLE_QUOTE_RATIO or ratio < 1 / _IMPLAUSIBLE_QUOTE_RATIO:
+            return None, IBKR_PRICE_FALLBACK_IMPLAUSIBLE, snapshot_value, snapshot_value
+    return quote, None, live_value, snapshot_value
+
+
+def _nav_live_price_deltas(
+    nav_position_rows: list[Dict[str, Any]],
+    latest_prices: Dict[int, Dict[str, Any]],
+    rates: Dict[str, float],
+    base_currency: str,
+) -> Dict[int, float]:
+    """Per legacy account: (holdings at the price job's quotes) - (holdings at IBKR's
+    statement prices), in base currency, to add to that account's NAV in live views."""
+    deltas: Dict[int, float] = {}
+    for row in nav_position_rows:
+        if not row.get("has_nav_snapshot") or row.get("account_id") is None:
+            continue
+        if str(row.get("asset_class") or "").upper() not in {"STOCK", "FUND"}:
+            continue
+        quote, _reason, live_value, snapshot_value = _nav_row_live_price(row, latest_prices, rates, base_currency)
+        if quote is None:
+            continue
+        account_id = int(row["account_id"])
+        deltas[account_id] = deltas.get(account_id, 0.0) + (live_value - snapshot_value)
+    return deltas
+
+
+def _nav_live_context(
+    db: Session,
+    anchor_ts: datetime,
+    current_user_id: int,
+    base_currency: str,
+    *,
+    enabled: bool,
+) -> tuple[list[Dict[str, Any]], Dict[int, Dict[str, Any]], set[str]]:
+    """IBKR position rows, their latest quotes, and the currencies needed to value
+    them; empty when not a live view."""
+    if not enabled:
+        return [], {}, set()
+    rows = [
+        row
+        for row in canonical_position_rows_by_legacy_account(
+            db,
+            current_user_id=current_user_id,
+            anchor_date=anchor_ts.date(),
+            include_nav_accounts=True,
+        )
+        if row.get("has_nav_snapshot")
+    ]
+    prices = _latest_prices_for_positions(db, anchor_ts, rows, enabled=True)
+    currencies = {_canonical_base_currency(row, base_currency) for row in rows}
+    currencies.update(str(price["currency"]).upper() for price in prices.values() if price.get("currency"))
+    return rows, prices, currencies
+
+
 def _canonical_cash_value(row: Dict[str, Any], rates: Dict[str, float], fallback_currency: str) -> float:
     currency = _canonical_base_currency(row, fallback_currency)
     return float(row.get("balance_base") or 0.0) * rates.get(currency, 1.0)
@@ -588,6 +687,9 @@ def _networth_components(
         anchor_date=anchor_ts.date(),
     )
     latest_prices = _latest_prices_for_positions(db, anchor_ts, canonical_pos_rows, enabled=price_overlay)
+    nav_live_rows, nav_live_prices, nav_live_currencies = _nav_live_context(
+        db, anchor_ts, current_user_id, base_currency, enabled=price_overlay
+    )
     nav_account_ids = {
         int(row["legacy_account_id"])
         for row in canonical_nav_rows
@@ -597,6 +699,7 @@ def _networth_components(
         _canonical_base_currency(row, base_currency)
         for row in canonical_pos_rows
     }
+    currencies.update(nav_live_currencies)
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
     currencies.update(_canonical_base_currency(row, base_currency) for row in canonical_cash_rows)
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
@@ -615,13 +718,14 @@ def _networth_components(
         asset_class = str(r["asset_class"] or "").upper()
         if asset_class in ("STOCK", "FUND"):
             stocks_funds += _canonical_position_value(r, rates, base_currency, latest_prices)
+    nav_deltas = _nav_live_price_deltas(nav_live_rows, nav_live_prices, rates, base_currency)
     for row in canonical_nav_rows:
         nav_currency = str(row["base_currency"] or base_currency).upper()
         rate = rates.get(nav_currency, 1.0)
         cash_base = float(row["cash_base"] or 0.0)
         total_nav_base = float(row["total_nav_base"] or 0.0)
         cash += cash_base * rate
-        stocks_funds += (total_nav_base - cash_base) * rate
+        stocks_funds += (total_nav_base - cash_base) * rate + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
     for row in canonical_cash_rows:
         if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
             continue
@@ -1157,6 +1261,7 @@ def _top_holdings(
                 "latest_trade_date": _iso_value(row.get("latest_trade_date")),
                 "quote_age_days": _quote_age_days(row.get("latest_trade_date")),
                 "price_source": row.get("price_source"),
+                "price_fallback_reason": row.get("price_fallback_reason"),
                 "price_provider": _price_provider(row.get("price_source")),
                 "quote_freshness_status": _quote_freshness_status(row.get("latest_trade_date")),
                 "exchange_code": row.get("exchange_code"),
@@ -1190,17 +1295,19 @@ def _top_holdings(
         avg_cost = cr.get("avg_cost")
         if has_nav_snapshot and cr.get("snapshot_cost_basis_local") is not None and quantity > 0:
             avg_cost = float(cr.get("snapshot_cost_basis_local") or 0.0) / quantity
-        price_row = (
-            latest_prices.get(int(cr["asset_id"]))
-            if cr.get("asset_id") is not None and not has_nav_snapshot
-            else None
-        )
-        value = _canonical_position_value(
-            cr,
-            rates,
-            base_currency,
-            None if has_nav_snapshot else latest_prices,
-        )
+        price_fallback_reason: Optional[str] = None
+        if has_nav_snapshot:
+            # Live view: the price job's quote when it's at least as recent as IBKR's
+            # report; otherwise IBKR's statement price, with the reason (#124).
+            if price_overlay:
+                price_row, price_fallback_reason, value, _snapshot = _nav_row_live_price(
+                    cr, latest_prices, rates, base_currency
+                )
+            else:
+                price_row, value = None, _canonical_position_value(cr, rates, base_currency)
+        else:
+            price_row = latest_prices.get(int(cr["asset_id"])) if cr.get("asset_id") is not None else None
+            value = _canonical_position_value(cr, rates, base_currency, latest_prices)
         latest_price = float(cr.get("snapshot_market_price")) if cr.get("snapshot_market_price") is not None else None
         latest_trade_date = cr.get("report_date")
         price_source = "ibkr_flex" if has_nav_snapshot else "canonical_snapshot"
@@ -1222,6 +1329,7 @@ def _top_holdings(
             "quote_currency": quote_currency,
             "latest_trade_date": latest_trade_date,
             "price_source": price_source,
+            "price_fallback_reason": price_fallback_reason,
             "exchange_code": cr.get("exchange_code"),
             "geo": _infer_country(
                 cr.get("symbol"),
@@ -1763,6 +1871,9 @@ def _platform_allocation(
         anchor_date=anchor_ts.date(),
     )
     latest_prices = _latest_prices_for_positions(db, anchor_ts, canonical_pos_rows, enabled=price_overlay)
+    nav_live_rows, nav_live_prices, nav_live_currencies = _nav_live_context(
+        db, anchor_ts, current_user_id, base_currency, enabled=price_overlay
+    )
     canonical_cash_rows = canonical_account_balance_rows(
         db,
         current_user_id=current_user_id,
@@ -1799,9 +1910,11 @@ def _platform_allocation(
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
     currencies.update(_canonical_base_currency(row, base_currency) for row in canonical_cash_rows)
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
+    currencies.update(nav_live_currencies)
     if wallet_usd:
         currencies.add("USD")
     rates = get_rates(anchor_ts, base_currency, currencies)
+    nav_deltas = _nav_live_price_deltas(nav_live_rows, nav_live_prices, rates, base_currency)
     buckets: Dict[tuple, float] = {}
 
     for row in canonical_pos_rows:
@@ -1814,6 +1927,7 @@ def _platform_allocation(
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
         value = float(row.get("total_nav_base") or 0.0) * rates.get(nav_currency, 1.0)
+        value += nav_deltas.get(int(row["legacy_account_id"]), 0.0) if row.get("legacy_account_id") is not None else 0.0
         key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("country"))
         buckets[key] = buckets.get(key, 0.0) + value
     for row in canonical_cash_rows:
@@ -1865,6 +1979,7 @@ def _stock_exposure(
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     rates = get_rates(anchor_ts, base_currency, currencies)
+    nav_deltas = _nav_live_price_deltas(canonical_pos_rows, latest_prices, rates, base_currency)
 
     by_country: Dict[str, float] = {}
     by_platform: Dict[str, float] = {}
@@ -1881,7 +1996,7 @@ def _stock_exposure(
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
         raw_stock_value = float(row.get("total_nav_base") or 0.0) - float(row.get("cash_base") or 0.0)
-        value = raw_stock_value * rates.get(nav_currency, 1.0)
+        value = raw_stock_value * rates.get(nav_currency, 1.0) + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
         if value <= 0:
             continue
         platform = row.get("platform") or "UNKNOWN"
@@ -1894,7 +2009,10 @@ def _stock_exposure(
             asset_class = str(detail.get("asset_class") or "STOCK").upper()
             if asset_class not in {"STOCK", "FUND"}:
                 continue
-            detail_value = _canonical_position_value(detail, rates, base_currency)
+            if latest_prices:
+                _quote, _reason, detail_value, _snapshot = _nav_row_live_price(detail, latest_prices, rates, base_currency)
+            else:
+                detail_value = _canonical_position_value(detail, rates, base_currency)
             if detail_value <= 0:
                 continue
             country = _infer_country(
