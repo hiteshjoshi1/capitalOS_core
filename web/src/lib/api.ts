@@ -307,6 +307,8 @@ export type DashboardSummary = {
     latest_trade_date?: string | null;
     quote_age_days?: number | null;
     price_source?: string | null;
+    /** Live views: why an IBKR holding is priced at IBKR's statement price (#124). */
+    price_fallback_reason?: string | null;
     price_provider?: string | null;
     quote_freshness_status?: string | null;
   }>;
