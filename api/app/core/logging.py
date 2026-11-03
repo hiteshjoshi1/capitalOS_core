@@ -105,6 +105,9 @@ _REDACTION_PATTERNS = (
         r"flex[_-]?token|flex[_-]?query[_-]?id|query[_-]?id|reference[_-]?code|ref[_-]?code)=)"
         r"[^&\s\"]+"
     ),
+    # IBKR Flex Web Service: `?t=<token>&q=<query id | reference code>` (#114).
+    # httpx logs every request URL at INFO, so these one-letter params leaked.
+    re.compile(r"([?&][tq]=)[^&\s\"]+"),
 )
 
 
@@ -307,6 +310,9 @@ def _record_factory(*args: Any, **kwargs: Any) -> logging.LogRecord:
     return record
 
 
+QUIET_HTTP_LOGGERS = ("httpx", "httpcore", "urllib3")
+
+
 def configure_logging() -> None:
     global _configured
     if _configured:
@@ -326,6 +332,12 @@ def configure_logging() -> None:
     root = logging.getLogger()
     root.setLevel(level)
     root.handlers = [handler]
+    # HTTP client libraries log every request URL at INFO, and some providers take
+    # credentials in the query string (IBKR Flex: `?t=<token>`). Our own code logs
+    # each provider call as an event without the URL, so these lines add nothing
+    # but a leak risk (#114). Their warnings and errors still come through.
+    for noisy in QUIET_HTTP_LOGGERS:
+        logging.getLogger(noisy).setLevel(max(level, logging.WARNING))
     logging.setLogRecordFactory(_record_factory)
     _install_redaction_on_existing_handlers()
     _configured = True
