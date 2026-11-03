@@ -57,7 +57,7 @@ endif
 #   ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign db-create-mcp-role user-set-password \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo ownership-reassign ibkr-rebuild-snapshots db-create-mcp-role user-set-password \
 	observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -328,7 +328,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
+.PHONY: user-set-password db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -470,6 +470,14 @@ db-query:
 ownership-reassign:
 	@test -n "$(TARGET_USER_ID)" || (echo "Usage: make ownership-reassign TARGET_USER_ID=<id> [APPLY=1]" && exit 2)
 	$(COMPOSE) run --rm api python -m app.scripts.reassign_legacy_ownership --target-user-id $(TARGET_USER_ID) $(if $(APPLY),--apply,)
+
+# #134: restore IBKR position/cash snapshots that a multi-day Flex import deleted, from the raw
+# Flex XMLs earlier imports kept (data/broker_raw/ibkr_flex). Dry run unless APPLY=1; idempotent;
+# prints counts per date, never amounts. Never touches NAV, the cash ledger, trades or authority
+# windows. Runs in the running api container (same /app/data as the app). Optional:
+# BROKER_ACCOUNT_ID=<broker_accounts.id>, RAW_DIR=<container dir holding the <hash>.xml files>.
+ibkr-rebuild-snapshots:
+	$(COMPOSE) exec api python -m app.scripts.rebuild_ibkr_flex_snapshots $(if $(APPLY),--apply,) $(if $(BROKER_ACCOUNT_ID),--broker-account-id $(BROKER_ACCOUNT_ID),) $(if $(RAW_DIR),--raw-dir "$(RAW_DIR)",)
 
 # ---- Quality gates ----
 # ---- Python lock files (#81) ----
