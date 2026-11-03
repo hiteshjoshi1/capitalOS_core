@@ -12,7 +12,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.currencies import router as currencies_router
 from app.routers.categories import router as categories_router
 from app.routers.spending import router as spending_router
-from app.routers.ingest import router as ingest_router
+from app.routers.ingest import UploadSizeLimitMiddleware, router as ingest_router
 from app.routers.crypto import router as crypto_router
 from app.routers.market_data import router as market_data_router
 from app.routers.portfolio import router as portfolio_router
@@ -59,6 +59,9 @@ def _resolve_cors_origins(raw_origins: str) -> list[str]:
             resolved.add(origin.replace("http://127.0.0.1:", "http://localhost:", 1))
     return sorted(resolved)
 
+
+# Added first so it sits inside CORS: a 413 still carries the CORS headers.
+app.add_middleware(UploadSizeLimitMiddleware)
 
 cors_origins = os.getenv("CORS_ORIGINS", "")
 origins = _resolve_cors_origins(cors_origins)
