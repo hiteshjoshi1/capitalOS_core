@@ -435,3 +435,33 @@ def test_health_endpoint_emits_logfmt_request_log(client: TestClient) -> None:
     assert f"request_id={request_id}" in line
     assert "level=info" in line
     assert "logger=capitalos.request" in line
+
+
+def test_httpx_request_log_never_contains_ibkr_flex_token() -> None:
+    # #114: httpx logs each request URL at INFO, and the Flex Web Service takes
+    # the token and query id / reference code as `t=` and `q=`.
+    import httpx
+
+    token = "244558547086984718040741"
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, text="<ok/>"))
+    logger, stream, handler, old_propagate, old_level = _capture_logger("httpx")
+    try:
+        with httpx.Client(transport=transport) as client:
+            client.get(
+                "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/SendRequest",
+                params={"t": token, "q": "1548865", "v": "3"},
+            )
+            client.get(
+                "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService/GetStatement",
+                params={"t": token, "q": "5041435844", "v": "3"},
+            )
+    finally:
+        _restore_logger(logger, handler, old_propagate, old_level)
+
+    output = stream.getvalue()
+    assert "HTTP Request: GET" in output  # the request is still logged
+    assert output.count("t=[REDACTED]") == 2
+    assert token not in output
+    assert "1548865" not in output
+    assert "5041435844" not in output
+    assert "v=3" in output

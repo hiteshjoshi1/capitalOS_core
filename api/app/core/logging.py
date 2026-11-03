@@ -105,6 +105,9 @@ _REDACTION_PATTERNS = (
         r"flex[_-]?token|flex[_-]?query[_-]?id|query[_-]?id|reference[_-]?code|ref[_-]?code)=)"
         r"[^&\s\"]+"
     ),
+    # IBKR Flex Web Service: `?t=<token>&q=<query id | reference code>` (#114).
+    # httpx logs every request URL at INFO, so these one-letter params leaked.
+    re.compile(r"([?&][tq]=)[^&\s\"]+"),
 )
 
 
