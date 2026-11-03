@@ -347,3 +347,80 @@ def test_rebuild_reads_from_raw_dir_and_rejects_tampered_files(db_engine, tmp_pa
         assert date.fromisoformat(D1) == result.dates[0].report_date
     finally:
         db.close()
+
+
+def test_rebuild_marks_history_dirty_from_earliest_restored_date(db_engine, tmp_path, monkeypatch):
+    """#169: an applied rebuild marks the account owner's History dirty from the
+    earliest restored date; a dry run and a no-op second run mark nothing."""
+    from app.wealth_rollup_dirty import dirty_state
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed(db_engine)
+    with db_engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, display_name, is_active) VALUES (1, 'rebuild-user', 'R', 1)"))
+        conn.execute(text("UPDATE accounts SET user_id = 1 WHERE id = :id"), {"id": LEGACY_ACCOUNT_ID})
+    db = sessionmaker(bind=db_engine)()
+    try:
+        _import(db, _daily(D1, ledger_id="L1", exec_id="E1"))
+        _import(db, _daily(D2, ledger_id="L2", exec_id="E2"))
+        _import(db, _backfill())
+        _simulate_pre_fix_deletion(db, [D1, D2])
+        db.execute(text("DELETE FROM wealth_rollup_dirty"))  # the imports' own marks
+        db.commit()
+
+        dry = rebuild_ibkr_flex_snapshots(db)
+        assert [str(d.report_date) for d in dry[0].dates] == [D1, D2]
+        assert dirty_state(db, 1) == (None, 0)
+
+        rebuild_ibkr_flex_snapshots(db, apply=True)
+        assert dirty_state(db, 1) == (date.fromisoformat(D1), 1)
+        reason = db.execute(text("SELECT reason FROM wealth_rollup_dirty WHERE user_id = 1")).scalar()
+        assert reason == "ibkr_rebuild"
+
+        # Settle the mark, then a second run restores nothing and marks nothing.
+        db.execute(text("UPDATE wealth_rollup_dirty SET from_date = NULL"))
+        db.commit()
+        again = rebuild_ibkr_flex_snapshots(db, apply=True)
+        assert again[0].dates == []
+        assert dirty_state(db, 1) == (None, 1)
+    finally:
+        db.close()
+
+
+def test_rebuild_dirty_mark_rolls_back_with_the_restored_rows(db_engine, tmp_path, monkeypatch):
+    """#169: the mark is written in the rebuild's transaction, so a failure there
+    leaves neither restored rows nor a mark."""
+    import pytest
+
+    from app.portfolio import ibkr_flex_rebuild
+    from app.wealth_rollup_dirty import dirty_state
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed(db_engine)
+    with db_engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (id, username, display_name, is_active) VALUES (1, 'rebuild-user', 'R', 1)"))
+        conn.execute(text("UPDATE accounts SET user_id = 1 WHERE id = :id"), {"id": LEGACY_ACCOUNT_ID})
+    db = sessionmaker(bind=db_engine)()
+    try:
+        _import(db, _daily(D1, ledger_id="L1", exec_id="E1"))
+        _import(db, _backfill())
+        _simulate_pre_fix_deletion(db, [D1])
+        db.execute(text("DELETE FROM wealth_rollup_dirty"))
+        db.commit()
+
+        def boom(*args, **kwargs):
+            raise RuntimeError("synthetic failure after the mark")
+
+        real_mark = ibkr_flex_rebuild.mark_rollups_dirty
+
+        def mark_then_fail(*args, **kwargs):
+            real_mark(*args, **kwargs)
+            boom()
+
+        monkeypatch.setattr(ibkr_flex_rebuild, "mark_rollups_dirty", mark_then_fail)
+        with pytest.raises(RuntimeError):
+            rebuild_ibkr_flex_snapshots(db, apply=True)
+        assert dirty_state(db, 1) == (None, 0)
+        assert _per_date(db, "portfolio_position_snapshots") == {D3: 1}
+    finally:
+        db.close()
