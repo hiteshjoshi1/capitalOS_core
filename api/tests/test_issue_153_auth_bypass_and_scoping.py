@@ -276,14 +276,11 @@ def test_market_data_refresh_diagnostics_scoped_for_non_admin(client, two_users_
         },
     )
     monkeypatch.setattr("app.routers.market_data.publish_portfolio_refresh", lambda *a, **k: None)
+    # #152 made refresh-now admin-only (D-n in the batch), so a non-admin can't
+    # reach the per-user diagnostics scoping any more: it gets 403 instead.
     with act_as(USER_A):
         resp = client.post("/market-data/refresh-now")
-    assert resp.status_code == 200
-    diag = resp.json()["exchanges"][0]["diagnostics"]
-    assert [item["symbol"] for item in diag["symbols"]] == ["AAAA"]
-    assert diag["diagnostics_summary"]["active_symbols"] == 1
-    assert diag["diagnostics_summary"]["refreshed"] == 1
-    assert diag["diagnostics_summary"]["failed"] == 0
+    assert resp.status_code == 403
 
 
 def test_data_hub_market_counts_are_per_user(client, two_users_two_tickers, monkeypatch):
