@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, require_current_user
 from app.core.logging import job_context
 from app.db.session import get_db
-from app.market_data.service import latest_status_by_exchange, list_runs, run_all_exchanges
+from app.market_data.service import (
+    held_asset_ids,
+    latest_status_by_exchange,
+    list_runs,
+    run_all_exchanges,
+    scope_exchange_diagnostics,
+)
 from app.services.portfolio_realtime import publish_portfolio_refresh
 
 router = APIRouter(prefix="/market-data", tags=["market-data"], dependencies=[Depends(require_current_user)])
@@ -26,9 +32,20 @@ def _validate_admin_key(x_admin_key: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+def _visible_asset_ids(db: Session, current_user: CurrentUser) -> set[int] | None:
+    """None (every symbol) for an admin; otherwise the assets the caller holds,
+    so per-symbol diagnostics never show another user's tickers (#153)."""
+    if current_user.is_admin:
+        return None
+    return held_asset_ids(db, current_user.id)
+
+
 @router.get("/status")
-def market_data_status(db: Session = Depends(get_db)):
-    return {"status": latest_status_by_exchange(db)}
+def market_data_status(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    return {"status": latest_status_by_exchange(db, asset_ids=_visible_asset_ids(db, current_user))}
 
 
 @router.get("/runs")
@@ -49,6 +66,11 @@ def market_data_refresh_now(
             logger.info("quote_refresh_started", extra={"event": "quote_refresh_started", "provider": "market_data"})
             result = run_all_exchanges(db)
             exchange_results = result.get("exchanges") or []
+            visible = _visible_asset_ids(db, current_user)
+            if visible is not None:
+                for item in exchange_results:
+                    if isinstance(item.get("diagnostics"), dict):
+                        item["diagnostics"] = scope_exchange_diagnostics(item["diagnostics"], visible)
             status = "completed"
             if any(item.get("status") == "failed" for item in exchange_results):
                 status = "failed"

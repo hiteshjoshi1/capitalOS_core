@@ -3,7 +3,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from app.auth_context import CurrentUser, require_current_user
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.models.platform import Platform, PlatformType
 from app.schemas.platform import PlatformCreate, PlatformOut
@@ -20,15 +20,18 @@ def list_platforms(
 @router.get("/options")
 def platform_options(
     db: Session = Depends(get_db),
-    _: CurrentUser = Depends(require_current_user),
+    current_user: CurrentUser = Depends(require_current_user),
 ):
-    q = text("""
+    # Only the caller's own accounts contribute countries (#153), like /accounts/options.
+    q = text(f"""
         SELECT DISTINCT country FROM platforms WHERE country IS NOT NULL
         UNION
-        SELECT DISTINCT country FROM accounts WHERE country IS NOT NULL
+        SELECT DISTINCT a.country FROM accounts a
+        WHERE a.country IS NOT NULL
+          AND {account_scope_sql("a")}
         ORDER BY country
     """)
-    countries = [r[0] for r in db.execute(q).fetchall()]
+    countries = [r[0] for r in db.execute(q, {"current_user_id": current_user.id}).fetchall()]
     return {
         "platform_types": list(PlatformType.enums),
         "countries": countries,

@@ -12,6 +12,7 @@ import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.auth_context import account_scope_sql
 from app.market_data.providers import EODHDProvider, FinnhubProvider, YahooProvider, YFinanceProvider, EodQuote
 
 
@@ -793,21 +794,11 @@ def _exchange_diagnostics(
     latest_run_started_at = latest_run.get("started_at") if latest_run else None
     deferred_lookup = deferred_asset_ids or set()
 
-    summary = {
-        "active_symbols": len(symbols),
-        "refreshed": 0,
-        "failed": 0,
-        "deferred": 0,
-        "fresh": 0,
-        "stale": 0,
-        "missing": 0,
-    }
     items: list[dict[str, Any]] = []
     for row in symbols:
         latest_price = latest_prices.get(row.asset_id, {})
         latest_item = latest_items.get(row.asset_id, {})
         freshness_status, age_days = _freshness_status(latest_price.get("trade_date"))
-        summary[freshness_status] += 1
 
         attempt_status = str(latest_item.get("status") or "").lower()
         refresh_status = freshness_status
@@ -825,9 +816,6 @@ def _exchange_diagnostics(
                 refresh_status = "failed"
             elif latest_run_started_at is not None and not latest_item:
                 refresh_status = "deferred"
-
-        if refresh_status in {"refreshed", "failed", "deferred"}:
-            summary[refresh_status] += 1
 
         items.append(
             {
@@ -857,9 +845,64 @@ def _exchange_diagnostics(
     return {
         "exchange_code": exchange_code,
         "latest_run": latest_run,
-        "diagnostics_summary": summary,
+        "diagnostics_summary": _diagnostics_summary(items),
         "symbols": items,
     }
+
+
+def _diagnostics_summary(items: list[dict[str, Any]]) -> dict[str, int]:
+    summary = {
+        "active_symbols": len(items),
+        "refreshed": 0,
+        "failed": 0,
+        "deferred": 0,
+        "fresh": 0,
+        "stale": 0,
+        "missing": 0,
+    }
+    for item in items:
+        summary[item["freshness_status"]] += 1
+        if item["refresh_status"] in {"refreshed", "failed", "deferred"}:
+            summary[item["refresh_status"]] += 1
+    return summary
+
+
+def held_asset_ids(db: Session, user_id: int) -> set[int]:
+    """Assets the user holds or has held: a position, a canonical position
+    snapshot or a transaction in one of their accounts (#153). Market-data
+    diagnostics are scoped to these so one user never sees another's tickers."""
+    scope = account_scope_sql("acc")
+    rows = db.execute(
+        text(
+            f"""
+            SELECT p.asset_id
+            FROM positions p
+            JOIN accounts acc ON acc.id = p.account_id
+            WHERE p.asset_id IS NOT NULL AND {scope}
+            UNION
+            SELECT bi.asset_id
+            FROM portfolio_position_snapshots ps
+            JOIN broker_instruments bi ON bi.id = ps.broker_instrument_id
+            JOIN broker_accounts ba ON ba.id = ps.broker_account_id
+            JOIN accounts acc ON acc.id = ba.legacy_account_id
+            WHERE bi.asset_id IS NOT NULL AND {scope}
+            UNION
+            SELECT t.asset_id
+            FROM transactions t
+            JOIN accounts acc ON acc.id = t.account_id
+            WHERE t.asset_id IS NOT NULL AND {scope}
+            """
+        ),
+        {"current_user_id": user_id},
+    ).fetchall()
+    return {int(row[0]) for row in rows}
+
+
+def scope_exchange_diagnostics(diagnostics: dict[str, Any], asset_ids: set[int]) -> dict[str, Any]:
+    """The same diagnostics restricted to ``asset_ids``, summary recounted.
+    Run-level fields (latest_run, exchange_code) are kept as they are."""
+    items = [item for item in diagnostics.get("symbols") or [] if item.get("asset_id") in asset_ids]
+    return {**diagnostics, "diagnostics_summary": _diagnostics_summary(items), "symbols": items}
 
 
 def _fetch_quotes(
@@ -1141,10 +1184,15 @@ def run_all_exchanges(
 
 
 
-def latest_status_by_exchange(db: Session) -> list[dict[str, Any]]:
+def latest_status_by_exchange(db: Session, *, asset_ids: set[int] | None = None) -> list[dict[str, Any]]:
+    """Per-exchange run status and per-symbol diagnostics. ``asset_ids`` limits
+    the symbols (and their counts) to those assets; None means every symbol
+    (admins, schedulers)."""
     payload: list[dict[str, Any]] = []
     for exchange_code in configured_exchanges():
         diagnostics = _exchange_diagnostics(db, exchange_code)
+        if asset_ids is not None:
+            diagnostics = scope_exchange_diagnostics(diagnostics, asset_ids)
         latest_run = diagnostics.pop("latest_run", None) or {}
         payload.append(
             {
@@ -1157,11 +1205,12 @@ def latest_status_by_exchange(db: Session) -> list[dict[str, Any]]:
 
 
 
-def freshness_counts_by_exchange(db: Session) -> dict[str, dict[str, int]]:
+def freshness_counts_by_exchange(db: Session, *, asset_ids: set[int] | None = None) -> dict[str, dict[str, int]]:
     """{exchange: {"fresh", "stale", "missing"}} for the configured exchanges:
     the diagnostics_summary freshness counts latest_status_by_exchange reports,
     from one query instead of four per exchange (#147). Each active symbol's
-    freshness is the age of its newest dated price."""
+    freshness is the age of its newest dated price. ``asset_ids`` limits the
+    count to those assets (#153); None counts every symbol."""
     exchanges = configured_exchanges()
     counts = {ex: {"fresh": 0, "stale": 0, "missing": 0} for ex in exchanges}
     if not exchanges:
@@ -1170,7 +1219,8 @@ def freshness_counts_by_exchange(db: Session) -> dict[str, dict[str, int]]:
     rows = db.execute(
         text(
             f"""
-            SELECT m.exchange_code,
+            SELECT m.asset_id,
+                   m.exchange_code,
                    m.exchange_symbol,
                    a.symbol AS asset_symbol,
                    lp.latest_trade_date
@@ -1191,6 +1241,8 @@ def freshness_counts_by_exchange(db: Session) -> dict[str, dict[str, int]]:
     ).mappings().all()
     for row in rows:
         if row["exchange_code"] not in counts:
+            continue
+        if asset_ids is not None and int(row["asset_id"]) not in asset_ids:
             continue
         _ex, sym = _resolved_exchange_symbol(row)
         if not sym:

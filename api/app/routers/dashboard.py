@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership, require_current_user
 from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
-from app.market_data.service import freshness_counts_by_exchange
+from app.market_data.service import freshness_counts_by_exchange, held_asset_ids
 from app.schemas.dashboard import (
     BootstrapResponse,
     CashDepositsItem,
@@ -3102,7 +3102,8 @@ def data_hub_summary(
         {"current_user_id": current_user.id},
     ).fetchone()
 
-    market_freshness = freshness_counts_by_exchange(db)
+    # The caller's own symbols only, admin or not: this card is about your data (#153).
+    market_freshness = freshness_counts_by_exchange(db, asset_ids=held_asset_ids(db, current_user.id))
     fresh_total = sum(counts["fresh"] for counts in market_freshness.values())
     stale_total = sum(counts["stale"] for counts in market_freshness.values())
 

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
-from app.ingestion.runner import create_import_job, run_ingestion
+from app.ingestion.runner import PARSER_REGISTRY, create_import_job, run_ingestion
 from app.ingestion.registry import register_signature
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
@@ -336,12 +336,19 @@ def register_job_signature(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
+    # The registry is shared by every user, so only an admin may write it (#153).
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only an admin can register a file format")
+    parser_key = (payload.parser_key or "").strip()
+    if parser_key not in PARSER_REGISTRY:
+        raise HTTPException(status_code=400, detail=f"Unknown parser_key: {parser_key!r}")
     job = db.query(ImportJob).filter(ImportJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     _require_account_platform(db, int(job.account_id), current_user.id)
     if not job.format_signature:
         raise HTTPException(status_code=400, detail="Job has no format_signature")
-    register_signature(db, job.format_signature, payload.parser_key, 1)
+    # An admin registering a signature that is already mapped corrects the mapping.
+    register_signature(db, job.format_signature, parser_key, 1, replace=True)
     report = run_ingestion(db=db, job_id=job.id, data_dir=_data_dir())
     return report
