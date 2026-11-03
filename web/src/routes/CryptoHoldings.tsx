@@ -5,6 +5,7 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
@@ -130,6 +131,7 @@ export default function CryptoHoldings() {
                 : `USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · historical snapshot as of ${formatDate(summary?.as_of)} · vs ${summary?.compare_month ?? "last month"}`
             }
           />
+          <FxNote sources={[summary]} />
 
           <section>
             <div className="cashFlowSectionHeading">

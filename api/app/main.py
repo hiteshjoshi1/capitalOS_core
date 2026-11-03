@@ -12,7 +12,7 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.currencies import router as currencies_router
 from app.routers.categories import router as categories_router
 from app.routers.spending import router as spending_router
-from app.routers.ingest import router as ingest_router
+from app.routers.ingest import UploadSizeLimitMiddleware, router as ingest_router
 from app.routers.crypto import router as crypto_router
 from app.routers.market_data import router as market_data_router
 from app.routers.portfolio import router as portfolio_router
@@ -20,9 +20,13 @@ from app.routers.alerts import router as alerts_router
 from app.routers.dividends import router as dividends_router
 from app.routers.realtime import router as realtime_router
 from app.core.logging import RequestIdMiddleware, configure_logging
-from app.crypto.scheduler import start_scheduler
+from app.valuation_cache import ValuationCacheMiddleware
+from app.fx import FxNotesMiddleware
+from app.crypto.scheduler import start_scheduler, stop_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
+from app.market_data.scheduler import stop_scheduler as stop_market_scheduler
 from app.portfolio.scheduler import start_scheduler as start_portfolio_scheduler
+from app.portfolio.scheduler import stop_scheduler as stop_portfolio_scheduler
 
 
 
@@ -33,7 +37,13 @@ async def _lifespan(_app: FastAPI):
     start_scheduler()
     start_market_scheduler()
     start_portfolio_scheduler()
-    yield
+    try:
+        yield
+    finally:
+        # Stop new jobs firing while a reload or deploy shuts this process down (#135).
+        stop_portfolio_scheduler()
+        stop_market_scheduler()
+        stop_scheduler()
 
 
 app = FastAPI(title="CapitalOS API", version="0.1.0", lifespan=_lifespan)
@@ -60,6 +70,9 @@ def _resolve_cors_origins(raw_origins: str) -> list[str]:
     return sorted(resolved)
 
 
+# Added first so it sits inside CORS: a 413 still carries the CORS headers.
+app.add_middleware(UploadSizeLimitMiddleware)
+
 cors_origins = os.getenv("CORS_ORIGINS", "")
 origins = _resolve_cors_origins(cors_origins)
 if origins:
@@ -71,6 +84,10 @@ if origins:
         allow_headers=["*"],
     )
 app.add_middleware(RequestIdMiddleware)
+# Per-request (and, where safe, cross-request) valuation caching for GETs (#147).
+app.add_middleware(ValuationCacheMiddleware)
+# Per-request record of currencies valued without a (current) FX rate (#139).
+app.add_middleware(FxNotesMiddleware)
 
 app.include_router(health_router)
 app.include_router(auth_router)

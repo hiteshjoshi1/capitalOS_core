@@ -186,7 +186,13 @@ belongs here too, along with removing the code path that calls it.
 
 ## Everything else
 
-Auth (`AUTH_ACCESS_TOKEN_SECRET`), CORS, and misc timing/threshold vars are
-covered inline in `.env.example` — none of them are required for local use.
+Auth (`AUTH_ACCESS_TOKEN_SECRET`), CORS, upload size (`INGEST_MAX_UPLOAD_MB`),
+and misc timing/threshold vars are covered inline in `.env.example` — none of
+them are required for local use.
+
+**Always set `AUTH_ACCESS_TOKEN_SECRET`** (e.g. `openssl rand -hex 32`) on any
+install you keep. Without it the API generates the signing key and stores it as
+`data/.auth_secret`, in the same data directory as uploads and reports; setting
+it keeps the key out of that directory.
 There is currently no in-app "which integrations are configured" screen —
 this doc plus `.env.example`'s comments are the source of truth.

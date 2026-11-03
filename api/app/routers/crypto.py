@@ -29,7 +29,8 @@ from app.crypto.verify import (
 from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refresh_lock, upsert_snapshot
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.crypto.valuation import latest_wallet_valuation
-from app.fx import get_rates
+from app.fx import fx_status, get_rates_by_date, rate_date
+from app.wealth_rollup_dirty import mark_wallet_history_dirty
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
 
@@ -369,7 +370,7 @@ def wallet_verify(
 
     wallet = db.execute(
         text(
-            "SELECT id, user_id FROM crypto_wallets WHERE chain_type = :chain_type AND chain = :chain AND address = :address"
+            "SELECT id, user_id, status FROM crypto_wallets WHERE chain_type = :chain_type AND chain = :chain AND address = :address"
         ),
         {
             "chain_type": payload.chain_type,
@@ -388,6 +389,8 @@ def wallet_verify(
             ),
             {"id": wallet_id, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         )
+        if wallet["status"] != "active" or wallet_owner is None:
+            mark_wallet_history_dirty(db, wallet_id, "crypto_wallet_activated")
     else:
         row = db.execute(
             text(
@@ -455,7 +458,7 @@ def wallet_verify_onchain(
 
     wallet = db.execute(
         text(
-            "SELECT id, user_id FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
+            "SELECT id, user_id, status FROM crypto_wallets WHERE chain_type = 'solana' AND chain = 'solana' AND address = :address"
         ),
         {"address": normalized_address},
     ).mappings().one_or_none()
@@ -468,6 +471,8 @@ def wallet_verify_onchain(
             text("UPDATE crypto_wallets SET status = 'active', verified_at = :now, user_id = COALESCE(user_id, :current_user_id) WHERE id = :id"),
             {"id": wallet_id, "now": datetime.now(tz=timezone.utc), "current_user_id": current_user.id},
         )
+        if wallet["status"] != "active" or wallet_owner is None:
+            mark_wallet_history_dirty(db, wallet_id, "crypto_wallet_activated")
     else:
         row = db.execute(
             text(
@@ -724,9 +729,36 @@ def crypto_summary(
     total_usd, last_refreshed, _ = _crypto_total_and_freshness(wallet_rows)
     snapshot_total_usd, _, _ = _crypto_total_and_freshness(snapshot_wallet_rows)
     is_stale = bool(display_valuation["stale_holdings"] or display_valuation["stale_prices"])
-    rate = get_rates(datetime.now(tz=timezone.utc), base_currency, {"USD"}).get("USD", 1.0)
+    # FX-date rule (#139): a balance converts at its own anchor date's rate, so
+    # the current view uses the anchor's rate and the prior-month snapshot (and
+    # each trend month) its own. A missing rate converts to 0 and is flagged.
+    trend_points = []
+    for candidate_month in _month_window(selected_month_start, months=6):
+        candidate_anchor = _anchor_date(candidate_month)
+        candidate_wallet_rows = _latest_wallet_rows(db, current_user.id, as_of_date=candidate_anchor)
+        candidate_total_usd, _, _ = _crypto_total_and_freshness(candidate_wallet_rows)
+        trend_points.append((candidate_month, candidate_anchor, candidate_wallet_rows, candidate_total_usd))
+    # Only dates that have something to convert, so a missing rate for an empty
+    # month doesn't flag the response.
+    def _has_value(rows: list[dict[str, Any]]) -> bool:
+        return any(row.get("total_usd") is not None for row in rows)
+
+    fx_dates = [
+        anchor
+        for anchor, rows in ((effective_anchor, wallet_rows), (snapshot_anchor, snapshot_wallet_rows))
+        if _has_value(rows)
+    ]
+    fx_dates += [anchor for _month, anchor, rows, _total in trend_points if _has_value(rows)]
+    usd_by_date = get_rates_by_date(fx_dates, base_currency, {"USD"})
+
+    def _usd_rate(anchor: datetime) -> float:
+        rates = usd_by_date.get(rate_date(anchor))
+        return rates.get("USD", 0.0) if rates is not None else 0.0
+
+    rate = _usd_rate(effective_anchor)
+    snapshot_rate = _usd_rate(snapshot_anchor)
     total_base = total_usd * rate
-    snapshot_total_base = snapshot_total_usd * rate
+    snapshot_total_base = snapshot_total_usd * snapshot_rate
     snapshot_delta_base = total_base - snapshot_total_base
 
     previous_lookup = {
@@ -785,14 +817,14 @@ def crypto_summary(
                 "price_change_pct": ((current_price_usd - previous_price_usd) / previous_price_usd)
                 if current_price_usd is not None and previous_price_usd not in (None, 0)
                 else None,
-                "value_change_base": (current_value_usd - previous_value_usd) * rate
+                "value_change_base": current_value_usd * rate - previous_value_usd * snapshot_rate
                 if previous_value_usd is not None
                 else None,
                 "value_change_pct": ((current_value_usd - previous_value_usd) / previous_value_usd)
                 if previous_value_usd not in (None, 0)
                 else None,
-                "snapshot_value_base": snapshot_value_usd * rate,
-                "snapshot_delta_base": (current_value_usd - snapshot_value_usd) * rate,
+                "snapshot_value_base": snapshot_value_usd * snapshot_rate,
+                "snapshot_delta_base": current_value_usd * rate - snapshot_value_usd * snapshot_rate,
                 "snapshot_delta_pct": ((current_value_usd - snapshot_value_usd) / snapshot_value_usd)
                 if snapshot_value_usd > 0
                 else None,
@@ -850,14 +882,11 @@ def crypto_summary(
     ]
 
     trend = []
-    for candidate_month in _month_window(selected_month_start, months=6):
-        candidate_anchor = _anchor_date(candidate_month)
-        candidate_wallet_rows = _latest_wallet_rows(db, current_user.id, as_of_date=candidate_anchor)
-        candidate_total_usd, _, _ = _crypto_total_and_freshness(candidate_wallet_rows)
+    for candidate_month, candidate_anchor, candidate_wallet_rows, candidate_total_usd in trend_points:
         trend.append(
             {
                 "month": candidate_month.strftime("%Y-%m"),
-                "value": candidate_total_usd * rate if candidate_wallet_rows else None,
+                "value": candidate_total_usd * _usd_rate(candidate_anchor) if candidate_wallet_rows else None,
             }
         )
 
@@ -913,6 +942,7 @@ def crypto_summary(
         "stale_prices": bool(display_valuation["stale_prices"]),
         "is_stale": is_stale,
         "refresh_triggered": False,
+        **fx_status(),
     }
 
 

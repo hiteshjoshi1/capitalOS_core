@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 
+from app.schemas.fx import FxStatusFields
+
 
 class NetWorth(BaseModel):
     total: float
@@ -90,7 +92,7 @@ class TopMovers(BaseModel):
     detractors: List[TopMover]
 
 
-class DashboardSummaryResponse(BaseModel):
+class DashboardSummaryResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
@@ -108,6 +110,9 @@ class DashboardSummaryResponse(BaseModel):
     top_holdings: List[TopHolding]
     cash_balances: List[CashBalance]
     net_worth_change: Optional[Dict[str, NetWorthChange]] = None
+    # Live current_net_worth vs the latest completed month-end anchor (vs_prev_month)
+    # and the anchor twelve months before it (vs_prev_year), #133.
+    current_net_worth_change: Optional[Dict[str, NetWorthChange]] = None
     net_worth_component_change: Optional[Dict[str, NetWorthChange]] = None
     top_movers: Optional[TopMovers] = None
     cash_percent: float
@@ -152,7 +157,7 @@ class StockBreakdownItem(BaseModel):
     percent: float
 
 
-class StockHoldingsResponse(BaseModel):
+class StockHoldingsResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
@@ -299,7 +304,7 @@ class DataHubSummaryResponse(BaseModel):
     recent_activity: List[DataHubActivityItem]
 
 
-class BootstrapResponse(BaseModel):
+class BootstrapResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
@@ -348,6 +353,8 @@ class WealthTimelineNow(BaseModel):
     crypto: float
     liabilities: float
     as_of: Optional[str] = None
+    # Platforms with a statement import this (still open) month (#138).
+    uploads: List[str] = Field(default_factory=list)
 
 
 class WealthTimelineResponse(BaseModel):

@@ -498,7 +498,8 @@ def test_market_data_scheduler_registers_one_due_check(monkeypatch):
 
     assert market_scheduler.start_scheduler() is not None
     assert created["job_defaults"]["misfire_grace_time"] is None
-    assert [job["id"] for job in added_jobs] == ["stock_refresh_due_check"]
+    # The quote refresh check, plus the daily FX fill check (#139).
+    assert [job["id"] for job in added_jobs] == ["stock_refresh_due_check", "fx_fill_due_check"]
 
 
 def test_market_data_due_check_runs_only_windows_missed_since_their_close(monkeypatch):

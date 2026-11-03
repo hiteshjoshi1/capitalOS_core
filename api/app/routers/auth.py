@@ -11,7 +11,7 @@ from app.auth_context import CurrentUser, require_current_user
 from app.db.session import get_db
 from app.schemas.auth import (
     AuthMeResponse,
-    AuthTokenResponse,
+    AuthSessionResponse,
     ChangePasswordRequest,
     ChangePasswordResponse,
     DEFAULT_ACCENT_COLOR,
@@ -85,6 +85,53 @@ def _create_refresh_session(db: Session, *, user_id: int) -> str:
     return refresh_token
 
 
+def _load_user(db: Session, user_id: int) -> AuthMeResponse | None:
+    row = db.execute(
+        text(
+            """
+            SELECT id, username, display_name, email, COALESCE(is_admin, FALSE) AS is_admin
+            FROM users
+            WHERE id = :id
+            LIMIT 1
+            """
+        ),
+        {"id": user_id},
+    ).mappings().one_or_none()
+    if row is None:
+        return None
+    return AuthMeResponse(
+        id=int(row["id"]),
+        username=str(row["username"]),
+        display_name=row["display_name"],
+        email=row["email"],
+        is_admin=bool(row["is_admin"]),
+    )
+
+
+def _read_preferences(db: Session, user_id: int) -> UserPreferencesResponse:
+    """The user's stored preferences, or the defaults GET /auth/preferences would create."""
+    row = db.execute(
+        text("SELECT theme, accent_color FROM user_preferences WHERE user_id = :user_id"),
+        {"user_id": user_id},
+    ).mappings().one_or_none()
+    if row is None:
+        return UserPreferencesResponse(theme=DEFAULT_THEME, accent_color=DEFAULT_ACCENT_COLOR)
+    return UserPreferencesResponse(theme=str(row["theme"]), accent_color=str(row["accent_color"]))
+
+
+def _session_response(
+    db: Session, *, user_id: int, access_token: str, exp: datetime, now: datetime
+) -> AuthSessionResponse:
+    # user + preferences ride along with the token so a cold load is one round trip (#146).
+    return AuthSessionResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=max(int((exp - now).total_seconds()), 1),
+        user=_load_user(db, user_id),
+        preferences=_read_preferences(db, user_id),
+    )
+
+
 @router.post("/signup", response_model=AuthMeResponse)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     if os.getenv("AUTH_ALLOW_SIGNUP", "1").strip().lower() in {"0", "false", "no", "off"}:
@@ -138,7 +185,7 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/login", response_model=AuthTokenResponse)
+@router.post("/login", response_model=AuthSessionResponse)
 def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
     row = db.execute(
         text(
@@ -170,14 +217,10 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
     db.commit()
 
     _set_refresh_cookie(response, refresh_token)
-    return AuthTokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=max(int((exp - now).total_seconds()), 1),
-    )
+    return _session_response(db, user_id=user_id, access_token=access_token, exp=exp, now=now)
 
 
-@router.post("/refresh", response_model=AuthTokenResponse)
+@router.post("/refresh", response_model=AuthSessionResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
     refresh_token = request.cookies.get(refresh_cookie_name())
     if not refresh_token:
@@ -285,10 +328,8 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
                         access_token, exp = create_access_token(user_id=user_id, username=username)
                         db.commit()
                         _set_refresh_cookie(response, next_refresh_token)
-                        return AuthTokenResponse(
-                            access_token=access_token,
-                            token_type="bearer",
-                            expires_in=max(int((exp - now).total_seconds()), 1),
+                        return _session_response(
+                            db, user_id=user_id, access_token=access_token, exp=exp, now=now
                         )
 
         db.execute(
@@ -313,11 +354,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
     db.commit()
 
     _set_refresh_cookie(response, next_refresh_token)
-    return AuthTokenResponse(
-        access_token=access_token,
-        token_type="bearer",
-        expires_in=max(int((exp - now).total_seconds()), 1),
-    )
+    return _session_response(db, user_id=user_id, access_token=access_token, exp=exp, now=now)
 
 
 @router.post("/logout")
@@ -370,26 +407,10 @@ def change_password(
 
 @router.get("/me", response_model=AuthMeResponse)
 def me(current_user: CurrentUser = Depends(require_current_user), db: Session = Depends(get_db)):
-    row = db.execute(
-        text(
-            """
-            SELECT id, username, display_name, email, COALESCE(is_admin, FALSE) AS is_admin
-            FROM users
-            WHERE id = :id
-            LIMIT 1
-            """
-        ),
-        {"id": current_user.id},
-    ).mappings().one_or_none()
-    if row is None:
+    user = _load_user(db, current_user.id)
+    if user is None:
         raise HTTPException(status_code=404, detail="user not found")
-    return AuthMeResponse(
-        id=int(row["id"]),
-        username=str(row["username"]),
-        display_name=row["display_name"],
-        email=row["email"],
-        is_admin=bool(row["is_admin"]),
-    )
+    return user
 
 
 @router.get("/preferences", response_model=UserPreferencesResponse)

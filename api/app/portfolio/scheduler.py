@@ -22,6 +22,7 @@ from app.core.catchup import (
 from app.core.logging import job_context
 from app.db.session import SessionLocal
 from app.portfolio.ibkr_flex import SOURCE_TYPE, run_ibkr_flex_import_from_config
+from app.wealth_rollup_dirty import refresh_dirty_rollups_after_job
 
 logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
 _scheduler: BackgroundScheduler | None = None
@@ -174,6 +175,8 @@ def _run_daily_imports() -> bool:
                         "duration_ms": int((time.perf_counter() - started) * 1000),
                     },
                 )
+            if successes:
+                refresh_dirty_rollups_after_job(db, "ibkr_flex")
             return failures == 0
         finally:
             db.close()
@@ -229,3 +232,19 @@ def start_scheduler() -> BackgroundScheduler | None:
     scheduler.start()
     _scheduler = scheduler
     return scheduler
+
+
+def stop_scheduler() -> None:
+    """Stop firing jobs on API shutdown or reload (#135).
+
+    ``wait=False`` so a reload isn't held up by a running job; an import or
+    refresh cut short this way leaves a lock that the stale-lock rule takes over.
+    """
+    global _scheduler
+    scheduler, _scheduler = _scheduler, None
+    if scheduler is None:
+        return
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:  # noqa: BLE001 - shutdown must not block the others
+        logger.warning("scheduler_shutdown_failed", exc_info=True)

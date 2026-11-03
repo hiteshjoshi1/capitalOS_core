@@ -12,6 +12,8 @@ from app.auth_context import allow_legacy_null_ownership
 from app.crypto.ingest import should_refresh
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order
+from app.valuation_cache import valuation_cached
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 logger = logging.getLogger("capitalos.crypto.valuation")
 
@@ -98,6 +100,8 @@ def _ranked_snapshots_sql(as_of_filter: bool) -> str:
     )
 
 
+# Per request only: its stale_* flags are relative to the current time.
+@valuation_cached()
 def latest_wallet_valuation(
     db: Session,
     current_user_id: int,
@@ -242,7 +246,7 @@ def refresh_latest_snapshot_prices(db: Session, wallet_id: str) -> bool:
     snapshot = db.execute(
         text(
             """
-            SELECT id, fetched_at, source_versions
+            SELECT id, as_of_date, fetched_at, source_versions
             FROM crypto_wallet_snapshots
             WHERE wallet_id = :wallet_id
             ORDER BY as_of_date DESC, fetched_at DESC, id DESC
@@ -340,4 +344,6 @@ def refresh_latest_snapshot_prices(db: Session, wallet_id: str) -> bool:
         {"snapshot_id": snapshot["id"], "total_usd": total_usd, "source_versions": json.dumps(versions)},
     )
     logger.info("crypto_price_overlay_updated", extra={"wallet_id": wallet_id, "items": updated})
+    # Repricing the latest snapshot changes every anchor from its date on (#138).
+    mark_rollups_dirty(db, snapshot["as_of_date"], wallet_id=wallet_id, reason="crypto_snapshot_repriced")
     return True

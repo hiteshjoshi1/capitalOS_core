@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import time
 import uuid
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,8 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.valuation_cache import valuation_cached
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 PARSER_VERSION = "ibkr_flex_v1"
 SOURCE_TYPE = "ibkr_flex_daily"
@@ -22,6 +25,9 @@ PLATFORM_CODE = "IBKR"
 ALL_FACT_SCOPE = "all"
 DEFAULT_IBKR_FLEX_BASE_URL = "https://ndcdyn.interactivebrokers.com/AccountManagement/FlexWebService"
 DEFAULT_IBKR_USER_AGENT = "curl/8.0"
+DEFAULT_IMPORT_LOCK_STALE_MINUTES = 30.0
+
+logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
 
 
 class IbkrFlexError(Exception):
@@ -890,7 +896,8 @@ def _ensure_broker_account(
     return int(row[0])
 
 
-def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: date) -> None:
+def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: date) -> bool:
+    """Create the Flex authority window if missing. True when it was created."""
     exists = db.execute(
         text(
             """
@@ -911,7 +918,7 @@ def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: 
         },
     ).fetchone()
     if exists:
-        return
+        return False
     db.execute(
         text(
             """
@@ -928,6 +935,7 @@ def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: 
             "effective_from": cutover_date,
         },
     )
+    return True
 
 
 def _create_import_run(
@@ -977,28 +985,109 @@ def _create_import_run(
     return int(row[0])
 
 
+def import_lock_stale_after() -> timedelta:
+    """How old an import lock may get before a new import takes it over (#135).
+
+    A process killed mid-import (``uvicorn --reload``, a deploy, a crash) never
+    deletes its row; without a limit every later import would 409 forever.
+    """
+    raw = os.getenv("IBKR_IMPORT_LOCK_STALE_MINUTES", "").strip()
+    try:
+        minutes = float(raw) if raw else DEFAULT_IMPORT_LOCK_STALE_MINUTES
+    except ValueError:
+        minutes = DEFAULT_IMPORT_LOCK_STALE_MINUTES
+    if minutes <= 0:
+        minutes = DEFAULT_IMPORT_LOCK_STALE_MINUTES
+    return timedelta(minutes=minutes)
+
+
+def _as_utc(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.strip())
+        except ValueError:
+            return None
+    if not isinstance(value, datetime):
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _try_acquire_lock(db: Session, broker_account_id: int, source_type: str) -> str:
     owner = str(uuid.uuid4())
-    try:
-        db.execute(
+    now = _now()
+    inserted = db.execute(
+        text(
+            """
+            INSERT INTO portfolio_import_locks (broker_account_id, source_type, lock_owner, locked_at)
+            VALUES (:broker_account_id, :source_type, :lock_owner, :locked_at)
+            ON CONFLICT (broker_account_id) DO NOTHING
+            """
+        ),
+        {
+            "broker_account_id": broker_account_id,
+            "source_type": source_type,
+            "lock_owner": owner,
+            "locked_at": now,
+        },
+    )
+    if inserted.rowcount == 1:
+        db.flush()
+        return owner
+
+    existing = db.execute(
+        text(
+            """
+            SELECT lock_owner, locked_at
+            FROM portfolio_import_locks
+            WHERE broker_account_id = :broker_account_id
+            """
+        ),
+        {"broker_account_id": broker_account_id},
+    ).fetchone()
+    locked_at = _as_utc(existing[1]) if existing is not None else None
+    stale_after = import_lock_stale_after()
+    # A row with an unreadable timestamp can't be proven live, so it counts as stale.
+    if existing is not None and (locked_at is None or now - locked_at > stale_after):
+        # Compare-and-swap on the previous owner: if two imports race for the same
+        # stale row, exactly one UPDATE matches and the other is refused below.
+        taken = db.execute(
             text(
                 """
-                INSERT INTO portfolio_import_locks (broker_account_id, source_type, lock_owner, locked_at)
-                VALUES (:broker_account_id, :source_type, :lock_owner, :locked_at)
+                UPDATE portfolio_import_locks
+                SET lock_owner = :lock_owner, source_type = :source_type, locked_at = :locked_at
+                WHERE broker_account_id = :broker_account_id
+                  AND lock_owner = :previous_owner
                 """
             ),
             {
                 "broker_account_id": broker_account_id,
                 "source_type": source_type,
                 "lock_owner": owner,
-                "locked_at": _now(),
+                "locked_at": now,
+                "previous_owner": existing[0],
             },
         )
-        db.flush()
-    except Exception as exc:  # noqa: BLE001
-        db.rollback()
-        raise IbkrFlexImportInProgress("IBKR Flex import already in progress for this account") from exc
-    return owner
+        if taken.rowcount == 1:
+            db.flush()
+            logger.warning(
+                "ibkr_flex_stale_import_lock_taken_over",
+                extra={
+                    "event": "ibkr_flex_stale_import_lock_taken_over",
+                    "provider": "ibkr_flex",
+                    "platform": PLATFORM_CODE,
+                    "broker_account_id": broker_account_id,
+                    "lock_age_seconds": int((now - locked_at).total_seconds()) if locked_at else None,
+                    "stale_after_seconds": int(stale_after.total_seconds()),
+                },
+            )
+            return owner
+
+    db.rollback()
+    raise IbkrFlexImportInProgress("IBKR Flex import already in progress for this account")
 
 
 def _release_lock(db: Session, broker_account_id: int, owner: str) -> None:
@@ -1163,13 +1252,54 @@ def _validate_statement(statement: FlexStatement) -> None:
         raise IbkrFlexImportError("missing_nav", "Flex statement does not include EquitySummaryInBase")
 
 
-def _report_dates(statement: FlexStatement) -> set[date]:
-    dates = {nav.report_date for nav in statement.nav_snapshots}
-    dates.update(cash.report_date for cash in statement.cash_balances)
-    dates.update(position.report_date for position in statement.positions)
-    if not dates:
-        dates.add(statement.report_date_to)
-    return dates
+@dataclass(frozen=True)
+class FactScopes:
+    """Per-table report dates one Flex statement actually speaks for (#134).
+
+    A multi-day Flex report carries EquitySummaryByReportDateInBase (NAV) for every
+    day, but OpenPosition and CashReportCurrency rows only for the period end. Each
+    table is cleared and rewritten only on the dates the report carries for it, so
+    a 365-day backfill no longer wipes the positions and cash of earlier daily
+    imports. The period end (``toDate``) counts as carried for positions and cash
+    whenever the report has NAV for it: an empty OpenPositions section there means
+    "no positions", and a stale holding must not survive a re-import of that date.
+    """
+
+    nav: frozenset[date]
+    positions: frozenset[date]
+    cash: frozenset[date]
+    metrics: frozenset[date]
+
+    @property
+    def holdings(self) -> frozenset[date]:
+        """Dates on which the report carries positions or cash."""
+        return self.positions | self.cash
+
+    @property
+    def reconciled(self) -> frozenset[date]:
+        """Dates with NAV, positions and cash all in the report: NAV vs components is checked there."""
+        return self.nav & self.positions & self.cash
+
+    @property
+    def nav_only(self) -> frozenset[date]:
+        """Dates on which the report carries NAV but neither positions nor cash."""
+        return self.nav - self.holdings
+
+
+def _fact_scopes(statement: FlexStatement) -> FactScopes:
+    nav_dates = {nav.report_date for nav in statement.nav_snapshots}
+    position_dates = {position.report_date for position in statement.positions}
+    cash_dates = {cash.report_date for cash in statement.cash_balances}
+    if statement.report_date_to in nav_dates:
+        position_dates.add(statement.report_date_to)
+        cash_dates.add(statement.report_date_to)
+    metric_dates = {metric.report_date for metric in statement.report_metrics} | cash_dates
+    return FactScopes(
+        nav=frozenset(nav_dates),
+        positions=frozenset(position_dates),
+        cash=frozenset(cash_dates),
+        metrics=frozenset(metric_dates),
+    )
 
 
 def _authority_status(report_date: date, cutover_date: date) -> str:
@@ -1180,20 +1310,57 @@ def _resolve_cutover_date(statement: FlexStatement, cutover_date: date | None) -
     return cutover_date or statement.report_date_from
 
 
-def _clear_existing_authoritative_facts(db: Session, broker_account_id: int, report_dates: set[date]) -> None:
-    for report_date in report_dates:
-        for table_name in (
-            "portfolio_position_snapshots",
-            "portfolio_cash_balance_snapshots",
-            "portfolio_nav_snapshots",
-            "portfolio_report_metrics",
-            "portfolio_reconciliations",
-            "portfolio_data_completeness",
-        ):
+def _clear_existing_authoritative_facts(db: Session, broker_account_id: int, scopes: FactScopes) -> None:
+    # Each table only on the dates this report rewrites it (#134). The cash ledger,
+    # trades and corporate actions are replaced row by row in their own inserts.
+    dates_by_table: tuple[tuple[str, frozenset[date]], ...] = (
+        ("portfolio_position_snapshots", scopes.positions),
+        ("portfolio_cash_balance_snapshots", scopes.cash),
+        ("portfolio_nav_snapshots", scopes.nav),
+        ("portfolio_report_metrics", scopes.metrics),
+        ("portfolio_reconciliations", scopes.reconciled),
+        ("portfolio_data_completeness", scopes.nav | scopes.holdings),
+    )
+    for table_name, report_dates in dates_by_table:
+        for report_date in sorted(report_dates):
             db.execute(
                 text(f"DELETE FROM {table_name} WHERE broker_account_id = :broker_account_id AND report_date = :report_date"),
                 {"broker_account_id": broker_account_id, "report_date": report_date},
             )
+
+
+HOLDINGS_FACT_SCOPE = "holdings_cash_nav_fx"
+NAV_ONLY_STATUS = "nav_only"
+NAV_ONLY_REASON = "holdings_not_in_report"
+
+
+def _holdings_completeness_status(
+    db: Session, broker_account_id: int, report_date: date, stock_base: Decimal | None
+) -> tuple[str, str | None]:
+    """Completeness of a date the latest report carried only NAV for (#134).
+
+    'complete' when the stored facts still hold cash for the date and positions (or
+    the NAV says there is no stock); otherwise 'nav_only': NAV is known, holdings are not.
+    """
+    params = {"broker_account_id": broker_account_id, "report_date": report_date}
+    has_cash = db.execute(
+        text(
+            "SELECT 1 FROM portfolio_cash_balance_snapshots "
+            "WHERE broker_account_id = :broker_account_id AND report_date = :report_date LIMIT 1"
+        ),
+        params,
+    ).fetchone()
+    has_positions = db.execute(
+        text(
+            "SELECT 1 FROM portfolio_position_snapshots "
+            "WHERE broker_account_id = :broker_account_id AND report_date = :report_date LIMIT 1"
+        ),
+        params,
+    ).fetchone()
+    positions_known = has_positions is not None or (stock_base is not None and stock_base == Decimal("0"))
+    if has_cash is not None and positions_known:
+        return "complete", None
+    return NAV_ONLY_STATUS, NAV_ONLY_REASON
 
 
 def _ensure_broker_instrument_values(
@@ -1396,6 +1563,86 @@ def _link_priced_asset(db: Session, instrument_id: int, position: FlexPosition) 
     )
 
 
+def _insert_position_snapshot(
+    db: Session,
+    *,
+    broker_account_id: int,
+    legacy_account_id: int | None,
+    import_run_id: int,
+    raw_document_id: int,
+    position: FlexPosition,
+    authority_status: str,
+) -> None:
+    instrument_id = _ensure_broker_instrument(db, position)
+    db.execute(
+        text(
+            f"""
+            INSERT INTO portfolio_position_snapshots
+              (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, raw_document_id,
+               report_date, quantity, currency, market_price, market_value_local, market_value_base,
+               cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
+            VALUES
+              (:broker_account_id, :legacy_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
+               :report_date, :quantity, :currency, :market_price, :market_value_local, :market_value_base,
+               :cost_basis_local, :cost_basis_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
+            """
+        ),
+        {
+            "broker_account_id": broker_account_id,
+            "legacy_account_id": legacy_account_id,
+            "broker_instrument_id": instrument_id,
+            "import_run_id": import_run_id,
+            "raw_document_id": raw_document_id,
+            "report_date": position.report_date,
+            "quantity": _db_decimal(position.quantity),
+            "currency": position.currency,
+            "market_price": _db_decimal(position.market_price),
+            "market_value_local": _db_decimal(position.market_value_local),
+            "market_value_base": _db_decimal(position.market_value_base),
+            "cost_basis_local": _db_decimal(position.cost_basis_local),
+            "cost_basis_base": _db_decimal(position.cost_basis_base),
+            "fx_rate_to_base": _db_decimal(position.fx_rate_to_base),
+            "authority_status": authority_status,
+        },
+    )
+
+
+def _insert_cash_balance_snapshot(
+    db: Session,
+    *,
+    broker_account_id: int,
+    legacy_account_id: int | None,
+    import_run_id: int,
+    raw_document_id: int,
+    cash: FlexCashBalance,
+    authority_status: str,
+) -> None:
+    db.execute(
+        text(
+            f"""
+            INSERT INTO portfolio_cash_balance_snapshots
+              (broker_account_id, legacy_account_id, import_run_id, raw_document_id, report_date,
+               currency, cash_balance, cash_balance_base, fx_rate_to_base, authority_status, metadata_json)
+            VALUES
+              (:broker_account_id, :legacy_account_id, :import_run_id, :raw_document_id, :report_date,
+               :currency, :cash_balance, :cash_balance_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
+            """
+        ),
+        {
+            "broker_account_id": broker_account_id,
+            "legacy_account_id": legacy_account_id,
+            "import_run_id": import_run_id,
+            "raw_document_id": raw_document_id,
+            "report_date": cash.report_date,
+            "currency": cash.currency,
+            "cash_balance": _db_decimal(cash.cash_balance),
+            "cash_balance_base": _db_decimal(cash.cash_balance_base),
+            "fx_rate_to_base": _db_decimal(cash.fx_rate_to_base),
+            "authority_status": authority_status,
+        },
+    )
+
+
 def _insert_statement_facts(
     db: Session,
     *,
@@ -1406,8 +1653,8 @@ def _insert_statement_facts(
     statement: FlexStatement,
     cutover_date: date,
 ) -> None:
-    report_dates = _report_dates(statement)
-    _clear_existing_authoritative_facts(db, broker_account_id, report_dates)
+    scopes = _fact_scopes(statement)
+    _clear_existing_authoritative_facts(db, broker_account_id, scopes)
 
     for fx_rate in statement.fx_rates:
         db.execute(
@@ -1448,63 +1695,25 @@ def _insert_statement_facts(
         )
 
     for position in statement.positions:
-        instrument_id = _ensure_broker_instrument(db, position)
-        db.execute(
-            text(
-                f"""
-                INSERT INTO portfolio_position_snapshots
-                  (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, raw_document_id,
-                   report_date, quantity, currency, market_price, market_value_local, market_value_base,
-                   cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
-                VALUES
-                  (:broker_account_id, :legacy_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
-                   :report_date, :quantity, :currency, :market_price, :market_value_local, :market_value_base,
-                   :cost_basis_local, :cost_basis_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
-                """
-            ),
-            {
-                "broker_account_id": broker_account_id,
-                "legacy_account_id": legacy_account_id,
-                "broker_instrument_id": instrument_id,
-                "import_run_id": import_run_id,
-                "raw_document_id": raw_document_id,
-                "report_date": position.report_date,
-                "quantity": _db_decimal(position.quantity),
-                "currency": position.currency,
-                "market_price": _db_decimal(position.market_price),
-                "market_value_local": _db_decimal(position.market_value_local),
-                "market_value_base": _db_decimal(position.market_value_base),
-                "cost_basis_local": _db_decimal(position.cost_basis_local),
-                "cost_basis_base": _db_decimal(position.cost_basis_base),
-                "fx_rate_to_base": _db_decimal(position.fx_rate_to_base),
-                "authority_status": _authority_status(position.report_date, cutover_date),
-            },
+        _insert_position_snapshot(
+            db,
+            broker_account_id=broker_account_id,
+            legacy_account_id=legacy_account_id,
+            import_run_id=import_run_id,
+            raw_document_id=raw_document_id,
+            position=position,
+            authority_status=_authority_status(position.report_date, cutover_date),
         )
 
     for cash in statement.cash_balances:
-        db.execute(
-            text(
-                f"""
-                INSERT INTO portfolio_cash_balance_snapshots
-                  (broker_account_id, legacy_account_id, import_run_id, raw_document_id, report_date,
-                   currency, cash_balance, cash_balance_base, fx_rate_to_base, authority_status, metadata_json)
-                VALUES
-                  (:broker_account_id, :legacy_account_id, :import_run_id, :raw_document_id, :report_date,
-                   :currency, :cash_balance, :cash_balance_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
-                """
-            ),
-            {
-                "broker_account_id": broker_account_id,
-                "legacy_account_id": legacy_account_id,
-                "import_run_id": import_run_id,
-                "raw_document_id": raw_document_id,
-                "report_date": cash.report_date,
-                "currency": cash.currency,
-                "cash_balance": _db_decimal(cash.cash_balance),
-                "cash_balance_base": _db_decimal(cash.cash_balance_base),
-                "fx_rate_to_base": _db_decimal(cash.fx_rate_to_base),
-                "authority_status": _authority_status(cash.report_date, cutover_date),
-            },
+        _insert_cash_balance_snapshot(
+            db,
+            broker_account_id=broker_account_id,
+            legacy_account_id=legacy_account_id,
+            import_run_id=import_run_id,
+            raw_document_id=raw_document_id,
+            cash=cash,
+            authority_status=_authority_status(cash.report_date, cutover_date),
         )
 
     for nav in statement.nav_snapshots:
@@ -1592,17 +1801,25 @@ def _insert_statement_facts(
         import_run_id=import_run_id,
         raw_document_id=raw_document_id,
         statement=statement,
+        report_dates=scopes.reconciled,
     )
-    for report_date in report_dates:
+    stock_by_date = {nav.report_date: nav.stock_base for nav in statement.nav_snapshots}
+    for report_date in sorted(scopes.nav | scopes.holdings):
+        if report_date in scopes.holdings:
+            completeness_status, missing_reason = "complete", None
+        else:
+            completeness_status, missing_reason = _holdings_completeness_status(
+                db, broker_account_id, report_date, stock_by_date.get(report_date)
+            )
         _insert_completeness(
             db,
             broker_account_id=broker_account_id,
             import_run_id=import_run_id,
             raw_document_id=raw_document_id,
             report_date=report_date,
-            fact_scope="holdings_cash_nav_fx",
-            completeness_status="complete",
-            missing_reason=None,
+            fact_scope=HOLDINGS_FACT_SCOPE,
+            completeness_status=completeness_status,
+            missing_reason=missing_reason,
         )
 
 
@@ -1865,7 +2082,10 @@ def _insert_reconciliations(
     import_run_id: int,
     raw_document_id: int,
     statement: FlexStatement,
+    report_dates: frozenset[date],
 ) -> None:
+    # Only dates whose positions and cash are in this report: on a NAV-only date the
+    # components are unknown, and comparing NAV to zero would fabricate a warning (#134).
     positions_by_date: dict[date, Decimal] = {}
     for position in statement.positions:
         positions_by_date[position.report_date] = positions_by_date.get(position.report_date, Decimal("0")) + position.market_value_base
@@ -1874,6 +2094,8 @@ def _insert_reconciliations(
         cash_by_date[cash.report_date] = cash_by_date.get(cash.report_date, Decimal("0")) + cash.cash_balance_base
     tolerance = Decimal("0.05")
     for nav in statement.nav_snapshots:
+        if nav.report_date not in report_dates:
+            continue
         expected = (
             positions_by_date.get(nav.report_date, Decimal("0"))
             + cash_by_date.get(nav.report_date, Decimal("0"))
@@ -1963,7 +2185,9 @@ def run_ibkr_flex_import_from_xml(
         broker_account_id=statement.broker_account_id,
         base_currency=statement.base_currency,
     )
-    _ensure_authority_window(db, broker_account_id, effective_cutover_date)
+    if _ensure_authority_window(db, broker_account_id, effective_cutover_date):
+        # A new authority window changes which source counts from its date on (#138).
+        mark_rollups_dirty(db, effective_cutover_date, account_id=legacy_account_id, reason="ibkr_flex_authority")
     lock_owner = _try_acquire_lock(db, broker_account_id, SOURCE_TYPE)
     db.commit()
 
@@ -1995,6 +2219,15 @@ def run_ibkr_flex_import_from_xml(
             cutover_date=effective_cutover_date,
         )
         _mark_import_completed(db, import_run_id)
+        # NAV, cash and positions were (re)written for these report dates: History
+        # rows anchored on or after the earliest are recomputed (#138).
+        _scopes = _fact_scopes(statement)
+        mark_rollups_dirty(
+            db,
+            min(_scopes.nav | _scopes.holdings | _scopes.metrics, default=statement.report_date_to),
+            account_id=legacy_account_id,
+            reason="ibkr_flex",
+        )
         _release_lock(db, broker_account_id, lock_owner)
         db.commit()
     except IbkrFlexImportError as exc:
@@ -2133,6 +2366,7 @@ def run_ibkr_flex_import_from_config(
     )
 
 
+@valuation_cached(shared=True)
 def latest_authoritative_nav_by_legacy_account(
     db: Session,
     *,

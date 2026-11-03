@@ -7,6 +7,7 @@ import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import FxNote from "../components/FxNote";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -292,8 +293,11 @@ export default function WealthOverview() {
       ? (platformAllocation?.total ?? 0)
       : (currentNetWorth?.total ?? 0);
 
-  const prevMonthChange = summary?.net_worth_change?.vs_prev_month;
-  const prevYearChange = summary?.net_worth_change?.vs_prev_year;
+  // The hero headline is the live net worth, so its deltas are the live comparisons
+  // (live vs the latest completed month-end, and that month-end a year earlier), #133.
+  const heroChange = summary?.current_net_worth_change ?? summary?.net_worth_change;
+  const prevMonthChange = heroChange?.vs_prev_month;
+  const prevYearChange = heroChange?.vs_prev_year;
   const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
   const topMovers = summary?.top_movers ?? null;
   const liabilities = bootstrap?.net_worth?.liabilities ?? null;
@@ -360,6 +364,7 @@ export default function WealthOverview() {
             {currentNetWorthAsOf ? (
               <p className="coHeroFreshness">As of {currentNetWorthAsOf.slice(0, 10)}</p>
             ) : null}
+            <FxNote sources={[bootstrap, summary]} />
 
             <div className="coHeroDeltaRow">
               {sinceUpdate?.net_worth_change ? (

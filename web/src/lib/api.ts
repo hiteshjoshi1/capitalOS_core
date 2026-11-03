@@ -23,7 +23,7 @@ const RAW_API_BASE = import.meta.env.VITE_API_BASE as string | undefined;
 const RAW_API_PORT = import.meta.env.VITE_API_PORT as string | undefined;
 const API_BASE = resolveApiBase(RAW_API_BASE, null, RAW_API_PORT);
 let accessTokenMemory: string | null = null;
-let refreshInFlight: Promise<string | null> | null = null;
+let refreshInFlight: Promise<AuthSession | null> | null = null;
 let authFailureHandler: (() => void) | null = null;
 
 export function getAccessToken(): string | null {
@@ -127,7 +127,7 @@ export class AuthSessionExpiredError extends Error {
   }
 }
 
-async function callRefreshEndpoint(): Promise<string | null> {
+async function callRefreshEndpoint(): Promise<AuthSession | null> {
   try {
     const res = await fetch(`${API_BASE}/auth/refresh`, {
       method: "POST",
@@ -143,21 +143,21 @@ async function callRefreshEndpoint(): Promise<string | null> {
       // For 5xx or other transient errors, don't clear auth state.
       return null;
     }
-    const payload = (await res.json()) as AuthToken;
+    const payload = (await res.json()) as AuthSession;
     if (!payload?.access_token) {
       setAccessToken(null);
       notifyAuthFailure();
       return null;
     }
     setAccessToken(payload.access_token);
-    return payload.access_token;
+    return payload;
   } catch {
     // Network/transport error: treat as transient. Do not force logout.
     return null;
   }
 }
 
-async function refreshAccessToken(): Promise<string | null> {
+function refreshSession(): Promise<AuthSession | null> {
   if (refreshInFlight) return refreshInFlight;
   refreshInFlight = callRefreshEndpoint().finally(() => {
     refreshInFlight = null;
@@ -165,8 +165,22 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshInFlight;
 }
 
+async function refreshAccessToken(): Promise<string | null> {
+  const session = await refreshSession();
+  return session?.access_token ?? null;
+}
+
 export async function refreshAccessTokenNow(): Promise<string | null> {
   return refreshAccessToken();
+}
+
+/**
+ * Same deduped refresh as refreshAccessTokenNow(), but resolves to the whole response:
+ * since #146 /auth/refresh also carries `user` and `preferences`, so a cold load needs
+ * this one request instead of refresh -> /auth/me -> /auth/preferences.
+ */
+export async function refreshSessionNow(): Promise<AuthSession | null> {
+  return refreshSession();
 }
 
 async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {}): Promise<T> {
@@ -233,6 +247,14 @@ export type AuthToken = {
   expires_in: number;
 };
 
+/** /auth/login and /auth/refresh response (#146): the token plus, additively, the user
+ * (same shape as /auth/me) and their preferences (same shape as /auth/preferences).
+ * Optional: callers fall back to authMe()/getPreferences() when absent. */
+export type AuthSession = AuthToken & {
+  user?: AuthMe | null;
+  preferences?: UserPreferences | null;
+};
+
 export type ChangePasswordResult = {
   status: string;
   signed_out_sessions: number;
@@ -258,7 +280,17 @@ export type Account = {
   country?: string | null;
 };
 
-export type DashboardSummary = {
+/** Additive FX fields (#139) on responses with base-currency totals.
+ * fx_incomplete: a value had no FX rate at all and is left out of the totals
+ * (never counted 1:1); fx_missing_currencies names those currencies.
+ * fx_stale_currencies: converted with a stored rate older than the lookback. */
+export type FxStatus = {
+  fx_incomplete?: boolean;
+  fx_missing_currencies?: string[];
+  fx_stale_currencies?: string[];
+};
+
+export type DashboardSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
   current_net_worth_as_of?: string | null;
@@ -334,6 +366,9 @@ export type DashboardSummary = {
       compare_month: string;
     };
   };
+  /** Live current_net_worth vs the latest completed month-end (vs_prev_month) and the
+   * same month-end a year earlier (vs_prev_year), whatever month was requested (#133). */
+  current_net_worth_change?: DashboardSummary["net_worth_change"];
   net_worth_component_change?: null | {
     cash?: {
       abs: number;
@@ -394,7 +429,7 @@ export type DashboardNetWorthChange = {
   net_worth_change: DashboardSummary["net_worth_change"];
 };
 
-export type StockHoldingsSummary = {
+export type StockHoldingsSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
@@ -773,7 +808,7 @@ export type CryptoWalletInitResponse = {
   expires_at: string;
 };
 
-export type CryptoSummary = {
+export type CryptoSummary = FxStatus & {
   month?: string;
   is_live?: boolean;
   compare_month?: string | null;
@@ -945,7 +980,7 @@ export type NetWorthFreshness = {
   cash: AssetClassFreshness;
 };
 
-export type DashboardBootstrap = {
+export type DashboardBootstrap = FxStatus & {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
@@ -999,6 +1034,8 @@ export type WealthTimeline = {
     crypto: number;
     liabilities: number;
     as_of: string | null;
+    /** Platforms with a statement import in the still-open month (#138). */
+    uploads: string[];
   };
 };
 
@@ -1206,7 +1243,7 @@ export type DividendSummaryBucket = DividendTotals & {
   bucket: string;
 };
 
-export type DividendsSummary = {
+export type DividendsSummary = FxStatus & {
   from_month: string;
   to_month: string;
   current_net_worth_as_of?: string | null;
@@ -1236,7 +1273,7 @@ export type DividendCompanyItem = {
   yield_pct: number | null;
 };
 
-export type DividendsByCompany = {
+export type DividendsByCompany = FxStatus & {
   from_month: string;
   to_month: string;
   base_currency: string;
@@ -1250,7 +1287,7 @@ export type DividendHistoryEvent = DividendTotals & {
   month: string;
 };
 
-export type DividendHistory = {
+export type DividendHistory = FxStatus & {
   from_month: string;
   to_month: string;
   base_currency: string;
@@ -1331,9 +1368,9 @@ export const api = {
   authSignup: (payload: { username: string; password: string; display_name?: string }) =>
     req<AuthMe>("/auth/signup", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
   authLogin: (payload: { username: string; password: string }) =>
-    req<AuthToken>("/auth/login", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
+    req<AuthSession>("/auth/login", { method: "POST", body: JSON.stringify(payload) }, { skipAuth: true }),
   authRefresh: () =>
-    req<AuthToken>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
+    req<AuthSession>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
   authMe: () => req<AuthMe>("/auth/me"),
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
   changePassword: (payload: { current_password: string; new_password: string }) =>

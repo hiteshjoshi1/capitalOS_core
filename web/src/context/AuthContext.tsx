@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { api, refreshAccessTokenNow, setAccessToken, setAuthFailureHandler } from "../lib/api";
-import type { AuthMe } from "../lib/api";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, refreshAccessTokenNow, refreshSessionNow, setAccessToken, setAuthFailureHandler } from "../lib/api";
+import type { AuthMe, AuthSession, UserPreferences } from "../lib/api";
 import { useTheme } from "./ThemeContext";
 import type { AccentColor, Theme } from "./ThemeContext";
 import { DEFAULT_ACCENT, DEFAULT_THEME } from "./ThemeContext";
@@ -25,19 +25,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  // Apply the user's server-side theme/accent. Never blocks rendering: the ThemeProvider
+  // already painted the localStorage values, so when the session response doesn't carry
+  // preferences they're fetched in the background, and a failure keeps localStorage's.
+  const syncPreferences = useCallback(
+    (prefs: UserPreferences | null | undefined, isCancelled: () => boolean = () => false) => {
+      const apply = (p: UserPreferences) => {
+        if (isCancelled()) return;
+        applyServerPreferences({ theme: p.theme as Theme, accent_color: p.accent_color as AccentColor });
+      };
+      if (prefs) {
+        apply(prefs);
+        return;
+      }
+      void api.getPreferences().then(apply, () => {
+        // Non-fatal: localStorage values remain as fallback
+      });
+    },
+    [applyServerPreferences],
+  );
+
+  // The user from a login/refresh response (#146); /auth/me only if it's missing.
+  const userFromSession = useCallback(
+    async (session: AuthSession): Promise<AuthMe> => session.user ?? (await api.authMe()),
+    [],
+  );
+
   useEffect(() => {
-    // Route through the shared, deduped refreshAccessTokenNow() (same helper realtime.ts
-    // uses) rather than calling the endpoint directly. React 18 StrictMode double-invokes
-    // this effect in dev — and overlapping mounts/timers/tabs can do the same in prod — so
-    // without dedup, two concurrent /auth/refresh calls race on the same one-time-use
-    // refresh token. It also already clears the access token and notifies
-    // authFailureHandler on a definitive 401, so this effect just needs to react to the
-    // outcome, not duplicate that bookkeeping.
+    // Cold load is ONE request (#146): /auth/refresh is unavoidable (the access token
+    // lives only in memory, so after a reload the HttpOnly refresh cookie is the only
+    // credential), and it now also returns the user and their preferences, which used
+    // to be two more sequential calls (/auth/me, /auth/preferences) blocking every route.
+    //
+    // Route through the shared, deduped refresh (same helper realtime.ts uses) rather
+    // than calling the endpoint directly. React 18 StrictMode double-invokes this effect
+    // in dev — and overlapping mounts/timers/tabs can do the same in prod — so without
+    // dedup, two concurrent /auth/refresh calls race on the same one-time-use refresh
+    // token. It also already clears the access token and notifies authFailureHandler on
+    // a definitive 401, so this effect just needs to react to the outcome.
     let cancelled = false;
+    const isCancelled = () => cancelled;
     (async () => {
-      const token = await refreshAccessTokenNow();
+      const session = await refreshSessionNow();
       if (cancelled) return;
-      if (!token) {
+      if (!session) {
         // Definitive 401s already cleared user/token via authFailureHandler; transient
         // errors (network down, 5xx) leave the session as-is and just stop loading, so
         // the user sees the sign-in screen without being force-logged-out mid-session.
@@ -45,20 +76,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const me = await api.authMe();
-        if (!cancelled) setUser(me);
-        // Fetch server preferences and apply them; fall back gracefully to localStorage.
-        try {
-          const prefs = await api.getPreferences();
-          if (!cancelled) {
-            applyServerPreferences({
-              theme: prefs.theme as Theme,
-              accent_color: prefs.accent_color as AccentColor,
-            });
-          }
-        } catch {
-          // Non-fatal: localStorage values remain as fallback
-        }
+        const me = await userFromSession(session);
+        if (cancelled) return;
+        // Same tick as setUser, so the protected route's first paint has the theme.
+        syncPreferences(session.preferences, isCancelled);
+        setUser(me);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -66,7 +88,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [applyServerPreferences]);
+  }, [syncPreferences, userFromSession]);
 
   useEffect(() => {
     if (!user) return;
@@ -99,37 +121,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       loading,
       login: async (username: string, password: string) => {
-        const login = await api.authLogin({ username, password });
-        setAccessToken(login.access_token);
-        const me = await api.authMe();
+        const session = await api.authLogin({ username, password });
+        setAccessToken(session.access_token);
+        const me = await userFromSession(session);
+        syncPreferences(session.preferences);
         setUser(me);
-        // Sync preferences after login
-        try {
-          const prefs = await api.getPreferences();
-          applyServerPreferences({
-            theme: prefs.theme as Theme,
-            accent_color: prefs.accent_color as AccentColor,
-          });
-        } catch {
-          // Non-fatal
-        }
       },
       signup: async (username: string, password: string, displayName?: string) => {
         await api.authSignup({ username, password, display_name: displayName });
-        const login = await api.authLogin({ username, password });
-        setAccessToken(login.access_token);
-        const me = await api.authMe();
+        const session = await api.authLogin({ username, password });
+        setAccessToken(session.access_token);
+        const me = await userFromSession(session);
+        // A new user has no stored preferences: login returns the defaults.
+        syncPreferences(session.preferences);
         setUser(me);
-        // Sync preferences after signup (will create defaults server-side)
-        try {
-          const prefs = await api.getPreferences();
-          applyServerPreferences({
-            theme: prefs.theme as Theme,
-            accent_color: prefs.accent_color as AccentColor,
-          });
-        } catch {
-          // Non-fatal
-        }
       },
       logout: async () => {
         try {
@@ -144,7 +149,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       },
     }),
-    [applyServerPreferences, loading, user],
+    [applyServerPreferences, loading, syncPreferences, user, userFromSession],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

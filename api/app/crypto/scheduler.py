@@ -16,6 +16,7 @@ from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
 from app.crypto.ingest import should_refresh
 from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
+from app.wealth_rollup_dirty import refresh_dirty_rollups_after_job
 
 logger = logging.getLogger("capitalos.crypto")
 _scheduler: BackgroundScheduler | None = None
@@ -194,6 +195,8 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False, due: date
                     automatic=True,
                 ):
                     refreshed += 1
+            if refreshed:
+                refresh_dirty_rollups_after_job(db, "crypto_refresh")
             logger.info(
                 "crypto_refresh_succeeded",
                 extra={
@@ -256,3 +259,19 @@ def start_scheduler() -> BackgroundScheduler | None:
     scheduler.start()
     _scheduler = scheduler
     return scheduler
+
+
+def stop_scheduler() -> None:
+    """Stop firing jobs on API shutdown or reload (#135).
+
+    ``wait=False`` so a reload isn't held up by a running job; an import or
+    refresh cut short this way leaves a lock that the stale-lock rule takes over.
+    """
+    global _scheduler
+    scheduler, _scheduler = _scheduler, None
+    if scheduler is None:
+        return
+    try:
+        scheduler.shutdown(wait=False)
+    except Exception:  # noqa: BLE001 - shutdown must not block the others
+        logger.warning("scheduler_shutdown_failed", exc_info=True)

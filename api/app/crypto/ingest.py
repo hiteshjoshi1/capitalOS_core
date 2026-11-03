@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from app.crypto.adapters import TokenBalance, NativeBalance
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order, fetch_wallet_holdings
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 
 SINGAPORE_TZ = ZoneInfo("Asia/Singapore")
@@ -380,6 +381,9 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
             },
         )
 
+    # A snapshot dated on/before a completed anchor (normally only on the
+    # snapshot day itself) changes that month's History row (#138).
+    mark_rollups_dirty(db, as_of, wallet_id=wallet_id, reason="crypto_snapshot")
     return snapshot_id
 
 
@@ -396,18 +400,62 @@ def should_refresh(last_fetched_at: datetime | None) -> bool:
     return (datetime.now(tz=timezone.utc) - last_fetched_at) > timedelta(hours=24)
 
 
+DEFAULT_REFRESH_LOCK_STALE_MINUTES = 30.0
+
+
+def refresh_lock_stale_after() -> timedelta:
+    """How old a wallet's refresh flag may get before a new refresh takes it over (#135).
+
+    A process killed mid-refresh never clears ``refresh_in_progress``; without a
+    limit that wallet would never refresh again.
+    """
+    raw = os.getenv("CRYPTO_REFRESH_LOCK_STALE_MINUTES", "").strip()
+    try:
+        minutes = float(raw) if raw else DEFAULT_REFRESH_LOCK_STALE_MINUTES
+    except ValueError:
+        minutes = DEFAULT_REFRESH_LOCK_STALE_MINUTES
+    if minutes <= 0:
+        minutes = DEFAULT_REFRESH_LOCK_STALE_MINUTES
+    return timedelta(minutes=minutes)
+
+
 def acquire_refresh_lock(db: Session, wallet_id: str) -> bool:
+    now = datetime.now(tz=timezone.utc)
+    stale_after = refresh_lock_stale_after()
+    previous = db.execute(
+        text("SELECT refresh_in_progress, refresh_started_at FROM crypto_wallets WHERE id = :wallet_id"),
+        {"wallet_id": wallet_id},
+    ).fetchone()
+    # One conditional UPDATE, so two refreshes can't both win: a free flag, or a
+    # held one whose start is missing or older than the stale threshold.
     row = db.execute(
         text(
             """
             UPDATE crypto_wallets
             SET refresh_in_progress = TRUE, refresh_started_at = :now
-            WHERE id = :wallet_id AND refresh_in_progress = FALSE
+            WHERE id = :wallet_id
+              AND (
+                refresh_in_progress = FALSE
+                OR refresh_started_at IS NULL
+                OR refresh_started_at < :stale_before
+              )
             RETURNING id
             """
         ),
-        {"wallet_id": wallet_id, "now": datetime.now(tz=timezone.utc)},
+        {"wallet_id": wallet_id, "now": now, "stale_before": now - stale_after},
     ).fetchone()
+    if row is not None and previous is not None and previous[0]:
+        logger.warning(
+            "crypto_stale_refresh_lock_taken_over",
+            extra={
+                "event": "crypto_stale_refresh_lock_taken_over",
+                "provider": "crypto",
+                "platform": "crypto",
+                "wallet_id": wallet_id,
+                "refresh_started_at": str(previous[1]) if previous[1] is not None else None,
+                "stale_after_seconds": int(stale_after.total_seconds()),
+            },
+        )
     return row is not None
 
 

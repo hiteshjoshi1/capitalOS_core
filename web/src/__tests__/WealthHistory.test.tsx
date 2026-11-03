@@ -64,6 +64,7 @@ function timeline(points: WealthTimelinePoint[]): WealthTimeline {
       crypto: last.crypto,
       liabilities: last.liabilities,
       as_of: "2026-06-15T00:00:00+00:00",
+      uploads: [],
     },
   };
 }

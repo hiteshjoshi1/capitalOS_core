@@ -80,12 +80,14 @@ def test_newer_quote_prices_ibkr_holding_and_moves_the_totals(client, db_engine,
     assert aapl["latest_price"] == pytest.approx(150.0)
     assert aapl["price_source"] == "finnhub_market"
     assert aapl["price_fallback_reason"] is None
-    assert aapl["value"] == pytest.approx(1500.0)  # 10 x 150 (test FX is 1.0)
-    # IBKR stock value 1353.5 (NAV 1521 - cash 167.5) + (1500 - 1350) at the new price.
-    assert payload["stock_current_total"] == pytest.approx(1503.5)
+    # 10 x 150 USD at the statement's own USD->SGD rate (1.35, in portfolio_fx_rates,
+    # #139): it is the newest stored rate within the lookback, so no provider call.
+    assert aapl["value"] == pytest.approx(2025.0)
+    # IBKR stock value 1353.5 (NAV 1521 - cash 167.5) + (2025 - 1350) at the new price.
+    assert payload["stock_current_total"] == pytest.approx(2028.5)
 
     allocation = client.get(f"/dashboard/platform-allocation?month={CURRENT_MONTH}&base_currency=SGD").json()
-    assert allocation["total"] == pytest.approx(1671.0)  # NAV 1521 + 150
+    assert allocation["total"] == pytest.approx(2196.0)  # NAV 1521 + 675
 
 
 def test_no_quote_falls_back_to_ibkr_price_with_reason(client, db_engine, tmp_path, monkeypatch):

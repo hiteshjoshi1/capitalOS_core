@@ -25,6 +25,99 @@ class RegisterPayload(BaseModel):
 def _data_dir() -> str:
     return os.getenv("DATA_DIR", os.path.join(os.getcwd(), "data"))
 
+DEFAULT_MAX_UPLOAD_MB = 25
+_UPLOAD_CHUNK_BYTES = 1024 * 1024
+
+
+def max_upload_bytes() -> int:
+    """Upload size cap in bytes, from ``INGEST_MAX_UPLOAD_MB`` (default 25)."""
+    raw = os.getenv("INGEST_MAX_UPLOAD_MB", "").strip()
+    try:
+        mb = float(raw) if raw else DEFAULT_MAX_UPLOAD_MB
+    except ValueError:
+        mb = DEFAULT_MAX_UPLOAD_MB
+    if mb <= 0:
+        mb = DEFAULT_MAX_UPLOAD_MB
+    return int(mb * 1024 * 1024)
+
+
+def _too_large(limit: int) -> HTTPException:
+    return HTTPException(
+        status_code=413,
+        detail=f"File is too large. The upload limit is {limit // (1024 * 1024)} MB (INGEST_MAX_UPLOAD_MB).",
+    )
+
+
+def _spool_upload(file: UploadFile) -> str:
+    """Copy the upload to a temp file in chunks, enforcing the size cap.
+
+    Returns the temp file path; raises 413 (and removes the partial file) when the
+    upload is over the limit. The body is never held in memory as a whole.
+    """
+    limit = max_upload_bytes()
+    size = getattr(file, "size", None)
+    if size is not None and size > limit:
+        raise _too_large(limit)
+    total = 0
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+        try:
+            while True:
+                chunk = file.file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit:
+                    raise _too_large(limit)
+                tmp.write(chunk)
+        except BaseException:
+            tmp.close()
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            raise
+    return tmp_path
+
+
+# Allowance for multipart framing (boundaries, part headers) on top of the file itself.
+_MULTIPART_OVERHEAD_BYTES = 64 * 1024
+
+
+class UploadSizeLimitMiddleware:
+    """Refuse ``POST /ingest/...`` bodies whose Content-Length is over the cap.
+
+    Runs before the multipart body is read, so an oversized upload is not received
+    at all. Bodies without a Content-Length (chunked) fall through to the
+    per-file check in ``_spool_upload``.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if (
+            scope["type"] == "http"
+            and scope.get("method") == "POST"
+            and str(scope.get("path", "")).startswith("/ingest/")
+        ):
+            limit = max_upload_bytes()
+            for key, value in scope.get("headers", []):
+                if key.lower() == b"content-length":
+                    try:
+                        length = int(value)
+                    except ValueError:
+                        break
+                    if length > limit + _MULTIPART_OVERHEAD_BYTES:
+                        from fastapi.responses import JSONResponse
+
+                        response = JSONResponse(status_code=413, content={"detail": _too_large(limit).detail})
+                        await response(scope, receive, send)
+                        return
+                    break
+        await self.app(scope, receive, send)
+
+
 def _require_account_platform(db: Session, account_id: int, current_user_id: int) -> str:
     from sqlalchemy import text
 
@@ -73,9 +166,7 @@ def ingest_ibkr(
     data_dir = _data_dir()
     os.makedirs(data_dir, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(file.file.read())
-        tmp_path = tmp.name
+    tmp_path = _spool_upload(file)
 
     try:
         job = create_import_job(
@@ -111,9 +202,7 @@ def ingest_upload(
     data_dir = _data_dir()
     os.makedirs(data_dir, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(file.file.read())
-        tmp_path = tmp.name
+    tmp_path = _spool_upload(file)
 
     try:
         job = create_import_job(

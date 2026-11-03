@@ -12,24 +12,11 @@ vi.mock("react-dom/client", () => ({
   createRoot: createRootSpy,
 }));
 
-vi.mock("@solana/wallet-adapter-react", () => ({
-  ConnectionProvider: ({ children }: { children: React.ReactNode }) => children,
-  WalletProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-vi.mock("@solana/wallet-adapter-react-ui", () => ({
-  WalletModalProvider: ({ children }: { children: React.ReactNode }) => children,
-}));
-
-vi.mock("@solana/wallet-adapter-phantom", () => ({
-  PhantomWalletAdapter: class MockPhantomWalletAdapter {},
-}));
-
 vi.mock("../App.tsx", () => ({ default: () => null }));
 vi.mock("../components/AppShell.tsx", () => ({ default: () => null }));
 vi.mock("../routes/AddAccount.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Ingest.tsx", () => ({ default: () => null }));
-vi.mock("../routes/CryptoWallets.tsx", () => ({ default: () => null }));
+vi.mock("../routes/CryptoWalletsPage.tsx", () => ({ default: () => null }));
 vi.mock("../routes/CryptoHoldings.tsx", () => ({ default: () => null }));
 vi.mock("../routes/StockHoldings.tsx", () => ({ default: () => null }));
 vi.mock("../routes/CashOverview.tsx", () => ({ default: () => null }));
