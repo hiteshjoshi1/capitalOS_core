@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import Ingest from "../routes/Ingest";
-import { describeAsOf, hasOrderedHeaderSubset, resolvePlatformParser, todayLocalYYYYMMDD } from "../routes/ingestUtils";
+import { dateFromFilename, describeAsOf, hasOrderedHeaderSubset, resolvePlatformParser, todayLocalYYYYMMDD } from "../routes/ingestUtils";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
 
@@ -77,6 +77,18 @@ describe("Statement date helpers (#141)", () => {
     expect(describeAsOf("2026-10-01", undefined)).toBe("Dated 2026-10-01");
     expect(describeAsOf(undefined, "file")).toBeNull();
   });
+
+  it("reads a statement date from broker export file names", () => {
+    expect(dateFromFilename("2026_10_02.xls")).toBe("2026-10-02");
+    expect(dateFromFilename("holdings-2026-08-30.xlsx")).toBe("2026-08-30");
+    expect(dateFromFilename("stmt20260809.csv")).toBe("2026-08-09");
+    expect(dateFromFilename("portfolio_23_June_2026.xls")).toBe("2026-06-23");
+    expect(dateFromFilename("statement 5-Sep-2026.csv")).toBe("2026-09-05");
+    expect(dateFromFilename("2026_02_30.xls")).toBeNull(); // not a real date
+    expect(dateFromFilename("holdings.xls")).toBeNull();
+    expect(dateFromFilename("02_10_2026.xls")).toBeNull(); // ambiguous numeric order: not guessed
+    expect(dateFromFilename(undefined)).toBeNull();
+  });
 });
 
 describe("Ingest", () => {
@@ -122,6 +134,25 @@ describe("Ingest", () => {
 
     expect(mockApi.ingestUpload).toHaveBeenCalledWith(2, file, "2025-06-30");
     expect(await screen.findByText("Dated 2025-06-30 (the date you chose; the file states none)")).toBeInTheDocument();
+  });
+
+  it("pre-fills the statement date from a dated file name", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 2, name: "Broker", platform: "SHAREKHAN", account_type: "BROKER", currency: "INR", country: "IN" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await screen.findByText("Upload Statement CSV");
+    const dateInput = screen.getByLabelText("Statement date") as HTMLInputElement;
+    const file = new File(["data"], "portfolio_23_June_2025.xls", { type: "application/vnd.ms-excel" });
+    await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, file);
+    expect(dateInput.value).toBe("2025-06-23");
   });
 
   it("uploads a file and shows report", async () => {

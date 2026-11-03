@@ -5,7 +5,7 @@ import type { Account, ImportJobListItem } from "../lib/api";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
-import { describeAsOf, resolvePlatformParser, todayLocalYYYYMMDD } from "./ingestUtils";
+import { dateFromFilename, describeAsOf, resolvePlatformParser, todayLocalYYYYMMDD } from "./ingestUtils";
 import type { SignatureDebug } from "./ingestUtils";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -114,11 +114,19 @@ export default function Ingest() {
     }
   }
 
+  // A date in the file name (e.g. 2026_10_02.xls) pre-fills the statement date; the
+  // user sees it and can change it. Holdings exports often state no date inside.
+  function chooseFile(next: File | null) {
+    setFile(next);
+    const named = dateFromFilename(next?.name);
+    if (named && named <= todayLocalYYYYMMDD()) setAsOf(named);
+  }
+
   function handleDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setDragActive(false);
     const dropped = event.dataTransfer.files?.[0];
-    if (dropped) setFile(dropped);
+    if (dropped) chooseFile(dropped);
   }
 
   const reportData = report as {
@@ -225,7 +233,7 @@ export default function Ingest() {
                     type="file"
                     accept=".csv,.xls,.xlsx"
                     aria-label="Statement file"
-                    onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                    onChange={(e) => chooseFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
                 <label className="field">
@@ -238,7 +246,7 @@ export default function Ingest() {
                     max={todayLocalYYYYMMDD()}
                     onChange={(e) => setAsOf(e.target.value)}
                   />
-                  <span className="hint">Used when the file doesn't state its own date.</span>
+                  <span className="hint">Used when the file doesn't state its own date. Taken from the file name when it has one.</span>
                 </label>
                 <div className="actions">
                   <button className="btn" disabled={!file || !accountId || uploading} onClick={onUpload}>
