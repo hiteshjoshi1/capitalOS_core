@@ -20,3 +20,4 @@ class Transaction(Base):
     platform_reference = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     source = Column(Text, nullable=True)
+    source_fingerprint = Column(Text, nullable=True)

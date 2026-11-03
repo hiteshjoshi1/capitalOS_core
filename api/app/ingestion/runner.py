@@ -6,6 +6,7 @@ import os
 import shutil
 import time
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List
 
 from sqlalchemy import text
@@ -107,17 +108,105 @@ def _sha256_file(file_path: str) -> str:
     return h.hexdigest()
 
 
-def _fingerprint(account_id: int, tx: Dict[str, Any]) -> str:
-    parts = [
-        str(account_id),
-        tx["ts"].isoformat(),
+# Upload dedup (#157). A transaction's natural key is what the bank file says
+# about it: account, time, type, amount, currency, counterparty. Category is not
+# part of it (the classifier can change it after import). Two genuinely identical
+# rows (two same-day coffees) share a key, so dedup counts occurrences: a file
+# with the key n times, against m rows already stored, inserts n - m.
+_UPLOAD_LOCK_NAMESPACE = 157
+
+
+def _amount_text(amount: Any) -> str:
+    try:
+        normalized = Decimal(str(amount)).normalize()
+    except (InvalidOperation, ValueError):
+        return str(amount)
+    return format(normalized, "f")
+
+
+def _natural_key(tx: Dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        tx["ts"],
         tx["type"],
-        f"{tx['amount']}",
+        tx["amount"],
         tx["currency"],
         tx.get("merchant_counterparty", "") or "",
-        tx.get("category", "") or "",
+    )
+
+
+def _source_fingerprint(account_id: int, tx: Dict[str, Any], occurrence: int) -> str:
+    """Identity of the ``occurrence``-th row (1-based) with this natural key in the account."""
+    ts = tx["ts"]
+    parts = [
+        str(account_id),
+        ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+        str(tx["type"]),
+        _amount_text(tx["amount"]),
+        str(tx["currency"]),
+        tx.get("merchant_counterparty", "") or "",
+        str(occurrence),
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _lock_account_for_upload(db: Session, account_id: int) -> None:
+    """Serialise uploads into one account until this transaction ends (#157).
+
+    Postgres: a transaction-level advisory lock, released by the commit that also
+    commits the inserted rows, so a concurrent upload counts them before inserting.
+    SQLite (tests) has a single writer already; no-op.
+    """
+    dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    if getattr(dialect, "name", "") != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(CAST(:namespace AS integer), CAST(:account_key AS integer))"),
+        {"namespace": _UPLOAD_LOCK_NAMESPACE, "account_key": int(account_id) & 0x7FFFFFFF},
+    )
+
+
+def _stored_count_for_key(db: Session, account_id: int, tx: Dict[str, Any]) -> int:
+    row = db.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM transactions
+            WHERE account_id = :account_id
+              AND ts = :ts
+              AND type = :type
+              AND amount = :amount
+              AND currency = :currency
+              AND COALESCE(merchant_counterparty, '') = :merchant
+            """
+        ),
+        {
+            "account_id": account_id,
+            "ts": tx["ts"],
+            "type": tx["type"],
+            "amount": tx["amount"],
+            "currency": tx["currency"],
+            "merchant": tx.get("merchant_counterparty", "") or "",
+        },
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _free_source_fingerprint(db: Session, account_id: int, tx: Dict[str, Any], occurrence: int) -> str:
+    """The fingerprint for this occurrence, or the next unused one.
+
+    Normally occurrence k of a key gets index k. If a stored row already holds that
+    fingerprint (e.g. an earlier row of the key was deleted, so the count dropped),
+    the next free index is used, so the unique index never rejects an upload.
+    """
+    index = max(occurrence, 1)
+    while True:
+        fp = _source_fingerprint(account_id, tx, index)
+        taken = db.execute(
+            text("SELECT 1 FROM transactions WHERE account_id = :account_id AND source_fingerprint = :fp LIMIT 1"),
+            {"account_id": account_id, "fp": fp},
+        ).fetchone()
+        if not taken:
+            return fp
+        index += 1
 
 
 def _compose_notes(fp: str, parser_notes: Any) -> str:
@@ -457,8 +546,24 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
         duplicates = 0
         earliest_inserted_ts: datetime | None = None
 
+        account_id = int(job.account_id)
+        _lock_account_for_upload(db, account_id)
+        stored_by_key: dict[tuple[Any, ...], int] = {}
+        seen_by_key: dict[tuple[Any, ...], int] = {}
+
         for tx in parsed:
-            fp = _fingerprint(job.account_id, tx)
+            key = _natural_key(tx)
+            if key not in stored_by_key:
+                stored_by_key[key] = _stored_count_for_key(db, account_id, tx)
+            occurrence = seen_by_key.get(key, 0) + 1
+            seen_by_key[key] = occurrence
+            if occurrence <= stored_by_key[key]:
+                # This occurrence of the key is already stored (earlier upload,
+                # overlapping file, or a row whose category changed since).
+                duplicates += 1
+                continue
+
+            fp = _free_source_fingerprint(db, account_id, tx, occurrence)
             tx_asset_id: int | None = None
             tx_quantity: float | None = None
             if tx.get("type") in {"BUY", "SELL"} and tx.get("symbol") and tx.get("currency"):
@@ -479,34 +584,6 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                     except (TypeError, ValueError):
                         tx_quantity = None
 
-            exists = db.execute(
-                text(
-                    """
-                    SELECT 1 FROM transactions
-                    WHERE account_id = :account_id
-                      AND ts = :ts
-                      AND type = :type
-                      AND amount = :amount
-                      AND currency = :currency
-                      AND COALESCE(merchant_counterparty, '') = :merchant
-                      AND COALESCE(category, '') = :category
-                    LIMIT 1
-                    """
-                ),
-                {
-                    "account_id": job.account_id,
-                    "ts": tx["ts"],
-                    "type": tx["type"],
-                    "amount": tx["amount"],
-                    "currency": tx["currency"],
-                    "merchant": tx.get("merchant_counterparty", "") or "",
-                    "category": tx.get("category", "") or "",
-                },
-            ).fetchone()
-            if exists:
-                duplicates += 1
-                continue
-
             db.execute(
                 text(
                     """
@@ -521,7 +598,8 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                       category,
                       merchant_counterparty,
                       source,
-                      notes
+                      notes,
+                      source_fingerprint
                     )
                     VALUES (
                       :ts,
@@ -534,7 +612,8 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                       :category,
                       :merchant,
                       :source,
-                      :notes
+                      :notes,
+                      :source_fingerprint
                     )
                     """
                 ),
@@ -550,6 +629,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                     "merchant": tx.get("merchant_counterparty"),
                     "source": job.platform,
                     "notes": _compose_notes(fp, tx.get("notes")),
+                    "source_fingerprint": fp,
                 },
             )
             inserted += 1
