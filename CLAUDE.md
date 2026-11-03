@@ -32,7 +32,13 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - Vite listens on all interfaces (`host: true`) but `web/vite.network.ts` drops any connection
   that isn't from localhost or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). `VITE_ALLOW_LAN=1`
   opens it to the local network. `*.ts.net` Host headers are allowed (`allowedHosts`).
-- Demo login: `demo` / `Test@1234`.
+- Demo login `demo` / `Test@1234`: **dev worktree stacks and test instances only** (#152). Migration
+  072 turns it off everywhere; `make demo-enable` turns it back on (refused on the real-data stack;
+  `make db-seed-demo` = demo-enable + demo data; `make test-instance` enables it on the copy).
+- Accounts (#152): signup is off by default (`AUTH_ALLOW_SIGNUP=1` opens it). `make user-create
+  USERNAME=<name> ADMIN=1` makes one; `make user-grant-admin` / `user-revoke-admin USERNAME=<name>`.
+  Shared-data writes (platforms, currencies, token allowlist, market-data refresh) are admin-only (403).
+  Failed sign-ins are throttled per username and per IP (429 + Retry-After; in memory, see `.env.example`).
 - Passwords: Settings → Change password (signs out your other sessions). Forgotten one:
   `make user-set-password USERNAME=<name>` prompts for a new one and signs out all its sessions (#72).
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB

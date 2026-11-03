@@ -66,7 +66,8 @@ responses, anything where "restart from empty" (Path 1) isn't good enough.
    the session isn't tied to either device.
 4. **Once connected, nothing about CapitalOS itself changes** — this path
    only changes how you reach the terminal. Run it the same way described in
-   `CLAUDE.md`: `make up`, then the demo login (`demo` / `Test@1234`), API at
+   `CLAUDE.md`: `make up`, then your own login (the demo login, `demo` / `Test@1234`,
+   only on a dev/test stack after `make demo-enable`), API at
    `http://localhost:8000` (`curl http://localhost:8000/health`), web at
    `http://localhost:5173`.
 

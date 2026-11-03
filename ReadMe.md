@@ -20,7 +20,7 @@ The project emphasizes correctness, traceability, and process over prediction.
 
 ## Screenshots
 
-All screenshots below are the seeded demo account (`demo` / `Test@1234`) —
+All screenshots below are the demo account (`demo` / `Test@1234`, on a dev stack only) —
 dummy accounts, dummy wallets, fabricated balances. See
 [`docs/screenshots/`](docs/screenshots/) for the full set of every screen.
 
@@ -179,8 +179,13 @@ make build
 make up
 make db-migrate
 
-# 4. (optional) seed rich demo data — net worth, spending, crypto, 12mo history
-make db-seed-dummy
+# 4. create your account (signup is off by default); ADMIN=1 may change shared data
+#    (platforms, currencies, token allowlist, market-data refresh)
+make user-create USERNAME=<you> ADMIN=1
+
+# 4b. (optional, try-out/dev stacks only) the demo login + rich demo data:
+#     net worth, spending, crypto, 12mo history. Never on a stack holding real data.
+make db-seed-demo
 
 # 5. start the frontend dev server
 cd web && npm install && npm run dev
@@ -188,8 +193,10 @@ cd web && npm install && npm run dev
 
 - **Frontend**: http://localhost:5173
 - **API**: http://localhost:8000 (health: `curl http://localhost:8000/health`, docs: `/docs`)
-- **Log in** with the seeded demo account — `demo` / `Test@1234` — or register a new
-  user from the signup screen and start tracking your own portfolio.
+- **Log in** with the account from step 4 and start tracking your own portfolio. The demo
+  account (`demo` / `Test@1234`) only works after `make db-seed-demo` / `make demo-enable`:
+  it has a published password, so it is off on every install by default. Signup is off
+  too; set `AUTH_ALLOW_SIGNUP=1` in `.env` to open the signup screen.
 
 Stop everything with `make down`. The reset target under Development
 Workflow below wipes the database — back up first, see
