@@ -1172,6 +1172,24 @@ def _write_account_balance_snapshot(
         )
 
 
+def _statement_balance_meta(parse_result: ParseResult) -> dict[str, Any]:
+    """Both statement balances, and the held amount when they differ (#181).
+
+    The stored balance is the ledger balance; available = ledger minus funds on hold.
+    """
+    meta = parse_result.parser_meta or {}
+    available = meta.get("available_balance")
+    ledger = meta.get("ledger_balance")
+    out: dict[str, Any] = {}
+    if available is not None:
+        out["available_balance"] = float(available)
+    if ledger is not None:
+        out["ledger_balance"] = float(ledger)
+    if available is not None and ledger is not None and round(float(ledger) - float(available), 2) != 0:
+        out["held_amount"] = round(float(ledger) - float(available), 2)
+    return out
+
+
 def run_upload_balance_canonical_adapter(
     db: Session,
     *,
@@ -1200,6 +1218,7 @@ def run_upload_balance_canonical_adapter(
     ]
     as_of_date, as_of_source = _resolve_balance_date(parse_result, user_as_of)
     as_of_meta = as_of_metadata(as_of_date, as_of_source, user_as_of)
+    as_of_meta.update(_statement_balance_meta(parse_result))
     balances_written = 0
 
     for pos in positions:
