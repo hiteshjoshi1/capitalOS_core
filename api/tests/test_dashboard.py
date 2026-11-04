@@ -512,7 +512,11 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
     assert [row["symbol"] for row in dashboard_body["top_holdings"]] == ["ETH"]
     assert any(row["asset_class"] == "CRYPTO" for row in dashboard_body["top_holdings"])
     assert all(row["asset_class"] != "CASH" for row in dashboard_body["top_holdings"])
-    assert dashboard_body["geography"] == [{"country": "SG", "value": 1000.0, "percent": 89.01}]
+    # Geography splits gross assets, crypto included (#144), so it adds up to 100%.
+    assert dashboard_body["geography"] == [
+        {"country": "SG", "value": 1000.0, "percent": 89.01},
+        {"country": "US", "value": 123.45, "percent": 10.99},
+    ]
     assert allocation_body["total"] == 1123.45
     assert allocation_body["items"] == [
         {"platform": "DBS", "platform_type": "BANK", "country": "SG", "value": 1000.0, "percent": 89.01},

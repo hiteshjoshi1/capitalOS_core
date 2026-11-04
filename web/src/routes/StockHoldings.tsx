@@ -524,7 +524,7 @@ export default function StockHoldings() {
                             {formatFreshnessLabel(h.quote_freshness_status)}
                           </span>
                           {h.price_fallback_reason && (
-                            <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} />
+                            <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} platform={h.platform} />
                           )}
                           <div className="stockHoldingsMobileValueBlock">
                             <strong>{formatMoney(h.value)}</strong>
@@ -580,7 +580,7 @@ export default function StockHoldings() {
                               <td className="right stockHoldingsPriceCell">
                                 {formatNativeMoney(h.latest_price, h.quote_currency)}
                                 {h.price_fallback_reason && (
-                                  <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} />
+                                  <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} platform={h.platform} />
                                 )}
                               </td>
                             )}

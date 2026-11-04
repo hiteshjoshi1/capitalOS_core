@@ -55,9 +55,13 @@ class TopHolding(BaseModel):
     latest_trade_date: Optional[str] = None
     quote_age_days: Optional[int] = None
     price_source: Optional[str] = None
-    # Set when a live view prices an IBKR holding at IBKR's statement price because
-    # the price job had no usable quote: no_quote | quote_older | quote_implausible (#124).
+    # Set when a live view prices a holding at its statement price because the price
+    # job had no usable quote: no_quote | quote_older | quote_implausible (D-21, #124;
+    # every holding since #144, not only IBKR's).
     price_fallback_reason: Optional[str] = None
+    # The holding's statement has no market value and no usable quote applied, so
+    # it is valued at its cost basis (#144; it used to count as 0).
+    valued_at_cost: bool = False
     price_provider: Optional[str] = None
     quote_freshness_status: Optional[str] = None
 

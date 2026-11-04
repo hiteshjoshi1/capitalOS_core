@@ -345,8 +345,10 @@ export type DashboardSummary = FxStatus & {
     latest_trade_date?: string | null;
     quote_age_days?: number | null;
     price_source?: string | null;
-    /** Live views: why an IBKR holding is priced at IBKR's statement price (#124). */
+    /** Live views: why a holding is priced at its statement price (D-21, #124; every holding since #144). */
     price_fallback_reason?: string | null;
+    /** No market value on the statement and no usable quote: valued at cost (#144). */
+    valued_at_cost?: boolean;
     price_provider?: string | null;
     quote_freshness_status?: string | null;
   }>;

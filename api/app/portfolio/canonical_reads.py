@@ -317,7 +317,9 @@ def canonical_position_rows_by_legacy_account(
               THEN CAST(ps.cost_basis_base AS DOUBLE PRECISION) / CAST(ps.quantity AS DOUBLE PRECISION)
             ELSE NULL
           END AS avg_cost,
-          CAST(ps.market_value_base AS DOUBLE PRECISION) AS cost_basis_base,
+          -- The real cost basis (#130 2.7: this used to repeat market_value_base,
+          -- so a holding without a market value fell back to 0, not to its cost).
+          CAST(ps.cost_basis_base AS DOUBLE PRECISION) AS cost_basis_base,
           CAST(ps.market_price AS DOUBLE PRECISION) AS snapshot_market_price,
           CAST(ps.market_value_local AS DOUBLE PRECISION) AS snapshot_market_value_local,
           CAST(ps.market_value_base AS DOUBLE PRECISION) AS snapshot_market_value_base,
@@ -509,6 +511,11 @@ def canonical_account_balance_rows(
                            credit_balance | loan_balance | stablecoin_cash
     - ``balance_local``  — balance in the position currency
     - ``balance_base``   — balance converted to the account's base currency
+                           (IBKR: the Flex base currency, ``account_base_currency``;
+                           uploads store the statement amount here unconverted)
+    - ``account_base_currency`` — the currency ``balance_base`` is in, for broker
+                           cash rows (NULL for ``account_balance_snapshots`` rows)
+    - ``broker_account_id`` — the broker account of a broker cash row (else NULL)
     - ``fx_rate``        — FX rate used for the conversion
     - ``source``         — 'account_balance_snapshots' | 'portfolio_cash_balance_snapshots'
     - ``as_of_date``     — the snapshot date (DATE string)
@@ -600,6 +607,8 @@ def canonical_account_balance_rows(
           SELECT
             abs.account_id,
             acc.currency AS account_currency,
+            CAST(NULL AS INTEGER) AS broker_account_id,
+            CAST(NULL AS TEXT) AS account_base_currency,
             COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
             COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
             COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
@@ -672,6 +681,8 @@ def canonical_account_balance_rows(
           SELECT
             ba.legacy_account_id AS account_id,
             acc.currency AS account_currency,
+            ba.id AS broker_account_id,
+            ba.base_currency AS account_base_currency,
             COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
             COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
             COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,

@@ -46,6 +46,16 @@ from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
 from app.valuation_cache import request_memo, valuation_cached
 from app.wealth_rollup_dirty import dirty_state, dirty_user_ids, settle_dirty_mark
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.position_pricing import (
+    IMPLAUSIBLE_QUOTE_RATIO,
+    PRICE_FALLBACK_IMPLAUSIBLE,
+    PRICE_FALLBACK_NO_QUOTE,
+    PRICE_FALLBACK_OLDER_QUOTE,
+    PositionPrice,
+    latest_quotes,
+    position_base_currency,
+    price_position,
+)
 from app.portfolio.canonical_reads import (
     canonical_account_balance_rows,
     canonical_position_rows_by_legacy_account,
@@ -251,37 +261,10 @@ def _month_window(end_month_start: datetime, months: int = 6) -> list[datetime]:
     return [_add_months(end_month_start, offset) for offset in range(-(months - 1), 1)]
 
 
-@valuation_cached(date_args=("anchor_ts",))
 def _latest_price_map(db: Session, anchor_ts: datetime, asset_ids: set[int]) -> Dict[int, Dict[str, Any]]:
-    if not asset_ids:
-        return {}
-    placeholders = ",".join(str(int(asset_id)) for asset_id in sorted(asset_ids))
-    q = text(
-        f"""
-                SELECT p1.asset_id, p1.price, p1.currency, p1.trade_date, p1.source, p1.provider_symbol, p1.exchange_code
-        FROM prices p1
-        JOIN (
-          SELECT asset_id, MAX(trade_date) AS trade_date
-          FROM prices
-          WHERE trade_date IS NOT NULL
-            AND trade_date <= :anchor_date
-            AND asset_id IN ({placeholders})
-          GROUP BY asset_id
-        ) lp ON lp.asset_id = p1.asset_id AND lp.trade_date = p1.trade_date
-        """
-    )
-    rows = db.execute(q, {"anchor_date": anchor_ts.date()}).mappings().all()
-    return {
-        int(row["asset_id"]): {
-            "price": float(row["price"]) if row["price"] is not None else None,
-            "currency": row["currency"],
-            "trade_date": row["trade_date"],
-            "source": row["source"],
-            "provider_symbol": row["provider_symbol"],
-            "exchange_code": row["exchange_code"],
-        }
-        for row in rows
-    }
+    """The price job's newest quote per asset on or before the anchor date, with a
+    deterministic choice between sources (app.portfolio.position_pricing)."""
+    return latest_quotes(db, anchor_ts.date(), frozenset(int(asset_id) for asset_id in asset_ids))
 
 
 def _positions_coverage_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> Optional[datetime]:
@@ -327,7 +310,7 @@ def _serialize_net_worth(components: Dict[str, float]) -> Dict[str, float]:
 
 
 def _canonical_base_currency(row: Dict[str, Any], fallback: str) -> str:
-    return str(row.get("account_base_currency") or row.get("account_currency") or fallback).upper()
+    return position_base_currency(row, fallback)
 
 
 def _canonical_position_value(
@@ -336,18 +319,10 @@ def _canonical_position_value(
     fallback_currency: str,
     latest_prices: Dict[int, Dict[str, Any]] | None = None,
 ) -> float:
-    if latest_prices:
-        asset_id = row.get("asset_id")
-        quantity = row.get("quantity")
-        price_row = latest_prices.get(int(asset_id)) if asset_id is not None else None
-        if price_row and quantity is not None and price_row.get("price") is not None:
-            price_currency = str(price_row.get("currency") or row.get("quote_currency") or fallback_currency).upper()
-            return float(quantity or 0.0) * float(price_row["price"]) * rates.get(price_currency, 0.0)
-    currency = _canonical_base_currency(row, fallback_currency)
-    raw_value = row.get("snapshot_market_value_base")
-    if raw_value is None:
-        raw_value = row.get("cost_basis_base")
-    return float(raw_value or 0.0) * rates.get(currency, 0.0)
+    """A holding's value: its statement value (market value, else cost), or in a
+    live view (``latest_prices`` given) the price job's quote under D-21's rule,
+    for every holding (#144). An empty ``latest_prices`` is the same as none."""
+    return price_position(row, latest_prices or None, rates, fallback_currency).value
 
 
 def _latest_prices_for_positions(
@@ -363,15 +338,16 @@ def _latest_prices_for_positions(
     return _latest_price_map(db, anchor_ts, asset_ids)
 
 
-# ─── Live prices for IBKR (NAV-snapshot) holdings (#124) ─────────────────────
-# IBKR's Flex report is the source of truth for what is held (quantity, cost,
-# cash). For the *price* of a holding in a live view, the price job's quote wins
-# whenever it is at least as recent as IBKR's report; IBKR's own statement price
-# is the fallback, and the holding says why.
-IBKR_PRICE_FALLBACK_NO_QUOTE = "no_quote"  # the price job has no quote for it
-IBKR_PRICE_FALLBACK_OLDER_QUOTE = "quote_older"  # its newest quote predates IBKR's report
-IBKR_PRICE_FALLBACK_IMPLAUSIBLE = "quote_implausible"  # over 2x off IBKR's value: likely a wrong symbol/currency
-_IMPLAUSIBLE_QUOTE_RATIO = 2.0
+# ─── Live prices for holdings (D-21, #124; every holding since #144) ─────────
+# The statement (IBKR's Flex report, an uploaded holdings file) is the source of
+# truth for what is held. For the *price* of a holding in a live view, the price
+# job's quote wins whenever it is at least as recent as the holding's report and
+# within 2x of its statement value; otherwise the statement price stands, and
+# the holding says why. The rule lives in app.portfolio.position_pricing.
+IBKR_PRICE_FALLBACK_NO_QUOTE = PRICE_FALLBACK_NO_QUOTE
+IBKR_PRICE_FALLBACK_OLDER_QUOTE = PRICE_FALLBACK_OLDER_QUOTE
+IBKR_PRICE_FALLBACK_IMPLAUSIBLE = PRICE_FALLBACK_IMPLAUSIBLE
+_IMPLAUSIBLE_QUOTE_RATIO = IMPLAUSIBLE_QUOTE_RATIO
 
 
 def _date_only(value: Any) -> Optional[date]:
@@ -387,29 +363,25 @@ def _date_only(value: Any) -> Optional[date]:
         return None
 
 
+def _live_position_price(
+    row: Dict[str, Any],
+    latest_prices: Dict[int, Dict[str, Any]],
+    rates: Dict[str, float],
+    base_currency: str,
+) -> PositionPrice:
+    """One holding in a live view, under D-21 (whichever platform holds it)."""
+    return price_position(row, latest_prices or {}, rates, base_currency)
+
+
 def _nav_row_live_price(
     row: Dict[str, Any],
     latest_prices: Dict[int, Dict[str, Any]],
     rates: Dict[str, float],
     base_currency: str,
 ) -> tuple[Optional[Dict[str, Any]], Optional[str], float, float]:
-    """For one IBKR (NAV-snapshot) position in a live view:
-    (quote to use or None, fallback reason or None, live value, IBKR snapshot value)."""
-    snapshot_value = _canonical_position_value(row, rates, base_currency)
-    asset_id = row.get("asset_id")
-    quote = latest_prices.get(int(asset_id)) if asset_id is not None else None
-    if not quote or quote.get("price") is None or row.get("quantity") is None:
-        return None, IBKR_PRICE_FALLBACK_NO_QUOTE, snapshot_value, snapshot_value
-    quote_date = _date_only(quote.get("trade_date"))
-    report_date = _date_only(row.get("report_date"))
-    if quote_date is not None and report_date is not None and quote_date < report_date:
-        return None, IBKR_PRICE_FALLBACK_OLDER_QUOTE, snapshot_value, snapshot_value
-    live_value = _canonical_position_value(row, rates, base_currency, {int(asset_id): quote})
-    if snapshot_value > 0 and live_value > 0:
-        ratio = live_value / snapshot_value
-        if ratio > _IMPLAUSIBLE_QUOTE_RATIO or ratio < 1 / _IMPLAUSIBLE_QUOTE_RATIO:
-            return None, IBKR_PRICE_FALLBACK_IMPLAUSIBLE, snapshot_value, snapshot_value
-    return quote, None, live_value, snapshot_value
+    """(quote to use or None, fallback reason or None, live value, statement value)."""
+    priced = _live_position_price(row, latest_prices, rates, base_currency)
+    return priced.quote, priced.fallback_reason, priced.value, priced.statement_value
 
 
 def _nav_live_price_deltas(
@@ -462,9 +434,26 @@ def _nav_live_context(
     return rows, prices, currencies
 
 
+def _cash_row_amount(row: Dict[str, Any], fallback_currency: str) -> tuple[float, str]:
+    """(amount, the currency it is in) for one canonical balance row.
+
+    Broker cash (IBKR Flex) is taken in the Flex base currency, the same figure
+    as the NAV's cash (#144: it used to be converted again from the account's
+    currency). Every other balance is its statement amount in its own currency,
+    converted at the anchor's rate (D-30): an upload stores that amount
+    unconverted in ``balance_base`` too, so reading the base value with the
+    account's currency would treat a foreign-currency balance as already
+    converted (#130 2.8)."""
+    if row.get("account_base_currency"):
+        return float(row.get("balance_base") or 0.0), str(row["account_base_currency"]).upper()
+    if row.get("balance_local") is not None and row.get("currency"):
+        return float(row["balance_local"]), str(row["currency"]).upper()
+    return float(row.get("balance_base") or 0.0), _canonical_base_currency(row, fallback_currency)
+
+
 def _canonical_cash_value(row: Dict[str, Any], rates: Dict[str, float], fallback_currency: str) -> float:
-    currency = _canonical_base_currency(row, fallback_currency)
-    return float(row.get("balance_base") or 0.0) * rates.get(currency, 0.0)
+    amount, currency = _cash_row_amount(row, fallback_currency)
+    return amount * rates.get(currency, 0.0)
 
 
 def _card_liability_transaction_start(anchor_ts: datetime) -> datetime:
@@ -618,15 +607,10 @@ def _current_networth_state(db: Session, base_currency: str, current_user_id: in
         if wallet.get("as_of_date") is not None
     ]
 
-    cash_rows = _cash_balance_rows(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor.date(),
-    )
     cash_items = [
-        (_display_source(row.get("platform")), row.get("as_of_date"))
-        for row in cash_rows
-        if str(row.get("balance_type") or "").lower() in _CASH_FRESHNESS_BALANCE_TYPES
+        (_display_source(entry.get("platform")), entry.get("as_of_date"))
+        for entry in _cash_positions(db, anchor, base_currency, current_user_id)
+        if entry["balance_type"] in _CASH_FRESHNESS_BALANCE_TYPES
     ]
 
     cash_percent = round((components["cash"] / components["total"]) * 100, 2) if components["total"] > 0 else 0.0
@@ -706,14 +690,215 @@ def _cash_balance_rows(db: Session, *, current_user_id: int, anchor_date: date) 
     """The canonical balance rows that can count as cash: every account's except
     credit cards' (#180). A CREDIT_CARD account's balance is never cash, whether or
     not it has a credit_card_accounts row; a bank statement stored on a card account
-    by mistake must not add to Cash. Every cash reader here goes through this, so
-    #144 (one cash scope) can build on it."""
+    by mistake must not add to Cash. _cash_positions builds on this."""
     card_ids = _credit_card_account_ids(db, current_user_id)
     return [
         row
         for row in canonical_account_balance_rows(db, current_user_id=current_user_id, anchor_date=anchor_date)
         if row.get("account_id") is None or int(row["account_id"]) not in card_ids
     ]
+
+
+# ─── Cash: one scope for every reader (#144) ─────────────────────────────────
+CASH_BALANCE_TYPES = frozenset({"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"})
+CASH_SCOPE_NET_WORTH = "net_worth"  # what net worth counts as cash
+CASH_SCOPE_CASH_PAGE = "cash_page"  # net-worth cash plus stablecoins (net worth counts those as crypto)
+CASH_KIND_BALANCE = "balance"  # an account's own balance rows (bank, upload, broker without NAV)
+CASH_KIND_NAV = "nav"  # the cash of an account valued by its NAV (IBKR Flex)
+CASH_KIND_STABLECOIN = "stablecoin"
+_NAV_CASH_TOLERANCE = 0.005  # base-currency units: below this the NAV's cash rows "add up"
+
+
+def _wallet_valuation(db: Session, anchor_ts: datetime, current_user_id: int, *, price_overlay: bool) -> Dict[str, Any]:
+    """The crypto valuation net worth uses at this anchor; allocation and geography
+    use the same one so their totals add up to net worth's."""
+    if price_overlay:
+        return latest_wallet_valuation(db, current_user_id)
+    return latest_wallet_valuation(db, current_user_id, as_of_date=anchor_ts.date())
+
+
+def _stablecoin_rows_by_chain(db: Session, anchor_date: date, current_user_id: int) -> List[Dict[str, Any]]:
+    return [
+        dict(row)
+        for row in db.execute(
+            text(
+                """
+                WITH latest AS (
+                  SELECT wallet_id, MAX(as_of_date) AS as_of_date
+                  FROM crypto_wallet_snapshots
+                  WHERE as_of_date <= :as_of_date
+                  GROUP BY wallet_id
+                )
+                SELECT
+                  i.chain AS source,
+                  SUM(i.value_usd) AS value_usd,
+                  MAX(s.as_of_date) AS as_of_date
+                FROM crypto_wallet_snapshots s
+                JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
+                JOIN crypto_wallets w ON w.id = s.wallet_id
+                JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
+                WHERE w.status = 'active'
+                  AND """
+                + account_scope_sql("w")
+                + """
+                  AND UPPER(COALESCE(i.symbol, '')) IN ('USDC', 'USDT')
+                GROUP BY i.chain
+                ORDER BY i.chain
+                """
+            ),
+            {"as_of_date": anchor_date, "current_user_id": current_user_id},
+        ).mappings().all()
+    ]
+
+
+@valuation_cached(shared=True, date_args=("anchor_ts",))
+def _cash_positions(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+    *,
+    scope: str = CASH_SCOPE_NET_WORTH,
+) -> List[Dict[str, Any]]:
+    """The user's cash at ``anchor_ts`` in ``base_currency``: the one cash function
+    behind net worth, the Cash page, its trend and History, allocation, geography
+    and the cash freshness (#144).
+
+    Scope ``net_worth``:
+    - every non-card account's (#180) balance rows of a cash type, except
+    - accounts valued by an IBKR NAV: their cash is the NAV's cash, split by
+      currency with the broker cash rows of the NAV's own report date; whatever
+      those rows don't cover is one entry in the NAV's base currency, so the sum
+      is always the NAV's cash.
+    Scope ``cash_page``: the same plus stablecoins (USDC/USDT) in active wallets,
+    per chain.
+
+    Each entry: kind (balance | nav | stablecoin), balance_type, account_id, platform,
+    platform_type, country, currency (what the money is held in), value (in
+    ``base_currency``), as_of_date. A currency with no FX rate is valued 0 and
+    flagged by fx_status (D-30).
+    """
+    if scope not in (CASH_SCOPE_NET_WORTH, CASH_SCOPE_CASH_PAGE):
+        raise ValueError(f"unknown cash scope {scope!r}")
+    anchor_date = anchor_ts.date()
+    balance_rows = [
+        row
+        for row in _cash_balance_rows(db, current_user_id=current_user_id, anchor_date=anchor_date)
+        if str(row.get("balance_type") or "").lower() in CASH_BALANCE_TYPES
+    ]
+    nav_rows = latest_authoritative_nav_by_legacy_account(db, current_user_id=current_user_id, anchor_date=anchor_date)
+    nav_account_ids = {int(row["legacy_account_id"]) for row in nav_rows if row.get("legacy_account_id") is not None}
+    stablecoins = _stablecoin_rows_by_chain(db, anchor_date, current_user_id) if scope == CASH_SCOPE_CASH_PAGE else []
+
+    currencies = {_cash_row_amount(row, base_currency)[1] for row in balance_rows}
+    currencies.update(str(row.get("base_currency") or base_currency).upper() for row in nav_rows)
+    if stablecoins:
+        currencies.add("USD")
+    rates = get_rates(anchor_ts, base_currency, currencies) if currencies else {}
+
+    def _entry(kind: str, row: Dict[str, Any], *, currency: str, value: float, as_of: Any, country: Any) -> Dict[str, Any]:
+        return {
+            "kind": kind,
+            "balance_type": str(row.get("balance_type") or "broker_cash").lower(),
+            "account_id": int(row["account_id"]) if row.get("account_id") is not None else None,
+            "platform": row.get("platform"),
+            "platform_type": row.get("platform_type"),
+            "country": country,
+            "currency": currency,
+            "value": value,
+            "as_of_date": as_of,
+        }
+
+    nav_entries: List[Dict[str, Any]] = []
+    out: List[Dict[str, Any]] = []
+    for row in balance_rows:
+        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
+            continue
+        out.append(
+            _entry(
+                CASH_KIND_BALANCE,
+                row,
+                currency=str(row.get("currency") or base_currency).upper(),
+                value=_canonical_cash_value(row, rates, base_currency),
+                as_of=row.get("as_of_date"),
+                country=row.get("platform_country"),
+            )
+        )
+
+    for nav in nav_rows:
+        if nav.get("legacy_account_id") is None:
+            continue
+        account_id = int(nav["legacy_account_id"])
+        nav_currency = str(nav.get("base_currency") or base_currency).upper()
+        rate = rates.get(nav_currency, 0.0)
+        nav_cash = float(nav.get("cash_base") or 0.0)
+        report_date = _date_only(nav.get("report_date"))
+        same_day = [
+            row
+            for row in balance_rows
+            if row.get("account_id") is not None
+            and int(row["account_id"]) == account_id
+            and row.get("broker_account_id") is not None
+            and int(row["broker_account_id"]) == int(nav["broker_account_id"])
+            and str(row.get("account_base_currency") or "").upper() == nav_currency
+            and _date_only(row.get("as_of_date")) == report_date
+        ]
+        base = {
+            "account_id": account_id,
+            "platform": (same_day[0].get("platform") if same_day else None) or nav.get("platform"),
+            "platform_type": nav.get("platform_type"),
+        }
+        amounts: Dict[str, float] = {}
+        as_of_by_currency: Dict[str, Any] = {}
+        for row in same_day:
+            currency = str(row.get("currency") or nav_currency).upper()
+            amounts[currency] = amounts.get(currency, 0.0) + float(row.get("balance_base") or 0.0)
+            as_of_by_currency[currency] = row.get("as_of_date")
+        # Whatever the rows don't cover (a missing row, or IBKR's own rounding of
+        # the NAV) is held in the NAV's base currency, so the entries add up to
+        # exactly the NAV's cash, the figure net worth has always used.
+        remainder = nav_cash - sum(amounts.values())
+        if nav_currency in amounts or abs(remainder) > _NAV_CASH_TOLERANCE or not amounts:
+            amounts[nav_currency] = amounts.get(nav_currency, 0.0) + remainder
+        else:
+            # No row in the base currency and only rounding left: fold it into the largest.
+            largest = max(amounts, key=lambda c: abs(amounts[c]))
+            amounts[largest] += remainder
+        for currency, amount in amounts.items():
+            if amount == 0:
+                continue
+            nav_entries.append(
+                _entry(
+                    CASH_KIND_NAV,
+                    base,
+                    currency=currency,
+                    value=amount * rate,
+                    as_of=as_of_by_currency.get(currency) or (_iso_value(report_date) if report_date else nav.get("report_date")),
+                    country=nav.get("country"),
+                )
+            )
+
+    # Account order, as the canonical rows come (a tie in the freshness labels
+    # resolves the same way it always has).
+    out = sorted(nav_entries + out, key=lambda entry: entry["account_id"] if entry["account_id"] is not None else -1)
+    usd_rate = rates.get("USD", 0.0)
+    for row in stablecoins:
+        if row.get("value_usd") is None:
+            continue
+        out.append(
+            {
+                "kind": CASH_KIND_STABLECOIN,
+                "balance_type": "stablecoin_cash",
+                "account_id": None,
+                "platform": row.get("source"),
+                "platform_type": "WALLET_PROVIDER",
+                "country": "US",
+                "currency": "USD",
+                "value": float(row["value_usd"]) * usd_rate,
+                "as_of_date": row.get("as_of_date"),
+            }
+        )
+    return out
 
 
 @valuation_cached(shared=True, date_args=("anchor_ts",))
@@ -743,6 +928,7 @@ def _networth_asset_components(
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
+    cash_entries = _cash_positions(db, anchor_ts, base_currency, current_user_id)
     canonical_cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
@@ -752,25 +938,18 @@ def _networth_asset_components(
     nav_live_rows, nav_live_prices, nav_live_currencies = _nav_live_context(
         db, anchor_ts, current_user_id, base_currency, enabled=price_overlay
     )
-    nav_account_ids = {
-        int(row["legacy_account_id"])
-        for row in canonical_nav_rows
-        if row.get("legacy_account_id") is not None
-    }
     currencies = {
         _canonical_base_currency(row, base_currency)
         for row in canonical_pos_rows
     }
     currencies.update(nav_live_currencies)
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
-    currencies.update(_canonical_base_currency(row, base_currency) for row in canonical_cash_rows)
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     currencies.add("USD")  # Include USD for crypto wallet conversions
     rates = get_rates(anchor_ts, base_currency, currencies)
-    cash = 0.0
+    cash = sum(float(entry["value"]) for entry in cash_entries)
     stocks_funds = 0.0
     crypto = 0.0
-    credit_card_account_ids = _credit_card_account_ids(db, current_user_id)
     for r in canonical_pos_rows:
         asset_class = str(r["asset_class"] or "").upper()
         if asset_class in ("STOCK", "FUND"):
@@ -781,21 +960,9 @@ def _networth_asset_components(
         rate = rates.get(nav_currency, 0.0)
         cash_base = float(row["cash_base"] or 0.0)
         total_nav_base = float(row["total_nav_base"] or 0.0)
-        cash += cash_base * rate
+        # The NAV's cash is in cash_entries (_cash_positions).
         stocks_funds += (total_nav_base - cash_base) * rate + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
-    for row in canonical_cash_rows:
-        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
-            continue
-        if row.get("account_id") is not None and int(row["account_id"]) in credit_card_account_ids:
-            continue
-        balance_type = str(row.get("balance_type") or "").lower()
-        if balance_type not in {"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"}:
-            continue
-        cash += _canonical_cash_value(row, rates, base_currency)
-    if price_overlay:
-        wallet_usd = float(latest_wallet_valuation(db, current_user_id)["total_usd"])
-    else:
-        wallet_usd = float(latest_wallet_valuation(db, current_user_id, as_of_date=anchor_ts.date())["total_usd"])
+    wallet_usd = float(_wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)["total_usd"])
     if wallet_usd:
         usd_rate = rates.get("USD", 0.0)
         crypto += wallet_usd * usd_rate
@@ -1204,58 +1371,18 @@ def _geography(
     *,
     price_overlay: bool = False,
 ) -> List[Dict[str, Any]]:
+    """The summary's geography: per country, its share of gross assets (cash,
+    stocks/funds and crypto). The same split as _geography_exposure at the same
+    anchor, so the values add up to net worth + liabilities and the percents to
+    100 (#144: crypto was missing and the shares were of net worth). ``total``
+    (net worth) only says whether there is anything to split."""
     if total <= 0:
         return []
-    stock_payload = _stock_exposure(db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay)
-    canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    canonical_cash_rows = _cash_balance_rows(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    nav_account_ids = {
-        int(row["legacy_account_id"])
-        for row in canonical_nav_rows
-        if row.get("legacy_account_id") is not None
-    }
-    currencies = {_canonical_base_currency(row, base_currency) for row in canonical_cash_rows}
-    currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
-    rates = get_rates(anchor_ts, base_currency, currencies)
-    buckets: Dict[str, float] = {}
-    for row in stock_payload["by_country"]:
-        value = float(row.get("value") or 0.0)
-        if value <= 0:
-            continue
-        country = row.get("key") or "UNKNOWN"
-        buckets[country] = buckets.get(country, 0.0) + value
-    for row in canonical_nav_rows:
-        cash_base = float(row.get("cash_base") or 0.0)
-        if cash_base <= 0:
-            continue
-        nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value = cash_base * rates.get(nav_currency, 0.0)
-        country = row.get("country") or "UNKNOWN"
-        buckets[country] = buckets.get(country, 0.0) + value
-    for row in canonical_cash_rows:
-        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
-            continue
-        value = _canonical_cash_value(row, rates, base_currency)
-        if value <= 0:
-            continue
-        country = row.get("platform_country") or "UNKNOWN"
-        buckets[country] = buckets.get(country, 0.0) + value
-    out = []
-    for country, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
-        out.append({
-            "country": country,
-            "value": value,
-            "percent": round((value / total) * 100, 2)
-        })
-    return out
+    exposure = _geography_exposure(db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay)
+    return [
+        {"country": item["country"], "value": item["total"], "percent": item["percent"]}
+        for item in exposure["items"]
+    ]
 
 def _blank_geo_country_bucket() -> Dict[str, float]:
     return {"stocks_funds": 0.0, "cash": 0.0, "crypto": 0.0}
@@ -1270,26 +1397,12 @@ def _geography_exposure(
     *,
     price_overlay: bool = False,
 ) -> Dict[str, Any]:
+    """Gross assets at ``anchor_ts`` by country: stocks/funds (_stock_exposure),
+    cash (_cash_positions, net-worth scope) and crypto (the wallet valuation net
+    worth uses; stablecoins shown as US cash). The total is net worth's cash +
+    stocks/funds + crypto at the same anchor and price mode (#144)."""
     stock_payload = _stock_exposure(db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay)
-    canonical_nav_rows = latest_authoritative_nav_by_legacy_account(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    canonical_cash_rows = _cash_balance_rows(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    nav_account_ids = {
-        int(row["legacy_account_id"])
-        for row in canonical_nav_rows
-        if row.get("legacy_account_id") is not None
-    }
-    currencies = {_canonical_base_currency(row, base_currency) for row in canonical_cash_rows}
-    currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
-    currencies.add("USD")
-    rates = get_rates(anchor_ts, base_currency, currencies)
+    rates = get_rates(anchor_ts, base_currency, {"USD"})
     usd_rate = rates.get("USD", 0.0)
 
     buckets: Dict[str, Dict[str, float]] = {}
@@ -1306,59 +1419,20 @@ def _geography_exposure(
         country = row.get("key") or "UNKNOWN"
         _bucket(country)["stocks_funds"] += value_base
 
-    for row in canonical_nav_rows:
-        cash_base = float(row.get("cash_base") or 0.0)
-        if cash_base <= 0:
-            continue
-        nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value_base = cash_base * rates.get(nav_currency, 0.0)
-        _bucket(row.get("country") or "UNKNOWN")["cash"] += value_base
+    for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id):
+        _bucket(entry.get("country") or "UNKNOWN")["cash"] += float(entry["value"])
 
-    for row in canonical_cash_rows:
-        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
-            continue
-        value_base = _canonical_cash_value(row, rates, base_currency)
-        if value_base <= 0:
-            continue
-        _bucket(row.get("platform_country") or "UNKNOWN")["cash"] += value_base
-
-    wallet_rows = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT wallet_id, MAX(as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots
-              WHERE as_of_date <= :as_of_date
-              GROUP BY wallet_id
-            )
-            SELECT
-              UPPER(COALESCE(i.symbol, '')) AS symbol,
-              SUM(i.value_usd) AS value_usd
-            FROM crypto_wallet_snapshots s
-            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
-            JOIN crypto_wallets w ON w.id = s.wallet_id
-            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
-            WHERE w.status = 'active'
-              AND """
-            + account_scope_sql("w")
-            + """
-            GROUP BY UPPER(COALESCE(i.symbol, ''))
-            """
-        ),
-        {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
-    ).mappings().all()
-
-    us_bucket = _bucket("US")
-    for row in wallet_rows:
-        value_usd = float(row.get("value_usd") or 0.0)
-        if value_usd <= 0:
-            continue
-        value_base = value_usd * usd_rate
-        symbol = str(row.get("symbol") or "").upper()
-        if symbol in {"USDC", "USDT"}:
-            us_bucket["cash"] += value_base
-        else:
-            us_bucket["crypto"] += value_base
+    valuation = _wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)
+    wallet_usd = float(valuation.get("total_usd") or 0.0)
+    stable_usd = sum(
+        float(item.get("value_usd") or 0.0)
+        for item in valuation.get("items", [])
+        if str(item.get("symbol") or "").upper() in {"USDC", "USDT"}
+    )
+    if wallet_usd:
+        us_bucket = _bucket("US")
+        us_bucket["cash"] += stable_usd * usd_rate
+        us_bucket["crypto"] += (wallet_usd - stable_usd) * usd_rate
 
     items: List[Dict[str, Any]] = []
     grand_total = 0.0
@@ -1477,6 +1551,7 @@ def _top_holdings(
                 "quote_age_days": _quote_age_days(row.get("latest_trade_date")),
                 "price_source": row.get("price_source"),
                 "price_fallback_reason": row.get("price_fallback_reason"),
+                "valued_at_cost": bool(row.get("valued_at_cost")),
                 "price_provider": _price_provider(row.get("price_source")),
                 "quote_freshness_status": _quote_freshness_status(row.get("latest_trade_date")),
                 "exchange_code": row.get("exchange_code"),
@@ -1486,6 +1561,7 @@ def _top_holdings(
         if not agg[key].get("exchange_code") and row.get("exchange_code"):
             agg[key]["exchange_code"] = row.get("exchange_code")
         agg[key]["value"] += value
+        agg[key]["valued_at_cost"] = agg[key]["valued_at_cost"] or bool(row.get("valued_at_cost"))
         quantity = float(row.get("quantity")) if row.get("quantity") is not None else None
         if quantity is not None:
             agg[key]["quantity"] += quantity
@@ -1510,19 +1586,11 @@ def _top_holdings(
         avg_cost = cr.get("avg_cost")
         if has_nav_snapshot and cr.get("snapshot_cost_basis_local") is not None and quantity > 0:
             avg_cost = float(cr.get("snapshot_cost_basis_local") or 0.0) / quantity
-        price_fallback_reason: Optional[str] = None
-        if has_nav_snapshot:
-            # Live view: the price job's quote when it's at least as recent as IBKR's
-            # report; otherwise IBKR's statement price, with the reason (#124).
-            if price_overlay:
-                price_row, price_fallback_reason, value, _snapshot = _nav_row_live_price(
-                    cr, latest_prices, rates, base_currency
-                )
-            else:
-                price_row, value = None, _canonical_position_value(cr, rates, base_currency)
-        else:
-            price_row = latest_prices.get(int(cr["asset_id"])) if cr.get("asset_id") is not None else None
-            value = _canonical_position_value(cr, rates, base_currency, latest_prices)
+        # Live view: the price job's quote when it's at least as recent as the
+        # holding's statement (and within 2x of it); otherwise the statement
+        # price, with the reason (D-21, #124; every holding since #144).
+        priced = price_position(cr, latest_prices if price_overlay else None, rates, base_currency)
+        price_row, price_fallback_reason, value = priced.quote, priced.fallback_reason, priced.value
         latest_price = float(cr.get("snapshot_market_price")) if cr.get("snapshot_market_price") is not None else None
         latest_trade_date = cr.get("report_date")
         price_source = "ibkr_flex" if has_nav_snapshot else "canonical_snapshot"
@@ -1545,6 +1613,7 @@ def _top_holdings(
             "latest_trade_date": latest_trade_date,
             "price_source": price_source,
             "price_fallback_reason": price_fallback_reason,
+            "valued_at_cost": priced.valued_at_cost,
             "exchange_code": cr.get("exchange_code"),
             "geo": _infer_country(
                 cr.get("symbol"),
@@ -1939,32 +2008,15 @@ def _cash_trend(
     return points
 
 
-@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
-    rows = _cash_balance_rows(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    if not rows:
-        return []
-    currencies = {_canonical_base_currency(row, base_currency) for row in rows}
-    rates = get_rates(anchor_ts, base_currency, currencies)
+    """Net-worth cash by the currency it is held in (_cash_positions)."""
     buckets: Dict[str, float] = {}
-    for row in rows:
-        balance_type = str(row.get("balance_type") or "").lower()
-        if balance_type not in {"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"}:
-            continue
-        currency = str(row.get("currency") or base_currency).upper()
-        value = _canonical_cash_value(row, rates, base_currency)
-        buckets[currency] = buckets.get(currency, 0.0) + value
-    out = []
-    for currency, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
-        out.append({
-            "currency": currency,
-            "value": value,
-        })
-    return out
+    for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id):
+        buckets[entry["currency"]] = buckets.get(entry["currency"], 0.0) + float(entry["value"])
+    return [
+        {"currency": currency, "value": value}
+        for currency, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True)
+    ]
 
 def _display_source(value: str | None) -> str:
     if not value:
@@ -1978,59 +2030,13 @@ def _display_source(value: str | None) -> str:
     return text.lower().title()
 
 
-@valuation_cached(shared=True, date_args=("anchor_ts",))
 def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
+    """The Cash page's "where cash sits": net-worth cash plus stablecoins
+    (_cash_positions, Cash-page scope) by platform, stablecoins by chain."""
     buckets: Dict[str, float] = {}
-
-    cash_rows = _cash_balance_rows(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    cash_currencies = {_canonical_base_currency(row, base_currency) for row in cash_rows}
-    cash_rates = get_rates(anchor_ts, base_currency, cash_currencies) if cash_currencies else {}
-    for row in cash_rows:
-        balance_type = str(row.get("balance_type") or "").lower()
-        if balance_type not in {"cash", "broker_cash", "bank_cash", "credit_balance", "loan_balance", "stablecoin_cash"}:
-            continue
-        source = _display_source(row.get("platform"))
-        value = _canonical_cash_value(row, cash_rates, base_currency)
-        buckets[source] = buckets.get(source, 0.0) + value
-
-    wallet_rows = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT wallet_id, MAX(as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots
-              WHERE as_of_date <= :as_of_date
-              GROUP BY wallet_id
-            )
-            SELECT
-              i.chain AS source,
-              SUM(i.value_usd) AS value_usd
-            FROM crypto_wallet_snapshots s
-            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
-            JOIN crypto_wallets w ON w.id = s.wallet_id
-            JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
-            WHERE w.status = 'active'
-              AND """
-            + account_scope_sql("w")
-            + """
-              AND UPPER(COALESCE(i.symbol, '')) IN ('USDC', 'USDT')
-            GROUP BY i.chain
-            """
-        ),
-        {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
-    ).mappings().all()
-    if wallet_rows:
-        usd_rate = get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 0.0)
-        for row in wallet_rows:
-            if row["value_usd"] is None:
-                continue
-            source = _display_source(row["source"])
-            value = float(row["value_usd"]) * usd_rate
-            buckets[source] = buckets.get(source, 0.0) + value
+    for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id, scope=CASH_SCOPE_CASH_PAGE):
+        source = _display_source(entry.get("platform"))
+        buckets[source] = buckets.get(source, 0.0) + float(entry["value"])
 
     total = sum(buckets.values())
     items = []
@@ -2222,41 +2228,16 @@ def _platform_allocation(
     nav_live_rows, nav_live_prices, nav_live_currencies = _nav_live_context(
         db, anchor_ts, current_user_id, base_currency, enabled=price_overlay
     )
-    canonical_cash_rows = _cash_balance_rows(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-    )
-    nav_account_ids = {
-        int(row["legacy_account_id"])
-        for row in canonical_nav_rows
-        if row.get("legacy_account_id") is not None
-    }
-    wallet_total = db.execute(
-        text(
-            """
-            WITH latest AS (
-              SELECT s.wallet_id, MAX(s.as_of_date) AS as_of_date
-              FROM crypto_wallet_snapshots s
-              JOIN crypto_wallets w ON w.id = s.wallet_id
-              WHERE s.as_of_date <= :as_of_date
-                AND w.status = 'active'
-                AND """
-            + account_scope_sql("w")
-            + """
-              GROUP BY s.wallet_id
-            )
-            SELECT SUM(s.total_usd) AS total_usd
-            FROM crypto_wallet_snapshots s
-            JOIN latest l ON l.wallet_id = s.wallet_id AND l.as_of_date = s.as_of_date
-            """
-        ),
-        {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
-    ).mappings().one()
-    wallet_usd = float(wallet_total["total_usd"]) if wallet_total and wallet_total["total_usd"] else 0.0
+    # Cash of accounts not valued by a NAV (a NAV account's cash is in its NAV
+    # total below): the same entries net worth adds up (#144).
+    cash_entries = [
+        entry
+        for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id)
+        if entry["kind"] == CASH_KIND_BALANCE
+    ]
+    wallet_usd = float(_wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)["total_usd"] or 0.0)
     currencies = {_canonical_base_currency(row, base_currency) for row in canonical_pos_rows}
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
-    currencies.update(_canonical_base_currency(row, base_currency) for row in canonical_cash_rows)
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     currencies.update(nav_live_currencies)
     if wallet_usd:
@@ -2278,12 +2259,9 @@ def _platform_allocation(
         value += nav_deltas.get(int(row["legacy_account_id"]), 0.0) if row.get("legacy_account_id") is not None else 0.0
         key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("country"))
         buckets[key] = buckets.get(key, 0.0) + value
-    for row in canonical_cash_rows:
-        if row.get("account_id") is not None and int(row["account_id"]) in nav_account_ids:
-            continue
-        value = _canonical_cash_value(row, rates, base_currency)
-        key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("platform_country"))
-        buckets[key] = buckets.get(key, 0.0) + value
+    for entry in cash_entries:
+        key = (entry.get("platform") or "UNKNOWN", entry.get("platform_type"), entry.get("country"))
+        buckets[key] = buckets.get(key, 0.0) + float(entry["value"])
     if wallet_usd:
         buckets[("CRYPTO", "WALLET_PROVIDER", None)] = buckets.get(("CRYPTO", "WALLET_PROVIDER", None), 0.0) + (
             wallet_usd * rates.get("USD", 0.0)
@@ -3054,7 +3032,9 @@ def geography_exposure(
     month_start = _parse_month(month)
     anchor = _completed_snapshot_anchor_ts(month_start)
     as_of = _effective_as_of(db, anchor, current_user.id)
-    payload = _geography_exposure(db, anchor, base_currency, current_user.id, price_overlay=True)
+    # A completed month-end: valued like that month's net worth, at its
+    # statements' prices, not today's quotes (#144).
+    payload = _geography_exposure(db, anchor, base_currency, current_user.id, price_overlay=False)
     return GeographyExposureOut(
         as_of=as_of.isoformat() if as_of else None,
         base_currency=base_currency,
