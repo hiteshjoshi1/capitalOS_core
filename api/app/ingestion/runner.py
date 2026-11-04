@@ -5,7 +5,8 @@ import logging
 import os
 import shutil
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Dict, List
 
 from sqlalchemy import text
@@ -29,7 +30,9 @@ from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_x
 from app.models.import_job import ImportJob
 from app.wealth_rollup_dirty import mark_rollups_dirty
 from app.portfolio.upload_canonical import (
+    CanonicalUploadFailure,
     is_canonical_upload_platform,
+    record_upload_canonical_failure,
     parser_canonical_target,
     run_upload_canonical_adapter,
     run_upload_balance_canonical_adapter,
@@ -107,17 +110,105 @@ def _sha256_file(file_path: str) -> str:
     return h.hexdigest()
 
 
-def _fingerprint(account_id: int, tx: Dict[str, Any]) -> str:
-    parts = [
-        str(account_id),
-        tx["ts"].isoformat(),
+# Upload dedup (#157). A transaction's natural key is what the bank file says
+# about it: account, time, type, amount, currency, counterparty. Category is not
+# part of it (the classifier can change it after import). Two genuinely identical
+# rows (two same-day coffees) share a key, so dedup counts occurrences: a file
+# with the key n times, against m rows already stored, inserts n - m.
+_UPLOAD_LOCK_NAMESPACE = 157
+
+
+def _amount_text(amount: Any) -> str:
+    try:
+        normalized = Decimal(str(amount)).normalize()
+    except (InvalidOperation, ValueError):
+        return str(amount)
+    return format(normalized, "f")
+
+
+def _natural_key(tx: Dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        tx["ts"],
         tx["type"],
-        f"{tx['amount']}",
+        tx["amount"],
         tx["currency"],
         tx.get("merchant_counterparty", "") or "",
-        tx.get("category", "") or "",
+    )
+
+
+def _source_fingerprint(account_id: int, tx: Dict[str, Any], occurrence: int) -> str:
+    """Identity of the ``occurrence``-th row (1-based) with this natural key in the account."""
+    ts = tx["ts"]
+    parts = [
+        str(account_id),
+        ts.isoformat() if hasattr(ts, "isoformat") else str(ts),
+        str(tx["type"]),
+        _amount_text(tx["amount"]),
+        str(tx["currency"]),
+        tx.get("merchant_counterparty", "") or "",
+        str(occurrence),
     ]
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+
+
+def _lock_account_for_upload(db: Session, account_id: int) -> None:
+    """Serialise uploads into one account until this transaction ends (#157).
+
+    Postgres: a transaction-level advisory lock, released by the commit that also
+    commits the inserted rows, so a concurrent upload counts them before inserting.
+    SQLite (tests) has a single writer already; no-op.
+    """
+    dialect = getattr(getattr(db, "bind", None), "dialect", None)
+    if getattr(dialect, "name", "") != "postgresql":
+        return
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(CAST(:namespace AS integer), CAST(:account_key AS integer))"),
+        {"namespace": _UPLOAD_LOCK_NAMESPACE, "account_key": int(account_id) & 0x7FFFFFFF},
+    )
+
+
+def _stored_count_for_key(db: Session, account_id: int, tx: Dict[str, Any]) -> int:
+    row = db.execute(
+        text(
+            """
+            SELECT COUNT(*) FROM transactions
+            WHERE account_id = :account_id
+              AND ts = :ts
+              AND type = :type
+              AND amount = :amount
+              AND currency = :currency
+              AND COALESCE(merchant_counterparty, '') = :merchant
+            """
+        ),
+        {
+            "account_id": account_id,
+            "ts": tx["ts"],
+            "type": tx["type"],
+            "amount": tx["amount"],
+            "currency": tx["currency"],
+            "merchant": tx.get("merchant_counterparty", "") or "",
+        },
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _free_source_fingerprint(db: Session, account_id: int, tx: Dict[str, Any], occurrence: int) -> str:
+    """The fingerprint for this occurrence, or the next unused one.
+
+    Normally occurrence k of a key gets index k. If a stored row already holds that
+    fingerprint (e.g. an earlier row of the key was deleted, so the count dropped),
+    the next free index is used, so the unique index never rejects an upload.
+    """
+    index = max(occurrence, 1)
+    while True:
+        fp = _source_fingerprint(account_id, tx, index)
+        taken = db.execute(
+            text("SELECT 1 FROM transactions WHERE account_id = :account_id AND source_fingerprint = :fp LIMIT 1"),
+            {"account_id": account_id, "fp": fp},
+        ).fetchone()
+        if not taken:
+            return fp
+        index += 1
 
 
 def _compose_notes(fp: str, parser_notes: Any) -> str:
@@ -331,19 +422,23 @@ def create_import_job(db: Session, account_id: int, platform: str, original_file
     return job
 
 
-def run_ingestion(db: Session, job_id: int, data_dir: str) -> dict:
+def run_ingestion(db: Session, job_id: int, data_dir: str, as_of: date | None = None) -> dict:
+    """Parse and import an uploaded file. ``as_of`` is the user's date for a
+    file that states none of its own (#141)."""
     context = job_context() if get_job_id() is None else None
     if context is not None:
         context.__enter__()
     started = time.perf_counter()
     try:
-        return _run_ingestion_with_context(db, job_id, data_dir, started)
+        return _run_ingestion_with_context(db, job_id, data_dir, started, as_of)
     finally:
         if context is not None:
             context.__exit__(None, None, None)
 
 
-def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started: float) -> dict:
+def _run_ingestion_with_context(
+    db: Session, job_id: int, data_dir: str, started: float, as_of: date | None = None
+) -> dict:
     job = db.query(ImportJob).filter(ImportJob.id == job_id).one()
     report_path = os.path.join(data_dir, "reports", f"{job.id}.json")
     logger.info(
@@ -457,8 +552,24 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
         duplicates = 0
         earliest_inserted_ts: datetime | None = None
 
+        account_id = int(job.account_id)
+        _lock_account_for_upload(db, account_id)
+        stored_by_key: dict[tuple[Any, ...], int] = {}
+        seen_by_key: dict[tuple[Any, ...], int] = {}
+
         for tx in parsed:
-            fp = _fingerprint(job.account_id, tx)
+            key = _natural_key(tx)
+            if key not in stored_by_key:
+                stored_by_key[key] = _stored_count_for_key(db, account_id, tx)
+            occurrence = seen_by_key.get(key, 0) + 1
+            seen_by_key[key] = occurrence
+            if occurrence <= stored_by_key[key]:
+                # This occurrence of the key is already stored (earlier upload,
+                # overlapping file, or a row whose category changed since).
+                duplicates += 1
+                continue
+
+            fp = _free_source_fingerprint(db, account_id, tx, occurrence)
             tx_asset_id: int | None = None
             tx_quantity: float | None = None
             if tx.get("type") in {"BUY", "SELL"} and tx.get("symbol") and tx.get("currency"):
@@ -479,34 +590,6 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                     except (TypeError, ValueError):
                         tx_quantity = None
 
-            exists = db.execute(
-                text(
-                    """
-                    SELECT 1 FROM transactions
-                    WHERE account_id = :account_id
-                      AND ts = :ts
-                      AND type = :type
-                      AND amount = :amount
-                      AND currency = :currency
-                      AND COALESCE(merchant_counterparty, '') = :merchant
-                      AND COALESCE(category, '') = :category
-                    LIMIT 1
-                    """
-                ),
-                {
-                    "account_id": job.account_id,
-                    "ts": tx["ts"],
-                    "type": tx["type"],
-                    "amount": tx["amount"],
-                    "currency": tx["currency"],
-                    "merchant": tx.get("merchant_counterparty", "") or "",
-                    "category": tx.get("category", "") or "",
-                },
-            ).fetchone()
-            if exists:
-                duplicates += 1
-                continue
-
             db.execute(
                 text(
                     """
@@ -521,7 +604,8 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                       category,
                       merchant_counterparty,
                       source,
-                      notes
+                      notes,
+                      source_fingerprint
                     )
                     VALUES (
                       :ts,
@@ -534,7 +618,8 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                       :category,
                       :merchant,
                       :source,
-                      :notes
+                      :notes,
+                      :source_fingerprint
                     )
                     """
                 ),
@@ -550,6 +635,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                     "merchant": tx.get("merchant_counterparty"),
                     "source": job.platform,
                     "notes": _compose_notes(fp, tx.get("notes")),
+                    "source_fingerprint": fp,
                 },
             )
             inserted += 1
@@ -577,6 +663,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
 
         # Guard: unregistered parser that emits positions must fail closed.
         if canonical_target is None and positions:
+            db.rollback()  # drop this upload's transactions (#136)
             job.status = "FAILED"
             job.error_message = (
                 f"canonical_adapter_missing: parser '{parser_key}' emits "
@@ -609,6 +696,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                 stored_path=job.stored_path,
                 file_sha256=job.file_sha256,
                 is_ibkr_flex_cutover_active=flex_cutover,
+                user_as_of=as_of,
             )
             canonical_positions_written = (canonical_result or {}).get("counts", {}).get("positions", 0)
 
@@ -618,6 +706,7 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
                 account_id=int(job.account_id),
                 import_job_id=int(job.id),
                 parse_result=result,
+                user_as_of=as_of,
             )
             canonical_balances_written = (canonical_result or {}).get("counts", {}).get("balances", 0)
 
@@ -651,6 +740,19 @@ def _run_ingestion_with_context(db: Session, job_id: int, data_dir: str, started
         )
         return write_and_return(report)
     except Exception as exc:  # noqa: BLE001
+        # Roll back first (#136): transactions inserted and snapshots deleted by
+        # this upload must not be committed with the FAILED status below.
+        db.rollback()
+        failure = getattr(exc, "canonical_failure", None)
+        if isinstance(failure, CanonicalUploadFailure):
+            try:
+                record_upload_canonical_failure(db, failure, exc)
+            except Exception:  # noqa: BLE001
+                db.rollback()
+                logger.exception(
+                    "upload_canonical_failure_not_recorded",
+                    extra={"event": "upload_canonical_failure_not_recorded", "job_db_id": job_id},
+                )
         job.status = "FAILED"
         job.error_message = str(exc)
         return write_and_return(_report(job, status="FAILED", error=str(exc), error_class=exc.__class__.__name__))

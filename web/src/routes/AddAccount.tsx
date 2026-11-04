@@ -169,13 +169,19 @@ export default function AddAccount() {
       return;
     }
 
-    await api.createPlatform({
-      code,
-      name,
-      platform_type,
-      country,
-      website: platformForm.website.trim() || null,
-    });
+    try {
+      await api.createPlatform({
+        code,
+        name,
+        platform_type,
+        country,
+        website: platformForm.website.trim() || null,
+      });
+    } catch (error) {
+      // e.g. 403 for a non-admin: platforms are shared data (#152).
+      setErr(error instanceof Error ? error.message : "Could not add the platform.");
+      return;
+    }
     await refreshOptions();
     setPlatformForm({
       code: "",

@@ -15,6 +15,8 @@ os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("IBKR_FLEX_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
 os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
+# The bypass is honoured only with this explicit test flag (#153).
+os.environ["AUTH_BYPASS_ALLOW"] = "test"
 os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
 os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "1"
 # Forced (not setdefault): a deployment's .env, which compose passes to the test
@@ -27,6 +29,7 @@ os.environ["INFERENCE_LLM_API_KEY"] = ""
 from app.db.session import get_db  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models.base import Base  # noqa: E402
+from app.services.login_throttle import login_throttle  # noqa: E402
 from app.valuation_cache import clear_shared_cache  # noqa: E402
 from tests.fx_test_helpers import synthetic_frankfurter  # noqa: E402
 
@@ -611,9 +614,14 @@ def setup_db():
               merchant_counterparty TEXT,
               platform_reference TEXT,
               notes TEXT,
-              source TEXT
+              source TEXT,
+              source_fingerprint TEXT
             )
             """
+        )
+        conn.exec_driver_sql(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_transactions_account_source_fingerprint "
+            "ON transactions(account_id, source_fingerprint) WHERE source_fingerprint IS NOT NULL"
         )
         conn.exec_driver_sql(
             """
@@ -791,7 +799,8 @@ def setup_db():
               merchant_counterparty TEXT,
               platform_reference TEXT,
               notes TEXT,
-              source TEXT
+              source TEXT,
+              source_fingerprint TEXT
             )
             """
         )
@@ -971,6 +980,8 @@ def synthetic_fx_providers(monkeypatch):
 def clear_db():
     # Each test starts with an empty cross-request valuation cache (#147).
     clear_shared_cache()
+    # ... and no failed sign-ins counted against it (#152).
+    login_throttle.reset()
     with engine.begin() as conn:
         conn.exec_driver_sql("DELETE FROM fx_rates")
         for table_name in (

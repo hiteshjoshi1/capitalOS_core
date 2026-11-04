@@ -4,6 +4,7 @@ import csv
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 
+from app.ingestion.as_of import parse_date_text
 from app.ingestion.parsers import ParseResult
 
 def _parse_datetime(value: str) -> datetime:
@@ -175,6 +176,7 @@ def parse_ibkr_activity_csv(file_path: str, delimiter: str) -> ParseResult:
     transactions: List[Dict[str, Any]] = []
     positions: List[Dict[str, Any]] = []
     section_counts: Dict[str, int] = {}
+    period_end = None
 
     with open(file_path, "r", encoding="utf-8-sig", newline="") as f:
         reader = csv.reader(f, delimiter=delimiter)
@@ -194,7 +196,11 @@ def parse_ibkr_activity_csv(file_path: str, delimiter: str) -> ParseResult:
             if not header:
                 continue
             data = {header[i]: row[i + 2] if i + 2 < len(row) else "" for i in range(len(header))}
-            if section == "Cash Transactions":
+            if section == "Statement" and len(row) >= 4 and row[2].strip().lower() == "period":
+                # "October 1, 2026 - October 31, 2026" (or a single day): the
+                # positions are as of the period's last day (#141).
+                period_end = parse_date_text(row[3].split(" - ")[-1])
+            elif section == "Cash Transactions":
                 transactions.append(_normalize_cash_transaction(data))
             elif section == "Trades":
                 transactions.append(_normalize_trade(data))
@@ -204,8 +210,12 @@ def parse_ibkr_activity_csv(file_path: str, delimiter: str) -> ParseResult:
                 cash = _normalize_cash_balance(data)
                 if cash:
                     positions.append(cash)
+    parser_meta: Dict[str, Any] = {}
+    if period_end is not None:
+        parser_meta["statement_period_end"] = period_end.isoformat()
     return ParseResult(
         transactions=transactions,
         positions=positions,
         section_counts=section_counts,
+        parser_meta=parser_meta,
     )

@@ -31,6 +31,10 @@ export default defineConfig(({ mode }) => {
         "/api": {
           target: apiTarget,
           changeOrigin: true,
+          // X-Forwarded-For carries the browser's address, so the API's login throttle
+          // counts per client rather than per proxy (#152). The API honours it only from a
+          // trusted local peer (AUTH_TRUSTED_PROXIES).
+          xfwd: true,
           ws: true,
           rewrite: (path) => path.replace(/^\/api/, ""),
         },

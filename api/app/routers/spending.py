@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
-from app.fx import get_rates
+from app.fx import FxRates, fx_status, get_rates, get_rates_by_date, rate_date
 from app.routers.dashboard import _anchor_ts, _effective_as_of, _networth_components
 from app.schemas.spending import (
     CategoryAmount,
@@ -285,23 +285,19 @@ def _normalize_text(value: str | None) -> str:
     return " ".join(str(value or "").strip().lower().split())
 
 
-def _build_month_rate_map(rows, base_currency: str) -> dict[str, dict[str, float]]:
-    currencies_by_month: dict[str, set[str]] = defaultdict(set)
-    for row in rows:
-        month_key = _month_key(row["ts"])
-        currency = (row["currency"] or base_currency).upper()
-        currencies_by_month[month_key].add(currency)
-
-    return {
-        month_key: get_rates(_parse_month(month_key), base_currency, currencies)
-        for month_key, currencies in currencies_by_month.items()
-    }
+def _build_row_rate_map(rows, base_currency: str) -> dict[date, FxRates]:
+    """Rates for each row's own transaction date (D-30, #170): one store read for
+    the whole range. A currency with no rate is left out (never 1.0), so its rows
+    convert to 0 and the response's ``fx_status`` says so."""
+    if not rows:
+        return {}
+    currencies = {(row["currency"] or base_currency).upper() for row in rows}
+    return get_rates_by_date([_row_ts(row["ts"]) for row in rows], base_currency, currencies)
 
 
-def _row_base_amount(row, base_currency: str, month_rates: dict[str, dict[str, float]]) -> float:
-    month_key = _month_key(row["ts"])
+def _row_base_amount(row, base_currency: str, rates_by_date: dict[date, FxRates]) -> float:
     currency = (row["currency"] or base_currency).upper()
-    rates = month_rates.get(month_key, {})
+    rates = rates_by_date.get(rate_date(_row_ts(row["ts"])), {})
     return float(row["amount"]) * rates.get(currency, 0.0)
 
 
@@ -400,7 +396,7 @@ def _category_delta_items(current: dict[str, float], prior: dict[str, float], *,
 
 
 def _month_metrics(rows, base_currency: str) -> dict[str, dict[str, float | None]]:
-    month_rates = _build_month_rate_map(rows, base_currency)
+    month_rates = _build_row_rate_map(rows, base_currency)
     metrics: dict[str, dict[str, float | None]] = defaultdict(
         lambda: {
             "inflows": 0.0,
@@ -456,10 +452,10 @@ def _analytics_for_month(
     expense_total: float,
     net: float,
 ) -> CashFlowAnalyticsOut:
-    current_month_rates = _build_month_rate_map(current_rows, base_currency)
+    current_month_rates = _build_row_rate_map(current_rows, base_currency)
     prior_month = _month_key(_add_months(_parse_month(month), -1))
     prior_rows = [row for row in lookback_rows if _month_key(row["ts"]) == prior_month]
-    prior_month_rates = _build_month_rate_map(prior_rows, base_currency)
+    prior_month_rates = _build_row_rate_map(prior_rows, base_currency)
     merchant_months = _merchant_month_sets(lookback_rows)
 
     outflow_categories: dict[str, float] = defaultdict(float)
@@ -566,7 +562,7 @@ def _analytics_for_month(
         ]
     else:
         reconciliation_rows = current_rows
-    reconciliation_rates = _build_month_rate_map(reconciliation_rows, base_currency)
+    reconciliation_rates = _build_row_rate_map(reconciliation_rows, base_currency)
     operating_inflows_for_bridge = 0.0
     operating_outflows_for_bridge = 0.0
     for row in reconciliation_rows:
@@ -793,6 +789,7 @@ def _spend_by_account(
     spend_q = text("""
         SELECT
           t.account_id,
+          t.ts,
           t.amount,
           t.currency
         FROM transactions t
@@ -808,12 +805,10 @@ def _spend_by_account(
         spend_q,
         {"start": start, "end": end, "current_user_id": current_user_id},
     ).mappings().all()
-    currencies = {r["currency"] for r in spend_rows if r["currency"]}
-    rates = get_rates(start, base_currency, currencies)
+    rates_by_date = _build_row_rate_map(spend_rows, base_currency)
     spend: dict[int, float] = {}
     for row in spend_rows:
-        cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * rates.get(cur, 0.0)
+        converted = _row_base_amount(row, base_currency, rates_by_date)
         account_id = int(row["account_id"])
         spend[account_id] = spend.get(account_id, 0.0) + (-converted)
     return spend
@@ -923,15 +918,13 @@ def _credit_card_recurring_payments(
     if account_id is not None:
         params["account_id"] = account_id
     recurring_rows = db.execute(recurring_q, params).mappings().all()
-    recurring_currencies = {r["currency"] for r in recurring_rows if r["currency"]}
-    recurring_rates = get_rates(_parse_month(month), base_currency, recurring_currencies)
+    recurring_rates = _build_row_rate_map(recurring_rows, base_currency)
 
     recurring_index: dict[tuple[int, str], dict] = {}
     for row in recurring_rows:
         merchant = str(row["merchant_counterparty"]).strip()
         key = (int(row["account_id"]), merchant)
-        cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * recurring_rates.get(cur, 0.0)
+        converted = _row_base_amount(row, base_currency, recurring_rates)
         record = recurring_index.setdefault(
             key,
             {
@@ -1037,16 +1030,14 @@ def spending_summary(
     start = _parse_month(month)
     end = _month_end(start)
     rows = _cash_flow_rows(db, start, end, current_user.id)
-    currencies = {r["currency"] for r in rows if r["currency"]}
-    rates = get_rates(start, base_currency, currencies)
+    rates_by_date = _build_row_rate_map(rows, base_currency)
 
     income_total = 0.0
     expense_total = 0.0
     income_categories: dict[str, float] = {}
     expense_categories: dict[str, float] = {}
     for r in rows:
-        cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates.get(cur, 0.0)
+        amount = _row_base_amount(r, base_currency, rates_by_date)
         category = r["resolved_category"] or "Uncategorized"
         bucket = _cash_flow_bucket(r)
         if bucket == "income":
@@ -1074,6 +1065,7 @@ def spending_summary(
         savings_rate=savings_rate,
         income_categories=income_categories_list,
         expense_categories=expense_categories_list,
+        **fx_status(),
     )
 
 
@@ -1089,7 +1081,7 @@ def cash_flow_detail(
     lookback_start = _add_months(start, -5)
     lookback_rows = _cash_flow_rows(db, lookback_start, end, current_user.id)
     rows = [row for row in lookback_rows if _month_key(row["ts"]) == month]
-    rates = _build_month_rate_map(rows, base_currency).get(month, {})
+    rates_by_date = _build_row_rate_map(rows, base_currency)
 
     income_total = 0.0
     expense_total = 0.0
@@ -1098,7 +1090,7 @@ def cash_flow_detail(
 
     for row in rows:
         currency = (row["currency"] or base_currency).upper()
-        base_amount = float(row["amount"]) * rates.get(currency, 0.0)
+        base_amount = _row_base_amount(row, base_currency, rates_by_date)
         item = CashFlowTransactionItem(
             transaction_id=int(row["transaction_id"]),
             ts=_tx_iso(row["ts"]),
@@ -1166,6 +1158,7 @@ def cash_flow_detail(
             included_types=list(EXPENSE_TYPES),
             transactions=expense_transactions,
         ),
+        **fx_status(),
     )
 
 
@@ -1189,6 +1182,7 @@ def credit_card_summary(
         base_currency=base_currency,
         total_spend=total_spend,
         cards=items,
+        **fx_status(),
     )
 
 
@@ -1244,13 +1238,11 @@ def credit_card_transactions(
         tx_q,
         {"start": start, "end": end, "current_user_id": current_user.id},
     ).mappings().all()
-    tx_currencies = {r["currency"] for r in tx_rows if r["currency"]}
-    tx_rates = get_rates(start, base_currency, tx_currencies)
+    tx_rates = _build_row_rate_map(tx_rows, base_currency)
 
     transactions: list[CreditCardTransactionItem] = []
     for row in tx_rows:
-        cur = (row["currency"] or base_currency).upper()
-        converted = float(row["amount"]) * tx_rates.get(cur, 0.0)
+        converted = _row_base_amount(row, base_currency, tx_rates)
         description = row["merchant_counterparty"] or row["resolved_category"] or row["category"] or "Transaction"
         transactions.append(
             CreditCardTransactionItem(
@@ -1287,6 +1279,7 @@ def credit_card_transactions(
         transactions=transactions,
         top_purchases=top_purchases,
         recurring_payments=recurring_payments,
+        **fx_status(),
     )
 
 
@@ -1314,7 +1307,7 @@ def credit_card_analytics(
         raise HTTPException(status_code=404, detail="Credit card not found")
 
     rows = _credit_card_analytics_rows(db, fetch_start, end, current_user.id)
-    month_rates = _build_month_rate_map(rows, base_currency)
+    month_rates = _build_row_rate_map(rows, base_currency)
 
     def base_amount(row) -> float:
         return _row_base_amount(row, base_currency, month_rates)
@@ -1430,4 +1423,5 @@ def credit_card_analytics(
         trend=trend,
         transactions=transactions,
         recurring_payments=recurring_payments,
+        **fx_status(),
     )

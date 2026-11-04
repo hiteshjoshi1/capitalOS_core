@@ -14,8 +14,9 @@ report speaking for a date decides it, as the import itself would have.
 What it never does: create or move authority windows, touch NAV, FX, report metrics,
 reconciliations, the cash ledger, trades or corporate actions, or overwrite a date
 that already has rows. Restored rows keep the lineage of the report they come from
-(its import_run_id and raw_document_id). The only other write is upgrading a
-'nav_only' completeness row to 'complete' once its holdings are back.
+(its import_run_id and raw_document_id). The only other writes are upgrading a
+'nav_only' completeness row to 'complete' once its holdings are back, and marking
+History dirty from the earliest restored date (#169), in the same transaction.
 Dry run by default; idempotent (a second run finds nothing to restore).
 """
 from __future__ import annotations
@@ -45,6 +46,7 @@ from app.portfolio.ibkr_flex import (
     _now,
     parse_flex_statement,
 )
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 
 @dataclass
@@ -223,6 +225,13 @@ def rebuild_account(
     claimed_positions: set[date] = set()
     claimed_cash: set[date] = set()
     restored: dict[date, RestoredDate] = {}
+    # Earliest restored date per legacy account, for the History dirty mark (#169).
+    earliest_by_legacy: dict[int | None, date] = {}
+
+    def _note_restored(legacy_id: Any, report_date: date) -> None:
+        key = int(legacy_id) if legacy_id is not None else None
+        if key not in earliest_by_legacy or report_date < earliest_by_legacy[key]:
+            earliest_by_legacy[key] = report_date
 
     for document in _completed_documents(db, broker_account_id):
         path = _resolve_path(str(document["storage_path"]), raw_dir)
@@ -270,6 +279,7 @@ def rebuild_account(
                 continue
             entry = _entry(report_date)
             entry.positions = len(rows)
+            _note_restored(legacy_account_id, report_date)
             if apply:
                 status = _restored_authority_status(db, broker_account_id, report_date)
                 for position in rows:
@@ -289,6 +299,7 @@ def rebuild_account(
                 continue
             entry = _entry(report_date)
             entry.cash_balances = len(cash_rows)
+            _note_restored(legacy_account_id, report_date)
             if apply:
                 status = _restored_authority_status(db, broker_account_id, report_date)
                 for cash in cash_rows:
@@ -305,6 +316,10 @@ def rebuild_account(
     if apply:
         for report_date, entry in restored.items():
             entry.completeness_upgraded = _upgrade_nav_only_completeness(db, broker_account_id, report_date)
+        # Positions and cash came back for past dates: History rows anchored on or
+        # after the earliest are recomputed, as after an import (#138, #169).
+        for legacy_id, earliest in sorted(earliest_by_legacy.items(), key=lambda item: item[1]):
+            mark_rollups_dirty(db, earliest, account_id=legacy_id, reason="ibkr_rebuild")
     result.dates = sorted(restored.values(), key=lambda item: item.report_date)
     return result
 

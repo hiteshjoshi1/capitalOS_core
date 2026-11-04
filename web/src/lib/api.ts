@@ -478,7 +478,7 @@ export type StockHoldingsSummary = FxStatus & {
   }>;
 };
 
-export type SpendingSummary = {
+export type SpendingSummary = FxStatus & {
   month: string;
   base_currency: string;
   income_total: number;
@@ -586,7 +586,7 @@ export type CashFlowAnalytics = {
   answers: CashFlowDiagnosticAnswer[];
 };
 
-export type CashFlowDetail = {
+export type CashFlowDetail = FxStatus & {
   month: string;
   base_currency: string;
   income_total: number;
@@ -599,7 +599,7 @@ export type CashFlowDetail = {
   expenses: CashFlowDetailSection;
 };
 
-export type CreditCardSummary = {
+export type CreditCardSummary = FxStatus & {
   month: string;
   base_currency: string;
   total_spend: number;
@@ -646,7 +646,7 @@ export type CreditCardRecurringPayment = {
   current_month_amount: number;
 };
 
-export type CreditCardDetail = {
+export type CreditCardDetail = FxStatus & {
   month: string;
   base_currency: string;
   total_spend: number;
@@ -681,7 +681,7 @@ export type CreditCardAnalyticsCategory = {
   percent: number;
 };
 
-export type CreditCardAnalytics = {
+export type CreditCardAnalytics = FxStatus & {
   month: string;
   base_currency: string;
   months: number;
@@ -1453,9 +1453,11 @@ export const api = {
         accountId != null ? `&account_id=${encodeURIComponent(String(accountId))}` : ""
       }`,
     ),
-  ingestUpload: async (accountId: number, file: File) => {
+  // asOf (YYYY-MM-DD): the statement's date, used when the file states none of its own (#141).
+  ingestUpload: async (accountId: number, file: File, asOf?: string) => {
     const form = new FormData();
     form.append("file", file);
+    if (asOf) form.append("as_of", asOf);
     const headers = buildHeaders(undefined, { includeJsonContentType: false });
     let res: Response;
     try {
@@ -1499,10 +1501,10 @@ export const api = {
   },
   ingestJobs: () => req<ImportJobListItem[]>("/ingest/jobs"),
   ingestJob: (jobId: number) => req<ImportJobDetail>(`/ingest/jobs/${jobId}`),
-  registerIngestSignature: (jobId: number, parserKey: string) =>
+  registerIngestSignature: (jobId: number, parserKey: string, asOf?: string) =>
     req<Record<string, unknown>>(`/ingest/jobs/${jobId}/register`, {
       method: "POST",
-      body: JSON.stringify({ parser_key: parserKey }),
+      body: JSON.stringify(asOf ? { parser_key: parserKey, as_of: asOf } : { parser_key: parserKey }),
     }),
   cryptoWallets: () => req<CryptoWallet[]>("/crypto/wallets"),
   cryptoWalletInit: (payload: { chain_type: string; chain: string; address: string; label?: string }) =>

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import Ingest from "../routes/Ingest";
-import { hasOrderedHeaderSubset, resolvePlatformParser } from "../routes/ingestUtils";
+import { dateFromFilename, describeAsOf, hasOrderedHeaderSubset, resolvePlatformParser, todayLocalYYYYMMDD } from "../routes/ingestUtils";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
 
@@ -64,9 +64,95 @@ describe("Ingest helpers", () => {
   });
 });
 
+describe("Statement date helpers (#141)", () => {
+  it("formats today in local time, not UTC", () => {
+    expect(todayLocalYYYYMMDD(new Date(2026, 0, 5, 23, 30))).toBe("2026-01-05");
+    expect(todayLocalYYYYMMDD(new Date(2026, 10, 3, 0, 15))).toBe("2026-11-03");
+  });
+
+  it("describes where the snapshot date came from", () => {
+    expect(describeAsOf("2026-10-01", "file")).toBe("Dated 2026-10-01 (from the file)");
+    expect(describeAsOf("2026-10-01", "user")).toMatch(/date you chose/);
+    expect(describeAsOf("2026-10-01", "fallback")).toMatch(/upload day/);
+    expect(describeAsOf("2026-10-01", undefined)).toBe("Dated 2026-10-01");
+    expect(describeAsOf(undefined, "file")).toBeNull();
+  });
+
+  it("reads a statement date from broker export file names", () => {
+    expect(dateFromFilename("2026_10_02.xls")).toBe("2026-10-02");
+    expect(dateFromFilename("holdings-2026-08-30.xlsx")).toBe("2026-08-30");
+    expect(dateFromFilename("stmt20260809.csv")).toBe("2026-08-09");
+    expect(dateFromFilename("portfolio_23_June_2026.xls")).toBe("2026-06-23");
+    expect(dateFromFilename("statement 5-Sep-2026.csv")).toBe("2026-09-05");
+    expect(dateFromFilename("2026_02_30.xls")).toBeNull(); // not a real date
+    expect(dateFromFilename("holdings.xls")).toBeNull();
+    expect(dateFromFilename("02_10_2026.xls")).toBeNull(); // ambiguous numeric order: not guessed
+    expect(dateFromFilename(undefined)).toBeNull();
+  });
+});
+
 describe("Ingest", () => {
   beforeEach(() => {
     mockApi.ingestJobs.mockResolvedValue([]);
+  });
+
+  it("sends the chosen statement date and shows where the snapshot date came from", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 2, name: "Broker", platform: "SHAREKHAN", account_type: "BROKER", currency: "INR", country: "IN" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    mockApi.ingestUpload.mockResolvedValueOnce({
+      job_id: 21,
+      status: "IMPORTED",
+      platform: "SHAREKHAN",
+      account_id: 2,
+      counts: { rows_total: 1, transactions_parsed: 0, transactions_inserted: 0, duplicates_skipped: 0, positions_parsed: 1, canonical_positions_written: 1 },
+      section_summary: [],
+      preview_transactions: [],
+      canonical_result: { report_date: "2025-06-30", as_of_date: "2025-06-30", as_of_source: "user", user_as_of: "2025-06-30" },
+    });
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    await screen.findByText("Upload Statement CSV");
+    const dateInput = screen.getByLabelText("Statement date") as HTMLInputElement;
+    expect(dateInput.value).toBe(todayLocalYYYYMMDD());
+
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "2");
+    const file = new File(["data"], "holdings.xls", { type: "application/vnd.ms-excel" });
+    await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, file);
+    await userEvent.clear(dateInput);
+    await userEvent.type(dateInput, "2025-06-30");
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
+
+    expect(mockApi.ingestUpload).toHaveBeenCalledWith(2, file, "2025-06-30");
+    expect(await screen.findByText("Dated 2025-06-30 (the date you chose; the file states none)")).toBeInTheDocument();
+  });
+
+  it("pre-fills the statement date from a dated file name", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 2, name: "Broker", platform: "SHAREKHAN", account_type: "BROKER", currency: "INR", country: "IN" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await screen.findByText("Upload Statement CSV");
+    const dateInput = screen.getByLabelText("Statement date") as HTMLInputElement;
+    const file = new File(["data"], "portfolio_23_June_2025.xls", { type: "application/vnd.ms-excel" });
+    await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, file);
+    expect(dateInput.value).toBe("2025-06-23");
   });
 
   it("uploads a file and shows report", async () => {
@@ -277,7 +363,7 @@ describe("Ingest", () => {
     const approve = await screen.findByRole("button", { name: "Approve as Sharekhan" });
     await userEvent.click(approve);
 
-    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(11, "sharekhan_holdings_xls_v1");
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(11, "sharekhan_holdings_xls_v1", todayLocalYYYYMMDD());
     expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
@@ -375,7 +461,7 @@ describe("Ingest", () => {
     const approve = await screen.findByRole("button", { name: "Approve as DBS Vickers" });
     await userEvent.click(approve);
 
-    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(12, "dbs_vickers_holdings_xls_v1");
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(12, "dbs_vickers_holdings_xls_v1", todayLocalYYYYMMDD());
     expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
@@ -424,7 +510,7 @@ describe("Ingest", () => {
     const approve = await screen.findByRole("button", { name: "Approve as Citi CC" });
     await userEvent.click(approve);
 
-    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(13, "citi_credit_card_csv_v1");
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(13, "citi_credit_card_csv_v1", todayLocalYYYYMMDD());
     expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
@@ -473,7 +559,7 @@ describe("Ingest", () => {
     const approve = await screen.findByRole("button", { name: "Approve as UOB" });
     await userEvent.click(approve);
 
-    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(14, "uob_account_xls_v1");
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(14, "uob_account_xls_v1", todayLocalYYYYMMDD());
     expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
@@ -533,7 +619,7 @@ describe("Ingest", () => {
     const approve = await screen.findByRole("button", { name: "Approve as UOB" });
     await userEvent.click(approve);
 
-    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(15, "uob_account_xls_v1");
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(15, "uob_account_xls_v1", todayLocalYYYYMMDD());
     expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 
@@ -596,7 +682,7 @@ describe("Ingest", () => {
     const approve = await screen.findByRole("button", { name: "Approve as UOB CC" });
     await userEvent.click(approve);
 
-    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(16, "uob_credit_card_xls_v1");
+    expect(mockApi.registerIngestSignature).toHaveBeenCalledWith(16, "uob_credit_card_xls_v1", todayLocalYYYYMMDD());
     expect(await screen.findByText("Completed")).toBeInTheDocument();
   });
 

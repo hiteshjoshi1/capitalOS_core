@@ -15,6 +15,7 @@ import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
+import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 
@@ -938,6 +939,7 @@ export default function CashFlowDetailRoute() {
 
       {state === "ready" && detail ? (
         <div className="wealthOverviewLayout">
+          <FxNote sources={[detail]} />
           {workspaceTab === "overview" ? <OverviewTab detail={detail} formatMoney={formatMoney} /> : null}
           {workspaceTab === "income" ? (
             <IncomeTab

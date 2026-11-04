@@ -91,9 +91,23 @@ def lookup_parser_key(
     return _infer_parser_key(signature_debug, platform_hint)
 
 
-def register_signature(db: Session, signature: str, parser_key: str, version: int = 1) -> ParserRegistry:
+def register_signature(
+    db: Session,
+    signature: str,
+    parser_key: str,
+    version: int = 1,
+    *,
+    replace: bool = False,
+) -> ParserRegistry:
+    """Map a file signature to a parser. An existing mapping is kept unless
+    ``replace`` is set, which corrects it to ``parser_key`` (#153)."""
     existing = db.query(ParserRegistry).filter(ParserRegistry.format_signature == signature).one_or_none()
     if existing:
+        if replace and (existing.parser_key != parser_key or existing.version != version):
+            existing.parser_key = parser_key
+            existing.version = version
+            db.commit()
+            db.refresh(existing)
         return existing
     row = ParserRegistry(format_signature=signature, parser_key=parser_key, version=version)
     db.add(row)

@@ -163,16 +163,24 @@ def test_ledger_replaces_transactions_rows_for_the_same_account(client, db_engin
     assert by_bucket == {"2026-09": 50.0, "2026-10": 587.99748}
 
 
-def test_identical_cash_lines_in_one_report_do_not_fail_the_import(db_engine, tmp_path, monkeypatch):
+def test_identical_cash_lines_in_one_report_are_both_kept(db_engine, tmp_path, monkeypatch):
+    # Two id-less lines with the same values are two lines (#157): both are kept,
+    # and importing the same report again (or an overlapping one) doesn't add more.
     _seed_ibkr_account(db_engine)
     duplicate = (
         '<StatementOfFundsLine currency="SGD" date="20261022" activityCode="ADJ" '
         'activityDescription="FX Translations P&amp;L" amount="2.0" transactionID="" />'
     )
-    _import(db_engine, tmp_path, monkeypatch, _flex_xml("20261001", "20261030", "20261030", duplicate + duplicate))
+    _import(
+        db_engine,
+        tmp_path,
+        monkeypatch,
+        _flex_xml("20261001", "20261030", "20261030", duplicate + duplicate),
+        _flex_xml("20261004", "20261102", "20261102", duplicate + duplicate),
+    )
 
     with db_engine.connect() as conn:
         count = conn.execute(
             text("SELECT COUNT(*) FROM portfolio_cash_ledger_entries WHERE activity_date = '2026-10-22'")
         ).scalar()
-    assert count == 1
+    assert count == 2

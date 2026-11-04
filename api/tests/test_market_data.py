@@ -535,6 +535,121 @@ def test_market_data_due_check_runs_only_windows_missed_since_their_close(monkey
     assert isinstance(market_scheduler._retry_gates["us_close"], catchup.RetryGate)
 
 
+def test_market_data_due_check_runs_window_once_a_day_with_an_empty_exchange(db_engine, monkeypatch):
+    """#137: SGX has no symbols, HKEX has one. The Asia window must run once after
+    its close and then stay done; the real done-check reads market_data_runs."""
+    from sqlalchemy.orm import sessionmaker
+
+    import app.market_data.service as market_service
+    from app.core.catchup import RetryGate
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(170, 'TESTHK', 'Test HK Co', 'STOCK', 'HKD', 'HK')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO market_symbol_map (asset_id, exchange_code, exchange_symbol, quote_currency, is_active) "
+                "VALUES (170, 'HKEX', '0001', 'HKD', 1)"
+            )
+        )
+
+    clock = {"now": datetime(2026, 11, 3, 11, 0, tzinfo=timezone.utc)}  # 19:00 SGT, after the 18:45 close
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock["now"] if tz is None else clock["now"].astimezone(tz)
+
+    def fake_yfinance(self, symbols, exchange_code=None, trade_date=None):
+        return {
+            symbol: providers.EodQuote(
+                provider="yfinance", symbol=symbol, trade_date=clock["now"].date(), close=10.0, currency="HKD"
+            )
+            for symbol in symbols
+        }
+
+    monkeypatch.setattr("app.market_data.providers.YFinanceProvider.fetch_prices", fake_yfinance)
+    monkeypatch.setattr(market_scheduler, "datetime", FrozenDatetime)
+    monkeypatch.setattr(market_service, "datetime", FrozenDatetime)
+    monkeypatch.setattr(market_scheduler, "SessionLocal", sessionmaker(bind=db_engine, autocommit=False, autoflush=False))
+    monkeypatch.setattr(market_scheduler, "_retry_gates", {})
+    monkeypatch.setattr(market_scheduler, "configured_exchanges", lambda: ["SGX", "HKEX"])
+    monkeypatch.delenv("STOCK_REFRESH_ASIA_CLOSE", raising=False)
+    monkeypatch.delenv("SCHEDULER_RETRY_MINUTES", raising=False)
+    windows = []
+    real_run_window = market_scheduler._run_window
+    monkeypatch.setattr(
+        market_scheduler, "_run_window", lambda name, ex: (windows.append(name), real_run_window(name, ex))
+    )
+
+    def run_count() -> dict[str, int]:
+        with db_engine.begin() as conn:
+            rows = conn.execute(
+                text("SELECT exchange_code, COUNT(*) FROM market_data_runs GROUP BY exchange_code")
+            ).fetchall()
+        return {str(row[0]): int(row[1]) for row in rows}
+
+    market_scheduler._run_due_windows()
+    assert windows == ["asia_close"]
+    assert run_count() == {"SGX": 1, "HKEX": 1}
+    with db_engine.begin() as conn:
+        sgx = conn.execute(
+            text("SELECT provider, status, requested_symbols, finished_at FROM market_data_runs WHERE exchange_code = 'SGX'")
+        ).one()
+    assert sgx[0] == market_service.EMPTY_EXCHANGE_PROVIDER
+    assert sgx[1] == "success"
+    assert sgx[2] == 0
+    assert sgx[3] is not None
+    assert market_scheduler._retry_gates["asia_close"].may_attempt(clock["now"])  # recorded as a success
+
+    # Every later check that day, past several retry intervals: nothing runs.
+    for minutes in (5, 30, 31, 60, 300, 600):
+        clock["now"] = datetime(2026, 11, 3, 11, 0, tzinfo=timezone.utc) + timedelta(minutes=minutes)
+        market_scheduler._run_due_windows()
+    assert windows == ["asia_close"]
+    assert run_count() == {"SGX": 1, "HKEX": 1}
+
+    # The next day's close makes it due once more.
+    clock["now"] = datetime(2026, 11, 4, 11, 0, tzinfo=timezone.utc)
+    market_scheduler._run_due_windows()
+    market_scheduler._run_due_windows()
+    assert windows == ["asia_close", "asia_close"]
+    assert run_count() == {"SGX": 2, "HKEX": 2}
+    assert isinstance(market_scheduler._retry_gates["asia_close"], RetryGate)
+
+
+def test_market_data_empty_exchange_run_is_listed_but_not_data_hub_activity(client, db_engine):
+    """#137: the 0-symbol run shows in /market-data/runs and /market-data/status
+    (it ran, nothing to fetch) but isn't 'Refreshed ... market data' activity."""
+    from app.market_data.service import EMPTY_EXCHANGE_PROVIDER, run_exchange_refresh
+    from sqlalchemy.orm import sessionmaker
+
+    db = sessionmaker(bind=db_engine, autocommit=False, autoflush=False)()
+    try:
+        result = run_exchange_refresh(db, "SGX", full_coverage=True)
+    finally:
+        db.close()
+    assert result["status"] == "success"
+    assert result["requested_symbols"] == 0
+    assert list(result["run_ids"]) == [EMPTY_EXCHANGE_PROVIDER]
+
+    runs = client.get("/market-data/runs?limit=5").json()["runs"]
+    assert [(r["exchange_code"], r["provider"], r["status"], r["requested_symbols"]) for r in runs] == [
+        ("SGX", EMPTY_EXCHANGE_PROVIDER, "success", 0)
+    ]
+    status = {row["exchange_code"]: row for row in client.get("/market-data/status").json()["status"]}
+    if "SGX" in status:
+        assert status["SGX"]["status"] == "success"
+        assert status["SGX"]["diagnostics_summary"]["active_symbols"] == 0
+
+    activity = client.get("/dashboard/data-hub-summary").json()["recent_activity"]
+    assert not any(item["kind"] == "market_data" for item in activity)
+
+
 def test_market_data_uses_asset_quote_currency_for_prices(client, db_engine, monkeypatch):
     with db_engine.begin() as conn:
         conn.execute(

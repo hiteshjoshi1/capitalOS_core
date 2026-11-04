@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { CashFlowTrendPoint, DividendSummaryBucket, WealthTimeline } from "../lib/api";
+import type { CashFlowTrendPoint, DividendSummaryBucket, FxStatus, WealthTimeline } from "../lib/api";
 import PageShell from "../components/PageShell";
+import FxNote from "../components/FxNote";
 import WealthHistoryChart, { type WealthHistoryChartMode } from "../components/WealthHistoryChart";
 import WealthAttributionStrip from "../components/WealthAttributionStrip";
 import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
@@ -57,6 +58,7 @@ export default function WealthHistory() {
 
   const [cashFlowState, setCashFlowState] = useState<LoadState>("loading");
   const [cashFlowTrend, setCashFlowTrend] = useState<CashFlowTrendPoint[]>([]);
+  const [cashFlowFx, setCashFlowFx] = useState<FxStatus | null>(null);
 
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
 
@@ -109,6 +111,7 @@ export default function WealthHistory() {
         const data = await api.cashFlowDetail(currentMonth(), baseCurrency);
         if (ignore) return;
         setCashFlowTrend(data.analytics.trend);
+        setCashFlowFx(data);
         setCashFlowState("ready");
       } catch {
         if (!ignore) setCashFlowState("error");
@@ -358,6 +361,7 @@ export default function WealthHistory() {
                   <div>
                     <div className="whCardTitle">Income vs spending</div>
                     <div className="whCardMeta">Last 6 months · cash-flow module</div>
+                    {cashFlowState === "ready" ? <FxNote sources={[cashFlowFx]} /> : null}
                   </div>
                   <div className="whSeriesLegend">
                     <span className="whSeriesLegendItem">

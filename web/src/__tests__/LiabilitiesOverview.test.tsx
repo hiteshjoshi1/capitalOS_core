@@ -130,6 +130,16 @@ describe("LiabilitiesOverview route", () => {
     expect(within(largestCategoryCard).getByText("Travel")).toBeInTheDocument();
   });
 
+  it("notes card spend left out for lack of an FX rate (#170)", async () => {
+    mockApi.creditCardAnalytics.mockResolvedValue(
+      makeAnalytics({ fx_incomplete: true, fx_missing_currencies: ["XYZ"], fx_stale_currencies: [] }),
+    );
+    renderPage();
+
+    expect(await screen.findByText("S$ 53,192")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("Excludes amounts in XYZ");
+  });
+
   it("filters by card, updating hero, trend meta, and ledger together", async () => {
     mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
     renderPage();

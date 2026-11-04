@@ -32,9 +32,26 @@ from app.services.auth import (
     refresh_token_ttl_seconds,
     verify_password,
 )
+from app.services.login_throttle import client_ip, login_throttle
 from app.services.passwords import set_user_password
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_dummy_password_hash: str | None = None
+
+
+def _dummy_hash() -> str:
+    """A real hash of a throwaway secret, checked when the username is unknown or inactive,
+    so a failed sign-in costs the same either way and doesn't reveal which usernames exist."""
+    global _dummy_password_hash
+    if _dummy_password_hash is None:
+        _dummy_password_hash = hash_password(generate_refresh_token())
+    return _dummy_password_hash
+
+
+def signup_allowed() -> bool:
+    """Signup is off unless AUTH_ALLOW_SIGNUP is set to a true value (#152)."""
+    return os.getenv("AUTH_ALLOW_SIGNUP", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _refresh_grace_seconds() -> int:
@@ -134,7 +151,7 @@ def _session_response(
 
 @router.post("/signup", response_model=AuthMeResponse)
 def signup(payload: SignupRequest, db: Session = Depends(get_db)):
-    if os.getenv("AUTH_ALLOW_SIGNUP", "1").strip().lower() in {"0", "false", "no", "off"}:
+    if not signup_allowed():
         raise HTTPException(status_code=403, detail="Signup is disabled")
     username = payload.username.strip()
     if not username:
@@ -186,7 +203,17 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=AuthSessionResponse)
-def login(payload: LoginRequest, response: Response, db: Session = Depends(get_db)):
+def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    username_input = payload.username.strip()
+    ip = client_ip(request)
+    wait = login_throttle.retry_after(username=username_input, ip=ip)
+    if wait > 0:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed sign-in attempts; try again later",
+            headers={"Retry-After": str(wait)},
+        )
+
     row = db.execute(
         text(
             """
@@ -201,13 +228,16 @@ def login(payload: LoginRequest, response: Response, db: Session = Depends(get_d
             LIMIT 1
             """
         ),
-        {"username": payload.username.strip()},
+        {"username": username_input},
     ).mappings().one_or_none()
-    if row is None or not bool(row["is_active"]):
+    known = row is not None and bool(row["is_active"])
+    # Always check a password, even for an unknown or inactive user (timing, #152).
+    password_hash = str(row["password_hash"]) if known and row is not None else _dummy_hash()
+    password_ok = verify_password(payload.password, password_hash)
+    if not known or not password_ok or row is None:
+        login_throttle.record_failure(username=username_input, ip=ip)
         raise HTTPException(status_code=401, detail="invalid credentials")
-
-    if not verify_password(payload.password, str(row["password_hash"])):
-        raise HTTPException(status_code=401, detail="invalid credentials")
+    login_throttle.record_success(username=username_input)
 
     user_id = int(row["id"])
     username = str(row["username"])

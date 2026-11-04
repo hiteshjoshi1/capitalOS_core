@@ -102,3 +102,51 @@ function hasDbsCreditCardMarker(header: unknown): boolean {
     .join(" ");
   return joined.includes("card transaction details for") && joined.includes("mastercard");
 }
+
+/** Today as YYYY-MM-DD in the browser's local timezone (not UTC, unlike toISOString). */
+export function todayLocalYYYYMMDD(now: Date = new Date()): string {
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+const MONTHS: Record<string, number> = {
+  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+};
+
+function validYmd(y: number, m: number, d: number): string | null {
+  if (y < 2000 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+/**
+ * A statement date in a file name, as brokers name their exports: `2026_10_02.xls`,
+ * `2026-10-02`, `20261002`, `portfolio_23_June_2026.xls`, `23-Jun-2026`. Numeric
+ * forms are read year-first only (no DD/MM vs MM/DD guessing). Null if none.
+ */
+export function dateFromFilename(name: string | null | undefined): string | null {
+  if (!name) return null;
+  const base = name.replace(/\.[A-Za-z0-9]+$/, "");
+  let m = base.match(/(?:^|\D)(20\d{2})[-_. ]?(\d{2})[-_. ]?(\d{2})(?:\D|$)/);
+  if (m) return validYmd(Number(m[1]), Number(m[2]), Number(m[3]));
+  m = base.match(/(?:^|[^0-9])(\d{1,2})[-_. ]?([A-Za-z]{3,9})[-_. ]?(20\d{2})(?:\D|$)/);
+  if (m) {
+    const month = MONTHS[m[2].slice(0, 3).toLowerCase()];
+    if (month) return validYmd(Number(m[3]), month, Number(m[1]));
+  }
+  return null;
+}
+
+export type AsOfSource = "file" | "user" | "fallback";
+
+/** How the import report says where its snapshot date came from (#141). */
+export function describeAsOf(asOfDate: string | null | undefined, source: string | null | undefined): string | null {
+  if (!asOfDate) return null;
+  if (source === "file") return `Dated ${asOfDate} (from the file)`;
+  if (source === "user") return `Dated ${asOfDate} (the date you chose; the file states none)`;
+  if (source === "fallback") return `Dated ${asOfDate} (upload day; the file states no date)`;
+  return `Dated ${asOfDate}`;
+}

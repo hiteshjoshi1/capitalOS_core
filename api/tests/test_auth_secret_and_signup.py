@@ -81,8 +81,8 @@ def test_signup_can_be_disabled(client, db_engine, monkeypatch):
     assert created == 0
 
 
-@pytest.mark.parametrize("value", ["1", "true", "", "yes"])
-def test_signup_stays_open_by_default(client, monkeypatch, value):
+@pytest.mark.parametrize("value", ["1", "true", "yes", "on"])
+def test_signup_opens_when_enabled(client, monkeypatch, value):
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_SIGNUP", value)
 
@@ -91,3 +91,21 @@ def test_signup_stays_open_by_default(client, monkeypatch, value):
         json={"username": f"open_{abs(hash(value)) % 10000}", "password": "OpenPass123!", "display_name": "Open"},
     )
     assert response.status_code == 200
+
+
+@pytest.mark.parametrize("value", [None, "", "0", "false", "anything"])
+def test_signup_is_off_by_default(client, db_engine, monkeypatch, value):
+    # #152: unset (or anything not clearly true) means signup is closed.
+    monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
+    if value is None:
+        monkeypatch.delenv("AUTH_ALLOW_SIGNUP", raising=False)
+    else:
+        monkeypatch.setenv("AUTH_ALLOW_SIGNUP", value)
+
+    response = client.post(
+        "/auth/signup",
+        json={"username": "closed_user", "password": "ClosedPass123!", "display_name": "Closed"},
+    )
+    assert response.status_code == 403
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM users WHERE username = 'closed_user'")).scalar() == 0

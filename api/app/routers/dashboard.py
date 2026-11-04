@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership, require_current_user
 from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
-from app.market_data.service import freshness_counts_by_exchange
+from app.market_data.service import EMPTY_EXCHANGE_PROVIDER, freshness_counts_by_exchange, held_asset_ids
 from app.schemas.dashboard import (
     BootstrapResponse,
     CashDepositsItem,
@@ -42,7 +42,7 @@ from app.schemas.dashboard import (
     WealthTimelineBackfillResponse,
     WealthTimelineResponse,
 )
-from app.fx import fx_status, get_rates
+from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
 from app.valuation_cache import request_memo, valuation_cached
 from app.wealth_rollup_dirty import dirty_state, dirty_user_ids, settle_dirty_mark
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
@@ -2027,11 +2027,21 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current
         )
     return {"items": items, "total": total}
 
+
+def _cashflow_rate_date(value: Any) -> date:
+    """A transaction's FX date: its UTC date (naive timestamps are UTC)."""
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value)
+        value = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return rate_date(value)
+
+
 @valuation_cached(shared=True)
 def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     q = text(
         """
         SELECT
+          t.ts,
           t.type,
           t.amount,
           t.currency
@@ -2044,13 +2054,17 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
         """
     )
     rows = db.execute(q, {"start": start, "end": end, "current_user_id": current_user_id}).mappings().all()
-    currencies = {r["currency"] for r in rows if r["currency"]}
-    rates = get_rates(start, base_currency, currencies)
+    # Each flow converts at the rate of its own date (D-30, #170), one store read
+    # for the month; a missing rate leaves the row out (never 1.0) and is noted
+    # for the response's fx_status (and keeps this result out of the shared cache).
+    currencies = {(r["currency"] or base_currency).upper() for r in rows}
+    row_dates = [_cashflow_rate_date(r["ts"]) for r in rows]
+    rates_by_date = get_rates_by_date(row_dates, base_currency, currencies) if rows else {}
     income = 0.0
     expenses = 0.0
-    for r in rows:
+    for r, day in zip(rows, row_dates):
         cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates.get(cur, 0.0)
+        amount = float(r["amount"]) * rates_by_date.get(day, {}).get(cur, 0.0)
         if r["type"] == "INCOME":
             income += amount
         elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):
@@ -3102,7 +3116,8 @@ def data_hub_summary(
         {"current_user_id": current_user.id},
     ).fetchone()
 
-    market_freshness = freshness_counts_by_exchange(db)
+    # The caller's own symbols only, admin or not: this card is about your data (#153).
+    market_freshness = freshness_counts_by_exchange(db, asset_ids=held_asset_ids(db, current_user.id))
     fresh_total = sum(counts["fresh"] for counts in market_freshness.values())
     stale_total = sum(counts["stale"] for counts in market_freshness.values())
 
@@ -3150,10 +3165,14 @@ def data_hub_summary(
             SELECT exchange_code, provider, finished_at, upserted_rows
             FROM market_data_runs
             WHERE finished_at IS NOT NULL
+              AND provider <> :empty_provider
             ORDER BY finished_at DESC
             LIMIT 5
             """
-        )
+        ),
+        # A 0-symbol run on an exchange with nothing held refreshed nothing (#137):
+        # it stays in /market-data/runs but isn't "Refreshed ... market data" activity.
+        {"empty_provider": EMPTY_EXCHANGE_PROVIDER},
     ).fetchall()
     for exchange_code, provider, finished_at, upserted_rows in market_activity:
         if finished_at is None:

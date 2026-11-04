@@ -2,20 +2,20 @@
 -- Goal: broad portfolio + spending + crypto + ingest coverage for UI demos, for a
 -- high-net-worth individual, with 12 months of trailing history so wealth/cash-flow/
 -- stock/crypto trend charts show real month-over-month movement.
--- Run with: make db-seed-dummy
+-- Run with: make db-seed-demo (enables the demo login too) or make db-seed-dummy (data only)
 
 BEGIN;
 
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM users WHERE LOWER(username) = 'demo') THEN
-    RAISE EXCEPTION 'Demo user not found. Run migrations/033_seed_demo_user.sql first.';
+    RAISE EXCEPTION 'Demo user not found. Run make demo-enable first.';
   END IF;
 END $$;
 
+-- Data only: whether demo can sign in is make demo-enable / demo-disable's business (#152).
 UPDATE users
 SET display_name = 'Demo User',
-    is_active = TRUE,
     updated_at = NOW()
 WHERE LOWER(username) = 'demo';
 

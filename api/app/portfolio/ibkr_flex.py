@@ -194,6 +194,9 @@ class FlexStatement:
     corporate_actions: list[FlexCorporateAction] = field(default_factory=list)
     report_metrics: list[FlexReportMetric] = field(default_factory=list)
     data_quality_errors: list[tuple[str, str]] = field(default_factory=list)
+    # Rows or attributes the parser had to drop or could not read; recorded as
+    # data-quality warnings by the import, never silently lost (#136).
+    data_quality_warnings: list[tuple[str, str]] = field(default_factory=list)
 
 
 def _attr(element: ET.Element, *names: str) -> str | None:
@@ -366,11 +369,19 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
         fx_by_currency[from_currency] = rate
         fx_rates.append(FlexFxRate(report_date=report_date, from_currency=from_currency, to_currency=to_currency, rate=rate))
 
+    data_quality_warnings: list[tuple[str, str]] = []
+    nav_missing_components: dict[str, int] = {}
+    nav_missing_total_dates: list[date] = []
     nav_snapshots: list[FlexNavSnapshot] = []
     for row in nav_rows:
         report_date = _date(_attr(row, "reportDate", "date"), to_date)
         if report_date is None:
             continue
+        # IBKR always sends cash and stock on an equity-summary row; a missing one
+        # means the attribute was renamed, so the 0 used below is a guess (#136).
+        for component, names in (("cash", ("cash", "cashBase")), ("stock", ("stock", "stocks", "stockBase"))):
+            if _decimal(_attr(row, *names)) is None:
+                nav_missing_components[component] = nav_missing_components.get(component, 0) + 1
         cash = _decimal(_attr(row, "cash", "cashBase"), Decimal("0")) or Decimal("0")
         stock = _decimal(_attr(row, "stock", "stocks", "stockBase"), Decimal("0")) or Decimal("0")
         options = _decimal(_attr(row, "options", "optionBase"), Decimal("0")) or Decimal("0")
@@ -380,7 +391,11 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
         dividend_accruals = _decimal(_attr(row, "dividendAccruals", "dividendAccrual"), Decimal("0")) or Decimal("0")
         total = _decimal(_attr(row, "total", "totalNav", "totalEquity", "netLiquidation"))
         if total is None:
-            total = cash + stock + options + funds + bonds + interest_accruals + dividend_accruals
+            # The total is the account's net worth. Summing components that may
+            # themselves have defaulted to 0 would fabricate it, so the import
+            # fails instead (#136).
+            nav_missing_total_dates.append(report_date)
+            continue
         nav_snapshots.append(
             FlexNavSnapshot(
                 report_date=report_date,
@@ -393,6 +408,22 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
                 interest_accrual_base=interest_accruals,
                 dividend_accrual_base=dividend_accruals,
                 total_nav_base=total,
+            )
+        )
+
+    if nav_missing_total_dates:
+        data_quality_errors.append(
+            (
+                "missing_nav_total",
+                f"{len(nav_missing_total_dates)} equity summary row(s) have no total NAV attribute "
+                f"(first {min(nav_missing_total_dates).isoformat()})",
+            )
+        )
+    for component, count in sorted(nav_missing_components.items()):
+        data_quality_warnings.append(
+            (
+                "missing_nav_component",
+                f"{count} equity summary row(s) have no {component} attribute; read as 0",
             )
         )
 
@@ -450,11 +481,14 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
         )
 
     positions: list[FlexPosition] = []
+    skipped_positions: dict[str, list[str]] = {}
     for row in position_rows:
         report_date = _date(_attr(row, "reportDate", "date"), to_date)
         broker_instrument_id = _attr(row, "conid", "contractId", "figi", "isin")
         currency = _currency(_attr(row, "currency"))
         if report_date is None or not broker_instrument_id or currency is None:
+            missing = "report date" if report_date is None else "conid" if not broker_instrument_id else "currency"
+            skipped_positions.setdefault(missing, []).append(_attr(row, "symbol") or "?")
             continue
         quantity = _required_decimal(_attr(row, "position", "quantity"), "position")
         market_value_local = _required_decimal(_attr(row, "positionValue", "marketValue"), "positionValue")
@@ -487,6 +521,15 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
                 cost_basis_local=cost_basis_local,
                 cost_basis_base=cost_basis_base,
                 fx_rate_to_base=fx_rate,
+            )
+        )
+
+    for missing, symbols in sorted(skipped_positions.items()):
+        shown = ", ".join(symbols[:5]) + (", ..." if len(symbols) > 5 else "")
+        data_quality_warnings.append(
+            (
+                "skipped_position_row",
+                f"{len(symbols)} OpenPosition row(s) skipped: no {missing} ({shown})",
             )
         )
 
@@ -583,6 +626,7 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
         corporate_actions=corporate_actions,
         report_metrics=report_metrics,
         data_quality_errors=data_quality_errors,
+        data_quality_warnings=data_quality_warnings,
     )
 
 
@@ -941,20 +985,25 @@ def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: 
 def _create_import_run(
     db: Session,
     *,
-    broker_account_id: int,
+    broker_account_id: int | None,
     legacy_account_id: int,
-    statement: FlexStatement,
     reference_code: str | None,
 ) -> int:
-    db.execute(
+    """Open a run row before the XML is parsed (#136).
+
+    The broker account and report dates come from the statement, so they may be
+    unknown here; ``_attach_statement_to_run`` fills them in after parsing.
+    """
+    row = db.execute(
         text(
             f"""
             INSERT INTO broker_import_runs
               (broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status,
-               started_at, report_date_from, report_date_to, flex_reference_code, parser_version, metadata_json)
+               started_at, flex_reference_code, parser_version, metadata_json)
             VALUES
               (:broker_account_id, :legacy_account_id, 'IBKR', :source_type, 'daily', 'started',
-               :started_at, :report_date_from, :report_date_to, :reference_code, :parser_version, {_platform_json_default(db)})
+               :started_at, :reference_code, :parser_version, {_platform_json_default(db)})
+            RETURNING id
             """
         ),
         {
@@ -962,27 +1011,91 @@ def _create_import_run(
             "legacy_account_id": legacy_account_id,
             "source_type": SOURCE_TYPE,
             "started_at": _now(),
-            "report_date_from": statement.report_date_from,
-            "report_date_to": statement.report_date_to,
             "reference_code": reference_code,
             "parser_version": PARSER_VERSION,
         },
-    )
+    ).fetchone()
+    return int(row[0])
+
+
+def _known_broker_account(db: Session, *, current_user_id: int, legacy_account_id: int) -> int | None:
+    """The Flex broker account already linked to this legacy account, if any.
+
+    Used before parsing so a run whose XML can't be read still shows under the
+    account in the import-run list (which joins on broker_account_id).
+    """
     row = db.execute(
         text(
             """
-            SELECT id
-            FROM broker_import_runs
-            WHERE broker_account_id = :broker_account_id
-              AND source_type = :source_type
-              AND status = 'started'
-            ORDER BY id DESC
+            SELECT ba.id
+            FROM broker_accounts ba
+            JOIN broker_connections bc ON bc.id = ba.connection_id
+            WHERE bc.user_id = :user_id
+              AND bc.platform_code = 'IBKR'
+              AND bc.connection_type = 'flex_api'
+              AND ba.legacy_account_id = :legacy_account_id
+            ORDER BY ba.id
             LIMIT 1
             """
         ),
-        {"broker_account_id": broker_account_id, "source_type": SOURCE_TYPE},
+        {"user_id": current_user_id, "legacy_account_id": legacy_account_id},
     ).fetchone()
-    return int(row[0])
+    return int(row[0]) if row else None
+
+
+def _attach_statement_to_run(
+    db: Session,
+    *,
+    import_run_id: int,
+    raw_document_id: int,
+    broker_account_id: int,
+    statement: FlexStatement,
+) -> None:
+    params = {
+        "broker_account_id": broker_account_id,
+        "report_date_from": statement.report_date_from,
+        "report_date_to": statement.report_date_to,
+    }
+    db.execute(
+        text(
+            """
+            UPDATE broker_import_runs
+            SET broker_account_id = :broker_account_id,
+                report_date_from = :report_date_from,
+                report_date_to = :report_date_to,
+                parsed_at = :parsed_at,
+                updated_at = :parsed_at
+            WHERE id = :import_run_id
+            """
+        ),
+        {**params, "parsed_at": _now(), "import_run_id": import_run_id},
+    )
+    db.execute(
+        text(
+            """
+            UPDATE raw_broker_documents
+            SET broker_account_id = :broker_account_id,
+                report_date_from = :report_date_from,
+                report_date_to = :report_date_to
+            WHERE id = :raw_document_id
+            """
+        ),
+        {**params, "raw_document_id": raw_document_id},
+    )
+
+
+def _failure_message(exc: BaseException) -> tuple[str, str]:
+    """(error_code, message) for a failed run: the error class and its text.
+
+    Parser messages name attributes and XML positions, not values; the Flex
+    token never reaches the parser. Capped so a pathological message can't
+    flood the run row.
+    """
+    if isinstance(exc, IbkrFlexImportError):
+        return exc.code, exc.message[:500]
+    detail = str(exc).strip()
+    message = f"{exc.__class__.__name__}: {detail}" if detail else exc.__class__.__name__
+    return "parse_failed", message[:500]
 
 
 def import_lock_stale_after() -> timedelta:
@@ -1107,9 +1220,8 @@ def _store_raw_xml(
     db: Session,
     *,
     import_run_id: int,
-    broker_account_id: int,
+    broker_account_id: int | None,
     xml_text: str,
-    statement: FlexStatement,
 ) -> int:
     content_hash = hashlib.sha256(xml_text.encode("utf-8")).hexdigest()
     raw_dir = Path(_data_dir()) / "broker_raw" / "ibkr_flex"
@@ -1125,7 +1237,7 @@ def _store_raw_xml(
                content_type, report_date_from, report_date_to, parser_version, metadata_json)
             VALUES
               (:import_run_id, :broker_account_id, :source_type, :content_hash, :storage_path,
-               'application/xml', :report_date_from, :report_date_to, :parser_version, {_platform_json_default(db)})
+               'application/xml', NULL, NULL, :parser_version, {_platform_json_default(db)})
             """
         ),
         {
@@ -1134,8 +1246,6 @@ def _store_raw_xml(
             "source_type": SOURCE_TYPE,
             "content_hash": content_hash,
             "storage_path": str(storage_path),
-            "report_date_from": statement.report_date_from,
-            "report_date_to": statement.report_date_to,
             "parser_version": PARSER_VERSION,
         },
     )
@@ -1833,45 +1943,77 @@ def _insert_cash_ledger_entries(
 ) -> None:
     is_postgres = bool(db.bind and db.bind.dialect.name == "postgresql")
     json_value = "CAST(:metadata_json AS JSONB)" if is_postgres else ":metadata_json"
-    # uq_portfolio_cash_ledger_activity rejects two lines with the same key, and one
-    # such pair would fail the whole import; lines without an IBKR transaction id
-    # (e.g. FX translation adjustments) can't be told apart anyway.
-    seen: set[tuple[Any, ...]] = set()
+    # Replace rules (#157):
+    # - A line with an IBKR transaction id is that transaction: every stored line
+    #   with the id is replaced by this report's lines with it, whatever their date,
+    #   amount or text (a re-issued line with edited text replaces, never doubles;
+    #   D-20 reads dividends from here). The same line listed twice in one report
+    #   is stored once (uq_portfolio_cash_ledger_activity_id).
+    # - Lines without an id can't be told apart from their values, so they are
+    #   counted: on a date the report covers, the stored lines with a key are
+    #   replaced by the report's lines with that key, as many as the report has
+    #   (two identical FX adjustments on one day are both kept).
+    replaced_ids: set[str] = set()
+    seen_id_lines: set[tuple[Any, ...]] = set()
+    replaced_idless_keys: set[tuple[Any, ...]] = set()
     for entry in entries:
-        key = (
-            entry.activity_date,
-            entry.currency,
-            entry.amount,
-            entry.activity_code or "",
-            entry.broker_activity_id or "",
-            entry.description or "",
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        db.execute(
-            text(
-                """
-                DELETE FROM portfolio_cash_ledger_entries
-                WHERE broker_account_id = :broker_account_id
-                  AND activity_date = :activity_date
-                  AND currency = :currency
-                  AND amount = :amount
-                  AND COALESCE(activity_code, '') = COALESCE(:activity_code, '')
-                  AND COALESCE(broker_activity_id, '') = COALESCE(:broker_activity_id, '')
-                  AND COALESCE(description, '') = COALESCE(:description, '')
-                """
-            ),
-            {
-                "broker_account_id": broker_account_id,
-                "activity_date": entry.activity_date,
-                "currency": entry.currency,
-                "amount": _db_decimal(entry.amount),
-                "activity_code": entry.activity_code,
-                "broker_activity_id": entry.broker_activity_id,
-                "description": entry.description,
-            },
-        )
+        activity_id = (entry.broker_activity_id or "").strip() or None
+        if activity_id is not None:
+            line = (
+                activity_id,
+                entry.activity_date,
+                entry.currency,
+                entry.amount,
+                entry.activity_code or "",
+                entry.description or "",
+            )
+            if line in seen_id_lines:
+                continue
+            seen_id_lines.add(line)
+            if activity_id not in replaced_ids:
+                replaced_ids.add(activity_id)
+                db.execute(
+                    text(
+                        """
+                        DELETE FROM portfolio_cash_ledger_entries
+                        WHERE broker_account_id = :broker_account_id
+                          AND broker_activity_id = :broker_activity_id
+                        """
+                    ),
+                    {"broker_account_id": broker_account_id, "broker_activity_id": activity_id},
+                )
+        else:
+            key = (
+                entry.activity_date,
+                entry.currency,
+                entry.amount,
+                entry.activity_code or "",
+                entry.description or "",
+            )
+            if key not in replaced_idless_keys:
+                replaced_idless_keys.add(key)
+                db.execute(
+                    text(
+                        """
+                        DELETE FROM portfolio_cash_ledger_entries
+                        WHERE broker_account_id = :broker_account_id
+                          AND activity_date = :activity_date
+                          AND currency = :currency
+                          AND amount = :amount
+                          AND COALESCE(activity_code, '') = COALESCE(:activity_code, '')
+                          AND COALESCE(broker_activity_id, '') = ''
+                          AND COALESCE(description, '') = COALESCE(:description, '')
+                        """
+                    ),
+                    {
+                        "broker_account_id": broker_account_id,
+                        "activity_date": entry.activity_date,
+                        "currency": entry.currency,
+                        "amount": _db_decimal(entry.amount),
+                        "activity_code": entry.activity_code,
+                        "description": entry.description,
+                    },
+                )
         db.execute(
             text(
                 f"""
@@ -1892,7 +2034,7 @@ def _insert_cash_ledger_entries(
                 "amount": _db_decimal(entry.amount),
                 "activity_code": entry.activity_code,
                 "description": entry.description,
-                "broker_activity_id": entry.broker_activity_id,
+                "broker_activity_id": activity_id,
                 "metadata_json": json.dumps({"security": entry.security} if entry.security else {}),
             },
         )
@@ -1934,8 +2076,22 @@ def _insert_trades(
     raw_document_id: int,
     trades: list[FlexTrade],
 ) -> None:
+    # A trade with an execution id is replaced by that id alone. Trades without one
+    # are counted (#157): the stored trades with the same values on that date are
+    # replaced once by all of this report's trades with them, so two identical
+    # fills both stay and a re-import doesn't double them.
+    replaced_idless_keys: set[tuple[Any, ...]] = set()
     for trade in trades:
         instrument_id = _optional_instrument_for_trade(db, trade)
+        idless_key = (
+            trade.trade_date,
+            instrument_id,
+            trade.currency,
+            trade.side,
+            trade.quantity,
+            trade.price,
+            trade.proceeds,
+        )
         if trade.broker_execution_id:
             db.execute(
                 text(
@@ -1947,12 +2103,14 @@ def _insert_trades(
                 ),
                 {"broker_account_id": broker_account_id, "broker_execution_id": trade.broker_execution_id},
             )
-        else:
+        elif idless_key not in replaced_idless_keys:
+            replaced_idless_keys.add(idless_key)
             db.execute(
                 text(
                     """
                     DELETE FROM portfolio_trades
                     WHERE broker_account_id = :broker_account_id
+                      AND COALESCE(broker_execution_id, '') = ''
                       AND trade_date = :trade_date
                       AND COALESCE(broker_instrument_id, 0) = COALESCE(:broker_instrument_id, 0)
                       AND COALESCE(currency, '') = COALESCE(:currency, '')
@@ -1999,7 +2157,9 @@ def _insert_trades(
                 "proceeds": _db_decimal(trade.proceeds),
                 "commission": _db_decimal(trade.commission),
                 "currency": trade.currency,
-                "broker_execution_id": trade.broker_execution_id,
+                # An empty ibExecID is no id: stored NULL so uq_portfolio_trades_execution
+                # doesn't treat two id-less fills as the same execution.
+                "broker_execution_id": trade.broker_execution_id or None,
             },
         )
 
@@ -2176,38 +2336,95 @@ def run_ibkr_flex_import_from_xml(
     cutover_date: date | None = None,
     reference_code: str | None = None,
 ) -> dict[str, Any]:
-    statement = parse_flex_statement(xml_text)
-    effective_cutover_date = _resolve_cutover_date(statement, cutover_date)
-    broker_account_id = _ensure_broker_account(
+    # Evidence first (#136): the run row and the raw XML are committed before the
+    # XML is parsed, so a statement that can't be read still leaves both behind,
+    # plus a data-quality event naming the error.
+    import_run_id = _create_import_run(
         db,
-        current_user_id=current_user_id,
+        broker_account_id=_known_broker_account(db, current_user_id=current_user_id, legacy_account_id=legacy_account_id),
         legacy_account_id=legacy_account_id,
-        broker_account_id=statement.broker_account_id,
-        base_currency=statement.base_currency,
+        reference_code=reference_code,
     )
-    if _ensure_authority_window(db, broker_account_id, effective_cutover_date):
-        # A new authority window changes which source counts from its date on (#138).
-        mark_rollups_dirty(db, effective_cutover_date, account_id=legacy_account_id, reason="ibkr_flex_authority")
-    lock_owner = _try_acquire_lock(db, broker_account_id, SOURCE_TYPE)
+    raw_document_id = _store_raw_xml(
+        db,
+        import_run_id=import_run_id,
+        broker_account_id=None,
+        xml_text=xml_text,
+    )
     db.commit()
 
-    import_run_id: int | None = None
-    raw_document_id: int | None = None
+    parsed = False
     try:
-        import_run_id = _create_import_run(
+        statement = parse_flex_statement(xml_text)
+        parsed = True
+        effective_cutover_date = _resolve_cutover_date(statement, cutover_date)
+        broker_account_id = _ensure_broker_account(
             db,
-            broker_account_id=broker_account_id,
+            current_user_id=current_user_id,
             legacy_account_id=legacy_account_id,
-            statement=statement,
-            reference_code=reference_code,
+            broker_account_id=statement.broker_account_id,
+            base_currency=statement.base_currency,
         )
-        raw_document_id = _store_raw_xml(
+        _attach_statement_to_run(
             db,
             import_run_id=import_run_id,
+            raw_document_id=raw_document_id,
             broker_account_id=broker_account_id,
-            xml_text=xml_text,
             statement=statement,
         )
+        if _ensure_authority_window(db, broker_account_id, effective_cutover_date):
+            # A new authority window changes which source counts from its date on (#138).
+            mark_rollups_dirty(db, effective_cutover_date, account_id=legacy_account_id, reason="ibkr_flex_authority")
+        # The stale-lock takeover rules (#135) live in _try_acquire_lock; on a live
+        # lock it rolls back and raises IbkrFlexImportInProgress.
+        lock_owner = _try_acquire_lock(db, broker_account_id, SOURCE_TYPE)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        if isinstance(exc, IbkrFlexImportInProgress):
+            code, message = "import_in_progress", str(exc)
+        elif parsed and not isinstance(exc, IbkrFlexImportError):
+            # A database error's text carries SQL and bound values: name the class only.
+            code, message = "import_failed", f"IBKR Flex import failed ({exc.__class__.__name__})"
+        else:
+            code, message = _failure_message(exc)
+        try:
+            run_broker_account_id = db.execute(
+                text("SELECT broker_account_id FROM broker_import_runs WHERE id = :id"),
+                {"id": import_run_id},
+            ).scalar()
+            _record_data_quality_event(
+                db,
+                broker_account_id=run_broker_account_id,
+                import_run_id=import_run_id,
+                raw_document_id=raw_document_id,
+                report_date=None,
+                severity="error",
+                event_code=code,
+                message=message,
+            )
+            _mark_import_failed(db, import_run_id, code, message)
+            db.commit()
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception("ibkr_flex_failed_run_not_recorded", extra={"event": "ibkr_flex_failed_run_not_recorded"})
+        raise
+
+    def _record_parser_warnings() -> None:
+        for code, message in statement.data_quality_warnings:
+            _record_data_quality_event(
+                db,
+                broker_account_id=broker_account_id,
+                import_run_id=import_run_id,
+                raw_document_id=raw_document_id,
+                report_date=statement.report_date_to,
+                severity="warning",
+                event_code=code,
+                message=message,
+            )
+
+    try:
+        _record_parser_warnings()
         _validate_statement(statement)
         _insert_statement_facts(
             db,
@@ -2231,6 +2448,10 @@ def run_ibkr_flex_import_from_xml(
         _release_lock(db, broker_account_id, lock_owner)
         db.commit()
     except IbkrFlexImportError as exc:
+        # Nothing written for this statement survives a failed import (#136);
+        # the warnings and the error are recorded afresh.
+        db.rollback()
+        _record_parser_warnings()
         _record_data_quality_event(
             db,
             broker_account_id=broker_account_id,
