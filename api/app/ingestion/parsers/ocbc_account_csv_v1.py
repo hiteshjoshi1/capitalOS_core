@@ -143,7 +143,9 @@ def parse_ocbc_account_csv(file_path: str, delimiter: str = ",") -> ParseResult:
         )
 
     positions: List[Dict] = []
-    balance_value = balances.available if balances.available is not None else balances.ledger
+    # Ledger, not available: available is ledger minus funds on hold, which are still the
+    # owner's money (#181). Available is kept in parser_meta.
+    balance_value = balances.ledger if balances.ledger is not None else balances.available
     if balance_value is not None:
         positions.append(
             {
