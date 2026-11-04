@@ -11,7 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 import app.main as main_module
-import app.routers.portfolio as portfolio_router
+import app.portfolio.scheduler as portfolio_scheduler
 from app.crypto.ingest import acquire_refresh_lock, refresh_lock_stale_after, release_refresh_lock
 from app.portfolio.ibkr_flex import (
     IbkrFlexImportInProgress,
@@ -182,7 +182,7 @@ def _route_import_through_xml(monkeypatch, db_engine, tmp_path):
             cutover_date=date(2026, 2, 1),
         )
 
-    monkeypatch.setattr(portfolio_router, "run_ibkr_flex_import_from_config", fake_import_from_config)
+    monkeypatch.setattr(portfolio_scheduler, "run_ibkr_flex_import_from_config", fake_import_from_config)
 
 
 def _broker_account_after_first_import(db_engine) -> int:

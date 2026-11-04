@@ -293,6 +293,37 @@ class DataHubMarketData(BaseModel):
     stale: int
 
 
+class DataHubJobScopeStatus(BaseModel):
+    scope: str
+    label: Optional[str] = None
+    last_run_at: Optional[str] = None
+    last_run_status: Optional[str] = None
+    last_run_trigger: Optional[str] = None
+    last_success_at: Optional[str] = None
+    data_as_of: Optional[str] = None
+    consecutive_failures: int = 0
+    last_error: Optional[str] = None
+
+
+class DataHubJobStatus(BaseModel):
+    """One data source's job status from job_runs (#156). `state`: ok, warning
+    (a failure below the threshold, or no new data), failing (at least
+    `failure_threshold` consecutive failures of one scope), never_run, or
+    not_configured (nothing to run for this user)."""
+
+    job: str
+    label: str
+    state: str
+    failure_threshold: int
+    last_run_at: Optional[str] = None
+    last_run_status: Optional[str] = None
+    last_success_at: Optional[str] = None
+    data_as_of: Optional[str] = None
+    consecutive_failures: int = 0
+    last_error: Optional[str] = None
+    scopes: List[DataHubJobScopeStatus] = []
+
+
 class DataHubSummaryResponse(BaseModel):
     linked_accounts: int
     platform_count: int
@@ -302,6 +333,7 @@ class DataHubSummaryResponse(BaseModel):
     connected_wallet_count: int
     connected_wallet_labels: List[str]
     recent_activity: List[DataHubActivityItem]
+    job_status: List[DataHubJobStatus] = []
 
 
 class BootstrapResponse(FxStatusFields):

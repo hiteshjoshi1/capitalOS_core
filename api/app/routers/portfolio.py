@@ -11,14 +11,15 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
+from app.core.job_runs import TRIGGER_MANUAL
 from app.core.logging import job_context
 from app.db.session import get_db
+from app.portfolio.scheduler import run_import_and_record
 from app.portfolio.ibkr_flex import (
     IbkrFlexConfigError,
     IbkrFlexError,
     IbkrFlexImportError,
     IbkrFlexImportInProgress,
-    run_ibkr_flex_import_from_config,
 )
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"], dependencies=[Depends(require_current_user)])
@@ -103,10 +104,11 @@ def import_ibkr_flex_now(
                     "legacy_account_id": account_id,
                 },
             )
-            result = run_ibkr_flex_import_from_config(
+            result = run_import_and_record(
                 db,
                 current_user_id=current_user.id,
                 legacy_account_id=account_id,
+                trigger=TRIGGER_MANUAL,
                 cutover_date=_parse_cutover_date(cutover_date),
             )
             logger.info(

@@ -2567,6 +2567,9 @@ def run_ibkr_flex_import_from_config(
             f"User {current_user_id} is not authorized to trigger IBKR Flex import "
             f"(configured owner is user {authorized_user_id})."
         )
+    # End the read transaction before the fetch, which can wait minutes on IBKR
+    # (retries with backoff): no transaction stays open across it (#130 4.6).
+    db.commit()
     max_attempts = int(os.getenv("IBKR_FLEX_MAX_ATTEMPTS", "5"))
     initial_backoff_seconds = float(
         _first_env_value("IBKR_FLEX_INITIAL_BACKOFF_SECONDS", "IBKR_FLEX_BACKOFF_SECONDS", default="2")

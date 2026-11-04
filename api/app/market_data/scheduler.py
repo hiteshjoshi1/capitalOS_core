@@ -19,6 +19,15 @@ from app.core.catchup import (
     parse_hhmm,
     run_is_due,
 )
+from app.core.job_runs import (
+    JOB_FX,
+    JOB_MARKET_DATA,
+    STATUS_FAILED,
+    STATUS_PARTIAL,
+    STATUS_SUCCESS,
+    TRIGGER_SCHEDULED,
+    record_job_run,
+)
 from app.core.logging import job_context
 from app import fx
 from app.db.session import SessionLocal
@@ -66,6 +75,115 @@ def _latest_success_for_exchanges(exchanges: list[str]) -> datetime | None:
     return min(value for value in latest.values() if value is not None)
 
 
+def exchange_run_status(item: dict) -> str:
+    """A job_runs status for one exchange's refresh result (#156): "failed" when
+    symbols were requested and no quote arrived (the data didn't advance)."""
+    requested = int(item.get("requested_symbols") or 0)
+    upserted = int(item.get("upserted_rows") or 0)
+    if item.get("status") == "failed" or (requested > 0 and upserted == 0):
+        return STATUS_FAILED
+    if item.get("status") == "success":
+        return STATUS_SUCCESS
+    return STATUS_PARTIAL
+
+
+def record_exchange_runs(
+    db,
+    exchange_results: list[dict],
+    *,
+    trigger: str,
+    started_at: datetime,
+    error: BaseException | None = None,
+    exchanges: list[str] | None = None,
+) -> None:
+    """One job_runs row per exchange refreshed (or, with `error`, per exchange the
+    refresh was for)."""
+    if error is not None:
+        for exchange in exchanges or []:
+            record_job_run(
+                db,
+                job=JOB_MARKET_DATA,
+                scope=f"exchange:{exchange.upper()}",
+                trigger=trigger,
+                status=STATUS_FAILED,
+                started_at=started_at,
+                error=error,
+            )
+        return
+    for item in exchange_results:
+        exchange = str(item.get("exchange_code") or "").upper()
+        if not exchange:
+            continue
+        status = exchange_run_status(item)
+        requested = int(item.get("requested_symbols") or 0)
+        upserted = int(item.get("upserted_rows") or 0)
+        missing = int(item.get("missing_symbols") or 0)
+        message = None
+        if status == STATUS_FAILED:
+            message = f"No quotes received for {requested} symbol{'s' if requested != 1 else ''}"
+        elif status == STATUS_PARTIAL:
+            message = f"{missing} of {requested} symbols missing, {int(item.get('deferred_symbols') or 0)} deferred"
+        record_job_run(
+            db,
+            job=JOB_MARKET_DATA,
+            scope=f"exchange:{exchange}",
+            trigger=trigger,
+            status=status,
+            started_at=started_at,
+            data_as_of=item.get("trade_date") if status != STATUS_FAILED else None,
+            data_advanced=upserted > 0,
+            error=message,
+            details={"requested_symbols": requested, "upserted_rows": upserted, "missing_symbols": missing},
+        )
+
+
+# Retries per window slot for an exchange whose refresh got no quotes; after
+# that the slot counts as done (the Data Hub shows the source red) so a provider
+# outage doesn't spend quota every retry interval all day (#130 4.2).
+FAILED_WINDOW_ATTEMPTS = 3
+
+
+def _exchanges_failed_since(exchanges: list[str], due: datetime) -> set[str]:
+    """Exchanges whose newest job run since `due` failed (no quote arrived), with
+    fewer than FAILED_WINDOW_ATTEMPTS failures since `due`: the window stays due
+    for them, so the retry fires (#156)."""
+    db = SessionLocal()
+    try:
+        rows = db.execute(
+            text(
+                """
+                SELECT scope, status, finished_at
+                FROM job_runs
+                WHERE job = :job AND scope IN :scopes
+                ORDER BY finished_at DESC, id DESC
+                LIMIT 200
+                """
+            ).bindparams(bindparam("scopes", expanding=True)),
+            {"job": JOB_MARKET_DATA, "scopes": [f"exchange:{e}" for e in exchanges]},
+        ).fetchall()
+    finally:
+        db.close()
+    newest: dict[str, str] = {}
+    failures_since: dict[str, int] = {}
+    for scope, status, finished_at in rows:
+        finished = coerce_utc(finished_at)
+        if finished is None or finished < due:
+            continue
+        newest.setdefault(str(scope), str(status))
+        if status == STATUS_FAILED:
+            failures_since[str(scope)] = failures_since.get(str(scope), 0) + 1
+    return {
+        exchange
+        for exchange in exchanges
+        if newest.get(f"exchange:{exchange}") == STATUS_FAILED
+        and failures_since.get(f"exchange:{exchange}", 0) < FAILED_WINDOW_ATTEMPTS
+    }
+
+
+def _window_due(exchanges: list[str], due: datetime) -> bool:
+    return run_is_due(_latest_success_for_exchanges(exchanges), due) or bool(_exchanges_failed_since(exchanges, due))
+
+
 def _window_plan(exchanges: list[str]) -> list[tuple[str, str, int, int, list[str]]]:
     """(window name, tz, hour, minute, exchanges) for every configured exchange:
     the grouped close windows, then a 00:05 local fallback for the rest."""
@@ -91,7 +209,7 @@ def _run_due_windows() -> None:
     for window_name, tz_name, hour, minute, window_exchanges in _window_plan(configured_exchanges()):
         due = most_recent_due(now, hour, minute, ZoneInfo(tz_name))
         try:
-            if not run_is_due(_latest_success_for_exchanges(window_exchanges), due):
+            if not _window_due(window_exchanges, due):
                 continue
         except Exception as exc:  # noqa: BLE001
             logger.exception("stock_refresh_last_run_check_failed", extra={"error_class": exc.__class__.__name__})
@@ -102,7 +220,7 @@ def _run_due_windows() -> None:
         succeeded = False
         try:
             _run_window(window_name, window_exchanges)
-            succeeded = not run_is_due(_latest_success_for_exchanges(window_exchanges), due)
+            succeeded = not _window_due(window_exchanges, due)
         except Exception as exc:  # noqa: BLE001
             logger.exception("stock_refresh_due_check_failed", extra={"error_class": exc.__class__.__name__})
         finally:
@@ -112,6 +230,7 @@ def _run_due_windows() -> None:
 def _run_window(window_name: str, exchanges: list[str]) -> None:
     with job_context():
         started = time.perf_counter()
+        started_at = datetime.now(tz=timezone.utc)
         db = SessionLocal()
         try:
             logger.info(
@@ -120,7 +239,8 @@ def _run_window(window_name: str, exchanges: list[str]) -> None:
             )
             result = run_all_exchanges(db, exchanges=exchanges, full_coverage=True)
             exchange_results = result.get("exchanges") or []
-            failed = [item for item in exchange_results if item.get("status") == "failed"]
+            record_exchange_runs(db, exchange_results, trigger=TRIGGER_SCHEDULED, started_at=started_at)
+            failed = [item for item in exchange_results if exchange_run_status(item) == STATUS_FAILED]
             event_name = "quote_refresh_failed" if failed else "quote_refresh_succeeded"
             level = logger.warning if failed else logger.info
             level(
@@ -137,6 +257,9 @@ def _run_window(window_name: str, exchanges: list[str]) -> None:
             )
         except Exception as exc:  # noqa: BLE001
             db.rollback()
+            record_exchange_runs(
+                db, [], trigger=TRIGGER_SCHEDULED, started_at=started_at, error=exc, exchanges=exchanges
+            )
             logger.exception(
                 "quote_refresh_failed",
                 extra={
@@ -181,9 +304,13 @@ def _run_fx_fill_if_due() -> None:
     succeeded = False
     with job_context():
         started = time.perf_counter()
+        started_at = datetime.now(tz=timezone.utc)
+        run_error: BaseException | str | None = None
         try:
             answered = fx.fill_daily()
             succeeded = not run_is_due(fx.last_fill_at(), due)
+            if not succeeded:
+                run_error = "No FX provider returned rates"
             (logger.info if succeeded else logger.warning)(
                 "fx_fill_succeeded" if succeeded else "fx_fill_failed",
                 extra={
@@ -193,9 +320,32 @@ def _run_fx_fill_if_due() -> None:
                 },
             )
         except Exception as exc:  # noqa: BLE001
+            run_error = exc
             logger.exception("fx_fill_failed", extra={"event": "fx_fill_failed", "error_class": exc.__class__.__name__})
         finally:
             _fx_retry_gate.record(now, succeeded=succeeded)
+            _record_fx_run(started_at, succeeded=succeeded, error=run_error)
+
+
+def _record_fx_run(started_at: datetime, *, succeeded: bool, error: BaseException | str | None) -> None:
+    db = SessionLocal()
+    try:
+        try:
+            data_as_of = fx.last_fill_at()
+        except Exception:  # noqa: BLE001 - the status row still records the failure
+            data_as_of = None
+        record_job_run(
+            db,
+            job=JOB_FX,
+            trigger=TRIGGER_SCHEDULED,
+            status=STATUS_SUCCESS if succeeded else STATUS_FAILED,
+            started_at=started_at,
+            data_as_of=data_as_of,
+            data_advanced=succeeded,
+            error=None if succeeded else error,
+        )
+    finally:
+        db.close()
 
 
 def start_scheduler() -> BackgroundScheduler | None:
