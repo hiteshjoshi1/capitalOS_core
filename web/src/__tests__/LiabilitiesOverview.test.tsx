@@ -240,7 +240,7 @@ describe("LiabilitiesOverview route", () => {
     renderPage();
     await screen.findByText("S$ 53,192");
 
-    expect(screen.getByText("S$ 59,739.44")).toBeInTheDocument();
+    expect(screen.getByText("S$ 59,739")).toBeInTheDocument();
     expect(screen.getByText("Not provided by issuer")).toBeInTheDocument();
   });
 

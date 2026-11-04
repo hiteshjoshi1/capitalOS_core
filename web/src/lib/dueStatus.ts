@@ -1,3 +1,5 @@
+import { formatDate } from "./format";
+
 export type DueTone = "overdue" | "warn" | "normal" | "not-synced";
 
 export type DueStatus = {
@@ -32,8 +34,9 @@ export function computeDueStatus(
   return { tone: "normal", label: `Due in ${days}d`, daysUntil: days };
 }
 
+/** `22 Jul` (the year is implied for an upcoming due date). */
 export function formatShortDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return formatDate(dateStr).replace(/ \d{4}$/, "");
 }
 
 /** Sort key: unsynced rows sort last, then soonest due date first. */

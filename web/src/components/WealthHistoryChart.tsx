@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { WealthTimeline, WealthTimelinePoint } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { computeMonthFlags, isCarriedPoint, isGapPoint } from "../lib/wealthHistoryAnalysis";
+import * as fmt from "../lib/format";
 
 export type WealthHistoryChartMode = "total" | "comp";
 
@@ -33,11 +34,7 @@ const W = 900;
 const H = 320;
 
 function monthLabel(month: string): string {
-  const [y, m] = month.split("-");
-  const year = Number(y);
-  const mon = Number(m);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", { month: "short", year: "2-digit" });
+  return fmt.formatMonth(month, "short");
 }
 
 function niceStep(range: number): number {

@@ -7,6 +7,8 @@ import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
 import SuccessBanner from "../components/SuccessBanner";
+import { formatPlatformLabel } from "../lib/platformLabels";
+import { formatEnumLabel } from "../lib/format";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -403,7 +405,7 @@ export default function AddAccount() {
                 <DirectoryListRow
                   key={a.id}
                   title={a.name}
-                  meta={`${a.platform} · ${a.account_type} · ${a.currency}`}
+                  meta={`${formatPlatformLabel(a.platform)} · ${formatEnumLabel(a.account_type)} · ${a.currency}`}
                   right={<span className="statusPill statusPill--good">Active</span>}
                 />
               ))

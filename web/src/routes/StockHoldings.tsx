@@ -5,12 +5,15 @@ import { formatPlatformLabel } from "../lib/platformLabels";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
 import "../App.css";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PriceFallbackInfo from "../components/PriceFallbackInfo";
 import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "pnl" | "percentNetWorth" | "quoteFreshness";
 
@@ -62,7 +65,7 @@ const loadVisibleStockColumns = (): Record<StockColumnKey, boolean> => {
 export default function StockHoldings() {
   const [refreshErr, setRefreshErr] = useState<string>("");
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const resource = useApiResource(resourceKey("stockHoldingsSummary", month, baseCurrency), () =>
     api.stockHoldingsSummary(month, baseCurrency),
   );
@@ -97,10 +100,12 @@ export default function StockHoldings() {
     setMonth(nextMonth);
   };
 
-  const handleBaseCurrencyChange = (nextBaseCurrency: string) => {
+  // The base currency is shared (#150): back to the first page whenever it changes.
+  const [pagedCurrency, setPagedCurrency] = useState(baseCurrency);
+  if (pagedCurrency !== baseCurrency) {
+    setPagedCurrency(baseCurrency);
     setVisibleCount(PAGE_SIZE);
-    setBaseCurrency(nextBaseCurrency);
-  };
+  }
 
   const handleColumnToggle = (key: StockColumnKey) => {
     setVisibleColumns((current) => ({
@@ -128,21 +133,12 @@ export default function StockHoldings() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = summary?.base_currency || baseCurrency;
-  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
-  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  const formatCompactMoney = (value?: number | null) =>
-    value == null
-      ? "—"
-      : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`;
-  const formatQuantity = (value?: number | null) =>
-    value == null ? "—" : value.toLocaleString(undefined, { maximumFractionDigits: 4 });
-  const formatNativeMoney = (value?: number | null, quoteCurrency?: string, maximumFractionDigits = 2) => {
-    if (value == null || !quoteCurrency) {
-      return "—";
-    }
-    return `${quoteCurrency.toUpperCase()} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-  };
+  const formatMoney = (value?: number | null, decimals = 0) => fmt.formatMoney(value, shownCurrency, { decimals });
+  const formatCompactMoney = (value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency);
+  const formatQuantity = (value?: number | null) => fmt.formatNumber(value, 4);
+  /** Prices and native P&L: 2 decimals, in the quote currency. */
+  const formatNativeMoney = (value?: number | null, quoteCurrency?: string, decimals = 2) =>
+    quoteCurrency ? fmt.formatMoney(value, quoteCurrency, { decimals }) : fmt.MISSING;
   const formatPnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
     if (
       holding.quantity == null
@@ -155,7 +151,7 @@ export default function StockHoldings() {
     const pnl = holding.quantity * (holding.latest_price - holding.avg_cost);
     const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
     return {
-      amount: `${pnl >= 0 ? "+" : "-"}${formatNativeMoney(Math.abs(pnl), holding.quote_currency)}`,
+      amount: fmt.formatSignedMoney(pnl, holding.quote_currency, { decimals: 2 }),
       pct: pnlPct,
       positive: pnl >= 0,
     };
@@ -178,7 +174,7 @@ export default function StockHoldings() {
     const pnl = holding.quantity * (holding.latest_price - holding.avg_cost) * inferredFxToBase;
     const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
     return {
-      amount: `${pnl >= 0 ? "+" : "-"}${formatMoney(Math.abs(pnl))}`,
+      amount: fmt.formatSignedMoney(pnl, shownCurrency),
       pct: pnlPct,
       positive: pnl >= 0,
     };
@@ -279,7 +275,7 @@ export default function StockHoldings() {
     if (!raw) return null;
     const parsed = new Date(raw);
     if (Number.isNaN(parsed.getTime())) return null;
-    return parsed.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    return fmt.formatDateTime(raw);
   }, [summary?.geography_performance_as_of]);
 
   return (
@@ -297,20 +293,7 @@ export default function StockHoldings() {
             Download CSV
           </button>
           <MonthControl month={month} onMonthChange={handleMonthChange} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(event) => handleBaseCurrencyChange(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       }
     >
@@ -330,7 +313,7 @@ export default function StockHoldings() {
             <div className="coHeroCardHeader">
               <p className="coHeroEyebrow">{summary?.is_live ? "CURRENT STOCK VALUE" : `STOCK VALUE — ${summary?.as_of_month ?? month}`}</p>
               <span className="muted" style={{ fontSize: "12px" }}>
-                {summary?.is_live ? `as of ${summary?.net_worth_as_of?.slice(0, 10) ?? "—"}` : "historical snapshot"}
+                {summary?.is_live ? `as of ${fmt.formatDate(summary?.net_worth_as_of)}` : "historical snapshot"}
               </span>
             </div>
             <div className="coHeroValueRow">
@@ -340,14 +323,14 @@ export default function StockHoldings() {
                 const pct = (delta / summary.stock_snapshot_total) * 100;
                 return (
                   <span className={`coChip${delta >= 0 ? " coChipPositive" : " coChipNegative"}`}>
-                    {delta >= 0 ? "+" : ""}{pct.toFixed(1)}%
+                    {fmt.formatPercent(pct, { signed: true, scale: "points" })}
                   </span>
                 );
               })() : null}
             </div>
             {summary?.stock_snapshot_total != null ? (
               <p className="coHeroFreshness">
-                vs {summary.compare_month ?? "last month"}: {formatMoney(summary.stock_snapshot_total)}
+                vs {summary.compare_month ? fmt.formatMonth(summary.compare_month, "medium") : "last month"}: {formatMoney(summary.stock_snapshot_total)}
                 {summary.quote_freshness_summary ? ` · ${summary.quote_freshness_summary.fresh} fresh · ${summary.quote_freshness_summary.stale} stale` : ""}
               </p>
             ) : null}
@@ -409,11 +392,10 @@ export default function StockHoldings() {
                         <strong
                           className={`coHoldingValue ${item.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                         >
-                          {item.delta_abs >= 0 ? "+" : "-"}
-                          {formatMoney(Math.abs(item.delta_abs))}
+                          {fmt.formatSignedMoney(item.delta_abs, shownCurrency)}
                         </strong>
                         <span className="coHoldingPct">
-                          {item.delta_pct == null ? "—" : `${item.delta_pct >= 0 ? "+" : ""}${(item.delta_pct * 100).toFixed(1)}%`}
+                          {fmt.formatPercent(item.delta_pct, { signed: true })}
                         </span>
                       </div>
                     </div>
@@ -514,11 +496,11 @@ export default function StockHoldings() {
                           )}
                           <div className="stockHoldingsMobileValueBlock">
                             <strong>{formatMoney(h.value)}</strong>
-                            <span>{h.percent_of_networth.toFixed(1)}% NW</span>
+                            <span>{fmt.formatPercent(h.percent_of_networth, { scale: "points" })} NW</span>
                           </div>
                           <div className={`stockHoldingsMobilePnlBlock ${mobilePnl.positive ? "good" : "bad"}`}>
                             <strong>{mobilePnl.amount}</strong>
-                            {mobilePnl.pct == null ? null : <span>{mobilePnl.pct >= 0 ? "+" : ""}{mobilePnl.pct.toFixed(1)}%</span>}
+                            {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
                           </div>
                         </div>
                       </article>
@@ -551,7 +533,7 @@ export default function StockHoldings() {
                               <div className="stockHoldingsAssetCell">
                                 <div className="stockHoldingsSymbol">{h.symbol}</div>
                                 <div className="stockHoldingsAssetMeta">
-                                  <span>{h.platform ?? "—"}</span>
+                                  <span>{h.platform ? formatPlatformLabel(h.platform) : "—"}</span>
                                   <span>{h.geo ?? "—"}</span>
                                 </div>
                               </div>
@@ -573,12 +555,12 @@ export default function StockHoldings() {
                             {visibleColumns.pnl && (
                               <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`}>
                                 <div>{pnl.amount}</div>
-                                {pnl.pct == null ? null : <small>{pnl.pct >= 0 ? "+" : ""}{pnl.pct.toFixed(1)}%</small>}
+                                {pnl.pct == null ? null : <small>{fmt.formatPercent(pnl.pct, { signed: true, scale: "points" })}</small>}
                               </td>
                             )}
                             {visibleColumns.percentNetWorth && (
                               <td className="right stockHoldingsPercentCell">
-                                <div>{h.percent_of_networth.toFixed(1)}%</div>
+                                <div>{fmt.formatPercent(h.percent_of_networth, { scale: "points" })}</div>
                                 <small>{formatMoney(h.value)}</small>
                               </td>
                             )}
@@ -586,7 +568,7 @@ export default function StockHoldings() {
                               <td>
                                 <div>{h.quote_freshness_status ?? "missing"}</div>
                                 <small className="muted">
-                                  {h.latest_trade_date?.slice(0, 10) ?? "—"}
+                                  {fmt.formatDate(h.latest_trade_date)}
                                   {h.price_provider ? ` · ${h.price_provider}` : ""}
                                 </small>
                               </td>

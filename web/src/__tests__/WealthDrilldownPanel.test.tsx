@@ -103,7 +103,7 @@ describe("WealthDrilldownPanel", () => {
 
   it("shows a negative delta without a leading plus sign", async () => {
     renderPanel({ flags: { ...baseFlags, delta: -50 } });
-    expect(await screen.findByText("S$ -50")).toBeInTheDocument();
+    expect(await screen.findByText("-S$ 50")).toBeInTheDocument();
   });
 
   it("shows the outlier banner attributing the dominant component", async () => {

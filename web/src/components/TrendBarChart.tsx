@@ -1,3 +1,4 @@
+import * as fmt from "../lib/format";
 type TrendBarPoint = {
   /** "YYYY-MM" — formatted to "Mon 'YY" for display */
   month: string;
@@ -12,14 +13,7 @@ type TrendBarChartProps = {
 };
 
 function formatTrendMonth(month: string): string {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  const date = new Date(year, monthIndex, 1);
-  return `${date.toLocaleString(undefined, { month: "short" })} '${String(year).slice(-2)}`;
+  return fmt.formatMonth(month, "short");
 }
 
 export default function TrendBarChart({ points, ariaLabel }: TrendBarChartProps) {

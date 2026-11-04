@@ -186,3 +186,24 @@ describe("CashOverview races", () => {
     expect(screen.queryByText("S$ 40,000")).not.toBeInTheDocument();
   });
 });
+
+// #150: the base currency is shared, so a choice made on another page applies here.
+describe("CashOverview shared currency", () => {
+  it("loads in the currency chosen elsewhere, and formats deltas with the shared rules", async () => {
+    window.localStorage.setItem("capitalos.baseCurrency", "USD");
+    mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+    mockApi.cashDeposits.mockResolvedValue({ ...cashDepositsFixture, base_currency: "USD" });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    expect((await screen.findAllByText("USD 40,000")).length).toBeGreaterThan(0);
+    expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
+    expect(screen.getByLabelText("Base currency")).toHaveValue("USD");
+    // Currency rows: "<amount> (<signed delta>)", sign before the prefix.
+    expect(screen.getByText("USD 25,000 (+USD 3,000)")).toBeInTheDocument();
+  });
+});

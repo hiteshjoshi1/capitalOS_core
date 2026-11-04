@@ -14,7 +14,8 @@
   --alloc-crypto: #c084fc;
   --good: #4ade80;
   --bad: oklch(68% 0.15 25);
-  --trend-negative: #60a5fa;
+  /* #150: "down" is one colour everywhere (#131: blue in the hero, red in the pill). */
+  --trend-negative: var(--bad);
   --warn: #f7c97b;
   --shadow: rgba(0, 0, 0, 0.5);
   --surface-glow: rgba(255, 255, 255, 0.03);
@@ -43,7 +44,7 @@
   --alloc-crypto: #8650d9;
   --good: #1e6b47;
   --bad: #b55d2d;
-  --trend-negative: #2b6ddb;
+  --trend-negative: var(--bad);
   --warn: #b55d2d;
   --shadow: rgba(31, 36, 33, 0.06);
   --surface-glow: rgba(15, 122, 92, 0.04);

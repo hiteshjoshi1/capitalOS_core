@@ -7,21 +7,13 @@ import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
+import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
-
-// Palette used for donut segments, matching the HTML design reference
-const DONUT_COLORS = [
-  "oklch(0.58 0.16 260)",
-  "oklch(0.55 0.13 160)",
-  "oklch(0.7 0.15 70)",
-  "oklch(0.55 0.18 320)",
-  "oklch(0.62 0.18 20)",
-  "oklch(0.62 0.13 190)",
-  "oklch(0.75 0.13 100)",
-  "oklch(0.58 0.14 290)",
-];
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
@@ -33,42 +25,10 @@ const DAILY_SOURCE_FRESH_DAYS = 3;
 // still counts as "fresh" for that kind of source.
 const MANUAL_SOURCE_FRESH_DAYS = 31;
 
-function buildConicGradient(items: { percent: number }[]): string {
-  let offset = 0;
-  const parts = items.map((item, idx) => {
-    const next = offset + Math.max(0, item.percent);
-    const color = DONUT_COLORS[idx % DONUT_COLORS.length];
-    const part = `${color} ${offset.toFixed(2)}% ${next.toFixed(2)}%`;
-    offset = next;
-    return part;
-  });
-  if (offset < 100) {
-    parts.push(
-      `color-mix(in srgb, var(--line) 60%, transparent 40%) ${offset.toFixed(2)}% 100%`,
-    );
-  }
-  return `conic-gradient(${parts.join(", ")})`;
-}
-
 /** Formats amounts in `currency`: each panel passes the currency its own data is in, so a
  * panel still showing the previous currency (while a switch loads, #148) keeps its label. */
 function moneyFormatter(currency: string) {
-  const prefix = currencyPrefixFor(currency);
-  return (value?: number | null, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${prefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
-}
-
-function currencyPrefixFor(currency: string): string {
-  return currency === "SGD" ? "S$" : currency;
-}
-
-function formatMoneyShort(prefix: string, value?: number | null): string {
-  if (value == null) return "—";
-  const abs = Math.abs(value);
-  const sign = value < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}${prefix} ${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${sign}${prefix} ${(abs / 1_000).toFixed(0)}K`;
-  return `${sign}${prefix} ${abs.toLocaleString()}`;
+  return (value?: number | null) => fmt.formatMoney(value, currency);
 }
 
 function ageInDays(iso?: string | null): number | null {
@@ -83,7 +43,7 @@ function formatChipAsOf(iso?: string | null): string {
   if (days == null) return "no data";
   if (days === 0) return "today";
   if (days === 1) return "yesterday";
-  const label = new Date(iso as string).toLocaleString("en", { day: "numeric", month: "short" });
+  const label = fmt.formatDate(iso).replace(/ \d{4}$/, "");
   return `${label} · ${days}d`;
 }
 
@@ -142,7 +102,7 @@ export default function WealthOverview() {
   // no month selector here (see Wealth Timeline Phase 1 plan for why).
   const month = useMemo(() => currentMonthYYYYMM(), []);
 
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
   const [holdingsView, setHoldingsView] = useState<"holdings" | "movers" | "today">("holdings");
 
@@ -204,9 +164,10 @@ export default function WealthOverview() {
   }, []);
 
   const formatMoney = moneyFormatter(bootstrap?.base_currency || selectedBaseCurrency);
-  const formatSummaryMoney = moneyFormatter(summary?.base_currency || selectedBaseCurrency);
+  const summaryCurrency = summary?.base_currency || selectedBaseCurrency;
+  const sinceUpdateCurrency = sinceUpdate?.base_currency || selectedBaseCurrency;
+  const formatSummaryMoney = moneyFormatter(summaryCurrency);
   const formatSpendingMoney = moneyFormatter(spendingSummary?.base_currency || selectedBaseCurrency);
-  const formatSinceMoney = moneyFormatter(sinceUpdate?.base_currency || selectedBaseCurrency);
   const platformCurrency = platformRes.data?.currency || selectedBaseCurrency;
   const formatPlatformMoney = moneyFormatter(platformCurrency);
 
@@ -253,9 +214,7 @@ export default function WealthOverview() {
 
   const activeAllocItems = allocView === "platform" ? platformItems : assetClassItems;
   const formatAllocMoney = allocView === "platform" ? formatPlatformMoney : formatMoney;
-  const allocCurrencyPrefix = currencyPrefixFor(
-    allocView === "platform" ? platformCurrency : bootstrap?.base_currency || selectedBaseCurrency,
-  );
+  const allocCurrency = allocView === "platform" ? platformCurrency : bootstrap?.base_currency || selectedBaseCurrency;
   const allocTotal =
     allocView === "platform"
       ? (platformAllocation?.total ?? 0)
@@ -275,20 +234,7 @@ export default function WealthOverview() {
       title="Wealth Overview"
       subtitle="Portfolio composition and the most important balance-sheet signals."
       headerActions={
-        <label className="coPillBtn">
-          <span aria-hidden="true">{selectedBaseCurrency}</span>
-          <select
-            className="coPillBtnInput"
-            aria-label="Base currency"
-            value={selectedBaseCurrency}
-            onChange={(event) => setBaseCurrency(event.target.value)}
-          >
-            <option value="SGD">SGD</option>
-            <option value="USD">USD</option>
-            <option value="HKD">HKD</option>
-            <option value="INR">INR</option>
-          </select>
-        </label>
+        <BaseCurrencyPicker />
       }
     >
       {bootstrapRes.isLoading ? (
@@ -313,15 +259,12 @@ export default function WealthOverview() {
               <p className="coHeroEyebrow">CURRENT NET WORTH</p>
             </div>
             <div className="coHeroValueRow">
-              <span className="coHeroValue">{formatMoney(currentNetWorth?.total, 2)}</span>
+              <span className="coHeroValue">{formatMoney(currentNetWorth?.total)}</span>
               {prevMonthChange ? (
                 <span
                   className={`coChip${prevMonthChange.abs >= 0 ? " coChipPositive" : " coChipNegative"}`}
                 >
-                  {prevMonthChange.abs >= 0 ? "+" : "-"}
-                  {prevMonthChange.pct == null
-                    ? "—"
-                    : `${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%`}
+                  {fmt.formatPercent(prevMonthChange.pct, { signed: true })}
                 </span>
               ) : null}
             </div>
@@ -333,7 +276,7 @@ export default function WealthOverview() {
             </div>
 
             {currentNetWorthAsOf ? (
-              <p className="coHeroFreshness">As of {currentNetWorthAsOf.slice(0, 10)}</p>
+              <p className="coHeroFreshness">As of {fmt.formatDate(currentNetWorthAsOf)}</p>
             ) : null}
             <FxNote sources={[bootstrap, summary]} />
 
@@ -348,11 +291,7 @@ export default function WealthOverview() {
                       sinceUpdate.net_worth_change.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
                     }
                   >
-                    {sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}
-                    {formatSinceMoney(Math.abs(sinceUpdate.net_worth_change.abs))}
-                    {sinceUpdate.net_worth_change.pct != null
-                      ? ` (${sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}${Math.abs(sinceUpdate.net_worth_change.pct * 100).toFixed(1)}%)`
-                      : ""}
+                    {fmt.formatDelta(sinceUpdate.net_worth_change.abs, sinceUpdate.net_worth_change.pct, sinceUpdateCurrency)}
                   </strong>
                 </div>
               ) : sinceUpdateRes.isLoading ? (
@@ -369,11 +308,7 @@ export default function WealthOverview() {
                       prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
                     }
                   >
-                    {prevMonthChange.abs >= 0 ? "+" : "-"}
-                    {formatSummaryMoney(Math.abs(prevMonthChange.abs))}
-                    {prevMonthChange.pct != null
-                      ? ` (${prevMonthChange.abs >= 0 ? "+" : "-"}${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%)`
-                      : ""}
+                    {fmt.formatDelta(prevMonthChange.abs, prevMonthChange.pct, summaryCurrency)}
                   </strong>
                 </div>
               ) : summaryRes.isLoading ? (
@@ -390,8 +325,7 @@ export default function WealthOverview() {
                       prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
                     }
                   >
-                    {prevYearChange.abs >= 0 ? "+" : ""}
-                    {formatSummaryMoney(prevYearChange.abs)}
+                    {fmt.formatSignedMoney(prevYearChange.abs, summaryCurrency)}
                   </strong>
                 </div>
               ) : null}
@@ -434,13 +368,13 @@ export default function WealthOverview() {
               <div className="coAllocationCard">
                 <div
                   className="coAllocationDonut"
-                  style={{ background: buildConicGradient(activeAllocItems) }}
+                  style={{ background: donutGradient(activeAllocItems.map((item) => item.percent)) }}
                   aria-label="Allocation donut chart"
                 >
                   <div className="coAllocationInner">
                     <span className="coAllocationTotalLabel">TOTAL</span>
                     <strong className="coAllocationTotalValue">
-                      {formatMoneyShort(allocCurrencyPrefix, allocTotal)}
+                      {fmt.formatMoneyCompact(allocTotal, allocCurrency)}
                     </strong>
                   </div>
                 </div>
@@ -451,14 +385,14 @@ export default function WealthOverview() {
                       <div className="coAllocationRowLeft">
                         <span
                           className="coAllocationDot"
-                          style={{ background: DONUT_COLORS[idx % DONUT_COLORS.length] }}
+                          style={{ background: chartColor(idx) }}
                           aria-hidden="true"
                         />
                         <span className="coAllocationName">{item.label}</span>
                       </div>
                       <div className="coAllocationRowRight">
                         <span className="coAllocationValue">{formatAllocMoney(item.value)}</span>
-                        <strong className="coAllocationPct">{item.percent.toFixed(1)}%</strong>
+                        <strong className="coAllocationPct">{fmt.formatPercent(item.percent, { scale: "points" })}</strong>
                       </div>
                     </div>
                   ))}
@@ -488,7 +422,7 @@ export default function WealthOverview() {
                     <p className="coSignalValue">{formatSpendingMoney(spendingSummary?.net)}</p>
                     <p className="coSignalMeta">
                       {spendingSummary
-                        ? `Income ${formatSpendingMoney(spendingSummary.income_total)} · Expenses ${formatSpendingMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
+                        ? `Income ${formatSpendingMoney(spendingSummary.income_total)} · Expenses ${formatSpendingMoney(spendingSummary.expense_total)} · Saved ${fmt.formatPercent(spendingSummary.savings_rate)}`
                         : "—"}
                     </p>
                     <FxNote sources={[spendingSummary]} />
@@ -551,7 +485,7 @@ export default function WealthOverview() {
                         <div className="coHoldingRight">
                           <strong className="coHoldingValue">{formatSummaryMoney(h.value)}</strong>
                           <span className="coHoldingPct">
-                            {h.percent_of_networth.toFixed(1)}%
+                            {fmt.formatPercent(h.percent_of_networth, { scale: "points" })}
                           </span>
                         </div>
                       </div>
@@ -577,13 +511,12 @@ export default function WealthOverview() {
                           <strong
                             className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                           >
-                            {row.delta_abs >= 0 ? "+" : "-"}
-                            {formatSummaryMoney(Math.abs(row.delta_abs))}
+                            {fmt.formatSignedMoney(row.delta_abs, summaryCurrency)}
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
                               ? `vs ${row.compare_month}`
-                              : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                              : fmt.formatPercent(row.delta_pct, { signed: true })}
                           </span>
                         </div>
                       </div>
@@ -614,13 +547,12 @@ export default function WealthOverview() {
                           <strong
                             className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                           >
-                            {row.delta_abs >= 0 ? "+" : "-"}
-                            {formatSinceMoney(Math.abs(row.delta_abs))}
+                            {fmt.formatSignedMoney(row.delta_abs, sinceUpdateCurrency)}
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
                               ? "—"
-                              : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                              : fmt.formatPercent(row.delta_pct, { signed: true })}
                           </span>
                         </div>
                       </div>

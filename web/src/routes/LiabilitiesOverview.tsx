@@ -4,6 +4,8 @@ import type { CreditCardTransaction } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
+import { chartColor } from "../lib/chartColors";
 import { computeDueStatus, dueSortValue, formatShortDate } from "../lib/dueStatus";
 import type { DueStatus } from "../lib/dueStatus";
 import "../App.css";
@@ -14,6 +16,8 @@ import FxNote from "../components/FxNote";
 import DueStatusPill from "../components/DueStatusPill";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 type UpcomingRow = {
   key: string;
@@ -24,21 +28,10 @@ type UpcomingRow = {
   sortValue: number;
 };
 
-const CARD_COLORS = [
-  "#4f8cff",
-  "#1fb981",
-  "#f59f43",
-  "#7d67ff",
-  "#ef6ca8",
-  "#2ebac6",
-  "#8f9db2",
-  "#b7a08a",
-];
-
 const NOTABLE_THRESHOLD = 50;
 
 function cardColor(index: number): string {
-  return CARD_COLORS[index % CARD_COLORS.length];
+  return chartColor(index);
 }
 
 function cardGradient(index: number): string {
@@ -47,11 +40,7 @@ function cardGradient(index: number): string {
 }
 
 function monthLabel(month: string): string {
-  const [y, m] = month.split("-");
-  const year = Number(y);
-  const mon = Number(m);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", { month: "long", year: "numeric" });
+  return fmt.formatMonth(month);
 }
 
 function csvEscape(value: string): string {
@@ -90,7 +79,7 @@ function downloadCsv(filename: string, csv: string) {
 
 export default function LiabilitiesOverview() {
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
   // #148: the account list doesn't depend on month, currency or card filter, so it has
@@ -105,22 +94,11 @@ export default function LiabilitiesOverview() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = data?.base_currency || baseCurrency;
-  const currencyPrefix = shownCurrency === "SGD" ? "S$" : shownCurrency;
   const formatMoney = useCallback(
-    (value?: number | null, maximumFractionDigits = 0) =>
-      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
-    [currencyPrefix],
+    (value?: number | null, decimals = 0) => fmt.formatMoney(value, shownCurrency, { decimals }),
+    [shownCurrency],
   );
-  const formatMoneyShort = useCallback(
-    (value?: number | null) => {
-      if (value == null) return "—";
-      const abs = Math.abs(value);
-      if (abs >= 1_000_000) return `${currencyPrefix} ${(abs / 1_000_000).toFixed(1)}M`;
-      if (abs >= 1_000) return `${currencyPrefix} ${(abs / 1_000).toFixed(0)}K`;
-      return `${currencyPrefix} ${abs.toFixed(0)}`;
-    },
-    [currencyPrefix],
-  );
+  const formatMoneyShort = useCallback((value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency), [shownCurrency]);
 
   const selectedCard = useMemo(
     () => (selectedAccountId != null ? data?.cards.find((c) => c.account_id === selectedAccountId) : null),
@@ -183,20 +161,7 @@ export default function LiabilitiesOverview() {
       headerActions={
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-            <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       }
     >
@@ -261,7 +226,7 @@ export default function LiabilitiesOverview() {
             <section className="ccHeroGrid">
               <HeroMetricCard
                 eyebrow={`Spent in ${monthLabel(data.month)}`}
-                value={formatMoney(data.total_spend, 2)}
+                value={formatMoney(data.total_spend)}
                 deltaChip={
                   delta != null
                     ? {
@@ -276,7 +241,7 @@ export default function LiabilitiesOverview() {
               />
               <article className="card cashFlowKpiCard">
                 <p className="wealthEyebrow">Card charges</p>
-                <p className={`cashFlowKpiValue${data.charge_total > 0 ? " bad" : ""}`}>{formatMoney(data.charge_total, 2)}</p>
+                <p className={`cashFlowKpiValue${data.charge_total > 0 ? " bad" : ""}`}>{formatMoney(data.charge_total)}</p>
                 <p className="muted">Fees, interest and tax — review below</p>
               </article>
               <article className="card cashFlowKpiCard">
@@ -284,7 +249,7 @@ export default function LiabilitiesOverview() {
                 <p className="cashFlowKpiValue">{largestCategory ? largestCategory.label : "—"}</p>
                 <p className="muted">
                   {largestCategory
-                    ? `${formatMoney(largestCategory.amount)} · ${(largestCategory.percent * 100).toFixed(1)}% of purchase spend`
+                    ? `${formatMoney(largestCategory.amount)} · ${fmt.formatPercent(largestCategory.percent)} of purchase spend`
                     : "No purchases yet this month"}
                 </p>
               </article>
@@ -298,7 +263,7 @@ export default function LiabilitiesOverview() {
                   </div>
                   <div className="ccChargeAlertMeta">Annual fees, finance charges and tax included in this month's spend.</div>
                 </div>
-                <div className="ccChargeAlertAmount">{formatMoney(data.charge_total, 2)}</div>
+                <div className="ccChargeAlertAmount">{formatMoney(data.charge_total)}</div>
               </section>
             ) : (
               <section className="card">
@@ -318,14 +283,14 @@ export default function LiabilitiesOverview() {
                   </div>
                   <div className="ccCardTileFooter">
                     <div>
-                      <div className="ccCardTileSpend">{formatMoney(card.spend, 2)}</div>
+                      <div className="ccCardTileSpend">{formatMoney(card.spend)}</div>
                       <div className="ccCardTileSub">spent this month</div>
                     </div>
                     <div className="ccCardTileAvailable">
                       Available credit
                       {card.available_limit != null && card.available_limit_as_of != null ? (
                         <>
-                          <strong>{formatMoney(card.available_limit, 2)}</strong>
+                          <strong>{formatMoney(card.available_limit)}</strong>
                           <span>as of {card.available_limit_as_of.slice(0, 10)}</span>
                         </>
                       ) : (
@@ -576,7 +541,7 @@ export default function LiabilitiesOverview() {
                           <td>
                             <span className="tag">{tx.resolved_category || tx.category || "Uncategorized"}</span>
                           </td>
-                          <td>{tx.type}</td>
+                          <td>{fmt.formatEnumLabel(tx.type)}</td>
                           <td className={`right${tx.type !== "EXPENSE" ? " bad" : ""}`}>{formatMoney(Math.abs(tx.amount), 2)}</td>
                         </tr>
                       ))}

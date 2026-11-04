@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
 import {
   buildTopNDistribution,
   computeLargestPositionRisk,
@@ -20,10 +21,12 @@ import GeographyPieCard from "../components/dashboard/GeographyPieCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import SegmentedToggle from "../components/SegmentedToggle";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 export default function WealthRisk() {
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
   // #148: the summary resource is the same key Wealth Overview reads, so moving between
   // the two pages reuses one cached response (and revalidates it in the background).
@@ -41,9 +44,7 @@ export default function WealthRisk() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = summary?.base_currency || selectedBaseCurrency;
-  const currencyPrefix = shownCurrency === "SGD" ? "S$" : shownCurrency;
-  const formatMoney = (value?: number, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatMoney = (value?: number | null) => fmt.formatMoney(value, shownCurrency);
 
   const netWorthTotal = summary?.net_worth.total ?? 0;
   const cashPct = netWorthTotal ? ((summary?.net_worth.cash ?? 0) / netWorthTotal) * 100 : 0;
@@ -61,20 +62,7 @@ export default function WealthRisk() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{selectedBaseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={selectedBaseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
@@ -91,7 +79,7 @@ export default function WealthRisk() {
           <section className="grid g-mid">
             <div className="card">
               <h2>Cash buffer</h2>
-              <div className="big small">{cashPct.toFixed(1)}%</div>
+              <div className="big small">{fmt.formatPercent(cashPct, { scale: "points" })}</div>
               <div className="muted">{formatMoney(summary?.net_worth.cash)} of {formatMoney(netWorthTotal)} net worth</div>
             </div>
 

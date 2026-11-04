@@ -1,6 +1,7 @@
 import { useRef } from "react";
 
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
+import { formatMonth } from "../lib/format";
 
 type MonthControlProps = {
   month: string;
@@ -8,14 +9,7 @@ type MonthControlProps = {
 };
 
 function formatMonthLabel(month: string): string {
-  const [yearStr, monStr] = month.split("-");
-  const year = Number(yearStr);
-  const mon = Number(monStr);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", {
-    month: "long",
-    year: "numeric",
-  });
+  return formatMonth(month);
 }
 
 export default function MonthControl({ month, onMonthChange }: MonthControlProps) {

@@ -8,6 +8,9 @@ import WealthAttributionStrip from "../components/WealthAttributionStrip";
 import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
 import { computeMonthFlags, isGapPoint } from "../lib/wealthHistoryAnalysis";
 import "../App.css";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import * as fmt from "../lib/format";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -29,22 +32,17 @@ function shiftMonth(month: string, delta: number): string {
 }
 
 function currentMonth(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return fmt.currentMonth();
 }
 
 function monthLabel(month: string): string {
-  const [y, m] = month.split("-");
-  const year = Number(y);
-  const mon = Number(m);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", { month: "short", year: "2-digit" });
+  return fmt.formatMonth(month, "short");
 }
 
 export default function WealthHistory() {
   const [range, setRange] = useState<number>(24);
   const [mode, setMode] = useState<WealthHistoryChartMode>("total");
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
 
   // Everything starts loading: the fetch effects below only set state once a response arrives.
   const [timelineState, setTimelineState] = useState<LoadState>("loading");
@@ -134,23 +132,11 @@ export default function WealthHistory() {
     }
   }, [range, baseCurrency]);
 
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : baseCurrency;
   const formatMoney = useCallback(
-    (value?: number | null, maximumFractionDigits = 0) =>
-      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
-    [currencyPrefix],
+    (value?: number | null, decimals = 0) => fmt.formatMoney(value, baseCurrency, { decimals }),
+    [baseCurrency],
   );
-  const formatMoneyShort = useCallback(
-    (value?: number | null) => {
-      if (value == null) return "—";
-      const abs = Math.abs(value);
-      const sign = value < 0 ? "-" : "";
-      if (abs >= 1_000_000) return `${sign}${currencyPrefix} ${(abs / 1_000_000).toFixed(1)}M`;
-      if (abs >= 1_000) return `${sign}${currencyPrefix} ${(abs / 1_000).toFixed(0)}K`;
-      return `${sign}${currencyPrefix} ${abs.toFixed(0)}`;
-    },
-    [currencyPrefix],
-  );
+  const formatMoneyShort = useCallback((value?: number | null) => fmt.formatMoneyCompact(value, baseCurrency), [baseCurrency]);
 
   const hasAnyData = useMemo(() => (timeline ? timeline.points.some((p) => !isGapPoint(p)) : false), [timeline]);
 
@@ -184,20 +170,7 @@ export default function WealthHistory() {
       title="History"
       subtitle="How your wealth evolved — and why. Carried data is shown dashed; gaps stay gaps."
       headerActions={
-        <label className="coPillBtn">
-          <span aria-hidden="true">{baseCurrency}</span>
-          <select
-            className="coPillBtnInput"
-            aria-label="Base currency"
-            value={baseCurrency}
-            onChange={(event) => setBaseCurrency(event.target.value)}
-          >
-            <option value="SGD">SGD</option>
-            <option value="USD">USD</option>
-            <option value="HKD">HKD</option>
-            <option value="INR">INR</option>
-          </select>
-        </label>
+        <BaseCurrencyPicker />
       }
     >
       <div className="whFilters">

@@ -1,3 +1,4 @@
+import * as fmt from "../lib/format";
 type ValueTrendPoint = {
   month: string;
   value?: number | null;
@@ -10,16 +11,7 @@ type ValueTrendChartProps = {
   formatCompactMoney: (value?: number | null) => string;
 };
 
-const formatTrendMonth = (month: string) => {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  const date = new Date(year, monthIndex, 1);
-  return `${date.toLocaleString(undefined, { month: "short" })} '${String(year).slice(-2)}`;
-};
+const formatTrendMonth = (month: string) => fmt.formatMonth(month, "short");
 
 export default function ValueTrendChart({
   points,

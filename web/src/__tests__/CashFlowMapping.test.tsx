@@ -105,7 +105,7 @@ describe("CashFlowMapping route", () => {
     expect(await screen.findByText("3 transactions across 2 merchants still need a category")).toBeInTheDocument();
     expect(screen.getByText("NTUC FairPrice")).toBeInTheDocument();
     expect(screen.getByText("Grab")).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === "2 transactions · S$ 42.5")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "2 transactions · S$ 42.50")).toBeInTheDocument();
   });
 
   it("shows loading state while category and queue data are still in flight", async () => {
