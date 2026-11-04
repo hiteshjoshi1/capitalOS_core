@@ -5,8 +5,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-import app.routers.dashboard as dashboard_router
-from app.routers.dashboard import _display_source, _infer_country, _anchor_ts, _networth_components, _parse_month
+from app.valuation import clock as valuation_clock
+from app.valuation.clock import _anchor_ts, _parse_month
+from app.valuation.facts import _display_source, _networth_components
+from app.valuation.holdings import _infer_country
 from tests.canonical_test_helpers import (
     seed_canonical_account_balance_for_test,
     seed_canonical_position_snapshot_for_test,
@@ -35,9 +37,9 @@ def test_current_anchor_uses_configured_local_timezone(monkeypatch):
             return utc_now.astimezone(tz) if tz else utc_now.replace(tzinfo=None)
 
     monkeypatch.setenv("TZ", "Asia/Singapore")
-    monkeypatch.setattr(dashboard_router, "datetime", FixedDateTime)
+    monkeypatch.setattr(valuation_clock, "datetime", FixedDateTime)
 
-    anchor = dashboard_router._current_anchor_ts()
+    anchor = valuation_clock._current_anchor_ts()
 
     assert anchor.isoformat() == "2026-07-05T02:30:00+08:00"
 
@@ -214,7 +216,7 @@ def test_canonical_net_worth_ignores_legacy_position_roll_forward(db_engine, mon
             )
         )
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_args, **_kwargs: {"SGD": 1.0, "USD": 1.0})
 
     db = Session(bind=db_engine)
     try:
@@ -263,7 +265,7 @@ def test_net_worth_includes_dbs_credit_card_liability_once(db_engine, monkeypatc
         balance_base=-260.56,
         balance_type="credit_balance",
     )
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_args, **_kwargs: {"SGD": 1.0, "USD": 1.0})
 
     with db_engine.connect() as conn:
         expected_liability = float(
@@ -319,7 +321,7 @@ def test_stock_holdings_summary_follows_selected_month_not_always_current(
     # Month boundaries: April's own anchor is May 1; March's is April 1.
     as_of_april_boundary = datetime(2026, 4, 1, tzinfo=timezone.utc)
     as_of_may_boundary = datetime(2026, 5, 1, tzinfo=timezone.utc)
-    monkeypatch.setattr("app.routers.dashboard._quote_age_days", lambda _trade_date: 1)
+    monkeypatch.setattr("app.valuation.prices._quote_age_days", lambda _trade_date: 1)
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -372,7 +374,7 @@ def test_stock_holdings_summary_follows_selected_month_not_always_current(
         currency="HKD", platform_code="IBKR",
     )
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_args, **_kwargs: {"USD": 1.0, "HKD": 1.0})
 
     resp = client.get("/dashboard/stock-holdings?month=2026-04&base_currency=USD")
     assert resp.status_code == 200
@@ -417,7 +419,7 @@ def test_stock_holdings_summary_is_live_for_current_month(client: TestClient, se
         def now(cls, tz=None):
             return fixed_now.astimezone(tz) if tz else fixed_now.replace(tzinfo=None)
 
-    monkeypatch.setattr("app.routers.dashboard.datetime", FixedDateTime)
+    monkeypatch.setattr("app.valuation.clock.datetime", FixedDateTime)
 
     resp = client.get("/dashboard/stock-holdings?month=2026-07&base_currency=SGD")
     assert resp.status_code == 200
@@ -488,7 +490,7 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     dashboard_resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert dashboard_resp.status_code == 200
@@ -570,7 +572,7 @@ def test_dashboard_eth_derivative_grouping(client: TestClient, db_engine, monkey
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert resp.status_code == 200
@@ -626,7 +628,7 @@ def test_dashboard_crypto_fallback_join_does_not_double_count_duplicate_assets(
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert resp.status_code == 200
@@ -801,9 +803,9 @@ def test_platform_allocation_uses_current_holdings_with_latest_price(client: Tes
     )
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 6, 15, tzinfo=timezone.utc),
     )
 
@@ -821,7 +823,7 @@ def test_dashboard_geography_exposure_breakdown_maps_crypto_to_us(client: TestCl
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -889,11 +891,11 @@ def test_dashboard_geography_exposure_uses_requested_month_snapshot(client: Test
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 7, 15, tzinfo=timezone.utc),
     )
     monkeypatch.setattr(
-        "app.routers.dashboard.get_rates",
+        "app.valuation.fx.get_rates",
         lambda _date, _base, symbols: {symbol: 1.0 for symbol in symbols},
     )
 
@@ -983,7 +985,7 @@ def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: T
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -1071,7 +1073,7 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
         balance_type="broker_cash",
     )
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _date, _base, symbols: {"SGD": 1.0, "USD": 1.5})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda _date, _base, symbols: {"SGD": 1.0, "USD": 1.5})
 
     # month=2026-05 is a past month; its own boundary (June 1) picks up the June-dated
     # balances as "current", and April's boundary (May 1) as the "vs last month" compare.
@@ -1156,7 +1158,7 @@ def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClien
             rates["USD"] = 1.5
         return rates
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -1208,7 +1210,7 @@ def test_dashboard_cash_deposits_converts_non_sgd_cash_positions(client: TestCli
         assert symbols == {"USD"}
         return {"USD": 1.5}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -1293,7 +1295,7 @@ def test_dashboard_geography_exposure_maps_sgd_cash_to_sg_when_home_country_miss
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -1358,7 +1360,7 @@ def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monk
         assert base == "SGD"
         return {"SGD": 1.0, "INR": 0.01, "USD": 1.5}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -1416,7 +1418,7 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
         assert base == "USD"
         return {"USD": 1.0}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert resp.status_code == 200
@@ -1493,7 +1495,7 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
         assert base == "HKD"
         return {"HKD": 1.0}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=HKD")
     assert resp.status_code == 200
@@ -1577,7 +1579,7 @@ def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client:
         assert base == "USD"
         return {"USD": 1.0}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert resp.status_code == 200
@@ -1629,7 +1631,7 @@ def test_dashboard_fallback_join_multiple_crypto_assets_no_doublecount(client: T
     def fake_rates(_date, _base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=USD")
     assert resp.status_code == 200
@@ -1717,7 +1719,7 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/bootstrap?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -1748,7 +1750,7 @@ def test_dashboard_summary_skip_networth(client: TestClient, seed_dashboard_data
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&skip_networth=true")
     assert resp.status_code == 200
@@ -1781,7 +1783,7 @@ def test_dashboard_summary_snapshot_day_returned(client: TestClient, seed_dashbo
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02")
     assert resp.status_code == 200
@@ -1793,7 +1795,7 @@ def test_dashboard_summary_snapshot_day_drives_next_month_anchor(client: TestCli
     def fake_rates(_date, _base, symbols):
         return {s: 1.0 for s in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setenv("SNAPSHOT_DAY", "6")
 
     resp = client.get("/dashboard/summary?month=2026-02")
@@ -1846,9 +1848,9 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
             )
         )
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 3, 10, tzinfo=timezone.utc),
     )
 
@@ -1924,9 +1926,9 @@ def test_dashboard_summary_current_month_uses_last_completed_snapshot_anchor(cli
     )
 
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 5, 24, tzinfo=timezone.utc),
     )
 
@@ -2030,9 +2032,9 @@ def test_stock_holdings_geography_performance_reflects_daily_price_change(
         assert base == "USD"
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
     )
 
@@ -2072,9 +2074,9 @@ def test_net_worth_since_update_reflects_price_driven_delta(client: TestClient, 
     def fake_rates(_date, base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
     )
 
@@ -2139,9 +2141,9 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
     def fake_rates(_date, base, symbols):
         return {symbol: 1.0 for symbol in symbols}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
     )
 
@@ -2162,9 +2164,9 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
 
 def _freeze_inside_march(monkeypatch):
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda _d, _b, symbols: {s: 1.0 for s in symbols})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda _d, _b, symbols: {s: 1.0 for s in symbols})
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 3, 10, tzinfo=timezone.utc),
     )
 
@@ -2271,4 +2273,4 @@ def test_past_month_comparisons_unchanged_with_clock_inside_current_month(
 )
 def test_latest_completed_month_start(monkeypatch, snapshot_day, now, expected):
     monkeypatch.setenv("SNAPSHOT_DAY", snapshot_day)
-    assert dashboard_router._latest_completed_month_start(now).strftime("%Y-%m") == expected
+    assert valuation_clock._latest_completed_month_start(now).strftime("%Y-%m") == expected

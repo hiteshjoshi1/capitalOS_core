@@ -116,6 +116,10 @@ def _frozen_datetime(when: datetime) -> type:
 # drives) that asks for "now".
 _CLOCK_MODULES = (
     "app.routers.dashboard",
+    "app.valuation.clock",
+    "app.valuation.prices",
+    "app.valuation.history",
+    "app.services.data_hub",
     "app.routers.crypto",
     "app.routers.dividends",
     "app.routers.spending",
@@ -653,14 +657,15 @@ def _postgres_date_types(monkeypatch) -> None:
     """SQLite hands a DATE column back as text where Postgres returns a date.
     The History rollup's crypto freshness does date arithmetic on one such
     value, so on SQLite it is converted the way Postgres would type it."""
-    import app.routers.dashboard as dashboard
+    import app.valuation.history as history
+    from app.valuation.clock import _date_only
 
-    original = dashboard._crypto_snapshot_coverage_as_of
+    original = history._crypto_snapshot_coverage_as_of
 
     def _typed(db, anchor_date, current_user_id):  # noqa: ANN001
-        return dashboard._date_only(original(db, anchor_date, current_user_id))
+        return _date_only(original(db, anchor_date, current_user_id))
 
-    monkeypatch.setattr(dashboard, "_crypto_snapshot_coverage_as_of", _typed)
+    monkeypatch.setattr(history, "_crypto_snapshot_coverage_as_of", _typed)
 
 
 def as_user(monkeypatch, user_id: int) -> None:

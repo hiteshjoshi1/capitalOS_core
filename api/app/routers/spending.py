@@ -10,7 +10,9 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import FxRates, fx_status, get_rates, get_rates_by_date, rate_date
-from app.routers.dashboard import _anchor_ts, _effective_as_of, _networth_components
+from app.valuation.clock import _anchor_ts
+from app.valuation.facts import _networth_components
+from app.valuation.state import _effective_as_of
 from app.schemas.spending import (
     CategoryAmount,
     CashFlowAnalyticsOut,

@@ -15,7 +15,7 @@ from app.ingestion.parsers.base import ParseResult
 from app.ingestion.runner import _persist_credit_card_limit_metadata
 from app.portfolio.ibkr_flex import run_ibkr_flex_import_from_xml
 from app.portfolio.upload_canonical import run_upload_balance_canonical_adapter
-from app.routers.dashboard import refresh_dirty_wealth_rollups
+from app.valuation.history import refresh_dirty_wealth_rollups
 from app.valuation_cache import write_generation
 from app.wealth_rollup_dirty import (
     dirty_state,
@@ -34,7 +34,7 @@ BANK = 970
 @pytest.fixture(autouse=True)
 def _setup(monkeypatch, db_engine):
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -46,7 +46,7 @@ def _setup(monkeypatch, db_engine):
 
 
 def _freeze(monkeypatch, when: datetime) -> None:
-    monkeypatch.setattr("app.routers.dashboard._current_anchor_ts", lambda: when)
+    monkeypatch.setattr("app.valuation.clock._current_anchor_ts", lambda: when)
 
 
 def _rows(db_engine, currency: str = "SGD") -> dict[str, dict]:

@@ -38,5 +38,9 @@ module = [
     "app.routers.dashboard",
     "app.routers.dividends",
     "app.routers.spending",
+    # Moved verbatim out of app.routers.dashboard (#143); typed in the next commit.
+    "app.valuation.facts",
+    "app.valuation.history",
+    "app.valuation.holdings",
 ]
 ignore_errors = true

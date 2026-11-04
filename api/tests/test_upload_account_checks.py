@@ -341,7 +341,7 @@ def test_refusal_names_the_account_the_statement_belongs_to(client, db_engine, t
 
 
 def test_a_credit_card_account_balance_never_counts_as_cash(db_engine):
-    from app.routers import dashboard
+    from app.valuation import facts, state
 
     _seed_accounts(db_engine)
     with db_engine.begin() as conn:
@@ -359,13 +359,13 @@ def test_a_credit_card_account_balance_never_counts_as_cash(db_engine):
     anchor = datetime(2026, 3, 1, tzinfo=timezone.utc)
     db = sessionmaker(bind=db_engine)()
     try:
-        rows = dashboard._cash_balance_rows(db, current_user_id=1, anchor_date=anchor.date())
+        rows = state._cash_balance_rows(db, current_user_id=1, anchor_date=anchor.date())
         assert {int(r["account_id"]) for r in rows} == {BANK_ID}
-        assert dashboard._credit_card_account_ids(db, 1) == {CARD_ID}
-        components = dashboard._networth_asset_components(db, anchor, "SGD", 1)
+        assert state._credit_card_account_ids(db, 1) == {CARD_ID}
+        components = facts._networth_asset_components(db, anchor, "SGD", 1)
         assert components["cash"] == pytest.approx(1000.0)
-        assert sum(b["value"] for b in dashboard._cash_balances(db, anchor, "SGD", 1)) == pytest.approx(1000.0)
-        deposits = dashboard._cash_deposits(db, anchor, "SGD", 1)
+        assert sum(b["value"] for b in facts._cash_balances(db, anchor, "SGD", 1)) == pytest.approx(1000.0)
+        deposits = facts._cash_deposits(db, anchor, "SGD", 1)
         assert deposits["total"] == pytest.approx(1000.0)
     finally:
         db.close()
