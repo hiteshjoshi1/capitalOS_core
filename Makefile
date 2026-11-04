@@ -57,7 +57,7 @@ endif
 #   ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -511,6 +511,16 @@ ownership-reassign:
 # BROKER_ACCOUNT_ID=<broker_accounts.id>, RAW_DIR=<container dir holding the <hash>.xml files>.
 ibkr-rebuild-snapshots:
 	$(COMPOSE) exec api python -m app.scripts.rebuild_ibkr_flex_snapshots $(if $(APPLY),--apply,) $(if $(BROKER_ACCOUNT_ID),--broker-account-id $(BROKER_ACCOUNT_ID),) $(if $(RAW_DIR),--raw-dir "$(RAW_DIR)",)
+
+# Source authority windows (#140): one per broker account/source/scope. Imports never
+# move one; this is the explicit, logged way (dry run unless APPLY=1). It restamps that
+# source's facts on the account and marks History dirty from the earliest affected date.
+authority-windows:
+	$(COMPOSE) exec api python -m app.scripts.authority_windows list $(if $(BROKER_ACCOUNT_ID),--broker-account-id $(BROKER_ACCOUNT_ID),)
+
+authority-window-move:
+	@test -n "$(BROKER_ACCOUNT_ID)" -a -n "$(FROM)" -a -n "$(REASON)" || { echo 'Usage: make authority-window-move BROKER_ACCOUNT_ID=<id> FROM=YYYY-MM-DD REASON="..." [TO=YYYY-MM-DD|OPEN=1] [SOURCE_KIND=ibkr_flex_daily] [FACT_SCOPE=all] [APPLY=1]' >&2; exit 2; }
+	$(COMPOSE) exec api python -m app.scripts.authority_windows move --broker-account-id $(BROKER_ACCOUNT_ID) --effective-from $(FROM) --reason "$(REASON)" $(if $(TO),--effective-to $(TO),) $(if $(OPEN),--open,) $(if $(SOURCE_KIND),--source-kind $(SOURCE_KIND),) $(if $(FACT_SCOPE),--fact-scope $(FACT_SCOPE),) $(if $(APPLY),--apply,)
 
 # ---- Quality gates ----
 # ---- Python lock files (#81) ----

@@ -152,26 +152,50 @@ UNIQUE (connection_id, broker_account_id)
 `portfolio_source_authority_windows` is the database-backed write gate. It prevents collisions between sources such as IBKR CSV uploads and IBKR Flex for the same account/date/scope.
 
 ```text
-portfolio_source_authority_windows
+portfolio_source_authority_windows        (as built; migrations 055, 075)
 - id BIGSERIAL PRIMARY KEY
 - broker_account_id BIGINT NOT NULL REFERENCES broker_accounts(id)
-- platform_code TEXT NOT NULL
-- source_kind TEXT NOT NULL                # ibkr_flex_daily | ibkr_flex_backfill | ibkr_csv_upload | sharekhan_upload | dbs_vickers_upload
-- authority_scope TEXT NOT NULL            # holdings | cash | nav | trades | cash_activity | corporate_actions | fx | all
-- effective_from_date DATE NOT NULL
-- effective_to_date DATE
-- authority_status TEXT NOT NULL           # authoritative | reference | disabled
-- metadata_json JSONB NOT NULL DEFAULT '{}'
+- source_kind TEXT NOT NULL                # ibkr_flex_daily | ibkr_csv_upload | sharekhan_upload | dbs_vickers_upload
+- fact_scope TEXT NOT NULL                 # all (IBKR Flex) | holdings (uploads)
+- effective_from DATE NOT NULL
+- effective_to DATE                        # NULL = open; CHECK effective_to >= effective_from
+- authority_status TEXT NOT NULL           # authoritative (only these route or stamp) | superseded | reference
 - created_at TIMESTAMPTZ NOT NULL
+UNIQUE (broker_account_id, source_kind, fact_scope)     # one window per account/source/scope
+
+portfolio_source_authority_window_changes # the log: created | moved | closed | merged | collapsed
+- window_id, broker_account_id, source_kind, fact_scope, action
+- old_/new_ effective_from, effective_to, authority_status
+- reason, actor, changed_at
 ```
+
+**One mechanism (#140): rows carry the answer, windows decide it at write time.**
+
+- Readers count a position, cash or NAV row by its `authority_status` alone
+  (`app.portfolio.authority.authoritative_sql`). No reader promotes a row because a window covers it.
+- Importers stamp that status from the window: a Flex fact is `authoritative` when its source's window
+  covers its date, else `reference`. Uploads keep their platform rule (Sharekhan / DBS Vickers authoritative;
+  IBKR CSV reference while a Flex window is active).
+- Windows also route a legacy account to the broker account that owns it on a date (the
+  `flex_authority_accounts` CTE, `is_ibkr_flex_cutover_active`, the legacy backfill skip), through one
+  helper, `window_covers_sql`.
 
 Rules:
 
-- IBKR Flex is authoritative on/after the configured cutover date.
-- IBKR manual uploads are reference/history after cutover.
-- Sharekhan uploads remain authoritative for Sharekhan accounts until a future connector replaces them.
-- DBS Vickers uploads remain authoritative for DBS Vickers accounts until a future connector replaces them.
-- Importers must resolve exactly one matching authority row before writing authoritative canonical facts.
+- One window per (broker account, source, scope), a unique index. Two sources on the same broker account
+  may not hold overlapping authoritative windows for overlapping scopes (`all` overlaps every scope); this
+  is checked in `authority.ensure_window` / `move_window`.
+- An import creates its window when there is none and never moves an existing one. A statement that reaches
+  outside the window (e.g. a backfill with an earlier start) is stored as reference before the window and
+  records an `authority_window_unchanged` data-quality warning.
+- Moving or closing a window is explicit: `make authority-window-move BROKER_ACCOUNT_ID=… FROM=… REASON="…"
+  [TO=…|OPEN=1] [APPLY=1]` (dry run without APPLY). It logs the change, restamps that source's facts on the
+  broker account, and marks History dirty from the earliest affected date (D-29).
+- When a Flex window is created, other sources' open windows on the same legacy account and platform (the IBKR
+  CSV upload window) are closed the day before it starts, and logged.
+- IBKR Flex is authoritative on/after its window start (`IBKR_FLEX_CUTOVER_DATE`, else the first statement's
+  start date). IBKR manual uploads are reference/history after cutover.
+- Sharekhan / DBS Vickers uploads remain authoritative for their accounts until a future connector replaces them.
 
 ### Import Runs
 

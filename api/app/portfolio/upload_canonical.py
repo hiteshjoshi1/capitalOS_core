@@ -27,6 +27,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.portfolio.authority import ensure_window
 from app.ingestion.as_of import AsOfSource, as_of_metadata, resolve_upload_as_of
 from app.ingestion.parsers.base import ParseResult
 from app.ingestion.undo import jsonable_row
@@ -259,60 +260,22 @@ def _ensure_upload_authority_window(
     source_kind: str,
     effective_from: date,
 ) -> int | None:
-    """Idempotently create a source authority window for an upload platform.
+    """The upload source's one 'holdings' window on this broker account (#140).
 
-    Returns the new window's id, or None when one already existed."""
-    exists = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM portfolio_source_authority_windows
-            WHERE broker_account_id = :broker_account_id
-              AND source_kind = :source_kind
-              AND fact_scope = 'holdings'
-              AND effective_from = :effective_from
-            LIMIT 1
-            """
-        ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": source_kind,
-            "effective_from": effective_from,
-        },
-    ).fetchone()
-    if exists:
-        return None
-    params = {
-        "broker_account_id": broker_account_id,
-        "source_kind": source_kind,
-        "effective_from": effective_from,
-    }
-    db.execute(
-        text(
-            """
-            INSERT INTO portfolio_source_authority_windows
-              (broker_account_id, source_kind, fact_scope, effective_from, authority_status)
-            VALUES
-              (:broker_account_id, :source_kind, 'holdings', :effective_from, 'authoritative')
-            """
-        ),
-        params,
+    Created at the first authoritative upload's date; later uploads, older or
+    newer, leave it as it is (only ``authority.move_window`` moves a window).
+    Returns the window's id when this call created it (so removing the upload
+    can remove it, #180), else None.
+    """
+    window, created = ensure_window(
+        db,
+        broker_account_id=broker_account_id,
+        source_kind=source_kind,
+        fact_scope="holdings",
+        effective_from=effective_from,
+        reason="upload: first authoritative upload",
     )
-    row = db.execute(
-        text(
-            """
-            SELECT id FROM portfolio_source_authority_windows
-            WHERE broker_account_id = :broker_account_id
-              AND source_kind = :source_kind
-              AND fact_scope = 'holdings'
-              AND effective_from = :effective_from
-            ORDER BY id DESC
-            LIMIT 1
-            """
-        ),
-        params,
-    ).fetchone()
-    return int(row[0]) if row else None
+    return int(window.id) if created else None
 
 
 def _create_upload_import_run(

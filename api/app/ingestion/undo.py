@@ -32,6 +32,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.models.import_job import ImportJob
+from app.portfolio.authority import remove_window_created_by_upload
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
 UNDO_LOG_VERSION = 1
@@ -250,9 +251,8 @@ def remove_import_job(db: Session, job: ImportJob) -> dict[str, Any]:
         )
 
     window_ids = [int(w) for w in undo.get("created_authority_window_ids") or []]
-    if window_ids:
-        placeholders, params = _in_clause("window", window_ids)
-        db.execute(text(f"DELETE FROM portfolio_source_authority_windows WHERE id IN ({placeholders})"), params)
+    for window_id in window_ids:
+        remove_window_created_by_upload(db, window_id, reason=f"upload job {job.id} removed")
 
     if undo.get("statement_identity_linked"):
         db.execute(

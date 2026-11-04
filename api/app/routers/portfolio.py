@@ -83,7 +83,11 @@ def import_ibkr_flex_now(
     account_id: int = Query(...),
     cutover_date: str | None = Query(
         None,
-        description="YYYY-MM-DD. Defaults to IBKR_FLEX_CUTOVER_DATE or the Flex statement start date.",
+        description=(
+            "YYYY-MM-DD. Start of the IBKR Flex authority window when the account has none yet; "
+            "defaults to IBKR_FLEX_CUTOVER_DATE or the Flex statement start date. An existing window "
+            "is never moved by an import (make authority-window-move)."
+        ),
     ),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),

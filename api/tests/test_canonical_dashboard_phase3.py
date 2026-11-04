@@ -665,6 +665,12 @@ def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
             ),
             {"account_id": ibkr_flex_canonical_account},
         )
+        # The Flex rows above are 'reference' inside the Flex window: the layout the
+        # pre-#140 code could leave, where readers counted them through the window.
+        # Migration 075 stamps them authoritative so the same rows count (#140).
+        from tests.test_authority_windows import run_migration_075_portable
+
+        run_migration_075_portable(conn)
 
     Session = sessionmaker(bind=db_engine)
     db = Session()

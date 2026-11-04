@@ -97,6 +97,29 @@ def _create_canonical_portfolio_tables(conn):
         )
         """,
         """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_portfolio_source_authority_windows_scope
+          ON portfolio_source_authority_windows (broker_account_id, source_kind, fact_scope)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_source_authority_window_changes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          window_id INTEGER,
+          broker_account_id INTEGER NOT NULL,
+          source_kind TEXT NOT NULL,
+          fact_scope TEXT NOT NULL,
+          action TEXT NOT NULL,
+          old_effective_from DATE,
+          old_effective_to DATE,
+          old_authority_status TEXT,
+          new_effective_from DATE,
+          new_effective_to DATE,
+          new_authority_status TEXT,
+          reason TEXT NOT NULL DEFAULT '',
+          actor TEXT NOT NULL DEFAULT '',
+          changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS broker_import_runs (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           broker_account_id INTEGER,
@@ -943,6 +966,7 @@ def setup_db():
             "broker_instruments",
             "raw_broker_documents",
             "broker_import_runs",
+            "portfolio_source_authority_window_changes",
             "portfolio_source_authority_windows",
             "broker_accounts",
             "broker_connections",
@@ -1023,6 +1047,7 @@ def clear_db():
             "broker_instruments",
             "raw_broker_documents",
             "broker_import_runs",
+            "portfolio_source_authority_window_changes",
             "portfolio_source_authority_windows",
             "broker_accounts",
             "broker_connections",
