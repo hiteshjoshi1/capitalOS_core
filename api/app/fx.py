@@ -25,7 +25,9 @@ Rules:
   ``FX_DISABLE_REMOTE=1`` turns the providers off: only stored rates are used.
 - A provider answer is cached in-process for ``FX_CACHE_TTL_SECONDS``; a failure
   for ``FX_NEGATIVE_CACHE_SECONDS`` (default 60), so an outage costs one timeout
-  per minute, not one per conversion.
+  per minute, not one per conversion. Storing a new or corrected rate drops the
+  cached per-date rates from its date on (``forget_rates_from``, #188), in the
+  same path that marks History dirty, so the recompute reads the new rate.
 
 Every missing or stale currency met while serving a request is recorded for that
 request (``fx_status``), so the response can say its totals are incomplete, and
@@ -262,8 +264,28 @@ def _store_rows(rows: list[dict[str, Any]]) -> int:
             # months from that date on (#138); today's rate marks nothing.
             from app.wealth_rollup_dirty import mark_rollups_dirty
 
+            # The in-process rate cache must not keep serving the old rate to
+            # the recompute that mark triggers (#188): drop it before marking.
+            forget_rates_from(min(changed))
             mark_rollups_dirty(conn, min(changed), reason="fx")  # type: ignore[arg-type]
+    if changed:
+        # Again once committed: a read between the first drop and the commit
+        # could have re-cached the old row.
+        forget_rates_from(min(changed))
     return len(rows)
+
+
+def forget_rates_from(day: date) -> int:
+    """Drop every cached per-date rate on or after ``day``, for every base and
+    currency (#188). A stored row for ``day`` is what any later date within the
+    stale window resolves to, and pairs are derived through shared bases, so
+    "this date on" for everything is the exact set a new or corrected row can
+    change. Provider-call entries are kept (they say nothing about values).
+    Returns how many entries were dropped."""
+    stale = [key for key in list(_CACHE) if key[0] == "rate" and key[1] >= day]
+    for key in stale:
+        _CACHE.pop(key, None)
+    return len(stale)
 
 
 def _as_rate_date(value: Any) -> date:

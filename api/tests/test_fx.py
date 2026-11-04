@@ -152,6 +152,32 @@ def test_provider_failure_is_negative_cached_and_never_raises(providers_down, mo
     assert len(providers_down) == 2  # after the negative TTL it tries again
 
 
+def test_a_corrected_past_rate_replaces_the_cached_one(db_engine, providers_down):
+    """#188: storing a new or corrected rate drops the cached rates from its date
+    on, so the next read (and the History recompute it marks) uses it."""
+    earlier = DAY.date() - timedelta(days=10)
+    _store(db_engine, earlier, {"SGD": 1.50, "USD": 1.10})
+    _store(db_engine, DAY.date(), {"SGD": 1.50, "USD": 1.10})
+    assert fx.get_rates(DAY, "SGD", {"USD"})["USD"] == pytest.approx(1.50 / 1.10)
+    assert fx.get_rates(earlier, "SGD", {"USD"})["USD"] == pytest.approx(1.50 / 1.10)
+    assert ("rate", DAY.date(), "SGD", "USD") in fx._CACHE
+
+    fx._store_rows(
+        [{"rate_date": DAY.date().isoformat(), "base": "EUR", "quote": "USD", "rate": 1.20,
+          "source": "frankfurter", "fetched_at": "2026-03-03T00:00:00+00:00"}]
+    )
+
+    assert fx.get_rates(DAY, "SGD", {"USD"})["USD"] == pytest.approx(1.50 / 1.20)
+    # An earlier date can't resolve to the corrected row: its entry is kept.
+    assert ("rate", earlier, "SGD", "USD") in fx._CACHE
+    # Re-storing the same rate changes nothing, so nothing is dropped.
+    fx._store_rows(
+        [{"rate_date": DAY.date().isoformat(), "base": "EUR", "quote": "USD", "rate": 1.20,
+          "source": "frankfurter", "fetched_at": "2026-03-04T00:00:00+00:00"}]
+    )
+    assert ("rate", DAY.date(), "SGD", "USD") in fx._CACHE
+
+
 def test_ibkr_statement_rates_are_read(db_engine, providers_down):
     with db_engine.begin() as conn:
         conn.execute(
