@@ -1,15 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { AssetClassFreshness, DashboardBootstrap, DashboardSummary, NetWorthFreshness, NetWorthSinceUpdate, PlatformAllocation, SpendingSummary } from "../lib/api";
+import type { AssetClassFreshness, NetWorthFreshness } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
 
 // Palette used for donut segments, matching the HTML design reference
 const DONUT_COLORS = [
@@ -48,6 +48,18 @@ function buildConicGradient(items: { percent: number }[]): string {
     );
   }
   return `conic-gradient(${parts.join(", ")})`;
+}
+
+/** Formats amounts in `currency`: each panel passes the currency its own data is in, so a
+ * panel still showing the previous currency (while a switch loads, #148) keeps its label. */
+function moneyFormatter(currency: string) {
+  const prefix = currencyPrefixFor(currency);
+  return (value?: number | null, maximumFractionDigits = 0) =>
+    value == null ? "—" : `${prefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+}
+
+function currencyPrefixFor(currency: string): string {
+  return currency === "SGD" ? "S$" : currency;
 }
 
 function formatMoneyShort(prefix: string, value?: number | null): string {
@@ -130,94 +142,48 @@ export default function WealthOverview() {
   // no month selector here (see Wealth Timeline Phase 1 plan for why).
   const month = useMemo(() => currentMonthYYYYMM(), []);
 
-  const [bootstrapState, setBootstrapState] = useState<LoadState>("idle");
-  const [bootstrapErr, setBootstrapErr] = useState<string>("");
-  const [bootstrap, setBootstrap] = useState<DashboardBootstrap | null>(null);
-
-  const [summaryState, setSummaryState] = useState<LoadState>("idle");
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-
-  const [spendingState, setSpendingState] = useState<LoadState>("idle");
-  const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
-
-  const [platformState, setPlatformState] = useState<LoadState>("idle");
-  const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
-
-  const [sinceUpdateState, setSinceUpdateState] = useState<LoadState>("idle");
-  const [sinceUpdate, setSinceUpdate] = useState<NetWorthSinceUpdate | null>(null);
-
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
   const [holdingsView, setHoldingsView] = useState<"holdings" | "movers" | "today">("holdings");
+
+  // #148: each panel is its own resource. Bootstrap is the lean call, so the hero renders
+  // as soon as it resolves without waiting on the heavier summary/spending/platform
+  // calls; on a currency switch every panel keeps its previous numbers until its own
+  // reply lands (and a slow earlier reply can never overwrite a later currency).
+  const bootstrapRes = useApiResource(resourceKey("dashboardBootstrap", month, baseCurrency), () =>
+    api.dashboardBootstrap(month, baseCurrency),
+  );
+  const summaryRes = useApiResource(
+    resourceKey("dashboardSummary", month, "prev_month,prev_year", baseCurrency),
+    () => api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+  );
+  const spendingRes = useApiResource(resourceKey("spendingSummary", month, baseCurrency), () =>
+    api.spendingSummary(month, baseCurrency),
+  );
+  // The platform-allocation response carries no base_currency, so remember it alongside.
+  const platformRes = useApiResource(resourceKey("platformAllocation", month, baseCurrency), async () => ({
+    currency: baseCurrency,
+    allocation: await api.platformAllocation(month, baseCurrency),
+  }));
+  const sinceUpdateRes = useApiResource(resourceKey("netWorthSinceUpdate", baseCurrency), () =>
+    api.netWorthSinceUpdate(baseCurrency),
+  );
+
+  const bootstrap = bootstrapRes.data ?? null;
+  const summary = summaryRes.data ?? null;
+  const spendingSummary = spendingRes.data ?? null;
+  const platformAllocation = platformRes.data?.allocation ?? null;
+  const sinceUpdate = sinceUpdateRes.data ?? null;
   const selectedBaseCurrency = baseCurrency || bootstrap?.base_currency || "SGD";
 
-  const fetchBootstrap = useCallback(async (silent = false) => {
-    if (!silent) setBootstrapState("loading");
-    try {
-      const data = await api.dashboardBootstrap(month, baseCurrency);
-      setBootstrap(data);
-      setBootstrapState("ready");
-    } catch (error: unknown) {
-      setBootstrapErr(error instanceof Error ? error.message : String(error));
-      setBootstrapState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchSummary = useCallback(async (silent = false) => {
-    if (!silent) setSummaryState("loading");
-    try {
-      const data = await api.dashboardSummary(month, "prev_month,prev_year", baseCurrency);
-      setSummary(data);
-      setSummaryState("ready");
-    } catch {
-      setSummaryState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchSpending = useCallback(async (silent = false) => {
-    if (!silent) setSpendingState("loading");
-    try {
-      const data = await api.spendingSummary(month, baseCurrency);
-      setSpendingSummary(data);
-      setSpendingState("ready");
-    } catch {
-      setSpendingState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchPlatform = useCallback(async (silent = false) => {
-    if (!silent) setPlatformState("loading");
-    try {
-      const data = await api.platformAllocation(month, baseCurrency);
-      setPlatformAllocation(data);
-      setPlatformState("ready");
-    } catch {
-      setPlatformState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchSinceUpdate = useCallback(async (silent = false) => {
-    if (!silent) setSinceUpdateState("loading");
-    try {
-      const data = await api.netWorthSinceUpdate(baseCurrency);
-      setSinceUpdate(data);
-      setSinceUpdateState("ready");
-    } catch {
-      setSinceUpdateState("error");
-    }
-  }, [baseCurrency]);
-
-  // First paint: bootstrap is the lean call, so the hero renders as soon as it
-  // resolves without waiting on the heavier summary/spending/platform calls.
+  const reloadAllRef = useRef<() => void>(() => undefined);
   useEffect(() => {
-    void (async () => {
-      void fetchBootstrap();
-      void fetchSummary();
-      void fetchSpending();
-      void fetchPlatform();
-      void fetchSinceUpdate();
-    })();
-  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform, fetchSinceUpdate]);
+    reloadAllRef.current = () => {
+      for (const res of [bootstrapRes, summaryRes, spendingRes, platformRes, sinceUpdateRes]) {
+        void res.reload().catch(() => undefined);
+      }
+    };
+  });
 
   const refreshTimerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -225,11 +191,8 @@ export default function WealthOverview() {
       onEvent: () => {
         if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = window.setTimeout(() => {
-          void fetchBootstrap(true);
-          void fetchSummary(true);
-          void fetchSpending(true);
-          void fetchPlatform(true);
-          void fetchSinceUpdate(true);
+          // A background refresh: the numbers stay on screen until the new ones land.
+          reloadAllRef.current();
         }, PORTFOLIO_REFRESH_DEBOUNCE_MS);
       },
     });
@@ -238,13 +201,14 @@ export default function WealthOverview() {
       if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
       unsubscribe();
     };
-  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform, fetchSinceUpdate]);
+  }, []);
 
-  const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
-  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
-    value == null
-      ? "—"
-      : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatMoney = moneyFormatter(bootstrap?.base_currency || selectedBaseCurrency);
+  const formatSummaryMoney = moneyFormatter(summary?.base_currency || selectedBaseCurrency);
+  const formatSpendingMoney = moneyFormatter(spendingSummary?.base_currency || selectedBaseCurrency);
+  const formatSinceMoney = moneyFormatter(sinceUpdate?.base_currency || selectedBaseCurrency);
+  const platformCurrency = platformRes.data?.currency || selectedBaseCurrency;
+  const formatPlatformMoney = moneyFormatter(platformCurrency);
 
   // Hero headline, freshness, liabilities, and the asset-class allocation view all
   // come from bootstrap — none of them need to wait on the heavier summary call.
@@ -288,6 +252,10 @@ export default function WealthOverview() {
   );
 
   const activeAllocItems = allocView === "platform" ? platformItems : assetClassItems;
+  const formatAllocMoney = allocView === "platform" ? formatPlatformMoney : formatMoney;
+  const allocCurrencyPrefix = currencyPrefixFor(
+    allocView === "platform" ? platformCurrency : bootstrap?.base_currency || selectedBaseCurrency,
+  );
   const allocTotal =
     allocView === "platform"
       ? (platformAllocation?.total ?? 0)
@@ -323,18 +291,21 @@ export default function WealthOverview() {
         </label>
       }
     >
-      {bootstrapState === "loading" || bootstrapState === "idle" ? (
+      {bootstrapRes.isLoading ? (
         <div className="card">Loading…</div>
       ) : null}
-      {bootstrapState === "error" ? (
+      {bootstrapRes.error ? (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{bootstrapErr}</pre>
+          <pre className="pre">{bootstrapRes.error.message}</pre>
         </div>
       ) : null}
 
-      {bootstrapState === "ready" && bootstrap ? (
-        <div className="wealthOverviewLayout">
+      {bootstrap ? (
+        <RefreshingRegion
+          className="wealthOverviewLayout"
+          busy={[bootstrapRes, summaryRes, spendingRes, platformRes, sinceUpdateRes].some((r) => r.isFetching && r.data !== undefined)}
+        >
 
           {/* ── Hero card ─────────────────────────────────────────────── */}
           <article className="coHeroCard">
@@ -378,13 +349,13 @@ export default function WealthOverview() {
                     }
                   >
                     {sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}
-                    {formatMoney(Math.abs(sinceUpdate.net_worth_change.abs))}
+                    {formatSinceMoney(Math.abs(sinceUpdate.net_worth_change.abs))}
                     {sinceUpdate.net_worth_change.pct != null
                       ? ` (${sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}${Math.abs(sinceUpdate.net_worth_change.pct * 100).toFixed(1)}%)`
                       : ""}
                   </strong>
                 </div>
-              ) : sinceUpdateState === "loading" ? (
+              ) : sinceUpdateRes.isLoading ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
                   <strong className="muted">…</strong>
@@ -399,13 +370,13 @@ export default function WealthOverview() {
                     }
                   >
                     {prevMonthChange.abs >= 0 ? "+" : "-"}
-                    {formatMoney(Math.abs(prevMonthChange.abs))}
+                    {formatSummaryMoney(Math.abs(prevMonthChange.abs))}
                     {prevMonthChange.pct != null
                       ? ` (${prevMonthChange.abs >= 0 ? "+" : "-"}${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%)`
                       : ""}
                   </strong>
                 </div>
-              ) : summaryState === "loading" ? (
+              ) : summaryRes.isLoading ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">VS LAST MONTH</span>
                   <strong className="muted">…</strong>
@@ -420,7 +391,7 @@ export default function WealthOverview() {
                     }
                   >
                     {prevYearChange.abs >= 0 ? "+" : ""}
-                    {formatMoney(prevYearChange.abs)}
+                    {formatSummaryMoney(prevYearChange.abs)}
                   </strong>
                 </div>
               ) : null}
@@ -457,7 +428,7 @@ export default function WealthOverview() {
               </div>
             </div>
 
-            {allocView === "platform" && platformState === "loading" ? (
+            {allocView === "platform" && platformRes.isLoading ? (
               <p className="muted">Loading allocation…</p>
             ) : activeAllocItems.length > 0 ? (
               <div className="coAllocationCard">
@@ -469,7 +440,7 @@ export default function WealthOverview() {
                   <div className="coAllocationInner">
                     <span className="coAllocationTotalLabel">TOTAL</span>
                     <strong className="coAllocationTotalValue">
-                      {formatMoneyShort(currencyPrefix, allocTotal)}
+                      {formatMoneyShort(allocCurrencyPrefix, allocTotal)}
                     </strong>
                   </div>
                 </div>
@@ -486,7 +457,7 @@ export default function WealthOverview() {
                         <span className="coAllocationName">{item.label}</span>
                       </div>
                       <div className="coAllocationRowRight">
-                        <span className="coAllocationValue">{formatMoney(item.value)}</span>
+                        <span className="coAllocationValue">{formatAllocMoney(item.value)}</span>
                         <strong className="coAllocationPct">{item.percent.toFixed(1)}%</strong>
                       </div>
                     </div>
@@ -510,14 +481,14 @@ export default function WealthOverview() {
             <div className="coSignalsGrid">
               <article className="coSignalCard">
                 <p className="coSignalEyebrow">CASH FLOW</p>
-                {spendingState === "loading" ? (
+                {spendingRes.isLoading ? (
                   <p className="muted">Loading…</p>
                 ) : (
                   <>
-                    <p className="coSignalValue">{formatMoney(spendingSummary?.net)}</p>
+                    <p className="coSignalValue">{formatSpendingMoney(spendingSummary?.net)}</p>
                     <p className="coSignalMeta">
                       {spendingSummary
-                        ? `Income ${formatMoney(spendingSummary.income_total)} · Expenses ${formatMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
+                        ? `Income ${formatSpendingMoney(spendingSummary.income_total)} · Expenses ${formatSpendingMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
                         : "—"}
                     </p>
                     <FxNote sources={[spendingSummary]} />
@@ -567,7 +538,7 @@ export default function WealthOverview() {
               </div>
 
               <div className="coHoldingsList">
-                {summaryState === "loading" ? (
+                {summaryRes.isLoading ? (
                   <p className="muted">Loading holdings…</p>
                 ) : holdingsView === "holdings" ? (
                   topHoldings.length > 0 ? (
@@ -578,7 +549,7 @@ export default function WealthOverview() {
                           <span className="coHoldingClass">{h.asset_class.toUpperCase()}</span>
                         </div>
                         <div className="coHoldingRight">
-                          <strong className="coHoldingValue">{formatMoney(h.value)}</strong>
+                          <strong className="coHoldingValue">{formatSummaryMoney(h.value)}</strong>
                           <span className="coHoldingPct">
                             {h.percent_of_networth.toFixed(1)}%
                           </span>
@@ -607,7 +578,7 @@ export default function WealthOverview() {
                             className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                           >
                             {row.delta_abs >= 0 ? "+" : "-"}
-                            {formatMoney(Math.abs(row.delta_abs))}
+                            {formatSummaryMoney(Math.abs(row.delta_abs))}
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
@@ -620,7 +591,7 @@ export default function WealthOverview() {
                   ) : (
                     <p className="muted">No mover data for this period.</p>
                   )
-                ) : sinceUpdateState === "loading" ? (
+                ) : sinceUpdateRes.isLoading ? (
                   <p className="muted">Loading today's movers…</p>
                 ) : sinceUpdate?.top_movers ? (
                   [
@@ -644,7 +615,7 @@ export default function WealthOverview() {
                             className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                           >
                             {row.delta_abs >= 0 ? "+" : "-"}
-                            {formatMoney(Math.abs(row.delta_abs))}
+                            {formatSinceMoney(Math.abs(row.delta_abs))}
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
@@ -663,7 +634,7 @@ export default function WealthOverview() {
               </div>
             </article>
           </section>
-        </div>
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

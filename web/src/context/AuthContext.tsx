@@ -5,6 +5,7 @@ import { useTheme } from "./ThemeContext";
 import type { AccentColor, Theme } from "./ThemeContext";
 import { DEFAULT_ACCENT, DEFAULT_THEME } from "./ThemeContext";
 import { AuthContext } from "./authContextObject";
+import { clearApiCache } from "../lib/useApiResource";
 import type { AuthContextValue } from "./authContextObject";
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -17,6 +18,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     setAuthFailureHandler(() => {
       setAccessToken(null);
+      clearApiCache();
       setUser(null);
       setLoading(false);
     });
@@ -122,6 +124,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       loading,
       login: async (username: string, password: string) => {
         const session = await api.authLogin({ username, password });
+        // Another user may have signed out in this tab: never show their cached data.
+        clearApiCache();
         setAccessToken(session.access_token);
         const me = await userFromSession(session);
         syncPreferences(session.preferences);
@@ -130,6 +134,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       signup: async (username: string, password: string, displayName?: string) => {
         await api.authSignup({ username, password, display_name: displayName });
         const session = await api.authLogin({ username, password });
+        clearApiCache();
         setAccessToken(session.access_token);
         const me = await userFromSession(session);
         // A new user has no stored preferences: login returns the defaults.
@@ -141,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           await api.authLogout();
         } finally {
           setAccessToken(null);
+          clearApiCache();
           setUser(null);
           // Reset theme/accent to defaults so the next user starts from a clean
           // visual state. The access token is already null here, so isAuthenticated()

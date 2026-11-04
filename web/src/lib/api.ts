@@ -1,3 +1,5 @@
+import { currentAbortSignal, isAbortError } from "./abortScope";
+
 export function resolveApiBase(
   rawApiBase?: string,
   locationLike?: { protocol?: string; hostname?: string } | null,
@@ -190,15 +192,21 @@ export async function refreshSessionNow(): Promise<AuthSession | null> {
 }
 
 async function req<T>(path: string, init?: RequestInit, opts: RequestOptions = {}): Promise<T> {
+  // Read synchronously, before the first await (#148): see lib/abortScope.ts.
+  const signal = init?.signal ?? currentAbortSignal();
   const execute = async (): Promise<Response> => {
     try {
       const { headers: initHeaders, ...restInit } = init ?? {};
       return await fetch(`${API_BASE}${path}`, {
         credentials: "include",
         ...restInit,
+        ...(signal ? { signal } : {}),
         headers: buildHeaders(initHeaders, { includeJsonContentType: true, skipAuth: opts.skipAuth }),
       });
     } catch (err: unknown) {
+      // An aborted request (a superseded month/currency, or the page went away) is not
+      // an unreachable API: let the caller see the AbortError as-is.
+      if (isAbortError(err)) throw err;
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`Unable to reach API at ${API_BASE}: ${reason}`, { cause: err });
     }

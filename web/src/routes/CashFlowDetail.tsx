@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import type {
@@ -11,6 +11,8 @@ import type {
   CategoryTaxonomy,
 } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -19,7 +21,6 @@ import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
 type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
 
@@ -809,45 +810,34 @@ function ExpensesTab({
 export default function CashFlowDetailRoute() {
   const location = useLocation();
   const workspaceTab = resolveWorkspaceTab(location.pathname);
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [detail, setDetail] = useState<CashFlowDetail | null>(null);
-  const [categories, setCategories] = useState<CategoryTaxonomy[]>([]);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [pendingOverrides, setPendingOverrides] = useState<Record<number, boolean>>({});
   const [overrideErrors, setOverrideErrors] = useState<Record<number, string>>({});
   const [overrideSelections, setOverrideSelections] = useState<Record<number, string>>({});
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setState("loading");
-      setErr("");
-      setPendingOverrides({});
-      setOverrideErrors({});
-      setOverrideSelections({});
+  // #148: categories and the detail are separate cached resources. Switching between the
+  // Overview / Income / Expenses tabs no longer remounts this route (AppShell's pathname
+  // key is gone), so a tab switch costs no request and keeps any edit in progress.
+  const categoriesRes = useApiResource("categories", () => api.categories());
+  const detailRes = useApiResource(resourceKey("cashFlowDetail", month, baseCurrency), () =>
+    api.cashFlowDetail(month, baseCurrency),
+  );
+  const categories = useMemo(() => categoriesRes.data ?? [], [categoriesRes.data]);
+  const detail = detailRes.data ?? null;
+  // A failed load blocks the page only when there is nothing to show; a failed refresh
+  // after a save (data still on screen) is reported next to the row instead.
+  const loadError = (detailRes.data ? null : detailRes.error) ?? (categoriesRes.data ? null : categoriesRes.error);
 
-      try {
-        const [taxonomy, data] = await Promise.all([
-          api.categories(),
-          api.cashFlowDetail(month, baseCurrency),
-        ]);
-        if (cancelled) return;
-        setCategories(taxonomy);
-        setDetail(data);
-        setState("ready");
-      } catch (e: unknown) {
-        if (cancelled) return;
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [month, baseCurrency]);
+  // Unsaved category picks belong to one month and currency: reset them on a switch.
+  const viewKey = `${month}|${baseCurrency}`;
+  const [editsViewKey, setEditsViewKey] = useState(viewKey);
+  if (editsViewKey !== viewKey) {
+    setEditsViewKey(viewKey);
+    setPendingOverrides({});
+    setOverrideErrors({});
+    setOverrideSelections({});
+  }
 
   const categoryGroups = useMemo(() => groupCategories(categories), [categories]);
   const effectiveBaseCurrency = detail?.base_currency || baseCurrency;
@@ -880,8 +870,7 @@ export default function CashFlowDetailRoute() {
     let succeeded = false;
     try {
       await api.categoryOverride({ transaction_id: transactionId, category_id: categoryId });
-      const refreshed = await api.cashFlowDetail(month, baseCurrency);
-      setDetail(refreshed);
+      await detailRes.reload();
       setOverrideSelections((current) => {
         const next = { ...current };
         delete next[transactionId];
@@ -928,17 +917,17 @@ export default function CashFlowDetailRoute() {
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {!loadError && (detailRes.isLoading || categoriesRes.isLoading) && <div className="card">Loading…</div>}
 
-      {state === "error" && (
+      {loadError && (
         <div className="card error">
           <div className="cardTitle">Cash flow detail unavailable</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{loadError.message}</pre>
         </div>
       )}
 
-      {state === "ready" && detail ? (
-        <div className="wealthOverviewLayout">
+      {!loadError && detail && categoriesRes.data ? (
+        <RefreshingRegion className="wealthOverviewLayout" busy={detailRes.isFetching}>
           <FxNote sources={[detail]} />
           {workspaceTab === "overview" ? <OverviewTab detail={detail} formatMoney={formatMoney} /> : null}
           {workspaceTab === "income" ? (
@@ -969,7 +958,7 @@ export default function CashFlowDetailRoute() {
               onSave={handleSave}
             />
           ) : null}
-        </div>
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

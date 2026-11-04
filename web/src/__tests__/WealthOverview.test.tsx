@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { controlledCalls } from "./raceHelpers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -406,5 +407,41 @@ describe("WealthOverview", () => {
 
     expect(await screen.findByText("AAPL")).toBeInTheDocument();
     expect(screen.getByText("+S$ 10")).toBeInTheDocument();
+  });
+});
+
+// #148: currency switches with out-of-order replies.
+describe("WealthOverview currency races", () => {
+  it("keeps the previous currency on screen, then shows only the latest currency", async () => {
+    vi.clearAllMocks();
+    vi.setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    mockApi.spendingSummary.mockResolvedValue({ income_total: 0, expense_total: 0, net: 0, savings_rate: null } as never);
+    mockApi.platformAllocation.mockResolvedValue({ as_of: null, total: 0, items: [] } as never);
+    mockApi.netWorthSinceUpdate.mockResolvedValue({ base_currency: "SGD", net_worth_change: null, top_movers: null } as never);
+    const boot = controlledCalls<ReturnType<typeof makeBootstrap>>();
+    mockApi.dashboardBootstrap.mockImplementation(boot.impl as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+    await act(async () => boot.find((a) => a[1] === "SGD").resolve(makeBootstrap(100)));
+    expect(await screen.findByText("S$ 100")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Base currency"), { target: { value: "USD" } });
+    // Still the SGD figure, still labelled S$, marked busy.
+    expect(screen.getByText("S$ 100").closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
+    fireEvent.change(screen.getByLabelText("Base currency"), { target: { value: "HKD" } });
+
+    const usd = boot.find((a) => a[1] === "USD");
+    await act(async () => boot.find((a) => a[1] === "HKD").resolve({ ...makeBootstrap(500), base_currency: "HKD" }));
+    expect(await screen.findByText("HKD 500")).toBeInTheDocument();
+    await act(async () => usd.resolve({ ...makeBootstrap(300), base_currency: "USD" }));
+    expect(screen.queryByText("USD 300")).not.toBeInTheDocument();
+    expect(screen.getByText("HKD 500")).toBeInTheDocument();
+    await waitFor(() => expect(usd.signal?.aborted).toBe(true));
   });
 });

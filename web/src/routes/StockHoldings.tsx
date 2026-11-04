@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import "../App.css";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
@@ -10,7 +12,6 @@ import PriceFallbackInfo from "../components/PriceFallbackInfo";
 import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
 type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "pnl" | "percentNetWorth" | "quoteFreshness";
 
 const PAGE_SIZE = 20;
@@ -59,11 +60,13 @@ const loadVisibleStockColumns = (): Record<StockColumnKey, boolean> => {
 };
 
 export default function StockHoldings() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [summary, setSummary] = useState<StockHoldingsSummary | null>(null);
+  const [refreshErr, setRefreshErr] = useState<string>("");
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const resource = useApiResource(resourceKey("stockHoldingsSummary", month, baseCurrency), () =>
+    api.stockHoldingsSummary(month, baseCurrency),
+  );
+  const summary = resource.data ?? null;
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<StockColumnKey, boolean>>(loadVisibleStockColumns);
@@ -106,25 +109,6 @@ export default function StockHoldings() {
     }));
   };
 
-  const loadSummary = useCallback(async () => {
-    setErr("");
-    setState("loading");
-    const stockData = await api.stockHoldingsSummary(month, baseCurrency);
-    setSummary(stockData);
-    setState("ready");
-  }, [month, baseCurrency]);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        await loadSummary();
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, [loadSummary]);
-
   useEffect(() => {
     window.localStorage.setItem(STOCK_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns));
   }, [visibleColumns]);
@@ -132,17 +116,19 @@ export default function StockHoldings() {
   const onRefresh = async () => {
     try {
       setRefreshing(true);
+      setRefreshErr("");
       await api.marketDataRefreshNow();
-      await loadSummary();
+      await resource.reload();
     } catch (e: unknown) {
-      setErr(e instanceof Error ? e.message : String(e));
-      setState("error");
+      setRefreshErr(e instanceof Error ? e.message : String(e));
     } finally {
       setRefreshing(false);
     }
   };
 
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
+  // The currency the shown numbers are in (the previous one while a switch loads).
+  const shownCurrency = summary?.base_currency || baseCurrency;
+  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
   const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
   const formatCompactMoney = (value?: number | null) =>
@@ -328,16 +314,16 @@ export default function StockHoldings() {
         </>
       }
     >
-      {state === "loading" && <div className="card">Loading…</div>}
-      {state === "error" && (
+      {resource.isLoading && <div className="card">Loading…</div>}
+      {(resource.error || refreshErr) && (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{resource.error?.message ?? refreshErr}</pre>
         </div>
       )}
 
-      {state === "ready" && (
-        <div className="wealthOverviewLayout">
+      {summary && (
+        <RefreshingRegion className="wealthOverviewLayout" busy={resource.isFetching}>
 
           {/* ── Hero: stock value summary ─────────────────────────────── */}
           <article className="coHeroCard">
@@ -639,7 +625,7 @@ export default function StockHoldings() {
               ) : null}
             </div>
           </section>
-        </div>
+        </RefreshingRegion>
       )}
     </PageShell>
   );

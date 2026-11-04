@@ -97,7 +97,9 @@ export default function AppShell() {
             </div>
           </header>
 
-          <div key={location.pathname} className="appShellContent">
+          {/* No pathname key (#148): it remounted Cash Flow on every tab switch, refetching
+              everything and dropping local state. Different routes still mount fresh. */}
+          <div className="appShellContent">
             {/* Routes are lazy chunks (#145): keep the shell up while one loads. */}
             <Suspense fallback={<RouteFallback />}>
               <Outlet />

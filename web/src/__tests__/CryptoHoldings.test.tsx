@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { controlledCalls } from "./raceHelpers";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -290,5 +291,31 @@ describe("CryptoHoldings route", () => {
     expect(await screen.findByText("No crypto holdings yet.")).toBeInTheDocument();
     expect(screen.getByText("Wallet mix")).toBeInTheDocument();
     expect(screen.getAllByText("No exposure data yet.").length).toBeGreaterThan(0);
+  });
+});
+
+// #148: a slow earlier month never renders under a later one.
+describe("CryptoHoldings races", () => {
+  it("shows the later month even when the earlier month's reply lands last", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-02");
+    const summaries = controlledCalls<CryptoSummary>();
+    mockApi.cryptoSummary.mockImplementation(summaries.impl as typeof api.cryptoSummary);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
+    const feb = summaries.find((a) => a[0] === "2026-02");
+    const jan = summaries.find((a) => a[0] === "2026-01");
+
+    await act(async () => jan.resolve({ ...cryptoSummaryFixture, month: "2026-01", is_live: false }));
+    expect(await screen.findByText("CRYPTO VALUE — 2026-01")).toBeInTheDocument();
+    await act(async () => feb.resolve({ ...cryptoSummaryFixture, month: "2026-02", is_live: false }));
+    expect(screen.queryByText("CRYPTO VALUE — 2026-02")).not.toBeInTheDocument();
+    expect(screen.getByText("CRYPTO VALUE — 2026-01")).toBeInTheDocument();
+    await waitFor(() => expect(feb.signal?.aborted).toBe(true));
   });
 });
