@@ -1022,7 +1022,13 @@ export type CategoryResolution = {
   rule_name: string | null;
 };
 
-export type Health = { status: string };
+export type Health = {
+  status: string;
+  /** #155: "ok", or "unreachable" (with HTTP 503). */
+  database?: string;
+  /** #155: newest applied migration vs the newest migration file; current is null when either is unknown. */
+  migrations?: { applied: string | null; latest_file: string | null; current: boolean | null };
+};
 
 export type NetWorthBreakdown = {
   total: number;

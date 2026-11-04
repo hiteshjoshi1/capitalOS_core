@@ -28,7 +28,8 @@ x-api-common: &api-common
   volumes:
     - ./data:/app/data
     - ./config:/app/config:ro
-    - ./api/app:/app/app:ro
+    # Read-only, so /health can report the newest migration file next to the newest applied (#155).
+    - ./migrations:/app/migrations:ro
 
 services:
   postgres:
@@ -66,7 +67,11 @@ services:
       HOME: /tmp
     ports:
       - "127.0.0.1:8000:8000"
-    command: uvicorn app.main:app --host=0.0.0.0 --port=8000 --reload
+    # The code baked into the image at build time, no --reload (#155): on the real stack new code
+    # goes live only when `make deploy` recreates the container, after the build and the
+    # migrations, never at the `git merge`. Worktrees and the test instance mount the code and
+    # reload (docker-compose.isolated.yml).
+    command: uvicorn app.main:app --host=0.0.0.0 --port=8000
 
   # Test/lint/typecheck tooling (`make test-backend`, `make lint`, `make typecheck`).
   # Same config as `api`, built from the `dev` target; only started via `compose run`.
@@ -75,12 +80,13 @@ services:
     build:
       context: ./api
       target: dev
-    # The api volumes plus the migrations (read-only), so tests can run the real SQL (#140).
+    # Tests, lint and typecheck see this checkout's code without a rebuild; migrations
+    # are mounted so tests can run the real SQL (#140).
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
-      - ./api/app:/app/app:ro
       - ./migrations:/app/migrations:ro
+      - ./api/app:/app/app:ro
     profiles:
       - tools
 

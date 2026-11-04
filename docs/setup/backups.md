@@ -21,7 +21,14 @@ make db-backup
 
 Writes a timestamped `pg_dump` (custom format) to `backups/` at the repo
 root — a plain file, gitignored, untouched by anything Docker does to its
-own volumes.
+own volumes — and, next to it, `capitalos_<timestamp>.data.tar.gz`: the
+contents of `data/` (the raw statements and broker reports the database
+points at; the API's signing key `data/.auth_secret` is left out). Both are
+verified: the dump is restored into a scratch database (exact row counts),
+the archive is unpacked and every file a restored row records must be there
+with the sha256 the database has for it. Only then is a `.verified` marker
+written. `make backup-data-check` runs the file check against the live
+database and `data/` without making a backup.
 
 ```bash
 make db-restore BACKUP_FILE=backups/capitalos_20260101_120000.dump
@@ -29,7 +36,17 @@ make db-restore BACKUP_FILE=backups/capitalos_20260101_120000.dump
 
 Restores that file into the running Postgres container, after an explicit
 `yes` confirmation (this overwrites the current database — it's meant for
-disaster recovery, not routine use).
+disaster recovery, not routine use), and `data/` from the matching
+`.data.tar.gz`. The current `data/` is not deleted: it is moved to
+`data.pre-restore-<timestamp>/`. The API is stopped during the restore and
+started again afterwards. A dump from before data archives existed restores
+the database only, with a warning.
+
+`make backup-prune` keeps every verified backup from the last 14 days, the
+first verified backup of each of the last 12 months, and the newest one; a
+dump and its data archive are removed together. `make backup-prune DRY_RUN=1`
+lists what it would remove. Dumps without a `.verified` marker are never
+pruned.
 
 ## Automate it
 
