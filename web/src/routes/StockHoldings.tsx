@@ -14,6 +14,7 @@ import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "pnl" | "percentNetWorth" | "quoteFreshness";
 
@@ -297,12 +298,9 @@ export default function StockHoldings() {
         </>
       }
     >
-      {resource.isLoading && <div className="card">Loading…</div>}
+      {resource.isLoading && <div className="card" role="status">Loading…</div>}
       {(resource.error || refreshErr) && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{resource.error?.message ?? refreshErr}</pre>
-        </div>
+        <LoadError title="Couldn't load stock holdings" error={resource.error?.message ?? refreshErr} onRetry={() => void resource.reload().catch(() => undefined)} />
       )}
 
       {summary && (

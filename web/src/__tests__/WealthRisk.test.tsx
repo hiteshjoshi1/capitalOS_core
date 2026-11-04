@@ -117,7 +117,7 @@ describe("WealthRisk route", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load risk")).toBeInTheDocument();
     expect(screen.getByText("risk unavailable")).toBeInTheDocument();
   });
 });

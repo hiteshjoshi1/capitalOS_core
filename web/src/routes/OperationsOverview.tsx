@@ -8,6 +8,7 @@ import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import type { StatusPillTone } from "../components/StatusPill";
 import * as fmt from "../lib/format";
+import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type RefreshStatus = "idle" | "running" | "done" | "error";
@@ -173,12 +174,9 @@ export default function OperationsOverview() {
       title="Data Hub"
       subtitle="Connections, imports, and market data health at a glance."
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {state === "loading" && <div className="card" role="status">Loading…</div>}
       {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+        <LoadError title="Couldn't load the Data Hub" error={err} />
       )}
 
       {state === "ready" && (

@@ -166,7 +166,7 @@ describe("Dividends", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load dividends")).toBeInTheDocument();
     expect(screen.getByText("dividends failed")).toBeInTheDocument();
   });
 

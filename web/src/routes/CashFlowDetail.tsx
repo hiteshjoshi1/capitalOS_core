@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import type {
@@ -24,6 +24,8 @@ import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
+import { describeShares } from "../lib/chartA11y";
 
 type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
@@ -178,6 +180,7 @@ function DonutSection({
   ariaLabel: string;
   formatMoney: FormatMoney;
 }) {
+  const descId = useId();
   return (
     <section>
       <div className="cashFlowSectionHeading">
@@ -185,8 +188,17 @@ function DonutSection({
         <h2 className="cashFlowSectionTitle">{title}</h2>
       </div>
       {items.length > 0 ? (
-        <div className="card cashFlowDonutLayout" style={{ padding: 28 }} aria-label={ariaLabel}>
-          <div className="cashFlowDonutChart" style={{ background: conicGradient(items) }}>
+        <div className="card cashFlowDonutLayout" style={{ padding: 28 }}>
+          <div
+            className="cashFlowDonutChart"
+            style={{ background: conicGradient(items) }}
+            role="img"
+            aria-label={ariaLabel}
+            aria-describedby={descId}
+          >
+            <span id={descId} className="srOnly">
+              {describeShares(ariaLabel, items.map((item) => ({ label: item.label, percent: item.percent * 100 })))}
+            </span>
             <div className="cashFlowDonutCenter">
               <span className="label">Total</span>
               <strong>{formatMoney(total)}</strong>
@@ -875,13 +887,10 @@ export default function CashFlowDetailRoute() {
         </>
       )}
     >
-      {!loadError && (detailRes.isLoading || categoriesRes.isLoading) && <div className="card">Loading…</div>}
+      {!loadError && (detailRes.isLoading || categoriesRes.isLoading) && <div className="card" role="status">Loading…</div>}
 
       {loadError && (
-        <div className="card error">
-          <div className="cardTitle">Cash flow detail unavailable</div>
-          <pre className="pre">{loadError.message}</pre>
-        </div>
+        <LoadError title="Cash flow detail unavailable" error={loadError.message} onRetry={() => { void detailRes.reload().catch(() => undefined); void categoriesRes.reload().catch(() => undefined); }} />
       )}
 
       {!loadError && detail && categoriesRes.data ? (

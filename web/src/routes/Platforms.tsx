@@ -6,6 +6,7 @@ import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
 import SuccessBanner from "../components/SuccessBanner";
+import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -87,13 +88,10 @@ export default function Platforms() {
       title="Add Platform"
       subtitle="Maintain the directory of banks, brokers, and exchanges that powers imports and account metadata."
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {state === "loading" && <div className="card" role="status">Loading…</div>}
 
       {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+        <LoadError title="Couldn't load platforms" error={err} />
       )}
 
       {state === "ready" && (

@@ -8,6 +8,7 @@ import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import * as fmt from "../lib/format";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 type CategoryGroup = {
   label: string;
@@ -183,16 +184,21 @@ export default function CashFlowMapping() {
         </>
       )}
     >
-      {!ready && !error && <div className="card">Loading…</div>}
+      {!ready && !error && <div className="card" role="status">Loading…</div>}
 
       {error && (
-        <div className="card error">
-          <div className="cardTitle">Category mapping unavailable</div>
-          <pre className="pre">{error.message}</pre>
+        <LoadError
+          title="Category mapping unavailable"
+          error={error}
+          onRetry={() => {
+            if (unmappedRes.error) void unmappedRes.reload().catch(() => undefined);
+            if (categoriesRes.error) void categoriesRes.reload().catch(() => undefined);
+          }}
+        >
           <div className="hint">
             Check that the API is running. If category tables are missing, run <code>make db-migrate</code> then <code>make api-rebuild</code>.
           </div>
-        </div>
+        </LoadError>
       )}
 
       {ready && transactions.length === 0 && (

@@ -14,6 +14,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 
 export default function CryptoHoldings() {
@@ -74,12 +75,9 @@ export default function CryptoHoldings() {
         </>
       )}
     >
-      {resource.isLoading && <div className="card">Loading…</div>}
+      {resource.isLoading && <div className="card" role="status">Loading…</div>}
       {resource.error && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{resource.error.message}</pre>
-        </div>
+        <LoadError title="Couldn't load crypto holdings" error={resource.error.message} onRetry={() => void resource.reload().catch(() => undefined)} />
       )}
 
       {summary && (

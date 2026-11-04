@@ -169,7 +169,7 @@ describe("CryptoHoldings route", () => {
       </ThemeProvider>
     );
 
-    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load crypto holdings")).toBeInTheDocument();
     expect(screen.getByText("crypto unavailable")).toBeInTheDocument();
   });
 

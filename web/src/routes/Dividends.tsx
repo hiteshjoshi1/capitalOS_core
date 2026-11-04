@@ -14,6 +14,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 type CompanyTab = "realized" | "expected";
 
@@ -138,12 +139,9 @@ export default function Dividends() {
         </>
       )}
     >
-      {monthRes.isLoading && <div className="card">Loading…</div>}
+      {monthRes.isLoading && <div className="card" role="status">Loading…</div>}
       {monthRes.error && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{monthRes.error.message}</pre>
-        </div>
+        <LoadError title="Couldn't load dividends" error={monthRes.error.message} onRetry={() => void monthRes.reload().catch(() => undefined)} />
       )}
 
       {monthSummary && (
@@ -247,7 +245,7 @@ export default function Dividends() {
                   Couldn't load companies: {(companyTab === "realized" ? companyRes : expectedRes).error?.message}
                 </div>
               ) : (companyTab === "realized" ? companySummary : expectedOverview) == null ? (
-                <div className="muted">Loading…</div>
+                <div className="muted" role="status">Loading…</div>
               ) : companyTab === "realized" ? (
                 topCompanies.length === 0 ? (
                   <div className="muted">No company-level dividend records yet.</div>

@@ -9,6 +9,7 @@ import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformD
 import SuccessBanner from "../components/SuccessBanner";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { formatEnumLabel } from "../lib/format";
+import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -218,13 +219,10 @@ export default function AddAccount() {
       title="Add Account"
       subtitle="Create a new account linked to a platform, so new statements have the right destination."
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {state === "loading" && <div className="card" role="status">Loading…</div>}
 
       {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">Load error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+        <LoadError title="Load error" error={err} />
       )}
 
       {state === "ready" && (

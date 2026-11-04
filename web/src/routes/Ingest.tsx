@@ -9,6 +9,7 @@ import { dateFromFilename, describeAsOf, resolvePlatformParser, todayLocalYYYYMM
 import type { SignatureDebug } from "./ingestUtils";
 import * as fmt from "../lib/format";
 import { formatPlatformLabel } from "../lib/platformLabels";
+import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -220,13 +221,10 @@ export default function Ingest() {
       title="Import Statements"
       subtitle="Upload a statement. We'll detect the format and show you what we found."
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {state === "loading" && <div className="card" role="status">Loading…</div>}
 
       {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">Load error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+        <LoadError title="Load error" error={err} />
       )}
 
       {state === "ready" && (
