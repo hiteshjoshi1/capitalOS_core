@@ -5,18 +5,23 @@ import { MemoryRouter } from "react-router-dom";
 
 import Ingest from "../routes/Ingest";
 import { dateFromFilename, describeAsOf, hasOrderedHeaderSubset, resolvePlatformParser, todayLocalYYYYMMDD } from "../routes/ingestUtils";
-import { api } from "../lib/api";
+import { api, UploadRefusedError } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
 
-vi.mock("../lib/api", () => ({
-  api: {
-    accounts: vi.fn(),
-    ingestJobs: vi.fn(),
-    ingestJob: vi.fn(),
-    ingestUpload: vi.fn(),
-    registerIngestSignature: vi.fn(),
-  },
-}));
+vi.mock("../lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/api")>();
+  return {
+    UploadRefusedError: actual.UploadRefusedError,
+    api: {
+      accounts: vi.fn(),
+      ingestJobs: vi.fn(),
+      ingestJob: vi.fn(),
+      ingestUpload: vi.fn(),
+      registerIngestSignature: vi.fn(),
+      removeIngestJob: vi.fn(),
+    },
+  };
+});
 
 const mockApi = vi.mocked(api, true);
 
@@ -742,5 +747,140 @@ describe("Ingest", () => {
       expect(scoped.getByText("2 parsed")).toBeInTheDocument();
       expect(scoped.getByText("2 inserted")).toBeInTheDocument();
     }
+  });
+
+  it("shows an account refusal and uploads anyway only when asked (#180)", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 5, name: "Savings", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" },
+      { id: 6, name: "Joint", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValue([]);
+    mockApi.ingestUpload
+      .mockRejectedValueOnce(
+        new UploadRefusedError({
+          code: "statement_account_mismatch",
+          message: "This statement is for the account ending 4321, but the selected account's statements are for the account ending 6789.",
+          job_id: 40,
+          statement_last4: "4321",
+          linked_last4: "6789",
+          suggested_account_id: 6,
+          override_field: "allow_account_mismatch",
+        }),
+      )
+      .mockResolvedValueOnce({ job_id: 41, status: "IMPORTED", platform: "DBS", counts: {}, preview_transactions: [] });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "5");
+    const file = new File(["data"], "dbs.csv", { type: "text/csv" });
+    await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, file);
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
+
+    const refusal = await screen.findByRole("alert", { name: "Upload refused" });
+    expect(within(refusal).getByText(/ending 4321/)).toBeInTheDocument();
+    expect(within(refusal).getByRole("button", { name: "Select Joint" })).toBeInTheDocument();
+    expect(mockApi.ingestUpload).toHaveBeenCalledTimes(1);
+
+    await userEvent.click(within(refusal).getByRole("button", { name: "Upload anyway" }));
+
+    expect(mockApi.ingestUpload).toHaveBeenLastCalledWith(5, file, expect.any(String), { allowAccountMismatch: true });
+    expect(await screen.findByText(/job #41/i)).toBeInTheDocument();
+    expect(screen.queryByRole("alert", { name: "Upload refused" })).not.toBeInTheDocument();
+  });
+
+  it("offers no override for a wrong account type", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 7, name: "Card", platform: "DBS", account_type: "CREDIT_CARD", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValue([]);
+    mockApi.ingestUpload.mockRejectedValueOnce(
+      new UploadRefusedError({
+        code: "account_type_mismatch",
+        message: "This file is a DBS bank-account statement, which belongs to a bank account (BANK).",
+        expected_account_types: ["BANK"],
+      }),
+    );
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await screen.findByText("Upload Statement CSV");
+    await userEvent.selectOptions(screen.getByLabelText("Account"), "7");
+    await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, new File(["d"], "dbs.csv"));
+    await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
+
+    const refusal = await screen.findByRole("alert", { name: "Upload refused" });
+    expect(within(refusal).getByText(/belongs to a bank account/)).toBeInTheDocument();
+    expect(within(refusal).queryByRole("button", { name: "Upload anyway" })).not.toBeInTheDocument();
+  });
+
+  it("removes an import after a confirm step (#180)", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 5, name: "Savings", platform: "DBS", account_type: "BANK", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs
+      .mockResolvedValueOnce([
+        { id: 50, status: "IMPORTED", platform: "DBS", account_id: 5, original_filename: "wrong.csv", created_at: null, removable: true },
+        { id: 49, status: "IMPORTED", platform: "DBS", account_id: 5, original_filename: "old.csv", created_at: null, removable: false },
+      ])
+      .mockResolvedValueOnce([
+        { id: 50, status: "REMOVED", platform: "DBS", account_id: 5, original_filename: "wrong.csv", created_at: null, removable: false },
+        { id: 49, status: "IMPORTED", platform: "DBS", account_id: 5, original_filename: "old.csv", created_at: null, removable: false },
+      ]);
+    mockApi.removeIngestJob.mockResolvedValueOnce({
+      job_id: 50,
+      status: "REMOVED",
+      account_id: 5,
+      removed: { transactions: 30, balance_snapshots: 1, position_snapshots: 0, restored_rows: 0 },
+      history_dirty_from: "2026-10-01",
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await screen.findByText("Recent Imports");
+    expect(screen.queryByRole("button", { name: "Remove import 49" })).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: "Remove import 50" }));
+    expect(mockApi.removeIngestJob).not.toHaveBeenCalled();
+    expect(mockApi.ingestJob).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole("button", { name: "Yes, remove" }));
+
+    expect(mockApi.removeIngestJob).toHaveBeenCalledWith(50);
+    expect(await screen.findByText(/Import #50 removed: 30 transactions, 1 balances/)).toBeInTheDocument();
+    expect(screen.getByText("Removed")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove import 50" })).not.toBeInTheDocument();
+  });
+
+  it("cancelling the confirm step removes nothing", async () => {
+    mockApi.accounts.mockResolvedValueOnce([]);
+    mockApi.ingestJobs.mockResolvedValueOnce([
+      { id: 60, status: "IMPORTED", platform: "DBS", account_id: 5, original_filename: "x.csv", created_at: null, removable: true },
+    ]);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Remove import 60" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(mockApi.removeIngestJob).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Remove import 60" })).toBeInTheDocument();
   });
 });

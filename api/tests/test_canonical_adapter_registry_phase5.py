@@ -40,16 +40,18 @@ from app.portfolio.upload_canonical import (
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
-def _seed_account(db_engine, account_id: int, name: str, platform: str, currency: str) -> None:
+def _seed_account(
+    db_engine, account_id: int, name: str, platform: str, currency: str, account_type: str = "BANK"
+) -> None:
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
         db.execute(
             text(
                 "INSERT OR IGNORE INTO accounts (id, name, platform, account_type, currency, country) "
-                "VALUES (:id, :name, :platform, 'BANK', :currency, 'SG')"
+                "VALUES (:id, :name, :platform, :account_type, :currency, 'SG')"
             ),
-            {"id": account_id, "name": name, "platform": platform, "currency": currency},
+            {"id": account_id, "name": name, "platform": platform, "currency": currency, "account_type": account_type},
         )
         db.commit()
     finally:
@@ -397,7 +399,7 @@ def test_dbs_transaction_upload_writes_canonical_balance(client: TestClient, db_
 def test_canonical_adapter_failure_fails_import(client: TestClient, db_engine, tmp_path, monkeypatch):
     """When the canonical adapter raises, the import must fail (not silently succeed)."""
     account_id = 730
-    _seed_account(db_engine, account_id, "Fail Test", "SHAREKHAN", "INR")
+    _seed_account(db_engine, account_id, "Fail Test", "SHAREKHAN", "INR", account_type="BROKER")
 
     sharekhan_html = """<html><body>
     <table>
@@ -453,7 +455,7 @@ def test_canonical_adapter_failure_fails_import(client: TestClient, db_engine, t
 def test_unregistered_parser_with_positions_fails_import(client: TestClient, db_engine, tmp_path):
     """An upload from an unregistered parser that emits positions must fail with FAILED status."""
     account_id = 740
-    _seed_account(db_engine, account_id, "Unknown Parser Test", "SHAREKHAN", "INR")
+    _seed_account(db_engine, account_id, "Unknown Parser Test", "SHAREKHAN", "INR", account_type="BROKER")
 
     # Register a known signature to a fake parser key not in PARSER_CANONICAL_REGISTRY
     fake_content = "fake_unknown_parser_content_xyz\ncol1,col2\nval1,val2\n"
@@ -491,8 +493,11 @@ def test_unregistered_parser_with_positions_fails_import(client: TestClient, db_
             parser_meta={},
         )
 
+    from app.ingestion import account_checks
+
     original_registry = dict(runner_mod.PARSER_REGISTRY)
     runner_mod.PARSER_REGISTRY["future_unknown_parser_v1"] = ("csv", _fake_parser)
+    account_checks.PARSER_ACCOUNT_TYPES["future_unknown_parser_v1"] = frozenset({"BROKER"})
 
     try:
         with open(str(fixture), "rb") as f:
@@ -508,6 +513,7 @@ def test_unregistered_parser_with_positions_fails_import(client: TestClient, db_
     finally:
         runner_mod.PARSER_REGISTRY.clear()
         runner_mod.PARSER_REGISTRY.update(original_registry)
+        account_checks.PARSER_ACCOUNT_TYPES.pop("future_unknown_parser_v1", None)
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +523,7 @@ def test_unregistered_parser_with_positions_fails_import(client: TestClient, db_
 def test_citi_credit_card_upload_not_affected(client: TestClient, db_engine, tmp_path):
     """Credit card parsers (no positions) must remain fully functional and untouched."""
     account_id = 750
-    _seed_account(db_engine, account_id, "Citi CC Phase5", "CITI", "SGD")
+    _seed_account(db_engine, account_id, "Citi CC Phase5", "CITI", "SGD", account_type="CREDIT_CARD")
 
     citi_csv = "01/01/2024,AMAZON PURCHASE,50.00,SGD,4321\n"
     fixture = tmp_path / "citi_phase5.csv"

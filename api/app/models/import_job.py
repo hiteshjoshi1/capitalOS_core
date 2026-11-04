@@ -1,4 +1,5 @@
-from sqlalchemy import BigInteger, Column, Text, Enum, ForeignKey, DateTime
+from sqlalchemy import JSON, BigInteger, Column, Text, Enum, ForeignKey, DateTime
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.sql import func
 from .base import Base
 
@@ -10,6 +11,11 @@ ImportStatus = Enum(
     "IMPORTED",
     "NEEDS_MAPPING",
     "FAILED",
+    # Refused before anything was written: wrong account type, or the file names
+    # another account (#180).
+    "REJECTED",
+    # Its rows were removed by "Remove this import" (#180).
+    "REMOVED",
     name="import_status",
     create_type=False,
 )
@@ -31,3 +37,7 @@ class ImportJob(Base):
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    # What removing this upload must put back (#180); NULL for jobs imported
+    # before migration 074, which can't be removed.
+    undo_json = Column(JSON().with_variant(JSONB(), "postgresql"), nullable=True)
+    removed_at = Column(DateTime(timezone=True), nullable=True)

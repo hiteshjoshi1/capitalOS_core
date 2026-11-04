@@ -12,6 +12,8 @@ from app.auth_context import CurrentUser, account_scope_sql, require_current_use
 from app.db.session import get_db
 from app.ingestion.runner import PARSER_REGISTRY, create_import_job, run_ingestion
 from app.ingestion.registry import register_signature
+from app.ingestion.account_checks import account_type_of, check_parser_account_type
+from app.ingestion.undo import RemovalRefused, remove_import_job
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
 from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
@@ -23,6 +25,23 @@ class RegisterPayload(BaseModel):
     parser_key: str
     # The upload's as-of date, re-sent when a NEEDS_MAPPING upload is approved (#141).
     as_of: date | None = None
+    # Import even though the file names a different account than the one linked (#180).
+    allow_account_mismatch: bool = False
+
+
+def _raise_if_refused(report: dict) -> dict:
+    """A refused upload (#180) is a 409 whose detail says why; nothing was written.
+
+    ``detail`` carries ``code`` (account_type_mismatch | statement_account_mismatch),
+    ``message`` and ``job_id``; a statement mismatch also names ``override_field``,
+    the form field that uploads it anyway.
+    """
+    if report.get("status") != "REJECTED":
+        return report
+    refusal = dict(report.get("refusal") or {})
+    refusal.setdefault("message", report.get("error_message") or "Upload refused")
+    refusal["job_id"] = report.get("job_id")
+    raise HTTPException(status_code=409, detail=refusal)
 
 
 def _data_dir() -> str:
@@ -181,7 +200,7 @@ def ingest_ibkr(
             data_dir=data_dir,
         )
         report = run_ingestion(db=db, job_id=job.id, data_dir=data_dir)
-        return report
+        return _raise_if_refused(report)
     finally:
         try:
             os.remove(tmp_path)
@@ -202,6 +221,11 @@ def ingest_upload(
     as_of: date | None = Form(
         None,
         description="The statement's as-of date (YYYY-MM-DD), used when the file states none of its own (#141).",
+    ),
+    allow_account_mismatch: bool = Form(
+        False,
+        description="Import even though the file names a different account than the one this account's "
+        "statements name (#180). The account-type check has no override.",
     ),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
@@ -227,10 +251,16 @@ def ingest_upload(
             upload_path=tmp_path,
             data_dir=data_dir,
         )
-        report = run_ingestion(db=db, job_id=job.id, data_dir=data_dir, as_of=as_of)
+        report = run_ingestion(
+            db=db,
+            job_id=job.id,
+            data_dir=data_dir,
+            as_of=as_of,
+            allow_account_mismatch=allow_account_mismatch,
+        )
         if report.get("status") == "IMPORTED":
             _backfill_account_categories(db, account_id)
-        return report
+        return _raise_if_refused(report)
     finally:
         try:
             os.remove(tmp_path)
@@ -265,7 +295,8 @@ def list_jobs(
     rows = db.execute(
         text(
             """
-            SELECT ij.id, ij.status, ij.platform, ij.account_id, ij.original_filename, ij.created_at
+            SELECT ij.id, ij.status, ij.platform, ij.account_id, ij.original_filename, ij.created_at,
+                   ij.error_message, ij.removed_at, (ij.undo_json IS NOT NULL) AS has_undo_log
             FROM import_jobs ij
             JOIN accounts a ON a.id = ij.account_id
             WHERE """
@@ -284,10 +315,21 @@ def list_jobs(
             "platform": r["platform"],
             "account_id": int(r["account_id"]),
             "original_filename": r["original_filename"],
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "created_at": _iso(r["created_at"]),
+            # #180: why it was refused or failed, when it was removed, and
+            # whether "Remove this import" can undo it.
+            "error_message": r["error_message"],
+            "removed_at": _iso(r["removed_at"]),
+            "removable": r["status"] == "IMPORTED" and bool(r["has_undo_log"]),
         }
         for r in rows
     ]
+
+
+def _iso(value) -> str | None:
+    if value is None:
+        return None
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
 @router.get("/jobs/{job_id}")
@@ -360,10 +402,48 @@ def register_job_signature(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     _require_account_platform(db, int(job.account_id), current_user.id)
+    if job.status in ("IMPORTED", "REMOVED"):
+        raise HTTPException(status_code=409, detail=f"Job is already {job.status}; upload the file again instead")
     if not job.format_signature:
         raise HTTPException(status_code=400, detail="Job has no format_signature")
     _check_as_of(payload.as_of)
+    # Refuse before the shared registry is written: a mapping registered from the
+    # wrong account would misroute every later upload of this format (#180).
+    wrong_type = check_parser_account_type(parser_key, account_type_of(db, int(job.account_id)))
+    if wrong_type is not None:
+        raise HTTPException(status_code=409, detail={**wrong_type.as_dict(), "job_id": int(job.id)})
     # An admin registering a signature that is already mapped corrects the mapping.
     register_signature(db, job.format_signature, parser_key, 1, replace=True)
-    report = run_ingestion(db=db, job_id=job.id, data_dir=_data_dir(), as_of=payload.as_of)
-    return report
+    report = run_ingestion(
+        db=db,
+        job_id=job.id,
+        data_dir=_data_dir(),
+        as_of=payload.as_of,
+        allow_account_mismatch=payload.allow_account_mismatch,
+    )
+    return _raise_if_refused(report)
+
+
+@router.post("/jobs/{job_id}/remove")
+def remove_job(
+    job_id: int,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Remove an upload's rows (#180): its transactions, balance snapshots and
+    holdings, putting back what it replaced, and mark History dirty from the
+    earliest affected date. The job row stays, with status REMOVED.
+
+    Only the owner of the job's account can remove it (404 otherwise). 409 when it
+    can't be removed (not imported, imported before removal existed, or a later
+    upload replaced its rows); nothing is changed then.
+    """
+    job = db.query(ImportJob).filter(ImportJob.id == job_id).one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    _require_account_platform(db, int(job.account_id), current_user.id)
+    try:
+        return remove_import_job(db, job)
+    except RemovalRefused as refused:
+        db.rollback()
+        raise HTTPException(status_code=refused.status_code, detail=refused.message) from refused

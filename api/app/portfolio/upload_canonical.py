@@ -29,6 +29,7 @@ from sqlalchemy.orm import Session
 
 from app.ingestion.as_of import AsOfSource, as_of_metadata, resolve_upload_as_of
 from app.ingestion.parsers.base import ParseResult
+from app.ingestion.undo import jsonable_row
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
 UPLOAD_ADAPTER_VERSION = "upload_canonical_v1"
@@ -257,8 +258,10 @@ def _ensure_upload_authority_window(
     broker_account_id: int,
     source_kind: str,
     effective_from: date,
-) -> None:
-    """Idempotently create a source authority window for an upload platform."""
+) -> int | None:
+    """Idempotently create a source authority window for an upload platform.
+
+    Returns the new window's id, or None when one already existed."""
     exists = db.execute(
         text(
             """
@@ -278,7 +281,12 @@ def _ensure_upload_authority_window(
         },
     ).fetchone()
     if exists:
-        return
+        return None
+    params = {
+        "broker_account_id": broker_account_id,
+        "source_kind": source_kind,
+        "effective_from": effective_from,
+    }
     db.execute(
         text(
             """
@@ -288,12 +296,23 @@ def _ensure_upload_authority_window(
               (:broker_account_id, :source_kind, 'holdings', :effective_from, 'authoritative')
             """
         ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": source_kind,
-            "effective_from": effective_from,
-        },
+        params,
     )
+    row = db.execute(
+        text(
+            """
+            SELECT id FROM portfolio_source_authority_windows
+            WHERE broker_account_id = :broker_account_id
+              AND source_kind = :source_kind
+              AND fact_scope = 'holdings'
+              AND effective_from = :effective_from
+            ORDER BY id DESC
+            LIMIT 1
+            """
+        ),
+        params,
+    ).fetchone()
+    return int(row[0]) if row else None
 
 
 def _create_upload_import_run(
@@ -305,19 +324,22 @@ def _create_upload_import_run(
     source_kind: str,
     report_date: date,
     metadata: dict[str, Any] | None = None,
+    import_job_id: int | None = None,
 ) -> int:
     db.execute(
         text(
             f"""
             INSERT INTO broker_import_runs
               (broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status,
-               started_at, report_date_from, report_date_to, parser_version, metadata_json)
+               started_at, report_date_from, report_date_to, parser_version, metadata_json, import_job_id)
             VALUES
               (:broker_account_id, :legacy_account_id, :platform_code, :source_type, 'upload', 'started',
-               :started_at, :report_date, :report_date, :parser_version, {_json_param_sql(db, "metadata_json")})
+               :started_at, :report_date, :report_date, :parser_version, {_json_param_sql(db, "metadata_json")},
+               :import_job_id)
             """
         ),
         {
+            "import_job_id": import_job_id,
             "metadata_json": json.dumps(metadata or {}, sort_keys=True),
             "broker_account_id": broker_account_id,
             "legacy_account_id": legacy_account_id,
@@ -580,12 +602,28 @@ def _clear_existing_upload_position_facts(
     db: Session,
     broker_account_id: int,
     report_date: date,
+    undo: dict[str, Any] | None = None,
 ) -> None:
-    """Delete existing authoritative position snapshots for this account/date."""
+    """Delete existing authoritative position snapshots for this account/date.
+
+    With ``undo``, the deleted rows are kept there so removing this upload can
+    put them back (#180)."""
     for table_name in (
         "portfolio_position_snapshots",
         "portfolio_data_completeness",
     ):
+        if undo is not None:
+            replaced = db.execute(
+                text(
+                    f"SELECT * FROM {table_name} "
+                    "WHERE broker_account_id = :broker_account_id AND report_date = :report_date"
+                ),
+                {"broker_account_id": broker_account_id, "report_date": report_date},
+            ).mappings().all()
+            if replaced:
+                undo.setdefault("replaced_rows", {}).setdefault(table_name, []).extend(
+                    jsonable_row(row) for row in replaced
+                )
         db.execute(
             text(
                 f"DELETE FROM {table_name} "
@@ -882,6 +920,8 @@ def run_upload_canonical_adapter(
     file_sha256: str,
     is_ibkr_flex_cutover_active: bool = False,
     user_as_of: date | None = None,
+    import_job_id: int | None = None,
+    undo: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Adapt an upload ParseResult into canonical portfolio facts.
 
@@ -901,6 +941,8 @@ def run_upload_canonical_adapter(
             reference-only canonical facts instead of authoritative facts.
         user_as_of: The as-of date chosen with the upload; used when the file
             states no date of its own (#141).
+        import_job_id: The upload job, recorded on the import run (#180).
+        undo: Collects what removing the upload must put back (#180).
 
     Returns:
         Dict with canonical write result metadata.
@@ -937,7 +979,9 @@ def run_upload_canonical_adapter(
 
     # Set up source authority window for authoritative uploads only
     if authority_status == "authoritative":
-        _ensure_upload_authority_window(db, broker_account_id, source_kind, report_date)
+        window_id = _ensure_upload_authority_window(db, broker_account_id, source_kind, report_date)
+        if window_id is not None and undo is not None:
+            undo.setdefault("created_authority_window_ids", []).append(window_id)
 
     import_run_id = _create_upload_import_run(
         db,
@@ -947,7 +991,11 @@ def run_upload_canonical_adapter(
         source_kind=source_kind,
         report_date=report_date,
         metadata=as_of_meta,
+        import_job_id=import_job_id,
     )
+    if undo is not None:
+        undo.setdefault("import_run_ids", []).append(import_run_id)
+        undo.setdefault("affected_dates", []).append(report_date.isoformat())
     raw_document_id = _store_upload_raw_document(
         db,
         import_run_id=import_run_id,
@@ -964,7 +1012,7 @@ def run_upload_canonical_adapter(
         # Idempotent fact replacement: clear existing canonical facts for this
         # account + date before writing new ones. Inside the try so a failure
         # here is recorded too; the caller rolls the deletion back (#136).
-        _clear_existing_upload_position_facts(db, broker_account_id, report_date)
+        _clear_existing_upload_position_facts(db, broker_account_id, report_date, undo=undo)
 
         positions_written = _insert_upload_position_snapshots(
             db,
@@ -1081,12 +1129,37 @@ def _write_account_balance_snapshot(
     balance_type: str,
     source_row_hash: str,
     metadata: dict[str, Any] | None = None,
+    undo: dict[str, Any] | None = None,
 ) -> None:
     """Upsert a single authoritative account balance snapshot.
 
     Uses DELETE + INSERT to handle the partial-unique-index constraint
-    (SQLite does not support ON CONFLICT on partial indexes).
+    (SQLite does not support ON CONFLICT on partial indexes). With ``undo``, the
+    row it replaces is kept there so removing this upload can put it back (#180).
     """
+    if undo is not None:
+        replaced = db.execute(
+            text(
+                """
+                SELECT * FROM account_balance_snapshots
+                WHERE account_id = :account_id
+                  AND as_of_date = :as_of_date
+                  AND currency = :currency
+                  AND balance_type = :balance_type
+                  AND authority_status = 'authoritative'
+                """
+            ),
+            {
+                "account_id": account_id,
+                "as_of_date": as_of_date,
+                "currency": currency.upper(),
+                "balance_type": balance_type,
+            },
+        ).mappings().all()
+        if replaced:
+            undo.setdefault("replaced_rows", {}).setdefault("account_balance_snapshots", []).extend(
+                jsonable_row(row) for row in replaced
+            )
     dialect_name = getattr(getattr(getattr(db, "bind", None), "dialect", None), "name", "sqlite")
     if dialect_name == "postgresql":
         db.execute(
@@ -1197,6 +1270,7 @@ def run_upload_balance_canonical_adapter(
     import_job_id: int | None,
     parse_result: ParseResult,
     user_as_of: date | None = None,
+    undo: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Adapt bank/account upload ParseResult into canonical account_balance_snapshots.
 
@@ -1244,11 +1318,14 @@ def run_upload_balance_canonical_adapter(
             balance_type="bank_cash",
             source_row_hash=row_hash,
             metadata=as_of_meta,
+            undo=undo,
         )
         balances_written += 1
 
     if balances_written:
         mark_rollups_dirty(db, as_of_date, account_id=account_id, reason="upload_account_balance")
+        if undo is not None:
+            undo.setdefault("affected_dates", []).append(as_of_date.isoformat())
 
     return {
         "status": "CANONICAL_IMPORTED",

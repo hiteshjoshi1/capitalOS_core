@@ -618,7 +618,7 @@ def _current_networth_state(db: Session, base_currency: str, current_user_id: in
         if wallet.get("as_of_date") is not None
     ]
 
-    cash_rows = canonical_account_balance_rows(
+    cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor.date(),
@@ -682,9 +682,12 @@ def _infer_country(
     return "UNKNOWN"
 
 
+@valuation_cached(shared=True)
 def _credit_card_account_ids(db: Session, current_user_id: int) -> set[int]:
     """The user's credit-card accounts: their balances are liabilities, not cash
-    (the same set _credit_card_liability_component returns)."""
+    (the same set _credit_card_liability_component returns). A card is any account
+    whose account_type is CREDIT_CARD, with or without a credit_card_accounts row
+    (#180)."""
     rows = db.execute(
         text(
             """
@@ -697,6 +700,20 @@ def _credit_card_account_ids(db: Session, current_user_id: int) -> set[int]:
         {"current_user_id": current_user_id},
     ).mappings().all()
     return {int(row["account_id"]) for row in rows}
+
+
+def _cash_balance_rows(db: Session, *, current_user_id: int, anchor_date: date) -> List[Dict[str, Any]]:
+    """The canonical balance rows that can count as cash: every account's except
+    credit cards' (#180). A CREDIT_CARD account's balance is never cash, whether or
+    not it has a credit_card_accounts row; a bank statement stored on a card account
+    by mistake must not add to Cash. Every cash reader here goes through this, so
+    #144 (one cash scope) can build on it."""
+    card_ids = _credit_card_account_ids(db, current_user_id)
+    return [
+        row
+        for row in canonical_account_balance_rows(db, current_user_id=current_user_id, anchor_date=anchor_date)
+        if row.get("account_id") is None or int(row["account_id"]) not in card_ids
+    ]
 
 
 @valuation_cached(shared=True, date_args=("anchor_ts",))
@@ -726,7 +743,7 @@ def _networth_asset_components(
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
-    canonical_cash_rows = canonical_account_balance_rows(
+    canonical_cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
@@ -1195,7 +1212,7 @@ def _geography(
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
-    canonical_cash_rows = canonical_account_balance_rows(
+    canonical_cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
@@ -1259,7 +1276,7 @@ def _geography_exposure(
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
     )
-    canonical_cash_rows = canonical_account_balance_rows(
+    canonical_cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
@@ -1924,7 +1941,7 @@ def _cash_trend(
 
 @valuation_cached(shared=True, date_args=("anchor_ts",))
 def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
-    rows = canonical_account_balance_rows(
+    rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
@@ -1965,7 +1982,7 @@ def _display_source(value: str | None) -> str:
 def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     buckets: Dict[str, float] = {}
 
-    cash_rows = canonical_account_balance_rows(
+    cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
@@ -2205,7 +2222,7 @@ def _platform_allocation(
     nav_live_rows, nav_live_prices, nav_live_currencies = _nav_live_context(
         db, anchor_ts, current_user_id, base_currency, enabled=price_overlay
     )
-    canonical_cash_rows = canonical_account_balance_rows(
+    canonical_cash_rows = _cash_balance_rows(
         db,
         current_user_id=current_user_id,
         anchor_date=anchor_ts.date(),
