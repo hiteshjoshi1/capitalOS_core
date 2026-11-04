@@ -283,16 +283,18 @@ def test_first_of_month_dashboard_and_history_agree(household_first):
 def test_first_of_month_last_month_is_closed_everywhere(household_first):
     """At 06:00 SGT on 1 April, March is a completed month on every page: its
     summary is its own month-end (the same figures the open month reports), the
-    live change compares with March's month-end, and the Stocks and Cash
-    pages browse March as a past month, not live."""
+    live change compares with March's month-end, and the Stocks, Cash and
+    Crypto pages browse March as a past month, not live."""
     april = _summary(household_first, "2026-04")
     march = _summary(household_first, "2026-03")
     assert march["net_worth_boundary_at"] == april["net_worth_boundary_at"] == "2026-04-01T00:00:00+00:00"
     assert march["net_worth"] == pytest.approx(april["net_worth"], abs=TOL)
     assert april["current_net_worth_change"]["vs_prev_month"]["compare_month"] == "2026-03"
-    for path in ("/dashboard/stock-holdings", "/dashboard/cash-deposits"):
+    for path in ("/dashboard/stock-holdings", "/dashboard/cash-deposits", "/crypto/summary"):
         assert _get(household_first, f"{path}?month=2026-03&base_currency=SGD")["is_live"] is False, path
         assert _get(household_first, f"{path}?month=2026-04&base_currency=SGD")["is_live"] is True, path
+    crypto_march = _get(household_first, "/crypto/summary?month=2026-03&base_currency=SGD")["total_crypto_base"]
+    assert crypto_march == pytest.approx(march["net_worth"]["crypto"], abs=TOL)
 
 
 # ─── User isolation ──────────────────────────────────────────────────────────

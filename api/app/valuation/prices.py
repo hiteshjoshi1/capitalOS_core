@@ -19,6 +19,7 @@ from app.portfolio.position_pricing import (
     position_base_currency,
     price_position,
 )
+from app.valuation import fx
 from app.valuation.clock import _iso_value, _normalize_ts
 
 
@@ -176,3 +177,38 @@ def _nav_live_context(
     return rows, prices, currencies
 
 
+def _asset_market_values(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+) -> dict[int, float]:
+    """Per asset: the market value of every stock/fund holding at ``anchor_ts``
+    in ``base_currency``, priced like the live dashboard holdings (the yield
+    denominator of the Dividends page)."""
+    rows = canonical_position_rows_by_legacy_account(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+        include_nav_accounts=True,
+    )
+    holding_rows = [
+        row
+        for row in rows
+        if row.get("asset_id") is not None and str(row.get("asset_class") or "").upper() in {"STOCK", "FUND"}
+    ]
+    if not holding_rows:
+        return {}
+    # The same price rule as the dashboard's holdings (D-21 for every holding,
+    # #144): the price job's quote when it's at least as recent as the holding's
+    # statement and within 2x of it, else the statement value (market value, else cost).
+    quotes = latest_quotes(db, anchor_ts.date(), frozenset(int(row["asset_id"]) for row in holding_rows))
+    currencies = {position_base_currency(row, base_currency) for row in holding_rows}
+    currencies.update(str(quote["currency"]).upper() for quote in quotes.values() if quote.get("currency"))
+    currencies.update(str(row["quote_currency"]).upper() for row in holding_rows if row.get("quote_currency"))
+    fx_rates = fx.get_rates(anchor_ts, base_currency, currencies)
+    out: dict[int, float] = {}
+    for row in holding_rows:
+        asset = int(row["asset_id"])
+        out[asset] = out.get(asset, 0.0) + price_position(row, quotes, fx_rates, base_currency).value
+    return out

@@ -12,7 +12,9 @@ from app.db.session import get_db
 from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
 from app.market_data.service import YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
-from app.portfolio.position_pricing import latest_quotes, position_base_currency, price_position
+from app.valuation import clock as valuation_clock
+# The holdings' market value under the dashboard's price rule (D-21, #144), from the valuation service.
+from app.valuation.prices import _asset_market_values as _latest_asset_market_values
 from app.portfolio.ledger_dividends import fetch_ledger_dividend_rows, ledger_covered_since
 from app.schemas.dividends import (
     DividendCompanyItemOut,
@@ -78,11 +80,10 @@ def _parse_country_tax_rates(raw: str | None) -> dict[str, float]:
 
 
 def _resolve_range(from_month: str | None, to_month: str | None) -> tuple[datetime, datetime, str, str]:
-    now = datetime.now(tz=timezone.utc)
     if to_month:
         to_start = _parse_month(to_month)
     else:
-        to_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        to_start = valuation_clock._month_start_of(valuation_clock._app_today())
     if from_month:
         from_start = _parse_month(from_month)
     else:
@@ -234,40 +235,6 @@ def _covered_by_ledger(row: dict[str, Any], covered_since: dict[int, date]) -> b
     if account_id is None or int(account_id) not in covered_since:
         return False
     return _row_ts(row["ts"]).date() >= covered_since[int(account_id)]
-
-
-def _latest_asset_market_values(
-    db: Session,
-    anchor_ts: datetime,
-    base_currency: str,
-    current_user_id: int,
-) -> dict[int, float]:
-    rows = canonical_position_rows_by_legacy_account(
-        db,
-        current_user_id=current_user_id,
-        anchor_date=anchor_ts.date(),
-        include_nav_accounts=True,
-    )
-    holding_rows = [
-        row
-        for row in rows
-        if row.get("asset_id") is not None and str(row.get("asset_class") or "").upper() in {"STOCK", "FUND"}
-    ]
-    if not holding_rows:
-        return {}
-    # The same price rule as the dashboard's holdings (D-21 for every holding,
-    # #144): the price job's quote when it's at least as recent as the holding's
-    # statement and within 2x of it, else the statement value (market value, else cost).
-    quotes = latest_quotes(db, anchor_ts.date(), frozenset(int(row["asset_id"]) for row in holding_rows))
-    currencies = {position_base_currency(row, base_currency) for row in holding_rows}
-    currencies.update(str(quote["currency"]).upper() for quote in quotes.values() if quote.get("currency"))
-    currencies.update(str(row["quote_currency"]).upper() for row in holding_rows if row.get("quote_currency"))
-    fx_rates = get_rates(anchor_ts, base_currency, currencies)
-    out: dict[int, float] = {}
-    for row in holding_rows:
-        asset = int(row["asset_id"])
-        out[asset] = out.get(asset, 0.0) + price_position(row, quotes, fx_rates, base_currency).value
-    return out
 
 
 def _aggregate_dividend_data(
