@@ -13,12 +13,11 @@ if (!globalThis.ResizeObserver) {
   globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
 }
 
+// One hook, in this order: unmount first, then empty the API cache (#148), which is
+// module-level. Separate afterEach hooks run in reverse order, so clearing the cache
+// would re-render still-mounted pages and start a request the next test then joins.
 afterEach(() => {
   cleanup();
-});
-
-// The API cache (#148) is module-level: start every test empty.
-afterEach(() => {
   clearApiCache();
 });
 
