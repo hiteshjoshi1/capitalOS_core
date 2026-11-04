@@ -13,8 +13,8 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   `capitalos-oss-test`). The default-project stack (`capitalos`, API :8000) is not used in
   this checkout — don't start it. Without that file (fresh
   clone) it's the base stack on :5432 / :8000.
-- **The main checkout stays on `main`** (it runs the real data, and its API reloads this checkout's
-  code). Stack-changing targets refuse there on any other branch (#44). Do feature work in a
+- **The main checkout stays on `main`** (it runs the real data; its API runs the code baked into the image at the
+  last `make deploy`, without `--reload` (#155), while worktree and test-instance APIs mount the code and reload). Stack-changing targets refuse there on any other branch (#44). Do feature work in a
   worktree: `make worktree ISSUE=<n> SLUG=<slug>` → `../capitalOS-worktrees/issue-<n>-<slug>`,
   where `make up` / `web-up` / `db-migrate` run an **isolated** stack (own project, containers,
   ports and DB; `make where` prints them) and `make instance-drop` removes it.
@@ -43,11 +43,18 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   `make user-set-password USERNAME=<name>` prompts for a new one and signs out all its sessions (#72).
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
   volume**; now requires typing the project name — run `make db-backup` first).
-- Backups (#41): `make db-backup` dumps **and proves it restores** (scratch-DB restore with exact
-  per-table counts from the dump's own snapshot). It runs daily at 03:00 via launchd
+- Backups (#41, #155): `make db-backup` dumps **and proves it restores** (scratch-DB restore with exact
+  per-table counts from the dump's own snapshot), and archives `data/` (raw statements) as
+  `capitalos_<ts>.data.tar.gz` next to the dump: every file a restored row records must be in it with
+  its sha256, or the backup fails. It runs daily at 03:00 via launchd
   (`make backup-schedule`); `make backup-status` shows the newest verified backup and the
-  schedule. `make backup-prune KEEP=14` only removes verified backups beyond the newest 14, never
-  the older unmarked dumps. Restore: `make db-restore BACKUP_FILE=<dump>`.
+  schedule; `make backup-data-check` checks the live DB's files against `data/` (read-only).
+  `make backup-prune` keeps every verified set of the last 14 days plus the first of each month for
+  12 months (and the newest), dump and archive together, never the older unmarked dumps
+  (`DRY_RUN=1` lists). Restore: `make db-restore BACKUP_FILE=<dump>` (database and `data/`; the
+  current `data/` is moved to `data.pre-restore-<ts>/`).
+- `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
+  is down).
 
 ## Deploy (#46): installing merged main into the real app
 - `make deploy` in the main checkout (on `main`, clean tree), **never a bare `git pull`**. It runs:

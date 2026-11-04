@@ -462,8 +462,8 @@ make db-reset
 ### Backing up / restoring database
 
 ```bash
-make db-backup                                    # writes backups/capitalos_<timestamp>.dump
-make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump
+make db-backup                                    # writes backups/capitalos_<timestamp>.dump + .data.tar.gz (data/)
+make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump   # database and data/
 ```
 
 See [`docs/setup/backups.md`](docs/setup/backups.md) for automating this on a schedule.

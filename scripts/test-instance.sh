@@ -103,6 +103,18 @@ serve() {
     die "the restored copy's row counts differ from the backup's"
   fi
   echo "Restored: $(wc -l <"$dump.counts" | tr -d ' ') tables, counts identical to the backup"
+  # The raw files of the same backup set (#155), so rebuilds from raw statements work on the copy.
+  local archive="${dump%.dump}.data.tar.gz"
+  if [ -f "$archive" ]; then
+    mkdir -p "$TW/data"
+    tar -xzf "$archive" -C "$TW/data"
+    DB_CONTAINER="$ISO_NAME-postgres" DB_USER=$DB_USER DB_NAME=$DB_NAME BACKUP_DATA_DIR="$TW/data" \
+      "$(cd "$(dirname "$0")" && pwd)/db-backup.sh" check-data | tail -1 ||
+      die "the copy's data/ lacks or differs from files its database records"
+    echo "Data: $archive unpacked into $TW/data"
+  else
+    echo "Data: no data archive with this backup (made before #155); $TW/data has no raw files"
+  fi
 
   say "The batch's migrations, on the copy"
   tmake db-migrate DB_CONTAINER="$ISO_NAME-postgres"

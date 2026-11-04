@@ -51,10 +51,10 @@ API_CONTAINER=$(ISO_NAME)-api
 endif
 
 # Guard (#44): targets that change the stack or its data.
-# - In the main checkout with the real-data stack: only on `main`. The API bind-mounts
-#   ./api/app with --reload, so a feature branch checked out there would run against the
-#   real data. Work in a worktree instead (make worktree ISSUE=<n> SLUG=<slug>), or pass
-#   ALLOW_BRANCH=1 deliberately.
+# - In the main checkout with the real-data stack: only on `main`. Its API runs the code baked
+#   into the image at the last build (#155), so a build or `up` on a feature branch would put
+#   that branch live on the real data. Work in a worktree instead (make worktree ISSUE=<n>
+#   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
 	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots db-create-mcp-role \
@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-migrations-applied db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-data-check backup-status backup-schedule backup-unschedule backup-now
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -381,8 +381,9 @@ db-create-mcp-role: db-wait
 		psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/db-create-mcp-role.sql && \
 	echo "Role capitalos_mcp_ro is ready (read-only, no access to user_credentials/auth_sessions)."
 
-# Verified backups (#41): dump + exact snapshot counts, then a restore into a scratch DB
-# that must reproduce every table's row count. See scripts/db-backup.sh.
+# Verified backups (#41, #155): dump + exact snapshot counts + an archive of data/, then a restore
+# into a scratch DB that must reproduce every table's row count, and every file a restored row
+# records found in the unpacked archive with its sha256. See scripts/db-backup.sh.
 DB_BACKUP=DB_CONTAINER=$(DB_CONTAINER) DB_USER=$(DB_USER) DB_NAME=$(DB_NAME) scripts/db-backup.sh
 db-backup: db-wait
 	@$(DB_BACKUP) create
@@ -391,8 +392,16 @@ db-backup-verify: db-wait
 	@test -n "$(BACKUP)" || (echo "Usage: make db-backup-verify BACKUP=backups/capitalos_<timestamp>.dump" && exit 2)
 	@$(DB_BACKUP) verify "$(BACKUP)"
 
+# Retention (#155): every verified set from the last KEEP_DAYS (14) days, plus the first verified
+# set of each of the last KEEP_MONTHS (12) months, plus the newest. A dump and its data archive
+# go together; dumps without markers are never pruned (D-11). DRY_RUN=1 lists without removing.
 backup-prune:
-	@$(DB_BACKUP) prune $(or $(KEEP),14)
+	@test -z "$(KEEP)" || (echo "KEEP=N was replaced by KEEP_DAYS / KEEP_MONTHS (#155); DRY_RUN=1 to preview" && exit 2)
+	@KEEP_DAYS=$(or $(KEEP_DAYS),14) KEEP_MONTHS=$(or $(KEEP_MONTHS),12) DRY_RUN=$(DRY_RUN) $(DB_BACKUP) prune
+
+# Would a backup's data check pass? The live database's recorded files against data/ (read-only).
+backup-data-check: db-wait
+	@$(DB_BACKUP) check-data
 
 backup-status:
 	@$(DB_BACKUP) status
@@ -407,13 +416,18 @@ backup-unschedule:
 backup-now:
 	@scripts/backup-schedule.sh run
 
-db-restore:
+# Restores the database and, from the set's .data.tar.gz, data/ (#155). The current data/ is moved
+# aside to data.pre-restore-<ts>/, never deleted. The API is stopped meanwhile (its data/ bind
+# mount must be re-made onto the restored folder) and started again afterwards, also on failure.
+# A dump from before #155 has no archive: the database is restored and data/ left as is (warned).
+db-restore: db-wait
 	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump" && exit 2)
 	@test -f "$(BACKUP_FILE)" || (echo "Backup file not found: $(BACKUP_FILE)" && exit 2)
-	@echo "WARNING: this overwrites the current database ($(DB_NAME)) in $(DB_CONTAINER)."
+	@echo "WARNING: this overwrites the current database ($(DB_NAME)) in $(DB_CONTAINER), and replaces data/ with the backup's (the current one is moved aside)."
 	@read -p "Type 'yes' to continue: " confirm; [ "$$confirm" = "yes" ] || (echo "Aborted." && exit 1)
-	docker exec -i $(DB_CONTAINER) pg_restore -U $(DB_USER) -d $(DB_NAME) --clean --if-exists < $(BACKUP_FILE)
-	@echo "Restore complete."
+	$(COMPOSE) stop api
+	@rc=0; $(DB_BACKUP) restore "$(BACKUP_FILE)" || rc=$$?; $(COMPOSE) up -d api; \
+	if [ $$rc -eq 0 ]; then echo "Restore complete."; else echo "Restore FAILED (exit $$rc); the API was started again." >&2; fi; exit $$rc
 
 db-shell:
 	docker exec -it $(DB_CONTAINER) psql -U $(DB_USER) -d $(DB_NAME)
@@ -457,6 +471,10 @@ db-migrate: db-wait
 			echo "Migration $$f FAILED: rolled back, not recorded; later migrations not run." >&2; exit 1; }; \
 	done
 	@echo "Migrations complete."
+
+# Applied migration filenames, one per line (deploy names the ones a failed batch left applied).
+db-migrations-applied:
+	@docker exec -i $(DB_CONTAINER) psql -X -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT filename FROM schema_migrations ORDER BY filename;"
 
 db-adopt-migrations: db-wait
 	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" > /dev/null
@@ -549,6 +567,7 @@ lint: web-deps
 	cd $(WEB_DIR) && npm run lint
 	scripts/check-pinned-refs.sh
 	scripts/test-checkout-guard.sh
+	scripts/test-db-backup.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
 typecheck: web-deps

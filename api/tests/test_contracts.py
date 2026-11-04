@@ -4,7 +4,11 @@ from fastapi.testclient import TestClient
 def test_health_contract(client: TestClient):
     resp = client.get("/health")
     assert resp.status_code == 200
-    assert resp.json() == {"status": "ok"}
+    body = resp.json()
+    assert body["status"] == "ok"
+    # Added by #155: the database answered, and the migration state.
+    assert body["database"] == "ok"
+    assert set(body["migrations"]) == {"applied", "latest_file", "current"}
 
 
 def test_dashboard_summary_contract_shape(client: TestClient, seed_dashboard_data):
