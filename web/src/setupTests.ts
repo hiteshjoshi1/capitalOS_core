@@ -19,9 +19,6 @@ if (!globalThis.ResizeObserver) {
 afterEach(() => {
   cleanup();
   clearApiCache();
-});
-
-// The shared base currency (#150) is per browser: start every test from the default.
-afterEach(() => {
+  // The shared base currency (#150) is per browser: start every test from the default.
   window.localStorage.removeItem("capitalos.baseCurrency");
 });
