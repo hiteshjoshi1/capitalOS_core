@@ -157,7 +157,7 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("+HKD 280.04")).toBeInTheDocument();
       expect(scoped.getByText("+21.6%")).toBeInTheDocument();
       expect(scoped.getByText("fresh")).toBeInTheDocument();
-      expect(scoped.getByText(/2026-03-01 · eodhd/)).toBeInTheDocument();
+      expect(scoped.getByText(/1 Mar 2026 · eodhd/)).toBeInTheDocument();
       expect(scoped.getByText("24.0%")).toBeInTheDocument();
     }
 

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo } from "react";
 import { api } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
@@ -9,29 +9,15 @@ import HeroMetricCard from "../components/HeroMetricCard";
 import StackedBar from "../components/StackedBar";
 import TrendBarChart from "../components/TrendBarChart";
 import RefreshingRegion from "../components/RefreshingRegion";
+import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent, formatSignedMoney } from "../lib/format";
+import { chartColor, donutGradient } from "../lib/chartColors";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 const STABLECOINS = new Set(["USDC", "USDT"]);
-const STACKED_BAR_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8"];
-
-type DonutItem = { label: string; value: number; percent: number };
-
-function donutConicGradient(items: DonutItem[]): string {
-  let offset = 0;
-  const parts = items.map((item, idx) => {
-    const next = offset + Math.max(0, item.percent);
-    const part = `${STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length]} ${offset.toFixed(2)}% ${next.toFixed(2)}%`;
-    offset = next;
-    return part;
-  });
-  if (offset < 100) {
-    parts.push(`color-mix(in srgb, var(--line) 65%, transparent 35%) ${offset.toFixed(2)}% 100%`);
-  }
-  return `conic-gradient(${parts.join(", ")})`;
-}
-
 export default function CashOverview() {
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   // #148: one resource per call, so the stablecoin card (crypto summary) never holds up
   // the cash numbers, and the previous month stays on screen while the next one loads.
   const deposits = useApiResource(resourceKey("cashDeposits", month, baseCurrency), () =>
@@ -46,19 +32,8 @@ export default function CashOverview() {
   // Label amounts with the currency they were computed in: while a currency switch loads,
   // the previous currency's numbers stay on screen and must keep their own prefix.
   const shownCurrency = cashDeposits?.base_currency || baseCurrency;
-  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
-  const formatMoney = useCallback(
-    (value?: number | null, maximumFractionDigits = 0) =>
-      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
-    [currencyPrefix],
-  );
-  const formatCompactMoney = useCallback(
-    (value?: number | null) =>
-      value == null
-        ? "—"
-        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
-    [currencyPrefix],
-  );
+  const money = useCallback((value?: number | null) => formatMoney(value, shownCurrency), [shownCurrency]);
+  const compactMoney = useCallback((value?: number | null) => formatMoneyCompact(value, shownCurrency), [shownCurrency]);
 
   const stablecoins = useMemo(() => {
     const tokens = (cryptoSummary?.top_holdings ?? []).filter((t) => STABLECOINS.has((t.symbol || "").toUpperCase()));
@@ -79,10 +54,10 @@ export default function CashOverview() {
       key: c.currency,
       label: c.currency,
       percent: (Math.max(0, c.current_value) / sum) * 100,
-      color: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length],
-      valueLabel: `${formatMoney(c.current_value)} (${c.delta_abs >= 0 ? "+" : "-"}${formatMoney(Math.abs(c.delta_abs))})`,
+      color: chartColor(idx),
+      valueLabel: `${money(c.current_value)} (${formatSignedMoney(c.delta_abs, shownCurrency)})`,
     }));
-  }, [cashDeposits, formatMoney]);
+  }, [cashDeposits, money, shownCurrency]);
 
   const trendPoints = useMemo(
     () =>
@@ -91,10 +66,10 @@ export default function CashOverview() {
         .map((point) => ({
           month: point.month,
           value: point.value as number,
-          displayValue: formatCompactMoney(point.value),
+          displayValue: compactMoney(point.value),
           tone: "neutral" as const,
         })),
-    [cashDeposits, formatCompactMoney],
+    [cashDeposits, compactMoney],
   );
 
   const deltaPositive = (cashDeposits?.delta_abs ?? 0) >= 0;
@@ -109,20 +84,7 @@ export default function CashOverview() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
@@ -138,13 +100,13 @@ export default function CashOverview() {
         <RefreshingRegion className="wealthOverviewLayout" busy={deposits.isFetching || crypto.isFetching}>
           <HeroMetricCard
             eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${cashDeposits?.as_of_month ?? month}`}
-            value={formatMoney(cashDeposits?.current_total)}
+            value={money(cashDeposits?.current_total)}
             deltaChip={
               deltaPct == null
                 ? null
-                : { text: `${deltaPositive ? "+" : "-"}${Math.abs(deltaPct * 100).toFixed(1)}%`, positive: deltaPositive }
+                : { text: formatPercent(deltaPct, { signed: true }), positive: deltaPositive }
             }
-            insightText={`As of ${cashDeposits?.current_cash_as_of?.slice(0, 10) ?? "—"} · vs ${cashDeposits?.compare_month ?? "last month"} (${cashDeposits?.snapshot_cash_as_of?.slice(0, 10) ?? "—"})`}
+            insightText={`As of ${formatDate(cashDeposits?.current_cash_as_of)} · vs ${cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month"} (${formatDate(cashDeposits?.snapshot_cash_as_of)})`}
           />
 
           <section>
@@ -156,21 +118,21 @@ export default function CashOverview() {
               <div className="card muted">No cash deposits yet.</div>
             ) : (
               <div className="card cashFlowDonutLayout" style={{ padding: 28 }} aria-label="Cash by account">
-                <div className="cashFlowDonutChart" style={{ background: donutConicGradient(accountItems) }}>
+                <div className="cashFlowDonutChart" style={{ background: donutGradient(accountItems.map((item) => item.percent)) }}>
                   <div className="cashFlowDonutCenter">
                     <span className="label">Total</span>
-                    <strong>{formatMoney(cashDeposits?.total)}</strong>
+                    <strong>{money(cashDeposits?.total)}</strong>
                   </div>
                 </div>
                 <div className="cashFlowLegendList">
                   {accountItems.map((item, idx) => (
                     <div className="cashFlowLegendRow" key={item.label}>
                       <span className="cashFlowLegendLabel">
-                        <i style={{ background: STACKED_BAR_COLORS[idx % STACKED_BAR_COLORS.length] }} />
+                        <i style={{ background: chartColor(idx) }} />
                         <span className="cashFlowLegendText">{item.label}</span>
                       </span>
                       <span className="muted">
-                        {formatMoney(item.value)} <strong>{item.percent.toFixed(1)}%</strong>
+                        {money(item.value)} <strong>{formatPercent(item.percent, { scale: "points" })}</strong>
                       </span>
                     </div>
                   ))}
@@ -195,7 +157,7 @@ export default function CashOverview() {
                   <p className="cashFlowCardTitle" style={{ margin: 0 }}>Stablecoins</p>
                   <span className="muted">USDC / USDT</span>
                 </div>
-                <div className="big small">{cryptoSummary ? formatMoney(stablecoinTotal) : "—"}</div>
+                <div className="big small">{cryptoSummary ? money(stablecoinTotal) : "—"}</div>
                 <div className="listRows" style={{ marginTop: 8 }}>
                   {crypto.error ? (
                     <p className="muted">Stablecoin balances couldn't load: {crypto.error.message}</p>
@@ -209,11 +171,11 @@ export default function CashOverview() {
                         <div className="listRowMain">
                           <span className="listRowTitle">{t.symbol}</span>
                           <span className="listRowMeta">
-                            <span>{t.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })}</span>
+                            <span>{formatNumber(t.amount, 6)}</span>
                             <span>{t.chain.toUpperCase()}</span>
                           </span>
                         </div>
-                        <div className="listRowValue">{formatMoney(t.value_base)}</div>
+                        <div className="listRowValue">{money(t.value_base)}</div>
                       </div>
                     ))
                   )}

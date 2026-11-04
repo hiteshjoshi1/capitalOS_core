@@ -3,6 +3,8 @@ import { api } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import { directionClass, formatDate, formatDelta, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent } from "../lib/format";
+import { chartColor } from "../lib/chartColors";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -10,12 +12,13 @@ import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
-const EXPOSURE_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8", "#2ebac6", "#f4cf5d", "#8f9db2"];
 
 export default function CryptoHoldings() {
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [showDust, setShowDust] = useState<boolean>(false);
   const resource = useApiResource(resourceKey("cryptoSummary", month, baseCurrency), () =>
     api.cryptoSummary(month, baseCurrency),
@@ -24,25 +27,13 @@ export default function CryptoHoldings() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = summary?.base_currency || baseCurrency;
-  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
-  const formatMoney = useCallback(
-    (value?: number | null, maximumFractionDigits = 0) =>
-      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
-    [currencyPrefix],
-  );
-  const formatCompactMoney = useCallback(
-    (value?: number | null) =>
-      value == null
-        ? "—"
-        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
-    [currencyPrefix],
-  );
-  const formatDate = (value?: string | null) => value?.slice(0, 10) ?? "—";
-  const formatDelta = (value?: number | null, pct?: number | null) => {
-    if (value == null) {
-      return "—";
-    }
-    return `${value >= 0 ? "+" : "-"}${formatMoney(Math.abs(value))}${pct == null ? "" : ` (${pct >= 0 ? "+" : "-"}${Math.abs(pct * 100).toFixed(1)}%)`}`;
+  const money = useCallback((value?: number | null) => formatMoney(value, shownCurrency), [shownCurrency]);
+  const compactMoney = useCallback((value?: number | null) => formatMoneyCompact(value, shownCurrency), [shownCurrency]);
+  /** A holding's change, with the % computed from the same (base-currency) amounts, so the
+   * two never disagree in sign (#131: "-S$ 13,764 (+3.1%)"). */
+  const holdingDelta = (valueBase?: number | null, changeBase?: number | null) => {
+    const previous = valueBase != null && changeBase != null ? valueBase - changeBase : null;
+    return formatDelta(changeBase, previous ? (changeBase as number) / Math.abs(previous) : null, shownCurrency);
   };
 
   const allHoldings = useMemo(() => summary?.top_holdings ?? [], [summary?.top_holdings]);
@@ -62,10 +53,10 @@ export default function CryptoHoldings() {
         .map((point) => ({
           month: point.month,
           value: point.value as number,
-          displayValue: formatCompactMoney(point.value),
+          displayValue: compactMoney(point.value),
           tone: "neutral" as const,
         })),
-    [summary, formatCompactMoney],
+    [summary, compactMoney],
   );
 
   const deltaPositive = (summary?.snapshot_delta_base ?? 0) >= 0;
@@ -79,20 +70,7 @@ export default function CryptoHoldings() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
@@ -108,15 +86,15 @@ export default function CryptoHoldings() {
         <RefreshingRegion className="wealthOverviewLayout" busy={resource.isFetching}>
           <HeroMetricCard
             eyebrow={summary?.is_live ? "CURRENT CRYPTO VALUE" : `CRYPTO VALUE — ${summary?.month ?? month}`}
-            value={formatMoney(summary?.total_crypto_base)}
+            value={money(summary?.total_crypto_base)}
             deltaChip={{
-              text: `${deltaPositive ? "+" : "-"}${summary?.snapshot_delta_pct == null ? "—" : Math.abs(summary.snapshot_delta_pct * 100).toFixed(1) + "%"}`,
+              text: formatPercent(summary?.snapshot_delta_pct, { signed: true }),
               positive: deltaPositive,
             }}
             insightText={
               summary?.is_live
-                ? `USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · Holdings as of ${formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)} (${holdingsFresh ? "fresh" : "stale"}) · Prices as of ${formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)} (${pricesFresh ? "fresh" : "stale"}${summary?.refresh_triggered ? ", refreshing" : ""})`
-                : `USD ${summary?.total_crypto_usd?.toLocaleString(undefined, { maximumFractionDigits: 0 }) ?? "—"} · historical snapshot as of ${formatDate(summary?.as_of)} · vs ${summary?.compare_month ?? "last month"}`
+                ? `${formatMoney(summary?.total_crypto_usd, "USD")} · Holdings as of ${formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)} (${holdingsFresh ? "fresh" : "stale"}) · Prices as of ${formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)} (${pricesFresh ? "fresh" : "stale"}${summary?.refresh_triggered ? ", refreshing" : ""})`
+                : `${formatMoney(summary?.total_crypto_usd, "USD")} · historical snapshot as of ${formatDate(summary?.as_of)} · vs ${summary?.compare_month ? formatMonth(summary.compare_month, "medium") : "last month"}`
             }
           />
           <FxNote sources={[summary]} />
@@ -139,8 +117,8 @@ export default function CryptoHoldings() {
                       key: item.chain,
                       label: item.chain,
                       percent: item.percent,
-                      color: EXPOSURE_COLORS[idx % EXPOSURE_COLORS.length],
-                      valueLabel: `${formatMoney(item.total_base)} · ${item.percent.toFixed(1)}%`,
+                      color: chartColor(idx),
+                      valueLabel: `${money(item.total_base)} · ${formatPercent(item.percent, { scale: "points" })}`,
                     }))}
                   />
                 )}
@@ -158,8 +136,8 @@ export default function CryptoHoldings() {
                       key: item.wallet_id,
                       label: item.label ?? `${item.address.slice(0, 6)}…${item.address.slice(-4)}`,
                       percent: item.percent ?? 0,
-                      color: EXPOSURE_COLORS[idx % EXPOSURE_COLORS.length],
-                      valueLabel: `${formatMoney(item.total_base)} · ${(item.percent ?? 0).toFixed(1)}%`,
+                      color: chartColor(idx),
+                      valueLabel: `${money(item.total_base)} · ${formatPercent(item.percent ?? 0, { scale: "points" })}`,
                     }))}
                   />
                 )}
@@ -185,13 +163,13 @@ export default function CryptoHoldings() {
                   onChange={(e) => setShowDust(e.target.checked)}
                   style={{ marginRight: 6 }}
                 />
-                Show holdings under $10
+                Show holdings under USD 10
               </label>
             </div>
             <div className="muted stockHoldingsMeta" style={{ marginBottom: 8 }}>
               {showDust
-                ? `Showing all ${allHoldings.length} holdings, including dust under $10`
-                : `Showing ${visibleHoldings.length} of ${allHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under $10` : ""}`}
+                ? `Showing all ${allHoldings.length} holdings, including dust under USD 10`
+                : `Showing ${visibleHoldings.length} of ${allHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under USD 10` : ""}`}
             </div>
             <div className="listRows">
               {visibleHoldings.length === 0 ? (
@@ -205,14 +183,14 @@ export default function CryptoHoldings() {
                         <span className="tag">{h.chain.toUpperCase()}</span>
                       </span>
                       <span className="listRowMeta">
-                        <span>{h.amount.toLocaleString(undefined, { maximumFractionDigits: 6 })} qty</span>
+                        <span>{formatNumber(h.amount, 6)} qty</span>
                         <span>{h.price_provider ?? h.holdings_provider ?? "—"}</span>
                         {h.wallet_label ? <span>{h.wallet_label}</span> : null}
                       </span>
                     </div>
-                    <div className={`listRowValue ${(h.value_change_pct ?? 0) >= 0 ? "good" : "bad"}`}>
-                      {formatMoney(h.value_base)}
-                      <span className="listRowValueSecondary">{formatDelta(h.value_change_base, h.value_change_pct)}</span>
+                    <div className={`listRowValue ${directionClass(h.value_change_base) || "good"}`}>
+                      {money(h.value_base)}
+                      <span className="listRowValueSecondary">{holdingDelta(h.value_base, h.value_change_base)}</span>
                     </div>
                   </div>
                 ))

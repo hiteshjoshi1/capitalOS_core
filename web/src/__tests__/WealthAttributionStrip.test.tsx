@@ -86,7 +86,7 @@ describe("WealthAttributionStrip", () => {
     );
     const columns = container.querySelectorAll(".whAttribCol");
     fireEvent.pointerEnter(columns[columns.length - 1]);
-    expect(getByText(/Jun 26 Δ vs May 26/)).toBeInTheDocument();
+    expect(getByText(/Jun '26 Δ vs May '26/)).toBeInTheDocument();
     expect(getByText("S$ 90")).toBeInTheDocument(); // stocks_funds delta
     expect(getByText("S$ 10")).toBeInTheDocument(); // cash delta
   });

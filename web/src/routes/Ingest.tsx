@@ -7,6 +7,8 @@ import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import { dateFromFilename, describeAsOf, resolvePlatformParser, todayLocalYYYYMMDD } from "./ingestUtils";
 import type { SignatureDebug } from "./ingestUtils";
+import * as fmt from "../lib/format";
+import { formatPlatformLabel } from "../lib/platformLabels";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -14,7 +16,7 @@ function formatPreviewDate(ts?: string | null): string {
   if (!ts) return "—";
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return fmt.formatDate(ts);
 }
 
 function jobStatusMeta(status?: string | null): { tone: "good" | "warn" | "neutral"; label: string } {
@@ -27,10 +29,7 @@ function jobStatusMeta(status?: string | null): { tone: "good" | "warn" | "neutr
 
 function formatPreviewAmount(amount: unknown, currency: unknown): string {
   const value = typeof amount === "number" ? amount : Number(amount);
-  if (!Number.isFinite(value)) return "—";
-  const prefix = value >= 0 ? "+" : "-";
-  const currencyLabel = typeof currency === "string" && currency ? currency : "";
-  return `${prefix}${currencyLabel ? `${currencyLabel} ` : ""}${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return fmt.formatSignedMoney(value, typeof currency === "string" ? currency : null, { decimals: 2 });
 }
 
 export default function Ingest() {
@@ -444,7 +443,7 @@ export default function Ingest() {
                     <div className="listRowMain">
                       <div className="listRowTitle">{j.original_filename}</div>
                       <div className="listRowMeta">
-                        {j.platform} · Account {j.account_id} · {formatPreviewDate(j.created_at)}
+                        {formatPlatformLabel(j.platform)} · Account {j.account_id} · {formatPreviewDate(j.created_at)}
                       </div>
                     </div>
                     <StatusPill

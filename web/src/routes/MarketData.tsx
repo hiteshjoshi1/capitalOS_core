@@ -4,6 +4,7 @@ import type { MarketDataExchangeStatus, MarketDataRun } from "../lib/api";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import "../App.css";
+import * as fmt from "../lib/format";
 
 const REASON_LABELS = {
   RATE_LIMITED: "Rate limited",
@@ -16,7 +17,7 @@ function formatRunStarted(ts?: string | null): string {
   if (!ts) return "—";
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return fmt.formatDateTime(ts);
 }
 
 export default function MarketData() {

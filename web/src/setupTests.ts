@@ -21,3 +21,8 @@ afterEach(() => {
 afterEach(() => {
   clearApiCache();
 });
+
+// The shared base currency (#150) is per browser: start every test from the default.
+afterEach(() => {
+  window.localStorage.removeItem("capitalos.baseCurrency");
+});

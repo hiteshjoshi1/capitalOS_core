@@ -6,6 +6,8 @@ import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
+import * as fmt from "../lib/format";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 type CategoryGroup = {
   label: string;
@@ -85,7 +87,6 @@ function groupByMerchant(transactions: UnmappedTransaction[]): MerchantGroup[] {
 
 export default function CashFlowMapping() {
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [search, setSearch] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [groupSelections, setGroupSelections] = useState<Record<string, string>>({});
@@ -121,9 +122,14 @@ export default function CashFlowMapping() {
   }
 
   const categoryGroups = groupCategories(categories);
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = (value: number) =>
-    `${currencyPrefix} ${Math.abs(value).toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
+  // Queue rows are raw transactions in their own currency (the API doesn't convert
+  // them), so each amount is labelled with its own currency, not the base currency.
+  const formatMoney = (value: number, currency: string | null | undefined) =>
+    fmt.formatMoney(Math.abs(value), currency, { decimals: 2 });
+  const groupTotal = (group: MerchantGroup) => {
+    const currencies = new Set(group.transactions.map((t) => t.currency));
+    return currencies.size === 1 ? formatMoney(group.total, [...currencies][0]) : "mixed currencies";
+  };
 
   const allGroups = useMemo(() => groupByMerchant(transactions), [transactions]);
   const filteredGroups = useMemo(
@@ -173,20 +179,7 @@ export default function CashFlowMapping() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
@@ -244,7 +237,7 @@ export default function CashFlowMapping() {
                       <div>
                         <strong>{group.merchant}</strong>
                         <div className="muted">
-                          {group.transactions.length} transactions · {formatMoney(group.total)}
+                          {group.transactions.length} transactions · {groupTotal(group)}
                         </div>
                       </div>
                       <button
@@ -293,14 +286,14 @@ export default function CashFlowMapping() {
                         {group.transactions.map((transaction) => (
                           <div className="listRow" key={transaction.transaction_id}>
                             <div className="listRowMain">
-                              <span className="listRowTitle">{asDate(transaction.ts)}</span>
+                              <span className="listRowTitle">{fmt.formatDate(asDate(transaction.ts))}</span>
                               <span className="listRowMeta">
                                 <span>{transaction.account_name}</span>
                                 <span>{transaction.raw_category ?? "Uncategorized"}</span>
                               </span>
                             </div>
                             <div className={`listRowValue ${transaction.amount < 0 ? "bad" : "good"}`}>
-                              {formatMoney(transaction.amount)}
+                              {formatMoney(transaction.amount, transaction.currency)}
                             </div>
                           </div>
                         ))}

@@ -4,6 +4,7 @@ import type { DividendCompanyItem, DividendsSummary, ExpectedDividendCompany } f
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -11,6 +12,8 @@ import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 type CompanyTab = "realized" | "expected";
 
@@ -26,7 +29,7 @@ function shiftMonth(month: string, delta: number): string {
 
 export default function Dividends() {
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [companyTab, setCompanyTab] = useState<CompanyTab>("realized");
 
   const fromMonth = useMemo(() => shiftMonth(month, -11), [month]);
@@ -50,23 +53,12 @@ export default function Dividends() {
   const shownMonth = monthSummary?.to_month || month;
 
   const shownCurrency = monthSummary?.base_currency || baseCurrency;
-  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
-  const formatMoney = useCallback(
-    (value?: number, maximumFractionDigits = 0) =>
-      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
-    [currencyPrefix],
-  );
+  const formatMoney = useCallback((value?: number | null) => fmt.formatMoney(value, shownCurrency), [shownCurrency]);
   const formatCompactMoney = useCallback(
-    (value?: number | null) =>
-      value == null
-        ? "—"
-        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
-    [currencyPrefix],
+    (value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency),
+    [shownCurrency],
   );
-  const formatNumber = (value?: number, maximumFractionDigits = 4) =>
-    typeof value === "number" && Number.isFinite(value)
-      ? value.toLocaleString(undefined, { maximumFractionDigits })
-      : "—";
+  const formatNumber = (value?: number) => fmt.formatNumber(value, 4);
 
   const topCompanies: DividendCompanyItem[] = (companySummary?.items ?? []).slice(0, 20);
   const expectedCompanies: ExpectedDividendCompany[] = useMemo(
@@ -142,20 +134,7 @@ export default function Dividends() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
@@ -176,7 +155,8 @@ export default function Dividends() {
             eyebrow="REALIZED THIS MONTH"
             value={formatMoney(realizedMonth.payout_minus_tax)}
             deltaChip={{
-              text: `${momDeltaAbs >= 0 ? "+" : "-"}${momDeltaPct == null ? "—" : Math.abs(momDeltaPct * 100).toFixed(1) + "%"}`,
+              // No baseline is "—", not "+—" (#131).
+              text: fmt.formatPercent(momDeltaPct, { signed: true }),
               positive: momDeltaAbs >= 0,
             }}
             insightText={`Gross ${formatMoney(realizedMonth.gross)} · Withholding ${formatMoney(realizedMonth.withholding)}`}
@@ -202,8 +182,8 @@ export default function Dividends() {
                 ) : null}
                 <p className="dividendSignalValue">{expectedOverview ? formatMoney(expectedYear.payout_minus_tax) : "—"}</p>
                 <p className="dividendSignalContext">
-                  <span className={expectedVsTrailingPct != null && expectedVsTrailingPct >= 0 ? "good" : "bad"}>
-                    {expectedVsTrailingPct == null ? "—" : `${expectedVsTrailingPct >= 0 ? "+" : "-"}${Math.abs(expectedVsTrailingPct * 100).toFixed(0)}%`}
+                  <span className={fmt.directionClass(expectedVsTrailingPct)}>
+                    {fmt.formatPercent(expectedVsTrailingPct, { signed: true, decimals: 0 })}
                   </span>{" "}
                   vs trailing 12 months ({formatMoney(realizedTrailing12.payout_minus_tax)}), based on current holdings and yields.
                 </p>
@@ -214,7 +194,7 @@ export default function Dividends() {
                   {expectedOverview?.assets_with_actions ?? 0} / {expectedOverview?.holdings_considered ?? 0}
                 </p>
                 <p className="dividendSignalContext">
-                  Holdings currently paying a dividend · {avgYieldPct == null ? "—" : `${avgYieldPct.toFixed(1)}%`} average yield.
+                  Holdings currently paying a dividend · {fmt.formatPercent(avgYieldPct, { scale: "points" })} average yield.
                 </p>
               </article>
             </div>
@@ -277,7 +257,7 @@ export default function Dividends() {
                       <div className="listRowMain">
                         <span className="listRowTitle">
                           {item.company}
-                          {item.yield_pct != null ? <span className="tag">{item.yield_pct.toFixed(2)}%</span> : null}
+                          {item.yield_pct != null ? <span className="tag">{fmt.formatPercent(item.yield_pct, { scale: "points", decimals: 2 })}</span> : null}
                         </span>
                         <span className="listRowMeta">
                           <span>{item.symbol ?? "—"}</span>
@@ -301,7 +281,7 @@ export default function Dividends() {
                     <div className="listRowMain">
                       <span className="listRowTitle">
                         {item.company}
-                        {item.yield_pct != null ? <span className="tag">{item.yield_pct.toFixed(2)}%</span> : null}
+                        {item.yield_pct != null ? <span className="tag">{fmt.formatPercent(item.yield_pct, { scale: "points", decimals: 2 })}</span> : null}
                       </span>
                       <span className="listRowMeta">
                         <span>{item.symbol}</span>

@@ -205,7 +205,7 @@ describe("AddAccount", () => {
 
     expect(await screen.findByText("Linked accounts")).toBeInTheDocument();
     expect(screen.getByText("UOB One")).toBeInTheDocument();
-    expect(screen.getByText("UOB · BANK · SGD")).toBeInTheDocument();
+    expect(screen.getByText("UOB · Bank · SGD")).toBeInTheDocument();
   });
 
   it("shows load error when options fail", async () => {

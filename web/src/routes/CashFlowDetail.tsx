@@ -13,6 +13,8 @@ import type {
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
+import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -20,6 +22,8 @@ import HeroMetricCard from "../components/HeroMetricCard";
 import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 
 type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
@@ -29,18 +33,8 @@ type CategoryGroup = {
   options: CategoryTaxonomy[];
 };
 
-type FormatMoney = (value?: number | null, maximumFractionDigits?: number) => string;
+type FormatMoney = (value?: number | null, decimals?: number) => string;
 
-const CHART_COLORS = [
-  "#4f8cff",
-  "#1fb981",
-  "#f59f43",
-  "#7d67ff",
-  "#ef6ca8",
-  "#2ebac6",
-  "#f4cf5d",
-  "#8f9db2",
-];
 
 const DINING_CATEGORY_KEYWORDS = [
   "dining",
@@ -54,7 +48,7 @@ const DINING_CATEGORY_KEYWORDS = [
 ];
 
 function asDate(ts: string) {
-  return ts.slice(0, 10);
+  return fmt.formatDate(ts.slice(0, 10));
 }
 
 function groupCategories(categories: CategoryTaxonomy[]) {
@@ -104,41 +98,19 @@ function defaultSelectionValue(transaction: CashFlowTransaction) {
 }
 
 function formatPercent(value?: number | null) {
-  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+  return fmt.formatPercent(value);
 }
 
 function formatMonthName(month: string): string {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  return new Date(year, monthIndex, 1).toLocaleString(undefined, { month: "long" });
+  return fmt.formatMonth(month).replace(/ \d{4}$/, "");
 }
 
 function formatMonthYear(month: string): string {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  return new Date(year, monthIndex, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
+  return fmt.formatMonth(month);
 }
 
 function conicGradient(items: CashFlowBreakdownItem[]) {
-  let offset = 0;
-  const parts: string[] = [];
-  items.forEach((item, idx) => {
-    const next = Math.min(100, offset + Math.max(0, item.percent * 100));
-    parts.push(`${CHART_COLORS[idx % CHART_COLORS.length]} ${offset.toFixed(2)}% ${next.toFixed(2)}%`);
-    offset = next;
-  });
-  if (offset < 100) {
-    parts.push(`color-mix(in srgb, var(--line) 65%, transparent 35%) ${offset.toFixed(2)}% 100%`);
-  }
-  return `conic-gradient(${parts.join(", ")})`;
+  return donutGradient(items.map((item) => item.percent * 100));
 }
 
 function isDiningExpenseTransaction(transaction: CashFlowTransaction) {
@@ -224,7 +196,7 @@ function DonutSection({
             {items.map((item, idx) => (
               <div className="cashFlowLegendRow" key={item.label}>
                 <span className="cashFlowLegendLabel">
-                  <i style={{ background: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                  <i style={{ background: chartColor(idx) }} />
                   <span className="cashFlowLegendText">{item.label}</span>
                 </span>
                 <span className="muted">
@@ -297,7 +269,7 @@ function MerchantRows({ items, formatMoney }: { items: CashFlowBreakdownItem[]; 
           <span className="cashFlowMerchantLabel">{item.label}</span>
           <div className="cashFlowMerchantTrack">
             <span
-              style={{ width: `${Math.max(6, (item.amount / maxAmount) * 100)}%`, background: CHART_COLORS[idx % CHART_COLORS.length] }}
+              style={{ width: `${Math.max(6, (item.amount / maxAmount) * 100)}%`, background: chartColor(idx) }}
             />
           </div>
           <strong className="cashFlowMerchantAmount">{formatMoney(item.amount)}</strong>
@@ -361,7 +333,7 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
       <div className="card" style={{ padding: "28px 24px 20px" }}>
         {waterfall.snapshot_start_as_of && waterfall.snapshot_end_as_of ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            Reconciled across available cash snapshots from {waterfall.snapshot_start_as_of.slice(0, 10)} to {waterfall.snapshot_end_as_of.slice(0, 10)}.
+            Reconciled across available cash snapshots from {fmt.formatDate(waterfall.snapshot_start_as_of)} to {fmt.formatDate(waterfall.snapshot_end_as_of)}.
           </p>
         ) : null}
 
@@ -551,7 +523,7 @@ function OverviewTab({
     delta == null
       ? null
       : {
-          text: `${delta >= 0 ? "+" : "-"}${formatMoney(Math.abs(delta))}${
+          text: `${fmt.formatSignedMoney(delta, detail.base_currency)}${
             detail.analytics.prior_month ? ` vs ${formatMonthName(detail.analytics.prior_month)}` : ""
           }`,
           positive: delta >= 0,
@@ -561,7 +533,7 @@ function OverviewTab({
     <>
       <HeroMetricCard
         eyebrow="Net cash flow this month"
-        value={`${detail.net >= 0 ? "+" : ""}${formatMoney(detail.net)}`}
+        value={fmt.formatSignedMoney(detail.net, detail.base_currency)}
         deltaChip={deltaChip}
         insightText={`Saved ${formatPercent(detail.savings_rate)} of income · Burn rate ${formatPercent(detail.analytics.burn_rate)}`}
       />
@@ -811,7 +783,7 @@ export default function CashFlowDetailRoute() {
   const location = useLocation();
   const workspaceTab = resolveWorkspaceTab(location.pathname);
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [pendingOverrides, setPendingOverrides] = useState<Record<number, boolean>>({});
   const [overrideErrors, setOverrideErrors] = useState<Record<number, string>>({});
   const [overrideSelections, setOverrideSelections] = useState<Record<number, string>>({});
@@ -841,9 +813,8 @@ export default function CashFlowDetailRoute() {
 
   const categoryGroups = useMemo(() => groupCategories(categories), [categories]);
   const effectiveBaseCurrency = detail?.base_currency || baseCurrency;
-  const currencyPrefix = effectiveBaseCurrency === "SGD" ? "S$" : effectiveBaseCurrency;
-  const formatMoney: FormatMoney = (value, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatMoney: FormatMoney = (value, decimals = 0) =>
+    fmt.formatMoney(value, effectiveBaseCurrency, { decimals });
 
   const shellTitle =
     workspaceTab === "income"
@@ -900,20 +871,7 @@ export default function CashFlowDetailRoute() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >

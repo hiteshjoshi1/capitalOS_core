@@ -173,7 +173,7 @@ describe("OperationsOverview (Data Hub Overview)", () => {
     const ibkr = screen.getByTestId("job-status-ibkr_flex");
     expect(ibkr).toHaveClass("dataHubJobFailing");
     expect(ibkr).toHaveTextContent("Failing");
-    expect(ibkr).toHaveTextContent("Data as of: 2026-11-01");
+    expect(ibkr).toHaveTextContent("Data as of: 1 Nov 2026");
     expect(ibkr).toHaveTextContent("3 failed runs in a row: IbkrFlexError: statement not ready");
 
     const quotes = screen.getByTestId("job-status-market_data");

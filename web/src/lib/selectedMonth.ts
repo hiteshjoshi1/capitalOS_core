@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
 
+import { currentMonth } from "./format";
+
 const SELECTED_MONTH_STORAGE_KEY = "capitalos.selectedMonth";
 const MONTH_PATTERN = /^\d{4}-\d{2}$/;
 
+/** The current month as `YYYY-MM` (one implementation: lib/format's `currentMonth`). */
 export function currentMonthYYYYMM() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  return `${y}-${m}`;
+  return currentMonth();
 }
 
 function isValidMonth(value: string | null): value is string {

@@ -155,7 +155,7 @@ describe("CryptoHoldings route", () => {
     expect(chainHeading).toBeInTheDocument();
     expect(walletHeading).toBeInTheDocument();
     expect(screen.getByText(/fresh\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Holdings as of 2026-02-06/)).toBeInTheDocument();
+    expect(screen.getByText(/Holdings as of 6 Feb 2026/)).toBeInTheDocument();
   });
 
   it("shows API error state when fetch fails", async () => {
@@ -201,15 +201,15 @@ describe("CryptoHoldings route", () => {
 
     expect(await screen.findByText("Top holdings")).toBeInTheDocument();
     expect(screen.queryByText("DUST")).not.toBeInTheDocument();
-    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under \$10/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing 1 of 2 holdings · 1 hidden under USD 10/)).toBeInTheDocument();
     expect(screen.getByText(/stale\)/)).toBeInTheDocument();
     expect(screen.getByText(/refreshing/)).toBeInTheDocument();
 
-    await user.click(screen.getByRole("checkbox", { name: /Show holdings under \$10/i }));
+    await user.click(screen.getByRole("checkbox", { name: /Show holdings under USD 10/i }));
     await waitFor(() => {
       expect(screen.getByText("DUST")).toBeInTheDocument();
     });
-    expect(screen.getByText(/Showing all 2 holdings, including dust under \$10/)).toBeInTheDocument();
+    expect(screen.getByText(/Showing all 2 holdings, including dust under USD 10/)).toBeInTheDocument();
   });
 
   it("shows Coinbase exchange holdings and wallet exposure from the crypto summary", async () => {

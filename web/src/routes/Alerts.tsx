@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import { useApiResource } from "../lib/useApiResource";
 import "../App.css";
 import PageShell from "../components/PageShell";
+import { formatPlatformLabel } from "../lib/platformLabels";
 
 export default function Alerts() {
   // #148: the same resource as the sidebar's alert badge, so opening Alerts shares one
@@ -49,7 +50,7 @@ export default function Alerts() {
                   <div className="alertCardHeader">
                     <span className="alertIcon" aria-hidden="true">⚠️</span>
                     <span className="alertAccountName">{r.account_name}</span>
-                    <span className="pill alertPlatformBadge">{r.platform}</span>
+                    <span className="pill alertPlatformBadge">{formatPlatformLabel(r.platform)}</span>
                     <span className="muted alertAccountType">{r.account_type}</span>
                   </div>
 

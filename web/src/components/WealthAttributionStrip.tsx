@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { WealthTimelinePoint } from "../lib/api";
 import { computeMonthFlags, isGapPoint } from "../lib/wealthHistoryAnalysis";
+import * as fmt from "../lib/format";
 
 type Props = {
   points: WealthTimelinePoint[];
@@ -24,11 +25,7 @@ const COMPONENT_COLOR: Record<(typeof COMPONENT_ORDER)[number], string> = {
 };
 
 function monthLabel(month: string): string {
-  const [y, m] = month.split("-");
-  const year = Number(y);
-  const mon = Number(m);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", { month: "short", year: "2-digit" });
+  return fmt.formatMonth(month, "short");
 }
 
 export default function WealthAttributionStrip({ points, formatMoney, selectedMonth, onSelectMonth }: Props) {
