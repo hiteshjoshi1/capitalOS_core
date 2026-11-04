@@ -1,5 +1,7 @@
 import * as fmt from "../lib/format";
 import { chartColor, donutGradient } from "../lib/chartColors";
+import { useId } from "react";
+import { describeShares } from "../lib/chartA11y";
 
 type ExposurePieItem = {
   label: string;
@@ -30,6 +32,7 @@ export default function ExposurePieCard({
   ariaLabel,
   className,
 }: ExposurePieCardProps) {
+  const descId = useId();
   const pieStyle = items.length > 0 ? { background: conicGradient(items) } : undefined;
 
   return (
@@ -43,7 +46,8 @@ export default function ExposurePieCard({
       ) : (
         <>
           <div className="cashFlowDonutLayout">
-            <div className="cashFlowDonutChart" style={pieStyle} aria-label={ariaLabel}>
+            <div className="cashFlowDonutChart" style={pieStyle} role="img" aria-label={ariaLabel} aria-describedby={descId}>
+              <span id={descId} className="srOnly">{describeShares(ariaLabel, items)}</span>
               <div className="cashFlowDonutCenter">
                 <span className="label">Total</span>
                 <strong>{totalLabel}</strong>

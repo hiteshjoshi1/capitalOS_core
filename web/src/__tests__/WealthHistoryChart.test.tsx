@@ -136,7 +136,7 @@ describe("WealthHistoryChart", () => {
     fireEvent.pointerMove(host, { clientX: 205, clientY: 100 });
 
     expect(getByText("Total")).toBeInTheDocument();
-    expect(getByText("Click to inspect this month →")).toBeInTheDocument();
+    expect(getByText("Click or press Enter to inspect this month →")).toBeInTheDocument();
 
     fireEvent.click(host);
     expect(onSelectMonth).toHaveBeenCalledWith("2026-05");
@@ -166,5 +166,51 @@ describe("WealthHistoryChart", () => {
     expect(getByText(/Uploaded this month:/)).toBeInTheDocument();
 
     vi.restoreAllMocks();
+  });
+});
+
+// #151: the drill-down works from the keyboard.
+describe("WealthHistoryChart keyboard drill-down", () => {
+  const points = [
+    point({ month: "2026-04", total: 800 }),
+    point({ month: "2026-05", total: 900 }),
+    point({ month: "2026-06", total: 1000 }),
+  ];
+
+  it("is one tab stop; arrows move between months, announced; Enter inspects", () => {
+    const onSelectMonth = vi.fn();
+    const { getByRole, container } = render(
+      <WealthHistoryChart points={points} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} onSelectMonth={onSelectMonth} />,
+    );
+    const host = getByRole("group", { name: /Net worth by month/ });
+    expect(host).toHaveAttribute("tabindex", "0");
+    const live = container.querySelector("[aria-live=polite]")!;
+
+    fireEvent.focus(host);
+    expect(live.textContent).toContain("June 2026: total S$ 1,000");
+    fireEvent.keyDown(host, { key: "ArrowLeft" });
+    expect(live.textContent).toContain("May 2026: total S$ 900");
+    fireEvent.keyDown(host, { key: "Enter" });
+    expect(onSelectMonth).toHaveBeenCalledWith("2026-05");
+
+    fireEvent.keyDown(host, { key: "Home" });
+    fireEvent.keyDown(host, { key: " " });
+    expect(onSelectMonth).toHaveBeenLastCalledWith("2026-04");
+
+    // End is the live "now" marker: announced, but not a month to inspect.
+    fireEvent.keyDown(host, { key: "End" });
+    expect(live.textContent).toContain("Now, live prices");
+    fireEvent.keyDown(host, { key: "Enter" });
+    expect(onSelectMonth).toHaveBeenCalledTimes(2);
+
+    fireEvent.keyDown(host, { key: "Escape" });
+    expect(live.textContent).toBe("");
+  });
+
+  it("an empty chart is not a tab stop", () => {
+    const { getByRole } = render(
+      <WealthHistoryChart points={[]} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} />,
+    );
+    expect(getByRole("group")).not.toHaveAttribute("tabindex");
   });
 });

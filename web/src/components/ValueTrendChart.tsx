@@ -1,4 +1,6 @@
+import { useId } from "react";
 import * as fmt from "../lib/format";
+import { describeSeries } from "../lib/chartA11y";
 type ValueTrendPoint = {
   month: string;
   value?: number | null;
@@ -19,6 +21,7 @@ export default function ValueTrendChart({
   formatMoney,
   formatCompactMoney,
 }: ValueTrendChartProps) {
+  const descId = useId();
   const numericPoints = points.reduce<Array<{ month: string; value: number; index: number }>>((acc, point) => {
     const value = point.value == null ? null : Number(point.value);
     if (value != null && Number.isFinite(value)) {
@@ -41,7 +44,13 @@ export default function ValueTrendChart({
   };
 
   return (
-    <div className="valueTrendChart" aria-label={ariaLabel}>
+    <div className="valueTrendChart" role="img" aria-label={ariaLabel} aria-describedby={descId}>
+      <span id={descId} className="srOnly">
+        {describeSeries(
+          ariaLabel,
+          numericPoints.map((p) => ({ label: formatTrendMonth(p.month), value: formatMoney(p.value) })),
+        )}
+      </span>
       <div
         className="valueTrendBars"
         style={{ gridTemplateColumns: `repeat(${numericPoints.length}, minmax(0, 1fr))` }}

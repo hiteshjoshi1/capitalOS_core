@@ -263,7 +263,7 @@ describe("WealthHistory route", () => {
     });
     expect(mockApi.netWorthTimelineMovers).toHaveBeenCalledWith("2026-06", "SGD", 8);
 
-    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
     await waitFor(() => {
       expect(screen.queryByLabelText(/Details for/)).not.toBeInTheDocument();
     });

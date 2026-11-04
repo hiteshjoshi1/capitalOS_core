@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useId, useMemo } from "react";
 import { api } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
@@ -13,10 +13,13 @@ import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber,
 import { chartColor, donutGradient } from "../lib/chartColors";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
+import { describeShares } from "../lib/chartA11y";
 
 const STABLECOINS = new Set(["USDC", "USDT"]);
 export default function CashOverview() {
   const [month, setMonth] = useSelectedMonth();
+  const donutDescId = useId();
   const [baseCurrency] = useBaseCurrency();
   // #148: one resource per call, so the stablecoin card (crypto summary) never holds up
   // the cash numbers, and the previous month stays on screen while the next one loads.
@@ -88,12 +91,9 @@ export default function CashOverview() {
         </>
       )}
     >
-      {deposits.isLoading && <div className="card">Loading…</div>}
+      {deposits.isLoading && <div className="card" role="status">Loading…</div>}
       {deposits.error && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{deposits.error.message}</pre>
-        </div>
+        <LoadError title="Couldn't load cash" error={deposits.error.message} onRetry={() => void deposits.reload().catch(() => undefined)} />
       )}
 
       {cashDeposits && (
@@ -117,8 +117,15 @@ export default function CashOverview() {
             {accountItems.length === 0 ? (
               <div className="card muted">No cash deposits yet.</div>
             ) : (
-              <div className="card cashFlowDonutLayout" style={{ padding: 28 }} aria-label="Cash by account">
-                <div className="cashFlowDonutChart" style={{ background: donutGradient(accountItems.map((item) => item.percent)) }}>
+              <div className="card cashFlowDonutLayout" style={{ padding: 28 }}>
+                <div
+                  className="cashFlowDonutChart"
+                  style={{ background: donutGradient(accountItems.map((item) => item.percent)) }}
+                  role="img"
+                  aria-label="Cash by account"
+                  aria-describedby={donutDescId}
+                >
+                  <span id={donutDescId} className="srOnly">{describeShares("Cash by account", accountItems)}</span>
                   <div className="cashFlowDonutCenter">
                     <span className="label">Total</span>
                     <strong>{money(cashDeposits?.total)}</strong>
@@ -162,7 +169,7 @@ export default function CashOverview() {
                   {crypto.error ? (
                     <p className="muted">Stablecoin balances couldn't load: {crypto.error.message}</p>
                   ) : !cryptoSummary ? (
-                    <p className="muted">Loading stablecoins…</p>
+                    <p className="muted" role="status">Loading stablecoins…</p>
                   ) : stablecoins.length === 0 ? (
                     <p className="muted">No stablecoin balances found.</p>
                   ) : (

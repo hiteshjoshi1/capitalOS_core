@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { AssetClassFreshness, NetWorthFreshness } from "../lib/api";
@@ -14,6 +14,8 @@ import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
+import { describeShares } from "../lib/chartA11y";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
@@ -103,6 +105,7 @@ export default function WealthOverview() {
   const month = useMemo(() => currentMonthYYYYMM(), []);
 
   const [baseCurrency] = useBaseCurrency();
+  const allocDescId = useId();
   const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
   const [holdingsView, setHoldingsView] = useState<"holdings" | "movers" | "today">("holdings");
 
@@ -162,6 +165,10 @@ export default function WealthOverview() {
       unsubscribe();
     };
   }, []);
+
+  // #151: a panel whose call failed says so (with a retry) instead of showing "—",
+  // which read the same as zero (#130 finding 7.5).
+  const retry = (res: { reload: () => Promise<unknown> }) => () => void res.reload().catch(() => undefined);
 
   const formatMoney = moneyFormatter(bootstrap?.base_currency || selectedBaseCurrency);
   const summaryCurrency = summary?.base_currency || selectedBaseCurrency;
@@ -238,13 +245,10 @@ export default function WealthOverview() {
       }
     >
       {bootstrapRes.isLoading ? (
-        <div className="card">Loading…</div>
+        <div className="card" role="status">Loading…</div>
       ) : null}
       {bootstrapRes.error ? (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{bootstrapRes.error.message}</pre>
-        </div>
+        <LoadError title="Couldn't load net worth" error={bootstrapRes.error.message} onRetry={() => void bootstrapRes.reload().catch(() => undefined)} />
       ) : null}
 
       {bootstrap ? (
@@ -299,6 +303,11 @@ export default function WealthOverview() {
                   <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
                   <strong className="muted">…</strong>
                 </div>
+              ) : sinceUpdateRes.error ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
+                  <LoadError compact title="Couldn't load" onRetry={retry(sinceUpdateRes)} />
+                </div>
               ) : null}
               {prevMonthChange ? (
                 <div className="coHeroDelta">
@@ -315,6 +324,11 @@ export default function WealthOverview() {
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">VS LAST MONTH</span>
                   <strong className="muted">…</strong>
+                </div>
+              ) : summaryRes.error ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">VS LAST MONTH</span>
+                  <LoadError compact title="Couldn't load" onRetry={retry(summaryRes)} />
                 </div>
               ) : null}
               {prevYearChange ? (
@@ -363,14 +377,24 @@ export default function WealthOverview() {
             </div>
 
             {allocView === "platform" && platformRes.isLoading ? (
-              <p className="muted">Loading allocation…</p>
+              <p className="muted" role="status">Loading allocation…</p>
+            ) : allocView === "platform" && platformRes.error && !platformAllocation ? (
+              <LoadError compact title="Couldn't load the allocation" error={platformRes.error} onRetry={retry(platformRes)} />
             ) : activeAllocItems.length > 0 ? (
               <div className="coAllocationCard">
                 <div
                   className="coAllocationDonut"
                   style={{ background: donutGradient(activeAllocItems.map((item) => item.percent)) }}
+                  role="img"
                   aria-label="Allocation donut chart"
+                  aria-describedby={allocDescId}
                 >
+                  <span id={allocDescId} className="srOnly">
+                    {describeShares(
+                      allocView === "platform" ? "Allocation by platform" : "Allocation by asset class",
+                      activeAllocItems,
+                    )}
+                  </span>
                   <div className="coAllocationInner">
                     <span className="coAllocationTotalLabel">TOTAL</span>
                     <strong className="coAllocationTotalValue">
@@ -416,7 +440,9 @@ export default function WealthOverview() {
               <article className="coSignalCard">
                 <p className="coSignalEyebrow">CASH FLOW</p>
                 {spendingRes.isLoading ? (
-                  <p className="muted">Loading…</p>
+                  <p className="muted" role="status">Loading…</p>
+                ) : spendingRes.error && !spendingSummary ? (
+                  <LoadError compact title="Couldn't load cash flow" error={spendingRes.error} onRetry={retry(spendingRes)} />
                 ) : (
                   <>
                     <p className="coSignalValue">{formatSpendingMoney(spendingSummary?.net)}</p>
@@ -473,7 +499,9 @@ export default function WealthOverview() {
 
               <div className="coHoldingsList">
                 {summaryRes.isLoading ? (
-                  <p className="muted">Loading holdings…</p>
+                  <p className="muted" role="status">Loading holdings…</p>
+                ) : holdingsView !== "today" && summaryRes.error && !summary ? (
+                  <LoadError compact title="Couldn't load positions" error={summaryRes.error} onRetry={retry(summaryRes)} />
                 ) : holdingsView === "holdings" ? (
                   topHoldings.length > 0 ? (
                     topHoldings.map((h) => (
@@ -525,7 +553,9 @@ export default function WealthOverview() {
                     <p className="muted">No mover data for this period.</p>
                   )
                 ) : sinceUpdateRes.isLoading ? (
-                  <p className="muted">Loading today's movers…</p>
+                  <p className="muted" role="status">Loading today's movers…</p>
+                ) : sinceUpdateRes.error && !sinceUpdate ? (
+                  <LoadError compact title="Couldn't load today's movers" error={sinceUpdateRes.error} onRetry={retry(sinceUpdateRes)} />
                 ) : sinceUpdate?.top_movers ? (
                   [
                     ...(sinceUpdate.top_movers.gainers ?? []).slice(0, 3),

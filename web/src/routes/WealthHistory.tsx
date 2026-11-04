@@ -11,6 +11,7 @@ import "../App.css";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import * as fmt from "../lib/format";
+import LoadError from "../components/LoadError";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -204,12 +205,9 @@ export default function WealthHistory() {
         </div>
       </div>
 
-      {timelineState === "loading" ? <div className="card">Loading…</div> : null}
+      {timelineState === "loading" ? <div className="card" role="status">Loading…</div> : null}
       {timelineState === "error" ? (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{timelineErr}</pre>
-        </div>
+        <LoadError title="Couldn't load history" error={timelineErr} onRetry={() => setTimelineReload((n) => n + 1)} />
       ) : null}
 
       {timelineState === "ready" && timeline ? (
@@ -308,7 +306,7 @@ export default function WealthHistory() {
                   </div>
                 </div>
                 {dividendsState === "loading" ? (
-                  <p className="muted">Loading…</p>
+                  <p className="muted" role="status">Loading…</p>
                 ) : dividendBuckets.length === 0 ? (
                   <p className="muted">No dividend income in this range.</p>
                 ) : (
@@ -346,7 +344,7 @@ export default function WealthHistory() {
                   </div>
                 </div>
                 {cashFlowState === "loading" ? (
-                  <p className="muted">Loading…</p>
+                  <p className="muted" role="status">Loading…</p>
                 ) : cashFlowTrend.length === 0 ? (
                   <p className="muted">No cash-flow data in this range.</p>
                 ) : (

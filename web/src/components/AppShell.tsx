@@ -2,6 +2,7 @@ import { Link, Outlet, useLocation } from "react-router-dom";
 import { Suspense, useState, type ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import RouteFallback from "./RouteFallback";
+import RouteErrorBoundary from "./RouteErrorBoundary";
 import { useAuth } from "../context/useAuth";
 import { useTheme } from "../context/ThemeContext";
 import { ShellHeaderProvider } from "../context/ShellHeaderContext";
@@ -16,6 +17,10 @@ export default function AppShell() {
 
   return (
     <div className="appShell">
+      {/* #151 / #131: keyboard users skip the sidebar and tabs straight to the page. */}
+      <a className="skipLink" href="#main-content">
+        Skip to content
+      </a>
       <Sidebar />
       <main className="appShellMain">
         <ShellHeaderProvider setHeaderActions={setHeaderActions}>
@@ -48,10 +53,11 @@ export default function AppShell() {
 
             <div className="appShellTopbarMeta">
               {headerActions ? <div className="appShellTopbarActions">{headerActions}</div> : null}
-              <div className="coThemeToggle">
+              <div className="coThemeToggle" role="group" aria-label="Theme">
                 <button
                   type="button"
                   className={`coThemeBtn${theme === "light" ? " coThemeBtnActive" : ""}`}
+                  aria-pressed={theme === "light"}
                   onClick={() => setTheme("light")}
                 >
                   Light
@@ -59,6 +65,7 @@ export default function AppShell() {
                 <button
                   type="button"
                   className={`coThemeBtn${theme === "dark" ? " coThemeBtnActive" : ""}`}
+                  aria-pressed={theme === "dark"}
                   onClick={() => setTheme("dark")}
                 >
                   Dark
@@ -99,11 +106,15 @@ export default function AppShell() {
 
           {/* No pathname key (#148): it remounted Cash Flow on every tab switch, refetching
               everything and dropping local state. Different routes still mount fresh. */}
-          <div className="appShellContent">
-            {/* Routes are lazy chunks (#145): keep the shell up while one loads. */}
-            <Suspense fallback={<RouteFallback />}>
-              <Outlet />
-            </Suspense>
+          <div id="main-content" className="appShellContent" tabIndex={-1}>
+            {/* One page failing to render shows an error card here, not a blank app (#151);
+                moving to another route clears it. */}
+            <RouteErrorBoundary resetKey={location.pathname}>
+              {/* Routes are lazy chunks (#145): keep the shell up while one loads. */}
+              <Suspense fallback={<RouteFallback />}>
+                <Outlet />
+              </Suspense>
+            </RouteErrorBoundary>
           </div>
         </ShellHeaderProvider>
       </main>

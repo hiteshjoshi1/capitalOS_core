@@ -4,7 +4,7 @@
   --panel: oklch(22% 0.005 60);
   --panel2: oklch(19% 0.004 60);
   --text: oklch(95% 0.004 60);
-  --muted: oklch(68% 0.01 60);
+  --muted: oklch(72% 0.01 60); /* #151: was 68%, small table headers were 3.98:1 */
   --line: oklch(30% 0.006 60);
   --accent: #0f7a5c;
   --accent-soft: rgba(15, 122, 92, 0.2);
@@ -34,7 +34,7 @@
   --panel: rgba(255, 255, 255, 0.92);
   --panel2: rgba(248, 250, 252, 0.96);
   --text: #1e2529;
-  --muted: #66717a;
+  --muted: #5d6770; /* #151: was #66717a (4.39:1 on tinted cards) */
   --line: rgba(0, 0, 0, 0.09);
   --accent: #0f7a5c;
   --accent-soft: rgba(15, 122, 92, 0.1);
@@ -43,9 +43,9 @@
   --alloc-stocks: #2b6ddb;
   --alloc-crypto: #8650d9;
   --good: #1e6b47;
-  --bad: #b55d2d;
+  --bad: #a3501f; /* #151: was #b55d2d, 4.39:1 on light panels (#131 contrast probe) */
   --trend-negative: var(--bad);
-  --warn: #b55d2d;
+  --warn: #a3501f; /* #151: was #b55d2d (4.39:1) */
   --shadow: rgba(31, 36, 33, 0.06);
   --surface-glow: rgba(15, 122, 92, 0.04);
   --radius: 22px;
@@ -6436,4 +6436,61 @@ html, body {
   .refreshingRegion[data-refreshing="true"] {
     transition: none;
   }
+}
+
+/* #151: skip link, visible only when focused. */
+.skipLink {
+  position: absolute;
+  left: 12px;
+  top: -48px;
+  z-index: 1000;
+  padding: 10px 16px;
+  border-radius: 10px;
+  background: var(--text);
+  color: var(--bg);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.skipLink:focus {
+  top: 12px;
+}
+
+.appShellContent:focus {
+  outline: none;
+}
+
+/* #151: the shared "couldn't load" state. */
+.loadError {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.loadErrorCompact {
+  padding: 4px 0;
+}
+
+.loadErrorTitle {
+  margin: 0;
+}
+
+.loadErrorMessage {
+  margin: 0;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* #151: keyboard focus on charts and the drill-down panel. */
+.whChartSvgHost:focus-visible,
+.whDrillPanel:focus-visible,
+.whDrillPanel h3:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
+/* #151: in dark mode the accent green is too dark for small link text (#131: 3.6:1). */
+:root:not([data-theme="light"]) .wealthInlineLink {
+  color: color-mix(in srgb, var(--accent) 55%, white 45%);
 }

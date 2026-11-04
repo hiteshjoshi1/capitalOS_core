@@ -23,6 +23,7 @@ import PageShell from "../components/PageShell";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 export default function WealthRisk() {
   const [month, setMonth] = useSelectedMonth();
@@ -66,12 +67,9 @@ export default function WealthRisk() {
         </>
       )}
     >
-      {summaryRes.isLoading && !loadError ? <div className="card">Loading…</div> : null}
+      {summaryRes.isLoading && !loadError ? <div className="card" role="status">Loading…</div> : null}
       {loadError ? (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{loadError.message}</pre>
-        </div>
+        <LoadError title="Couldn't load risk" error={loadError.message} onRetry={() => { void summaryRes.reload().catch(() => undefined); void geographyRes.reload().catch(() => undefined); }} />
       ) : null}
 
       {summary ? (

@@ -1,6 +1,8 @@
 import type { GeographyExposure } from "../../lib/api";
 import * as fmt from "../../lib/format";
 import { chartColor } from "../../lib/chartColors";
+import { useId } from "react";
+import { describeShares } from "../../lib/chartA11y";
 
 type GeographyPieCardProps = {
   exposure: GeographyExposure | null;
@@ -53,6 +55,7 @@ function formatAsOf(asOf: string | null | undefined): string {
 
 export default function GeographyPieCard({ exposure, formatMoney }: GeographyPieCardProps) {
   const items = exposure?.items ?? [];
+  const descId = useId();
   const total = exposure?.total ?? 0;
   const slices = buildPieSlices(items);
   const pieStyle = items.length > 0 ? { background: conicGradient(slices) } : undefined;
@@ -73,7 +76,16 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
         <>
           <div className="geographyExposureLayout">
             <div className="geographyPieChartWrap">
-              <div className="geographyPieChart" style={pieStyle} role="img" aria-label="Geographic exposure pie chart">
+              <div
+                className="geographyPieChart"
+                style={pieStyle}
+                role="img"
+                aria-label="Geographic exposure pie chart"
+                aria-describedby={descId}
+              >
+                <span id={descId} className="srOnly">
+                  {describeShares("Geographic exposure", items.map((item) => ({ label: item.country, percent: item.percent })))}
+                </span>
                 <div className="geographyPieCenter">
                   <div className="label">Mapped</div>
                   <div className="val">{compactMappedTotal(total, exposure?.base_currency)}</div>

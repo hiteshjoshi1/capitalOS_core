@@ -18,6 +18,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 type UpcomingRow = {
   key: string;
@@ -165,23 +166,17 @@ export default function LiabilitiesOverview() {
         </>
       }
     >
-      {analytics.isLoading ? <div className="card">Loading…</div> : null}
+      {analytics.isLoading ? <div className="card" role="status">Loading…</div> : null}
 
       {analytics.error ? (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{analytics.error.message}</pre>
-          <button
-            type="button"
-            className="btn"
-            onClick={() => {
-              void analytics.reload().catch(() => undefined);
-              if (accountsRes.error) void accountsRes.reload().catch(() => undefined);
-            }}
-          >
-            Retry
-          </button>
-        </div>
+        <LoadError
+          title="Couldn't load card spend"
+          error={analytics.error}
+          onRetry={() => {
+            void analytics.reload().catch(() => undefined);
+            if (accountsRes.error) void accountsRes.reload().catch(() => undefined);
+          }}
+        />
       ) : null}
 
       {data ? (

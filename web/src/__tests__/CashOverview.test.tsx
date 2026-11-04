@@ -207,3 +207,21 @@ describe("CashOverview shared currency", () => {
     expect(screen.getByText("USD 25,000 (+USD 3,000)")).toBeInTheDocument();
   });
 });
+
+// #151: the donut is announced with its data.
+describe("CashOverview chart accessibility", () => {
+  it("exposes the donut as an image described by its shares", async () => {
+    mockApi.cashDeposits.mockResolvedValue(cashDepositsFixture);
+    mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    const donut = await screen.findByRole("img", { name: "Cash by account" });
+    expect(donut).toHaveAccessibleDescription("Cash by account: DBS 62.5%, OCBC 37.5%");
+    expect(screen.getByRole("img", { name: "Six-month cash trend" })).toHaveAccessibleDescription(/Jan '26 S\$ 35K/);
+  });
+});

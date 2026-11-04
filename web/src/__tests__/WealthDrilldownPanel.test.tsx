@@ -177,7 +177,35 @@ describe("WealthDrilldownPanel", () => {
 
   it("calls onClose when the close button is clicked", async () => {
     const { onClose } = renderPanel();
-    fireEvent.click(await screen.findByRole("button", { name: "Close" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Close details" }));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+// #151: focus management.
+describe("WealthDrilldownPanel focus", () => {
+  beforeEach(() => {
+    mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-05", gainers: [], detractors: [] });
+    mockApi.dividendsSummary.mockResolvedValue({ buckets: [], totals: null } as never);
+    mockApi.spendingSummary.mockResolvedValue({ net: 0 } as never);
+  });
+
+  it("moves focus to its heading on open, closes on Escape, and returns focus to the opener", async () => {
+    const opener = document.createElement("button");
+    opener.textContent = "chart";
+    document.body.appendChild(opener);
+    opener.focus();
+
+    const { onClose, unmount } = renderPanel();
+    const heading = screen.getByRole("heading", { name: "June 2026" });
+    expect(heading).toHaveFocus();
+
+    fireEvent.keyDown(heading, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(opener).toHaveFocus();
+    opener.remove();
+    await waitFor(() => undefined);
   });
 });

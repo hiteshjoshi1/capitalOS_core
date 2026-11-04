@@ -5,6 +5,7 @@ import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import "../App.css";
 import * as fmt from "../lib/format";
+import LoadError from "../components/LoadError";
 
 const REASON_LABELS = {
   RATE_LIMITED: "Rate limited",
@@ -91,12 +92,9 @@ export default function MarketData() {
         </button>
       )}
     >
-      {loading && <div className="card">Loading…</div>}
+      {loading && <div className="card" role="status">Loading…</div>}
       {error && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{error}</pre>
-        </div>
+        <LoadError title="Couldn't load market data" error={error} />
       )}
 
       {!loading && !error && (

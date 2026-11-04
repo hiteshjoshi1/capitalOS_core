@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { controlledCalls } from "./raceHelpers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -443,5 +443,62 @@ describe("WealthOverview currency races", () => {
     expect(screen.queryByText("USD 300")).not.toBeInTheDocument();
     expect(screen.getByText("HKD 500")).toBeInTheDocument();
     await waitFor(() => expect(usd.signal?.aborted).toBe(true));
+  });
+});
+
+// #151: a failed panel says so (with a retry) instead of showing "—" like a zero.
+describe("WealthOverview panel errors", () => {
+  it("shows a couldn't-load state per panel and recovers on retry", async () => {
+    vi.resetAllMocks();
+    vi.setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary
+      .mockRejectedValueOnce(new Error("summary down"))
+      .mockResolvedValue(makeSummary(100) as never);
+    mockApi.spendingSummary.mockRejectedValue(new Error("spending down"));
+    mockApi.platformAllocation.mockResolvedValue({ as_of: null, total: 0, items: [] } as never);
+    mockApi.netWorthSinceUpdate.mockResolvedValue({ base_currency: "SGD", net_worth_change: null, top_movers: null } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("Couldn't load positions")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't load cash flow")).toBeInTheDocument();
+    const alerts = screen.getAllByRole("alert");
+    expect(alerts.length).toBeGreaterThanOrEqual(2);
+    // The cash-flow card no longer prints "—" as if it were a value.
+    expect(screen.getByText("spending down")).toBeInTheDocument();
+
+    const positions = screen.getByText("Couldn't load positions").closest("[role=alert]") as HTMLElement;
+    fireEvent.click(within(positions).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByText("Couldn't load positions")).not.toBeInTheDocument());
+  });
+
+  it("the allocation donut is an image with its data described", async () => {
+    vi.clearAllMocks();
+    vi.setSystemTime(new Date("2026-05-15T12:00:00Z"));
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    mockApi.spendingSummary.mockResolvedValue({ income_total: 0, expense_total: 0, net: 0, savings_rate: null } as never);
+    mockApi.platformAllocation.mockResolvedValue({
+      as_of: null,
+      total: 125,
+      items: [
+        { platform: "IBKR", platform_type: "BROKER", country: "US", value: 100, percent: 80 },
+        { platform: "DBS_VICKERS", platform_type: "BROKER", country: "SG", value: 25, percent: 20 },
+      ],
+    } as never);
+    mockApi.netWorthSinceUpdate.mockResolvedValue({ base_currency: "SGD", net_worth_change: null, top_movers: null } as never);
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+    const donut = await screen.findByRole("img", { name: "Allocation donut chart" });
+    await waitFor(() => expect(donut).toHaveAccessibleDescription(/IBKR 80.0%, DBS Vickers 20.0%/));
   });
 });
