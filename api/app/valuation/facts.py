@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal, Mapping, overload
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -152,8 +152,11 @@ def _freshness_pair(items: list[tuple[str, Any]]) -> Dict[str, Any]:
     Surfacing both instead of picking one aggregate means neither "your best
     account" nor "your worst account" is hidden from the freshness signal.
     """
-    dated = [(label, _iso_value(value)) for label, value in items]
-    dated = [(label, iso) for label, iso in dated if iso is not None]
+    dated: list[tuple[str, str]] = []
+    for label, value in items:
+        iso = _iso_value(value)
+        if iso is not None:
+            dated.append((label, iso))
     if not dated:
         return {
             "most_recent_at": None,
@@ -292,6 +295,30 @@ def _networth_asset_components(
             "cash": canonical_cash_rows,
         },
     }
+
+
+@overload
+def _networth_components(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+    *,
+    price_overlay: bool = False,
+    return_rows: Literal[False] = False,
+) -> Dict[str, float]: ...
+
+
+@overload
+def _networth_components(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+    *,
+    price_overlay: bool = False,
+    return_rows: Literal[True],
+) -> tuple[Dict[str, float], Dict[str, Any]]: ...
 
 
 def _networth_components(
@@ -575,7 +602,9 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
     # for the response's fx_status (and keeps this result out of the shared cache).
     currencies = {(r["currency"] or base_currency).upper() for r in rows}
     row_dates = [_cashflow_rate_date(r["ts"]) for r in rows]
-    rates_by_date = fx.get_rates_by_date(row_dates, base_currency, currencies) if rows else {}
+    rates_by_date: Mapping[date, Mapping[str, float]] = (
+        fx.get_rates_by_date(row_dates, base_currency, currencies) if rows else {}
+    )
     income = 0.0
     expenses = 0.0
     for r, day in zip(rows, row_dates):

@@ -3,7 +3,7 @@ by country and platform."""
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -171,7 +171,8 @@ def _top_holdings(
             agg[key]["exchange_code"] = row.get("exchange_code")
         agg[key]["value"] += value
         agg[key]["valued_at_cost"] = agg[key]["valued_at_cost"] or bool(row.get("valued_at_cost"))
-        quantity = float(row.get("quantity")) if row.get("quantity") is not None else None
+        raw_quantity = row.get("quantity")
+        quantity = float(raw_quantity) if raw_quantity is not None else None
         if quantity is not None:
             agg[key]["quantity"] += quantity
             agg[key]["_has_quantity"] = True
@@ -200,7 +201,8 @@ def _top_holdings(
         # price, with the reason (D-21, #124; every holding since #144).
         priced = price_position(cr, latest_prices if price_overlay else None, rates, base_currency)
         price_row, price_fallback_reason, value = priced.quote, priced.fallback_reason, priced.value
-        latest_price = float(cr.get("snapshot_market_price")) if cr.get("snapshot_market_price") is not None else None
+        snapshot_price = cr.get("snapshot_market_price")
+        latest_price = float(snapshot_price) if snapshot_price is not None else None
         latest_trade_date = cr.get("report_date")
         price_source = "ibkr_flex" if has_nav_snapshot else "canonical_snapshot"
         quote_currency = str(cr.get("quote_currency")).upper() if cr.get("quote_currency") else None
@@ -295,9 +297,10 @@ def _top_movers_from_holdings(
         if abs(delta_abs) < 0.005:
             continue
         delta_pct = (delta_abs / previous_value) if previous_value else None
-        symbol = current["symbol"] if current else prior["symbol"]
-        asset_class = current["asset_class"] if current else prior["asset_class"]
-        asset_id = current.get("asset_id") if current else prior.get("asset_id")
+        either = cast(Dict[str, Any], current or prior)  # the key came from one of the two
+        symbol = either["symbol"]
+        asset_class = either["asset_class"]
+        asset_id = either.get("asset_id")
         movers.append(
             {
                 "asset_id": asset_id,
