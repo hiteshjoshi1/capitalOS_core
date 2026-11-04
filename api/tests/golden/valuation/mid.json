@@ -626,8 +626,8 @@
         "cash": {
           "most_recent_at": "2026-03-16",
           "most_recent_label": "IBKR",
-          "stalest_at": "2026-02-26",
-          "stalest_label": "DBS"
+          "stalest_at": "2026-03-10",
+          "stalest_label": "HSBC"
         },
         "crypto": {
           "most_recent_at": "2026-03-17",
@@ -668,17 +668,17 @@
       "currency_breakdown": [
         {
           "currency": "USD",
-          "current_value": 16366.4642,
-          "delta_abs": 976.827,
-          "delta_pct": 0.0635,
-          "snapshot_value": 15389.6372
+          "current_value": 15682.8865,
+          "delta_abs": 971.3769,
+          "delta_pct": 0.066,
+          "snapshot_value": 14711.5096
         },
         {
           "currency": "SGD",
-          "current_value": 51952.5346,
-          "delta_abs": 7279.8073,
-          "delta_pct": 0.163,
-          "snapshot_value": 44672.7273
+          "current_value": 48000.0,
+          "delta_abs": 4000.0001,
+          "delta_pct": 0.0909,
+          "snapshot_value": 43999.9999
         },
         {
           "currency": "HKD",
@@ -703,36 +703,36 @@
         }
       ],
       "current_cash_as_of": "2026-02-28T00:00:00+00:00",
-      "current_total": 68318.9988,
-      "delta_abs": 8256.6343,
-      "delta_pct": 0.1375,
+      "current_total": 63682.8865,
+      "delta_abs": 4971.377,
+      "delta_pct": 0.0847,
       "is_live": false,
       "items": [
         {
-          "percent": 71.14,
+          "percent": 71.45,
           "source": "DBS",
-          "value": 48600.0
+          "value": 45500.0
         },
         {
-          "percent": 16.1,
+          "percent": 17.27,
           "source": "HSBC",
           "value": 10996.3134
         },
         {
-          "percent": 8.84,
+          "percent": 7.07,
           "source": "IBKR",
-          "value": 6040.6577
+          "value": 4504.5455
         },
         {
-          "percent": 3.93,
+          "percent": 4.21,
           "source": "Ethereum",
           "value": 2682.0276
         }
       ],
       "snapshot_cash_as_of": "2026-01-31T00:00:00+00:00",
       "snapshot_day": 1,
-      "snapshot_total": 60062.3645,
-      "total": 68318.9988,
+      "snapshot_total": 58711.5095,
+      "total": 63682.8865,
       "trend": [
         {
           "month": "2025-09",
@@ -752,11 +752,11 @@
         },
         {
           "month": "2026-01",
-          "value": 60062.3645
+          "value": 58711.5095
         },
         {
           "month": "2026-02",
-          "value": 68318.9988
+          "value": 63682.8865
         }
       ]
     },
@@ -767,17 +767,17 @@
       "currency_breakdown": [
         {
           "currency": "USD",
-          "current_value": 15235.9564,
-          "delta_abs": -1130.5078,
-          "delta_pct": -0.0691,
-          "snapshot_value": 16366.4642
+          "current_value": 14550.0,
+          "delta_abs": -1132.8865,
+          "delta_pct": -0.0722,
+          "snapshot_value": 15682.8865
         },
         {
           "currency": "SGD",
-          "current_value": 51959.2166,
-          "delta_abs": 6.682,
-          "delta_pct": 0.0001,
-          "snapshot_value": 51952.5346
+          "current_value": 48450.0,
+          "delta_abs": 449.9999,
+          "delta_pct": 0.0094,
+          "snapshot_value": 48000.0
         },
         {
           "currency": "HKD",
@@ -802,41 +802,41 @@
         }
       ],
       "current_cash_as_of": "2026-03-16T00:00:00+00:00",
-      "current_total": 67195.173,
-      "delta_abs": -1123.8258,
-      "delta_pct": -0.0164,
+      "current_total": 63000.0,
+      "delta_abs": -682.8866,
+      "delta_pct": -0.0107,
       "is_live": true,
       "items": [
         {
-          "percent": 74.93,
+          "percent": 75.0,
           "source": "DBS",
-          "value": 50350.0
+          "value": 47250.0
         },
         {
-          "percent": 16.17,
+          "percent": 17.24,
           "source": "HSBC",
           "value": 10862.212
         },
         {
-          "percent": 6.41,
+          "percent": 5.1,
           "source": "IBKR",
-          "value": 4306.6937
+          "value": 3211.5207
         },
         {
-          "percent": 2.0,
+          "percent": 2.13,
           "source": "Ethereum",
           "value": 1341.0138
         },
         {
-          "percent": 0.5,
+          "percent": 0.53,
           "source": "Solana",
           "value": 335.2535
         }
       ],
       "snapshot_cash_as_of": "2026-02-28T00:00:00+00:00",
       "snapshot_day": 1,
-      "snapshot_total": 68318.9988,
-      "total": 67195.173,
+      "snapshot_total": 63682.8865,
+      "total": 63000.0,
       "trend": [
         {
           "month": "2025-10",
@@ -852,15 +852,15 @@
         },
         {
           "month": "2026-01",
-          "value": 60062.3645
+          "value": 58711.5095
         },
         {
           "month": "2026-02",
-          "value": 68318.9988
+          "value": 63682.8865
         },
         {
           "month": "2026-03",
-          "value": 67195.173
+          "value": 63000.0
         }
       ]
     },
@@ -869,78 +869,78 @@
       "base_currency": "SGD",
       "items": [
         {
-          "cash": 48600.0,
+          "cash": 45500.0,
           "country": "SG",
           "crypto": 0.0,
-          "percent": 51.77,
+          "percent": 50.13,
           "stocks_funds": 0.0,
-          "total": 48600.0
+          "total": 45500.0
         },
         {
           "cash": 7186.5731,
           "country": "US",
           "crypto": 15555.7604,
-          "percent": 29.65,
-          "stocks_funds": 5095.8525,
-          "total": 27838.1861
+          "percent": 30.65,
+          "stocks_funds": 5078.1818,
+          "total": 27820.5153
         },
         {
           "cash": 10996.3134,
           "country": "HK",
           "crypto": 0.0,
-          "percent": 17.57,
-          "stocks_funds": 5497.0484,
-          "total": 16493.3618
+          "percent": 18.16,
+          "stocks_funds": 5482.5175,
+          "total": 16478.8309
         },
         {
           "cash": 0.0,
           "country": "IN",
           "crypto": 0.0,
-          "percent": 1.01,
-          "stocks_funds": 952.5082,
-          "total": 952.5082
+          "percent": 1.05,
+          "stocks_funds": 955.6885,
+          "total": 955.6885
         }
       ],
-      "total": 93884.056
+      "total": 90755.0347
     },
     "/dashboard/geography-exposure?month=2026-03&base_currency=SGD": {
       "as_of": "2026-02-28T00:00:00+00:00",
       "base_currency": "SGD",
       "items": [
         {
-          "cash": 48600.0,
+          "cash": 45500.0,
           "country": "SG",
           "crypto": 0.0,
-          "percent": 51.77,
+          "percent": 50.13,
           "stocks_funds": 0.0,
-          "total": 48600.0
+          "total": 45500.0
         },
         {
           "cash": 7186.5731,
           "country": "US",
           "crypto": 15555.7604,
-          "percent": 29.65,
-          "stocks_funds": 5095.8525,
-          "total": 27838.1861
+          "percent": 30.65,
+          "stocks_funds": 5078.1818,
+          "total": 27820.5153
         },
         {
           "cash": 10996.3134,
           "country": "HK",
           "crypto": 0.0,
-          "percent": 17.57,
-          "stocks_funds": 5497.0484,
-          "total": 16493.3618
+          "percent": 18.16,
+          "stocks_funds": 5482.5175,
+          "total": 16478.8309
         },
         {
           "cash": 0.0,
           "country": "IN",
           "crypto": 0.0,
-          "percent": 1.01,
-          "stocks_funds": 952.5082,
-          "total": 952.5082
+          "percent": 1.05,
+          "stocks_funds": 955.6885,
+          "total": 955.6885
         }
       ],
-      "total": 93884.056
+      "total": 90755.0347
     },
     "/dashboard/net-worth-change?month=2026-02&base_currency=SGD": {
       "as_of_month": "2026-02",
@@ -1268,41 +1268,41 @@
       "items": [
         {
           "country": "SG",
-          "percent": 50.87,
+          "percent": 49.28,
           "platform": "DBS",
           "platform_type": "BANK",
-          "value": 50350.0
+          "value": 47250.0
         },
         {
           "country": null,
-          "percent": 21.41,
+          "percent": 22.1,
           "platform": "CRYPTO",
           "platform_type": "WALLET_PROVIDER",
           "value": 21188.0184
         },
         {
           "country": "US",
-          "percent": 15.66,
+          "percent": 16.16,
           "platform": "IBKR",
           "platform_type": "BROKER",
           "value": 15495.3737
         },
         {
           "country": "HK",
-          "percent": 10.97,
+          "percent": 11.33,
           "platform": "HSBC",
           "platform_type": "BANK",
           "value": 10862.212
         },
         {
           "country": "IN",
-          "percent": 1.09,
+          "percent": 1.12,
           "platform": "SHAREKHAN",
           "platform_type": "BROKER",
           "value": 1078.1311
         }
       ],
-      "total": 98973.7352
+      "total": 95873.7352
     },
     "/dashboard/stock-exposure?month=2026-03&base_currency=SGD": {
       "as_of": "2026-03-16T00:00:00+00:00",
@@ -1437,7 +1437,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "stale",
           "symbol": "0700",
-          "value": 5482.5175
+          "value": 5482.5175,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1458,7 +1459,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "stale",
           "symbol": "AAPL",
-          "value": 5078.1818
+          "value": 5078.1818,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1479,7 +1481,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "stale",
           "symbol": "INFY",
-          "value": 502.4918
+          "value": 502.4918,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1500,7 +1503,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "stale",
           "symbol": "RELIANCE",
-          "value": 453.1967
+          "value": 453.1967,
+          "valued_at_cost": false
         }
       ],
       "trend": [
@@ -1665,7 +1669,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "fresh",
           "symbol": "AAPL",
-          "value": 6872.6959
+          "value": 6872.6959,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1686,7 +1691,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "fresh",
           "symbol": "0700",
-          "value": 5411.157
+          "value": 5411.157,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1707,7 +1713,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "RELIANCE",
-          "value": 553.377
+          "value": 553.377,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1728,7 +1735,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "INFY",
-          "value": 524.7541
+          "value": 524.7541,
+          "valued_at_cost": false
         }
       ],
       "trend": [
@@ -1764,11 +1772,11 @@
       "cash_balances": [
         {
           "currency": "SGD",
-          "value": 51959.2166
+          "value": 48450.0
         },
         {
           "currency": "USD",
-          "value": 13559.6891
+          "value": 12873.7327
         }
       ],
       "cash_flow": {
@@ -1799,8 +1807,8 @@
         "cash": {
           "most_recent_at": "2026-03-16",
           "most_recent_label": "IBKR",
-          "stalest_at": "2026-02-26",
-          "stalest_label": "DBS"
+          "stalest_at": "2026-03-10",
+          "stalest_label": "HSBC"
         },
         "crypto": {
           "most_recent_at": "2026-03-17",
@@ -1822,22 +1830,22 @@
       "geography": [
         {
           "country": "SG",
-          "percent": 53.05,
-          "value": 50350.0
-        },
-        {
-          "country": "HK",
-          "percent": 17.15,
-          "value": 16273.3691
+          "percent": 49.28,
+          "value": 47250.0
         },
         {
           "country": "US",
-          "percent": 10.63,
-          "value": 10084.2166
+          "percent": 32.62,
+          "value": 31272.235
+        },
+        {
+          "country": "HK",
+          "percent": 16.97,
+          "value": 16273.3691
         },
         {
           "country": "IN",
-          "percent": 1.14,
+          "percent": 1.12,
           "value": 1078.1311
         }
       ],
@@ -1906,7 +1914,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "ETH",
-          "value": 10392.8571
+          "value": 10392.8571,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -1927,7 +1936,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "SOL",
-          "value": 9118.894
+          "value": 9118.894,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1948,7 +1958,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "fresh",
           "symbol": "AAPL",
-          "value": 6872.6959
+          "value": 6872.6959,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -1969,7 +1980,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "fresh",
           "symbol": "0700",
-          "value": 5411.157
+          "value": 5411.157,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -1990,7 +2002,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDC",
-          "value": 1341.0138
+          "value": 1341.0138,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2011,7 +2024,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "RELIANCE",
-          "value": 553.377
+          "value": 553.377,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2032,7 +2046,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "INFY",
-          "value": 524.7541
+          "value": 524.7541,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2053,7 +2068,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDT",
-          "value": 335.2535
+          "value": 335.2535,
+          "valued_at_cost": false
         }
       ],
       "top_movers": {
@@ -2099,11 +2115,11 @@
       "cash_balances": [
         {
           "currency": "SGD",
-          "value": 51959.2166
+          "value": 48450.0
         },
         {
           "currency": "USD",
-          "value": 13559.6891
+          "value": 12873.7327
         }
       ],
       "cash_flow": {
@@ -2141,8 +2157,8 @@
         "cash": {
           "most_recent_at": "2026-03-16",
           "most_recent_label": "IBKR",
-          "stalest_at": "2026-02-26",
-          "stalest_label": "DBS"
+          "stalest_at": "2026-03-10",
+          "stalest_label": "HSBC"
         },
         "crypto": {
           "most_recent_at": "2026-03-17",
@@ -2164,22 +2180,22 @@
       "geography": [
         {
           "country": "SG",
-          "percent": 53.05,
-          "value": 50350.0
-        },
-        {
-          "country": "HK",
-          "percent": 17.15,
-          "value": 16273.3691
+          "percent": 49.28,
+          "value": 47250.0
         },
         {
           "country": "US",
-          "percent": 10.63,
-          "value": 10084.2166
+          "percent": 32.62,
+          "value": 31272.235
+        },
+        {
+          "country": "HK",
+          "percent": 16.97,
+          "value": 16273.3691
         },
         {
           "country": "IN",
-          "percent": 1.14,
+          "percent": 1.12,
           "value": 1078.1311
         }
       ],
@@ -2255,7 +2271,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "ETH",
-          "value": 10392.8571
+          "value": 10392.8571,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2276,7 +2293,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "SOL",
-          "value": 9118.894
+          "value": 9118.894,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2297,7 +2315,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "fresh",
           "symbol": "AAPL",
-          "value": 6872.6959
+          "value": 6872.6959,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2318,7 +2337,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "fresh",
           "symbol": "0700",
-          "value": 5411.157
+          "value": 5411.157,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2339,7 +2359,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDC",
-          "value": 1341.0138
+          "value": 1341.0138,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2360,7 +2381,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "RELIANCE",
-          "value": 553.377
+          "value": 553.377,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2381,7 +2403,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "INFY",
-          "value": 524.7541
+          "value": 524.7541,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2402,7 +2425,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDT",
-          "value": 335.2535
+          "value": 335.2535,
+          "valued_at_cost": false
         }
       ],
       "top_movers": {
@@ -2469,11 +2493,11 @@
       "cash_balances": [
         {
           "currency": "SGD",
-          "value": 51959.2166
+          "value": 48450.0
         },
         {
           "currency": "USD",
-          "value": 13559.6891
+          "value": 12873.7327
         }
       ],
       "cash_flow": {
@@ -2511,8 +2535,8 @@
         "cash": {
           "most_recent_at": "2026-03-16",
           "most_recent_label": "IBKR",
-          "stalest_at": "2026-02-26",
-          "stalest_label": "DBS"
+          "stalest_at": "2026-03-10",
+          "stalest_label": "HSBC"
         },
         "crypto": {
           "most_recent_at": "2026-03-17",
@@ -2534,22 +2558,22 @@
       "geography": [
         {
           "country": "SG",
-          "percent": 53.05,
-          "value": 50350.0
-        },
-        {
-          "country": "HK",
-          "percent": 17.15,
-          "value": 16273.3691
+          "percent": 49.28,
+          "value": 47250.0
         },
         {
           "country": "US",
-          "percent": 10.63,
-          "value": 10084.2166
+          "percent": 32.62,
+          "value": 31272.235
+        },
+        {
+          "country": "HK",
+          "percent": 16.97,
+          "value": 16273.3691
         },
         {
           "country": "IN",
-          "percent": 1.14,
+          "percent": 1.12,
           "value": 1078.1311
         }
       ],
@@ -2625,7 +2649,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "ETH",
-          "value": 10392.8571
+          "value": 10392.8571,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2646,7 +2671,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "SOL",
-          "value": 9118.894
+          "value": 9118.894,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2667,7 +2693,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "fresh",
           "symbol": "AAPL",
-          "value": 6872.6959
+          "value": 6872.6959,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2688,7 +2715,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "fresh",
           "symbol": "0700",
-          "value": 5411.157
+          "value": 5411.157,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2709,7 +2737,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDC",
-          "value": 1341.0138
+          "value": 1341.0138,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2730,7 +2759,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "RELIANCE",
-          "value": 553.377
+          "value": 553.377,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2751,7 +2781,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "INFY",
-          "value": 524.7541
+          "value": 524.7541,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2772,7 +2803,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDT",
-          "value": 335.2535
+          "value": 335.2535,
+          "valued_at_cost": false
         }
       ],
       "top_movers": {
@@ -2839,11 +2871,11 @@
       "cash_balances": [
         {
           "currency": "SGD",
-          "value": 51959.2166
+          "value": 48450.0
         },
         {
           "currency": "USD",
-          "value": 13559.6891
+          "value": 12873.7327
         }
       ],
       "cash_flow": {
@@ -2859,22 +2891,22 @@
       "geography": [
         {
           "country": "SG",
-          "percent": 53.05,
-          "value": 50350.0
-        },
-        {
-          "country": "HK",
-          "percent": 17.15,
-          "value": 16273.3691
+          "percent": 49.28,
+          "value": 47250.0
         },
         {
           "country": "US",
-          "percent": 10.63,
-          "value": 10084.2166
+          "percent": 32.62,
+          "value": 31272.235
+        },
+        {
+          "country": "HK",
+          "percent": 16.97,
+          "value": 16273.3691
         },
         {
           "country": "IN",
-          "percent": 1.14,
+          "percent": 1.12,
           "value": 1078.1311
         }
       ],
@@ -2899,7 +2931,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "ETH",
-          "value": 10392.8571
+          "value": 10392.8571,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2920,7 +2953,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "SOL",
-          "value": 9118.894
+          "value": 9118.894,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2941,7 +2975,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "fresh",
           "symbol": "AAPL",
-          "value": 6872.6959
+          "value": 6872.6959,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -2962,7 +2997,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "fresh",
           "symbol": "0700",
-          "value": 5411.157
+          "value": 5411.157,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -2983,7 +3019,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDC",
-          "value": 1341.0138
+          "value": 1341.0138,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -3004,7 +3041,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "RELIANCE",
-          "value": 553.377
+          "value": 553.377,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -3025,7 +3063,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "INFY",
-          "value": 524.7541
+          "value": 524.7541,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -3046,7 +3085,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDT",
-          "value": 335.2535
+          "value": 335.2535,
+          "valued_at_cost": false
         }
       ]
     },
@@ -3056,11 +3096,11 @@
       "cash_balances": [
         {
           "currency": "SGD",
-          "value": 38746.2199
+          "value": 36129.3814
         },
         {
           "currency": "USD",
-          "value": 10111.5207
+          "value": 9600.0
         }
       ],
       "cash_flow": {
@@ -3091,8 +3131,8 @@
         "cash": {
           "most_recent_at": "2026-03-16",
           "most_recent_label": "IBKR",
-          "stalest_at": "2026-02-26",
-          "stalest_label": "DBS"
+          "stalest_at": "2026-03-10",
+          "stalest_label": "HSBC"
         },
         "crypto": {
           "most_recent_at": "2026-03-17",
@@ -3114,22 +3154,22 @@
       "geography": [
         {
           "country": "SG",
-          "percent": 53.05,
-          "value": 37546.2199
-        },
-        {
-          "country": "HK",
-          "percent": 17.15,
-          "value": 12135.124
+          "percent": 49.28,
+          "value": 35234.5361
         },
         {
           "country": "US",
-          "percent": 10.63,
-          "value": 7519.8454
+          "percent": 32.62,
+          "value": 23319.8454
+        },
+        {
+          "country": "HK",
+          "percent": 16.97,
+          "value": 12135.124
         },
         {
           "country": "IN",
-          "percent": 1.14,
+          "percent": 1.12,
           "value": 803.9672
         }
       ],
@@ -3198,7 +3238,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "ETH",
-          "value": 7750.0
+          "value": 7750.0,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -3219,7 +3260,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "SOL",
-          "value": 6800.0
+          "value": 6800.0,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -3240,7 +3282,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "fresh",
           "symbol": "AAPL",
-          "value": 5125.0
+          "value": 5125.0,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -3261,7 +3304,8 @@
           "quote_currency": "HKD",
           "quote_freshness_status": "fresh",
           "symbol": "0700",
-          "value": 4035.124
+          "value": 4035.124,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -3282,7 +3326,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDC",
-          "value": 1000.0
+          "value": 1000.0,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -3303,7 +3348,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "RELIANCE",
-          "value": 412.6557
+          "value": 412.6557,
+          "valued_at_cost": false
         },
         {
           "asset_class": "STOCK",
@@ -3324,7 +3370,8 @@
           "quote_currency": "INR",
           "quote_freshness_status": "fresh",
           "symbol": "INFY",
-          "value": 391.3115
+          "value": 391.3115,
+          "valued_at_cost": false
         },
         {
           "asset_class": "CRYPTO",
@@ -3345,7 +3392,8 @@
           "quote_currency": "USD",
           "quote_freshness_status": "missing",
           "symbol": "USDT",
-          "value": 250.0
+          "value": 250.0,
+          "valued_at_cost": false
         }
       ],
       "top_movers": {

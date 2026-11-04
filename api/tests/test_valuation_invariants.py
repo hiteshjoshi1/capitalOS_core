@@ -146,11 +146,6 @@ def test_crypto_page_equals_net_worth_crypto(household):
     assert _get(household, "/crypto/summary?month=2026-02&base_currency=SGD")["total_crypto_base"] == pytest.approx(past, abs=TOL)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#144 (one cash scope: IBKR broker cash converted from the account currency, NAV accounts' "
-    "cash rows read separately) and #180 (a CREDIT_CARD account's balance counts on the Cash page)",
-)
 def test_cash_page_equals_net_worth_cash_plus_stablecoins(household, db_engine):
     """The Cash page shows net-worth cash plus stablecoins (which net worth
     counts under crypto), live and for a past month."""
@@ -168,11 +163,6 @@ def test_cash_page_equals_net_worth_cash_plus_stablecoins(household, db_engine):
     assert past_page["current_total"] == pytest.approx(past_nw + past_stable, abs=TOL)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#144: IBKR broker cash on the Cash page is converted from the account's currency (USD), "
-    "though it is already in the Flex base currency (SGD); net worth uses NAV cash",
-)
 def test_cash_page_ibkr_cash_is_nav_cash(household):
     report = next(r for r in FLEX_REPORTS if r.report_date == date(2026, 3, 16))
     nav_cash = report.cash_sgd + report.cash_usd * fx(report.report_date, "USD")
@@ -180,12 +170,10 @@ def test_cash_page_ibkr_cash_is_nav_cash(household):
     assert items["IBKR"] == pytest.approx(nav_cash, abs=TOL)
 
 
-@pytest.mark.xfail(strict=True, reason="#180: a CREDIT_CARD account's balance counts as cash on the Cash page")
 def test_card_account_balance_never_counts_as_cash(household, db_engine):
-    """A savings balance uploaded to a card account (the #180 case) must not
-    add to cash. Net worth already ignores it; the Cash page doesn't. (The
-    allocation and geography totals include it too: covered by the #144
-    invariants above.)"""
+    """A savings balance uploaded to a card account (the #180 case) never adds
+    to cash: not to net worth, not to the Cash page. (Allocation and geography
+    read the same cash, _cash_positions: covered by the #144 invariants.)"""
     def figures() -> dict:
         cash_page = _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
         past_page = _get(household, "/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
@@ -203,10 +191,6 @@ def test_card_account_balance_never_counts_as_cash(household, db_engine):
     assert with_card_balance == pytest.approx(figures(), abs=TOL)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#144: platform allocation adds every cash row (card accounts too) and ignores liabilities",
-)
 def test_platform_allocation_total_is_assets(household):
     """Allocation splits gross assets: its total is net worth + liabilities."""
     nw = _summary(household, "2026-03")["current_net_worth"]
@@ -215,10 +199,6 @@ def test_platform_allocation_total_is_assets(household):
     assert sum(i["value"] for i in allocation["items"]) == pytest.approx(allocation["total"], abs=TOL)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#144: the summary's geography has no crypto but divides by total net worth, so it doesn't add up",
-)
 def test_summary_geography_adds_up_to_assets(household):
     summary = _summary(household, "2026-03")
     nw = summary["current_net_worth"]
@@ -226,10 +206,6 @@ def test_summary_geography_adds_up_to_assets(household):
     assert sum(g["percent"] for g in summary["geography"]) == pytest.approx(100.0, abs=0.05)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#144: geography exposure uses its own total (live prices at a past anchor, card-account cash)",
-)
 def test_geography_exposure_total_is_assets(household):
     """Geography exposure for a month splits that month's gross assets."""
     for month in ("2026-02", "2026-03"):
