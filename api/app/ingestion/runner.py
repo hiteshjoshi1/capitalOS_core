@@ -17,6 +17,7 @@ from app.ingestion.parsers import ParseResult
 from app.ingestion.parsers.citi_credit_card_csv_v1 import parse_citi_credit_card_csv
 from app.ingestion.parsers.dbs_credit_card_csv_v1 import parse_dbs_credit_card_csv
 from app.ingestion.signature import compute_format_signature
+from app.ingestion.masking import mask_parser_meta, mask_signature_debug
 from app.ingestion.registry import lookup_parser_key
 from app.ingestion.validators import validate_transactions
 from app.ingestion.report import write_report
@@ -902,8 +903,10 @@ def _report(
         "validation_warnings": warnings or [],
         "preview_transactions": preview or [],
         "preview_positions": (parser_meta or {}).get("preview_positions", []),
-        "parser_meta": parser_meta or {},
-        "signature_debug": signature_debug,
+        # Account numbers in the header copies are masked to the last 4 (#190);
+        # the statement identity was hashed from the unmasked value before this.
+        "parser_meta": mask_parser_meta(parser_meta) or {},
+        "signature_debug": mask_signature_debug(signature_debug),
         "error_message": error,
         "error_class": error_class,
         "canonical_result": canonical_result,
