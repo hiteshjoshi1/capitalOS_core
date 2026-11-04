@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
-import { api } from "../lib/api";
-import type { Account, ImportJobListItem } from "../lib/api";
+import { api, UploadRefusedError } from "../lib/api";
+import type { Account, ImportJobListItem, UploadRefusal } from "../lib/api";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
@@ -20,6 +20,8 @@ function formatPreviewDate(ts?: string | null): string {
 function jobStatusMeta(status?: string | null): { tone: "good" | "warn" | "neutral"; label: string } {
   if (status === "IMPORTED") return { tone: "good", label: "Completed" };
   if (status === "NEEDS_MAPPING") return { tone: "warn", label: "Needs mapping" };
+  if (status === "REJECTED") return { tone: "warn", label: "Refused" };
+  if (status === "REMOVED") return { tone: "neutral", label: "Removed" };
   return { tone: "neutral", label: status ?? "—" };
 }
 
@@ -47,6 +49,12 @@ export default function Ingest() {
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
   const [registering, setRegistering] = useState<boolean>(false);
   const [loadingJob, setLoadingJob] = useState<number | null>(null);
+  // An upload refused before anything was written (#180); some can be sent anyway.
+  const [refusal, setRefusal] = useState<UploadRefusal | null>(null);
+  // "Remove this import": the job awaiting confirmation, the one being removed.
+  const [confirmRemoveJob, setConfirmRemoveJob] = useState<number | null>(null);
+  const [removingJob, setRemovingJob] = useState<number | null>(null);
+  const [removeNotice, setRemoveNotice] = useState<string>("");
 
   useEffect(() => {
     (async () => {
@@ -67,20 +75,55 @@ export default function Ingest() {
     })();
   }, [requestedAccountId]);
 
-  async function onUpload() {
+  async function onUpload(allowAccountMismatch = false) {
     if (!file || !accountId) return;
     setUploading(true);
     setErr("");
+    setRefusal(null);
     try {
-      const result = await api.ingestUpload(Number(accountId), file, asOf || undefined);
+      const result = allowAccountMismatch
+        ? await api.ingestUpload(Number(accountId), file, asOf || undefined, { allowAccountMismatch: true })
+        : await api.ingestUpload(Number(accountId), file, asOf || undefined);
       setReport(result as Record<string, unknown>);
       const refreshed = await api.ingestJobs();
       setJobs(refreshed);
     } catch (e: unknown) {
+      if (e instanceof UploadRefusedError) {
+        setRefusal(e.refusal);
+        setReport(null);
+        try {
+          setJobs(await api.ingestJobs());
+        } catch {
+          // The refusal is what matters; the list refreshes on the next upload.
+        }
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        setErr(msg);
+      }
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function onRemoveJob(jobId: number) {
+    setRemovingJob(jobId);
+    setErr("");
+    setRemoveNotice("");
+    try {
+      const result = await api.removeIngestJob(jobId);
+      const r = result.removed;
+      setRemoveNotice(
+        `Import #${jobId} removed: ${r.transactions} transactions, ${r.balance_snapshots} balances and ` +
+          `${r.position_snapshots} holdings deleted${r.restored_rows ? `, ${r.restored_rows} earlier rows put back` : ""}.`,
+      );
+      setConfirmRemoveJob(null);
+      if (report && (report as { job_id?: number }).job_id === jobId) setReport(null);
+      setJobs(await api.ingestJobs());
+    } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setErr(msg);
     } finally {
-      setUploading(false);
+      setRemovingJob(null);
     }
   }
 
@@ -249,10 +292,37 @@ export default function Ingest() {
                   <span className="hint">Used when the file doesn't state its own date. Taken from the file name when it has one.</span>
                 </label>
                 <div className="actions">
-                  <button className="btn" disabled={!file || !accountId || uploading} onClick={onUpload}>
+                  <button className="btn" disabled={!file || !accountId || uploading} onClick={() => onUpload()}>
                     {uploading ? "Uploading…" : "Upload statement"}
                   </button>
                 </div>
+                {refusal && (
+                  <div className="mini" role="alert" aria-label="Upload refused">
+                    <h3>Not imported</h3>
+                    <div>{refusal.message}</div>
+                    {refusal.suggested_account_id != null &&
+                      accounts.some((a) => a.id === refusal.suggested_account_id) && (
+                        <div className="actions">
+                          <button
+                            className="btn"
+                            onClick={() => {
+                              setAccountId(String(refusal.suggested_account_id));
+                              setRefusal(null);
+                            }}
+                          >
+                            Select {accounts.find((a) => a.id === refusal.suggested_account_id)?.name}
+                          </button>
+                        </div>
+                      )}
+                    {refusal.override_field && (
+                      <div className="actions">
+                        <button className="btn" disabled={uploading} onClick={() => onUpload(true)}>
+                          {uploading ? "Uploading…" : "Upload anyway"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {err && <div className="hint" role="alert">{err}</div>}
               </div>
             )}
@@ -359,6 +429,7 @@ export default function Ingest() {
               </div>
             </div>
             <div className="card">
+              {removeNotice && <div className="hint" role="status">{removeNotice}</div>}
               {jobs.length === 0 ? (
                 <p className="muted">No import jobs yet.</p>
               ) : (
@@ -380,6 +451,33 @@ export default function Ingest() {
                       tone={jobStatusMeta(j.status).tone}
                       label={loadingJob === j.id ? "Loading…" : jobStatusMeta(j.status).label}
                     />
+                    {j.removable && (
+                      <div className="actions" onClick={(e) => e.stopPropagation()}>
+                        {confirmRemoveJob === j.id ? (
+                          <>
+                            <span className="hint">Delete everything this import wrote?</span>
+                            <button
+                              className="btn btnSmall btnDanger"
+                              disabled={removingJob === j.id}
+                              onClick={() => onRemoveJob(j.id)}
+                            >
+                              {removingJob === j.id ? "Removing…" : "Yes, remove"}
+                            </button>
+                            <button className="btn btnSmall" onClick={() => setConfirmRemoveJob(null)}>
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            className="btn btnSmall"
+                            aria-label={`Remove import ${j.id}`}
+                            onClick={() => setConfirmRemoveJob(j.id)}
+                          >
+                            Remove this import
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))
               )}

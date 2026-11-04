@@ -118,6 +118,7 @@ def _create_canonical_portfolio_tables(conn):
           error_code TEXT,
           error_message TEXT,
           metadata_json TEXT,
+          import_job_id INTEGER,
           created_at TIMESTAMP,
           updated_at TIMESTAMP
         )
@@ -419,6 +420,17 @@ def _create_canonical_portfolio_tables(conn):
         WHERE authority_status = 'authoritative'
         """,
         """
+        CREATE TABLE IF NOT EXISTS account_statement_identities (
+          account_id INTEGER PRIMARY KEY,
+          identity_hash TEXT NOT NULL,
+          last4 TEXT NOT NULL,
+          parser_key TEXT,
+          import_job_id INTEGER,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS wealth_monthly_rollups (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
@@ -569,7 +581,9 @@ def setup_db():
               report_path TEXT,
               error_message TEXT,
               created_at TIMESTAMP,
-              updated_at TIMESTAMP
+              updated_at TIMESTAMP,
+              undo_json TEXT,
+              removed_at TIMESTAMP
             )
             """
         )
@@ -615,7 +629,8 @@ def setup_db():
               platform_reference TEXT,
               notes TEXT,
               source TEXT,
-              source_fingerprint TEXT
+              source_fingerprint TEXT,
+              import_job_id INTEGER
             )
             """
         )
@@ -800,7 +815,8 @@ def setup_db():
               platform_reference TEXT,
               notes TEXT,
               source TEXT,
-              source_fingerprint TEXT
+              source_fingerprint TEXT,
+              import_job_id INTEGER
             )
             """
         )
@@ -909,6 +925,7 @@ def setup_db():
     with engine.begin() as conn:
         for table_name in (
           "account_balance_snapshots",
+            "account_statement_identities",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
@@ -986,6 +1003,7 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM fx_rates")
         for table_name in (
         "account_balance_snapshots",
+            "account_statement_identities",
             "wealth_monthly_rollups",
             "wealth_rollup_dirty",
             "portfolio_import_locks",

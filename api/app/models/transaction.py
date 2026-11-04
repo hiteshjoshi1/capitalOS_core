@@ -21,3 +21,5 @@ class Transaction(Base):
     notes = Column(Text, nullable=True)
     source = Column(Text, nullable=True)
     source_fingerprint = Column(Text, nullable=True)
+    # The upload that inserted the row (#180); NULL before migration 074.
+    import_job_id = Column(SqlId, nullable=True)

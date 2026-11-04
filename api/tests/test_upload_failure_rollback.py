@@ -184,6 +184,9 @@ def test_canonical_adapter_missing_does_not_commit_transactions(client: TestClie
     monkeypatch.setitem(
         runner_mod.PARSER_REGISTRY, "future_parser_v136", ("excel", lambda path: _fake_parse_result("x", 1.0))
     )
+    from app.ingestion import account_checks
+
+    monkeypatch.setitem(account_checks.PARSER_ACCOUNT_TYPES, "future_parser_v136", frozenset({"BROKER"}))
 
     data = _upload(client, account_id, fixture)
 
