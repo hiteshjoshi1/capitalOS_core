@@ -12,8 +12,8 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/156
 - Red after N = 3 consecutive failures of one scope (`FAILURE_THRESHOLD`): a due run that fails is retried every 30 min (D-19), so one failure is usually a hiccup the retry fixes; three in a row is an hour of failing retries. One or two show amber.
 - A source's `last_success_at` / `data_as_of` are the oldest across its scopes (a source is as current as its stalest account / exchange / wallet). Only scopes that still exist for the user count (deleted wallet's old failures don't keep it red).
 - IBKR: an account is done for a slot when an import completed since the scheduled time with a statement at least as new as the last weekday before New York's date at that time. A US holiday (older statement) retries at most `STALE_STATEMENT_ATTEMPTS = 3` times per slot, spaced by the retry gate.
-- Crypto partial EVM: the failed chains' items are copied from the previous snapshot (`source_versions.stale_chains` records how old each is), and a partial newest snapshot keeps the wallet due.
-- Quotes: an exchange whose newest run since the window's time got 0 quotes for >0 symbols is `failed` and keeps the window due.
+- Crypto partial EVM: the failed chains' items are copied from the previous snapshot (`source_versions.stale_chains` records how old each is), and a partial newest snapshot keeps the wallet due, at most `PARTIAL_RETRY_ATTEMPTS = 3` partial runs per daily slot.
+- Quotes: an exchange whose newest run since the window's time got 0 quotes for >0 symbols is `failed` and keeps the window due, at most `FAILED_WINDOW_ATTEMPTS = 3` per slot.
 - Error summaries are scrubbed (`safe_error_summary`): URLs, key=value secrets, 0x addresses, account-number shapes, long digit runs and long tokens are removed; capped at 300 chars.
 - Smaller (#130 4.6): crypto refresh flag committed before the provider fetch; IBKR read transaction ended before the Flex fetch; bad `CRYPTO_REFRESH_HOUR_LOCAL` falls back to 0; Coinbase wallet ensure no longer writes every 5 minutes.
 
@@ -42,7 +42,8 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/156
 ## Deterministic Gate Results (Codex Mutable)
 - `tests (job_runs)`: pass — 18 passed
 - `tests (frontend Data Hub)`: pass — 7 passed
-- `make verify`: see PR
+- `make verify`: pass — backend 688 passed / 1 skipped, frontend 306 passed, ruff + mypy clean
+- `db-migrate` (isolated Postgres 16): 001…076 applied; record_job_run/job_status smoke OK
 
 ## Extra Files Changed (Codex Mutable)
 - `api/app/crypto/coinbase.py` — reason: #130 4.6 no-op write every due check.
