@@ -594,11 +594,19 @@ def _patch_ibkr_due_check(monkeypatch, *, now, last_success, run_result=True):
     monkeypatch.delenv("IBKR_FLEX_SCHEDULER_TZ", raising=False)
     monkeypatch.delenv("IBKR_FLEX_SCHEDULER_TIME", raising=False)
     monkeypatch.setattr(portfolio_scheduler, "_retry_gate", catchup.RetryGate())
-    monkeypatch.setattr(portfolio_scheduler, "_latest_completed_import_finished_at", lambda: last_success)
-    monkeypatch.setattr(portfolio_scheduler, "_has_active_accounts", lambda: True)
+    state = {"last_success": last_success}
+    account = {"user_id": 1, "legacy_account_id": 300}
 
-    def fake_run():
+    def fake_due_accounts(due):
+        return [account] if catchup.run_is_due(state["last_success"], due) else []
+
+    monkeypatch.setattr(portfolio_scheduler, "_due_accounts", fake_due_accounts)
+
+    def fake_run(accounts, due):
+        assert accounts == [account]
         calls.append(datetime.now(tz=timezone.utc))
+        if run_result:
+            state["last_success"] = now
         return run_result
 
     monkeypatch.setattr(portfolio_scheduler, "_run_daily_imports", fake_run)

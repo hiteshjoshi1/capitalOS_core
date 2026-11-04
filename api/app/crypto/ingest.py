@@ -11,6 +11,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
+from app.core.job_runs import safe_error_summary
 from app.crypto.adapters import TokenBalance, NativeBalance
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order, fetch_wallet_holdings
@@ -117,6 +118,7 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
         chains = _evm_chains()
         token_chains = _evm_token_chains()
         chain_errors: list[str] = []
+        failed_chain_names: list[str] = []
         for chain in chains:
             try:
                 native, tokens, provider_name = fetch_wallet_holdings("evm", chain, wallet["address"])
@@ -124,7 +126,10 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
                 if chain not in token_chains:
                     tokens = []
             except Exception as exc:
-                chain_errors.append(f"{chain}: {exc}")
+                # Stored on the snapshot: scrubbed, since provider errors can carry
+                # an RPC URL with its key (#156).
+                chain_errors.append(f"{chain}: {safe_error_summary(exc)}")
+                failed_chain_names.append(chain)
                 logger.warning(
                     "crypto_chain_fetch_failed",
                     extra={"wallet_id": wallet_id, "chain": chain, "error": str(exc)},
@@ -295,7 +300,78 @@ def ingest_wallet(db: Session, wallet_id: str) -> SnapshotResult:
     source_versions["pricing_provider"] = source_versions["price_provider"]
     if wallet["chain_type"] == "evm" and chain_errors:
         source_versions["failed_chains"] = "; ".join(chain_errors)
+        # The chains upsert_snapshot carries forward from the previous snapshot,
+        # and the reason the wallet stays due for a retry (#156).
+        source_versions["failed_chain_names"] = failed_chain_names
     return SnapshotResult(total_usd=total_usd, items=items, source_versions=source_versions)
+
+
+_ITEM_COLUMNS = (
+    "chain",
+    "asset_kind",
+    "contract_or_mint",
+    "symbol",
+    "name",
+    "decimals",
+    "raw_amount",
+    "normalized_amount",
+    "price_usd",
+    "value_usd",
+    "price_source",
+)
+
+
+def _load_versions(value) -> dict:
+    if not value:
+        return {}
+    if isinstance(value, dict):
+        return dict(value)
+    try:
+        parsed = json.loads(value)
+    except (TypeError, json.JSONDecodeError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _carry_forward_failed_chains(db: Session, wallet_id: str, failed_chains: list[str]) -> tuple[list[dict], dict[str, str]]:
+    """The previous snapshot's items on chains this refresh could not fetch, and
+    how old each chain's data is (#156). A partial refresh then replaces today's
+    snapshot without dropping those holdings; the wallet stays due for a retry."""
+    if not failed_chains:
+        return [], {}
+    previous = db.execute(
+        text(
+            """
+            SELECT id, fetched_at, source_versions
+            FROM crypto_wallet_snapshots
+            WHERE wallet_id = :wallet_id
+            ORDER BY as_of_date DESC, fetched_at DESC, id DESC
+            LIMIT 1
+            """
+        ),
+        {"wallet_id": wallet_id},
+    ).fetchone()
+    if previous is None:
+        return [], {}
+    versions = _load_versions(previous[2])
+    previous_stale = versions.get("stale_chains") if isinstance(versions.get("stale_chains"), dict) else {}
+    holdings_as_of = versions.get("holdings_as_of") or (
+        previous[1].isoformat() if isinstance(previous[1], datetime) else (str(previous[1]) if previous[1] else None)
+    )
+    rows = db.execute(
+        text(
+            "SELECT " + ", ".join(_ITEM_COLUMNS) + " FROM crypto_wallet_snapshot_items WHERE snapshot_id = :id ORDER BY id"
+        ),
+        {"id": int(previous[0])},
+    ).mappings().all()
+    wanted = set(failed_chains)
+    items = [dict(row) for row in rows if row["chain"] in wanted]
+    stale_as_of = {
+        chain: str(previous_stale.get(chain) or holdings_as_of)
+        for chain in failed_chains
+        if previous_stale.get(chain) or holdings_as_of
+    }
+    return items, stale_as_of
 
 
 def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
@@ -304,6 +380,15 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
     source_versions = dict(getattr(result, "source_versions", {}) or {})
     source_versions.setdefault("holdings_as_of", now.isoformat())
     source_versions.setdefault("price_as_of", now.isoformat())
+    items = list(result.items)
+    total_usd = result.total_usd
+    failed_chains = [str(c) for c in (source_versions.get("failed_chain_names") or [])]
+    if failed_chains:
+        carried, stale_as_of = _carry_forward_failed_chains(db, wallet_id, failed_chains)
+        items.extend(carried)
+        total_usd = (total_usd or 0.0) + sum(float(item.get("value_usd") or 0.0) for item in carried)
+        if stale_as_of:
+            source_versions["stale_chains"] = stale_as_of
     existing = db.execute(
         text(
             "SELECT id FROM crypto_wallet_snapshots WHERE wallet_id = :wallet_id AND as_of_date = :as_of"
@@ -318,7 +403,7 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
             ),
             {
                 "id": snapshot_id,
-                "total_usd": result.total_usd,
+                "total_usd": total_usd,
                 "source_versions": json.dumps(source_versions),
                 "now": now,
             },
@@ -336,7 +421,7 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
             {
                 "wallet_id": wallet_id,
                 "as_of_date": as_of,
-                "total_usd": result.total_usd,
+                "total_usd": total_usd,
                 "source_versions": json.dumps(source_versions),
                 "now": now,
             },
@@ -345,16 +430,16 @@ def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
 
     # Cap items
     max_items = int(os.getenv("CRYPTO_SNAPSHOT_MAX_ITEMS", "500"))
-    if len(result.items) > max_items:
+    if len(items) > max_items:
         logger.info(
             "crypto_snapshot_item_cap",
-            extra={"wallet_id": wallet_id, "items": len(result.items), "cap": max_items},
+            extra={"wallet_id": wallet_id, "items": len(items), "cap": max_items},
         )
     wallet_row = db.execute(
         text("SELECT chain_type, chain FROM crypto_wallets WHERE id = :wallet_id"),
         {"wallet_id": wallet_id},
     ).mappings().one()
-    for item in result.items[:max_items]:
+    for item in items[:max_items]:
         db.execute(
             text(
                 """

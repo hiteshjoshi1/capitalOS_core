@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { Account, DataHubSummary } from "../lib/api";
+import type { Account, DataHubJobStatus, DataHubSummary } from "../lib/api";
 import "../App.css";
 import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
+import type { StatusPillTone } from "../components/StatusPill";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type RefreshStatus = "idle" | "running" | "done" | "error";
@@ -30,6 +31,30 @@ const QUICK_ACTIONS: QuickAction[] = [
   { title: "Add Crypto Wallets", desc: "Connect and verify a wallet.", to: "/crypto" },
   { title: "Refresh Market Data", desc: "Pull the latest quotes across every exchange.", to: "/market-data" },
 ];
+
+const JOB_STATE_PILL: Record<string, { tone: StatusPillTone; label: string }> = {
+  ok: { tone: "good", label: "Healthy" },
+  warning: { tone: "warn", label: "Needs a look" },
+  failing: { tone: "bad", label: "Failing" },
+  never_run: { tone: "neutral", label: "Not run yet" },
+};
+
+function formatWhen(value?: string | null): string {
+  if (!value) return "never";
+  // A bare date (statement / trade date) stays a date; timestamps show local time.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+}
+
+function jobStatusDetail(job: DataHubJobStatus): string | null {
+  if (job.consecutive_failures > 0) {
+    const runs = `${job.consecutive_failures} failed run${job.consecutive_failures === 1 ? "" : "s"} in a row`;
+    return job.last_error ? `${runs}: ${job.last_error}` : runs;
+  }
+  if (job.last_run_status === "no_new_data") return "Last run brought no new data.";
+  return null;
+}
 
 export default function OperationsOverview() {
   const [state, setState] = useState<LoadState>("idle");
@@ -168,6 +193,40 @@ export default function OperationsOverview() {
               ))}
             </div>
           </section>
+
+          {summary && summary.job_status.some((job) => job.state !== "not_configured") && (
+            <section aria-label="Job status">
+              <div className="coSectionHeader">
+                <div>
+                  <p className="coEyebrow">SCHEDULED JOBS</p>
+                  <h2 className="coSectionTitle">Job status</h2>
+                </div>
+              </div>
+              <div className="dataHubStatGrid">
+                {summary.job_status
+                  .filter((job) => job.state !== "not_configured")
+                  .map((job) => {
+                    const pill = JOB_STATE_PILL[job.state] ?? { tone: "neutral" as const, label: job.state };
+                    const detail = jobStatusDetail(job);
+                    return (
+                      <article
+                        className={`card dataHubStatCard${job.state === "failing" ? " dataHubJobFailing" : ""}`}
+                        key={job.job}
+                        data-testid={`job-status-${job.job}`}
+                      >
+                        <p className="dataHubStatLabel">{job.label}</p>
+                        <StatusPill tone={pill.tone} label={pill.label} />
+                        <p className="dataHubStatMeta">Last success: {formatWhen(job.last_success_at)}</p>
+                        <p className="dataHubStatMeta">Data as of: {formatWhen(job.data_as_of)}</p>
+                        {detail && (
+                          <p className={job.state === "failing" ? "dataHubRefreshError dataHubJobError" : "dataHubStatMeta"}>{detail}</p>
+                        )}
+                      </article>
+                    );
+                  })}
+              </div>
+            </section>
+          )}
 
           <section aria-label="Quick actions">
             <div className="coSectionHeader">

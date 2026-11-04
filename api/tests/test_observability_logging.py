@@ -289,7 +289,7 @@ def test_ibkr_scheduler_lifecycle_logs_job_id(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         portfolio_scheduler,
-        "run_ibkr_flex_import_from_config",
+        "run_import_and_record",
         lambda *args, **kwargs: {"import_run_id": 9, "counts": {"positions": 3}},
     )
 

@@ -42,6 +42,7 @@ const summaryFixture: DataHubSummary = {
     { kind: "import", title: "Imported DBS Multiplier statement", meta: "42 transactions · 3 duplicates skipped", occurred_at: "2 days ago" },
     { kind: "market_data", title: "Refreshed SGX market data", meta: "3 stale quotes resolved", occurred_at: "6 hours ago" },
   ],
+  job_status: [],
 };
 
 function renderPage() {
@@ -130,5 +131,61 @@ describe("OperationsOverview (Data Hub Overview)", () => {
 
     expect(await screen.findByText("Refresh now")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Refresh IBKR" })).toBeDisabled();
+  });
+  it("shows per-source job status and turns a source red after repeated failures (#156)", async () => {
+    mockApi.dataHubSummary.mockResolvedValue({
+      ...summaryFixture,
+      job_status: [
+        {
+          job: "ibkr_flex",
+          label: "IBKR Flex import",
+          state: "failing",
+          failure_threshold: 3,
+          last_success_at: "2026-11-02T10:35:00+00:00",
+          data_as_of: "2026-11-01",
+          consecutive_failures: 3,
+          last_error: "IbkrFlexError: statement not ready",
+          scopes: [],
+        },
+        {
+          job: "market_data",
+          label: "Quote refresh",
+          state: "ok",
+          failure_threshold: 3,
+          last_success_at: "2026-11-03T22:50:00+00:00",
+          data_as_of: "2026-11-03",
+          consecutive_failures: 0,
+          scopes: [],
+        },
+        {
+          job: "crypto_refresh",
+          label: "Crypto wallet refresh",
+          state: "not_configured",
+          failure_threshold: 3,
+          consecutive_failures: 0,
+          scopes: [],
+        },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Job status")).toBeInTheDocument());
+    const ibkr = screen.getByTestId("job-status-ibkr_flex");
+    expect(ibkr).toHaveClass("dataHubJobFailing");
+    expect(ibkr).toHaveTextContent("Failing");
+    expect(ibkr).toHaveTextContent("Data as of: 2026-11-01");
+    expect(ibkr).toHaveTextContent("3 failed runs in a row: IbkrFlexError: statement not ready");
+
+    const quotes = screen.getByTestId("job-status-market_data");
+    expect(quotes).toHaveTextContent("Healthy");
+    expect(quotes).not.toHaveClass("dataHubJobFailing");
+    expect(screen.queryByTestId("job-status-crypto_refresh")).toBeNull();
+  });
+
+  it("hides the job status section when nothing is configured", async () => {
+    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Linked accounts")).toBeInTheDocument());
+    expect(screen.queryByText("Job status")).toBeNull();
   });
 });

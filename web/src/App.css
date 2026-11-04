@@ -4315,6 +4315,16 @@ a.btn {
   line-height: 1.4;
 }
 
+/* A data source with FAILURE_THRESHOLD failed runs in a row (#156). */
+.dataHubJobFailing {
+  border-color: var(--bad);
+  box-shadow: inset 3px 0 0 var(--bad);
+}
+
+.dataHubJobError {
+  color: var(--bad);
+}
+
 .dataHubActionGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));

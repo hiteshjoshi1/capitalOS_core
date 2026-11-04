@@ -1258,6 +1258,35 @@ export type DataHubActivityItem = {
   occurred_at: string;
 };
 
+export type DataHubJobScopeStatus = {
+  scope: string;
+  label?: string | null;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_run_trigger?: string | null;
+  last_success_at?: string | null;
+  data_as_of?: string | null;
+  consecutive_failures: number;
+  last_error?: string | null;
+};
+
+// One data source's job status from job_runs (#156).
+export type DataHubJobState = "ok" | "warning" | "failing" | "never_run" | "not_configured";
+
+export type DataHubJobStatus = {
+  job: string;
+  label: string;
+  state: DataHubJobState | string;
+  failure_threshold: number;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_success_at?: string | null;
+  data_as_of?: string | null;
+  consecutive_failures: number;
+  last_error?: string | null;
+  scopes: DataHubJobScopeStatus[];
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -1274,6 +1303,7 @@ export type DataHubSummary = {
   connected_wallet_count: number;
   connected_wallet_labels: string[];
   recent_activity: DataHubActivityItem[];
+  job_status: DataHubJobStatus[];
 };
 
 export type UploadReminder = {

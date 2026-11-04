@@ -258,7 +258,7 @@ def test_coinbase_scheduler_creates_and_refreshes_stale_exchange_wallet(db_engin
 
     def fake_refresh_wallet_snapshot(db, wallet_id, *, user_id, automatic):
         refreshed.append({"wallet_id": wallet_id, "user_id": user_id, "automatic": automatic})
-        return True
+        return "success"
 
     monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
     monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
@@ -266,7 +266,7 @@ def test_coinbase_scheduler_creates_and_refreshes_stale_exchange_wallet(db_engin
     monkeypatch.delenv("COINBASE_USERNAME", raising=False)
     monkeypatch.setenv("COINBASE_USER_ID", "1")
     monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
-    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)
+    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot_outcome", fake_refresh_wallet_snapshot)
 
     crypto_scheduler._refresh_due_wallets()
 
@@ -314,7 +314,7 @@ def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch)
 
     def fake_refresh_wallet_snapshot(db, wallet_id, *, user_id, automatic):
         refreshed.append({"wallet_id": wallet_id, "user_id": user_id, "automatic": automatic})
-        return True
+        return "success"
 
     monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
     monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
@@ -322,7 +322,7 @@ def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch)
     monkeypatch.setenv("COINBASE_USERNAME", "testuser")
     monkeypatch.setenv("COINBASE_USER_ID", "1")
     monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
-    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)
+    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot_outcome", fake_refresh_wallet_snapshot)
 
     crypto_scheduler._refresh_due_wallets()
 

@@ -15,7 +15,13 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership, require_current_user
 from app.crypto.valuation import latest_wallet_valuation
 from app.db.session import get_db
-from app.market_data.service import EMPTY_EXCHANGE_PROVIDER, freshness_counts_by_exchange, held_asset_ids
+from app.core.job_runs import JOB_CRYPTO, JOB_FX, JOB_IBKR_FLEX, JOB_MARKET_DATA, job_status
+from app.market_data.service import (
+    EMPTY_EXCHANGE_PROVIDER,
+    configured_exchanges,
+    freshness_counts_by_exchange,
+    held_asset_ids,
+)
 from app.schemas.dashboard import (
     BootstrapResponse,
     CashDepositsItem,
@@ -25,6 +31,7 @@ from app.schemas.dashboard import (
     DataHubActivityItem,
     DataHubImportHealth,
     DataHubMarketData,
+    DataHubJobStatus,
     DataHubSummaryResponse,
     MiniTrendPoint,
     NetWorthChangeResponse,
@@ -3049,6 +3056,49 @@ def _wallet_scope_sql_for_summary(alias: str = "w") -> str:
     return f"{alias}.user_id = :current_user_id"
 
 
+def _data_hub_job_status(db: Session, current_user: CurrentUser) -> list[DataHubJobStatus]:
+    """Per source: last success, data as of, failure streak (#156), limited to
+    the scopes that still exist for this user (a deleted wallet's old failures
+    don't keep the source red)."""
+    params = {"current_user_id": current_user.id}
+    ibkr_rows = db.execute(
+        text(
+            """
+            SELECT DISTINCT ba.legacy_account_id, a.name
+            FROM broker_accounts ba
+            JOIN broker_connections bc ON bc.id = ba.connection_id
+            JOIN accounts a ON a.id = ba.legacy_account_id
+            WHERE bc.platform_code = 'IBKR'
+              AND bc.connection_type = 'flex_api'
+              AND bc.status = 'active'
+              AND ba.status = 'active'
+              AND bc.user_id = :current_user_id
+            """
+        ),
+        params,
+    ).fetchall()
+    ibkr_labels = {f"account:{row[0]}": str(row[1] or f"Account {row[0]}") for row in ibkr_rows}
+    wallet_rows = db.execute(
+        text(
+            "SELECT id, label, chain FROM crypto_wallets w WHERE w.status = 'active' AND "
+            + _wallet_scope_sql_for_summary("w")
+        ),
+        params,
+    ).fetchall()
+    wallet_labels = {f"wallet:{row[0]}": str(row[1] or row[2]) for row in wallet_rows}
+    exchange_labels = {f"exchange:{code}": code for code in configured_exchanges()}
+    plan = (
+        (JOB_IBKR_FLEX, ibkr_labels),
+        (JOB_MARKET_DATA, exchange_labels),
+        (JOB_CRYPTO, wallet_labels),
+        (JOB_FX, {"all": "Daily fill"}),
+    )
+    return [
+        DataHubJobStatus(**job_status(db, job, user_id=current_user.id, scopes=labels.keys(), scope_labels=labels))
+        for job, labels in plan
+    ]
+
+
 def _relative_time_label(occurred_at: datetime) -> str:
     if occurred_at.tzinfo is None:
         occurred_at = occurred_at.replace(tzinfo=timezone.utc)
@@ -3255,4 +3305,5 @@ def data_hub_summary(
             )
             for row in activity_rows[:10]
         ],
+        job_status=_data_hub_job_status(db, current_user),
     )

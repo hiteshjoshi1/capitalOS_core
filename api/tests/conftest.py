@@ -876,6 +876,25 @@ def setup_db():
         )
         conn.exec_driver_sql(
             """
+            CREATE TABLE IF NOT EXISTS job_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              job TEXT NOT NULL,
+              scope TEXT NOT NULL DEFAULT 'all',
+              user_id INTEGER,
+              trigger TEXT NOT NULL,
+              status TEXT NOT NULL,
+              started_at TIMESTAMP NOT NULL,
+              finished_at TIMESTAMP NOT NULL,
+              data_advanced BOOLEAN NOT NULL DEFAULT 0,
+              data_as_of TEXT,
+              error_summary TEXT,
+              attempt INTEGER NOT NULL DEFAULT 1,
+              details TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
             CREATE TABLE IF NOT EXISTS market_data_runs (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               provider TEXT NOT NULL,
@@ -983,6 +1002,7 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_run_items")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_runs")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS job_runs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_dividend_yields")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_symbol_map")
         conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
@@ -1065,6 +1085,7 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM prices")
         conn.exec_driver_sql("DELETE FROM market_data_run_items")
         conn.exec_driver_sql("DELETE FROM market_data_runs")
+        conn.exec_driver_sql("DELETE FROM job_runs")
         conn.exec_driver_sql("DELETE FROM market_dividend_yields")
         conn.exec_driver_sql("DELETE FROM market_symbol_map")
         conn.exec_driver_sql("DELETE FROM currencies")
