@@ -425,14 +425,10 @@ def test_history_after_writes_equals_a_fresh_recompute(household, db_engine, mon
     assert [m for m in before if before[m]["total"] != recomputed[m]["total"]] == ["2026-01", "2026-02"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="untracked (found by #142): fx._store_rows marks History dirty for a corrected past rate but "
-    "doesn't clear the in-process rate cache (24 h TTL), so the recompute uses the old rate and settles the mark",
-)
 def test_history_after_an_fx_correction_equals_a_fresh_process(household):
     """A corrected rate for a past date (here 1 Jan, December's anchor) is in
-    History on the next read, the same as a fresh process computes it."""
+    History on the next read, the same as a fresh process computes it (#188:
+    storing it drops the in-process rate cache from that date on)."""
     from app import fx as fx_module
 
     before = _points(_timeline(household, backfill=True))
