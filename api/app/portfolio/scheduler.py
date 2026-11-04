@@ -19,9 +19,17 @@ from app.core.catchup import (
     parse_hhmm,
     run_is_due,
 )
+from app.core.job_runs import (
+    JOB_IBKR_FLEX,
+    STATUS_FAILED,
+    STATUS_NO_NEW_DATA,
+    STATUS_SUCCESS,
+    TRIGGER_SCHEDULED,
+    record_job_run,
+)
 from app.core.logging import job_context
 from app.db.session import SessionLocal
-from app.portfolio.ibkr_flex import SOURCE_TYPE, run_ibkr_flex_import_from_config
+from app.portfolio.ibkr_flex import SOURCE_TYPE, IbkrFlexImportInProgress, run_ibkr_flex_import_from_config
 from app.wealth_rollup_dirty import refresh_dirty_rollups_after_job
 
 logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
@@ -59,25 +67,150 @@ def _scheduler_enabled() -> bool:
     return bool(token and query_id)
 
 
-def _latest_completed_import_finished_at() -> datetime | None:
+# IBKR doesn't publish a newer statement on US holidays: after this many
+# completed imports since the scheduled time that all returned an older
+# statement, the slot counts as done (#156) instead of retrying all day.
+STALE_STATEMENT_ATTEMPTS = 3
+
+
+def expected_report_date(due: datetime) -> date:
+    """The statement date a run at `due` should get: the last weekday before
+    New York's date at that time (IBKR builds day D's statement a few hours
+    after the US close). US holidays aren't known here; see
+    STALE_STATEMENT_ATTEMPTS."""
+    day = due.astimezone(ZoneInfo("America/New_York")).date() - timedelta(days=1)
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+def _as_date(value: object) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _completed_runs(db, legacy_account_id: int, limit: int = 20) -> list[tuple[datetime | None, date | None]]:
+    """(finished_at, report_date_to) of an account's newest completed Flex imports."""
+    rows = db.execute(
+        text(
+            """
+            SELECT finished_at, report_date_to
+            FROM broker_import_runs
+            WHERE platform_code = 'IBKR'
+              AND source_type = :source_type
+              AND status = 'completed'
+              AND finished_at IS NOT NULL
+              AND legacy_account_id = :legacy_account_id
+            ORDER BY finished_at DESC, id DESC
+            LIMIT :limit
+            """
+        ),
+        {"source_type": SOURCE_TYPE, "legacy_account_id": legacy_account_id, "limit": limit},
+    ).fetchall()
+    return [(coerce_utc(row[0]), _as_date(row[1])) for row in rows]
+
+
+def latest_report_date(db, legacy_account_id: int) -> date | None:
+    dates = [report_date for _finished, report_date in _completed_runs(db, legacy_account_id) if report_date]
+    return max(dates) if dates else None
+
+
+def account_import_due(db, legacy_account_id: int, due: datetime) -> bool:
+    """Per account (#156): due until an import completed since `due` with a
+    statement at least as new as expected_report_date(due). An account that
+    failed is retried even when another account succeeded."""
+    expected = expected_report_date(due)
+    since = [
+        report_date
+        for finished_at, report_date in _completed_runs(db, legacy_account_id)
+        if finished_at is not None and finished_at >= due
+    ]
+    if any(report_date is not None and report_date >= expected for report_date in since):
+        return False
+    return len(since) < STALE_STATEMENT_ATTEMPTS
+
+
+def _due_accounts(due: datetime) -> list[dict]:
     db = SessionLocal()
     try:
-        row = db.execute(
-            text(
-                """
-                SELECT MAX(finished_at)
-                FROM broker_import_runs
-                WHERE platform_code = 'IBKR'
-                  AND source_type = :source_type
-                  AND status = 'completed'
-                  AND finished_at IS NOT NULL
-                """
-            ),
-            {"source_type": SOURCE_TYPE},
-        ).fetchone()
-        return coerce_utc(row[0] if row else None)
+        return [account for account in _active_accounts(db) if account_import_due(db, int(account["legacy_account_id"]), due)]
     finally:
         db.close()
+
+
+def _current_due(now: datetime) -> datetime:
+    tz_name, hour, minute = _schedule_time()
+    return most_recent_due(now, hour, minute, ZoneInfo(tz_name))
+
+
+def run_import_and_record(
+    db,
+    *,
+    current_user_id: int,
+    legacy_account_id: int,
+    trigger: str,
+    cutover_date: date | None = None,
+    due: datetime | None = None,
+) -> dict:
+    """Run one account's Flex import and record it in job_runs (#156).
+
+    success: the statement is as new as expected for the most recent scheduled
+    time; no_new_data: it imported, but IBKR returned an older statement;
+    failed: it raised (re-raised to the caller). A run refused because another
+    import holds the account's lock isn't recorded.
+    """
+    started_at = datetime.now(tz=timezone.utc)
+    due = due or _current_due(started_at)
+    scope = f"account:{legacy_account_id}"
+    previous = latest_report_date(db, legacy_account_id)
+    try:
+        result = run_ibkr_flex_import_from_config(
+            db,
+            current_user_id=current_user_id,
+            legacy_account_id=legacy_account_id,
+            cutover_date=cutover_date,
+        )
+    except IbkrFlexImportInProgress:
+        raise
+    except Exception as exc:
+        db.rollback()
+        record_job_run(
+            db,
+            job=JOB_IBKR_FLEX,
+            scope=scope,
+            trigger=trigger,
+            status=STATUS_FAILED,
+            started_at=started_at,
+            user_id=current_user_id,
+            data_as_of=previous,
+            error=exc,
+        )
+        raise
+    report_date = _as_date(result.get("report_date_to"))
+    expected = expected_report_date(due)
+    current = report_date is not None and report_date >= expected
+    record_job_run(
+        db,
+        job=JOB_IBKR_FLEX,
+        scope=scope,
+        trigger=trigger,
+        status=STATUS_SUCCESS if current else STATUS_NO_NEW_DATA,
+        started_at=started_at,
+        user_id=current_user_id,
+        data_as_of=report_date,
+        data_advanced=report_date is not None and (previous is None or report_date > previous),
+        error=None if current else f"IBKR returned the statement for {report_date}, expected {expected} or later",
+        details={"import_run_id": result.get("import_run_id"), "expected_report_date": expected.isoformat()},
+    )
+    return result
 
 
 def _active_accounts(db) -> list[dict]:
@@ -102,26 +235,29 @@ def _active_accounts(db) -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _run_daily_imports() -> bool:
-    """Import every active IBKR Flex account. True when none failed."""
+def _run_daily_imports(accounts: list[dict] | None = None, due: datetime | None = None) -> bool:
+    """Import the given (default: every active) IBKR Flex account. True when none failed."""
     with job_context():
         started = time.perf_counter()
         successes = 0
         failures = 0
         db = SessionLocal()
         try:
-            accounts = _active_accounts(db)
+            if accounts is None:
+                accounts = _active_accounts(db)
             logger.info(
                 "ibkr_flex_refresh_started",
                 extra={"event": "ibkr_flex_refresh_started", "provider": "ibkr_flex", "platform": "IBKR", "rows": len(accounts)},
             )
             for account in accounts:
                 try:
-                    result = run_ibkr_flex_import_from_config(
+                    result = run_import_and_record(
                         db,
                         current_user_id=int(account["user_id"]),
                         legacy_account_id=int(account["legacy_account_id"]),
+                        trigger=TRIGGER_SCHEDULED,
                         cutover_date=_cutover_date(),
+                        due=due,
                     )
                     successes += 1
                     logger.info(
@@ -182,33 +318,29 @@ def _run_daily_imports() -> bool:
             db.close()
 
 
-def _has_active_accounts() -> bool:
-    db = SessionLocal()
-    try:
-        return bool(_active_accounts(db))
-    finally:
-        db.close()
-
-
 def _run_if_due() -> None:
-    """Every check interval: import when no import has completed since the most
-    recent scheduled time (so a run missed while the Mac slept happens on wake)."""
+    """Every check interval: import each active account that hasn't had a current
+    statement imported since the most recent scheduled time (so a run missed
+    while the Mac slept happens on wake). Checked per account (#156)."""
     now = datetime.now(tz=timezone.utc)
-    tz_name, hour, minute = _schedule_time()
-    due = most_recent_due(now, hour, minute, ZoneInfo(tz_name))
+    due = _current_due(now)
     try:
-        if not run_is_due(_latest_completed_import_finished_at(), due):
-            return
-        if not _has_active_accounts():
-            return
+        accounts = _due_accounts(due)
     except Exception as exc:  # noqa: BLE001
         logger.exception("ibkr_flex_last_run_check_failed", extra={"error_class": exc.__class__.__name__})
+        return
+    if not accounts:
         return
     if not _retry_gate.may_attempt(now):
         return
     succeeded = False
     try:
-        succeeded = _run_daily_imports()
+        succeeded = _run_daily_imports(accounts, due)
+        # An import that returned an older statement leaves the account due:
+        # wait the retry gap before asking IBKR again.
+        succeeded = succeeded and not _due_accounts(due)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("ibkr_flex_last_run_check_failed", extra={"error_class": exc.__class__.__name__})
     finally:
         _retry_gate.record(now, succeeded=succeeded)
 

@@ -2,15 +2,17 @@ import { useId, useState } from "react";
 
 import { priceFallbackMessage } from "../lib/priceFallback";
 
-// #124: the "i" next to an IBKR holding priced at IBKR's statement price.
+// D-21 (#124, #144): the "i" next to a holding priced at its own statement price.
 
 type Props = {
   symbol: string;
   reason: string;
   asOf?: string | null;
+  /** The platform whose statement priced it (default IBKR). */
+  platform?: string | null;
 };
 
-export default function PriceFallbackInfo({ symbol, reason, asOf }: Props) {
+export default function PriceFallbackInfo({ symbol, reason, asOf, platform }: Props) {
   const [open, setOpen] = useState(false);
   const noteId = useId();
   return (
@@ -27,7 +29,7 @@ export default function PriceFallbackInfo({ symbol, reason, asOf }: Props) {
       </button>
       {open && (
         <span id={noteId} className="priceFallbackInfoNote" role="note">
-          {priceFallbackMessage(symbol, reason, asOf)}
+          {priceFallbackMessage(symbol, reason, asOf, platform)}
         </span>
       )}
     </span>

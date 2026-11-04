@@ -87,7 +87,7 @@ def ensure_coinbase_wallet(db: Session, user_id: int) -> str:
     existing = db.execute(
         text(
             """
-            SELECT id, user_id, status
+            SELECT id, user_id, status, label
             FROM crypto_wallets
             WHERE chain_type = 'exchange' AND chain = 'coinbase' AND address = :address
             """
@@ -96,6 +96,10 @@ def ensure_coinbase_wallet(db: Session, user_id: int) -> str:
     ).fetchone()
     if existing:
         reactivated = existing[2] != "active" or existing[1] is None
+        if not reactivated and existing[3] is not None:
+            # Already set up: the due check calls this every few minutes, so no
+            # write (and no commit) when nothing would change (#130 4.6).
+            return str(existing[0])
         db.execute(
             text(
                 """

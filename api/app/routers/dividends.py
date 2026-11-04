@@ -12,6 +12,7 @@ from app.db.session import get_db
 from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
 from app.market_data.service import YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
+from app.portfolio.position_pricing import latest_quotes, position_base_currency, price_position
 from app.portfolio.ledger_dividends import fetch_ledger_dividend_rows, ledger_covered_since
 from app.schemas.dividends import (
     DividendCompanyItemOut,
@@ -254,30 +255,18 @@ def _latest_asset_market_values(
     ]
     if not holding_rows:
         return {}
-    currencies: set[str] = set()
-    price_by_asset: dict[int, tuple[float | None, str | None]] = {}
-    latest_prices = _latest_prices_for_assets(db, {int(row["asset_id"]) for row in holding_rows}, anchor_ts.date())
-    for row in holding_rows:
-        asset_id = int(row["asset_id"])
-        fallback_price, fallback_currency = latest_prices.get(asset_id, (None, None))
-        price_by_asset[asset_id] = (fallback_price, fallback_currency)
-        if fallback_price is not None and fallback_currency:
-            currencies.add(fallback_currency.upper())
-        else:
-            currencies.add(str(row.get("account_base_currency") or row.get("account_currency") or base_currency).upper())
+    # The same price rule as the dashboard's holdings (D-21 for every holding,
+    # #144): the price job's quote when it's at least as recent as the holding's
+    # statement and within 2x of it, else the statement value (market value, else cost).
+    quotes = latest_quotes(db, anchor_ts.date(), frozenset(int(row["asset_id"]) for row in holding_rows))
+    currencies = {position_base_currency(row, base_currency) for row in holding_rows}
+    currencies.update(str(quote["currency"]).upper() for quote in quotes.values() if quote.get("currency"))
+    currencies.update(str(row["quote_currency"]).upper() for row in holding_rows if row.get("quote_currency"))
     fx_rates = get_rates(anchor_ts, base_currency, currencies)
     out: dict[int, float] = {}
     for row in holding_rows:
         asset = int(row["asset_id"])
-        latest_price, latest_currency = price_by_asset.get(asset, (None, None))
-        if latest_price is not None:
-            currency = (latest_currency or row.get("quote_currency") or base_currency).upper()
-            value = float(row.get("quantity") or 0.0) * float(latest_price)
-        else:
-            currency = str(row.get("account_base_currency") or row.get("account_currency") or base_currency).upper()
-            value = float(row.get("snapshot_market_value_base") or row.get("cost_basis_base") or 0.0)
-        converted = value * fx_rates.get(currency, 0.0)
-        out[asset] = out.get(asset, 0.0) + converted
+        out[asset] = out.get(asset, 0.0) + price_position(row, quotes, fx_rates, base_currency).value
     return out
 
 

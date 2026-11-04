@@ -27,6 +27,16 @@ from app.ingestion.parsers.sharekhan_holdings_xls_v1 import parse_sharekhan_hold
 from app.ingestion.parsers.dbs_vickers_holdings_xls_v1 import parse_dbs_vickers_holdings_xls
 from app.ingestion.parsers.uob_account_xls_v1 import parse_uob_account_xls
 from app.ingestion.parsers.uob_credit_card_xls_v1 import parse_uob_credit_card_xls
+from app.ingestion.account_checks import (
+    UploadRefusal,
+    account_type_of,
+    check_parser_account_type,
+    check_statement_identity,
+    check_unrecognised_file,
+    link_statement_identity,
+    statement_identity,
+)
+from app.ingestion.undo import card_limits_row, new_undo_log
 from app.models.import_job import ImportJob
 from app.wealth_rollup_dirty import mark_rollups_dirty
 from app.portfolio.upload_canonical import (
@@ -81,6 +91,9 @@ def _log_ingestion_result(payload: dict, duration_ms: int) -> None:
     elif status == "FAILED":
         event = "upload_ingest_failed"
         level = logger.warning
+    elif status == "REJECTED":
+        event = "upload_ingest_rejected"
+        level = logger.warning
     else:
         return
 
@@ -97,7 +110,7 @@ def _log_ingestion_result(payload: dict, duration_ms: int) -> None:
         "skipped": counts.get("duplicates_skipped"),
         "duration_ms": duration_ms,
         "error_class": payload.get("error_class"),
-        "reason": _reason_category(payload),
+        "reason": (payload.get("refusal") or {}).get("code") or _reason_category(payload),
     }
     level(event, extra={key: value for key, value in extra.items() if value is not None})
 
@@ -250,6 +263,7 @@ def _persist_credit_card_limit_metadata(
     account_id: int,
     parser_key: str | None,
     parser_meta: dict[str, Any],
+    undo: dict[str, Any] | None = None,
 ) -> None:
     if parser_key != "dbs_credit_card_csv_v1":
         return
@@ -262,6 +276,7 @@ def _persist_credit_card_limit_metadata(
         text("SELECT available_limit_as_of FROM credit_card_accounts WHERE account_id = :account_id"),
         {"account_id": account_id},
     ).fetchone()
+    before = card_limits_row(db, account_id) if undo is not None else None
     db.execute(
         text(
             """
@@ -279,6 +294,9 @@ def _persist_credit_card_limit_metadata(
             "available_limit_as_of": available_limit_as_of,
         },
     )
+    if before is not None and undo is not None:
+        # Removing this upload puts the earlier limits back (#180).
+        undo["card_limits"] = {"before": before, "after": card_limits_row(db, account_id)}
     if previous is not None:
         # Anchors from the earlier of the old and new limit dates on read these
         # limits (the old one stops applying, the new one starts) (#138).
@@ -422,22 +440,38 @@ def create_import_job(db: Session, account_id: int, platform: str, original_file
     return job
 
 
-def run_ingestion(db: Session, job_id: int, data_dir: str, as_of: date | None = None) -> dict:
+def run_ingestion(
+    db: Session,
+    job_id: int,
+    data_dir: str,
+    as_of: date | None = None,
+    allow_account_mismatch: bool = False,
+) -> dict:
     """Parse and import an uploaded file. ``as_of`` is the user's date for a
-    file that states none of its own (#141)."""
+    file that states none of its own (#141). ``allow_account_mismatch`` imports a
+    statement that names a different account than the one linked (#180); the
+    account-type check has no override.
+
+    A refused upload returns status REJECTED with a ``refusal`` and writes nothing
+    but its job row."""
     context = job_context() if get_job_id() is None else None
     if context is not None:
         context.__enter__()
     started = time.perf_counter()
     try:
-        return _run_ingestion_with_context(db, job_id, data_dir, started, as_of)
+        return _run_ingestion_with_context(db, job_id, data_dir, started, as_of, allow_account_mismatch)
     finally:
         if context is not None:
             context.__exit__(None, None, None)
 
 
 def _run_ingestion_with_context(
-    db: Session, job_id: int, data_dir: str, started: float, as_of: date | None = None
+    db: Session,
+    job_id: int,
+    data_dir: str,
+    started: float,
+    as_of: date | None = None,
+    allow_account_mismatch: bool = False,
 ) -> dict:
     job = db.query(ImportJob).filter(ImportJob.id == job_id).one()
     report_path = os.path.join(data_dir, "reports", f"{job.id}.json")
@@ -460,6 +494,17 @@ def _run_ingestion_with_context(
         _log_ingestion_result(payload, int((time.perf_counter() - started) * 1000))
         return payload
 
+    def reject(refusal: UploadRefusal) -> dict:
+        # Nothing but the job row has been written at this point (#180). The
+        # report leaves out the file's header (signature_debug), which can carry
+        # the statement's account number.
+        db.rollback()
+        job.status = "REJECTED"
+        job.error_message = refusal.message
+        return write_and_return(
+            _report(job, status="REJECTED", error=refusal.message, refusal=refusal.as_dict())
+        )
+
     try:
         if not os.path.exists(job.stored_path):
             job.status = "FAILED"
@@ -472,6 +517,7 @@ def _run_ingestion_with_context(
         job.updated_at = _now()
         db.add(job)
         db.commit()
+        account_type = account_type_of(db, int(job.account_id))
 
         parser_key = lookup_parser_key(
             db,
@@ -480,6 +526,9 @@ def _run_ingestion_with_context(
             platform_hint=job.platform,
         )
         if not parser_key:
+            unrecognised = check_unrecognised_file(signature_debug, account_type)
+            if unrecognised is not None:
+                return reject(unrecognised)
             job.status = "NEEDS_MAPPING"
             job.updated_at = _now()
             db.add(job)
@@ -508,6 +557,9 @@ def _run_ingestion_with_context(
                 parser_key = inferred
 
         job.parser_key = parser_key
+        wrong_type = check_parser_account_type(parser_key, account_type)
+        if wrong_type is not None:
+            return reject(wrong_type)
         job.status = "PARSED"
         job.updated_at = _now()
         db.add(job)
@@ -535,11 +587,26 @@ def _run_ingestion_with_context(
         positions = result.positions
         section_counts = result.section_counts
         parser_meta = result.parser_meta
+        account_user_id = _get_account_user_id(db, int(job.account_id))
+        identity = statement_identity(parser_key, job.stored_path, parser_meta)
+        if not allow_account_mismatch:
+            other_account = check_statement_identity(
+                db,
+                account_id=int(job.account_id),
+                current_user_id=account_user_id,
+                identity=identity,
+            )
+            if other_account is not None:
+                return reject(other_account)
+
+        # What removing this upload must put back (#180); saved with its rows.
+        undo = new_undo_log()
         _persist_credit_card_limit_metadata(
             db,
             account_id=int(job.account_id),
             parser_key=parser_key,
             parser_meta=parser_meta,
+            undo=undo,
         )
 
         warnings = validate_transactions(parsed)
@@ -605,7 +672,8 @@ def _run_ingestion_with_context(
                       merchant_counterparty,
                       source,
                       notes,
-                      source_fingerprint
+                      source_fingerprint,
+                      import_job_id
                     )
                     VALUES (
                       :ts,
@@ -619,7 +687,8 @@ def _run_ingestion_with_context(
                       :merchant,
                       :source,
                       :notes,
-                      :source_fingerprint
+                      :source_fingerprint,
+                      :import_job_id
                     )
                     """
                 ),
@@ -636,6 +705,7 @@ def _run_ingestion_with_context(
                     "source": job.platform,
                     "notes": _compose_notes(fp, tx.get("notes")),
                     "source_fingerprint": fp,
+                    "import_job_id": job.id,
                 },
             )
             inserted += 1
@@ -689,7 +759,7 @@ def _run_ingestion_with_context(
             flex_cutover = is_ibkr_flex_cutover_active(db, int(job.account_id))
             canonical_result = run_upload_canonical_adapter(
                 db,
-                current_user_id=_get_account_user_id(db, int(job.account_id)),
+                current_user_id=account_user_id,
                 legacy_account_id=int(job.account_id),
                 platform_code=job.platform,
                 parse_result=result,
@@ -697,6 +767,8 @@ def _run_ingestion_with_context(
                 file_sha256=job.file_sha256,
                 is_ibkr_flex_cutover_active=flex_cutover,
                 user_as_of=as_of,
+                import_job_id=int(job.id),
+                undo=undo,
             )
             canonical_positions_written = (canonical_result or {}).get("counts", {}).get("positions", 0)
 
@@ -707,10 +779,24 @@ def _run_ingestion_with_context(
                 import_job_id=int(job.id),
                 parse_result=result,
                 user_as_of=as_of,
+                undo=undo,
             )
             canonical_balances_written = (canonical_result or {}).get("counts", {}).get("balances", 0)
 
-        db.commit()
+        if identity is not None:
+            # The first identified import links the account to the file's number;
+            # an upload sent anyway (override) moves the link to its number.
+            undo["statement_identity_linked"] = link_statement_identity(
+                db,
+                account_id=account_id,
+                identity=identity,
+                parser_key=parser_key,
+                import_job_id=int(job.id),
+                undo=undo,
+            )
+
+        # Rows, undo log and status commit together (#180).
+        job.undo_json = undo
         job.status = "IMPORTED"
         job.updated_at = _now()
         db.add(job)
@@ -790,6 +876,7 @@ def _report(
     error_class: str | None = None,
     canonical_result: dict | None = None,
     canonical_warning: str | None = None,
+    refusal: dict | None = None,
 ) -> dict:
     return {
         "job_id": job.id,
@@ -821,6 +908,8 @@ def _report(
         "error_class": error_class,
         "canonical_result": canonical_result,
         "canonical_warning": canonical_warning,
+        # Why the upload was refused (status REJECTED, #180).
+        "refusal": refusal,
     }
 
 

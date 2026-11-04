@@ -14,6 +14,11 @@ services:
     container_name: ${ISO_NAME:?}-api
     ports: !override
       - "127.0.0.1:${ISO_API_PORT:?}:8000"
+    # Dev and test copies run the checkout's code and reload on edits; the real-data stack runs
+    # the code baked into its image, so a deploy puts it live only after build + migrations (#155).
+    command: uvicorn app.main:app --host=0.0.0.0 --port=8000 --reload
+    volumes:
+      - ./api/app:/app/app:ro
     environment:
       # A dev or test copy never calls brokers, exchanges or market data on its own
       # (#45): the real-data app is the only one that runs the schedulers.

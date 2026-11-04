@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 import json
 from types import SimpleNamespace
@@ -258,7 +258,7 @@ def test_coinbase_scheduler_creates_and_refreshes_stale_exchange_wallet(db_engin
 
     def fake_refresh_wallet_snapshot(db, wallet_id, *, user_id, automatic):
         refreshed.append({"wallet_id": wallet_id, "user_id": user_id, "automatic": automatic})
-        return True
+        return "success"
 
     monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
     monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
@@ -266,7 +266,7 @@ def test_coinbase_scheduler_creates_and_refreshes_stale_exchange_wallet(db_engin
     monkeypatch.delenv("COINBASE_USERNAME", raising=False)
     monkeypatch.setenv("COINBASE_USER_ID", "1")
     monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
-    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)
+    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot_outcome", fake_refresh_wallet_snapshot)
 
     crypto_scheduler._refresh_due_wallets()
 
@@ -314,7 +314,7 @@ def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch)
 
     def fake_refresh_wallet_snapshot(db, wallet_id, *, user_id, automatic):
         refreshed.append({"wallet_id": wallet_id, "user_id": user_id, "automatic": automatic})
-        return True
+        return "success"
 
     monkeypatch.setenv("COINBASE_KEY_ID", "organizations/test-org/apiKeys/test-key")
     monkeypatch.setenv("COINBASE_KEY_SECRET", "test-secret")
@@ -322,7 +322,7 @@ def test_coinbase_scheduler_resolves_configured_username(db_engine, monkeypatch)
     monkeypatch.setenv("COINBASE_USERNAME", "testuser")
     monkeypatch.setenv("COINBASE_USER_ID", "1")
     monkeypatch.setattr(crypto_scheduler, "get_db", fake_get_db)
-    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot", fake_refresh_wallet_snapshot)
+    monkeypatch.setattr(crypto_scheduler, "refresh_wallet_snapshot_outcome", fake_refresh_wallet_snapshot)
 
     crypto_scheduler._refresh_due_wallets()
 
@@ -706,7 +706,7 @@ def test_crypto_http_retry_is_bounded_for_rate_limits(monkeypatch):
     assert sleeps == [0.25, 0.5]
 
 
-def test_failed_holdings_refresh_overlays_fresh_prices_without_new_snapshot(client: TestClient, db_engine, monkeypatch):
+def test_failed_holdings_refresh_writes_a_prices_only_snapshot_dated_today(client: TestClient, db_engine, monkeypatch):
     wallet_id = "wallet-stale-holdings-fresh-price"
     old_as_of = datetime(2026, 7, 3, tzinfo=timezone.utc)
 
@@ -746,6 +746,7 @@ def test_failed_holdings_refresh_overlays_fresh_prices_without_new_snapshot(clie
             )
         )
 
+    monkeypatch.setattr("app.crypto.valuation._as_of_date", lambda: date(2026, 7, 6))
     monkeypatch.setattr("app.crypto.refresh.ingest_wallet", lambda db, wallet_id: (_ for _ in ()).throw(RuntimeError("Alchemy 429")))
     monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: 150.0 if symbol == "ETH" else None)
     monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
@@ -756,27 +757,31 @@ def test_failed_holdings_refresh_overlays_fresh_prices_without_new_snapshot(clie
 
     assert refreshed is False
     with db_engine.connect() as conn:
-        snapshots = conn.execute(
-            text("SELECT COUNT(*) FROM crypto_wallet_snapshots WHERE wallet_id = :wallet_id"),
-            {"wallet_id": wallet_id},
-        ).scalar_one()
-        row = conn.execute(
+        rows = conn.execute(
             text(
                 """
-                SELECT s.total_usd, i.price_usd, i.value_usd, s.source_versions
+                SELECT s.id, s.as_of_date, s.total_usd, i.price_usd, i.value_usd, i.normalized_amount, s.source_versions
                 FROM crypto_wallet_snapshots s
                 JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id
                 WHERE s.wallet_id = :wallet_id
+                ORDER BY s.as_of_date
                 """
             ),
             {"wallet_id": wallet_id},
-        ).mappings().one()
+        ).mappings().all()
 
-    assert snapshots == 1
-    assert float(row["total_usd"]) == 300.0
-    assert float(row["price_usd"]) == 150.0
-    assert float(row["value_usd"]) == 300.0
-    assert "2026-07-03T00:00:00+00:00" in row["source_versions"]
+    # The 3 July snapshot keeps its own prices (#144, #130 2.10): a failed refresh
+    # no longer rewrites history in place.
+    assert [str(row["as_of_date"])[:10] for row in rows] == ["2026-07-03", "2026-07-06"]
+    old, new = rows
+    assert (old["id"], float(old["total_usd"]), float(old["price_usd"]), float(old["value_usd"])) == (9910, 200.0, 100.0, 200.0)
+    # Today's prices-only snapshot: the same holdings at today's price.
+    assert float(new["normalized_amount"]) == 2.0
+    assert (float(new["total_usd"]), float(new["price_usd"]), float(new["value_usd"])) == (300.0, 150.0, 300.0)
+    versions = json.loads(new["source_versions"])
+    assert versions["holdings_as_of"] == "2026-07-03T00:00:00+00:00"
+    assert versions["prices_only"] is True
+    assert versions["holdings_snapshot_id"] == 9910
 
     resp = client.get("/crypto/summary?base_currency=USD")
     assert resp.status_code == 200
@@ -786,3 +791,71 @@ def test_failed_holdings_refresh_overlays_fresh_prices_without_new_snapshot(clie
     assert body["price_as_of"] is not None
     assert body["stale_holdings"] is True
     assert body["stale_prices"] is False
+
+
+def _seed_priced_wallet(db_engine, wallet_id: str, as_of: str, snapshot_id: int) -> None:
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at) "
+                "VALUES (:w, 1, 'evm', 'ethereum', :addr, 'Synthetic', 'active', '2026-07-01 00:00:00+00:00')"
+            ),
+            {"w": wallet_id, "addr": f"0x{snapshot_id:040x}"},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd, source_versions) "
+                "VALUES (:id, :w, :d, :d, 200, '{}')"
+            ),
+            {"id": snapshot_id, "w": wallet_id, "d": as_of},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, price_usd, value_usd) "
+                "VALUES (:id, 'evm', 'ethereum', 'native', 'ETH', 2, 100, 200)"
+            ),
+            {"id": snapshot_id},
+        )
+
+
+def test_price_refresh_reprices_todays_snapshot_in_place(db_engine, monkeypatch):
+    """When the newest snapshot is already today's, repricing it changes only today."""
+    from app.crypto.valuation import refresh_latest_snapshot_prices
+
+    _seed_priced_wallet(db_engine, "wallet-today", "2026-07-06", 9920)
+    monkeypatch.setattr("app.crypto.valuation._as_of_date", lambda: date(2026, 7, 6))
+    monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: 120.0)
+    monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
+    monkeypatch.setattr("app.crypto.valuation.price_by_mint", lambda mints: {})
+    with Session(db_engine) as db:
+        assert refresh_latest_snapshot_prices(db, "wallet-today") is True
+        db.commit()
+    with db_engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT s.id, s.total_usd, i.value_usd FROM crypto_wallet_snapshots s "
+                "JOIN crypto_wallet_snapshot_items i ON i.snapshot_id = s.id WHERE s.wallet_id = 'wallet-today'"
+            )
+        ).all()
+    assert [(row[0], float(row[1]), float(row[2])) for row in rows] == [(9920, 240.0, 240.0)]
+
+
+def test_price_refresh_without_any_fresh_price_writes_nothing(db_engine, monkeypatch):
+    """No provider price: no snapshot is written and the old one is untouched
+    (it used to be re-stamped as freshly priced with its old prices)."""
+    from app.crypto.valuation import refresh_latest_snapshot_prices
+
+    _seed_priced_wallet(db_engine, "wallet-noprice", "2026-07-03", 9930)
+    monkeypatch.setattr("app.crypto.valuation._as_of_date", lambda: date(2026, 7, 6))
+    monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: None)
+    monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
+    monkeypatch.setattr("app.crypto.valuation.price_by_mint", lambda mints: {})
+    with Session(db_engine) as db:
+        assert refresh_latest_snapshot_prices(db, "wallet-noprice") is False
+        db.commit()
+    with db_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT id, total_usd, source_versions FROM crypto_wallet_snapshots WHERE wallet_id = 'wallet-noprice'")
+        ).all()
+    assert [(row[0], float(row[1]), row[2]) for row in rows] == [(9930, 200.0, "{}")]

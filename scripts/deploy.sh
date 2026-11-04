@@ -9,11 +9,14 @@
 #   1. refuse: not the main checkout, not on main, uncommitted tracked changes, not a fast-forward
 #   2. a VERIFIED backup (make db-backup) when the update brings new migrations
 #   3. fast-forward the code
-#   4. build the images (the running API keeps serving)
+#   4. build the images (the running API keeps serving the code baked into its image: the real
+#      stack has no code bind mount and no --reload, so steps 3-5 change nothing live; #155)
 #   5. migrations: each file in one transaction (make db-migrate). On failure the code is reset
-#      to the previous commit, the old API is still running, and the backup is named.
-#   6. recreate the stack (make up), and observability if it's running
-#   7. health checks: API, then Loki/Grafana if they run
+#      to the previous commit and the image rebuilt from it, the old API is still running, the
+#      migrations of this deploy that did apply are named (D-13), and so is the backup.
+#   6. recreate the stack (make up): the new code goes live here, after build and migrations
+#   7. health checks: API (/health checks the database and the migration state), then
+#      Loki/Grafana if they run
 # Each deploy appends a line to deployments.log (git-ignored).
 set -euo pipefail
 
@@ -81,7 +84,7 @@ fi
 say "Code: fast-forward to $(git rev-parse --short "$TO")"
 git merge -q --ff-only "$TO"
 
-# 4. Images (the running API keeps serving meanwhile)
+# 4. Images (the running API keeps serving its own image meanwhile; nothing reloads, #155)
 say "Build"
 make -s api-build
 
@@ -89,7 +92,13 @@ make -s api-build
 if [ "$NEW_MIGRATIONS" -gt 0 ]; then
   say "Migrations"
   if ! make -s db-migrate; then
+    applied_now=$(make -s db-migrations-applied 2>/dev/null || true)
+    partial=$(new_migrations "$FROM" "$TO" | xargs -n1 basename | grep -Fxf <(printf '%s\n' "$applied_now") || true)
     git reset -q --hard "$FROM"
+    # The image tag now holds the new code; rebuild it from the old, so a later `make up` (or
+    # restart) doesn't start code whose migrations didn't run.
+    make -s api-build || echo "deploy: WARNING: rebuilding the previous image failed; run make api-build before any make up" >&2
+    [ -n "$partial" ] && printf 'deploy: applied before the failure (they stay applied, D-13): %s\n' $partial >&2
     die "a migration failed (rolled back, see above). Code reset to $(git rev-parse --short "$FROM"); the old API is still running. Backup taken first: $BACKUP"
   fi
 fi
@@ -105,7 +114,12 @@ say "Health"
 api=$(make -s api-url)
 for _ in $(seq 1 60); do curl -sf "$api/health" >/dev/null && break; sleep 2; done
 curl -sf "$api/health" >/dev/null || die "the API is not healthy at $api (make api-logs). Previous commit: $(git rev-parse --short "$FROM")"
-echo "API: $(curl -s "$api/health")"
+health=$(curl -s "$api/health")
+echo "API: $health"
+# The migration state /health reports (#155); an older API without it says nothing here.
+case "$health" in
+  *'"current":false'*) echo "deploy: WARNING: the newest applied migration is not the newest file (see above; make db-migrate?)" >&2 ;;
+esac
 if make -s observability-running; then
   curl -sf http://127.0.0.1:3100/ready >/dev/null && echo "Loki: ready" || echo "Loki: NOT ready"
   curl -sf http://127.0.0.1:3000/api/health >/dev/null && echo "Grafana: ok" || echo "Grafana: NOT ok"

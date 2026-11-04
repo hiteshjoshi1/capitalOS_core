@@ -16,6 +16,13 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+from app.portfolio.authority import (
+    AuthorityWindow,
+    authoritative_sql,
+    close_windows_superseded_by,
+    ensure_window,
+    window_covers_sql,
+)
 from app.valuation_cache import valuation_cached
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
@@ -798,7 +805,7 @@ def is_ibkr_flex_cutover_active(db: Session, legacy_account_id: int, on_date: da
     effective_date = on_date or date.today()
     row = db.execute(
         text(
-            """
+            f"""
             SELECT 1
             FROM portfolio_source_authority_windows aw
             JOIN broker_accounts ba ON ba.id = aw.broker_account_id
@@ -807,9 +814,7 @@ def is_ibkr_flex_cutover_active(db: Session, legacy_account_id: int, on_date: da
               AND bc.platform_code = 'IBKR'
               AND aw.source_kind = :source_kind
               AND aw.fact_scope = :fact_scope
-              AND aw.authority_status = 'authoritative'
-              AND aw.effective_from <= :effective_date
-              AND (aw.effective_to IS NULL OR aw.effective_to >= :effective_date)
+              AND {window_covers_sql("aw", ":effective_date")}
             LIMIT 1
             """
         ),
@@ -940,46 +945,25 @@ def _ensure_broker_account(
     return int(row[0])
 
 
-def _ensure_authority_window(db: Session, broker_account_id: int, cutover_date: date) -> bool:
-    """Create the Flex authority window if missing. True when it was created."""
-    exists = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM portfolio_source_authority_windows
-            WHERE broker_account_id = :broker_account_id
-              AND source_kind = :source_kind
-              AND fact_scope = :fact_scope
-              AND effective_from = :effective_from
-            LIMIT 1
-            """
-        ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": SOURCE_TYPE,
-            "fact_scope": ALL_FACT_SCOPE,
-            "effective_from": cutover_date,
-        },
-    ).fetchone()
-    if exists:
-        return False
-    db.execute(
-        text(
-            """
-            INSERT INTO portfolio_source_authority_windows
-              (broker_account_id, source_kind, fact_scope, effective_from, authority_status)
-            VALUES
-              (:broker_account_id, :source_kind, :fact_scope, :effective_from, 'authoritative')
-            """
-        ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": SOURCE_TYPE,
-            "fact_scope": ALL_FACT_SCOPE,
-            "effective_from": cutover_date,
-        },
+def _ensure_authority_window(
+    db: Session, broker_account_id: int, requested_from: date
+) -> tuple[AuthorityWindow, bool]:
+    """The Flex authority window of this broker account (#140).
+
+    Created at ``requested_from`` when there is none; an existing one is never
+    moved by an import (only ``authority.move_window`` moves it). True when created.
+    """
+    window, created = ensure_window(
+        db,
+        broker_account_id=broker_account_id,
+        source_kind=SOURCE_TYPE,
+        fact_scope=ALL_FACT_SCOPE,
+        effective_from=requested_from,
+        reason="ibkr_flex import: first statement",
     )
-    return True
+    if created:
+        close_windows_superseded_by(db, window, reason="ibkr_flex import")
+    return window, created
 
 
 def _create_import_run(
@@ -1412,12 +1396,21 @@ def _fact_scopes(statement: FlexStatement) -> FactScopes:
     )
 
 
-def _authority_status(report_date: date, cutover_date: date) -> str:
-    return "authoritative" if report_date >= cutover_date else "reference"
+def _authority_status(report_date: date, window: AuthorityWindow) -> str:
+    return window.status_for(report_date)
 
 
 def _resolve_cutover_date(statement: FlexStatement, cutover_date: date | None) -> date:
     return cutover_date or statement.report_date_from
+
+
+def _statement_reaches_outside(statement: FlexStatement, window: AuthorityWindow) -> bool:
+    dates = [
+        *(nav.report_date for nav in statement.nav_snapshots),
+        *(position.report_date for position in statement.positions),
+        *(cash.report_date for cash in statement.cash_balances),
+    ]
+    return any(not window.covers(d) for d in dates)
 
 
 def _clear_existing_authoritative_facts(db: Session, broker_account_id: int, scopes: FactScopes) -> None:
@@ -1761,7 +1754,7 @@ def _insert_statement_facts(
     import_run_id: int,
     raw_document_id: int,
     statement: FlexStatement,
-    cutover_date: date,
+    authority_window: AuthorityWindow,
 ) -> None:
     scopes = _fact_scopes(statement)
     _clear_existing_authoritative_facts(db, broker_account_id, scopes)
@@ -1812,7 +1805,7 @@ def _insert_statement_facts(
             import_run_id=import_run_id,
             raw_document_id=raw_document_id,
             position=position,
-            authority_status=_authority_status(position.report_date, cutover_date),
+            authority_status=_authority_status(position.report_date, authority_window),
         )
 
     for cash in statement.cash_balances:
@@ -1823,7 +1816,7 @@ def _insert_statement_facts(
             import_run_id=import_run_id,
             raw_document_id=raw_document_id,
             cash=cash,
-            authority_status=_authority_status(cash.report_date, cutover_date),
+            authority_status=_authority_status(cash.report_date, authority_window),
         )
 
     for nav in statement.nav_snapshots:
@@ -1855,7 +1848,7 @@ def _insert_statement_facts(
                 "interest_accrual_base": _db_decimal(nav.interest_accrual_base),
                 "dividend_accrual_base": _db_decimal(nav.dividend_accrual_base),
                 "total_nav_base": _db_decimal(nav.total_nav_base),
-                "authority_status": _authority_status(nav.report_date, cutover_date),
+                "authority_status": _authority_status(nav.report_date, authority_window),
             },
         )
 
@@ -2372,9 +2365,12 @@ def run_ibkr_flex_import_from_xml(
             broker_account_id=broker_account_id,
             statement=statement,
         )
-        if _ensure_authority_window(db, broker_account_id, effective_cutover_date):
+        authority_window, window_created = _ensure_authority_window(db, broker_account_id, effective_cutover_date)
+        if window_created:
             # A new authority window changes which source counts from its date on (#138).
-            mark_rollups_dirty(db, effective_cutover_date, account_id=legacy_account_id, reason="ibkr_flex_authority")
+            mark_rollups_dirty(
+                db, authority_window.effective_from, account_id=legacy_account_id, reason="ibkr_flex_authority"
+            )
         # The stale-lock takeover rules (#135) live in _try_acquire_lock; on a live
         # lock it rolls back and raises IbkrFlexImportInProgress.
         lock_owner = _try_acquire_lock(db, broker_account_id, SOURCE_TYPE)
@@ -2410,8 +2406,23 @@ def run_ibkr_flex_import_from_xml(
             logger.exception("ibkr_flex_failed_run_not_recorded", extra={"event": "ibkr_flex_failed_run_not_recorded"})
         raise
 
+    # An existing window is never moved by an import (#140): facts dated outside it
+    # are stored as reference, and the import says so.
+    authority_warnings: list[tuple[str, str]] = []
+    if not window_created and _statement_reaches_outside(statement, authority_window):
+        authority_warnings.append(
+            (
+                "authority_window_unchanged",
+                "Facts in this statement dated outside the IBKR Flex authority window (from "
+                f"{authority_window.effective_from.isoformat()}"
+                + (f" to {authority_window.effective_to.isoformat()}" if authority_window.effective_to else "")
+                + ") were stored as reference. To change which dates IBKR Flex is the authority for, "
+                "move the window explicitly (make authority-window-move).",
+            )
+        )
+
     def _record_parser_warnings() -> None:
-        for code, message in statement.data_quality_warnings:
+        for code, message in [*statement.data_quality_warnings, *authority_warnings]:
             _record_data_quality_event(
                 db,
                 broker_account_id=broker_account_id,
@@ -2433,7 +2444,7 @@ def run_ibkr_flex_import_from_xml(
             import_run_id=import_run_id,
             raw_document_id=raw_document_id,
             statement=statement,
-            cutover_date=effective_cutover_date,
+            authority_window=authority_window,
         )
         _mark_import_completed(db, import_run_id)
         # NAV, cash and positions were (re)written for these report dates: History
@@ -2498,6 +2509,11 @@ def run_ibkr_flex_import_from_xml(
         "raw_document_id": raw_document_id,
         "report_date_from": statement.report_date_from.isoformat(),
         "report_date_to": statement.report_date_to.isoformat(),
+        "authority_window": {
+            "effective_from": authority_window.effective_from.isoformat(),
+            "effective_to": authority_window.effective_to.isoformat() if authority_window.effective_to else None,
+            "created": window_created,
+        },
         "counts": {
             "nav_snapshots": len(statement.nav_snapshots),
             "cash_balances": len(statement.cash_balances),
@@ -2567,6 +2583,9 @@ def run_ibkr_flex_import_from_config(
             f"User {current_user_id} is not authorized to trigger IBKR Flex import "
             f"(configured owner is user {authorized_user_id})."
         )
+    # End the read transaction before the fetch, which can wait minutes on IBKR
+    # (retries with backoff): no transaction stays open across it (#130 4.6).
+    db.commit()
     max_attempts = int(os.getenv("IBKR_FLEX_MAX_ATTEMPTS", "5"))
     initial_backoff_seconds = float(
         _first_env_value("IBKR_FLEX_INITIAL_BACKOFF_SECONDS", "IBKR_FLEX_BACKOFF_SECONDS", default="2")
@@ -2596,26 +2615,14 @@ def latest_authoritative_nav_by_legacy_account(
 ) -> list[dict[str, Any]]:
     rows = db.execute(
         text(
-            """
+            f"""
             WITH latest AS (
               SELECT ns.broker_account_id, MAX(ns.report_date) AS report_date
               FROM portfolio_nav_snapshots ns
               JOIN broker_accounts ba ON ba.id = ns.broker_account_id
               JOIN accounts acc ON acc.id = ba.legacy_account_id
               WHERE ns.report_date <= :anchor_date
-                AND (
-                  ns.authority_status = 'authoritative'
-                  OR EXISTS (
-                    SELECT 1
-                    FROM portfolio_source_authority_windows aw
-                    WHERE aw.broker_account_id = ns.broker_account_id
-                      AND aw.source_kind = :source_kind
-                      AND aw.fact_scope = 'all'
-                      AND aw.authority_status = 'authoritative'
-                      AND aw.effective_from <= ns.report_date
-                      AND (aw.effective_to IS NULL OR aw.effective_to >= ns.report_date)
-                  )
-                )
+                AND {authoritative_sql("ns")}
                 AND ba.legacy_account_id IS NOT NULL
                 AND (acc.user_id = :current_user_id OR acc.user_id IS NULL)
               GROUP BY ns.broker_account_id
@@ -2638,6 +2645,6 @@ def latest_authoritative_nav_by_legacy_account(
             LEFT JOIN platforms pl ON pl.id = acc.platform_id
             """
         ),
-        {"anchor_date": anchor_date, "current_user_id": current_user_id, "source_kind": SOURCE_TYPE},
+        {"anchor_date": anchor_date, "current_user_id": current_user_id},
     ).mappings().all()
     return [dict(row) for row in rows]

@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import allow_legacy_null_ownership
-from app.crypto.ingest import should_refresh
+from app.crypto.ingest import _as_of_date, should_refresh
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order
 from app.valuation_cache import valuation_cached
@@ -243,6 +243,15 @@ def latest_wallet_valuation(
 
 
 def refresh_latest_snapshot_prices(db: Session, wallet_id: str) -> bool:
+    """After a failed holdings refresh: today's prices for the newest snapshot's
+    holdings, written as a **new prices-only snapshot dated today** (#144, #130
+    2.10). The newest snapshot itself is left as it was, so the day it describes
+    keeps its own prices (it used to be overwritten with today's, changing every
+    anchor from its date on). If the newest snapshot is already today's, it is
+    repriced in place: that changes only today.
+
+    True when at least one price was refreshed and a snapshot written.
+    """
     snapshot = db.execute(
         text(
             """
@@ -261,9 +270,11 @@ def refresh_latest_snapshot_prices(db: Session, wallet_id: str) -> bool:
     items = db.execute(
         text(
             """
-            SELECT id, chain_type, chain, asset_kind, contract_or_mint, symbol, normalized_amount, price_usd, value_usd
+            SELECT id, asset_id, chain_type, chain, asset_kind, contract_or_mint, symbol, name, decimals,
+                   raw_amount, normalized_amount, price_usd, value_usd, price_source
             FROM crypto_wallet_snapshot_items
             WHERE snapshot_id = :snapshot_id
+            ORDER BY id
             """
         ),
         {"snapshot_id": snapshot["id"]},
@@ -292,58 +303,87 @@ def refresh_latest_snapshot_prices(db: Session, wallet_id: str) -> bool:
         prices_by_key[("solana", mint.lower())] = price
     symbol_prices = {symbol: price_by_symbol(symbol) for symbol in symbols}
 
+    provider = ",".join(configured_price_provider_order())
     updated = 0
     total_usd = 0.0
+    new_items: list[dict[str, Any]] = []
     for item in items:
         normalized = float(item["normalized_amount"]) if item.get("normalized_amount") is not None else None
         contract = str(item.get("contract_or_mint") or "").lower()
         chain = str(item["chain"])
-        price = prices_by_key.get((chain, contract)) if contract else symbol_prices.get(str(item.get("symbol") or "").upper())
-        if price is None:
-            price = float(item["price_usd"]) if item.get("price_usd") is not None else None
-        value = normalized * price if normalized is not None and price is not None else item.get("value_usd")
-        if value is None:
-            continue
-        total_usd += float(value)
-        if price is not None:
+        fresh = prices_by_key.get((chain, contract)) if contract else symbol_prices.get(str(item.get("symbol") or "").upper())
+        row = dict(item)
+        if fresh is not None and normalized is not None:
             updated += 1
-            db.execute(
-                text(
-                    """
-                    UPDATE crypto_wallet_snapshot_items
-                    SET price_usd = :price_usd,
-                        value_usd = :value_usd,
-                        price_source = :price_source
-                    WHERE id = :id
-                    """
-                ),
-                {
-                    "id": item["id"],
-                    "price_usd": price,
-                    "value_usd": value,
-                    "price_source": ",".join(configured_price_provider_order()),
-                },
-            )
+            row["price_usd"] = fresh
+            row["value_usd"] = normalized * fresh
+            row["price_source"] = provider
+        if row.get("value_usd") is not None:
+            total_usd += float(row["value_usd"])
+        new_items.append(row)
     if updated == 0:
         return False
 
     now = datetime.now(tz=timezone.utc)
+    today = _as_of_date()
     versions = _parse_source_versions(snapshot.get("source_versions"))
+    # The holdings are the newest snapshot's: their time stays theirs.
     versions.setdefault("holdings_as_of", _iso_dt(_parse_dt(snapshot.get("fetched_at"))))
     versions["price_as_of"] = now.isoformat()
-    versions["price_provider"] = ",".join(configured_price_provider_order())
-    db.execute(
-        text(
-            """
-            UPDATE crypto_wallet_snapshots
-            SET total_usd = :total_usd,
-                source_versions = :source_versions
-            WHERE id = :snapshot_id
-            """
-        ),
-        {"snapshot_id": snapshot["id"], "total_usd": total_usd, "source_versions": json.dumps(versions)},
+    versions["price_provider"] = provider
+    source_date = snapshot["as_of_date"]
+    source_date_value = source_date if isinstance(source_date, date) else date.fromisoformat(str(source_date)[:10])
+    if source_date_value >= today:
+        snapshot_id = int(snapshot["id"])
+        db.execute(
+            text(
+                """
+                UPDATE crypto_wallet_snapshots
+                SET total_usd = :total_usd,
+                    source_versions = :source_versions
+                WHERE id = :snapshot_id
+                """
+            ),
+            {"snapshot_id": snapshot_id, "total_usd": total_usd, "source_versions": json.dumps(versions)},
+        )
+        db.execute(text("DELETE FROM crypto_wallet_snapshot_items WHERE snapshot_id = :id"), {"id": snapshot_id})
+    else:
+        versions["prices_only"] = True
+        versions["holdings_snapshot_id"] = int(snapshot["id"])
+        versions["holdings_snapshot_date"] = source_date_value.isoformat()
+        snapshot_id = int(
+            db.execute(
+                text(
+                    "INSERT INTO crypto_wallet_snapshots (wallet_id, as_of_date, fetched_at, total_usd, source_versions) "
+                    "VALUES (:wallet_id, :as_of_date, :now, :total_usd, :source_versions) RETURNING id"
+                ),
+                {
+                    "wallet_id": wallet_id,
+                    "as_of_date": today,
+                    "now": now,
+                    "total_usd": total_usd,
+                    "source_versions": json.dumps(versions),
+                },
+            ).scalar_one()
+        )
+    for row in new_items:
+        db.execute(
+            text(
+                """
+                INSERT INTO crypto_wallet_snapshot_items
+                (snapshot_id, asset_id, chain_type, chain, asset_kind, contract_or_mint, symbol, name, decimals,
+                 raw_amount, normalized_amount, price_usd, value_usd, price_source)
+                VALUES
+                (:snapshot_id, :asset_id, :chain_type, :chain, :asset_kind, :contract_or_mint, :symbol, :name, :decimals,
+                 :raw_amount, :normalized_amount, :price_usd, :value_usd, :price_source)
+                """
+            ),
+            {**{k: v for k, v in row.items() if k != "id"}, "snapshot_id": snapshot_id},
+        )
+    logger.info(
+        "crypto_price_overlay_updated",
+        extra={"wallet_id": wallet_id, "items": updated, "snapshot_db_id": snapshot_id, "as_of_date": today.isoformat()},
     )
-    logger.info("crypto_price_overlay_updated", extra={"wallet_id": wallet_id, "items": updated})
-    # Repricing the latest snapshot changes every anchor from its date on (#138).
-    mark_rollups_dirty(db, snapshot["as_of_date"], wallet_id=wallet_id, reason="crypto_snapshot_repriced")
+    # Only today's snapshot changed: History from today on (#138).
+    mark_rollups_dirty(db, today, wallet_id=wallet_id, reason="crypto_snapshot_repriced")
     return True

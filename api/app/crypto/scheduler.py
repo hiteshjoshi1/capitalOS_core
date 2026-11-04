@@ -10,11 +10,17 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlalchemy import text
 
-from app.core.catchup import JOB_DEFAULTS, RetryGate, check_interval_minutes, most_recent_due, run_is_due
+from app.core.catchup import JOB_DEFAULTS, RetryGate, check_interval_minutes, coerce_utc, most_recent_due, run_is_due
+from app.core.job_runs import JOB_CRYPTO
 from app.core.logging import job_context
 from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
 from app.crypto.ingest import should_refresh
-from app.crypto.refresh import refresh_wallet_snapshot
+from app.crypto.refresh import (
+    OUTCOME_FAILED,
+    OUTCOME_LOCKED,
+    OUTCOME_PARTIAL,
+    refresh_wallet_snapshot_outcome,
+)
 from app.db.session import get_db
 from app.wealth_rollup_dirty import refresh_dirty_rollups_after_job
 
@@ -101,7 +107,7 @@ def _parse_snapshot_timestamp(value) -> datetime | None:
     return value.astimezone(timezone.utc)
 
 
-def _latest_snapshot_freshness(db, wallet_id: str) -> tuple[datetime | None, datetime | None]:
+def _latest_snapshot_versions(db, wallet_id: str) -> tuple[bool, datetime | None, dict] | None:
     row = db.execute(
         text(
             """
@@ -115,8 +121,7 @@ def _latest_snapshot_freshness(db, wallet_id: str) -> tuple[datetime | None, dat
         {"wallet_id": wallet_id},
     ).fetchone()
     if row is None:
-        return None, None
-    fetched_at = _parse_snapshot_timestamp(row[0])
+        return None
     source_versions = {}
     if row[1]:
         try:
@@ -125,23 +130,78 @@ def _latest_snapshot_freshness(db, wallet_id: str) -> tuple[datetime | None, dat
             source_versions = {}
     if not isinstance(source_versions, dict):
         source_versions = {}
+    return True, _parse_snapshot_timestamp(row[0]), source_versions
+
+
+def _latest_snapshot_freshness(db, wallet_id: str) -> tuple[datetime | None, datetime | None]:
+    latest = _latest_snapshot_versions(db, wallet_id)
+    if latest is None:
+        return None, None
+    _found, fetched_at, source_versions = latest
     holdings_as_of = _parse_snapshot_timestamp(source_versions.get("holdings_as_of")) or fetched_at
     price_as_of = _parse_snapshot_timestamp(source_versions.get("price_as_of")) or fetched_at
     return holdings_as_of, price_as_of
 
 
+def _latest_snapshot_partial(db, wallet_id: str) -> bool:
+    """The newest snapshot came from a refresh where some EVM chains failed (#156)."""
+    latest = _latest_snapshot_versions(db, wallet_id)
+    return bool(latest and latest[2].get("failed_chain_names"))
+
+
+# Retries per daily slot for a wallet whose refresh was partial; after that the
+# slot counts as done, so a chain that is down all day (or not supported) isn't
+# re-fetched every retry interval. The next slot tries again.
+PARTIAL_RETRY_ATTEMPTS = 3
+
+
+def _partial_runs_since(db, wallet_id: str, due: datetime) -> int:
+    rows = db.execute(
+        text(
+            """
+            SELECT finished_at
+            FROM job_runs
+            WHERE job = :job AND scope = :scope AND status = 'partial'
+            ORDER BY finished_at DESC, id DESC
+            LIMIT 20
+            """
+        ),
+        {"job": JOB_CRYPTO, "scope": f"wallet:{wallet_id}"},
+    ).fetchall()
+    return sum(1 for row in rows if (coerce_utc(row[0]) or due) >= due)
+
+
 def _wallet_refresh_due(db, wallet_id: str, due: datetime | None = None) -> bool:
-    """With `due`: not refreshed since that scheduled time. Without: older than 24h."""
+    """With `due`: not refreshed since that scheduled time. Without: older than 24h.
+
+    A wallet whose newest snapshot is partial (some chains failed, carried
+    forward) stays due, so the retry fires (#156); the retry gate spaces those
+    retries out (SCHEDULER_RETRY_MINUTES), and with `due` they stop after
+    PARTIAL_RETRY_ATTEMPTS partial runs since that time."""
+    if _latest_snapshot_partial(db, wallet_id):
+        if due is None or _partial_runs_since(db, wallet_id, due) < PARTIAL_RETRY_ATTEMPTS:
+            return True
     holdings_as_of, price_as_of = _latest_snapshot_freshness(db, wallet_id)
     if due is not None:
         return run_is_due(holdings_as_of, due) or run_is_due(price_as_of, due)
     return should_refresh(holdings_as_of) or should_refresh(price_as_of)
 
 
+def _refresh_hour() -> int:
+    """`CRYPTO_REFRESH_HOUR_LOCAL` (0-23), midnight when unset or invalid: a bad
+    value must not raise on every check (#130 4.6)."""
+    raw = os.getenv("CRYPTO_REFRESH_HOUR_LOCAL", "").strip()
+    try:
+        hour = int(raw) if raw else 0
+    except ValueError:
+        logger.warning("crypto_refresh_hour_invalid", extra={"event": "crypto_refresh_hour_invalid"})
+        return 0
+    return hour if 0 <= hour <= 23 else 0
+
+
 def _daily_due(now: datetime) -> datetime:
     tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
-    hour = int(os.getenv("CRYPTO_REFRESH_HOUR_LOCAL", "0"))
-    return most_recent_due(now, hour, 0, tz)
+    return most_recent_due(now, _refresh_hour(), 0, tz)
 
 
 def _any_wallet_due(due: datetime) -> bool:
@@ -171,6 +231,8 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False, due: date
                 )
                 return
             refreshed = 0
+            partial = 0
+            failed = 0
             skipped = 0
             logger.info(
                 "crypto_refresh_started",
@@ -188,23 +250,34 @@ def _refresh_wallets(*, only_stale: bool, coinbase_only: bool = False, due: date
                 if only_stale and not _wallet_refresh_due(db, wallet_id, due):
                     skipped += 1
                     continue
-                if refresh_wallet_snapshot(
+                outcome = refresh_wallet_snapshot_outcome(
                     db,
                     wallet_id,
                     user_id=int(wallet["user_id"]) if wallet["user_id"] is not None else None,
                     automatic=True,
-                ):
+                )
+                if outcome == OUTCOME_LOCKED:
+                    skipped += 1
+                elif outcome == OUTCOME_FAILED:
+                    failed += 1
+                else:
                     refreshed += 1
+                    if outcome == OUTCOME_PARTIAL:
+                        partial += 1
             if refreshed:
                 refresh_dirty_rollups_after_job(db, "crypto_refresh")
-            logger.info(
-                "crypto_refresh_succeeded",
+            # A run where every attempted wallet failed is a failure, not "succeeded" (#156).
+            event_name = "crypto_refresh_failed" if failed and not refreshed else "crypto_refresh_succeeded"
+            (logger.warning if failed else logger.info)(
+                event_name,
                 extra={
-                    "event": "crypto_refresh_succeeded",
+                    "event": event_name,
                     "provider": "crypto",
                     "platform": "crypto",
                     "rows": len(rows),
                     "refreshed": refreshed,
+                    "partial": partial,
+                    "failed": failed,
                     "skipped": skipped,
                     "coinbase_only": coinbase_only,
                     "duration_ms": int((datetime.now(tz=timezone.utc) - started).total_seconds() * 1000),

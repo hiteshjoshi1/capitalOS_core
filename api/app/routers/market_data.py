@@ -3,15 +3,19 @@ from __future__ import annotations
 import os
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, require_admin, require_current_user
+from app.core.job_runs import TRIGGER_MANUAL
 from app.core.logging import job_context
 from app.db.session import get_db
+from app.market_data.scheduler import record_exchange_runs
 from app.market_data.service import (
+    configured_exchanges,
     held_asset_ids,
     latest_status_by_exchange,
     list_runs,
@@ -62,11 +66,13 @@ def market_data_refresh_now(
 ):
     _validate_admin_key(x_admin_key)
     started = time.perf_counter()
+    started_at = datetime.now(tz=timezone.utc)
     with job_context():
         try:
             logger.info("quote_refresh_started", extra={"event": "quote_refresh_started", "provider": "market_data"})
             result = run_all_exchanges(db)
             exchange_results = result.get("exchanges") or []
+            record_exchange_runs(db, exchange_results, trigger=TRIGGER_MANUAL, started_at=started_at)
             visible = _visible_asset_ids(db, current_user)
             if visible is not None:
                 for item in exchange_results:
@@ -99,6 +105,10 @@ def market_data_refresh_now(
             )
             return {"status": "ok", **result}
         except Exception as exc:
+            db.rollback()
+            record_exchange_runs(
+                db, [], trigger=TRIGGER_MANUAL, started_at=started_at, error=exc, exchanges=configured_exchanges()
+            )
             logger.exception(
                 "quote_refresh_failed",
                 extra={

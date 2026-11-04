@@ -71,6 +71,12 @@ function formatApiValidationMessage(detail: unknown): string | null {
     return detail.trim();
   }
 
+  // A structured refusal (e.g. an upload sent to the wrong account, #180).
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const message = (detail as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) return message.trim();
+  }
+
   if (!Array.isArray(detail)) {
     return null;
   }
@@ -339,8 +345,10 @@ export type DashboardSummary = FxStatus & {
     latest_trade_date?: string | null;
     quote_age_days?: number | null;
     price_source?: string | null;
-    /** Live views: why an IBKR holding is priced at IBKR's statement price (#124). */
+    /** Live views: why a holding is priced at its statement price (D-21, #124; every holding since #144). */
     price_fallback_reason?: string | null;
+    /** No market value on the statement and no usable quote: valued at cost (#144). */
+    valued_at_cost?: boolean;
     price_provider?: string | null;
     quote_freshness_status?: string | null;
   }>;
@@ -707,6 +715,63 @@ export type ImportJobListItem = {
   account_id: number;
   original_filename: string;
   created_at: string | null;
+  // #180: why it was refused or failed, when it was removed, and whether
+  // "Remove this import" can undo it.
+  error_message?: string | null;
+  removed_at?: string | null;
+  removable?: boolean;
+};
+
+// Why an upload was refused before anything was written (409 detail, #180).
+export type UploadRefusal = {
+  code: "account_type_mismatch" | "statement_account_mismatch" | string;
+  message: string;
+  job_id?: number | null;
+  parser_key?: string | null;
+  account_type?: string | null;
+  expected_account_types?: string[];
+  statement_last4?: string;
+  linked_last4?: string;
+  suggested_account_id?: number | null;
+  // Present when the refusal can be overridden ("upload anyway").
+  override_field?: string;
+};
+
+export class UploadRefusedError extends Error {
+  refusal: UploadRefusal;
+
+  constructor(refusal: UploadRefusal) {
+    super(refusal.message);
+    this.name = "UploadRefusedError";
+    this.refusal = refusal;
+  }
+}
+
+function uploadRefusalFrom(status: number, rawText: string): UploadRefusal | null {
+  if (status !== 409) return null;
+  try {
+    const detail = (JSON.parse(rawText) as { detail?: unknown }).detail;
+    if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+      const refusal = detail as UploadRefusal;
+      if (typeof refusal.code === "string" && typeof refusal.message === "string") return refusal;
+    }
+  } catch {
+    // Not JSON.
+  }
+  return null;
+}
+
+export type ImportJobRemoval = {
+  job_id: number;
+  status: "REMOVED";
+  account_id: number;
+  removed: {
+    transactions: number;
+    balance_snapshots: number;
+    position_snapshots: number;
+    restored_rows: number;
+  };
+  history_dirty_from: string | null;
 };
 
 export type ImportJobDetail = {
@@ -957,7 +1022,13 @@ export type CategoryResolution = {
   rule_name: string | null;
 };
 
-export type Health = { status: string };
+export type Health = {
+  status: string;
+  /** #155: "ok", or "unreachable" (with HTTP 503). */
+  database?: string;
+  /** #155: newest applied migration vs the newest migration file; current is null when either is unknown. */
+  migrations?: { applied: string | null; latest_file: string | null; current: boolean | null };
+};
 
 export type NetWorthBreakdown = {
   total: number;
@@ -1193,6 +1264,35 @@ export type DataHubActivityItem = {
   occurred_at: string;
 };
 
+export type DataHubJobScopeStatus = {
+  scope: string;
+  label?: string | null;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_run_trigger?: string | null;
+  last_success_at?: string | null;
+  data_as_of?: string | null;
+  consecutive_failures: number;
+  last_error?: string | null;
+};
+
+// One data source's job status from job_runs (#156).
+export type DataHubJobState = "ok" | "warning" | "failing" | "never_run" | "not_configured";
+
+export type DataHubJobStatus = {
+  job: string;
+  label: string;
+  state: DataHubJobState | string;
+  failure_threshold: number;
+  last_run_at?: string | null;
+  last_run_status?: string | null;
+  last_success_at?: string | null;
+  data_as_of?: string | null;
+  consecutive_failures: number;
+  last_error?: string | null;
+  scopes: DataHubJobScopeStatus[];
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -1209,6 +1309,7 @@ export type DataHubSummary = {
   connected_wallet_count: number;
   connected_wallet_labels: string[];
   recent_activity: DataHubActivityItem[];
+  job_status: DataHubJobStatus[];
 };
 
 export type UploadReminder = {
@@ -1454,10 +1555,13 @@ export const api = {
       }`,
     ),
   // asOf (YYYY-MM-DD): the statement's date, used when the file states none of its own (#141).
-  ingestUpload: async (accountId: number, file: File, asOf?: string) => {
+  // A refused upload throws UploadRefusedError (#180); allowAccountMismatch uploads a
+  // statement that names another account anyway.
+  ingestUpload: async (accountId: number, file: File, asOf?: string, opts?: { allowAccountMismatch?: boolean }) => {
     const form = new FormData();
     form.append("file", file);
     if (asOf) form.append("as_of", asOf);
+    if (opts?.allowAccountMismatch) form.append("allow_account_mismatch", "true");
     const headers = buildHeaders(undefined, { includeJsonContentType: false });
     let res: Response;
     try {
@@ -1473,6 +1577,8 @@ export const api = {
     }
     if (!res.ok) {
       const text = await res.text();
+      const refusal = uploadRefusalFrom(res.status, text);
+      if (refusal) throw new UploadRefusedError(refusal);
       throw new Error(formatHttpError(res.status, text));
     }
     return res.json() as Promise<Record<string, unknown>>;
@@ -1506,6 +1612,9 @@ export const api = {
       method: "POST",
       body: JSON.stringify(asOf ? { parser_key: parserKey, as_of: asOf } : { parser_key: parserKey }),
     }),
+  // "Remove this import" (#180): deletes the rows the upload wrote; the job stays as REMOVED.
+  removeIngestJob: (jobId: number) =>
+    req<ImportJobRemoval>(`/ingest/jobs/${jobId}/remove`, { method: "POST" }),
   cryptoWallets: () => req<CryptoWallet[]>("/crypto/wallets"),
   cryptoWalletInit: (payload: { chain_type: string; chain: string; address: string; label?: string }) =>
     req<CryptoWalletInitResponse>("/crypto/wallets/init", {

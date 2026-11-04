@@ -97,6 +97,29 @@ def _create_canonical_portfolio_tables(conn):
         )
         """,
         """
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_portfolio_source_authority_windows_scope
+          ON portfolio_source_authority_windows (broker_account_id, source_kind, fact_scope)
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS portfolio_source_authority_window_changes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          window_id INTEGER,
+          broker_account_id INTEGER NOT NULL,
+          source_kind TEXT NOT NULL,
+          fact_scope TEXT NOT NULL,
+          action TEXT NOT NULL,
+          old_effective_from DATE,
+          old_effective_to DATE,
+          old_authority_status TEXT,
+          new_effective_from DATE,
+          new_effective_to DATE,
+          new_authority_status TEXT,
+          reason TEXT NOT NULL DEFAULT '',
+          actor TEXT NOT NULL DEFAULT '',
+          changed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS broker_import_runs (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           broker_account_id INTEGER,
@@ -118,6 +141,7 @@ def _create_canonical_portfolio_tables(conn):
           error_code TEXT,
           error_message TEXT,
           metadata_json TEXT,
+          import_job_id INTEGER,
           created_at TIMESTAMP,
           updated_at TIMESTAMP
         )
@@ -419,6 +443,17 @@ def _create_canonical_portfolio_tables(conn):
         WHERE authority_status = 'authoritative'
         """,
         """
+        CREATE TABLE IF NOT EXISTS account_statement_identities (
+          account_id INTEGER PRIMARY KEY,
+          identity_hash TEXT NOT NULL,
+          last4 TEXT NOT NULL,
+          parser_key TEXT,
+          import_job_id INTEGER,
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """,
+        """
         CREATE TABLE IF NOT EXISTS wealth_monthly_rollups (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           user_id INTEGER NOT NULL,
@@ -569,7 +604,9 @@ def setup_db():
               report_path TEXT,
               error_message TEXT,
               created_at TIMESTAMP,
-              updated_at TIMESTAMP
+              updated_at TIMESTAMP,
+              undo_json TEXT,
+              removed_at TIMESTAMP
             )
             """
         )
@@ -615,7 +652,8 @@ def setup_db():
               platform_reference TEXT,
               notes TEXT,
               source TEXT,
-              source_fingerprint TEXT
+              source_fingerprint TEXT,
+              import_job_id INTEGER
             )
             """
         )
@@ -800,7 +838,8 @@ def setup_db():
               platform_reference TEXT,
               notes TEXT,
               source TEXT,
-              source_fingerprint TEXT
+              source_fingerprint TEXT,
+              import_job_id INTEGER
             )
             """
         )
@@ -832,6 +871,25 @@ def setup_db():
               yahoo_symbol_override TEXT,
               created_at TIMESTAMP,
               updated_at TIMESTAMP
+            )
+            """
+        )
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS job_runs (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              job TEXT NOT NULL,
+              scope TEXT NOT NULL DEFAULT 'all',
+              user_id INTEGER,
+              trigger TEXT NOT NULL,
+              status TEXT NOT NULL,
+              started_at TIMESTAMP NOT NULL,
+              finished_at TIMESTAMP NOT NULL,
+              data_advanced BOOLEAN NOT NULL DEFAULT 0,
+              data_as_of TEXT,
+              error_summary TEXT,
+              attempt INTEGER NOT NULL DEFAULT 1,
+              details TEXT NOT NULL DEFAULT '{}'
             )
             """
         )
@@ -909,6 +967,7 @@ def setup_db():
     with engine.begin() as conn:
         for table_name in (
           "account_balance_snapshots",
+            "account_statement_identities",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
@@ -926,6 +985,7 @@ def setup_db():
             "broker_instruments",
             "raw_broker_documents",
             "broker_import_runs",
+            "portfolio_source_authority_window_changes",
             "portfolio_source_authority_windows",
             "broker_accounts",
             "broker_connections",
@@ -942,6 +1002,7 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS prices")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_run_items")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_runs")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS job_runs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_dividend_yields")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_symbol_map")
         conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
@@ -986,6 +1047,7 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM fx_rates")
         for table_name in (
         "account_balance_snapshots",
+            "account_statement_identities",
             "wealth_monthly_rollups",
             "wealth_rollup_dirty",
             "portfolio_import_locks",
@@ -1005,6 +1067,7 @@ def clear_db():
             "broker_instruments",
             "raw_broker_documents",
             "broker_import_runs",
+            "portfolio_source_authority_window_changes",
             "portfolio_source_authority_windows",
             "broker_accounts",
             "broker_connections",
@@ -1022,6 +1085,7 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM prices")
         conn.exec_driver_sql("DELETE FROM market_data_run_items")
         conn.exec_driver_sql("DELETE FROM market_data_runs")
+        conn.exec_driver_sql("DELETE FROM job_runs")
         conn.exec_driver_sql("DELETE FROM market_dividend_yields")
         conn.exec_driver_sql("DELETE FROM market_symbol_map")
         conn.exec_driver_sql("DELETE FROM currencies")

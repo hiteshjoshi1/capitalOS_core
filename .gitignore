@@ -115,6 +115,9 @@ data/
 !data/fixtures/**
 data/raw/
 data/reports/
+# make db-restore (#155): the data/ a restore moved aside, and its staging folder
+data.pre-restore-*/
+data.restore-*/
 
 tasks/private/
 tasks/*.local.md

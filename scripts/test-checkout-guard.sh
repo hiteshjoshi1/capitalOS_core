@@ -19,12 +19,12 @@ trap cleanup EXIT
 
 git clone -q --local --no-hardlinks "$src" "$tmp/main"
 # The current, possibly uncommitted Makefile and override, so the test checks what's in the tree.
-cp "$src/Makefile" "$src/docker-compose.isolated.yml" "$tmp/main/"
+cp "$src/Makefile" "$src/docker-compose.yml" "$src/docker-compose.isolated.yml" "$tmp/main/"
 # Simulate the real-data machine: the git-ignored override exists in the main checkout.
 printf 'services: {}\n' >"$tmp/main/docker-compose.oss-test.yml"
 git -C "$tmp/main" checkout -q -B main
 git -C "$tmp/main" worktree add -q -b feature/issue-0-guard-test "$tmp/wt" main
-cp "$src/Makefile" "$src/docker-compose.isolated.yml" "$tmp/wt/"
+cp "$src/Makefile" "$src/docker-compose.yml" "$src/docker-compose.isolated.yml" "$tmp/wt/"
 
 pass=0 fail=0
 ok() { pass=$((pass + 1)); echo "ok   $1"; }
@@ -62,6 +62,22 @@ if out=$(cd "$W" && ISO_NAME=capitalos-wt-wt ISO_API_PORT=1 ISO_PG_PORT=2 ISO_LO
   -f docker-compose.isolated.yml config api 2>&1) &&
   printf '%s' "$out" | grep -q 'AUTH_REFRESH_COOKIE_NAME: capitalos_refresh_capitalos-wt-wt$'; then ok "$d"
 else bad "$d"; fi
+
+# #155: the real-data API runs its image's code without --reload (a deploy's fast-forward must not
+# put code live before build + migrations); worktrees and the test instance mount it and reload.
+real_api=$(cd "$M" && COMPOSE_PROJECT_NAME="" COMPOSE_FILE="" docker compose -p capitalos-oss-test -f docker-compose.yml \
+  -f docker-compose.oss-test.yml config api 2>&1) || real_api="config failed: $real_api"
+d="real-data stack: the API runs without --reload"
+if printf '%s' "$real_api" | grep -q -- '- uvicorn' && ! printf '%s' "$real_api" | grep -q -- '--reload'; then ok "$d"; else bad "$d"; fi
+d="real-data stack: the code is not bind-mounted"
+if printf '%s' "$real_api" | grep -q 'target: /app/data' && ! printf '%s' "$real_api" | grep -q 'target: /app/app$'; then ok "$d"; else bad "$d"; fi
+d="real-data stack: migrations are mounted read-only for /health"
+if printf '%s' "$real_api" | grep -A2 'target: /app/migrations' | grep -q 'read_only: true'; then ok "$d"; else bad "$d"; fi
+wt_api=$(cd "$W" && ISO_NAME=capitalos-wt-wt ISO_API_PORT=1 ISO_PG_PORT=2 ISO_LOKI_PORT=3 ISO_GRAFANA_PORT=4 \
+  COMPOSE_PROJECT_NAME="" COMPOSE_FILE="" docker compose -p capitalos-wt-wt -f docker-compose.yml \
+  -f docker-compose.isolated.yml config api 2>&1) || wt_api="config failed: $wt_api"
+d="worktree: the API mounts the code and reloads"
+if printf '%s' "$wt_api" | grep -q -- '--reload' && printf '%s' "$wt_api" | grep -q 'target: /app/app$'; then ok "$d"; else bad "$d"; fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

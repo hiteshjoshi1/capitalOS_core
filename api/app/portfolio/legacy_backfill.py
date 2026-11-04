@@ -41,6 +41,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.wealth_rollup_dirty import ALL_HISTORY, mark_rollups_dirty
+from app.portfolio.authority import FLEX_FACT_SCOPE, FLEX_SOURCE_KIND, window_covers_sql
 from app.auth_context import account_scope_sql
 from app.fx import get_rates
 
@@ -51,8 +52,8 @@ BACKFILL_PLATFORM_CODE = "LEGACY_BACKFILL"
 BACKFILL_SOURCE_TYPE = "legacy_positions_backfill"
 BACKFILL_CONNECTION_TYPE = "legacy_backfill"
 BACKFILL_SOURCE_KIND = "legacy_positions_backfill"
-IBKR_FLEX_SOURCE_KIND = "ibkr_flex_daily"
-IBKR_FLEX_FACT_SCOPE = "all"
+IBKR_FLEX_SOURCE_KIND = FLEX_SOURCE_KIND
+IBKR_FLEX_FACT_SCOPE = FLEX_FACT_SCOPE
 _LOCAL_VALUE_LEGACY_PLATFORMS = {"IBKR"}
 
 # Asset classes that map to portfolio_position_snapshots
@@ -501,7 +502,7 @@ def _ibkr_flex_authority_covers(db: Session, *, legacy_account_id: int, report_d
     """Return True when IBKR Flex owns portfolio facts for this account/date."""
     row = db.execute(
         text(
-            """
+            f"""
             SELECT 1
             FROM portfolio_source_authority_windows aw
             JOIN broker_accounts ba ON ba.id = aw.broker_account_id
@@ -510,9 +511,7 @@ def _ibkr_flex_authority_covers(db: Session, *, legacy_account_id: int, report_d
               AND bc.platform_code = 'IBKR'
               AND aw.source_kind = :source_kind
               AND aw.fact_scope = :fact_scope
-              AND aw.authority_status = 'authoritative'
-              AND aw.effective_from <= :report_date
-              AND (aw.effective_to IS NULL OR aw.effective_to >= :report_date)
+              AND {window_covers_sql("aw", ":report_date")}
             LIMIT 1
             """
         ),
