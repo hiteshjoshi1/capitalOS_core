@@ -433,11 +433,6 @@ def test_history_after_an_fx_correction_equals_a_fresh_process(household):
     assert lazily == fresh
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#140: a Flex backfill with an earlier start opens a new authority window and silently "
-    "re-sources the months before it (here December's uploaded IBKR cash)",
-)
 def test_flex_backfill_does_not_resource_older_history(household, db_engine):
     """December's IBKR cash came from an upload (Flex took over on 30 January).
     Importing a Flex statement that starts in December must not change which
