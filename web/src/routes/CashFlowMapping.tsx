@@ -1,12 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../lib/api";
 import type { CategoryTaxonomy, UnmappedTransaction } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
 
 type CategoryGroup = {
   label: string;
@@ -85,10 +84,6 @@ function groupByMerchant(transactions: UnmappedTransaction[]): MerchantGroup[] {
 }
 
 export default function CashFlowMapping() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [categories, setCategories] = useState<CategoryTaxonomy[]>([]);
-  const [transactions, setTransactions] = useState<UnmappedTransaction[]>([]);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [search, setSearch] = useState("");
@@ -96,28 +91,34 @@ export default function CashFlowMapping() {
   const [groupSelections, setGroupSelections] = useState<Record<string, string>>({});
   const [applying, setApplying] = useState<Record<string, boolean>>({});
   const [applyErrors, setApplyErrors] = useState<Record<string, string>>({});
+  // Transactions categorised on this page since the queue loaded (hidden at once).
+  const [appliedIds, setAppliedIds] = useState<Set<number>>(() => new Set());
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setState("loading");
-        setErr("");
-        setExpanded({});
-        setGroupSelections({});
-        setApplyErrors({});
-        const [taxonomy, unmapped] = await Promise.all([
-          api.categories(),
-          api.unmappedTransactions(month),
-        ]);
-        setCategories(taxonomy);
-        setTransactions(unmapped);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, [month]);
+  // #148: categories are shared with Cash Flow (one cached request). The queue does NOT
+  // keep the previous month on screen while the next loads: it is a work list, and
+  // categorising last month's rows under this month's heading would be confusing.
+  const categoriesRes = useApiResource("categories", () => api.categories());
+  const unmappedRes = useApiResource(
+    resourceKey("unmappedTransactions", month),
+    () => api.unmappedTransactions(month),
+    { keepPreviousData: false },
+  );
+  const categories = useMemo(() => categoriesRes.data ?? [], [categoriesRes.data]);
+  const transactions = useMemo(
+    () => (unmappedRes.data ?? []).filter((t) => !appliedIds.has(t.transaction_id)),
+    [unmappedRes.data, appliedIds],
+  );
+  const error = unmappedRes.error ?? categoriesRes.error;
+  const ready = unmappedRes.data != null && categoriesRes.data != null && !error;
+
+  // A new month starts with a clean slate (what the old remount-per-fetch did).
+  const [stateMonth, setStateMonth] = useState(month);
+  if (stateMonth !== month) {
+    setStateMonth(month);
+    setExpanded({});
+    setGroupSelections({});
+    setApplyErrors({});
+  }
 
   const categoryGroups = groupCategories(categories);
   const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
@@ -147,8 +148,7 @@ export default function CashFlowMapping() {
     try {
       const transactionIds = group.transactions.map((t) => t.transaction_id);
       await api.categoryOverrideBulk({ transaction_ids: transactionIds, category_id: categoryId });
-      const appliedIds = new Set(transactionIds);
-      setTransactions((current) => current.filter((t) => !appliedIds.has(t.transaction_id)));
+      setAppliedIds((current) => new Set([...current, ...transactionIds]));
     } catch (e: unknown) {
       setApplyErrors((current) => ({
         ...current,
@@ -190,26 +190,26 @@ export default function CashFlowMapping() {
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {!ready && !error && <div className="card">Loading…</div>}
 
-      {state === "error" && (
+      {error && (
         <div className="card error">
           <div className="cardTitle">Category mapping unavailable</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{error.message}</pre>
           <div className="hint">
             Check that the API is running. If category tables are missing, run <code>make db-migrate</code> then <code>make api-rebuild</code>.
           </div>
         </div>
       )}
 
-      {state === "ready" && transactions.length === 0 && (
+      {ready && transactions.length === 0 && (
         <div className="card">
           <div className="cardTitle">Unmapped queue</div>
           <div>All transactions mapped for {month}.</div>
         </div>
       )}
 
-      {state === "ready" && transactions.length > 0 && (
+      {ready && transactions.length > 0 && (
         <div className="wealthOverviewLayout">
           <div className="card">
             <div className="stockHoldingsHeader">

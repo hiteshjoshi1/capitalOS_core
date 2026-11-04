@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -12,31 +13,18 @@ import StackedBar from "../components/StackedBar";
 
 const EXPOSURE_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8", "#2ebac6", "#f4cf5d", "#8f9db2"];
 
-type LoadState = "idle" | "loading" | "ready" | "error";
-
 export default function CryptoHoldings() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [summary, setSummary] = useState<CryptoSummary | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [showDust, setShowDust] = useState<boolean>(false);
+  const resource = useApiResource(resourceKey("cryptoSummary", month, baseCurrency), () =>
+    api.cryptoSummary(month, baseCurrency),
+  );
+  const summary = resource.data ?? null;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setState("loading");
-        const data = await api.cryptoSummary(month, baseCurrency);
-        setSummary(data);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, [baseCurrency, month]);
-
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
+  // The currency the shown numbers are in (the previous one while a switch loads).
+  const shownCurrency = summary?.base_currency || baseCurrency;
+  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
   const formatMoney = useCallback(
     (value?: number | null, maximumFractionDigits = 0) =>
       value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
@@ -108,16 +96,16 @@ export default function CryptoHoldings() {
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
-      {state === "error" && (
+      {resource.isLoading && <div className="card">Loading…</div>}
+      {resource.error && (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{resource.error.message}</pre>
         </div>
       )}
 
-      {state === "ready" && (
-        <div className="wealthOverviewLayout">
+      {summary && (
+        <RefreshingRegion className="wealthOverviewLayout" busy={resource.isFetching}>
           <HeroMetricCard
             eyebrow={summary?.is_live ? "CURRENT CRYPTO VALUE" : `CRYPTO VALUE — ${summary?.month ?? month}`}
             value={formatMoney(summary?.total_crypto_base)}
@@ -231,7 +219,7 @@ export default function CryptoHoldings() {
               )}
             </div>
           </div>
-        </div>
+        </RefreshingRegion>
       )}
     </PageShell>
   );

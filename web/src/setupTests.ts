@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { clearApiCache } from "./lib/useApiResource";
 
 class ResizeObserverMock {
   observe() {}
@@ -14,4 +15,9 @@ if (!globalThis.ResizeObserver) {
 
 afterEach(() => {
   cleanup();
+});
+
+// The API cache (#148) is module-level: start every test empty.
+afterEach(() => {
+  clearApiCache();
 });

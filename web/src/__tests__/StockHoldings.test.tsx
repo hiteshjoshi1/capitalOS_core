@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { controlledCalls } from "./raceHelpers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -389,5 +390,51 @@ describe("StockHoldings", () => {
         "Geography performance is only available for the current, live period — pick the current month to see it.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+// #148: a slow earlier month never renders under a later one; the earlier one is aborted.
+describe("StockHoldings races", () => {
+  it("shows the later month even when the earlier month's reply lands last", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-02");
+    const summaries = controlledCalls<StockHoldingsSummary>();
+    mockApi.stockHoldingsSummary.mockImplementation(summaries.impl as typeof api.stockHoldingsSummary);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
+    const feb = summaries.find((a) => a[0] === "2026-02");
+    const jan = summaries.find((a) => a[0] === "2026-01");
+
+    await act(async () => jan.resolve({ ...summaryFixture, as_of_month: "2026-01", is_live: false }));
+    expect(await screen.findByText("STOCK VALUE — 2026-01")).toBeInTheDocument();
+    await act(async () => feb.resolve({ ...summaryFixture, as_of_month: "2026-02", is_live: false }));
+    expect(screen.queryByText("STOCK VALUE — 2026-02")).not.toBeInTheDocument();
+    await waitFor(() => expect(feb.signal?.aborted).toBe(true));
+  });
+
+  it("keeps the previous month on screen (dimmed, aria-busy) while the next loads", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-02");
+    const summaries = controlledCalls<StockHoldingsSummary>();
+    mockApi.stockHoldingsSummary.mockImplementation(summaries.impl as typeof api.stockHoldingsSummary);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    await act(async () => summaries.find((a) => a[0] === "2026-02").resolve(summaryFixture));
+    expect(await screen.findByText("STOCK VALUE — 2026-02")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
+    expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+    const kept = screen.getByText("STOCK VALUE — 2026-02");
+    expect(kept.closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getAllByRole("status").some((el) => el.textContent?.includes("Updating"))).toBe(true);
   });
 });

@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../lib/api";
-import type { DashboardSummary, GeographyExposure } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import {
   buildTopNDistribution,
   computeLargestPositionRisk,
@@ -20,43 +21,27 @@ import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import SegmentedToggle from "../components/SegmentedToggle";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
-
 export default function WealthRisk() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [geographyExposure, setGeographyExposure] = useState<GeographyExposure | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
+  // #148: the summary resource is the same key Wealth Overview reads, so moving between
+  // the two pages reuses one cached response (and revalidates it in the background).
+  const summaryRes = useApiResource(
+    resourceKey("dashboardSummary", month, "prev_month,prev_year", baseCurrency),
+    () => api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+  );
+  const geographyRes = useApiResource(resourceKey("geographyExposure", month, baseCurrency), () =>
+    api.dashboardGeographyExposure(month, baseCurrency),
+  );
+  const summary = summaryRes.data ?? null;
+  const geographyExposure = geographyRes.data ?? null;
+  const loadError = summaryRes.error ?? geographyRes.error;
   const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setState("loading");
-        const [summaryData, geographyData] = await Promise.all([
-          api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
-          api.dashboardGeographyExposure(month, baseCurrency),
-        ]);
-        if (cancelled) return;
-        setSummary(summaryData);
-        setGeographyExposure(geographyData);
-        setState("ready");
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setErr(error instanceof Error ? error.message : String(error));
-        setState("error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [month, baseCurrency]);
-
-  const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
+  // The currency the shown numbers are in (the previous one while a switch loads).
+  const shownCurrency = summary?.base_currency || selectedBaseCurrency;
+  const currencyPrefix = shownCurrency === "SGD" ? "S$" : shownCurrency;
   const formatMoney = (value?: number, maximumFractionDigits = 0) =>
     value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
 
@@ -93,16 +78,16 @@ export default function WealthRisk() {
         </>
       )}
     >
-      {state === "loading" ? <div className="card">Loading…</div> : null}
-      {state === "error" ? (
+      {summaryRes.isLoading && !loadError ? <div className="card">Loading…</div> : null}
+      {loadError ? (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{loadError.message}</pre>
         </div>
       ) : null}
 
-      {state === "ready" && summary ? (
-        <div className="wealthOverviewLayout">
+      {summary ? (
+        <RefreshingRegion className="wealthOverviewLayout" busy={summaryRes.isFetching || geographyRes.isFetching}>
           <section className="grid g-mid">
             <div className="card">
               <h2>Cash buffer</h2>
@@ -176,7 +161,7 @@ export default function WealthRisk() {
           </section>
 
           <GeographyPieCard exposure={geographyExposure} formatMoney={formatMoney} />
-        </div>
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

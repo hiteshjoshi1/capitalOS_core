@@ -1,15 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { CashDeposits, CryptoSummary } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
 import StackedBar from "../components/StackedBar";
 import TrendBarChart from "../components/TrendBarChart";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
+import RefreshingRegion from "../components/RefreshingRegion";
 
 const STABLECOINS = new Set(["USDC", "USDT"]);
 const STACKED_BAR_COLORS = ["#4f8cff", "#1fb981", "#f59f43", "#7d67ff", "#ef6ca8"];
@@ -31,32 +30,23 @@ function donutConicGradient(items: DonutItem[]): string {
 }
 
 export default function CashOverview() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [cryptoSummary, setCryptoSummary] = useState<CryptoSummary | null>(null);
-  const [cashDeposits, setCashDeposits] = useState<CashDeposits | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  // #148: one resource per call, so the stablecoin card (crypto summary) never holds up
+  // the cash numbers, and the previous month stays on screen while the next one loads.
+  const deposits = useApiResource(resourceKey("cashDeposits", month, baseCurrency), () =>
+    api.cashDeposits(month, baseCurrency),
+  );
+  const crypto = useApiResource(resourceKey("cryptoSummary", month, baseCurrency), () =>
+    api.cryptoSummary(month, baseCurrency),
+  );
+  const cashDeposits = deposits.data ?? null;
+  const cryptoSummary = crypto.data ?? null;
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setState("loading");
-        const [crypto, deposits] = await Promise.all([
-          api.cryptoSummary(month, baseCurrency),
-          api.cashDeposits(month, baseCurrency),
-        ]);
-        setCryptoSummary(crypto);
-        setCashDeposits(deposits);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, [month, baseCurrency]);
-
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
+  // Label amounts with the currency they were computed in: while a currency switch loads,
+  // the previous currency's numbers stay on screen and must keep their own prefix.
+  const shownCurrency = cashDeposits?.base_currency || baseCurrency;
+  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
   const formatMoney = useCallback(
     (value?: number | null, maximumFractionDigits = 0) =>
       value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
@@ -136,16 +126,16 @@ export default function CashOverview() {
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
-      {state === "error" && (
+      {deposits.isLoading && <div className="card">Loading…</div>}
+      {deposits.error && (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{deposits.error.message}</pre>
         </div>
       )}
 
-      {state === "ready" && (
-        <div className="wealthOverviewLayout">
+      {cashDeposits && (
+        <RefreshingRegion className="wealthOverviewLayout" busy={deposits.isFetching || crypto.isFetching}>
           <HeroMetricCard
             eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${cashDeposits?.as_of_month ?? month}`}
             value={formatMoney(cashDeposits?.current_total)}
@@ -205,9 +195,13 @@ export default function CashOverview() {
                   <p className="cashFlowCardTitle" style={{ margin: 0 }}>Stablecoins</p>
                   <span className="muted">USDC / USDT</span>
                 </div>
-                <div className="big small">{formatMoney(stablecoinTotal)}</div>
+                <div className="big small">{cryptoSummary ? formatMoney(stablecoinTotal) : "—"}</div>
                 <div className="listRows" style={{ marginTop: 8 }}>
-                  {stablecoins.length === 0 ? (
+                  {crypto.error ? (
+                    <p className="muted">Stablecoin balances couldn't load: {crypto.error.message}</p>
+                  ) : !cryptoSummary ? (
+                    <p className="muted">Loading stablecoins…</p>
+                  ) : stablecoins.length === 0 ? (
                     <p className="muted">No stablecoin balances found.</p>
                   ) : (
                     stablecoins.map((t) => (
@@ -235,7 +229,7 @@ export default function CashOverview() {
             </div>
             <TrendBarChart points={trendPoints} ariaLabel="Six-month cash trend" />
           </div>
-        </div>
+        </RefreshingRegion>
       )}
     </PageShell>
   );

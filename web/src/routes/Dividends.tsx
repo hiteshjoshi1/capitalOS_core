@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { DividendCompanyItem, DividendsByCompany, DividendsSummary, ExpectedDividendCompany, ExpectedDividendsOverview } from "../lib/api";
+import type { DividendCompanyItem, DividendsSummary, ExpectedDividendCompany } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -10,7 +12,6 @@ import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
 type CompanyTab = "realized" | "expected";
 
 function shiftMonth(month: string, delta: number): string {
@@ -24,39 +25,32 @@ function shiftMonth(month: string, delta: number): string {
 }
 
 export default function Dividends() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [monthSummary, setMonthSummary] = useState<DividendsSummary | null>(null);
-  const [companySummary, setCompanySummary] = useState<DividendsByCompany | null>(null);
-  const [expectedOverview, setExpectedOverview] = useState<ExpectedDividendsOverview | null>(null);
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
   const [companyTab, setCompanyTab] = useState<CompanyTab>("realized");
 
   const fromMonth = useMemo(() => shiftMonth(month, -11), [month]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setState("loading");
-        setErr("");
-        const [monthData, companyData, expectedData] = await Promise.all([
-          api.dividendsSummary(fromMonth, month, "month", baseCurrency),
-          api.dividendsByCompany(month, month, baseCurrency),
-          api.expectedDividendsOverview(fromMonth, month, baseCurrency),
-        ]);
-        setMonthSummary(monthData);
-        setCompanySummary(companyData);
-        setExpectedOverview(expectedData);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, [fromMonth, month, baseCurrency]);
+  // #148: three independent resources. The page renders once the monthly summary is in;
+  // the company and expected sections show their own loading/error state.
+  const monthRes = useApiResource(resourceKey("dividendsSummary", fromMonth, month, baseCurrency), () =>
+    api.dividendsSummary(fromMonth, month, "month", baseCurrency),
+  );
+  const companyRes = useApiResource(resourceKey("dividendsByCompany", month, baseCurrency), () =>
+    api.dividendsByCompany(month, month, baseCurrency),
+  );
+  const expectedRes = useApiResource(resourceKey("expectedDividends", fromMonth, month, baseCurrency), () =>
+    api.expectedDividendsOverview(fromMonth, month, baseCurrency),
+  );
+  const monthSummary = monthRes.data ?? null;
+  const companySummary = companyRes.data ?? null;
+  const expectedOverview = expectedRes.data ?? null;
+  // Derive periods from the month the summary is for: while the next month loads, the
+  // previous month's summary stays on screen and must be read as that month.
+  const shownMonth = monthSummary?.to_month || month;
 
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
+  const shownCurrency = monthSummary?.base_currency || baseCurrency;
+  const currencyPrefix = shownCurrency === "SGD" ? "S$" : `${shownCurrency} `;
   const formatMoney = useCallback(
     (value?: number, maximumFractionDigits = 0) =>
       value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
@@ -79,10 +73,10 @@ export default function Dividends() {
     () => expectedOverview?.companies ?? [],
     [expectedOverview?.companies],
   );
-  const monthKey = month;
-  const yearKey = month.slice(0, 4);
+  const monthKey = shownMonth;
+  const yearKey = shownMonth.slice(0, 4);
   const quarterKey = (() => {
-    const parts = month.split("-");
+    const parts = shownMonth.split("-");
     const year = parts[0] ?? "";
     const monthNumber = Number(parts[1] ?? "1");
     const quarter = Math.floor((Math.max(1, monthNumber) - 1) / 3) + 1;
@@ -109,7 +103,7 @@ export default function Dividends() {
         { gross: 0, withholding: 0, net_received: 0, payout_minus_tax: 0 },
       );
   const realizedMonth = sumRealized((bucket) => bucket.bucket === monthKey);
-  const realizedPrevMonth = sumRealized((bucket) => bucket.bucket === shiftMonth(month, -1));
+  const realizedPrevMonth = sumRealized((bucket) => bucket.bucket === shiftMonth(shownMonth, -1));
   const realizedQuarter = sumRealized((bucket) => toQuarterKey(bucket.bucket) === quarterKey);
   const realizedYear = sumRealized((bucket) => bucket.bucket.startsWith(`${yearKey}-`));
   const realizedTrailing12 = sumRealized(() => true);
@@ -165,16 +159,19 @@ export default function Dividends() {
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
-      {state === "error" && (
+      {monthRes.isLoading && <div className="card">Loading…</div>}
+      {monthRes.error && (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
+          <pre className="pre">{monthRes.error.message}</pre>
         </div>
       )}
 
-      {state === "ready" && (
-        <div className="wealthOverviewLayout">
+      {monthSummary && (
+        <RefreshingRegion
+          className="wealthOverviewLayout"
+          busy={monthRes.isFetching || companyRes.isFetching || expectedRes.isFetching}
+        >
           <HeroMetricCard
             eyebrow="REALIZED THIS MONTH"
             value={formatMoney(realizedMonth.payout_minus_tax)}
@@ -200,7 +197,10 @@ export default function Dividends() {
             <div className="dividendSignalGrid">
               <article className="card dividendSignalCard">
                 <p className="dividendSignalLabel">Expected, next 12 months</p>
-                <p className="dividendSignalValue">{formatMoney(expectedYear.payout_minus_tax)}</p>
+                {expectedRes.error ? (
+                  <p className="dividendSignalContext">Couldn't load expected dividends: {expectedRes.error.message}</p>
+                ) : null}
+                <p className="dividendSignalValue">{expectedOverview ? formatMoney(expectedYear.payout_minus_tax) : "—"}</p>
                 <p className="dividendSignalContext">
                   <span className={expectedVsTrailingPct != null && expectedVsTrailingPct >= 0 ? "good" : "bad"}>
                     {expectedVsTrailingPct == null ? "—" : `${expectedVsTrailingPct >= 0 ? "+" : "-"}${Math.abs(expectedVsTrailingPct * 100).toFixed(0)}%`}
@@ -262,7 +262,13 @@ export default function Dividends() {
                   : "Annualized dividend estimates based on current holdings and available yields."}
               </p>
               <div className="listRows">
-              {companyTab === "realized" ? (
+              {(companyTab === "realized" ? companyRes : expectedRes).error ? (
+                <div className="muted" role="alert">
+                  Couldn't load companies: {(companyTab === "realized" ? companyRes : expectedRes).error?.message}
+                </div>
+              ) : (companyTab === "realized" ? companySummary : expectedOverview) == null ? (
+                <div className="muted">Loading…</div>
+              ) : companyTab === "realized" ? (
                 topCompanies.length === 0 ? (
                   <div className="muted">No company-level dividend records yet.</div>
                 ) : (
@@ -314,7 +320,7 @@ export default function Dividends() {
               </div>
             </div>
           </section>
-        </div>
+        </RefreshingRegion>
       )}
     </PageShell>
   );

@@ -6406,3 +6406,33 @@ html, body {
     grid-template-columns: 1fr;
   }
 }
+
+/* #148: content kept on screen while it refreshes (RefreshingRegion). */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.refreshingRegion {
+  position: relative;
+  transition: opacity 0.15s ease;
+}
+
+.refreshingRegion[data-refreshing="true"] {
+  opacity: 0.6;
+  transition: opacity 0.2s ease 0.25s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .refreshingRegion,
+  .refreshingRegion[data-refreshing="true"] {
+    transition: none;
+  }
+}

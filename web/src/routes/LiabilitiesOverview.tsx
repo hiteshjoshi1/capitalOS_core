@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { Account, CreditCardAnalytics, CreditCardTransaction } from "../lib/api";
+import type { CreditCardTransaction } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
 import { computeDueStatus, dueSortValue, formatShortDate } from "../lib/dueStatus";
 import type { DueStatus } from "../lib/dueStatus";
 import "../App.css";
@@ -12,8 +14,6 @@ import FxNote from "../components/FxNote";
 import DueStatusPill from "../components/DueStatusPill";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
 
 type UpcomingRow = {
   key: string;
@@ -93,34 +93,19 @@ export default function LiabilitiesOverview() {
   const [baseCurrency, setBaseCurrency] = useState("SGD");
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
 
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState("");
-  const [data, setData] = useState<CreditCardAnalytics | null>(null);
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  // #148: the account list doesn't depend on month, currency or card filter, so it has
+  // its own resource and is no longer refetched on every filter change.
+  const analytics = useApiResource(
+    resourceKey("creditCardAnalytics", month, baseCurrency, 12, selectedAccountId),
+    () => api.creditCardAnalytics(month, baseCurrency, 12, selectedAccountId),
+  );
+  const accountsRes = useApiResource("accounts", () => api.accounts());
+  const data = analytics.data ?? null;
+  const accounts = useMemo(() => accountsRes.data ?? [], [accountsRes.data]);
 
-  const fetchAll = useCallback(async () => {
-    setState("loading");
-    try {
-      const [analytics, accountList] = await Promise.all([
-        api.creditCardAnalytics(month, baseCurrency, 12, selectedAccountId),
-        api.accounts(),
-      ]);
-      setData(analytics);
-      setAccounts(accountList);
-      setState("ready");
-    } catch (error: unknown) {
-      setErr(error instanceof Error ? error.message : String(error));
-      setState("error");
-    }
-  }, [month, baseCurrency, selectedAccountId]);
-
-  useEffect(() => {
-    void (async () => {
-      void fetchAll();
-    })();
-  }, [fetchAll]);
-
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : baseCurrency;
+  // The currency the shown numbers are in (the previous one while a switch loads).
+  const shownCurrency = data?.base_currency || baseCurrency;
+  const currencyPrefix = shownCurrency === "SGD" ? "S$" : shownCurrency;
   const formatMoney = useCallback(
     (value?: number | null, maximumFractionDigits = 0) =>
       value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
@@ -215,20 +200,28 @@ export default function LiabilitiesOverview() {
         </>
       }
     >
-      {state === "loading" || state === "idle" ? <div className="card">Loading…</div> : null}
+      {analytics.isLoading ? <div className="card">Loading…</div> : null}
 
-      {state === "error" ? (
+      {analytics.error ? (
         <div className="card error">
           <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
-          <button type="button" className="btn" onClick={() => void fetchAll()}>
+          <pre className="pre">{analytics.error.message}</pre>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => {
+              void analytics.reload().catch(() => undefined);
+              if (accountsRes.error) void accountsRes.reload().catch(() => undefined);
+            }}
+          >
             Retry
           </button>
         </div>
       ) : null}
 
-      {state === "ready" && data ? (
-        data.cards.length === 0 ? (
+      {data ? (
+        <RefreshingRegion busy={analytics.isFetching}>
+        {data.cards.length === 0 ? (
           <div className="liabNoLoansBanner">
             <div className="liabNoLoansText">
               <strong>No credit cards linked yet</strong>
@@ -593,7 +586,8 @@ export default function LiabilitiesOverview() {
               )}
             </section>
           </div>
-        )
+        )}
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

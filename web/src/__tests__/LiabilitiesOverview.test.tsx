@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { controlledCalls } from "./raceHelpers";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -319,5 +320,27 @@ describe("LiabilitiesOverview route", () => {
     });
     const monthCalls = mockApi.creditCardAnalytics.mock.calls.map((c) => c[0]);
     expect(new Set(monthCalls).size).toBe(1);
+  });
+});
+
+// #148: month switches with out-of-order replies; the account list is fetched once.
+describe("LiabilitiesOverview races", () => {
+  it("a slow earlier month never renders under the later month, and accounts load once", async () => {
+    vi.clearAllMocks();
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-07");
+    mockApi.accounts.mockResolvedValue(noLoans);
+    const analytics = controlledCalls<CreditCardAnalytics>();
+    mockApi.creditCardAnalytics.mockImplementation(analytics.impl as typeof api.creditCardAnalytics);
+    renderPage();
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-06" } });
+    const july = analytics.find((a) => a[0] === "2026-07");
+    const june = analytics.find((a) => a[0] === "2026-06");
+    await act(async () => june.resolve(makeAnalytics({ month: "2026-06", total_spend: 11111 })));
+    expect(await screen.findByText("S$ 11,111")).toBeInTheDocument();
+    await act(async () => july.resolve(makeAnalytics({ month: "2026-07", total_spend: 99999 })));
+    expect(screen.queryByText("S$ 99,999")).not.toBeInTheDocument();
+    await waitFor(() => expect(july.signal?.aborted).toBe(true));
+    expect(mockApi.accounts).toHaveBeenCalledTimes(1);
   });
 });
