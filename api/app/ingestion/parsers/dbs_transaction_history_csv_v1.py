@@ -193,7 +193,9 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> P
         )
 
     positions: List[Dict] = []
-    balance_value = balances.available if balances.available is not None else balances.ledger
+    # Ledger, not available: available is ledger minus funds on hold, which are still the
+    # owner's money (#181). Available is kept in parser_meta.
+    balance_value = balances.ledger if balances.ledger is not None else balances.available
     if balance_value is not None and balances.currency:
         positions.append(
             {
@@ -213,4 +215,9 @@ def parse_dbs_transaction_history_csv(file_path: str, delimiter: str = ",") -> P
         transactions=parsed,
         positions=positions,
         section_counts=section_counts,
+        parser_meta={
+            "available_balance": balances.available,
+            "ledger_balance": balances.ledger,
+            "currency": balances.currency,
+        },
     )
