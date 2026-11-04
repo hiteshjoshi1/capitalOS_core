@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 from app.valuation import clock
-from app.valuation.clock import _add_months, _anchor_ts, _date_only, _latest_completed_month_start, _normalize_ts, _parse_month
+from app.valuation.clock import _add_months, _anchor_ts, _date_only, _iso_value, _latest_completed_month_start, _normalize_ts, _parse_month
 from app.valuation.facts import _networth_components
 from app.valuation.state import _crypto_snapshot_coverage_as_of, _effective_as_of
 from app.wealth_rollup_dirty import dirty_state, dirty_user_ids, settle_dirty_mark
@@ -352,6 +352,55 @@ def _timeline_upload_markers(
         month_key = created_at.strftime("%Y-%m")
         markers.setdefault(month_key, set()).add(str(row["platform"] or "").upper())
     return {month: sorted(platforms) for month, platforms in markers.items()}
+
+
+def _stored_timeline_points(
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    range_start: datetime,
+) -> tuple[list[dict[str, Any]], Dict[str, list[str]]]:
+    """The stored History rows from ``range_start``'s month on (one indexed
+    scan), and the upload markers by month."""
+    rollup_rows = db.execute(
+        text(
+            """
+            SELECT month, anchor_date, total, cash, stocks_funds, crypto, liabilities,
+                   source_freshness, freshness_status, computed_at
+            FROM wealth_monthly_rollups
+            WHERE user_id = :user_id AND base_currency = :base_currency AND month >= :from_month
+            ORDER BY month ASC
+            """
+        ),
+        {
+            "user_id": current_user_id,
+            "base_currency": base_currency,
+            "from_month": range_start.strftime("%Y-%m"),
+        },
+    ).mappings().all()
+
+    upload_markers = _timeline_upload_markers(db, current_user_id, range_start)
+
+    points = []
+    for row in rollup_rows:
+        source_freshness = row["source_freshness"]
+        if isinstance(source_freshness, str):
+            source_freshness = json.loads(source_freshness)
+        anchor_date = row["anchor_date"]
+        points.append({
+            "month": row["month"],
+            "anchor_date": anchor_date if isinstance(anchor_date, str) else anchor_date.isoformat(),
+            "total": float(row["total"]),
+            "cash": float(row["cash"]),
+            "stocks_funds": float(row["stocks_funds"]),
+            "crypto": float(row["crypto"]),
+            "liabilities": float(row["liabilities"]),
+            "source_freshness": source_freshness,
+            "freshness_status": row["freshness_status"],
+            "computed_at": _iso_value(row["computed_at"]),
+            "uploads": upload_markers.get(row["month"], []),
+        })
+    return points, upload_markers
 
 
 def _cached_networth_components(
