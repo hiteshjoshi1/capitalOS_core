@@ -543,7 +543,7 @@ orch-lock:
 	CUSTOM_COMPILE_COMMAND="make orch-lock" "$$tmp/venv/bin/pip-compile" $(PIP_COMPILE_ARGS) -o orchestration/requirements.txt orchestration/requirements.in
 	scripts/check-lock-age.py orchestration/requirements.txt orchestration/requirements.in
 
-.PHONY: lint typecheck test-backend contract-backend test-frontend contract-frontend e2e test test-all verify
+.PHONY: lint typecheck test-backend golden-update contract-backend test-frontend contract-frontend e2e test test-all verify
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
@@ -557,6 +557,13 @@ typecheck: web-deps
 
 test-backend:
 	$(COMPOSE) run --rm --build --no-deps api-dev pytest
+
+# Rewrite the valuation goldens (api/tests/golden/valuation/*.json, #142) from the
+# current code. Only after checking that the change in numbers is intended; then
+# review `git diff api/tests/golden` like any other change.
+golden-update:
+	$(COMPOSE) run --rm --build --no-deps -e UPDATE_GOLDEN=1 -v "$(CURDIR)/api/tests/golden:/app/tests/golden" \
+		api-dev pytest tests/test_valuation_golden.py
 
 contract-backend:
 	$(COMPOSE) run --rm --build --no-deps api-dev pytest tests/test_contracts.py -q

@@ -1,0 +1,4498 @@
+{
+  "now": "2026-03-18T10:00:00+08:00",
+  "responses": {
+    "/crypto/summary?month=2026-02&base_currency=SGD": {
+      "as_of": "2026-03-01T00:00:00+00:00",
+      "base_currency": "SGD",
+      "chain_exposure": [
+        {
+          "chain": "ethereum",
+          "percent": 55.8824,
+          "total_base": 10191.7051,
+          "total_usd": 7600.0
+        },
+        {
+          "chain": "solana",
+          "percent": 44.1176,
+          "total_base": 8046.0829,
+          "total_usd": 6000.0
+        }
+      ],
+      "compare_month": "2026-01",
+      "eth": {
+        "balance": 2.0,
+        "value_base": 7509.6774,
+        "value_usd": 5600.0
+      },
+      "eth_exposure_base": 7509.6774,
+      "eth_exposure_usd": 5600.0,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "holdings_as_of": "2026-02-10T12:00:00+00:00",
+      "is_live": false,
+      "is_stale": true,
+      "last_refreshed_at": "2026-02-28T12:00:00+00:00",
+      "month": "2026-02",
+      "price_as_of": "2026-02-10T12:00:00+00:00",
+      "priced_token_count": 3,
+      "refresh_triggered": false,
+      "snapshot_as_of": "2026-01-31",
+      "snapshot_day": 1,
+      "snapshot_delta_base": 8215.0607,
+      "snapshot_delta_pct": 0.8196,
+      "snapshot_total_base": 10022.7273,
+      "snapshot_total_usd": 7500.0,
+      "sol": {
+        "balance": 40.0,
+        "value_base": 8046.0829,
+        "value_usd": 6000.0
+      },
+      "stale_holdings": true,
+      "stale_prices": true,
+      "token_count": 3,
+      "token_exposure_base": 10728.1106,
+      "token_exposure_usd": 8000.0,
+      "top5_holdings": [
+        {
+          "amount": 40.0,
+          "asset_class": "CRYPTO",
+          "chain": "solana",
+          "holdings_as_of": "2026-02-10T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-02-10T12:00:00+00:00",
+          "price_change_pct": null,
+          "price_change_usd": null,
+          "price_provider": "synthetic",
+          "price_usd": 150.0,
+          "snapshot_delta_base": 8046.0829,
+          "snapshot_delta_pct": null,
+          "snapshot_value_base": 0.0,
+          "symbol": "SOL",
+          "value_base": 8046.0829,
+          "value_change_base": null,
+          "value_change_pct": null,
+          "value_usd": 6000.0,
+          "wallet_address": "SynthA111111111111111111111111111111111111",
+          "wallet_id": "wallet-a-sol",
+          "wallet_label": "A sol"
+        },
+        {
+          "amount": 2.0,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-02-28T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-02-28T12:00:00+00:00",
+          "price_change_pct": -0.0667,
+          "price_change_usd": -200.0,
+          "price_provider": "synthetic",
+          "price_usd": 2800.0,
+          "snapshot_delta_base": -508.5044,
+          "snapshot_delta_pct": -0.0667,
+          "snapshot_value_base": 8018.1818,
+          "symbol": "ETH",
+          "value_base": 7509.6774,
+          "value_change_base": -508.5044,
+          "value_change_pct": -0.0667,
+          "value_usd": 5600.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        },
+        {
+          "amount": 2000.0,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-02-28T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-02-28T12:00:00+00:00",
+          "price_change_pct": 0.0,
+          "price_change_usd": 0.0,
+          "price_provider": "synthetic",
+          "price_usd": 1.0,
+          "snapshot_delta_base": 677.4822,
+          "snapshot_delta_pct": 0.3333,
+          "snapshot_value_base": 2004.5455,
+          "symbol": "USDC",
+          "value_base": 2682.0276,
+          "value_change_base": 677.4822,
+          "value_change_pct": 0.3333,
+          "value_usd": 2000.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        }
+      ],
+      "top_holdings": [
+        {
+          "amount": 40.0,
+          "asset_class": "CRYPTO",
+          "chain": "solana",
+          "holdings_as_of": "2026-02-10T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-02-10T12:00:00+00:00",
+          "price_change_pct": null,
+          "price_change_usd": null,
+          "price_provider": "synthetic",
+          "price_usd": 150.0,
+          "snapshot_delta_base": 8046.0829,
+          "snapshot_delta_pct": null,
+          "snapshot_value_base": 0.0,
+          "symbol": "SOL",
+          "value_base": 8046.0829,
+          "value_change_base": null,
+          "value_change_pct": null,
+          "value_usd": 6000.0,
+          "wallet_address": "SynthA111111111111111111111111111111111111",
+          "wallet_id": "wallet-a-sol",
+          "wallet_label": "A sol"
+        },
+        {
+          "amount": 2.0,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-02-28T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-02-28T12:00:00+00:00",
+          "price_change_pct": -0.0667,
+          "price_change_usd": -200.0,
+          "price_provider": "synthetic",
+          "price_usd": 2800.0,
+          "snapshot_delta_base": -508.5044,
+          "snapshot_delta_pct": -0.0667,
+          "snapshot_value_base": 8018.1818,
+          "symbol": "ETH",
+          "value_base": 7509.6774,
+          "value_change_base": -508.5044,
+          "value_change_pct": -0.0667,
+          "value_usd": 5600.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        },
+        {
+          "amount": 2000.0,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-02-28T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-02-28T12:00:00+00:00",
+          "price_change_pct": 0.0,
+          "price_change_usd": 0.0,
+          "price_provider": "synthetic",
+          "price_usd": 1.0,
+          "snapshot_delta_base": 677.4822,
+          "snapshot_delta_pct": 0.3333,
+          "snapshot_value_base": 2004.5455,
+          "symbol": "USDC",
+          "value_base": 2682.0276,
+          "value_change_base": 677.4822,
+          "value_change_pct": 0.3333,
+          "value_usd": 2000.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        }
+      ],
+      "total_crypto_base": 18237.788,
+      "total_crypto_usd": 13600.0,
+      "trend": [
+        {
+          "month": "2025-09",
+          "value": 0.0
+        },
+        {
+          "month": "2025-10",
+          "value": 0.0
+        },
+        {
+          "month": "2025-11",
+          "value": 0.0
+        },
+        {
+          "month": "2025-12",
+          "value": 0.0
+        },
+        {
+          "month": "2026-01",
+          "value": 10022.7273
+        },
+        {
+          "month": "2026-02",
+          "value": 18237.788
+        }
+      ],
+      "wallet_chain_exposure": [
+        {
+          "chain": "solana",
+          "total_base": 8046.0829,
+          "total_usd": 6000.0,
+          "wallet_id": "wallet-a-sol"
+        },
+        {
+          "chain": "ethereum",
+          "total_base": 7509.6774,
+          "total_usd": 5600.0,
+          "wallet_id": "wallet-a-evm"
+        },
+        {
+          "chain": "ethereum",
+          "total_base": 2682.0276,
+          "total_usd": 2000.0,
+          "wallet_id": "wallet-a-evm"
+        }
+      ],
+      "wallet_exposure": [
+        {
+          "address": "0x00000000000000000000000000000000000a0001",
+          "chain": "ethereum",
+          "chain_type": "evm",
+          "holdings_as_of": "2026-02-28T12:00:00+00:00",
+          "holdings_provider": null,
+          "label": "A main",
+          "percent": 55.8824,
+          "price_as_of": "2026-02-28T12:00:00+00:00",
+          "price_provider": null,
+          "stale_holdings": true,
+          "stale_prices": true,
+          "total_base": 10191.7051,
+          "total_usd": 7600.0,
+          "wallet_id": "wallet-a-evm"
+        },
+        {
+          "address": "SynthA111111111111111111111111111111111111",
+          "chain": "solana",
+          "chain_type": "solana",
+          "holdings_as_of": "2026-02-10T12:00:00+00:00",
+          "holdings_provider": null,
+          "label": "A sol",
+          "percent": 44.1176,
+          "price_as_of": "2026-02-10T12:00:00+00:00",
+          "price_provider": null,
+          "stale_holdings": true,
+          "stale_prices": true,
+          "total_base": 8046.0829,
+          "total_usd": 6000.0,
+          "wallet_id": "wallet-a-sol"
+        }
+      ]
+    },
+    "/crypto/summary?month=2026-03&base_currency=SGD": {
+      "as_of": "2026-03-18T02:00:00+00:00",
+      "base_currency": "SGD",
+      "chain_exposure": [
+        {
+          "chain": "ethereum",
+          "percent": 55.3797,
+          "total_base": 11733.871,
+          "total_usd": 8750.0
+        },
+        {
+          "chain": "solana",
+          "percent": 44.6203,
+          "total_base": 9454.1475,
+          "total_usd": 7050.0
+        }
+      ],
+      "compare_month": "2026-02",
+      "eth": {
+        "balance": 2.5,
+        "value_base": 10392.8571,
+        "value_usd": 7750.0
+      },
+      "eth_exposure_base": 10392.8571,
+      "eth_exposure_usd": 7750.0,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "holdings_as_of": "2026-03-15T12:00:00+00:00",
+      "is_live": true,
+      "is_stale": true,
+      "last_refreshed_at": "2026-03-17T12:00:00+00:00",
+      "month": "2026-03",
+      "price_as_of": "2026-03-15T12:00:00+00:00",
+      "priced_token_count": 4,
+      "refresh_triggered": false,
+      "snapshot_as_of": "2026-02-10",
+      "snapshot_day": 1,
+      "snapshot_delta_base": 2950.2304,
+      "snapshot_delta_pct": 0.1618,
+      "snapshot_total_base": 18237.788,
+      "snapshot_total_usd": 13600.0,
+      "sol": {
+        "balance": 40.0,
+        "value_base": 9118.894,
+        "value_usd": 6800.0
+      },
+      "stale_holdings": true,
+      "stale_prices": true,
+      "token_count": 4,
+      "token_exposure_base": 10795.1613,
+      "token_exposure_usd": 8050.0,
+      "top5_holdings": [
+        {
+          "amount": 2.5,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-03-17T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-17T12:00:00+00:00",
+          "price_change_pct": 0.1071,
+          "price_change_usd": 300.0,
+          "price_provider": "synthetic",
+          "price_usd": 3100.0,
+          "snapshot_delta_base": 2883.1797,
+          "snapshot_delta_pct": 0.3839,
+          "snapshot_value_base": 7509.6774,
+          "symbol": "ETH",
+          "value_base": 10392.8571,
+          "value_change_base": 2883.1797,
+          "value_change_pct": 0.3839,
+          "value_usd": 7750.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        },
+        {
+          "amount": 40.0,
+          "asset_class": "CRYPTO",
+          "chain": "solana",
+          "holdings_as_of": "2026-03-15T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-15T12:00:00+00:00",
+          "price_change_pct": 0.1333,
+          "price_change_usd": 20.0,
+          "price_provider": "synthetic",
+          "price_usd": 170.0,
+          "snapshot_delta_base": 1072.8111,
+          "snapshot_delta_pct": 0.1333,
+          "snapshot_value_base": 8046.0829,
+          "symbol": "SOL",
+          "value_base": 9118.894,
+          "value_change_base": 1072.8111,
+          "value_change_pct": 0.1333,
+          "value_usd": 6800.0,
+          "wallet_address": "SynthA111111111111111111111111111111111111",
+          "wallet_id": "wallet-a-sol",
+          "wallet_label": "A sol"
+        },
+        {
+          "amount": 1000.0,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-03-17T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-17T12:00:00+00:00",
+          "price_change_pct": 0.0,
+          "price_change_usd": 0.0,
+          "price_provider": "synthetic",
+          "price_usd": 1.0,
+          "snapshot_delta_base": -1341.0138,
+          "snapshot_delta_pct": -0.5,
+          "snapshot_value_base": 2682.0276,
+          "symbol": "USDC",
+          "value_base": 1341.0138,
+          "value_change_base": -1341.0138,
+          "value_change_pct": -0.5,
+          "value_usd": 1000.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        },
+        {
+          "amount": 250.0,
+          "asset_class": "CRYPTO",
+          "chain": "solana",
+          "holdings_as_of": "2026-03-15T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-15T12:00:00+00:00",
+          "price_change_pct": null,
+          "price_change_usd": null,
+          "price_provider": "synthetic",
+          "price_usd": 1.0,
+          "snapshot_delta_base": 335.2535,
+          "snapshot_delta_pct": null,
+          "snapshot_value_base": 0.0,
+          "symbol": "USDT",
+          "value_base": 335.2535,
+          "value_change_base": null,
+          "value_change_pct": null,
+          "value_usd": 250.0,
+          "wallet_address": "SynthA111111111111111111111111111111111111",
+          "wallet_id": "wallet-a-sol",
+          "wallet_label": "A sol"
+        }
+      ],
+      "top_holdings": [
+        {
+          "amount": 2.5,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-03-17T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-17T12:00:00+00:00",
+          "price_change_pct": 0.1071,
+          "price_change_usd": 300.0,
+          "price_provider": "synthetic",
+          "price_usd": 3100.0,
+          "snapshot_delta_base": 2883.1797,
+          "snapshot_delta_pct": 0.3839,
+          "snapshot_value_base": 7509.6774,
+          "symbol": "ETH",
+          "value_base": 10392.8571,
+          "value_change_base": 2883.1797,
+          "value_change_pct": 0.3839,
+          "value_usd": 7750.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        },
+        {
+          "amount": 40.0,
+          "asset_class": "CRYPTO",
+          "chain": "solana",
+          "holdings_as_of": "2026-03-15T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-15T12:00:00+00:00",
+          "price_change_pct": 0.1333,
+          "price_change_usd": 20.0,
+          "price_provider": "synthetic",
+          "price_usd": 170.0,
+          "snapshot_delta_base": 1072.8111,
+          "snapshot_delta_pct": 0.1333,
+          "snapshot_value_base": 8046.0829,
+          "symbol": "SOL",
+          "value_base": 9118.894,
+          "value_change_base": 1072.8111,
+          "value_change_pct": 0.1333,
+          "value_usd": 6800.0,
+          "wallet_address": "SynthA111111111111111111111111111111111111",
+          "wallet_id": "wallet-a-sol",
+          "wallet_label": "A sol"
+        },
+        {
+          "amount": 1000.0,
+          "asset_class": "CRYPTO",
+          "chain": "ethereum",
+          "holdings_as_of": "2026-03-17T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-17T12:00:00+00:00",
+          "price_change_pct": 0.0,
+          "price_change_usd": 0.0,
+          "price_provider": "synthetic",
+          "price_usd": 1.0,
+          "snapshot_delta_base": -1341.0138,
+          "snapshot_delta_pct": -0.5,
+          "snapshot_value_base": 2682.0276,
+          "symbol": "USDC",
+          "value_base": 1341.0138,
+          "value_change_base": -1341.0138,
+          "value_change_pct": -0.5,
+          "value_usd": 1000.0,
+          "wallet_address": "0x00000000000000000000000000000000000a0001",
+          "wallet_id": "wallet-a-evm",
+          "wallet_label": "A main"
+        },
+        {
+          "amount": 250.0,
+          "asset_class": "CRYPTO",
+          "chain": "solana",
+          "holdings_as_of": "2026-03-15T12:00:00+00:00",
+          "holdings_provider": null,
+          "price_as_of": "2026-03-15T12:00:00+00:00",
+          "price_change_pct": null,
+          "price_change_usd": null,
+          "price_provider": "synthetic",
+          "price_usd": 1.0,
+          "snapshot_delta_base": 335.2535,
+          "snapshot_delta_pct": null,
+          "snapshot_value_base": 0.0,
+          "symbol": "USDT",
+          "value_base": 335.2535,
+          "value_change_base": null,
+          "value_change_pct": null,
+          "value_usd": 250.0,
+          "wallet_address": "SynthA111111111111111111111111111111111111",
+          "wallet_id": "wallet-a-sol",
+          "wallet_label": "A sol"
+        }
+      ],
+      "total_crypto_base": 21188.0184,
+      "total_crypto_usd": 15800.0,
+      "trend": [
+        {
+          "month": "2025-10",
+          "value": 0.0
+        },
+        {
+          "month": "2025-11",
+          "value": 0.0
+        },
+        {
+          "month": "2025-12",
+          "value": 0.0
+        },
+        {
+          "month": "2026-01",
+          "value": 10022.7273
+        },
+        {
+          "month": "2026-02",
+          "value": 18237.788
+        },
+        {
+          "month": "2026-03",
+          "value": 21188.0184
+        }
+      ],
+      "wallet_chain_exposure": [
+        {
+          "chain": "ethereum",
+          "total_base": 10392.8571,
+          "total_usd": 7750.0,
+          "wallet_id": "wallet-a-evm"
+        },
+        {
+          "chain": "solana",
+          "total_base": 9118.894,
+          "total_usd": 6800.0,
+          "wallet_id": "wallet-a-sol"
+        },
+        {
+          "chain": "ethereum",
+          "total_base": 1341.0138,
+          "total_usd": 1000.0,
+          "wallet_id": "wallet-a-evm"
+        },
+        {
+          "chain": "solana",
+          "total_base": 335.2535,
+          "total_usd": 250.0,
+          "wallet_id": "wallet-a-sol"
+        }
+      ],
+      "wallet_exposure": [
+        {
+          "address": "0x00000000000000000000000000000000000a0001",
+          "chain": "ethereum",
+          "chain_type": "evm",
+          "holdings_as_of": "2026-03-17T12:00:00+00:00",
+          "holdings_provider": null,
+          "label": "A main",
+          "percent": 55.3797,
+          "price_as_of": "2026-03-17T12:00:00+00:00",
+          "price_provider": null,
+          "stale_holdings": false,
+          "stale_prices": false,
+          "total_base": 11733.871,
+          "total_usd": 8750.0,
+          "wallet_id": "wallet-a-evm"
+        },
+        {
+          "address": "SynthA111111111111111111111111111111111111",
+          "chain": "solana",
+          "chain_type": "solana",
+          "holdings_as_of": "2026-03-15T12:00:00+00:00",
+          "holdings_provider": null,
+          "label": "A sol",
+          "percent": 44.6203,
+          "price_as_of": "2026-03-15T12:00:00+00:00",
+          "price_provider": null,
+          "stale_holdings": true,
+          "stale_prices": true,
+          "total_base": 9454.1475,
+          "total_usd": 7050.0,
+          "wallet_id": "wallet-a-sol"
+        }
+      ]
+    },
+    "/dashboard/bootstrap?month=2026-03&base_currency=SGD": {
+      "as_of_month": "2026-03",
+      "base_currency": "SGD",
+      "cash_percent": 67.44,
+      "crypto_exposure_total": 18237.788,
+      "current_cash_percent": 64.62,
+      "current_crypto_exposure_total": 21188.0184,
+      "current_net_worth": {
+        "cash": 61323.7327,
+        "crypto": 21188.0184,
+        "liabilities": 970.55,
+        "stocks_funds": 13361.9841,
+        "total": 94903.1852
+      },
+      "current_net_worth_as_of": "2026-03-18T10:00:00+08:00",
+      "current_net_worth_freshness": {
+        "cash": {
+          "most_recent_at": "2026-03-16",
+          "most_recent_label": "IBKR",
+          "stalest_at": "2026-02-26",
+          "stalest_label": "DBS"
+        },
+        "crypto": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "A main",
+          "stalest_at": "2026-03-15",
+          "stalest_label": "A sol"
+        },
+        "stocks": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "AAPL",
+          "stalest_at": "2026-03-17",
+          "stalest_label": "AAPL"
+        }
+      },
+      "current_stock_exposure_total": 13361.9841,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "net_worth": {
+        "cash": 61000.8589,
+        "crypto": 18237.788,
+        "liabilities": 305.4,
+        "stocks_funds": 11516.3878,
+        "total": 90449.6347
+      },
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00",
+      "snapshot_day": 1,
+      "stock_exposure_total": 11516.3878
+    },
+    "/dashboard/cash-deposits?month=2026-02&base_currency=SGD": {
+      "as_of_month": "2026-02",
+      "base_currency": "SGD",
+      "compare_month": "2026-01",
+      "currency_breakdown": [
+        {
+          "currency": "USD",
+          "current_value": 16366.4642,
+          "delta_abs": 976.827,
+          "delta_pct": 0.0635,
+          "snapshot_value": 15389.6372
+        },
+        {
+          "currency": "SGD",
+          "current_value": 51952.5346,
+          "delta_abs": 7279.8073,
+          "delta_pct": 0.163,
+          "snapshot_value": 44672.7273
+        },
+        {
+          "currency": "HKD",
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "snapshot_value": 0.0
+        },
+        {
+          "currency": "INR",
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "snapshot_value": 0.0
+        },
+        {
+          "currency": "Other",
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "snapshot_value": 0.0
+        }
+      ],
+      "current_cash_as_of": "2026-02-28T00:00:00+00:00",
+      "current_total": 68318.9988,
+      "delta_abs": 8256.6343,
+      "delta_pct": 0.1375,
+      "is_live": false,
+      "items": [
+        {
+          "percent": 71.14,
+          "source": "DBS",
+          "value": 48600.0
+        },
+        {
+          "percent": 16.1,
+          "source": "HSBC",
+          "value": 10996.3134
+        },
+        {
+          "percent": 8.84,
+          "source": "IBKR",
+          "value": 6040.6577
+        },
+        {
+          "percent": 3.93,
+          "source": "Ethereum",
+          "value": 2682.0276
+        }
+      ],
+      "snapshot_cash_as_of": "2026-01-31T00:00:00+00:00",
+      "snapshot_day": 1,
+      "snapshot_total": 60062.3645,
+      "total": 68318.9988,
+      "trend": [
+        {
+          "month": "2025-09",
+          "value": null
+        },
+        {
+          "month": "2025-10",
+          "value": null
+        },
+        {
+          "month": "2025-11",
+          "value": null
+        },
+        {
+          "month": "2025-12",
+          "value": 44032.1101
+        },
+        {
+          "month": "2026-01",
+          "value": 60062.3645
+        },
+        {
+          "month": "2026-02",
+          "value": 68318.9988
+        }
+      ]
+    },
+    "/dashboard/cash-deposits?month=2026-03&base_currency=SGD": {
+      "as_of_month": "2026-03",
+      "base_currency": "SGD",
+      "compare_month": "2026-02",
+      "currency_breakdown": [
+        {
+          "currency": "USD",
+          "current_value": 15235.9564,
+          "delta_abs": -1130.5078,
+          "delta_pct": -0.0691,
+          "snapshot_value": 16366.4642
+        },
+        {
+          "currency": "SGD",
+          "current_value": 51959.2166,
+          "delta_abs": 6.682,
+          "delta_pct": 0.0001,
+          "snapshot_value": 51952.5346
+        },
+        {
+          "currency": "HKD",
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "snapshot_value": 0.0
+        },
+        {
+          "currency": "INR",
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "snapshot_value": 0.0
+        },
+        {
+          "currency": "Other",
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "snapshot_value": 0.0
+        }
+      ],
+      "current_cash_as_of": "2026-03-16T00:00:00+00:00",
+      "current_total": 67195.173,
+      "delta_abs": -1123.8258,
+      "delta_pct": -0.0164,
+      "is_live": true,
+      "items": [
+        {
+          "percent": 74.93,
+          "source": "DBS",
+          "value": 50350.0
+        },
+        {
+          "percent": 16.17,
+          "source": "HSBC",
+          "value": 10862.212
+        },
+        {
+          "percent": 6.41,
+          "source": "IBKR",
+          "value": 4306.6937
+        },
+        {
+          "percent": 2.0,
+          "source": "Ethereum",
+          "value": 1341.0138
+        },
+        {
+          "percent": 0.5,
+          "source": "Solana",
+          "value": 335.2535
+        }
+      ],
+      "snapshot_cash_as_of": "2026-02-28T00:00:00+00:00",
+      "snapshot_day": 1,
+      "snapshot_total": 68318.9988,
+      "total": 67195.173,
+      "trend": [
+        {
+          "month": "2025-10",
+          "value": null
+        },
+        {
+          "month": "2025-11",
+          "value": null
+        },
+        {
+          "month": "2025-12",
+          "value": 44032.1101
+        },
+        {
+          "month": "2026-01",
+          "value": 60062.3645
+        },
+        {
+          "month": "2026-02",
+          "value": 68318.9988
+        },
+        {
+          "month": "2026-03",
+          "value": 67195.173
+        }
+      ]
+    },
+    "/dashboard/geography-exposure?month=2026-02&base_currency=SGD": {
+      "as_of": "2026-02-28T00:00:00+00:00",
+      "base_currency": "SGD",
+      "items": [
+        {
+          "cash": 48600.0,
+          "country": "SG",
+          "crypto": 0.0,
+          "percent": 51.77,
+          "stocks_funds": 0.0,
+          "total": 48600.0
+        },
+        {
+          "cash": 7186.5731,
+          "country": "US",
+          "crypto": 15555.7604,
+          "percent": 29.65,
+          "stocks_funds": 5095.8525,
+          "total": 27838.1861
+        },
+        {
+          "cash": 10996.3134,
+          "country": "HK",
+          "crypto": 0.0,
+          "percent": 17.57,
+          "stocks_funds": 5497.0484,
+          "total": 16493.3618
+        },
+        {
+          "cash": 0.0,
+          "country": "IN",
+          "crypto": 0.0,
+          "percent": 1.01,
+          "stocks_funds": 952.5082,
+          "total": 952.5082
+        }
+      ],
+      "total": 93884.056
+    },
+    "/dashboard/geography-exposure?month=2026-03&base_currency=SGD": {
+      "as_of": "2026-02-28T00:00:00+00:00",
+      "base_currency": "SGD",
+      "items": [
+        {
+          "cash": 48600.0,
+          "country": "SG",
+          "crypto": 0.0,
+          "percent": 51.77,
+          "stocks_funds": 0.0,
+          "total": 48600.0
+        },
+        {
+          "cash": 7186.5731,
+          "country": "US",
+          "crypto": 15555.7604,
+          "percent": 29.65,
+          "stocks_funds": 5095.8525,
+          "total": 27838.1861
+        },
+        {
+          "cash": 10996.3134,
+          "country": "HK",
+          "crypto": 0.0,
+          "percent": 17.57,
+          "stocks_funds": 5497.0484,
+          "total": 16493.3618
+        },
+        {
+          "cash": 0.0,
+          "country": "IN",
+          "crypto": 0.0,
+          "percent": 1.01,
+          "stocks_funds": 952.5082,
+          "total": 952.5082
+        }
+      ],
+      "total": 93884.056
+    },
+    "/dashboard/net-worth-change?month=2026-02&base_currency=SGD": {
+      "as_of_month": "2026-02",
+      "base_currency": "SGD",
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_change": {
+        "vs_prev_month": {
+          "abs": 13712.1273,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.1787
+        },
+        "vs_prev_year": {
+          "abs": 90449.6347,
+          "compare_as_of": null,
+          "compare_month": "2025-02",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": null
+        }
+      },
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00"
+    },
+    "/dashboard/net-worth-change?month=2026-03&base_currency=SGD": {
+      "as_of_month": "2026-03",
+      "base_currency": "SGD",
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_change": {
+        "vs_prev_month": {
+          "abs": 13712.1273,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.1787
+        },
+        "vs_prev_year": {
+          "abs": 90449.6347,
+          "compare_as_of": null,
+          "compare_month": "2025-02",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": null
+        }
+      },
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00"
+    },
+    "/dashboard/net-worth-since-update?base_currency=SGD": {
+      "base_currency": "SGD",
+      "compare_as_of": "2026-03-16T00:00:00+00:00",
+      "component_change": {
+        "cash": {
+          "abs": 0.0,
+          "compare_as_of": "2026-03-16T00:00:00+00:00",
+          "compare_month": "2026-03-16T00:00:00+00:00",
+          "current_as_of": "2026-03-16T00:00:00+00:00",
+          "pct": 0.0
+        },
+        "crypto": {
+          "abs": 0.0,
+          "compare_as_of": "2026-03-16T00:00:00+00:00",
+          "compare_month": "2026-03-16T00:00:00+00:00",
+          "current_as_of": "2026-03-16T00:00:00+00:00",
+          "pct": 0.0
+        },
+        "stocks_funds": {
+          "abs": 0.0,
+          "compare_as_of": "2026-03-16T00:00:00+00:00",
+          "compare_month": "2026-03-16T00:00:00+00:00",
+          "current_as_of": "2026-03-16T00:00:00+00:00",
+          "pct": 0.0
+        }
+      },
+      "current_as_of": "2026-03-16T00:00:00+00:00",
+      "net_worth_change": {
+        "abs": 0.0,
+        "compare_as_of": "2026-03-16T00:00:00+00:00",
+        "compare_month": "2026-03-16T00:00:00+00:00",
+        "current_as_of": "2026-03-16T00:00:00+00:00",
+        "pct": 0.0
+      },
+      "top_movers": {
+        "compare_month": "2026-03-16T00:00:00+00:00",
+        "detractors": [],
+        "gainers": []
+      }
+    },
+    "/dashboard/net-worth-timeline/2026-02/movers?base_currency=SGD": {
+      "compare_month": "2026-01",
+      "detractors": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "compare_month": "2026-01",
+          "current_value": 7509.6774,
+          "delta_abs": -508.5044,
+          "delta_pct": -0.0634,
+          "previous_value": 8018.1818,
+          "symbol": "ETH"
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "compare_month": "2026-01",
+          "current_value": 502.4918,
+          "delta_abs": -8.8125,
+          "delta_pct": -0.0172,
+          "previous_value": 511.3043,
+          "symbol": "INFY"
+        }
+      ],
+      "gainers": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "compare_month": "2026-01",
+          "current_value": 8046.0829,
+          "delta_abs": 8046.0829,
+          "delta_pct": null,
+          "previous_value": 0.0,
+          "symbol": "SOL"
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "compare_month": "2026-01",
+          "current_value": 2682.0276,
+          "delta_abs": 677.4822,
+          "delta_pct": 0.338,
+          "previous_value": 2004.5455,
+          "symbol": "USDC"
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "compare_month": "2026-01",
+          "current_value": 5482.5175,
+          "delta_abs": 311.9293,
+          "delta_pct": 0.0603,
+          "previous_value": 5170.5882,
+          "symbol": "0700"
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "compare_month": "2026-01",
+          "current_value": 5078.1818,
+          "delta_abs": 239.6497,
+          "delta_pct": 0.0495,
+          "previous_value": 4838.5321,
+          "symbol": "AAPL"
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "compare_month": "2026-01",
+          "current_value": 453.1967,
+          "delta_abs": 5.8054,
+          "delta_pct": 0.013,
+          "previous_value": 447.3913,
+          "symbol": "RELIANCE"
+        }
+      ]
+    },
+    "/dashboard/net-worth-timeline?months=6&base_currency=SGD": {
+      "base_currency": "SGD",
+      "now": {
+        "as_of": "2026-03-18T10:00:00+08:00",
+        "cash": 61323.7327,
+        "crypto": 21188.0184,
+        "liabilities": 970.55,
+        "stocks_funds": 13361.9841,
+        "total": 94903.1852,
+        "uploads": []
+      },
+      "points": [
+        {
+          "anchor_date": "2025-11-01",
+          "cash": 0.0,
+          "computed_at": "<volatile>",
+          "crypto": 0.0,
+          "freshness_status": "missing",
+          "liabilities": 0.0,
+          "month": "2025-10",
+          "source_freshness": [],
+          "stocks_funds": 0.0,
+          "total": 0.0,
+          "uploads": []
+        },
+        {
+          "anchor_date": "2025-12-01",
+          "cash": 0.0,
+          "computed_at": "<volatile>",
+          "crypto": 0.0,
+          "freshness_status": "missing",
+          "liabilities": 0.0,
+          "month": "2025-11",
+          "source_freshness": [],
+          "stocks_funds": 0.0,
+          "total": 0.0,
+          "uploads": []
+        },
+        {
+          "anchor_date": "2026-01-01",
+          "cash": 44032.1101,
+          "computed_at": "<volatile>",
+          "crypto": 0.0,
+          "freshness_status": "fresh",
+          "liabilities": 0.0,
+          "month": "2025-12",
+          "source_freshness": [
+            {
+              "as_of": "2025-12-20",
+              "days_old": 12,
+              "platform": "DBS",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2025-12-31",
+              "days_old": 1,
+              "platform": "IBKR",
+              "status": "fresh"
+            }
+          ],
+          "stocks_funds": 0.0,
+          "total": 44032.1101,
+          "uploads": []
+        },
+        {
+          "anchor_date": "2026-02-01",
+          "cash": 56706.9641,
+          "computed_at": "<volatile>",
+          "crypto": 10022.7273,
+          "freshness_status": "fresh",
+          "liabilities": 960.0,
+          "month": "2026-01",
+          "source_freshness": [
+            {
+              "as_of": "2026-01-31",
+              "days_old": 1,
+              "platform": "CRYPTO",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-01-28",
+              "days_old": 4,
+              "platform": "DBS",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-01-15",
+              "days_old": 17,
+              "platform": "HSBC",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-01-30",
+              "days_old": 2,
+              "platform": "IBKR",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-01-31",
+              "days_old": 1,
+              "platform": "SHAREKHAN",
+              "status": "fresh"
+            }
+          ],
+          "stocks_funds": 10967.8161,
+          "total": 76737.5074,
+          "uploads": []
+        },
+        {
+          "anchor_date": "2026-03-01",
+          "cash": 61000.8589,
+          "computed_at": "<volatile>",
+          "crypto": 18237.788,
+          "freshness_status": "carried",
+          "liabilities": 305.4,
+          "month": "2026-02",
+          "source_freshness": [
+            {
+              "as_of": "2026-02-10",
+              "days_old": 19,
+              "platform": "CRYPTO",
+              "status": "carried"
+            },
+            {
+              "as_of": "2026-02-26",
+              "days_old": 3,
+              "platform": "DBS",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-02-20",
+              "days_old": 9,
+              "platform": "HSBC",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-02-27",
+              "days_old": 2,
+              "platform": "IBKR",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-02-28",
+              "days_old": 1,
+              "platform": "SHAREKHAN",
+              "status": "fresh"
+            }
+          ],
+          "stocks_funds": 11516.3878,
+          "total": 90449.6347,
+          "uploads": []
+        }
+      ]
+    },
+    "/dashboard/platform-allocation?month=2026-03&base_currency=SGD": {
+      "as_of": "2026-03-16T00:00:00+00:00",
+      "items": [
+        {
+          "country": "SG",
+          "percent": 50.87,
+          "platform": "DBS",
+          "platform_type": "BANK",
+          "value": 50350.0
+        },
+        {
+          "country": null,
+          "percent": 21.41,
+          "platform": "CRYPTO",
+          "platform_type": "WALLET_PROVIDER",
+          "value": 21188.0184
+        },
+        {
+          "country": "US",
+          "percent": 15.66,
+          "platform": "IBKR",
+          "platform_type": "BROKER",
+          "value": 15495.3737
+        },
+        {
+          "country": "HK",
+          "percent": 10.97,
+          "platform": "HSBC",
+          "platform_type": "BANK",
+          "value": 10862.212
+        },
+        {
+          "country": "IN",
+          "percent": 1.09,
+          "platform": "SHAREKHAN",
+          "platform_type": "BROKER",
+          "value": 1078.1311
+        }
+      ],
+      "total": 98973.7352
+    },
+    "/dashboard/stock-exposure?month=2026-03&base_currency=SGD": {
+      "as_of": "2026-03-16T00:00:00+00:00",
+      "base_currency": "SGD",
+      "by_country": [
+        {
+          "key": "US",
+          "percent": 51.43,
+          "value": 6872.6959
+        },
+        {
+          "key": "HK",
+          "percent": 40.5,
+          "value": 5411.1571
+        },
+        {
+          "key": "IN",
+          "percent": 8.07,
+          "value": 1078.1311
+        }
+      ],
+      "by_platform": [
+        {
+          "key": "IBKR",
+          "percent": 91.93,
+          "value": 12283.853
+        },
+        {
+          "key": "SHAREKHAN",
+          "percent": 8.07,
+          "value": 1078.1311
+        }
+      ],
+      "total": 13361.9841
+    },
+    "/dashboard/stock-holdings?month=2026-02&base_currency=SGD": {
+      "as_of_month": "2026-02",
+      "base_currency": "SGD",
+      "compare_month": "2026-01",
+      "current_holdings_as_of": "2026-02-28T00:00:00+00:00",
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography_breakdown": [
+        {
+          "current_value": 5078.1818,
+          "delta_abs": 239.6497,
+          "delta_pct": 0.0495,
+          "geography": "US",
+          "snapshot_value": 4838.5321
+        },
+        {
+          "current_value": 5482.5175,
+          "delta_abs": 311.9292,
+          "delta_pct": 0.0603,
+          "geography": "HK",
+          "snapshot_value": 5170.5883
+        },
+        {
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "geography": "SG",
+          "snapshot_value": 0.0
+        },
+        {
+          "current_value": 955.6885,
+          "delta_abs": -3.0071,
+          "delta_pct": -0.0031,
+          "geography": "IN",
+          "snapshot_value": 958.6957
+        },
+        {
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "geography": "Other",
+          "snapshot_value": 0.0
+        }
+      ],
+      "geography_performance": [],
+      "geography_performance_as_of": null,
+      "is_live": false,
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-01-31T00:00:00+00:00",
+      "platform_breakdown": [
+        {
+          "current_value": 10560.6993,
+          "delta_abs": 551.5789,
+          "delta_pct": 0.0551,
+          "key": "IBKR",
+          "percent": 91.7,
+          "snapshot_value": 10009.1204
+        },
+        {
+          "current_value": 955.6885,
+          "delta_abs": -3.0071,
+          "delta_pct": -0.0031,
+          "key": "SHAREKHAN",
+          "percent": 8.3,
+          "snapshot_value": 958.6957
+        }
+      ],
+      "quote_freshness_summary": {
+        "fresh": 0,
+        "missing": 0,
+        "stale": 4
+      },
+      "snapshot_day": 1,
+      "stock_current_total": 11516.3878,
+      "stock_snapshot_total": 10967.8161,
+      "top_holdings": [
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 256.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 320.0,
+          "latest_trade_date": "2026-02-27",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 6.06,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "ibkr",
+          "price_source": "ibkr_flex",
+          "quantity": 100.0,
+          "quote_age_days": 19,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "stale",
+          "symbol": "0700",
+          "value": 5482.5175
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 152.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 190.0,
+          "latest_trade_date": "2026-02-27",
+          "name": "Apple Inc.",
+          "percent_of_networth": 5.61,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "ibkr",
+          "price_source": "ibkr_flex",
+          "quantity": 20.0,
+          "quote_age_days": 19,
+          "quote_currency": "USD",
+          "quote_freshness_status": "stale",
+          "symbol": "AAPL",
+          "value": 5078.1818
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1422.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1580.0,
+          "latest_trade_date": "2026-02-28",
+          "name": "Infosys",
+          "percent_of_networth": 0.56,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "canonical",
+          "price_source": "canonical_snapshot",
+          "quantity": 20.0,
+          "quote_age_days": 18,
+          "quote_currency": "INR",
+          "quote_freshness_status": "stale",
+          "symbol": "INFY",
+          "value": 502.4918
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2565.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2850.0,
+          "latest_trade_date": "2026-02-28",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.5,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "canonical",
+          "price_source": "canonical_snapshot",
+          "quantity": 10.0,
+          "quote_age_days": 18,
+          "quote_currency": "INR",
+          "quote_freshness_status": "stale",
+          "symbol": "RELIANCE",
+          "value": 453.1967
+        }
+      ],
+      "trend": [
+        {
+          "month": "2025-09",
+          "value": null
+        },
+        {
+          "month": "2025-10",
+          "value": null
+        },
+        {
+          "month": "2025-11",
+          "value": null
+        },
+        {
+          "month": "2025-12",
+          "value": null
+        },
+        {
+          "month": "2026-01",
+          "value": 10967.8161
+        },
+        {
+          "month": "2026-02",
+          "value": 11516.3878
+        }
+      ]
+    },
+    "/dashboard/stock-holdings?month=2026-03&base_currency=SGD": {
+      "as_of_month": "2026-03",
+      "base_currency": "SGD",
+      "compare_month": "2026-02",
+      "current_holdings_as_of": "2026-03-16T00:00:00+00:00",
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography_breakdown": [
+        {
+          "current_value": 6872.6959,
+          "delta_abs": 1794.5141,
+          "delta_pct": 0.3534,
+          "geography": "US",
+          "snapshot_value": 5078.1818
+        },
+        {
+          "current_value": 5411.1571,
+          "delta_abs": -71.3604,
+          "delta_pct": -0.013,
+          "geography": "HK",
+          "snapshot_value": 5482.5175
+        },
+        {
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "geography": "SG",
+          "snapshot_value": 0.0
+        },
+        {
+          "current_value": 1078.1311,
+          "delta_abs": 122.4426,
+          "delta_pct": 0.1281,
+          "geography": "IN",
+          "snapshot_value": 955.6885
+        },
+        {
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "geography": "Other",
+          "snapshot_value": 0.0
+        }
+      ],
+      "geography_performance": [
+        {
+          "current_value": 6872.6959,
+          "delta_abs": 0.0,
+          "delta_pct": 0.0,
+          "geography": "US",
+          "snapshot_value": 6872.6959
+        },
+        {
+          "current_value": 5411.1571,
+          "delta_abs": 0.0,
+          "delta_pct": 0.0,
+          "geography": "HK",
+          "snapshot_value": 5411.1571
+        },
+        {
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "geography": "SG",
+          "snapshot_value": 0.0
+        },
+        {
+          "current_value": 1078.1311,
+          "delta_abs": 0.0,
+          "delta_pct": 0.0,
+          "geography": "IN",
+          "snapshot_value": 1078.1311
+        },
+        {
+          "current_value": 0.0,
+          "delta_abs": 0.0,
+          "delta_pct": null,
+          "geography": "Other",
+          "snapshot_value": 0.0
+        }
+      ],
+      "geography_performance_as_of": "2026-03-16T00:00:00+00:00",
+      "is_live": true,
+      "net_worth_as_of": "2026-03-18T10:00:00+08:00",
+      "net_worth_boundary_at": "2026-03-18T10:00:00+08:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00",
+      "platform_breakdown": [
+        {
+          "current_value": 12283.853,
+          "delta_abs": 1723.1537,
+          "delta_pct": 0.1632,
+          "key": "IBKR",
+          "percent": 91.93,
+          "snapshot_value": 10560.6993
+        },
+        {
+          "current_value": 1078.1311,
+          "delta_abs": 122.4426,
+          "delta_pct": 0.1281,
+          "key": "SHAREKHAN",
+          "percent": 8.07,
+          "snapshot_value": 955.6885
+        }
+      ],
+      "quote_freshness_summary": {
+        "fresh": 4,
+        "missing": 0,
+        "stale": 0
+      },
+      "snapshot_day": 1,
+      "stock_current_total": 13361.9841,
+      "stock_snapshot_total": 11516.3878,
+      "top_holdings": [
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 160.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 205.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Apple Inc.",
+          "percent_of_networth": 7.24,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 25.0,
+          "quote_age_days": 1,
+          "quote_currency": "USD",
+          "quote_freshness_status": "fresh",
+          "symbol": "AAPL",
+          "value": 6872.6959
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 248.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 315.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 5.7,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 100.0,
+          "quote_age_days": 1,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "fresh",
+          "symbol": "0700",
+          "value": 5411.157
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2592.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2900.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.58,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 12.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "RELIANCE",
+          "value": 553.377
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1458.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1650.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Infosys",
+          "percent_of_networth": 0.55,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 20.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "INFY",
+          "value": 524.7541
+        }
+      ],
+      "trend": [
+        {
+          "month": "2025-10",
+          "value": null
+        },
+        {
+          "month": "2025-11",
+          "value": null
+        },
+        {
+          "month": "2025-12",
+          "value": null
+        },
+        {
+          "month": "2026-01",
+          "value": 10967.8161
+        },
+        {
+          "month": "2026-02",
+          "value": 11516.3878
+        },
+        {
+          "month": "2026-03",
+          "value": 11516.3878
+        }
+      ]
+    },
+    "/dashboard/summary?month=2026-01&base_currency=SGD&compare=prev_month": {
+      "as_of_month": "2026-01",
+      "base_currency": "SGD",
+      "cash_balances": [
+        {
+          "currency": "SGD",
+          "value": 51959.2166
+        },
+        {
+          "currency": "USD",
+          "value": 13559.6891
+        }
+      ],
+      "cash_flow": {
+        "expenses": 3472.0,
+        "income": 8000.0,
+        "net": 4528.0,
+        "savings_rate": 0.566
+      },
+      "cash_percent": 73.9,
+      "current_net_worth": {
+        "cash": 61323.7327,
+        "crypto": 21188.0184,
+        "liabilities": 970.55,
+        "stocks_funds": 13361.9841,
+        "total": 94903.1852
+      },
+      "current_net_worth_as_of": "2026-03-18T10:00:00+08:00",
+      "current_net_worth_change": {
+        "vs_prev_month": {
+          "abs": 4453.5505,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-18T10:00:00+08:00",
+          "pct": 0.0492
+        }
+      },
+      "current_net_worth_freshness": {
+        "cash": {
+          "most_recent_at": "2026-03-16",
+          "most_recent_label": "IBKR",
+          "stalest_at": "2026-02-26",
+          "stalest_label": "DBS"
+        },
+        "crypto": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "A main",
+          "stalest_at": "2026-03-15",
+          "stalest_label": "A sol"
+        },
+        "stocks": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "AAPL",
+          "stalest_at": "2026-03-17",
+          "stalest_label": "AAPL"
+        }
+      },
+      "data_completeness_indicators": null,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography": [
+        {
+          "country": "SG",
+          "percent": 53.05,
+          "value": 50350.0
+        },
+        {
+          "country": "HK",
+          "percent": 17.15,
+          "value": 16273.3691
+        },
+        {
+          "country": "US",
+          "percent": 10.63,
+          "value": 10084.2166
+        },
+        {
+          "country": "IN",
+          "percent": 1.14,
+          "value": 1078.1311
+        }
+      ],
+      "net_worth": {
+        "cash": 56706.9641,
+        "crypto": 10022.7273,
+        "liabilities": 960.0,
+        "stocks_funds": 10967.8161,
+        "total": 76737.5074
+      },
+      "net_worth_as_of": "2026-02-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-02-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_change": {
+        "vs_prev_month": {
+          "abs": 32705.3973,
+          "compare_as_of": "2025-12-31T00:00:00+00:00",
+          "compare_month": "2025-12",
+          "current_as_of": "2026-01-31T00:00:00+00:00",
+          "pct": 0.7428
+        }
+      },
+      "net_worth_component_change": {
+        "cash": {
+          "abs": 12674.854,
+          "compare_as_of": "2025-12-31T00:00:00+00:00",
+          "compare_month": "2025-12",
+          "current_as_of": "2026-01-31T00:00:00+00:00",
+          "pct": 0.2879
+        },
+        "crypto": {
+          "abs": 10022.7273,
+          "compare_as_of": "2025-12-31T00:00:00+00:00",
+          "compare_month": "2025-12",
+          "current_as_of": "2026-01-31T00:00:00+00:00",
+          "pct": null
+        },
+        "stocks_funds": {
+          "abs": 10967.8161,
+          "compare_as_of": "2025-12-31T00:00:00+00:00",
+          "compare_month": "2025-12",
+          "current_as_of": "2026-01-31T00:00:00+00:00",
+          "pct": null
+        }
+      },
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-01-31T00:00:00+00:00",
+      "snapshot_day": 1,
+      "top_holdings": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "ETH",
+          "percent_of_networth": 10.95,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "ETH",
+          "value": 10392.8571
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "SOL",
+          "percent_of_networth": 9.61,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "SOL",
+          "value": 9118.894
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 160.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 205.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Apple Inc.",
+          "percent_of_networth": 7.24,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 25.0,
+          "quote_age_days": 1,
+          "quote_currency": "USD",
+          "quote_freshness_status": "fresh",
+          "symbol": "AAPL",
+          "value": 6872.6959
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 248.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 315.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 5.7,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 100.0,
+          "quote_age_days": 1,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "fresh",
+          "symbol": "0700",
+          "value": 5411.157
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDC",
+          "percent_of_networth": 1.41,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDC",
+          "value": 1341.0138
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2592.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2900.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.58,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 12.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "RELIANCE",
+          "value": 553.377
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1458.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1650.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Infosys",
+          "percent_of_networth": 0.55,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 20.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "INFY",
+          "value": 524.7541
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDT",
+          "percent_of_networth": 0.35,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDT",
+          "value": 335.2535
+        }
+      ],
+      "top_movers": {
+        "compare_month": "2025-12",
+        "detractors": [],
+        "gainers": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2025-12",
+            "current_value": 8018.1818,
+            "delta_abs": 8018.1818,
+            "delta_pct": null,
+            "previous_value": 0.0,
+            "symbol": "ETH"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 2,
+            "compare_month": "2025-12",
+            "current_value": 5170.5882,
+            "delta_abs": 5170.5882,
+            "delta_pct": null,
+            "previous_value": 0.0,
+            "symbol": "0700"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 1,
+            "compare_month": "2025-12",
+            "current_value": 4838.5321,
+            "delta_abs": 4838.5321,
+            "delta_pct": null,
+            "previous_value": 0.0,
+            "symbol": "AAPL"
+          }
+        ]
+      }
+    },
+    "/dashboard/summary?month=2026-02&base_currency=SGD&compare=prev_month,prev_year": {
+      "as_of_month": "2026-02",
+      "base_currency": "SGD",
+      "cash_balances": [
+        {
+          "currency": "SGD",
+          "value": 51959.2166
+        },
+        {
+          "currency": "USD",
+          "value": 13559.6891
+        }
+      ],
+      "cash_flow": {
+        "expenses": 3806.119,
+        "income": 10367.5539,
+        "net": 6561.4348,
+        "savings_rate": 0.6329
+      },
+      "cash_percent": 67.44,
+      "current_net_worth": {
+        "cash": 61323.7327,
+        "crypto": 21188.0184,
+        "liabilities": 970.55,
+        "stocks_funds": 13361.9841,
+        "total": 94903.1852
+      },
+      "current_net_worth_as_of": "2026-03-18T10:00:00+08:00",
+      "current_net_worth_change": {
+        "vs_prev_month": {
+          "abs": 4453.5505,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-18T10:00:00+08:00",
+          "pct": 0.0492
+        },
+        "vs_prev_year": {
+          "abs": 94903.1852,
+          "compare_as_of": null,
+          "compare_month": "2025-02",
+          "current_as_of": "2026-03-18T10:00:00+08:00",
+          "pct": null
+        }
+      },
+      "current_net_worth_freshness": {
+        "cash": {
+          "most_recent_at": "2026-03-16",
+          "most_recent_label": "IBKR",
+          "stalest_at": "2026-02-26",
+          "stalest_label": "DBS"
+        },
+        "crypto": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "A main",
+          "stalest_at": "2026-03-15",
+          "stalest_label": "A sol"
+        },
+        "stocks": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "AAPL",
+          "stalest_at": "2026-03-17",
+          "stalest_label": "AAPL"
+        }
+      },
+      "data_completeness_indicators": null,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography": [
+        {
+          "country": "SG",
+          "percent": 53.05,
+          "value": 50350.0
+        },
+        {
+          "country": "HK",
+          "percent": 17.15,
+          "value": 16273.3691
+        },
+        {
+          "country": "US",
+          "percent": 10.63,
+          "value": 10084.2166
+        },
+        {
+          "country": "IN",
+          "percent": 1.14,
+          "value": 1078.1311
+        }
+      ],
+      "net_worth": {
+        "cash": 61000.8589,
+        "crypto": 18237.788,
+        "liabilities": 305.4,
+        "stocks_funds": 11516.3878,
+        "total": 90449.6347
+      },
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_change": {
+        "vs_prev_month": {
+          "abs": 13712.1273,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.1787
+        },
+        "vs_prev_year": {
+          "abs": 90449.6347,
+          "compare_as_of": null,
+          "compare_month": "2025-02",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": null
+        }
+      },
+      "net_worth_component_change": {
+        "cash": {
+          "abs": 4293.8948,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.0757
+        },
+        "crypto": {
+          "abs": 8215.0607,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.8196
+        },
+        "stocks_funds": {
+          "abs": 548.5718,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.05
+        }
+      },
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00",
+      "snapshot_day": 1,
+      "top_holdings": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "ETH",
+          "percent_of_networth": 10.95,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "ETH",
+          "value": 10392.8571
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "SOL",
+          "percent_of_networth": 9.61,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "SOL",
+          "value": 9118.894
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 160.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 205.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Apple Inc.",
+          "percent_of_networth": 7.24,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 25.0,
+          "quote_age_days": 1,
+          "quote_currency": "USD",
+          "quote_freshness_status": "fresh",
+          "symbol": "AAPL",
+          "value": 6872.6959
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 248.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 315.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 5.7,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 100.0,
+          "quote_age_days": 1,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "fresh",
+          "symbol": "0700",
+          "value": 5411.157
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDC",
+          "percent_of_networth": 1.41,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDC",
+          "value": 1341.0138
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2592.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2900.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.58,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 12.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "RELIANCE",
+          "value": 553.377
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1458.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1650.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Infosys",
+          "percent_of_networth": 0.55,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 20.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "INFY",
+          "value": 524.7541
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDT",
+          "percent_of_networth": 0.35,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDT",
+          "value": 335.2535
+        }
+      ],
+      "top_movers": {
+        "compare_month": "2026-01",
+        "detractors": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 7509.6774,
+            "delta_abs": -508.5044,
+            "delta_pct": -0.0634,
+            "previous_value": 8018.1818,
+            "symbol": "ETH"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 4,
+            "compare_month": "2026-01",
+            "current_value": 502.4918,
+            "delta_abs": -8.8125,
+            "delta_pct": -0.0172,
+            "previous_value": 511.3043,
+            "symbol": "INFY"
+          }
+        ],
+        "gainers": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 8046.0829,
+            "delta_abs": 8046.0829,
+            "delta_pct": null,
+            "previous_value": 0.0,
+            "symbol": "SOL"
+          },
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 2682.0276,
+            "delta_abs": 677.4822,
+            "delta_pct": 0.338,
+            "previous_value": 2004.5455,
+            "symbol": "USDC"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 2,
+            "compare_month": "2026-01",
+            "current_value": 5482.5175,
+            "delta_abs": 311.9293,
+            "delta_pct": 0.0603,
+            "previous_value": 5170.5882,
+            "symbol": "0700"
+          }
+        ]
+      }
+    },
+    "/dashboard/summary?month=2026-03&base_currency=SGD&compare=prev_month,prev_year": {
+      "as_of_month": "2026-03",
+      "base_currency": "SGD",
+      "cash_balances": [
+        {
+          "currency": "SGD",
+          "value": 51959.2166
+        },
+        {
+          "currency": "USD",
+          "value": 13559.6891
+        }
+      ],
+      "cash_flow": {
+        "expenses": 3872.8541,
+        "income": 455.0885,
+        "net": -3417.7656,
+        "savings_rate": -7.5101
+      },
+      "cash_percent": 67.44,
+      "current_net_worth": {
+        "cash": 61323.7327,
+        "crypto": 21188.0184,
+        "liabilities": 970.55,
+        "stocks_funds": 13361.9841,
+        "total": 94903.1852
+      },
+      "current_net_worth_as_of": "2026-03-18T10:00:00+08:00",
+      "current_net_worth_change": {
+        "vs_prev_month": {
+          "abs": 4453.5505,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-18T10:00:00+08:00",
+          "pct": 0.0492
+        },
+        "vs_prev_year": {
+          "abs": 94903.1852,
+          "compare_as_of": null,
+          "compare_month": "2025-02",
+          "current_as_of": "2026-03-18T10:00:00+08:00",
+          "pct": null
+        }
+      },
+      "current_net_worth_freshness": {
+        "cash": {
+          "most_recent_at": "2026-03-16",
+          "most_recent_label": "IBKR",
+          "stalest_at": "2026-02-26",
+          "stalest_label": "DBS"
+        },
+        "crypto": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "A main",
+          "stalest_at": "2026-03-15",
+          "stalest_label": "A sol"
+        },
+        "stocks": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "AAPL",
+          "stalest_at": "2026-03-17",
+          "stalest_label": "AAPL"
+        }
+      },
+      "data_completeness_indicators": null,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography": [
+        {
+          "country": "SG",
+          "percent": 53.05,
+          "value": 50350.0
+        },
+        {
+          "country": "HK",
+          "percent": 17.15,
+          "value": 16273.3691
+        },
+        {
+          "country": "US",
+          "percent": 10.63,
+          "value": 10084.2166
+        },
+        {
+          "country": "IN",
+          "percent": 1.14,
+          "value": 1078.1311
+        }
+      ],
+      "net_worth": {
+        "cash": 61000.8589,
+        "crypto": 18237.788,
+        "liabilities": 305.4,
+        "stocks_funds": 11516.3878,
+        "total": 90449.6347
+      },
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_change": {
+        "vs_prev_month": {
+          "abs": 13712.1273,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.1787
+        },
+        "vs_prev_year": {
+          "abs": 90449.6347,
+          "compare_as_of": null,
+          "compare_month": "2025-02",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": null
+        }
+      },
+      "net_worth_component_change": {
+        "cash": {
+          "abs": 4293.8948,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.0757
+        },
+        "crypto": {
+          "abs": 8215.0607,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.8196
+        },
+        "stocks_funds": {
+          "abs": 548.5718,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.05
+        }
+      },
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00",
+      "snapshot_day": 1,
+      "top_holdings": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "ETH",
+          "percent_of_networth": 10.95,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "ETH",
+          "value": 10392.8571
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "SOL",
+          "percent_of_networth": 9.61,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "SOL",
+          "value": 9118.894
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 160.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 205.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Apple Inc.",
+          "percent_of_networth": 7.24,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 25.0,
+          "quote_age_days": 1,
+          "quote_currency": "USD",
+          "quote_freshness_status": "fresh",
+          "symbol": "AAPL",
+          "value": 6872.6959
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 248.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 315.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 5.7,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 100.0,
+          "quote_age_days": 1,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "fresh",
+          "symbol": "0700",
+          "value": 5411.157
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDC",
+          "percent_of_networth": 1.41,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDC",
+          "value": 1341.0138
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2592.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2900.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.58,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 12.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "RELIANCE",
+          "value": 553.377
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1458.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1650.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Infosys",
+          "percent_of_networth": 0.55,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 20.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "INFY",
+          "value": 524.7541
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDT",
+          "percent_of_networth": 0.35,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDT",
+          "value": 335.2535
+        }
+      ],
+      "top_movers": {
+        "compare_month": "2026-01",
+        "detractors": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 7509.6774,
+            "delta_abs": -508.5044,
+            "delta_pct": -0.0634,
+            "previous_value": 8018.1818,
+            "symbol": "ETH"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 4,
+            "compare_month": "2026-01",
+            "current_value": 502.4918,
+            "delta_abs": -8.8125,
+            "delta_pct": -0.0172,
+            "previous_value": 511.3043,
+            "symbol": "INFY"
+          }
+        ],
+        "gainers": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 8046.0829,
+            "delta_abs": 8046.0829,
+            "delta_pct": null,
+            "previous_value": 0.0,
+            "symbol": "SOL"
+          },
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 2682.0276,
+            "delta_abs": 677.4822,
+            "delta_pct": 0.338,
+            "previous_value": 2004.5455,
+            "symbol": "USDC"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 2,
+            "compare_month": "2026-01",
+            "current_value": 5482.5175,
+            "delta_abs": 311.9293,
+            "delta_pct": 0.0603,
+            "previous_value": 5170.5882,
+            "symbol": "0700"
+          }
+        ]
+      }
+    },
+    "/dashboard/summary?month=2026-03&base_currency=SGD&skip_networth=true": {
+      "as_of_month": "2026-03",
+      "base_currency": "SGD",
+      "cash_balances": [
+        {
+          "currency": "SGD",
+          "value": 51959.2166
+        },
+        {
+          "currency": "USD",
+          "value": 13559.6891
+        }
+      ],
+      "cash_flow": {
+        "expenses": 3872.8541,
+        "income": 455.0885,
+        "net": -3417.7656,
+        "savings_rate": -7.5101
+      },
+      "cash_percent": 64.62,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography": [
+        {
+          "country": "SG",
+          "percent": 53.05,
+          "value": 50350.0
+        },
+        {
+          "country": "HK",
+          "percent": 17.15,
+          "value": 16273.3691
+        },
+        {
+          "country": "US",
+          "percent": 10.63,
+          "value": 10084.2166
+        },
+        {
+          "country": "IN",
+          "percent": 1.14,
+          "value": 1078.1311
+        }
+      ],
+      "snapshot_day": 1,
+      "top_holdings": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "ETH",
+          "percent_of_networth": 10.95,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "ETH",
+          "value": 10392.8571
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "SOL",
+          "percent_of_networth": 9.61,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "SOL",
+          "value": 9118.894
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 160.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 205.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Apple Inc.",
+          "percent_of_networth": 7.24,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 25.0,
+          "quote_age_days": 1,
+          "quote_currency": "USD",
+          "quote_freshness_status": "fresh",
+          "symbol": "AAPL",
+          "value": 6872.6959
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 248.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 315.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 5.7,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 100.0,
+          "quote_age_days": 1,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "fresh",
+          "symbol": "0700",
+          "value": 5411.157
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDC",
+          "percent_of_networth": 1.41,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDC",
+          "value": 1341.0138
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2592.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2900.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.58,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 12.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "RELIANCE",
+          "value": 553.377
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1458.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1650.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Infosys",
+          "percent_of_networth": 0.55,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 20.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "INFY",
+          "value": 524.7541
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDT",
+          "percent_of_networth": 0.35,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDT",
+          "value": 335.2535
+        }
+      ]
+    },
+    "/dashboard/summary?month=2026-03&base_currency=USD&compare=prev_month": {
+      "as_of_month": "2026-03",
+      "base_currency": "USD",
+      "cash_balances": [
+        {
+          "currency": "SGD",
+          "value": 38746.2199
+        },
+        {
+          "currency": "USD",
+          "value": 10111.5207
+        }
+      ],
+      "cash_flow": {
+        "expenses": 2888.0046,
+        "income": 339.3615,
+        "net": -2548.6431,
+        "savings_rate": -7.5101
+      },
+      "cash_percent": 67.44,
+      "current_net_worth": {
+        "cash": 45729.3814,
+        "crypto": 15800.0,
+        "liabilities": 723.7435,
+        "stocks_funds": 9964.0913,
+        "total": 70769.7292
+      },
+      "current_net_worth_as_of": "2026-03-18T10:00:00+08:00",
+      "current_net_worth_change": {
+        "vs_prev_month": {
+          "abs": 3321.0325,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-18T10:00:00+08:00",
+          "pct": 0.0492
+        }
+      },
+      "current_net_worth_freshness": {
+        "cash": {
+          "most_recent_at": "2026-03-16",
+          "most_recent_label": "IBKR",
+          "stalest_at": "2026-02-26",
+          "stalest_label": "DBS"
+        },
+        "crypto": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "A main",
+          "stalest_at": "2026-03-15",
+          "stalest_label": "A sol"
+        },
+        "stocks": {
+          "most_recent_at": "2026-03-17",
+          "most_recent_label": "AAPL",
+          "stalest_at": "2026-03-17",
+          "stalest_label": "AAPL"
+        }
+      },
+      "data_completeness_indicators": null,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "geography": [
+        {
+          "country": "SG",
+          "percent": 53.05,
+          "value": 37546.2199
+        },
+        {
+          "country": "HK",
+          "percent": 17.15,
+          "value": 12135.124
+        },
+        {
+          "country": "US",
+          "percent": 10.63,
+          "value": 7519.8454
+        },
+        {
+          "country": "IN",
+          "percent": 1.14,
+          "value": 803.9672
+        }
+      ],
+      "net_worth": {
+        "cash": 45488.613,
+        "crypto": 13600.0,
+        "liabilities": 227.7381,
+        "stocks_funds": 8587.8218,
+        "total": 67448.6967
+      },
+      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_boundary_exact": false,
+      "net_worth_change": {
+        "vs_prev_month": {
+          "abs": 10026.0721,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.1746
+        }
+      },
+      "net_worth_component_change": {
+        "cash": {
+          "abs": 3054.8303,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.072
+        },
+        "crypto": {
+          "abs": 6100.0,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.8133
+        },
+        "stocks_funds": {
+          "abs": 380.6126,
+          "compare_as_of": "2026-01-31T00:00:00+00:00",
+          "compare_month": "2026-01",
+          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "pct": 0.0464
+        }
+      },
+      "net_worth_freshness_status": "synthetic",
+      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00",
+      "snapshot_day": 1,
+      "top_holdings": [
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "ETH",
+          "percent_of_networth": 10.95,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "ETH",
+          "value": 7750.0
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "SOL",
+          "percent_of_networth": 9.61,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "SOL",
+          "value": 6800.0
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 1,
+          "avg_cost": 160.0,
+          "exchange_code": "US",
+          "geo": "US",
+          "latest_price": 205.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Apple Inc.",
+          "percent_of_networth": 7.24,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 25.0,
+          "quote_age_days": 1,
+          "quote_currency": "USD",
+          "quote_freshness_status": "fresh",
+          "symbol": "AAPL",
+          "value": 5125.0
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 2,
+          "avg_cost": 248.0,
+          "exchange_code": "HKEX",
+          "geo": "HK",
+          "latest_price": 315.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Tencent Holdings",
+          "percent_of_networth": 5.7,
+          "platform": "IBKR",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 100.0,
+          "quote_age_days": 1,
+          "quote_currency": "HKD",
+          "quote_freshness_status": "fresh",
+          "symbol": "0700",
+          "value": 4035.124
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDC",
+          "percent_of_networth": 1.41,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDC",
+          "value": 1000.0
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 3,
+          "avg_cost": 2592.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 2900.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Reliance Industries",
+          "percent_of_networth": 0.58,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 12.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "RELIANCE",
+          "value": 412.6557
+        },
+        {
+          "asset_class": "STOCK",
+          "asset_id": 4,
+          "avg_cost": 1458.0,
+          "exchange_code": null,
+          "geo": "IN",
+          "latest_price": 1650.0,
+          "latest_trade_date": "2026-03-17",
+          "name": "Infosys",
+          "percent_of_networth": 0.55,
+          "platform": "SHAREKHAN",
+          "price_fallback_reason": null,
+          "price_provider": "synthetic",
+          "price_source": "synthetic",
+          "quantity": 20.0,
+          "quote_age_days": 1,
+          "quote_currency": "INR",
+          "quote_freshness_status": "fresh",
+          "symbol": "INFY",
+          "value": 391.3115
+        },
+        {
+          "asset_class": "CRYPTO",
+          "asset_id": null,
+          "avg_cost": null,
+          "exchange_code": null,
+          "geo": "US",
+          "latest_price": null,
+          "latest_trade_date": null,
+          "name": "USDT",
+          "percent_of_networth": 0.35,
+          "platform": "CRYPTO",
+          "price_fallback_reason": null,
+          "price_provider": null,
+          "price_source": null,
+          "quantity": null,
+          "quote_age_days": null,
+          "quote_currency": "USD",
+          "quote_freshness_status": "missing",
+          "symbol": "USDT",
+          "value": 250.0
+        }
+      ],
+      "top_movers": {
+        "compare_month": "2026-01",
+        "detractors": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 5600.0,
+            "delta_abs": -400.0,
+            "delta_pct": -0.0667,
+            "previous_value": 6000.0,
+            "symbol": "ETH"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 4,
+            "compare_month": "2026-01",
+            "current_value": 374.7104,
+            "delta_abs": -7.8983,
+            "delta_pct": -0.0206,
+            "previous_value": 382.6087,
+            "symbol": "INFY"
+          }
+        ],
+        "gainers": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 6000.0,
+            "delta_abs": 6000.0,
+            "delta_pct": null,
+            "previous_value": 0.0,
+            "symbol": "SOL"
+          },
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-01",
+            "current_value": 2000.0,
+            "delta_abs": 500.0,
+            "delta_pct": 0.3333,
+            "previous_value": 1500.0,
+            "symbol": "USDC"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 2,
+            "compare_month": "2026-01",
+            "current_value": 4088.3378,
+            "delta_abs": 219.1902,
+            "delta_pct": 0.0567,
+            "previous_value": 3869.1476,
+            "symbol": "0700"
+          }
+        ]
+      }
+    },
+    "/dividends/by-company?from_month=2026-01&to_month=2026-03&base_currency=SGD": {
+      "assumed_tax_rate": 0.0,
+      "base_currency": "SGD",
+      "country_tax_rates": {},
+      "from_month": "2026-01",
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "items": [
+        {
+          "asset_id": null,
+          "company": "RELIANCE",
+          "country": "IN",
+          "estimated_tax": 0.0,
+          "gross": 7.1902,
+          "net_received": 6.4712,
+          "payout_minus_tax": 6.4712,
+          "symbol": "RELIANCE",
+          "withholding": 0.719,
+          "yield_pct": null
+        },
+        {
+          "asset_id": null,
+          "company": "AAPL(US0000000001) Cash Dividend",
+          "country": "US",
+          "estimated_tax": 0.0,
+          "gross": 6.6818,
+          "net_received": 4.6773,
+          "payout_minus_tax": 4.6773,
+          "symbol": "AAPL(US0000000001) Cash Dividend",
+          "withholding": 2.0045,
+          "yield_pct": null
+        },
+        {
+          "asset_id": null,
+          "company": "INFY",
+          "country": "IN",
+          "estimated_tax": 0.0,
+          "gross": 5.0885,
+          "net_received": 5.0885,
+          "payout_minus_tax": 5.0885,
+          "symbol": "INFY",
+          "withholding": 0.0,
+          "yield_pct": null
+        }
+      ],
+      "to_month": "2026-03",
+      "totals": {
+        "estimated_tax": 0.0,
+        "gross": 18.9606,
+        "net_received": 16.237,
+        "payout_minus_tax": 16.237,
+        "withholding": 2.7236
+      }
+    },
+    "/dividends/expected/overview?from_month=2026-03&to_month=2026-05&base_currency=SGD": {
+      "actions_evaluated": 0,
+      "assets_with_actions": 0,
+      "assumed_tax_rate": 0.0,
+      "base_currency": "SGD",
+      "companies": [],
+      "country_tax_rates": {},
+      "from_month": "2026-03",
+      "holdings_considered": 4,
+      "monthly": {
+        "buckets": [
+          {
+            "bucket": "2026-05",
+            "estimated_tax": 0.0,
+            "gross": 0.0,
+            "payout_minus_tax": 0.0
+          }
+        ],
+        "estimated_tax": 0.0,
+        "gross": 0.0,
+        "payout_minus_tax": 0.0,
+        "period": "month"
+      },
+      "quarterly": {
+        "buckets": [
+          {
+            "bucket": "2026-Q2",
+            "estimated_tax": 0.0,
+            "gross": 0.0,
+            "payout_minus_tax": 0.0
+          }
+        ],
+        "estimated_tax": 0.0,
+        "gross": 0.0,
+        "payout_minus_tax": 0.0,
+        "period": "quarter"
+      },
+      "to_month": "2026-05",
+      "yearly": {
+        "buckets": [
+          {
+            "bucket": "2026",
+            "estimated_tax": 0.0,
+            "gross": 0.0,
+            "payout_minus_tax": 0.0
+          }
+        ],
+        "estimated_tax": 0.0,
+        "gross": 0.0,
+        "payout_minus_tax": 0.0,
+        "period": "year"
+      }
+    },
+    "/dividends/history?symbol=AAPL&from_month=2026-01&to_month=2026-03&base_currency=SGD": {
+      "asset_id": null,
+      "assumed_tax_rate": 0.0,
+      "base_currency": "SGD",
+      "company": null,
+      "country_tax_rates": {},
+      "events": [],
+      "from_month": "2026-01",
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "symbol": "AAPL",
+      "to_month": "2026-03",
+      "totals": {
+        "estimated_tax": 0.0,
+        "gross": 0.0,
+        "net_received": 0.0,
+        "payout_minus_tax": 0.0,
+        "withholding": 0.0
+      },
+      "yield_pct": null
+    },
+    "/dividends/history?symbol=RELIANCE&from_month=2026-01&to_month=2026-03&base_currency=SGD": {
+      "asset_id": null,
+      "assumed_tax_rate": 0.0,
+      "base_currency": "SGD",
+      "company": "RELIANCE",
+      "country_tax_rates": {},
+      "events": [
+        {
+          "estimated_tax": 0.0,
+          "gross": 7.1902,
+          "month": "2026-02",
+          "net_received": 6.4712,
+          "payout_minus_tax": 6.4712,
+          "withholding": 0.719
+        }
+      ],
+      "from_month": "2026-01",
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "symbol": "RELIANCE",
+      "to_month": "2026-03",
+      "totals": {
+        "estimated_tax": 0.0,
+        "gross": 7.1902,
+        "net_received": 6.4712,
+        "payout_minus_tax": 6.4712,
+        "withholding": 0.719
+      },
+      "yield_pct": null
+    },
+    "/dividends/summary?from_month=2026-01&to_month=2026-03&base_currency=SGD": {
+      "assumed_tax_rate": 0.0,
+      "base_currency": "SGD",
+      "buckets": [
+        {
+          "bucket": "2026-02",
+          "estimated_tax": 0.0,
+          "gross": 13.872,
+          "net_received": 11.1485,
+          "payout_minus_tax": 11.1485,
+          "withholding": 2.7236
+        },
+        {
+          "bucket": "2026-03",
+          "estimated_tax": 0.0,
+          "gross": 5.0885,
+          "net_received": 5.0885,
+          "payout_minus_tax": 5.0885,
+          "withholding": 0.0
+        }
+      ],
+      "country_tax_rates": {},
+      "from_month": "2026-01",
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "period": "month",
+      "to_month": "2026-03",
+      "totals": {
+        "estimated_tax": 0.0,
+        "gross": 18.9606,
+        "net_received": 16.237,
+        "payout_minus_tax": 16.237,
+        "withholding": 2.7236
+      }
+    },
+    "/spending/cash-flow-detail?month=2026-02&base_currency=SGD": {
+      "analytics": {
+        "answers": [
+          {
+            "answer": "Most outflows went to Rent (65.7% / 2500), Shopping (31.8% / 1210), Dining (2.5% / 95).",
+            "question": "Where did my money go this month?"
+          },
+          {
+            "answer": "Rent at 2500, Shopping at 1210, Dining at 95",
+            "question": "What were my top spending categories this month?"
+          },
+          {
+            "answer": "Saved 63.3% and spent 36.7% of inflows.",
+            "question": "How much of my income was saved vs spent?"
+          },
+          {
+            "answer": "Net cash flow was 6561 this month versus 4528 in 2026-01, a +2033 change. Inflows changed by +2368 and outflows changed by +334. Savings rate moved from 56.6% to 63.3%.",
+            "question": "What changed versus last month?"
+          },
+          {
+            "answer": "Rent (2500), Dining (95)",
+            "question": "Which recurring expenses are driving most of my outflows?"
+          },
+          {
+            "answer": "Salary 98.4%, dividends 0.1%, transfers 0.0%.",
+            "question": "What percentage of inflows came from salary, dividends, and transfers?"
+          },
+          {
+            "answer": "Shopping (-1210), Withholding tax (-1)",
+            "question": "Which categories explain most of the deterioration in free cash flow?"
+          }
+        ],
+        "burn_rate": 0.3671,
+        "deterioration_drivers": [
+          {
+            "current_amount": -1210.4,
+            "delta_amount": -1210.4,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Shopping",
+            "prior_amount": 0.0
+          },
+          {
+            "current_amount": -0.719,
+            "delta_amount": -0.719,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Withholding tax",
+            "prior_amount": 0.0
+          }
+        ],
+        "free_cash_flow_change_vs_prior_month": 2033.4348,
+        "inflow_categories": [
+          {
+            "amount": 10200.0,
+            "label": "Salary",
+            "percent": 0.9838
+          },
+          {
+            "amount": 160.3636,
+            "label": "Interest",
+            "percent": 0.0155
+          },
+          {
+            "amount": 7.1902,
+            "label": "Dividend",
+            "percent": 0.0007
+          }
+        ],
+        "inflow_recurring_split": [
+          {
+            "amount": 10367.5539,
+            "label": "Recurring",
+            "percent": 1.0
+          }
+        ],
+        "inflow_source_mix": [
+          {
+            "amount": 10200.0,
+            "label": "Salary",
+            "percent": 0.9838
+          },
+          {
+            "amount": 160.3636,
+            "label": "Interest",
+            "percent": 0.0155
+          },
+          {
+            "amount": 7.1902,
+            "label": "Dividends",
+            "percent": 0.0007
+          }
+        ],
+        "largest_inflow_drivers": [
+          {
+            "amount": 10200.0,
+            "label": "Salary",
+            "percent": 0.9838
+          },
+          {
+            "amount": 160.3636,
+            "label": "Interest",
+            "percent": 0.0155
+          },
+          {
+            "amount": 7.1902,
+            "label": "Dividend",
+            "percent": 0.0007
+          }
+        ],
+        "outflow_categories": [
+          {
+            "amount": 2500.0,
+            "label": "Rent",
+            "percent": 0.6568
+          },
+          {
+            "amount": 1210.4,
+            "label": "Shopping",
+            "percent": 0.318
+          },
+          {
+            "amount": 95.0,
+            "label": "Dining",
+            "percent": 0.025
+          },
+          {
+            "amount": 0.719,
+            "label": "Withholding tax",
+            "percent": 0.0002
+          }
+        ],
+        "outflow_category_deltas": [
+          {
+            "current_amount": 1210.4,
+            "delta_amount": 1210.4,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Shopping",
+            "prior_amount": 0.0
+          },
+          {
+            "current_amount": 0.719,
+            "delta_amount": 0.719,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Withholding tax",
+            "prior_amount": 0.0
+          }
+        ],
+        "outflow_fixed_variable_split": [
+          {
+            "amount": 2500.719,
+            "label": "Fixed",
+            "percent": 0.657
+          },
+          {
+            "amount": 1305.4,
+            "label": "Variable",
+            "percent": 0.343
+          }
+        ],
+        "outflow_recurring_split": [
+          {
+            "amount": 2595.0,
+            "label": "Recurring",
+            "percent": 0.6818
+          },
+          {
+            "amount": 1211.119,
+            "label": "One-off",
+            "percent": 0.3182
+          }
+        ],
+        "prior_month": "2026-01",
+        "prior_month_net": 4528.0,
+        "top_outflow_merchants": [
+          {
+            "amount": 2500.0,
+            "merchant": "Synthetic Landlord",
+            "percent": 0.6568,
+            "transaction_count": 1
+          },
+          {
+            "amount": 1210.4,
+            "merchant": "Synthetic Store",
+            "percent": 0.318,
+            "transaction_count": 1
+          },
+          {
+            "amount": 95.0,
+            "merchant": "Synthetic Cafe",
+            "percent": 0.025,
+            "transaction_count": 1
+          },
+          {
+            "amount": 0.719,
+            "merchant": "RELIANCE",
+            "percent": 0.0002,
+            "transaction_count": 1
+          }
+        ],
+        "trend": [
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-09",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-10",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-11",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": 0.0,
+            "inflows": 8000.0,
+            "month": "2025-12",
+            "net": 8000.0,
+            "outflows": 0.0,
+            "savings_rate": 1.0
+          },
+          {
+            "burn_rate": 0.434,
+            "inflows": 8000.0,
+            "month": "2026-01",
+            "net": 4528.0,
+            "outflows": 3472.0,
+            "savings_rate": 0.566
+          },
+          {
+            "burn_rate": 0.3671,
+            "inflows": 10367.5539,
+            "month": "2026-02",
+            "net": 6561.4348,
+            "outflows": 3806.119,
+            "savings_rate": 0.6329
+          }
+        ],
+        "waterfall": {
+          "availability_message": "Cash reconciliation needs exact cash snapshots on 2026-02-01 and 2026-03-01. Available snapshots are 2026-01-31 and 2026-02-28.",
+          "boundary_exact": false,
+          "ending_cash": 61000.8589,
+          "inflows": 10367.5539,
+          "investment_and_fx_effects": -3255.5401,
+          "other_cash_movements": -3255.5401,
+          "outflows": 3818.119,
+          "snapshot_end_as_of": "2026-02-28T00:00:00+00:00",
+          "snapshot_end_boundary_at": "2026-03-01T00:00:00+00:00",
+          "snapshot_start_as_of": "2026-01-31T00:00:00+00:00",
+          "snapshot_start_boundary_at": "2026-02-01T00:00:00+00:00",
+          "starting_cash": 56706.9641,
+          "transfers_and_funding": 1000.0
+        }
+      },
+      "base_currency": "SGD",
+      "calculation": "Net = income_total - expense_total using month-scoped transactions with types INCOME, EXPENSE, FEE, TAX, INTEREST, TRANSFER. Rows resolved under Transfer categories or explicit source transfer categories are excluded.",
+      "expense_total": 3806.119,
+      "expenses": {
+        "included_types": [
+          "EXPENSE",
+          "FEE",
+          "TAX",
+          "INTEREST"
+        ],
+        "total": 3806.119,
+        "transaction_count": 4,
+        "transactions": [
+          {
+            "account_id": 105,
+            "account_name": "DBS Card",
+            "account_type": "CREDIT_CARD",
+            "amount": -95.0,
+            "base_amount": -95.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Cafe",
+            "notes": null,
+            "raw_category": "Dining",
+            "resolved_category": "Dining",
+            "resolved_category_id": null,
+            "transaction_id": 17,
+            "ts": "2026-02-18T09:00:00+00:00",
+            "type": "EXPENSE"
+          },
+          {
+            "account_id": 104,
+            "account_name": "Sharekhan Demat",
+            "account_type": "BROKER",
+            "amount": -45.0,
+            "base_amount": -0.719,
+            "category_source": "parser",
+            "currency": "INR",
+            "merchant_counterparty": "RELIANCE",
+            "notes": null,
+            "raw_category": "Withholding tax",
+            "resolved_category": "Withholding tax",
+            "resolved_category_id": null,
+            "transaction_id": 12,
+            "ts": "2026-02-14T09:00:00+00:00",
+            "type": "TAX"
+          },
+          {
+            "account_id": 105,
+            "account_name": "DBS Card",
+            "account_type": "CREDIT_CARD",
+            "amount": -1210.4,
+            "base_amount": -1210.4,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Store",
+            "notes": null,
+            "raw_category": "Shopping",
+            "resolved_category": "Shopping",
+            "resolved_category_id": null,
+            "transaction_id": 16,
+            "ts": "2026-02-08T09:00:00+00:00",
+            "type": "EXPENSE"
+          },
+          {
+            "account_id": 101,
+            "account_name": "DBS Savings",
+            "account_type": "BANK",
+            "amount": -2500.0,
+            "base_amount": -2500.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Landlord",
+            "notes": null,
+            "raw_category": "Rent",
+            "resolved_category": "Rent",
+            "resolved_category_id": null,
+            "transaction_id": 5,
+            "ts": "2026-02-02T09:00:00+00:00",
+            "type": "EXPENSE"
+          }
+        ]
+      },
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "income": {
+        "included_types": [
+          "INCOME"
+        ],
+        "total": 10367.5539,
+        "transaction_count": 4,
+        "transactions": [
+          {
+            "account_id": 101,
+            "account_name": "DBS Savings",
+            "account_type": "BANK",
+            "amount": 8000.0,
+            "base_amount": 8000.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Employer",
+            "notes": null,
+            "raw_category": "Salary",
+            "resolved_category": "Salary",
+            "resolved_category_id": null,
+            "transaction_id": 6,
+            "ts": "2026-02-24T09:00:00+00:00",
+            "type": "INCOME"
+          },
+          {
+            "account_id": 102,
+            "account_name": "HSBC USD Saver",
+            "account_type": "BANK",
+            "amount": 120.0,
+            "base_amount": 160.3636,
+            "category_source": "parser",
+            "currency": "USD",
+            "merchant_counterparty": "HSBC",
+            "notes": null,
+            "raw_category": "Interest",
+            "resolved_category": "Interest",
+            "resolved_category_id": null,
+            "transaction_id": 9,
+            "ts": "2026-02-15T09:00:00+00:00",
+            "type": "INCOME"
+          },
+          {
+            "account_id": 104,
+            "account_name": "Sharekhan Demat",
+            "account_type": "BROKER",
+            "amount": 450.0,
+            "base_amount": 7.1902,
+            "category_source": "parser",
+            "currency": "INR",
+            "merchant_counterparty": "RELIANCE",
+            "notes": null,
+            "raw_category": "Dividend",
+            "resolved_category": "Dividend",
+            "resolved_category_id": null,
+            "transaction_id": 11,
+            "ts": "2026-02-14T09:00:00+00:00",
+            "type": "INCOME"
+          },
+          {
+            "account_id": 106,
+            "account_name": "DBS Altitude",
+            "account_type": "CREDIT_CARD",
+            "amount": 2200.0,
+            "base_amount": 2200.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Employer",
+            "notes": null,
+            "raw_category": "Salary",
+            "resolved_category": "Salary",
+            "resolved_category_id": null,
+            "transaction_id": 21,
+            "ts": "2026-02-03T09:00:00+00:00",
+            "type": "INCOME"
+          }
+        ]
+      },
+      "income_total": 10367.5539,
+      "month": "2026-02",
+      "net": 6561.4348,
+      "savings_rate": 0.6329
+    },
+    "/spending/cash-flow-detail?month=2026-03&base_currency=SGD": {
+      "analytics": {
+        "answers": [
+          {
+            "answer": "Most outflows went to Rent (64.6% / 2500), Travel (18.4% / 713), Groceries (17.0% / 660).",
+            "question": "Where did my money go this month?"
+          },
+          {
+            "answer": "Rent at 2500, Travel at 713, Groceries at 660",
+            "question": "What were my top spending categories this month?"
+          },
+          {
+            "answer": "Saved 0.0% of inflows and spent 100.0% of them. Outflows exceeded inflows by 3418, which had to come from existing cash or other funding sources.",
+            "question": "How much of my income was saved vs spent?"
+          },
+          {
+            "answer": "Net cash flow was -3418 this month versus 6561 in 2026-02, a -9979 change. Inflows changed by -9912 and outflows changed by +67. Savings rate moved from 63.3% to -751.0%.",
+            "question": "What changed versus last month?"
+          },
+          {
+            "answer": "Rent (2500), Groceries (660)",
+            "question": "Which recurring expenses are driving most of my outflows?"
+          },
+          {
+            "answer": "Salary 0.0%, dividends 1.1%, transfers 0.0%.",
+            "question": "What percentage of inflows came from salary, dividends, and transfers?"
+          },
+          {
+            "answer": "Salary (-10200), Travel (-713), Groceries (-660)",
+            "question": "Which categories explain most of the deterioration in free cash flow?"
+          }
+        ],
+        "burn_rate": 8.5101,
+        "deterioration_drivers": [
+          {
+            "current_amount": 0.0,
+            "delta_amount": -10200.0,
+            "delta_percent": -1.0,
+            "direction": "deteriorated",
+            "label": "Salary",
+            "prior_amount": 10200.0
+          },
+          {
+            "current_amount": -712.8541,
+            "delta_amount": -712.8541,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Travel",
+            "prior_amount": 0.0
+          },
+          {
+            "current_amount": -660.0,
+            "delta_amount": -660.0,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Groceries",
+            "prior_amount": 0.0
+          },
+          {
+            "current_amount": 0.0,
+            "delta_amount": -160.3636,
+            "delta_percent": -1.0,
+            "direction": "deteriorated",
+            "label": "Interest",
+            "prior_amount": 160.3636
+          },
+          {
+            "current_amount": 5.0885,
+            "delta_amount": -2.1017,
+            "delta_percent": -0.2923,
+            "direction": "deteriorated",
+            "label": "Dividend",
+            "prior_amount": 7.1902
+          }
+        ],
+        "free_cash_flow_change_vs_prior_month": -9979.2005,
+        "inflow_categories": [
+          {
+            "amount": 450.0,
+            "label": "Refund",
+            "percent": 0.9888
+          },
+          {
+            "amount": 5.0885,
+            "label": "Dividend",
+            "percent": 0.0112
+          }
+        ],
+        "inflow_recurring_split": [
+          {
+            "amount": 450.0,
+            "label": "One-off",
+            "percent": 0.9888
+          },
+          {
+            "amount": 5.0885,
+            "label": "Recurring",
+            "percent": 0.0112
+          }
+        ],
+        "inflow_source_mix": [
+          {
+            "amount": 450.0,
+            "label": "Other",
+            "percent": 0.9888
+          },
+          {
+            "amount": 5.0885,
+            "label": "Dividends",
+            "percent": 0.0112
+          }
+        ],
+        "largest_inflow_drivers": [
+          {
+            "amount": 450.0,
+            "label": "Refund",
+            "percent": 0.9888
+          },
+          {
+            "amount": 5.0885,
+            "label": "Dividend",
+            "percent": 0.0112
+          }
+        ],
+        "outflow_categories": [
+          {
+            "amount": 2500.0,
+            "label": "Rent",
+            "percent": 0.6455
+          },
+          {
+            "amount": 712.8541,
+            "label": "Travel",
+            "percent": 0.1841
+          },
+          {
+            "amount": 660.0,
+            "label": "Groceries",
+            "percent": 0.1704
+          }
+        ],
+        "outflow_category_deltas": [
+          {
+            "current_amount": 712.8541,
+            "delta_amount": 712.8541,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Travel",
+            "prior_amount": 0.0
+          },
+          {
+            "current_amount": 660.0,
+            "delta_amount": 660.0,
+            "delta_percent": null,
+            "direction": "deteriorated",
+            "label": "Groceries",
+            "prior_amount": 0.0
+          }
+        ],
+        "outflow_fixed_variable_split": [
+          {
+            "amount": 2500.0,
+            "label": "Fixed",
+            "percent": 0.6455
+          },
+          {
+            "amount": 1372.8541,
+            "label": "Variable",
+            "percent": 0.3545
+          }
+        ],
+        "outflow_recurring_split": [
+          {
+            "amount": 3160.0,
+            "label": "Recurring",
+            "percent": 0.8159
+          },
+          {
+            "amount": 712.8541,
+            "label": "One-off",
+            "percent": 0.1841
+          }
+        ],
+        "prior_month": "2026-02",
+        "prior_month_net": 6561.4348,
+        "top_outflow_merchants": [
+          {
+            "amount": 2500.0,
+            "merchant": "Synthetic Landlord",
+            "percent": 0.6455,
+            "transaction_count": 1
+          },
+          {
+            "amount": 660.0,
+            "merchant": "Synthetic Mart",
+            "percent": 0.1704,
+            "transaction_count": 1
+          },
+          {
+            "amount": 402.3041,
+            "merchant": "Synthetic Airline",
+            "percent": 0.1039,
+            "transaction_count": 1
+          },
+          {
+            "amount": 310.55,
+            "merchant": "Synthetic Hotel",
+            "percent": 0.0802,
+            "transaction_count": 1
+          }
+        ],
+        "trend": [
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-10",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": null,
+            "inflows": 0.0,
+            "month": "2025-11",
+            "net": 0.0,
+            "outflows": 0.0,
+            "savings_rate": null
+          },
+          {
+            "burn_rate": 0.0,
+            "inflows": 8000.0,
+            "month": "2025-12",
+            "net": 8000.0,
+            "outflows": 0.0,
+            "savings_rate": 1.0
+          },
+          {
+            "burn_rate": 0.434,
+            "inflows": 8000.0,
+            "month": "2026-01",
+            "net": 4528.0,
+            "outflows": 3472.0,
+            "savings_rate": 0.566
+          },
+          {
+            "burn_rate": 0.3671,
+            "inflows": 10367.5539,
+            "month": "2026-02",
+            "net": 6561.4348,
+            "outflows": 3806.119,
+            "savings_rate": 0.6329
+          },
+          {
+            "burn_rate": 8.5101,
+            "inflows": 455.0885,
+            "month": "2026-03",
+            "net": -3417.7656,
+            "outflows": 3872.8541,
+            "savings_rate": -7.5101
+          }
+        ],
+        "waterfall": {
+          "availability_message": "Cash reconciliation needs exact cash snapshots on 2026-03-01 and 2026-04-01. Available snapshots are 2026-02-28 and 2026-03-16.",
+          "boundary_exact": false,
+          "ending_cash": 61323.7327,
+          "inflows": 455.0885,
+          "investment_and_fx_effects": 3740.6394,
+          "other_cash_movements": 3740.6394,
+          "outflows": 3872.8541,
+          "snapshot_end_as_of": "2026-03-16T00:00:00+00:00",
+          "snapshot_end_boundary_at": "2026-04-01T00:00:00+00:00",
+          "snapshot_start_as_of": "2026-02-28T00:00:00+00:00",
+          "snapshot_start_boundary_at": "2026-03-01T00:00:00+00:00",
+          "starting_cash": 61000.8589,
+          "transfers_and_funding": 0.0
+        }
+      },
+      "base_currency": "SGD",
+      "calculation": "Net = income_total - expense_total using month-scoped transactions with types INCOME, EXPENSE, FEE, TAX, INTEREST, TRANSFER. Rows resolved under Transfer categories or explicit source transfer categories are excluded.",
+      "expense_total": 3872.8541,
+      "expenses": {
+        "included_types": [
+          "EXPENSE",
+          "FEE",
+          "TAX",
+          "INTEREST"
+        ],
+        "total": 3872.8541,
+        "transaction_count": 4,
+        "transactions": [
+          {
+            "account_id": 102,
+            "account_name": "HSBC USD Saver",
+            "account_type": "BANK",
+            "amount": -300.0,
+            "base_amount": -402.3041,
+            "category_source": "parser",
+            "currency": "USD",
+            "merchant_counterparty": "Synthetic Airline",
+            "notes": null,
+            "raw_category": "Travel",
+            "resolved_category": "Travel",
+            "resolved_category_id": null,
+            "transaction_id": 10,
+            "ts": "2026-03-15T09:00:00+00:00",
+            "type": "EXPENSE"
+          },
+          {
+            "account_id": 105,
+            "account_name": "DBS Card",
+            "account_type": "CREDIT_CARD",
+            "amount": -310.55,
+            "base_amount": -310.55,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Hotel",
+            "notes": null,
+            "raw_category": "Travel",
+            "resolved_category": "Travel",
+            "resolved_category_id": null,
+            "transaction_id": 20,
+            "ts": "2026-03-14T09:00:00+00:00",
+            "type": "EXPENSE"
+          },
+          {
+            "account_id": 105,
+            "account_name": "DBS Card",
+            "account_type": "CREDIT_CARD",
+            "amount": -660.0,
+            "base_amount": -660.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Mart",
+            "notes": null,
+            "raw_category": "Groceries",
+            "resolved_category": "Groceries",
+            "resolved_category_id": null,
+            "transaction_id": 19,
+            "ts": "2026-03-03T09:00:00+00:00",
+            "type": "EXPENSE"
+          },
+          {
+            "account_id": 101,
+            "account_name": "DBS Savings",
+            "account_type": "BANK",
+            "amount": -2500.0,
+            "base_amount": -2500.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Landlord",
+            "notes": null,
+            "raw_category": "Rent",
+            "resolved_category": "Rent",
+            "resolved_category_id": null,
+            "transaction_id": 7,
+            "ts": "2026-03-02T09:00:00+00:00",
+            "type": "EXPENSE"
+          }
+        ]
+      },
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "income": {
+        "included_types": [
+          "INCOME"
+        ],
+        "total": 455.0885,
+        "transaction_count": 2,
+        "transactions": [
+          {
+            "account_id": 101,
+            "account_name": "DBS Savings",
+            "account_type": "BANK",
+            "amount": 450.0,
+            "base_amount": 450.0,
+            "category_source": "parser",
+            "currency": "SGD",
+            "merchant_counterparty": "Synthetic Shop",
+            "notes": null,
+            "raw_category": "Refund",
+            "resolved_category": "Refund",
+            "resolved_category_id": null,
+            "transaction_id": 8,
+            "ts": "2026-03-10T09:00:00+00:00",
+            "type": "INCOME"
+          },
+          {
+            "account_id": 104,
+            "account_name": "Sharekhan Demat",
+            "account_type": "BROKER",
+            "amount": 320.0,
+            "base_amount": 5.0885,
+            "category_source": "parser",
+            "currency": "INR",
+            "merchant_counterparty": "INFY",
+            "notes": null,
+            "raw_category": "Dividend",
+            "resolved_category": "Dividend",
+            "resolved_category_id": null,
+            "transaction_id": 13,
+            "ts": "2026-03-05T09:00:00+00:00",
+            "type": "INCOME"
+          }
+        ]
+      },
+      "income_total": 455.0885,
+      "month": "2026-03",
+      "net": -3417.7656,
+      "savings_rate": -7.5101
+    },
+    "/spending/summary?month=2026-02&base_currency=SGD": {
+      "base_currency": "SGD",
+      "expense_categories": [
+        {
+          "amount": 95.0,
+          "category": "Dining"
+        },
+        {
+          "amount": 0.719,
+          "category": "Withholding tax"
+        },
+        {
+          "amount": 1210.4,
+          "category": "Shopping"
+        },
+        {
+          "amount": 2500.0,
+          "category": "Rent"
+        }
+      ],
+      "expense_total": 3806.119,
+      "fx_incomplete": false,
+      "fx_missing_currencies": [],
+      "fx_stale_currencies": [],
+      "income_categories": [
+        {
+          "amount": 10200.0,
+          "category": "Salary"
+        },
+        {
+          "amount": 160.3636,
+          "category": "Interest"
+        },
+        {
+          "amount": 7.1902,
+          "category": "Dividend"
+        }
+      ],
+      "income_total": 10367.5539,
+      "month": "2026-02",
+      "net": 6561.4348,
+      "savings_rate": 0.6329
+    }
+  },
+  "scenario": "mid"
+}
