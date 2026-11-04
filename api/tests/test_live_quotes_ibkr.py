@@ -125,13 +125,14 @@ def test_past_months_keep_ibkr_snapshot_values(client, db_engine, tmp_path, monk
     _add_quote(db_engine, TODAY - timedelta(days=1), 150.0)
     next_month = (TODAY.replace(day=1) + timedelta(days=32)).replace(day=1)
     # A past-month view is never live: snapshot values, no fallback marker.
-    from app.routers import dashboard
+    from app.valuation.clock import _anchor_ts, _parse_month
+    from app.valuation.facts import _networth_components
 
     db = sessionmaker(bind=db_engine)()
     try:
-        components = dashboard._networth_components(
+        components = _networth_components(
             db,
-            dashboard._anchor_ts(dashboard._parse_month(CURRENT_MONTH)).replace(year=next_month.year, month=next_month.month),
+            _anchor_ts(_parse_month(CURRENT_MONTH)).replace(year=next_month.year, month=next_month.month),
             "SGD",
             1,
             price_overlay=False,

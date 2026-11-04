@@ -4,7 +4,7 @@ Every write path that changes a valuation input calls ``mark_rollups_dirty``
 with the earliest date it changed, inside the same transaction as the write
 (so a rolled-back import leaves no mark). The History timeline recomputes the
 affected ``wealth_monthly_rollups`` rows on its next read, and the IBKR/crypto
-schedulers do the same right after their jobs (``app.routers.dashboard``).
+schedulers do the same right after their jobs (``app.valuation.history``).
 
 Data dated D is read by every snapshot anchor on or after D (canonical reads are
 ``report_date <= anchor_date``; card liabilities look back up to two months), so
@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import allow_legacy_null_ownership
+from app.core.clock import app_today
 
 logger = logging.getLogger("capitalos.wealth_rollups")
 
@@ -44,11 +45,9 @@ def _snapshot_day() -> int:
 
 
 def latest_completed_anchor_date(now: Optional[datetime] = None) -> date:
-    """The newest snapshot anchor (SNAPSHOT_DAY, 00:00 UTC) at or before now.
-
-    Mirrors dashboard._anchor_ts / _latest_completed_month_start, without
-    importing the router."""
-    today = (now or _utc_now()).astimezone(timezone.utc).date()
+    """The newest snapshot anchor date that has passed: on or before today in
+    the app timezone, the completion rule of app.valuation.clock (#143)."""
+    today = app_today(now or _utc_now())
     year, month = today.year, today.month
     for _ in range(3):
         next_month = date(year + (month // 12), month % 12 + 1, 1)
@@ -199,7 +198,7 @@ def refresh_dirty_rollups_after_job(db: Session, job: str) -> int:
         return 0
     try:
         # The rollup computation lives with the dashboard valuation code.
-        from app.routers.dashboard import refresh_dirty_wealth_rollups
+        from app.valuation.history import refresh_dirty_wealth_rollups
 
         written = refresh_dirty_wealth_rollups(db)
         if written:

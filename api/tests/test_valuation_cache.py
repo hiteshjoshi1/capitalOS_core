@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import event, text
 from sqlalchemy.orm import Session
 
-import app.routers.dashboard as dashboard_router
+from app.valuation import clock as valuation_clock, fx as valuation_fx
 from app import fx, valuation_cache
 from app.valuation_cache import request_scope, valuation_cached
 from tests.canonical_test_helpers import (
@@ -25,7 +25,7 @@ def frozen_now(monkeypatch):
     """"Now" is 2026-03-10 18:00 SGT for live views: March is the open month,
     February closed. (Fixed, so cached and uncached responses carry the same
     live timestamps.)"""
-    monkeypatch.setattr(dashboard_router, "_current_anchor_ts", lambda: _NOW)
+    monkeypatch.setattr(valuation_clock, "_current_anchor_ts", lambda: _NOW)
 
 
 @pytest.fixture()
@@ -346,7 +346,7 @@ def test_expected_dividends_batched_reads_pick_latest_rows_per_asset(client: Tes
 
 
 def test_cash_trend_stablecoins_use_each_months_latest_snapshot(client: TestClient, db_engine, monkeypatch):
-    monkeypatch.setattr(dashboard_router, "get_rates", lambda _date, base, symbols: {base: 1.0, **{s: 1.0 for s in symbols}})
+    monkeypatch.setattr(valuation_fx, "get_rates", lambda _date, base, symbols: {base: 1.0, **{s: 1.0 for s in symbols}})
     with db_engine.begin() as conn:
         conn.execute(
             text(

@@ -27,9 +27,14 @@ def app_timezone() -> ZoneInfo:
     return ZoneInfo(DEFAULT_APP_TZ)
 
 
-def app_today(now: datetime | None = None) -> date:
-    """Today's date in the app timezone (``now`` is for tests; naive means UTC)."""
+def app_now(now: datetime | None = None) -> datetime:
+    """Now in the app timezone, tz-aware (``now`` is for tests; naive means UTC)."""
     instant = now or datetime.now(tz=timezone.utc)
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
-    return instant.astimezone(app_timezone()).date()
+    return instant.astimezone(app_timezone())
+
+
+def app_today(now: datetime | None = None) -> date:
+    """Today's date in the app timezone (``now`` is for tests; naive means UTC)."""
+    return app_now(now).date()

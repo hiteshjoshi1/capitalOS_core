@@ -153,7 +153,7 @@ def test_snapshot_views_report_no_fallback_reason(household):
 
 def test_dividend_yield_denominator_follows_the_same_rule(household, db_engine):
     from app.routers.dividends import _latest_asset_market_values
-    from app.routers.dashboard import _current_anchor_ts
+    from app.valuation.clock import _current_anchor_ts
 
     with db_engine.begin() as conn:
         conn.execute(text("DELETE FROM prices WHERE asset_id = :a AND trade_date >= '2026-03-01'"), {"a": RELIANCE})

@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.routers.dashboard import (
+from app.valuation.facts import _networth_components
+from app.valuation.history import (
     _backfill_wealth_rollups,
-    _networth_components,
     _platform_freshness_entries,
     _upsert_wealth_rollup,
     _wealth_rollup_row,
@@ -45,7 +45,7 @@ def test_wealth_rollup_row_matches_networth_components(db_engine, monkeypatch):
         market_price=500.0,
         platform_code="IBKR",
     )
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
 
     db = Session(bind=db_engine)
     try:
@@ -75,7 +75,7 @@ def test_platform_freshness_distinguishes_daily_vs_manual_cadence(db_engine, mon
         db_engine, account_id=951, asset_id=951, as_of=stale_date,
         quantity=20, market_value_base=3000.0, market_price=150.0, platform_code="SHAREKHAN",
     )
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
 
     db = Session(bind=db_engine)
     try:
@@ -122,8 +122,8 @@ def test_upsert_wealth_rollup_is_idempotent(db_engine):
 def test_backfill_writes_completed_months_only(db_engine, monkeypatch):
     """The open month isn't stored (#138): "now" covers it."""
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
-    monkeypatch.setattr("app.routers.dashboard._current_anchor_ts", lambda: datetime(2026, 7, 13, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.clock._current_anchor_ts", lambda: datetime(2026, 7, 13, tzinfo=timezone.utc))
     db = Session(bind=db_engine)
     try:
         written = _backfill_wealth_rollups(db, 1, "SGD", months=6)
@@ -143,8 +143,8 @@ def test_backfill_writes_completed_months_only(db_engine, monkeypatch):
 
 def test_net_worth_timeline_endpoint_returns_points_with_upload_marker(client: TestClient, db_engine, monkeypatch):
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
-    monkeypatch.setattr("app.routers.dashboard._current_anchor_ts", lambda: datetime(2026, 7, 13, tzinfo=timezone.utc))
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.clock._current_anchor_ts", lambda: datetime(2026, 7, 13, tzinfo=timezone.utc))
     _seed_platform_account(db_engine, account_id=960, platform="IBKR", asset_id=960, symbol="GOOGL")
     seed_canonical_position_snapshot_for_test(
         db_engine, account_id=960, asset_id=960, as_of=date(2026, 6, 5),
@@ -183,7 +183,7 @@ def test_net_worth_timeline_read_endpoint_does_not_recompute_past_months(client:
     """The read endpoint must stay a pure scan for rows that aren't stale —
     that's the whole point of pre-aggregating. Prove it by poisoning stored
     rows directly in the DB and confirming a plain GET doesn't touch them."""
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
     assert client.post("/dashboard/net-worth-timeline/backfill?months=6&base_currency=SGD").status_code == 200
 
     with db_engine.begin() as conn:
@@ -200,7 +200,7 @@ def test_net_worth_timeline_read_endpoint_does_not_recompute_past_months(client:
 
 
 def test_net_worth_timeline_movers_endpoint_diffs_two_historical_anchors(client: TestClient, db_engine, monkeypatch):
-    monkeypatch.setattr("app.routers.dashboard.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
+    monkeypatch.setattr("app.valuation.fx.get_rates", lambda *_a, **_k: {"SGD": 1.0, "USD": 1.0})
     _seed_platform_account(db_engine, account_id=970, platform="IBKR", asset_id=970, symbol="NVDA")
     seed_canonical_position_snapshot_for_test(
         db_engine, account_id=970, asset_id=970, as_of=date(2025, 5, 15),
