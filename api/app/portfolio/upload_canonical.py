@@ -27,6 +27,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.portfolio.authority import ensure_window
 from app.ingestion.as_of import AsOfSource, as_of_metadata, resolve_upload_as_of
 from app.ingestion.parsers.base import ParseResult
 from app.wealth_rollup_dirty import mark_rollups_dirty
@@ -258,41 +259,18 @@ def _ensure_upload_authority_window(
     source_kind: str,
     effective_from: date,
 ) -> None:
-    """Idempotently create a source authority window for an upload platform."""
-    exists = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM portfolio_source_authority_windows
-            WHERE broker_account_id = :broker_account_id
-              AND source_kind = :source_kind
-              AND fact_scope = 'holdings'
-              AND effective_from = :effective_from
-            LIMIT 1
-            """
-        ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": source_kind,
-            "effective_from": effective_from,
-        },
-    ).fetchone()
-    if exists:
-        return
-    db.execute(
-        text(
-            """
-            INSERT INTO portfolio_source_authority_windows
-              (broker_account_id, source_kind, fact_scope, effective_from, authority_status)
-            VALUES
-              (:broker_account_id, :source_kind, 'holdings', :effective_from, 'authoritative')
-            """
-        ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": source_kind,
-            "effective_from": effective_from,
-        },
+    """The upload source's one 'holdings' window on this broker account (#140).
+
+    Created at the first authoritative upload's date; later uploads, older or
+    newer, leave it as it is (only ``authority.move_window`` moves a window).
+    """
+    ensure_window(
+        db,
+        broker_account_id=broker_account_id,
+        source_kind=source_kind,
+        fact_scope="holdings",
+        effective_from=effective_from,
+        reason="upload: first authoritative upload",
     )
 
 

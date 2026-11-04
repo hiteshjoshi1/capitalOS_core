@@ -75,6 +75,12 @@ services:
     build:
       context: ./api
       target: dev
+    # The api volumes plus the migrations (read-only), so tests can run the real SQL (#140).
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config:ro
+      - ./api/app:/app/app:ro
+      - ./migrations:/app/migrations:ro
     profiles:
       - tools
 

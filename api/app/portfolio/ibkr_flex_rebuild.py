@@ -46,6 +46,7 @@ from app.portfolio.ibkr_flex import (
     _now,
     parse_flex_statement,
 )
+from app.portfolio.authority import REFERENCE, get_window
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
 
@@ -140,28 +141,8 @@ def _restored_authority_status(db: Session, broker_account_id: int, report_date:
     ).fetchone()
     if nav_status is not None:
         return str(nav_status[0])
-    window = db.execute(
-        text(
-            """
-            SELECT 1
-            FROM portfolio_source_authority_windows
-            WHERE broker_account_id = :broker_account_id
-              AND source_kind = :source_kind
-              AND fact_scope = :fact_scope
-              AND authority_status = 'authoritative'
-              AND effective_from <= :report_date
-              AND (effective_to IS NULL OR effective_to >= :report_date)
-            LIMIT 1
-            """
-        ),
-        {
-            "broker_account_id": broker_account_id,
-            "source_kind": SOURCE_TYPE,
-            "fact_scope": ALL_FACT_SCOPE,
-            "report_date": report_date,
-        },
-    ).fetchone()
-    return "authoritative" if window is not None else "reference"
+    window = get_window(db, broker_account_id, SOURCE_TYPE, ALL_FACT_SCOPE)
+    return window.status_for(report_date) if window is not None else REFERENCE
 
 
 def _nav_stock_base(db: Session, broker_account_id: int, report_date: date) -> Decimal | None:
