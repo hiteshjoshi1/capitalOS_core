@@ -267,20 +267,32 @@ def test_cash_trend_points_equal_each_months_cash_page(household):
         assert trend[month] == pytest.approx(page["current_total"], abs=TOL), month
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="#143 (one anchor rule in one timezone, finding 1.10): on the 1st before 08:00 SGT the summary "
-    "treats last month as completed (UTC month, SGT clock) while History doesn't store it yet",
-)
 def test_first_of_month_dashboard_and_history_agree(household_first):
     """At 06:00 SGT on 1 April the dashboard's snapshot figures and History's
-    newest point must describe the same completed month."""
+    newest point must describe the same completed month (#143: one anchor
+    rule in the app timezone; it is already 1 April there)."""
     summary = _summary(household_first, "2026-04")
     points = _timeline(household_first, backfill=True)["points"]
     newest = points[-1]
+    assert newest["month"] == "2026-03"
     assert summary["net_worth_boundary_at"][:10] == newest["anchor_date"]
     point = {k: newest[k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
     assert point == pytest.approx(summary["net_worth"], abs=TOL)
+
+
+def test_first_of_month_last_month_is_closed_everywhere(household_first):
+    """At 06:00 SGT on 1 April, March is a completed month on every page: its
+    summary is its own month-end (the same figures the open month reports), the
+    live change compares with March's month-end, and the Stocks and Cash
+    pages browse March as a past month, not live."""
+    april = _summary(household_first, "2026-04")
+    march = _summary(household_first, "2026-03")
+    assert march["net_worth_boundary_at"] == april["net_worth_boundary_at"] == "2026-04-01T00:00:00+00:00"
+    assert march["net_worth"] == pytest.approx(april["net_worth"], abs=TOL)
+    assert april["current_net_worth_change"]["vs_prev_month"]["compare_month"] == "2026-03"
+    for path in ("/dashboard/stock-holdings", "/dashboard/cash-deposits"):
+        assert _get(household_first, f"{path}?month=2026-03&base_currency=SGD")["is_live"] is False, path
+        assert _get(household_first, f"{path}?month=2026-04&base_currency=SGD")["is_live"] is True, path
 
 
 # ─── User isolation ──────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core import clock as core_clock
 from app.valuation import clock as valuation_clock
 from app.valuation.clock import _anchor_ts, _parse_month
 from app.valuation.facts import _display_source, _networth_components
@@ -37,7 +38,7 @@ def test_current_anchor_uses_configured_local_timezone(monkeypatch):
             return utc_now.astimezone(tz) if tz else utc_now.replace(tzinfo=None)
 
     monkeypatch.setenv("TZ", "Asia/Singapore")
-    monkeypatch.setattr(valuation_clock, "datetime", FixedDateTime)
+    monkeypatch.setattr(core_clock, "datetime", FixedDateTime)
 
     anchor = valuation_clock._current_anchor_ts()
 
@@ -419,7 +420,7 @@ def test_stock_holdings_summary_is_live_for_current_month(client: TestClient, se
         def now(cls, tz=None):
             return fixed_now.astimezone(tz) if tz else fixed_now.replace(tzinfo=None)
 
-    monkeypatch.setattr("app.valuation.clock.datetime", FixedDateTime)
+    monkeypatch.setattr(core_clock, "datetime", FixedDateTime)
 
     resp = client.get("/dashboard/stock-holdings?month=2026-07&base_currency=SGD")
     assert resp.status_code == 200

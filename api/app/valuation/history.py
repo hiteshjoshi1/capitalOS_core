@@ -199,7 +199,7 @@ def _upsert_wealth_rollup(
 def _rollup_month_completed(month_start: datetime) -> bool:
     """A month gets a stored rollup row only once its own anchor has passed.
     The still-open month is covered by the timeline's live "now" point (#138)."""
-    return _anchor_ts(month_start) <= clock._current_anchor_ts()
+    return clock._anchor_passed(_anchor_ts(month_start))
 
 
 def _delete_wealth_rollup(db: Session, current_user_id: int, month: str, base_currency: str) -> None:

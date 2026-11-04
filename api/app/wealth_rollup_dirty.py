@@ -23,6 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import allow_legacy_null_ownership
+from app.core.clock import app_today
 
 logger = logging.getLogger("capitalos.wealth_rollups")
 
@@ -44,11 +45,9 @@ def _snapshot_day() -> int:
 
 
 def latest_completed_anchor_date(now: Optional[datetime] = None) -> date:
-    """The newest snapshot anchor (SNAPSHOT_DAY, 00:00 UTC) at or before now.
-
-    Mirrors dashboard._anchor_ts / _latest_completed_month_start, without
-    importing the router."""
-    today = (now or _utc_now()).astimezone(timezone.utc).date()
+    """The newest snapshot anchor date that has passed: on or before today in
+    the app timezone, the completion rule of app.valuation.clock (#143)."""
+    today = app_today(now or _utc_now())
     year, month = today.year, today.month
     for _ in range(3):
         next_month = date(year + (month // 12), month % 12 + 1, 1)
