@@ -13,7 +13,9 @@
   the exception (``_card_transaction_in_window``): they count before midnight
   of the anchor date *in the user's timezone*; a date-only timestamp (stored
   as 00:00 UTC, as statement imports write them) is that calendar date and is
-  compared by date (#202).
+  compared by date (#202). Spending and dashboard cash-flow months use the
+  same rule (``_transaction_in_month_window``, ``_transaction_month_key``,
+  #211): midnight to midnight in the user's timezone.
 - An anchor has **passed** (its month is completed) once today, in the user's
   timezone, is on or after its date (``_anchor_passed``). Dashboard snapshot
   views, the live comparisons, History and its dirty marks
@@ -130,6 +132,38 @@ def _card_transaction_in_window(ts: datetime, start_day: date, anchor_ts: dateti
     if snapshot:
         return ts < _local_midnight(anchor_ts.astimezone(timezone.utc).date())
     return ts < anchor_ts
+
+
+def _transaction_date(ts: Any) -> date:
+    """The user's calendar date of a transaction timestamp (#202, #211): a
+    date-only ``ts`` (00:00 UTC) is that date; a timed one is the date of the
+    instant in the user's timezone. For a month window this is the same rule
+    as ``_card_transaction_in_window`` with a date anchor."""
+    normalized = _normalize_ts(ts)
+    if normalized is None:
+        raise ValueError(f"not a timestamp: {ts!r}")
+    if _is_utc_midnight(normalized):
+        return normalized.astimezone(timezone.utc).date()
+    return _local_date(normalized)
+
+
+def _transaction_month_key(ts: Any) -> str:
+    """'YYYY-MM' of ``_transaction_date(ts)``: the month a transaction counts in."""
+    return _transaction_date(ts).strftime("%Y-%m")
+
+
+def _transaction_in_month_window(ts: Any, start: datetime, end: datetime) -> bool:
+    """Whether a transaction counts in the calendar window [start, end) (month
+    starts, 00:00 UTC as ``_parse_month`` gives them) by the user's calendar:
+    spending and cash flow (#211) use the card-month rule (#202)."""
+    return _card_transaction_in_window(ts, start.astimezone(timezone.utc).date(), end)
+
+
+def _transaction_query_bounds(start: datetime, end: datetime) -> tuple[datetime, datetime]:
+    """SQL bounds for a calendar window: a day of slack either side (local
+    midnight is within 14 hours of UTC midnight); ``_transaction_in_month_window``
+    then decides each row."""
+    return start - timedelta(days=1), end + timedelta(days=1)
 
 
 def _app_today() -> date:
