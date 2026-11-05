@@ -19,6 +19,7 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/49
 - [x] Batch 5: SQLAlchemy 2.1.4 (#88; 22 days, own series per D-14; greenlet no longer needed), cosign 3.1.4 (#70) and Trivy 0.76.1 under D-18 (`make image-fixes`: clear 20 and 2 HIGH). Merged via #103, deployed b33139b.
 - [ ] Batch 6: platformdirs 4.13.3 (#105; the held-back pin, now 15 days old), langsmith 0.14.11 + ormsgpack 1.13.0 (#104). Locks regenerated with `make api-lock` / `make orch-lock` instead of Dependabot's (it wrote `uvicorn[standard]`/`coverage[toml]` into the `--strip-extras` locks).
 - [ ] MCP Toolbox: 1.15.0 (#35) clears nothing; wait for a fixed release (#89).
+- [ ] Batch 7 (2026-11-05): SQLAlchemy 2.1.5 (#111), platformdirs 4.13.5 + starlette 1.9.0 + ast-serialize 0.13.1 (#110), jsonpointer 3.3 + langchain-core 1.6.12 + langgraph-sdk 0.4.8 (#109), eslint 10.13.0 (#108). All 17-20 days old; locks regenerated with `make api-lock` / `make orch-lock` (every transitive at least 14 days). eslint stays on 10.13.0, not 10.14.0 (30 Oct, eligible 13 Nov). MCP Toolbox 1.15.0 (#35) not taken: same 13 HIGH as 1.14.0, and it ships no provenance attestation, so `make verify-image` fails (1.14.0 passes). #89 stays open.
 
 ## How To Test
 - Batch 2: `make verify`, `make orch-test`, `make security-scan`; on the test instance import an XLS statement (UOB account / UOB card / DBS Vickers / Sharekhan): pandas reads only those (and the format detector), CSV imports don't use it.
@@ -32,3 +33,4 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/49
 - Batch 4 shipped 2026-10-29 (#85).
 - Batch 5 shipped 2026-10-30 (#103).
 - Batch 6 on `feature/issue-49-batch-6` (2026-10-31): `make verify`, `make orch-test` (201 passed), `make security-scan` clean.
+- Batch 7 on `feature/issue-49-dependabot-batch-7` (2026-11-05): `make verify`, `make orch-test` (201 passed), `make security-scan`; Toolbox 1.15.0 Trivy and verify-image results in the PR.
