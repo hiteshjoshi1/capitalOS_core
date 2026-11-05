@@ -2175,8 +2175,8 @@ def test_net_worth_since_update_shows_crypto_change(client: TestClient, db_engin
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-206', 'evm', 'ethereum', '0x206', 'Test wallet', 'active', :ts)"
+                "INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-206', 1, 'evm', 'ethereum', '0x206', 'Test wallet', 'active', :ts)"
             ),
             {"ts": fetched},
         )

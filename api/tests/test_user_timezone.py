@@ -69,7 +69,7 @@ def two_timezones(client: TestClient, db_engine, monkeypatch):
 
 
 def _open_and_completed(client: TestClient, monkeypatch, user_id: int) -> dict:
-    as_user(monkeypatch, user_id)
+    as_user(client, user_id)
     april = _summary(client, "2026-04")
     march = _summary(client, "2026-03")
     return {
@@ -125,7 +125,7 @@ def test_us_household_dashboard_and_history_agree(client: TestClient, db_engine,
 def test_changing_timezone_moves_the_open_month(two_timezones, monkeypatch, db_engine):
     """User A moves to New York (Settings): from the next request on, March is
     open again for them, and nothing cached under Singapore is served."""
-    as_user(monkeypatch, USER_A)
+    as_user(two_timezones, USER_A)
     assert _summary(two_timezones, "2026-03")["net_worth_boundary_at"] == "2026-04-01T00:00:00+00:00"
     resp = two_timezones.patch("/auth/preferences", json={"timezone": NEW_YORK})
     assert resp.status_code == 200, resp.text
@@ -230,7 +230,7 @@ def test_background_refresh_runs_each_user_in_their_timezone(two_timezones, monk
     """A's History is stored through March (Singapore). A then moves to New York
     and a job refreshes the dirty History outside any request: in New York March
     isn't completed yet, so its stored row goes."""
-    as_user(monkeypatch, USER_A)
+    as_user(two_timezones, USER_A)
     assert _timeline_months(two_timezones)[-1] == "2026-03"
     set_user_timezone(db_engine, USER_A, NEW_YORK)
     with Session(db_engine) as db:
@@ -248,8 +248,7 @@ def test_background_refresh_runs_each_user_in_their_timezone(two_timezones, monk
 
 def test_timezone_change_marks_history_from_the_first_card_transaction(client: TestClient, db_engine, monkeypatch):
     _seed_card(db_engine, 79)
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", "79")
-    monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
+    as_user(client, 79)
     resp = client.patch("/auth/preferences", json={"timezone": NEW_YORK})
     assert resp.status_code == 200, resp.text
     with Session(db_engine) as db:

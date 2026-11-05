@@ -2170,7 +2170,11 @@ CREATE TABLE public.user_preferences (
     user_id bigint NOT NULL,
     theme text DEFAULT 'dark'::text NOT NULL,
     accent_color text DEFAULT '#0f7a5c'::text NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    timezone text,
+    timezone_from_app boolean DEFAULT false NOT NULL,
+    base_currency text,
+    CONSTRAINT user_preferences_base_currency_format CHECK (((base_currency IS NULL) OR (base_currency ~ '^[A-Z]{3}$'::text)))
 );
 
 
