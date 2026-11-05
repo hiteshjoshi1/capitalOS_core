@@ -17,8 +17,8 @@ def test_dbs_vickers_holdings_ingest(client: TestClient, db_engine):
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(201, 'Test DBS Vickers', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(201, 'Test DBS Vickers', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG', 1)"
             )
         )
         db.commit()
@@ -85,8 +85,8 @@ def test_dbs_vickers_ingest_recovers_from_stale_csv_mapping(client: TestClient, 
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(202, 'Test DBS Vickers Stale Map', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(202, 'Test DBS Vickers Stale Map', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG', 1)"
             )
         )
         db.commit()

@@ -17,8 +17,9 @@ Two layers, both behind one decorator, ``valuation_cached``:
      Postgres, the WAL insert position, which moves on any committed write by
      anyone (psql, restores, scripts in other containers). Read once per request,
      before the request's first cached computation;
-   - the **day** (UTC and app-local dates: "today" feeds quote ages, live anchors
-     and FX dates);
+   - the **day** and **timezone** (the UTC date, the request user's home
+     timezone (#202) and today's date in it: "today" feeds quote ages, live
+     anchors, open/completed months and FX dates);
    - the env settings that change results (snapshot day, ownership scope, ...);
    - its age is under ``VALUATION_CACHE_TTL_SECONDS`` (default 600), a safety net.
 
@@ -48,6 +49,8 @@ from typing import Any, Callable, Iterator, Optional, TypeVar
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import event, text
+
+from app.core.clock import current_timezone_name
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -92,9 +95,12 @@ def _env_stamp() -> tuple[Optional[str], ...]:
     return tuple(os.getenv(name) for name in _RESULT_ENV_VARS)
 
 
-def _day_stamp() -> tuple[date, date]:
-    local_tz = ZoneInfo(os.getenv("TZ", "Asia/Singapore"))
-    return datetime.now(tz=timezone.utc).date(), datetime.now(tz=local_tz).date()
+def _day_stamp() -> tuple[date, str, date]:
+    """UTC date, the request user's timezone (#202) and today's date in it: two
+    users (or one user before and after changing timezone) never share an entry
+    computed under another timezone's months."""
+    tz_name = current_timezone_name()
+    return datetime.now(tz=timezone.utc).date(), tz_name, datetime.now(tz=ZoneInfo(tz_name)).date()
 
 
 # ─── Write generation ────────────────────────────────────────────────────────

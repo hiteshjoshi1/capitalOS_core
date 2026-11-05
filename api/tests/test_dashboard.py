@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -234,9 +234,9 @@ def test_net_worth_includes_dbs_credit_card_liability_once(db_engine, monkeypatc
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(820, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(821, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(820, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG', 1), "
+                "(821, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -332,9 +332,9 @@ def test_stock_holdings_summary_follows_selected_month_not_always_current(
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(210, 'IBKR US', 'IBKR', 'BROKER', 'USD', 'US', 210), "
-                "(211, 'IBKR HK', 'IBKR', 'BROKER', 'HKD', 'HK', 210)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(210, 'IBKR US', 'IBKR', 'BROKER', 'USD', 'US', 210, 1), "
+                "(211, 'IBKR HK', 'IBKR', 'BROKER', 'HKD', 'HK', 210, 1)"
             )
         )
         conn.execute(
@@ -445,9 +445,9 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(70, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 70), "
-                "(71, 'Coinbase', 'COINBASE', 'EXCHANGE', 'USD', 'US', 71)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(70, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 70, 1), "
+                "(71, 'Coinbase', 'COINBASE', 'EXCHANGE', 'USD', 'US', 71, 1)"
             )
         )
         conn.execute(
@@ -459,8 +459,8 @@ def test_dashboard_summary_uses_wallet_snapshots_for_crypto(client: TestClient, 
         )
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-70', 'evm', 'ethereum', '0x70', 'Main wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-70', 'evm', 'ethereum', '0x70', 'Main wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -536,8 +536,8 @@ def test_dashboard_eth_derivative_grouping(client: TestClient, db_engine, monkey
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-eth-test', 'evm', 'ethereum', '0xabc123', 'ETH Test Wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-eth-test', 'evm', 'ethereum', '0xabc123', 'ETH Test Wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -599,8 +599,8 @@ def test_dashboard_crypto_fallback_join_does_not_double_count_duplicate_assets(
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-fallback-test', 'evm', 'ethereum', '0xfallback', 'Fallback Wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-fallback-test', 'evm', 'ethereum', '0xfallback', 'Fallback Wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -942,8 +942,8 @@ def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: T
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(801, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 801)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(801, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 801, 1)"
             )
         )
         conn.execute(
@@ -954,8 +954,8 @@ def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: T
         )
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-geo', 'evm', 'ethereum', '0xgeo', 'Geo wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-geo', 'evm', 'ethereum', '0xgeo', 'Geo wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -1029,9 +1029,9 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(310, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 310), "
-                "(311, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 311)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(310, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 310, 1), "
+                "(311, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 311, 1)"
             )
         )
         conn.execute(
@@ -1109,8 +1109,8 @@ def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClien
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(50, 'OCBC 360', 'OCBC', 'BANK', 'SGD', 'SG', 50)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(50, 'OCBC 360', 'OCBC', 'BANK', 'SGD', 'SG', 50, 1)"
             )
         )
         conn.execute(
@@ -1121,9 +1121,9 @@ def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClien
         )
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-eth', 'evm', 'ethereum', '0xabc', 'Main wallet', 'active', :as_of), "
-                "('wallet-sol', 'svm', 'solana', 'So111', 'Sol wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-eth', 'evm', 'ethereum', '0xabc', 'Main wallet', 'active', :as_of, 1), "
+                "('wallet-sol', 'svm', 'solana', 'So111', 'Sol wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -1187,8 +1187,8 @@ def test_dashboard_cash_deposits_converts_non_sgd_cash_positions(client: TestCli
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(60, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 60)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(60, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 60, 1)"
             )
         )
         conn.execute(
@@ -1274,8 +1274,8 @@ def test_dashboard_geography_exposure_maps_sgd_cash_to_sg_when_home_country_miss
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(990, 'DBS Cash', 'DBS', 'BANK', 'SGD', 'SG', 990)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(990, 'DBS Cash', 'DBS', 'BANK', 'SGD', 'SG', 990, 1)"
             )
         )
         conn.execute(
@@ -1321,8 +1321,8 @@ def test_dashboard_converts_quote_currencies(client: TestClient, db_engine, monk
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(10, 'Sharekhan', 'SHAREKHAN', 'BROKER', 'INR', 'IN', 10)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(10, 'Sharekhan', 'SHAREKHAN', 'BROKER', 'INR', 'IN', 10, 1)"
             )
         )
         conn.execute(
@@ -1385,8 +1385,8 @@ def test_dashboard_uses_latest_stock_prices_when_available(client: TestClient, d
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(20, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 20)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(20, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 20, 1)"
             )
         )
         conn.execute(
@@ -1443,9 +1443,9 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(30, 'IBKR One', 'IBKR', 'BROKER', 'HKD', 'HK', 30), "
-                "(31, 'IBKR Two', 'IBKR', 'BROKER', 'HKD', 'HK', 30)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(30, 'IBKR One', 'IBKR', 'BROKER', 'HKD', 'HK', 30, 1), "
+                "(31, 'IBKR Two', 'IBKR', 'BROKER', 'HKD', 'HK', 30, 1)"
             )
         )
         conn.execute(
@@ -1530,8 +1530,8 @@ def test_dashboard_top_holdings_default_limit_supports_top_20_pagination(client:
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(40, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 40)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(40, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 40, 1)"
             )
         )
         asset_rows = []
@@ -1599,8 +1599,8 @@ def test_dashboard_fallback_join_multiple_crypto_assets_no_doublecount(client: T
         # Create test wallet
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-dupe-test', 'evm', 'ethereum', '0xDUPE', 'Dupe Test Wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-dupe-test', 'evm', 'ethereum', '0xDUPE', 'Dupe Test Wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -1663,9 +1663,9 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(80, 'OCBC Savings', 'OCBC', 'BANK', 'SGD', 'SG', 80), "
-                "(81, 'IBKR Brokerage', 'IBKR', 'BROKER', 'USD', 'US', 81)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(80, 'OCBC Savings', 'OCBC', 'BANK', 'SGD', 'SG', 80, 1), "
+                "(81, 'IBKR Brokerage', 'IBKR', 'BROKER', 'USD', 'US', 81, 1)"
             )
         )
         conn.execute(
@@ -1677,8 +1677,8 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
         )
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-bootstrap-test', 'evm', 'ethereum', '0xBOOT', 'Bootstrap Wallet', 'active', :as_of)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('wallet-bootstrap-test', 'evm', 'ethereum', '0xBOOT', 'Bootstrap Wallet', 'active', :as_of, 1)"
             ),
             {"as_of": as_of},
         )
@@ -1971,8 +1971,8 @@ def _seed_single_stock_with_two_daily_prices(
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(:account_id, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', :platform_id)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(:account_id, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', :platform_id, 1)"
             ),
             {"account_id": account_id, "platform_id": platform_id},
         )
@@ -2110,8 +2110,8 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(20303, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 20303)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(20303, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 20303, 1)"
             )
         )
         conn.execute(
@@ -2154,6 +2154,76 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
     assert body["net_worth_change"]["abs"] == pytest.approx(0.0)
     assert body["top_movers"]["gainers"] == []
     assert body["top_movers"]["detractors"] == []
+
+
+def test_net_worth_since_update_shows_crypto_change(client: TestClient, db_engine, monkeypatch):
+    """#206: the compare side reads the wallet valuation as of the previous
+    update, not the newest one, so a crypto move shows up, and the total change
+    is the sum of the component changes."""
+    _seed_single_stock_with_two_daily_prices(
+        db_engine,
+        account_id=20304,
+        asset_id=20304,
+        platform_id=20304,
+        symbol="MSFT",
+        today="2026-07-10",
+        yesterday="2026-07-09",
+        price_today=110,
+        price_yesterday=100,
+    )
+    fetched = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-206', 1, 'evm', 'ethereum', '0x206', 'Test wallet', 'active', :ts)"
+            ),
+            {"ts": fetched},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(20601, 'wallet-206', '2026-07-09', :d1, 300), "
+                "(20602, 'wallet-206', '2026-07-10', :d2, 360)"
+            ),
+            {"d1": fetched, "d2": fetched + timedelta(days=1)},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(20601, 20601, 'evm', 'ethereum', 'native', 'ETH', 1, 300), "
+                "(20602, 20602, 'evm', 'ethereum', 'native', 'ETH', 1, 360)"
+            )
+        )
+
+    def fake_rates(_date, base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.valuation.clock._current_anchor_ts",
+        lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/net-worth-since-update?base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    components = body["component_change"]
+    assert components["crypto"]["abs"] == pytest.approx(60.0)
+    assert components["crypto"]["pct"] == pytest.approx(0.2)
+    assert components["stocks_funds"]["abs"] == pytest.approx(100.0)
+    assert components["cash"]["abs"] == pytest.approx(0.0)
+    assert body["net_worth_change"]["abs"] == pytest.approx(160.0)
+    assert body["net_worth_change"]["abs"] == pytest.approx(sum(c["abs"] for c in components.values()))
+    eth = next(row for row in body["top_movers"]["gainers"] if row["symbol"] == "ETH")
+    assert eth["delta_abs"] == pytest.approx(components["crypto"]["abs"])
+
+    # "Now" stays on the newest valuation.
+    bootstrap = client.get("/dashboard/bootstrap?month=2026-07&base_currency=USD")
+    assert bootstrap.status_code == 200
+    assert bootstrap.json()["current_net_worth"]["crypto"] == pytest.approx(360.0)
 
 
 # --- #133: comparisons for the open (current) month are like for like -------------

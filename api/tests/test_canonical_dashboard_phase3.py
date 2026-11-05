@@ -30,6 +30,16 @@ from app.portfolio.canonical_reads import (
 )
 from app.portfolio.upload_canonical import run_upload_canonical_adapter
 from app.ingestion.parsers.base import ParseResult
+from tests.auth_helpers import signed_in_client
+
+# Every row here is owned by user 2 (accounts, broker connections), and the service
+# calls read as user 2; API calls sign in as the same user (#154).
+OWNER_ID = 2
+
+
+@pytest.fixture()
+def client(db_engine):
+    return signed_in_client(db_engine, OWNER_ID, admin=True)
 
 
 # ---------------------------------------------------------------------------
@@ -61,8 +71,8 @@ def _seed_account(
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) "
-                "VALUES (:id, :name, :platform, 'BROKER', :currency, :country, :platform_id)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) "
+                "VALUES (:id, :name, :platform, 'BROKER', :currency, :country, :platform_id, :owner)"
             ),
             {
                 "id": account_id,
@@ -71,6 +81,7 @@ def _seed_account(
                 "currency": currency,
                 "country": country,
                 "platform_id": platform_id,
+                "owner": OWNER_ID,
             },
         )
 
@@ -281,8 +292,8 @@ def test_canonical_position_rows_excludes_ibkr_flex_nav_accounts(db_engine, shar
         existing_acc = conn.execute(text("SELECT id FROM accounts WHERE id = 803")).fetchone()
         if not existing_acc:
             conn.execute(text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) "
-                "VALUES (803, 'IBKR Phase3 Test', 'IBKR_P3', 'BROKER', 'USD', 'US', 803)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) "
+                "VALUES (803, 'IBKR Phase3 Test', 'IBKR_P3', 'BROKER', 'USD', 'US', 803, 2)"
             ))
         # Insert broker connection + account for IBKR
         conn.execute(text(

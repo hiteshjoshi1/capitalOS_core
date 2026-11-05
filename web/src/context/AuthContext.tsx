@@ -6,6 +6,8 @@ import type { AccentColor, Theme } from "./ThemeContext";
 import { DEFAULT_ACCENT, DEFAULT_THEME } from "./ThemeContext";
 import { AuthContext } from "./authContextObject";
 import { clearApiCache } from "../lib/useApiResource";
+import { fillTimezoneIfUnset } from "../lib/timezone";
+import { resetServerBaseCurrency, syncServerBaseCurrency } from "./CurrencyContext";
 import type { AuthContextValue } from "./authContextObject";
 
 const SESSION_REFRESH_INTERVAL_MS = 10 * 60 * 1000;
@@ -35,6 +37,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const apply = (p: UserPreferences) => {
         if (isCancelled()) return;
         applyServerPreferences({ theme: p.theme as Theme, accent_color: p.accent_color as AccentColor });
+        // #202: the server's base currency wins over this browser's first paint, and a
+        // new account's home timezone is filled from this browser.
+        syncServerBaseCurrency(p.base_currency);
+        fillTimezoneIfUnset(p);
       };
       if (prefs) {
         apply(prefs);
@@ -152,6 +158,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           // visual state. The access token is already null here, so isAuthenticated()
           // returns false and the effects will NOT send a PATCH to the server.
           applyServerPreferences({ theme: DEFAULT_THEME, accent_color: DEFAULT_ACCENT });
+          resetServerBaseCurrency();
         }
       },
     }),

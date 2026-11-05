@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Text, func
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Text, false, func
 
 from .base import Base
 
@@ -53,4 +53,9 @@ class UserPreference(Base):
     user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     theme = Column(Text, nullable=False, default="dark")
     accent_color = Column(Text, nullable=False, default="#0f7a5c")
+    # #202: home timezone (IANA; NULL = the app's TZ), whether a pre-077 user
+    # follows the app's TZ, and the base currency saved on the server.
+    timezone = Column(Text, nullable=True)
+    timezone_from_app = Column(Boolean, nullable=False, default=False, server_default=false())
+    base_currency = Column(Text, nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

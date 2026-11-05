@@ -88,8 +88,8 @@ def test_citi_ingest_upload_and_idempotent(client: TestClient, db_engine):
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(500, 'Citi CC', 'CITI', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(500, 'Citi CC', 'CITI', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         db.commit()

@@ -194,6 +194,46 @@ def test_ibkr_statement_rates_are_read(db_engine, providers_down):
     assert fx.get_rates(DAY, "USD", {"SGD"})["SGD"] == pytest.approx(1 / 1.34)
 
 
+def test_a_statement_rate_does_not_override_a_provider_rate_for_a_later_day(
+    db_engine, providers_down, tmp_path, monkeypatch
+):
+    """#197: for a date D the newest stored day on or before D wins, whatever
+    its source. An IBKR statement rate for 20 Feb (imported, then corrected)
+    is what 20 and 21 Feb read, but a provider rate stored for 23 Feb still
+    decides 24 Feb, before and after the import drops the cache."""
+    from sqlalchemy.orm import Session
+
+    from app.portfolio.ibkr_flex import run_ibkr_flex_import_from_xml
+    from tests.test_ibkr_flex_phase1 import _seed_ibkr_account, _valid_flex_xml
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed_ibkr_account(db_engine)
+    _store(db_engine, date(2026, 2, 23), {"SGD": 1.47, "USD": 1.09})
+    later = datetime(2026, 2, 24, tzinfo=timezone.utc)
+    assert fx.get_rates(later, "SGD", {"USD"})["USD"] == pytest.approx(1.47 / 1.09)
+
+    def _import(xml: str) -> None:
+        db = Session(bind=db_engine)
+        try:
+            run_ibkr_flex_import_from_xml(
+                db, current_user_id=1, legacy_account_id=300, xml_text=xml, cutover_date=date(2026, 2, 1)
+            )
+        finally:
+            db.close()
+
+    _import(_valid_flex_xml())  # USD->SGD 1.35 on 20 Feb
+    assert fx.get_rates(datetime(2026, 2, 21, tzinfo=timezone.utc), "SGD", {"USD"})["USD"] == pytest.approx(1.35)
+    _import(_valid_flex_xml().replace('toCurrency="SGD" rate="1.35"', 'toCurrency="SGD" rate="1.3612"'))
+
+    on_day = fx.get_rates(datetime(2026, 2, 20, tzinfo=timezone.utc), "SGD", {"USD"})
+    assert on_day["USD"] == pytest.approx(1.3612)
+    assert on_day.quotes["USD"].source == "ibkr"
+    assert fx.get_rates(datetime(2026, 2, 21, tzinfo=timezone.utc), "SGD", {"USD"})["USD"] == pytest.approx(1.3612)
+    after = fx.get_rates(later, "SGD", {"USD"})
+    assert after["USD"] == pytest.approx(1.47 / 1.09)
+    assert after.quotes["USD"].source == "frankfurter"
+
+
 def test_erapi_is_only_used_for_today_and_stored_under_its_own_date(db_engine, monkeypatch):
     today = datetime.now(tz=timezone.utc).date()
     monkeypatch.setattr(fx, "_fetch_erapi", lambda: (today, {"SGD": 1.35, "TWD": 32.0}))
@@ -285,9 +325,9 @@ def _seed_xyz_cash(db_engine):
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(7101, 'Home Bank', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(7102, 'Exotic Bank', 'XBANK', 'BANK', 'XYZ', 'XX')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(7101, 'Home Bank', 'DBS', 'BANK', 'SGD', 'SG', 1), "
+                "(7102, 'Exotic Bank', 'XBANK', 'BANK', 'XYZ', 'XX', 1)"
             )
         )
     seed_canonical_account_balance_for_test(db_engine, account_id=7101, as_of="2026-02-06", currency="SGD", balance_base=1000)
@@ -310,8 +350,8 @@ def test_provider_down_pages_load_from_stored_rates_and_flag_stale(client, db_en
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(7201, 'US Bank', 'CHASE', 'BANK', 'USD', 'US')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(7201, 'US Bank', 'CHASE', 'BANK', 'USD', 'US', 1)"
             )
         )
     seed_canonical_account_balance_for_test(db_engine, account_id=7201, as_of="2026-02-06", currency="USD", balance_base=100)
@@ -345,8 +385,8 @@ def test_crypto_summary_converts_each_balance_at_its_anchor_date(client, db_engi
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at) "
-                "VALUES ('w-fx', 'evm', 'ethereum', '0xfx', 'active', '2026-04-01T00:00:00+00:00')"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at, user_id) "
+                "VALUES ('w-fx', 'evm', 'ethereum', '0xfx', 'active', '2026-04-01T00:00:00+00:00', 1)"
             )
         )
         conn.execute(

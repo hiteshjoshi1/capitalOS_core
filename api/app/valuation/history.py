@@ -10,6 +10,8 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
+from app.core.clock import use_timezone
+from app.services.user_preferences import effective_timezone
 from app.valuation import clock
 from app.valuation.clock import _add_months, _anchor_ts, _date_only, _iso_value, _latest_completed_month_start, _normalize_ts, _parse_month
 from app.valuation.facts import _networth_components
@@ -308,20 +310,25 @@ def refresh_dirty_wealth_rollups(db: Session) -> int:
     that user has rows in. Returns the number of rows written."""
     written = 0
     for user_id in dirty_user_ids(db):
-        currencies = [
-            str(row[0])
-            for row in db.execute(
-                text("SELECT DISTINCT base_currency FROM wealth_monthly_rollups WHERE user_id = :user_id"),
-                {"user_id": user_id},
-            ).fetchall()
-        ]
-        if not currencies:
-            if settle_dirty_mark(db, user_id, dirty_state(db, user_id)[1]):
-                db.commit()
-            continue
-        for currency in currencies:
-            written += _refresh_wealth_rollups(db, user_id, currency)["written"]
+        # Which months are completed follows each user's home timezone (#202).
+        with use_timezone(effective_timezone(db, user_id)):
+            written += _refresh_dirty_rollups_for_user(db, user_id)
     return written
+
+
+def _refresh_dirty_rollups_for_user(db: Session, user_id: int) -> int:
+    currencies = [
+        str(row[0])
+        for row in db.execute(
+            text("SELECT DISTINCT base_currency FROM wealth_monthly_rollups WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        ).fetchall()
+    ]
+    if not currencies:
+        if settle_dirty_mark(db, user_id, dirty_state(db, user_id)[1]):
+            db.commit()
+        return 0
+    return sum(_refresh_wealth_rollups(db, user_id, currency)["written"] for currency in currencies)
 
 
 def _timeline_upload_markers(

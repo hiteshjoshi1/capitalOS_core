@@ -14,11 +14,14 @@ os.environ.setdefault("CRYPTO_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("STOCK_PRICE_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("IBKR_FLEX_SCHEDULER_ENABLED", "0")
 os.environ.setdefault("FX_DISABLE_REMOTE", "1")
-os.environ.setdefault("AUTH_BYPASS_USER_ID", "1")
-# The bypass is honoured only with this explicit test flag (#153).
-os.environ["AUTH_BYPASS_ALLOW"] = "test"
+# Production-like auth (#154): no login bypass and no legacy NULL-owner rows. Every
+# request authenticates with a real access token (the `client` fixture signs in as
+# TEST_USER_ID) and sees only rows its user owns. Popped/forced, not setdefault, so a
+# deployment's .env passed to the test container can't turn either back on.
+os.environ.pop("AUTH_BYPASS_USER_ID", None)
+os.environ.pop("AUTH_BYPASS_ALLOW", None)
+os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "0"
 os.environ.setdefault("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
-os.environ["AUTH_ALLOW_LEGACY_NULL_OWNERSHIP"] = "1"
 # Forced (not setdefault): a deployment's .env, which compose passes to the test
 # container, may disable signup. Tests that need it off set it via monkeypatch.
 os.environ["AUTH_ALLOW_SIGNUP"] = "1"
@@ -31,6 +34,7 @@ from app.main import app  # noqa: E402
 from app.models.base import Base  # noqa: E402
 from app.services.login_throttle import login_throttle  # noqa: E402
 from app.valuation_cache import clear_shared_cache  # noqa: E402
+from tests.auth_helpers import signed_in_client  # noqa: E402
 from tests.fx_test_helpers import synthetic_frankfurter  # noqa: E402
 
 connect_args = {}
@@ -562,6 +566,9 @@ def setup_db():
               user_id INTEGER PRIMARY KEY,
               theme TEXT NOT NULL DEFAULT 'dark',
               accent_color TEXT NOT NULL DEFAULT '#0f7a5c',
+              timezone TEXT,
+              timezone_from_app BOOLEAN NOT NULL DEFAULT 0,
+              base_currency TEXT,
               updated_at TIMESTAMP
             )
             """
@@ -1050,6 +1057,7 @@ def clear_db():
             "account_statement_identities",
             "wealth_monthly_rollups",
             "wealth_rollup_dirty",
+            "user_preferences",  # a home timezone (#202) must not leak into the next test
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
@@ -1104,8 +1112,22 @@ def clear_db():
     yield
 
 
+# The user the `client` fixture signs in as (#154): an admin, like the owner of a
+# single-household install. Rows a test inserts must name their owner explicitly
+# (accounts.user_id, crypto_wallets.user_id, ...): NULL-owner rows are invisible, as
+# in production. Another user: tests/auth_helpers.py (signed_in_client, auth_headers).
+TEST_USER_ID = 1
+
+
 @pytest.fixture()
 def client():
+    """Signed in as TEST_USER_ID (admin) with a real access token."""
+    return signed_in_client(engine, TEST_USER_ID, admin=True)
+
+
+@pytest.fixture()
+def anon_client():
+    """No credentials at all."""
     return TestClient(app)
 
 
@@ -1128,9 +1150,9 @@ def seed_dashboard_data():
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(1, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1), "
-                "(2, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 2)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(1, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1, 1), "
+                "(2, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 2, 1)"
             )
         )
         conn.execute(
@@ -1205,8 +1227,8 @@ def seed_dashboard_data():
         )
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('wallet-btc', 'evm', 'ethereum', '0xbtc', 'BTC Wallet', 'active', :as_of_cur)"
+                "INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-btc', 1, 'evm', 'ethereum', '0xbtc', 'BTC Wallet', 'active', :as_of_cur)"
             ),
             {"as_of_cur": as_of_cur},
         )
@@ -1243,9 +1265,9 @@ def seed_spending_data():
     with engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(10, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(11, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(10, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1), "
+                "(11, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(

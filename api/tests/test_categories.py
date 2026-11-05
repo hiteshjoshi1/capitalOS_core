@@ -113,8 +113,8 @@ def test_backfill_unmapped_and_manual_override_precedence(client: TestClient, db
         conn.execute(
             text(
                 """
-                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
-                  (1, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG')
+                INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES
+                  (1, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1)
                 """
             )
         )
@@ -249,8 +249,8 @@ def _seed_bulk_override_data(db_engine) -> dict[str, int]:
         conn.execute(
             text(
                 """
-                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
-                  (90, 'Bulk Test Bank', 'DBS', 'BANK', 'SGD', 'SG')
+                INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES
+                  (90, 'Bulk Test Bank', 'DBS', 'BANK', 'SGD', 'SG', 1)
                 """
             )
         )

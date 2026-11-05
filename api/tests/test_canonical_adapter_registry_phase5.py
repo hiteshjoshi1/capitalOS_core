@@ -48,8 +48,8 @@ def _seed_account(
     try:
         db.execute(
             text(
-                "INSERT OR IGNORE INTO accounts (id, name, platform, account_type, currency, country) "
-                "VALUES (:id, :name, :platform, :account_type, :currency, 'SG')"
+                "INSERT OR IGNORE INTO accounts (id, name, platform, account_type, currency, country, user_id) "
+                "VALUES (:id, :name, :platform, :account_type, :currency, 'SG', 1)"
             ),
             {"id": account_id, "name": name, "platform": platform, "currency": currency, "account_type": account_type},
         )

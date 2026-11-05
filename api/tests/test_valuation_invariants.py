@@ -9,6 +9,7 @@ the fixing PR.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, timezone
 
 import pytest
@@ -17,11 +18,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import valuation_cache
+from app.portfolio.ibkr_flex import run_ibkr_flex_import_from_xml
 from tests.test_valuation_golden import ENDPOINTS, collect
 from tests.valuation_golden import normalise
 from tests.valuation_household import (
     DBS_SAVINGS,
     FLEX_REPORTS,
+    IBKR,
     MISFILED_CARD,
     SCENARIOS,
     USER_A,
@@ -29,7 +32,9 @@ from tests.valuation_household import (
     FlexReport,
     as_user,
     build_household,
+    build_scenario,
     build_user,
+    flex_xml,
     fx,
     household_env,
     import_flex,
@@ -319,7 +324,7 @@ def test_other_users_data_never_changes_my_numbers(client: TestClient, db_engine
 
 
 def test_user_b_sees_only_their_own_money(household, monkeypatch, db_engine):
-    as_user(monkeypatch, USER_B)
+    as_user(household, USER_B)
     nw = _summary(household, "2026-03")["current_net_worth"]
     usd = fx(MID.date(), "USD")
     # B: OCBC 17,000 SGD; wallet 1 ETH @ 3,000 + 700 USDT; card limit 5,000 - 4,200 available.
@@ -443,6 +448,95 @@ def test_history_after_an_fx_correction_equals_a_fresh_process(household):
     assert lazily == fresh
 
 
+def _with_usd_sgd(xml: str, rate: float) -> str:
+    """The same Flex statement with another USD->SGD ConversionRate (only that
+    rate: positions and NAV keep the values IBKR computed them with)."""
+    out, count = re.subn(r'(fromCurrency="USD" toCurrency="SGD" rate=")[^"]+', rf"\g<1>{rate:.8f}", xml)
+    assert count == 1
+    return out
+
+
+def _import_flex_xml(db_engine, xml: str) -> None:
+    db = Session(bind=db_engine)
+    try:
+        run_ibkr_flex_import_from_xml(db, current_user_id=USER_A, legacy_account_id=IBKR, xml_text=xml)
+    finally:
+        db.close()
+
+
+def _statement_rates_decide(db_engine) -> None:
+    """The synthetic ECB-style rows win over a statement rate on the same day, so
+    for the days January's and February's anchors (1 Feb, 1 Mar) resolve to,
+    drop them: those anchors then read the 30 Jan and 27 Feb statement rates."""
+    from app import fx as fx_module
+
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "DELETE FROM fx_rates WHERE rate_date BETWEEN '2026-01-30' AND '2026-02-01' "
+                "OR rate_date BETWEEN '2026-02-27' AND '2026-03-01'"
+            )
+        )
+    fx_module._CACHE.clear()
+
+
+def _statement_rates(db_engine) -> dict[tuple[str, str, str], float]:
+    with db_engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT report_date, from_currency, to_currency, rate FROM portfolio_fx_rates")
+        ).fetchall()
+    return {(str(r[0])[:10], r[1], r[2]): float(r[3]) for r in rows}
+
+
+def test_history_after_a_corrected_flex_statement_rate_equals_a_fresh_process(household, db_engine, monkeypatch):
+    """#197: re-importing a Flex statement with a corrected rate (30 Jan, what
+    January's anchor reads) is in History and in the cached dashboard on the
+    next read, the same as a fresh process computes them: the import drops the
+    in-process rate cache from that date on and marks History dirty."""
+    from app import fx as fx_module
+
+    monkeypatch.setenv("VALUATION_CACHE_ENABLED", "1")
+    _statement_rates_decide(db_engine)
+    before = _points(_timeline(household, backfill=True))
+    summary_before = _summary(household, "2026-01")["net_worth"]["total"]
+    jan = FLEX_REPORTS[0]
+    _import_flex_xml(db_engine, _with_usd_sgd(flex_xml(jan), fx(jan.report_date, "USD") * 1.04))
+
+    lazily = _points(_timeline(household))
+    summary_lazily = _summary(household, "2026-01")["net_worth"]["total"]
+    fx_module._CACHE.clear()  # what a restarted API would know
+    valuation_cache.clear_shared_cache()
+    fresh = _points(_timeline(household, backfill=True))
+    summary_fresh = _summary(household, "2026-01")["net_worth"]["total"]
+    assert fresh["2026-01"]["total"] != pytest.approx(before["2026-01"]["total"], abs=TOL)  # the correction matters
+    assert summary_fresh != pytest.approx(summary_before, abs=TOL)
+    assert lazily == fresh
+    assert summary_lazily == summary_fresh
+
+
+def test_an_older_flex_report_imported_after_newer_ones_leaves_newer_rates_and_history(household, db_engine):
+    """#197: the household has the 27 Feb and March reports; importing the
+    30 Jan report again (with a corrected rate) replaces only 30 Jan's rate.
+    The newer dates' statement rates and their History months stay as they were."""
+    _statement_rates_decide(db_engine)
+    before = _points(_timeline(household, backfill=True))
+    rates_before = _statement_rates(db_engine)
+    jan = FLEX_REPORTS[0]
+    new_rate = fx(jan.report_date, "USD") * 1.04
+    _import_flex_xml(db_engine, _with_usd_sgd(flex_xml(jan), new_rate))
+
+    after = _points(_timeline(household))
+    rates_after = _statement_rates(db_engine)
+    jan_key = ("2026-01-30", "USD", "SGD")
+    assert rates_after[jan_key] == pytest.approx(new_rate)
+    assert {k: v for k, v in rates_after.items() if k != jan_key} == {
+        k: v for k, v in rates_before.items() if k != jan_key
+    }
+    assert after["2026-01"]["total"] != pytest.approx(before["2026-01"]["total"], abs=TOL)  # it did reach History
+    for month in ("2026-02",):  # read from the 27 Feb statement rate
+        assert after[month] == before[month], month
+
+
 def test_flex_backfill_does_not_resource_older_history(household, db_engine):
     """December's IBKR cash came from an upload (Flex took over on 30 January).
     Importing a Flex statement that starts in December must not change which
@@ -463,7 +557,7 @@ def test_flex_backfill_does_not_resource_older_history(household, db_engine):
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
 def test_cache_on_and_off_give_identical_results(scenario: str, client: TestClient, db_engine, monkeypatch):
     household_env(monkeypatch, SCENARIOS[scenario])
-    build_household(db_engine, now=SCENARIOS[scenario])
+    build_scenario(db_engine, scenario)
     paths = ENDPOINTS[scenario]
 
     monkeypatch.setenv("VALUATION_CACHE_ENABLED", "0")

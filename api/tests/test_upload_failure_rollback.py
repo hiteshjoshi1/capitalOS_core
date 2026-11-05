@@ -42,8 +42,8 @@ def _seed_upload_account(db_engine, account_id: int) -> None:
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) "
-                "VALUES (:id, 'Rollback Test', 'SHAREKHAN', 'BROKER', 'INR', 'XX')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) "
+                "VALUES (:id, 'Rollback Test', 'SHAREKHAN', 'BROKER', 'INR', 'XX', 1)"
             ),
             {"id": account_id},
         )
@@ -209,8 +209,8 @@ def _seed_ibkr_account(db_engine, account_id: int = 9300) -> None:
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) "
-                "VALUES (:id, 'IBKR Synthetic', 'IBKR', 'BROKER', 'USD', 'US', 93)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) "
+                "VALUES (:id, 'IBKR Synthetic', 'IBKR', 'BROKER', 'USD', 'US', 93, 1)"
             ),
             {"id": account_id},
         )

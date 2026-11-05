@@ -46,7 +46,7 @@ from tests.canonical_test_helpers import seed_canonical_position_snapshot_for_te
 
 SGT = ZoneInfo("Asia/Singapore")
 
-USER_A = 1
+USER_A = 1  # = conftest.TEST_USER_ID: the user the `client` fixture signs in as (#154)
 USER_B = 2
 
 DBS_SAVINGS = 101
@@ -64,10 +64,19 @@ AAPL, TENCENT, RELIANCE, INFY = 1, 2, 3, 4
 #  mid:   a normal day: March is the open month, February closed.
 #  first: the 1st of a month at 06:00 SGT, which is still the 31st in UTC, so
 #         the month-end anchor (00:00Z on the 1st) hasn't passed yet.
+#  first_us: the same instant as "first", for a household whose home timezone
+#         is America/New_York (#202): there it is still 31 March, 18:00, so
+#         March is the open month and February the latest completed one.
 SCENARIOS: dict[str, datetime] = {
     "mid": datetime(2026, 3, 18, 10, 0, tzinfo=SGT),
     "first": datetime(2026, 4, 1, 6, 0, tzinfo=SGT),
+    "first_us": datetime(2026, 4, 1, 6, 0, tzinfo=SGT),
 }
+NEW_YORK = "America/New_York"
+# Home timezone of every household user, per scenario (#202). Not listed: no
+# user_preferences row, so the app timezone (TZ=Asia/Singapore) applies, as for
+# an account from before #202.
+SCENARIO_TIMEZONES: dict[str, str] = {"first_us": NEW_YORK}
 
 
 # ─── Frozen clock ────────────────────────────────────────────────────────────
@@ -476,7 +485,8 @@ def _insert_shared_data(conn, through: date) -> None:
     _seed_fx_rates(conn)
     conn.execute(
         text(
-            "INSERT INTO users (id, username, display_name, is_active, is_admin) VALUES "
+            # OR IGNORE: the `client` fixture has already created the user it signs in as.
+            "INSERT OR IGNORE INTO users (id, username, display_name, is_active, is_admin) VALUES "
             "(:a, 'household_a', 'Household A', 1, 0), (:b, 'household_b', 'Household B', 1, 0)"
         ),
         {"a": USER_A, "b": USER_B},
@@ -592,10 +602,26 @@ def _insert_user_rows(conn, user_id: int, through: date) -> None:
         )
 
 
-def build_user(db_engine, user_id: int, *, now: datetime) -> None:
-    """One user's part of the household as it stood at ``now``: plain inserts,
-    then the upload and IBKR Flex write paths."""
-    through = now.astimezone(SGT).date()
+def set_user_timezone(db_engine, user_id: int, timezone_name: str) -> None:
+    """Give ``user_id`` a home timezone (#202), as Settings would."""
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO user_preferences (user_id, theme, accent_color, timezone, timezone_from_app, updated_at) "
+                "VALUES (:u, 'dark', '#0f7a5c', :tz, 0, '2026-01-01 00:00:00+00:00') "
+                "ON CONFLICT (user_id) DO UPDATE SET timezone = excluded.timezone, timezone_from_app = 0"
+            ),
+            {"u": user_id, "tz": timezone_name},
+        )
+
+
+def build_user(db_engine, user_id: int, *, now: datetime, timezone_name: str | None = None) -> None:
+    """One user's part of the household as it stood at ``now`` (the user's
+    own date: their home timezone, else Singapore): plain inserts, then the
+    upload and IBKR Flex write paths."""
+    if timezone_name is not None:
+        set_user_timezone(db_engine, user_id, timezone_name)
+    through = now.astimezone(ZoneInfo(timezone_name) if timezone_name else SGT).date()
     with db_engine.begin() as conn:
         _insert_user_rows(conn, user_id, through)
     for account_id, as_of, currency, amount in BANK_BALANCES:
@@ -622,8 +648,12 @@ def build_user(db_engine, user_id: int, *, now: datetime) -> None:
             import_flex(db_engine, report)
 
 
-def build_household(db_engine, *, now: datetime, include_user_b: bool = True) -> None:
+def build_household(
+    db_engine, *, now: datetime, include_user_b: bool = True, timezone_name: str | None = None,
+) -> None:
     """Write the household as it stood at ``now`` (nothing dated after it).
+    ``timezone_name`` is every user's home timezone (#202); None leaves them
+    without one (the app timezone).
 
     Call after ``household_env`` so write-side timestamps are frozen too. Runs
     on the empty per-test database the suite's ``clear_db`` leaves."""
@@ -632,9 +662,14 @@ def build_household(db_engine, *, now: datetime, include_user_b: bool = True) ->
         # the same whichever test ran before.
         conn.exec_driver_sql("DELETE FROM sqlite_sequence")
         _insert_shared_data(conn, now.astimezone(SGT).date())
-    build_user(db_engine, USER_A, now=now)
+    build_user(db_engine, USER_A, now=now, timezone_name=timezone_name)
     if include_user_b:
-        build_user(db_engine, USER_B, now=now)
+        build_user(db_engine, USER_B, now=now, timezone_name=timezone_name)
+
+
+def build_scenario(db_engine, scenario: str, **kwargs: Any) -> None:
+    """``build_household`` at ``scenario``'s instant and home timezone."""
+    build_household(db_engine, now=SCENARIOS[scenario], timezone_name=SCENARIO_TIMEZONES.get(scenario), **kwargs)
 
 
 def household_env(monkeypatch, when: datetime) -> None:
@@ -646,7 +681,6 @@ def household_env(monkeypatch, when: datetime) -> None:
     monkeypatch.setenv("TZ", "Asia/Singapore")
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", str(USER_A))
     monkeypatch.setattr(fx_module, "remote_enabled", lambda: False)
     fx_module._CACHE.clear()
     freeze_clock(monkeypatch, when)
@@ -668,5 +702,8 @@ def _postgres_date_types(monkeypatch) -> None:
     monkeypatch.setattr(history, "_crypto_snapshot_coverage_as_of", _typed)
 
 
-def as_user(monkeypatch, user_id: int) -> None:
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", str(user_id))
+def as_user(client, user_id: int) -> None:  # noqa: ANN001
+    """Sign the test client in as user_id with a real access token (#154)."""
+    from tests.auth_helpers import auth_headers
+
+    client.headers.update(auth_headers(user_id))

@@ -106,8 +106,8 @@ def _seed_cc_account_and_transactions(db_engine, transactions: list[dict]) -> in
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(900, 'Test CC', 'CITI', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(900, 'Test CC', 'CITI', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         for tx in transactions:
@@ -308,8 +308,8 @@ def test_backfill_resolves_creditcard_purchase_by_merchant_pattern(
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(920, 'DBS CC', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(920, 'DBS CC', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -372,8 +372,8 @@ def test_backfill_bridges_parser_assigned_friendly_categories_to_taxonomy(
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(930, 'UOB CC', 'UOB', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(930, 'UOB CC', 'UOB', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -430,8 +430,8 @@ def test_credit_card_transactions_endpoint_returns_multiple_categories(
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(940, 'DBS Platinum', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(940, 'DBS Platinum', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(

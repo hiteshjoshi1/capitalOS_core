@@ -17,8 +17,8 @@ def test_sharekhan_holdings_ingest(client: TestClient, db_engine, tmp_path):
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(200, 'Test Sharekhan', 'SHAREKHAN', 'BROKER', 'INR', 'IN')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(200, 'Test Sharekhan', 'SHAREKHAN', 'BROKER', 'INR', 'IN', 1)"
             )
         )
         db.commit()

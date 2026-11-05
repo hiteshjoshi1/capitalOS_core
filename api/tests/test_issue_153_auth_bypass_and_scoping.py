@@ -74,8 +74,9 @@ def test_bypass_with_test_flag_is_active_and_warns(monkeypatch, caplog):
     assert any("AUTH BYPASS ACTIVE" in record.getMessage() for record in caplog.records)
 
 
-def test_bypass_ignored_at_request_time_without_flag(monkeypatch, client):
+def test_bypass_ignored_at_request_time_without_flag(monkeypatch, anon_client):
     """Fail closed: without the flag the bypass grants nothing; login applies."""
+    client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.setenv("AUTH_BYPASS_USER_ID", "1")
     monkeypatch.delenv("AUTH_BYPASS_ALLOW", raising=False)
     with pytest.raises(HTTPException) as exc:

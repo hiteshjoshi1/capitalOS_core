@@ -8,8 +8,8 @@ def _seed_dividend_data(db_engine):
         conn.execute(
             text(
                 """
-                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
-                (501, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US')
+                INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES
+                (501, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 1)
                 """
             )
         )
@@ -119,8 +119,8 @@ def test_expected_dividends_overview_is_annualized_from_yield(client, db_engine)
         conn.execute(
             text(
                 """
-                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
-                (510, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US')
+                INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES
+                (510, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 1)
                 """
             )
         )
@@ -195,8 +195,8 @@ def test_expected_dividends_overview_ignores_dummy_source_snapshots(client, db_e
         conn.execute(
             text(
                 """
-                INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES
-                (511, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US')
+                INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES
+                (511, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 1)
                 """
             )
         )
