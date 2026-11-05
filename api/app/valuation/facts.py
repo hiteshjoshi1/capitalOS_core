@@ -27,6 +27,8 @@ from app.valuation.clock import (
     _local_date,
     _month_window,
     _normalize_ts,
+    _transaction_in_month_window,
+    _transaction_query_bounds,
 )
 from app.valuation.fx import _cashflow_rate_date
 from app.valuation.prices import (
@@ -698,7 +700,15 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
         + """
         """
     )
-    rows = db.execute(q, {"start": start, "end": end, "current_user_id": current_user_id}).mappings().all()
+    # The month runs midnight to midnight in the user's timezone (#211, D-49).
+    query_start, query_end = _transaction_query_bounds(start, end)
+    rows = [
+        r
+        for r in db.execute(
+            q, {"start": query_start, "end": query_end, "current_user_id": current_user_id}
+        ).mappings().all()
+        if _transaction_in_month_window(r["ts"], start, end)
+    ]
     # Each flow converts at the rate of its own date (D-30, #170), one store read
     # for the month; a missing rate leaves the row out (never 1.0) and is noted
     # for the response's fx_status (and keeps this result out of the shared cache).

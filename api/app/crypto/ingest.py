@@ -4,21 +4,21 @@ import os
 import logging
 from dataclasses import dataclass
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Tuple
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
-from zoneinfo import ZoneInfo
 
+from app.core.clock import app_today, default_timezone_name, use_timezone
 from app.core.job_runs import safe_error_summary
 from app.crypto.adapters import TokenBalance, NativeBalance
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order, fetch_wallet_holdings
+from app.services.user_preferences import effective_timezone
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
 
-SINGAPORE_TZ = ZoneInfo("Asia/Singapore")
 logger = logging.getLogger("capitalos.crypto")
 DEFAULT_EVM_CHAINS = ["ethereum", "base", "arbitrum", "optimism", "mantle", "scroll"]
 DEFAULT_EVM_TOKEN_CHAINS = ["ethereum", "base", "arbitrum", "optimism"]
@@ -31,12 +31,32 @@ class SnapshotResult:
     source_versions: dict
 
 
-def _now_sg() -> datetime:
-    return datetime.now(tz=SINGAPORE_TZ)
+def _as_of_date() -> date:
+    """Today in the current timezone (``app.core.clock``). Callers date a
+    wallet's snapshot through ``wallet_as_of_date``, which sets the owner's."""
+    return app_today()
 
 
-def _as_of_date() -> datetime.date:
-    return _now_sg().date()
+def wallet_timezone(db: Session, wallet_id: str) -> str:
+    """The wallet owner's home timezone (#211, D-49); the app timezone for a
+    wallet without an owner."""
+    owner = db.execute(
+        text("SELECT user_id FROM crypto_wallets WHERE id = :id"),
+        {"id": wallet_id},
+    ).scalar()
+    if owner is None:
+        return default_timezone_name()
+    return effective_timezone(db, int(owner))
+
+
+def wallet_as_of_date(db: Session, wallet_id: str) -> date:
+    """The date a wallet snapshot taken now is filed under: today in the wallet
+    owner's timezone (#211), whoever triggered the refresh (the owner's
+    request, an admin's, or the scheduler, which has no user). Like a statement
+    balance it is the owner's own holding, so it follows their calendar, not
+    UTC market dates (D-44)."""
+    with use_timezone(wallet_timezone(db, wallet_id)):
+        return _as_of_date()
 
 
 def _normalize_price(balance: TokenBalance | NativeBalance, price: float | None) -> Tuple[float | None, float | None]:
@@ -375,7 +395,7 @@ def _carry_forward_failed_chains(db: Session, wallet_id: str, failed_chains: lis
 
 
 def upsert_snapshot(db: Session, wallet_id: str, result: SnapshotResult) -> int:
-    as_of = _as_of_date()
+    as_of = wallet_as_of_date(db, wallet_id)
     now = datetime.now(tz=timezone.utc)
     source_versions = dict(getattr(result, "source_versions", {}) or {})
     source_versions.setdefault("holdings_as_of", now.isoformat())

@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import allow_legacy_null_ownership
-from app.crypto.ingest import _as_of_date, should_refresh
+from app.crypto.ingest import should_refresh, wallet_as_of_date
 from app.crypto.pricing import price_by_contract, price_by_mint, price_by_symbol
 from app.crypto.providers import configured_price_provider_order
 from app.valuation_cache import valuation_cached
@@ -325,7 +325,7 @@ def refresh_latest_snapshot_prices(db: Session, wallet_id: str) -> bool:
         return False
 
     now = datetime.now(tz=timezone.utc)
-    today = _as_of_date()
+    today = wallet_as_of_date(db, wallet_id)
     versions = _parse_source_versions(snapshot.get("source_versions"))
     # The holdings are the newest snapshot's: their time stays theirs.
     versions.setdefault("holdings_as_of", _iso_dt(_parse_dt(snapshot.get("fetched_at"))))
