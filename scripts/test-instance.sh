@@ -132,8 +132,9 @@ serve() {
   say "Web"
   stop_web
   local label repo_url
-  label="TEST $(git -C "$TW" branch --show-current) · PRs$(for p in $(state_get merged); do printf ' #%s' "$p"; done)"
-  # The banner links each #N to its PR (#101).
+  label="TEST $(git -C "$TW" branch --show-current) · Issues$(for n in $(banner_refs); do printf ' #%s' "$n"; done)"
+  # The banner lists the issues the batch closes and links each #N to it (#200; GitHub sends
+  # /issues/N on to the PR when N is a PR, used for a PR that closes no issue).
   repo_url=$(cd "$TW" && gh repo view --json url --jq .url 2>/dev/null || true)
   (cd "$TW" && nohup make -s web-up INSTANCE_LABEL="$label" INSTANCE_REPO_URL="$repo_url" >"$TW/.test-instance-web.log" 2>&1 & echo $! >"$TW/.test-instance-web.pid")
   for _ in $(seq 1 90); do curl -sf -o /dev/null "http://127.0.0.1:$ISO_WEB_PORT/" && break; sleep 2; done
@@ -154,6 +155,17 @@ stop_web() {
   for pid in $(lsof -ti "tcp:$ISO_WEB_PORT" -sTCP:LISTEN 2>/dev/null); do
     if ps -o command= -p "$pid" | grep -q "$TW"; then kill "$pid" 2>/dev/null || true; fi
     if lsof -p "$pid" 2>/dev/null | grep -q "$TW/web"; then kill "$pid" 2>/dev/null || true; fi
+  done
+}
+
+banner_refs() {  # the issues each merged PR closes, in batch order; the PR itself when it closes none
+  local pr issues seen=" "
+  for pr in $(state_get merged); do
+    issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number' 2>/dev/null || true)
+    [ -n "$issues" ] || issues=$pr
+    for n in $issues; do
+      case "$seen" in *" $n "*) ;; *) seen="$seen$n "; printf '%s\n' "$n" ;; esac
+    done
   done
 }
 
