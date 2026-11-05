@@ -231,13 +231,6 @@ def _compose_notes(fp: str, parser_notes: Any) -> str:
     return f"{parser_notes} | fp:{fp}"
 
 
-def _snapshot_as_of() -> datetime:
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "1"))
-    now = datetime.now(tz=timezone.utc)
-    safe_day = min(snapshot_day, 28)
-    return now.replace(day=safe_day, hour=0, minute=0, second=0, microsecond=0)
-
-
 def _normalize_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -250,12 +243,6 @@ def _normalize_datetime(value: Any) -> datetime | None:
             return None
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
     return None
-
-
-def _latest_transaction_ts(parsed: list[dict[str, Any]]) -> datetime | None:
-    candidates = [_normalize_datetime(tx.get("ts")) for tx in parsed]
-    normalized = [candidate for candidate in candidates if candidate is not None]
-    return max(normalized) if normalized else None
 
 
 def _persist_credit_card_limit_metadata(
@@ -304,23 +291,6 @@ def _persist_credit_card_limit_metadata(
         previous_as_of = _normalize_datetime(previous[0])
         changed_from = min(available_limit_as_of, previous_as_of) if previous_as_of else available_limit_as_of
         mark_rollups_dirty(db, changed_from, account_id=account_id, reason="credit_card_limits")
-
-
-def _resolve_position_as_of(pos: Dict[str, Any], parser_meta: Dict[str, Any], parsed: list[dict[str, Any]]) -> datetime:
-    explicit = _normalize_datetime(pos.get("as_of"))
-    if explicit is not None:
-        return explicit
-
-    for key in ("statement_period_end", "report_date", "statement_date", "as_of", "latest_transaction_at"):
-        candidate = _normalize_datetime(parser_meta.get(key))
-        if candidate is not None:
-            return candidate
-
-    latest_tx = _latest_transaction_ts(parsed)
-    if latest_tx is not None:
-        return latest_tx.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    return _snapshot_as_of()
 
 
 def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:

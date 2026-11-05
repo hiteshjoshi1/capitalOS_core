@@ -149,7 +149,10 @@ CREATE TABLE public.account_balance_snapshots (
     source_row_hash text,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT account_balance_snapshots_authority_status_check CHECK ((authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text]))),
+    CONSTRAINT account_balance_snapshots_balance_type_check CHECK ((balance_type = ANY (ARRAY['cash'::text, 'broker_cash'::text, 'bank_cash'::text, 'credit_balance'::text, 'loan_balance'::text, 'stablecoin_cash'::text]))),
+    CONSTRAINT account_balance_snapshots_source_kind_check CHECK ((source_kind = ANY (ARRAY['upload_parser'::text, 'legacy_positions_backfill'::text, 'flex'::text, 'backfill'::text, 'manual_adjustment'::text, 'DUMMY'::text])))
 );
 
 
@@ -427,7 +430,10 @@ CREATE TABLE public.broker_import_runs (
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    import_job_id bigint
+    import_job_id bigint,
+    CONSTRAINT broker_import_runs_import_scope_check CHECK ((import_scope = ANY (ARRAY['daily'::text, 'upload'::text, 'backfill'::text]))),
+    CONSTRAINT broker_import_runs_source_type_check CHECK ((source_type = ANY (ARRAY['ibkr_flex_daily'::text, 'ibkr_csv_upload'::text, 'sharekhan_upload'::text, 'dbs_vickers_upload'::text, 'legacy_positions_backfill'::text, 'DUMMY'::text]))),
+    CONSTRAINT broker_import_runs_status_check CHECK ((status = ANY (ARRAY['started'::text, 'completed'::text, 'failed'::text, 'removed'::text])))
 );
 
 
@@ -1362,7 +1368,8 @@ CREATE TABLE public.portfolio_cash_balance_snapshots (
     authority_status text DEFAULT 'authoritative'::text NOT NULL,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT portfolio_cash_balance_snapshots_authority_status_check CHECK ((authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text])))
 );
 
 
@@ -1481,7 +1488,9 @@ CREATE TABLE public.portfolio_data_completeness (
     missing_reason text,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT portfolio_data_completeness_completeness_status_check CHECK ((completeness_status = ANY (ARRAY['complete'::text, 'incomplete'::text, 'nav_only'::text, 'failed'::text]))),
+    CONSTRAINT portfolio_data_completeness_fact_scope_check CHECK ((fact_scope = ANY (ARRAY['holdings'::text, 'cash_balance'::text, 'nav'::text, 'trades'::text, 'holdings_cash_nav_fx'::text])))
 );
 
 
@@ -1650,7 +1659,8 @@ CREATE TABLE public.portfolio_nav_snapshots (
     authority_status text DEFAULT 'authoritative'::text NOT NULL,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT portfolio_nav_snapshots_authority_status_check CHECK ((authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text])))
 );
 
 
@@ -1696,7 +1706,8 @@ CREATE TABLE public.portfolio_position_snapshots (
     authority_status text DEFAULT 'authoritative'::text NOT NULL,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT portfolio_position_snapshots_authority_status_check CHECK ((authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text])))
 );
 
 
@@ -1817,7 +1828,12 @@ CREATE TABLE public.portfolio_source_authority_window_changes (
     new_authority_status text,
     reason text DEFAULT ''::text NOT NULL,
     actor text DEFAULT ''::text NOT NULL,
-    changed_at timestamp with time zone DEFAULT now() NOT NULL
+    changed_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT authority_window_changes_action_check CHECK ((action = ANY (ARRAY['created'::text, 'closed'::text, 'moved'::text, 'removed'::text, 'merged'::text, 'collapsed'::text]))),
+    CONSTRAINT authority_window_changes_fact_scope_check CHECK ((fact_scope = ANY (ARRAY['all'::text, 'holdings'::text]))),
+    CONSTRAINT authority_window_changes_new_authority_status_check CHECK (((new_authority_status IS NULL) OR (new_authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text])))),
+    CONSTRAINT authority_window_changes_old_authority_status_check CHECK (((old_authority_status IS NULL) OR (old_authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text])))),
+    CONSTRAINT authority_window_changes_source_kind_check CHECK ((source_kind = ANY (ARRAY['ibkr_flex_daily'::text, 'ibkr_csv_upload'::text, 'sharekhan_upload'::text, 'dbs_vickers_upload'::text])))
 );
 
 
@@ -1853,6 +1869,9 @@ CREATE TABLE public.portfolio_source_authority_windows (
     effective_to date,
     authority_status text DEFAULT 'authoritative'::text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT authority_windows_authority_status_check CHECK ((authority_status = ANY (ARRAY['authoritative'::text, 'reference'::text, 'superseded'::text]))),
+    CONSTRAINT authority_windows_fact_scope_check CHECK ((fact_scope = ANY (ARRAY['all'::text, 'holdings'::text]))),
+    CONSTRAINT authority_windows_source_kind_check CHECK ((source_kind = ANY (ARRAY['ibkr_flex_daily'::text, 'ibkr_csv_upload'::text, 'sharekhan_upload'::text, 'dbs_vickers_upload'::text]))),
     CONSTRAINT chk_authority_window_dates CHECK (((effective_to IS NULL) OR (effective_to >= effective_from)))
 );
 
@@ -2008,7 +2027,8 @@ CREATE TABLE public.raw_broker_documents (
     report_date_to date,
     parser_version text NOT NULL,
     metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT raw_broker_documents_source_type_check CHECK ((source_type = ANY (ARRAY['ibkr_flex_daily'::text, 'ibkr_csv_upload'::text, 'sharekhan_upload'::text, 'dbs_vickers_upload'::text, 'legacy_positions_backfill'::text, 'DUMMY'::text])))
 );
 
 
@@ -2243,7 +2263,9 @@ CREATE TABLE public.wealth_monthly_rollups (
     source_freshness jsonb DEFAULT '[]'::jsonb NOT NULL,
     freshness_status text DEFAULT 'missing'::text NOT NULL,
     computed_at timestamp with time zone DEFAULT now() NOT NULL,
-    input_generation bigint DEFAULT 0 NOT NULL
+    input_generation bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT wealth_monthly_rollups_freshness_status_check CHECK ((freshness_status = ANY (ARRAY['fresh'::text, 'carried'::text, 'stale'::text, 'missing'::text]))),
+    CONSTRAINT wealth_monthly_rollups_month_format CHECK ((month ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'::text))
 );
 
 
@@ -3852,7 +3874,7 @@ ALTER TABLE ONLY public.account_balance_snapshots
 --
 
 ALTER TABLE ONLY public.account_balance_snapshots
-    ADD CONSTRAINT account_balance_snapshots_broker_import_run_id_fkey FOREIGN KEY (broker_import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE SET NULL;
+    ADD CONSTRAINT account_balance_snapshots_broker_import_run_id_fkey FOREIGN KEY (broker_import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -3868,7 +3890,7 @@ ALTER TABLE ONLY public.account_balance_snapshots
 --
 
 ALTER TABLE ONLY public.account_balance_snapshots
-    ADD CONSTRAINT account_balance_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT account_balance_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -3932,7 +3954,7 @@ ALTER TABLE ONLY public.broker_accounts
 --
 
 ALTER TABLE ONLY public.broker_accounts
-    ADD CONSTRAINT broker_accounts_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE SET NULL;
+    ADD CONSTRAINT broker_accounts_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
 
 
 --
@@ -3964,7 +3986,7 @@ ALTER TABLE ONLY public.broker_import_runs
 --
 
 ALTER TABLE ONLY public.broker_import_runs
-    ADD CONSTRAINT broker_import_runs_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE SET NULL;
+    ADD CONSTRAINT broker_import_runs_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
 
 
 --
@@ -4140,7 +4162,7 @@ ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
-    ADD CONSTRAINT portfolio_cash_balance_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_cash_balance_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4148,7 +4170,7 @@ ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
-    ADD CONSTRAINT portfolio_cash_balance_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_cash_balance_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
 
 
 --
@@ -4156,7 +4178,7 @@ ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
-    ADD CONSTRAINT portfolio_cash_balance_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_cash_balance_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4180,7 +4202,7 @@ ALTER TABLE ONLY public.portfolio_cash_ledger_entries
 --
 
 ALTER TABLE ONLY public.portfolio_cash_ledger_entries
-    ADD CONSTRAINT portfolio_cash_ledger_entries_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_cash_ledger_entries_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4188,7 +4210,7 @@ ALTER TABLE ONLY public.portfolio_cash_ledger_entries
 --
 
 ALTER TABLE ONLY public.portfolio_cash_ledger_entries
-    ADD CONSTRAINT portfolio_cash_ledger_entries_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_cash_ledger_entries_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4220,7 +4242,7 @@ ALTER TABLE ONLY public.portfolio_corporate_action_events
 --
 
 ALTER TABLE ONLY public.portfolio_corporate_action_events
-    ADD CONSTRAINT portfolio_corporate_action_events_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_corporate_action_events_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4228,7 +4250,7 @@ ALTER TABLE ONLY public.portfolio_corporate_action_events
 --
 
 ALTER TABLE ONLY public.portfolio_corporate_action_events
-    ADD CONSTRAINT portfolio_corporate_action_events_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_corporate_action_events_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4244,7 +4266,7 @@ ALTER TABLE ONLY public.portfolio_data_completeness
 --
 
 ALTER TABLE ONLY public.portfolio_data_completeness
-    ADD CONSTRAINT portfolio_data_completeness_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_data_completeness_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4252,7 +4274,7 @@ ALTER TABLE ONLY public.portfolio_data_completeness
 --
 
 ALTER TABLE ONLY public.portfolio_data_completeness
-    ADD CONSTRAINT portfolio_data_completeness_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_data_completeness_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4268,7 +4290,7 @@ ALTER TABLE ONLY public.portfolio_data_quality_events
 --
 
 ALTER TABLE ONLY public.portfolio_data_quality_events
-    ADD CONSTRAINT portfolio_data_quality_events_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_data_quality_events_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4276,7 +4298,7 @@ ALTER TABLE ONLY public.portfolio_data_quality_events
 --
 
 ALTER TABLE ONLY public.portfolio_data_quality_events
-    ADD CONSTRAINT portfolio_data_quality_events_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_data_quality_events_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4292,7 +4314,7 @@ ALTER TABLE ONLY public.portfolio_event_groups
 --
 
 ALTER TABLE ONLY public.portfolio_event_groups
-    ADD CONSTRAINT portfolio_event_groups_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_event_groups_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4300,7 +4322,7 @@ ALTER TABLE ONLY public.portfolio_event_groups
 --
 
 ALTER TABLE ONLY public.portfolio_event_groups
-    ADD CONSTRAINT portfolio_event_groups_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_event_groups_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4308,7 +4330,7 @@ ALTER TABLE ONLY public.portfolio_event_groups
 --
 
 ALTER TABLE ONLY public.portfolio_fx_rates
-    ADD CONSTRAINT portfolio_fx_rates_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_fx_rates_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4316,7 +4338,7 @@ ALTER TABLE ONLY public.portfolio_fx_rates
 --
 
 ALTER TABLE ONLY public.portfolio_fx_rates
-    ADD CONSTRAINT portfolio_fx_rates_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_fx_rates_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4340,7 +4362,7 @@ ALTER TABLE ONLY public.portfolio_nav_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_nav_snapshots
-    ADD CONSTRAINT portfolio_nav_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_nav_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4348,7 +4370,7 @@ ALTER TABLE ONLY public.portfolio_nav_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_nav_snapshots
-    ADD CONSTRAINT portfolio_nav_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_nav_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
 
 
 --
@@ -4356,7 +4378,7 @@ ALTER TABLE ONLY public.portfolio_nav_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_nav_snapshots
-    ADD CONSTRAINT portfolio_nav_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_nav_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4380,7 +4402,7 @@ ALTER TABLE ONLY public.portfolio_position_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_position_snapshots
-    ADD CONSTRAINT portfolio_position_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_position_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4388,7 +4410,7 @@ ALTER TABLE ONLY public.portfolio_position_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_position_snapshots
-    ADD CONSTRAINT portfolio_position_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_position_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
 
 
 --
@@ -4396,7 +4418,7 @@ ALTER TABLE ONLY public.portfolio_position_snapshots
 --
 
 ALTER TABLE ONLY public.portfolio_position_snapshots
-    ADD CONSTRAINT portfolio_position_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_position_snapshots_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4412,7 +4434,7 @@ ALTER TABLE ONLY public.portfolio_reconciliations
 --
 
 ALTER TABLE ONLY public.portfolio_reconciliations
-    ADD CONSTRAINT portfolio_reconciliations_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_reconciliations_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4420,7 +4442,7 @@ ALTER TABLE ONLY public.portfolio_reconciliations
 --
 
 ALTER TABLE ONLY public.portfolio_reconciliations
-    ADD CONSTRAINT portfolio_reconciliations_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_reconciliations_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4436,7 +4458,7 @@ ALTER TABLE ONLY public.portfolio_report_metrics
 --
 
 ALTER TABLE ONLY public.portfolio_report_metrics
-    ADD CONSTRAINT portfolio_report_metrics_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_report_metrics_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4444,7 +4466,7 @@ ALTER TABLE ONLY public.portfolio_report_metrics
 --
 
 ALTER TABLE ONLY public.portfolio_report_metrics
-    ADD CONSTRAINT portfolio_report_metrics_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_report_metrics_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4484,7 +4506,7 @@ ALTER TABLE ONLY public.portfolio_trades
 --
 
 ALTER TABLE ONLY public.portfolio_trades
-    ADD CONSTRAINT portfolio_trades_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT portfolio_trades_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
@@ -4492,7 +4514,7 @@ ALTER TABLE ONLY public.portfolio_trades
 --
 
 ALTER TABLE ONLY public.portfolio_trades
-    ADD CONSTRAINT portfolio_trades_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE SET NULL;
+    ADD CONSTRAINT portfolio_trades_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
 
 
 --
@@ -4532,7 +4554,7 @@ ALTER TABLE ONLY public.raw_broker_documents
 --
 
 ALTER TABLE ONLY public.raw_broker_documents
-    ADD CONSTRAINT raw_broker_documents_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE CASCADE;
+    ADD CONSTRAINT raw_broker_documents_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
 
 
 --
