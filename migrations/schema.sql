@@ -200,7 +200,8 @@ CREATE TABLE public.accounts (
     country text,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     platform_id bigint,
-    user_id bigint NOT NULL
+    user_id bigint NOT NULL,
+    closed_on date
 );
 
 

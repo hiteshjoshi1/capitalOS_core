@@ -35,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
+from app.portfolio.account_open import account_open_sql
 from app.portfolio.authority import FLEX_FACT_SCOPE, FLEX_SOURCE_KIND, authoritative_sql, window_covers_sql
 from app.valuation_cache import valuation_cached
 
@@ -206,6 +207,7 @@ def canonical_position_rows_by_legacy_account(
             AND ("""
         + account_scope_sql("acc")
         + """)
+            AND """ + account_open_sql("acc") + """
           GROUP BY ba.legacy_account_id
         ),
         sym_asset AS (
@@ -375,6 +377,7 @@ def canonical_cash_rows_by_legacy_account(
             AND ("""
         + account_scope_sql("acc")
         + """)
+            AND """ + account_open_sql("acc") + """
           GROUP BY cs.broker_account_id
         )
         SELECT
@@ -458,6 +461,7 @@ def canonical_account_balance_rows(
             AND ("""
         + account_scope_sql("acc")
         + """)
+            AND """ + account_open_sql("acc") + """
           GROUP BY abs.account_id
         ),
         abs_rows AS (
@@ -520,6 +524,7 @@ def canonical_account_balance_rows(
             AND ("""
         + account_scope_sql("acc")
         + """)
+            AND """ + account_open_sql("acc") + """
           GROUP BY cs.broker_account_id
         ),
         pcbs_rows AS (
@@ -618,6 +623,7 @@ def canonical_snapshot_coverage_as_of(
               AND ("""
             + account_scope_sql("acc")
             + """)
+              AND """ + account_open_sql("acc") + """
             GROUP BY ba.legacy_account_id
             """
         )
@@ -634,6 +640,7 @@ def canonical_snapshot_coverage_as_of(
               AND ("""
             + account_scope_sql("acc")
             + """)
+              AND """ + account_open_sql("acc") + """
             GROUP BY ba.legacy_account_id
             """
         )
@@ -645,9 +652,12 @@ def canonical_snapshot_coverage_as_of(
             JOIN accounts acc ON acc.id = abs.account_id
             WHERE abs.as_of_date <= :anchor_date
               AND """ + authoritative_sql("abs") + """
+              -- A card statement balance is a liability, not cash coverage (#207).
+              AND abs.balance_type <> 'credit_balance'
               AND ("""
             + account_scope_sql("acc")
             + """)
+              AND """ + account_open_sql("acc") + """
             GROUP BY abs.account_id
             """
         )
@@ -663,6 +673,7 @@ def canonical_snapshot_coverage_as_of(
               AND ("""
             + account_scope_sql("acc")
             + """)
+              AND """ + account_open_sql("acc") + """
             GROUP BY ba.legacy_account_id
             """
         )
@@ -716,6 +727,7 @@ def get_data_completeness_status(
             AND ("""
         + account_scope_sql("acc")
         + """)
+            AND """ + account_open_sql("acc") + """
           GROUP BY dc.broker_account_id, dc.fact_scope
         )
         SELECT

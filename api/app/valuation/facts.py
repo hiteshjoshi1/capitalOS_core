@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 from app.crypto.valuation import latest_wallet_valuation
+from app.portfolio.account_open import account_open_sql
+from app.portfolio.authority import authoritative_sql
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.valuation import clock, fx
@@ -73,33 +75,94 @@ def _card_liability_transaction_start(anchor_ts: datetime) -> date:
     return date(local_day.year, local_day.month, 1)
 
 
+# A card statement balance (a dated ``credit_balance`` snapshot, #207) is the
+# card's liability at an anchor when it is the newest one on or before the
+# anchor's date and at most this many days older than it: about one statement
+# cycle plus two weeks, so a monthly statement always reaches the next month-end.
+# An older one is not carried forward: the card falls back to its transactions.
+CARD_STATEMENT_MAX_AGE_DAYS = 45
+
+
 @valuation_cached()
-def _credit_card_liability_component(
+def _credit_card_liability_details(
     db: Session,
     anchor_ts: datetime,
     base_currency: str,
     current_user_id: int,
-) -> tuple[float, set[int]]:
+) -> list[Dict[str, Any]]:
+    """Each of the user's cards at ``anchor_ts``: what it owes, in ``base_currency``.
+
+    Per card (D-n, #207):
+    - closed before the anchor's date (``accounts.closed_on``): nothing;
+    - else its newest statement balance (``credit_balance`` snapshot) dated on
+      or before the anchor's date and at most CARD_STATEMENT_MAX_AGE_DAYS older:
+      that balance, as of its date (spend after it is not added);
+    - else its net card transactions in the anchor's card window (the method
+      before #207).
+    A newer statement never changes an earlier anchor: only snapshots on or
+    before an anchor are read. A credit balance (overpaid card) owes nothing.
+
+    Each entry: account_id, method (statement | transactions | closed),
+    as_of_date (the statement's date, else None), value (>= 0).
+    """
+    anchor_date = anchor_ts.date()
     cards = db.execute(
         text(
             """
             SELECT
               a.id AS account_id,
               a.currency AS account_currency,
-              COALESCE(cc.credit_limit, 0) AS credit_limit,
-              cc.available_limit,
-              cc.available_limit_as_of
+              a.closed_on
             FROM accounts a
-            LEFT JOIN credit_card_accounts cc ON cc.account_id = a.id
             WHERE a.account_type = 'CREDIT_CARD'
               AND """
             + account_scope_sql("a")
         ),
         {"current_user_id": current_user_id},
     ).mappings().all()
-    card_account_ids = {int(card["account_id"]) for card in cards}
     if not cards:
-        return 0.0, set()
+        return []
+
+    statement_rows = db.execute(
+        text(
+            """
+            SELECT abs.account_id, abs.as_of_date, abs.currency, abs.balance_local
+            FROM account_balance_snapshots abs
+            JOIN accounts a ON a.id = abs.account_id
+            WHERE a.account_type = 'CREDIT_CARD'
+              AND abs.balance_type = 'credit_balance'
+              AND """
+            + authoritative_sql("abs")
+            + """
+              AND abs.as_of_date <= :anchor_date
+              AND abs.as_of_date >= :oldest
+              AND """
+            + account_open_sql("a")
+            + """
+              AND """
+            + account_scope_sql("a")
+        ),
+        {
+            "anchor_date": anchor_date,
+            "oldest": anchor_date - timedelta(days=CARD_STATEMENT_MAX_AGE_DAYS),
+            "current_user_id": current_user_id,
+        },
+    ).mappings().all()
+    newest_statement: dict[int, date] = {}
+    for row in statement_rows:
+        as_of = _date_only(row["as_of_date"])
+        if as_of is None:
+            continue
+        account_id = int(row["account_id"])
+        if account_id not in newest_statement or as_of > newest_statement[account_id]:
+            newest_statement[account_id] = as_of
+    statement_balances: dict[int, list[tuple[str, float]]] = {}
+    for row in statement_rows:
+        account_id = int(row["account_id"])
+        if _date_only(row["as_of_date"]) == newest_statement.get(account_id):
+            statement_balances.setdefault(account_id, []).append(
+                (str(row["currency"] or base_currency).upper(), float(row["balance_local"] or 0.0))
+            )
 
     # The month boundary is midnight in the user's timezone (#202); the query
     # takes a day of slack either side and _card_transaction_in_window decides.
@@ -126,11 +189,9 @@ def _credit_card_liability_component(
         if _card_transaction_in_window(_normalize_ts(row["ts"]) or row["ts"], start_day, anchor_ts)
     ]
 
-    currencies = {
-        str(card["account_currency"] or base_currency).upper()
-        for card in cards
-    }
+    currencies = {str(card["account_currency"] or base_currency).upper() for card in cards}
     currencies.update(str(row["currency"] or base_currency).upper() for row in transaction_rows)
+    currencies.update(currency for balances in statement_balances.values() for currency, _ in balances)
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
 
     transaction_outstanding: dict[int, float] = {}
@@ -142,26 +203,46 @@ def _credit_card_liability_component(
             + (-float(row["amount"] or 0.0) * rates.get(currency, 0.0))
         )
 
-    liability = 0.0
+    out: list[Dict[str, Any]] = []
     for card in cards:
         account_id = int(card["account_id"])
-        account_currency = str(card["account_currency"] or base_currency).upper()
-        rate = rates.get(account_currency, 0.0)
-        available_as_of = _normalize_ts(card["available_limit_as_of"])
-        if (
-            card["available_limit"] is not None
-            and card["credit_limit"] is not None
-            and available_as_of is not None
-            and available_as_of <= anchor_ts
-        ):
-            outstanding = (
-                float(card["credit_limit"] or 0.0)
-                - float(card["available_limit"] or 0.0)
-            ) * rate
-        else:
-            outstanding = transaction_outstanding.get(account_id, 0.0)
-        liability += max(outstanding, 0.0)
-    return liability, card_account_ids
+        closed_on = _date_only(card["closed_on"])
+        if closed_on is not None and closed_on < anchor_date:
+            out.append({"account_id": account_id, "method": "closed", "as_of_date": None, "value": 0.0})
+            continue
+        if account_id in statement_balances:
+            # A card's balance is negative while money is owed (the holder's view,
+            # like its transactions), so what it owes is minus the balance.
+            outstanding = sum(-amount * rates.get(currency, 0.0) for currency, amount in statement_balances[account_id])
+            out.append(
+                {
+                    "account_id": account_id,
+                    "method": "statement",
+                    "as_of_date": newest_statement[account_id],
+                    "value": max(outstanding, 0.0),
+                }
+            )
+            continue
+        out.append(
+            {
+                "account_id": account_id,
+                "method": "transactions",
+                "as_of_date": None,
+                "value": max(transaction_outstanding.get(account_id, 0.0), 0.0),
+            }
+        )
+    return out
+
+
+@valuation_cached()
+def _credit_card_liability_component(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+) -> tuple[float, set[int]]:
+    details = _credit_card_liability_details(db, anchor_ts, base_currency, current_user_id)
+    return sum(card["value"] for card in details), {int(card["account_id"]) for card in details}
 
 
 _CASH_FRESHNESS_BALANCE_TYPES = {"cash", "broker_cash", "bank_cash", "stablecoin_cash"}

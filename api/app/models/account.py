@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Column, DateTime, Text, Enum, ForeignKey
+from sqlalchemy import BigInteger, Column, Date, DateTime, Text, Enum, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .base import Base
@@ -31,3 +31,6 @@ class Account(Base):
     platform_rel = relationship("Platform", back_populates="accounts")
 
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    # Closed on this date (#207): counts at every anchor up to it, nothing after.
+    closed_on = Column(Date, nullable=True)
