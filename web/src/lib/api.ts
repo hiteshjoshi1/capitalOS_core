@@ -274,14 +274,28 @@ export type ChangePasswordResult = {
   signed_out_sessions: number;
 };
 
+/** Where the effective home timezone comes from (#202): chosen by the user (or filled
+ * from their browser), the app's TZ for an account from before #202, or not filled yet. */
+export type TimezoneSource = "user" | "app" | "unset";
+
 export type UserPreferences = {
   theme: "dark" | "light";
   accent_color: "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
+  /** #202 (additive; absent from older servers). The effective home timezone (IANA name):
+   * months, month-end anchors and History follow it. */
+  timezone?: string | null;
+  timezone_source?: TimezoneSource | null;
+  /** #202: the base currency saved on the server; null until set. */
+  base_currency?: string | null;
 };
 
 export type UserPreferencesPatch = {
   theme?: "dark" | "light";
   accent_color?: "#0f7a5c" | "#2b6ddb" | "#8650d9" | "#b5842a";
+  /** IANA timezone name, e.g. "America/New_York" (#202). */
+  timezone?: string;
+  /** One of CURRENCY_OPTIONS (#202). */
+  base_currency?: string;
 };
 
 export type Account = {

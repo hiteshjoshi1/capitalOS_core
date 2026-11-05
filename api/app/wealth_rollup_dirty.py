@@ -23,7 +23,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import allow_legacy_null_ownership
-from app.core.clock import app_today
+from app.core.clock import app_today, use_timezone
 
 logger = logging.getLogger("capitalos.wealth_rollups")
 
@@ -44,10 +44,15 @@ def _snapshot_day() -> int:
     return max(1, min(day, 31))
 
 
-def latest_completed_anchor_date(now: Optional[datetime] = None) -> date:
+def latest_completed_anchor_date(now: Optional[datetime] = None, *, timezone_name: Optional[str] = None) -> date:
     """The newest snapshot anchor date that has passed: on or before today in
-    the app timezone, the completion rule of app.valuation.clock (#143)."""
-    today = app_today(now or _utc_now())
+    the user's timezone (``timezone_name``, else the current one: the request
+    user's, #202), the completion rule of app.valuation.clock (#143)."""
+    if timezone_name is not None:
+        with use_timezone(timezone_name):
+            today = app_today(now or _utc_now())
+    else:
+        today = app_today(now or _utc_now())
     year, month = today.year, today.month
     for _ in range(3):
         next_month = date(year + (month // 12), month % 12 + 1, 1)
@@ -104,7 +109,7 @@ def mark_rollups_dirty(
     commit. Returns whether anything was marked.
     """
     changed = _as_date(from_date)
-    if changed is None or changed > latest_completed_anchor_date():
+    if changed is None:
         return False
     if user_ids is not None:
         targets = sorted({int(u) for u in user_ids})
@@ -114,9 +119,18 @@ def mark_rollups_dirty(
         targets = _owner_user_ids(db, "crypto_wallets", wallet_id)
     else:
         targets = _all_user_ids(db)
+    # Only a change on or before a user's latest completed anchor can touch their
+    # stored rows; "completed" follows each user's own timezone (#202).
+    from app.services.user_preferences import timezones_for_users
+
+    now = _utc_now()
+    zones = timezones_for_users(db, targets)
+    targets = [
+        user_id for user_id in targets
+        if changed <= latest_completed_anchor_date(now, timezone_name=zones[user_id])
+    ]
     if not targets:
         return False
-    now = _utc_now()
     for user_id in targets:
         db.execute(
             text(

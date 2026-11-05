@@ -1,5 +1,6 @@
 import "../App.css";
 import ChangePasswordCard from "../components/ChangePasswordCard";
+import HomeRegionCard from "../components/HomeRegionCard";
 import PageShell from "../components/PageShell";
 import { useTheme } from "../context/ThemeContext";
 
@@ -16,6 +17,7 @@ export default function Settings() {
             {theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
           </button>
         </div>
+        <HomeRegionCard />
         <ChangePasswordCard />
       </div>
     </PageShell>

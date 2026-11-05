@@ -9,8 +9,10 @@ from fastapi import Depends, Header, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.clock import bind_request_timezone, normalize_timezone_name
 from app.db.session import get_db
 from app.services.auth import decode_access_token
+from app.services.user_preferences import stored_timezone
 
 logger = logging.getLogger("capitalos.auth")
 
@@ -20,6 +22,8 @@ class CurrentUser:
     id: int
     username: str
     is_admin: bool = False
+    # Home timezone (#202): a valid IANA name, or None for the app timezone.
+    timezone: str | None = None
 
 
 def allow_legacy_null_ownership() -> bool:
@@ -92,9 +96,11 @@ def _load_current_user(db: Session, user_id: int) -> CurrentUser:
     row = db.execute(
         text(
             """
-            SELECT id, username, COALESCE(is_admin, FALSE) AS is_admin, COALESCE(is_active, TRUE) AS is_active
-            FROM users
-            WHERE id = :user_id
+            SELECT u.id, u.username, COALESCE(u.is_admin, FALSE) AS is_admin,
+                   COALESCE(u.is_active, TRUE) AS is_active, p.timezone AS timezone
+            FROM users u
+            LEFT JOIN user_preferences p ON p.user_id = u.id
+            WHERE u.id = :user_id
             LIMIT 1
             """
         ),
@@ -107,13 +113,22 @@ def _load_current_user(db: Session, user_id: int) -> CurrentUser:
         id=int(row["id"]),
         username=str(row["username"]),
         is_admin=bool(row["is_admin"]),
+        timezone=normalize_timezone_name(row["timezone"]),
     )
+
+
+def _with_request_timezone(user: CurrentUser) -> CurrentUser:
+    """Month logic for the rest of this request follows the user's home
+    timezone (#202, app.core.clock)."""
+    bind_request_timezone(user.timezone)
+    return user
 
 
 def resolve_current_user_from_access_token(db: Session, access_token: str | None) -> CurrentUser:
     bypass_user = _bypass_current_user()
     if bypass_user is not None:
-        return bypass_user
+        bypass_user.timezone = stored_timezone(db, bypass_user.id)
+        return _with_request_timezone(bypass_user)
 
     if not access_token:
         raise HTTPException(status_code=401, detail="Missing access token")
@@ -129,7 +144,7 @@ def resolve_current_user_from_access_token(db: Session, access_token: str | None
     except (TypeError, ValueError) as exc:
         raise HTTPException(status_code=401, detail="Invalid token subject") from exc
 
-    return _load_current_user(db, user_id)
+    return _with_request_timezone(_load_current_user(db, user_id))
 
 
 def require_current_user(
@@ -138,7 +153,8 @@ def require_current_user(
 ) -> CurrentUser:
     bypass_user = _bypass_current_user()
     if bypass_user is not None:
-        return bypass_user
+        bypass_user.timezone = stored_timezone(db, bypass_user.id)
+        return _with_request_timezone(bypass_user)
 
     if not authorization:
         raise HTTPException(status_code=401, detail="Missing authorization")

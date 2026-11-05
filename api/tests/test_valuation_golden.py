@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from tests.valuation_golden import check_golden
-from tests.valuation_household import SCENARIOS, build_household, household_env
+from tests.valuation_household import SCENARIOS, build_scenario, household_env
 
 # Endpoints per scenario, as the web app calls them. The History timeline is
 # read after "Generate history" (the backfill), like a user's first visit.
@@ -64,7 +64,25 @@ _FIRST = [
     "/crypto/summary?month=2026-04&base_currency=SGD",
 ]
 
-ENDPOINTS = {"mid": _MID, "first": _FIRST}
+# The "first" instant for a New York household (#202): still 31 March there,
+# so March is the open month (live) and February the latest completed month.
+_FIRST_US = [
+    "/dashboard/bootstrap?month=2026-03&base_currency=SGD",
+    "/dashboard/summary?month=2026-03&base_currency=SGD&compare=prev_month,prev_year",
+    "/dashboard/summary?month=2026-02&base_currency=SGD&compare=prev_month,prev_year",
+    "/dashboard/net-worth-change?month=2026-03&base_currency=SGD",
+    "/dashboard/net-worth-since-update?base_currency=SGD",
+    "/dashboard/net-worth-timeline?months=6&base_currency=SGD",
+    "/dashboard/cash-deposits?month=2026-03&base_currency=SGD",
+    "/dashboard/cash-deposits?month=2026-02&base_currency=SGD",
+    "/dashboard/stock-holdings?month=2026-03&base_currency=SGD",
+    "/dashboard/stock-holdings?month=2026-02&base_currency=SGD",
+    "/dashboard/geography-exposure?month=2026-03&base_currency=SGD",
+    "/crypto/summary?month=2026-03&base_currency=SGD",
+    "/crypto/summary?month=2026-02&base_currency=SGD",
+]
+
+ENDPOINTS = {"mid": _MID, "first": _FIRST, "first_us": _FIRST_US}
 
 
 def collect(client: TestClient, paths: list[str]) -> dict:
@@ -83,7 +101,7 @@ def collect(client: TestClient, paths: list[str]) -> dict:
 def test_valuation_golden(scenario: str, client: TestClient, db_engine, monkeypatch):
     now = SCENARIOS[scenario]
     household_env(monkeypatch, now)
-    build_household(db_engine, now=now)
+    build_scenario(db_engine, scenario)
     check_golden(
         scenario,
         {"scenario": scenario, "now": now.isoformat(), "responses": collect(client, ENDPOINTS[scenario])},

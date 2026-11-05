@@ -29,6 +29,7 @@ from tests.valuation_household import (
     FlexReport,
     as_user,
     build_household,
+    build_scenario,
     build_user,
     fx,
     household_env,
@@ -463,7 +464,7 @@ def test_flex_backfill_does_not_resource_older_history(household, db_engine):
 @pytest.mark.parametrize("scenario", sorted(SCENARIOS))
 def test_cache_on_and_off_give_identical_results(scenario: str, client: TestClient, db_engine, monkeypatch):
     household_env(monkeypatch, SCENARIOS[scenario])
-    build_household(db_engine, now=SCENARIOS[scenario])
+    build_scenario(db_engine, scenario)
     paths = ENDPOINTS[scenario]
 
     monkeypatch.setenv("VALUATION_CACHE_ENABLED", "0")

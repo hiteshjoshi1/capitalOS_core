@@ -1,24 +1,31 @@
-"""Clock and snapshot anchors for valuation: one rule, one timezone (#143,
-#130 finding 1.10).
+"""Clock and snapshot anchors for valuation: one rule, one timezone per user
+(#143, #130 finding 1.10, #202).
 
-- **Now** is ``_current_anchor_ts()``: the app-timezone instant (``TZ``,
-  default Asia/Singapore, ``app.core.clock``), frozen for one request (#147).
-  **Today** is its date (``_app_today``).
+- **The timezone** is the request user's home timezone
+  (``user_preferences.timezone``, #202), else the app timezone (``TZ``,
+  default Asia/Singapore); see ``app.core.clock``. Background History refreshes
+  run each user in their own (``app.valuation.history``).
+- **Now** is ``_current_anchor_ts()``: the instant in that timezone, frozen
+  for one request (#147). **Today** is its date (``_app_today``).
 - A month's **anchor** is the date SNAPSHOT_DAY of the next month (clamped to
   the month's length), carried as 00:00 UTC of that date: readers use its date
-  (snapshots ``report_date <= anchor date``, inclusive) except card
-  transactions, which are ``ts < anchor`` (before 00:00 UTC that day).
-- An anchor has **passed** (its month is completed) once today, in the app
+  (snapshots ``report_date <= anchor date``, inclusive). Card transactions are
+  the exception (``_card_transaction_in_window``): they count before midnight
+  of the anchor date *in the user's timezone*; a date-only timestamp (stored
+  as 00:00 UTC, as statement imports write them) is that calendar date and is
+  compared by date (#202).
+- An anchor has **passed** (its month is completed) once today, in the user's
   timezone, is on or after its date (``_anchor_passed``). Dashboard snapshot
   views, the live comparisons, History and its dirty marks
   (``app.wealth_rollup_dirty``) all use this one rule, so on the 1st before
   08:00 SGT (still the previous day in UTC) they agree that last month is done.
-- The **open month** is today's month in the app timezone.
+- The **open month** is today's month in the user's timezone.
+- Quote and FX date lookups are not affected (D-44): market/UTC dates.
 """
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -79,6 +86,50 @@ def _local_date(instant: datetime) -> date:
     if instant.tzinfo is None:
         instant = instant.replace(tzinfo=timezone.utc)
     return instant.astimezone(app_timezone()).date()
+
+
+def _local_midnight(day: date) -> datetime:
+    """00:00 of ``day`` in the current timezone, as a UTC instant."""
+    return datetime.combine(day, time(0), tzinfo=app_timezone()).astimezone(timezone.utc)
+
+
+def _is_utc_midnight(instant: datetime) -> bool:
+    utc = instant.astimezone(timezone.utc) if instant.tzinfo is not None else instant
+    return (utc.hour, utc.minute, utc.second, utc.microsecond) == (0, 0, 0, 0)
+
+
+def _is_snapshot_anchor(anchor_ts: datetime) -> bool:
+    """Whether ``anchor_ts`` is a date anchor (00:00 UTC, as ``_anchor_ts``
+    carries them) rather than a live instant."""
+    offset = anchor_ts.utcoffset() if anchor_ts.tzinfo is not None else timedelta(0)
+    return offset == timedelta(0) and _is_utc_midnight(anchor_ts)
+
+
+def _card_transaction_in_window(ts: datetime, start_day: date, anchor_ts: datetime) -> bool:
+    """Whether a card transaction at ``ts`` is in the window that starts on
+    ``start_day`` and ends at ``anchor_ts``, by the user's calendar (#202).
+
+    - A date-only ``ts`` (00:00 UTC: statement rows carry just a date) is its
+      calendar date: in the window when ``start_day <= date`` and the date is
+      before a date anchor's date, or on/before today for a live anchor.
+    - A timed ``ts`` is an instant: in the window from midnight of
+      ``start_day`` in the user's timezone up to midnight of a date anchor's
+      date in the user's timezone, or up to the live instant.
+    """
+    ts = _normalize_ts(ts) or ts
+    snapshot = _is_snapshot_anchor(anchor_ts)
+    if _is_utc_midnight(ts):
+        day = ts.astimezone(timezone.utc).date()
+        if day < start_day:
+            return False
+        if snapshot:
+            return day < anchor_ts.astimezone(timezone.utc).date()
+        return day <= _local_date(anchor_ts)
+    if ts < _local_midnight(start_day):
+        return False
+    if snapshot:
+        return ts < _local_midnight(anchor_ts.astimezone(timezone.utc).date())
+    return ts < anchor_ts
 
 
 def _app_today() -> date:

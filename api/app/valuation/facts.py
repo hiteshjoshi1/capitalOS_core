@@ -2,7 +2,7 @@
 cash flow, at an anchor."""
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Mapping, overload
 
@@ -14,7 +14,18 @@ from app.crypto.valuation import latest_wallet_valuation
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.valuation import clock, fx
-from app.valuation.clock import _add_months, _anchor_ts, _configured_snapshot_day, _date_only, _iso_value, _month_window, _normalize_ts
+from app.valuation.clock import (
+    _add_months,
+    _anchor_ts,
+    _card_transaction_in_window,
+    _configured_snapshot_day,
+    _date_only,
+    _is_snapshot_anchor,
+    _iso_value,
+    _local_date,
+    _month_window,
+    _normalize_ts,
+)
 from app.valuation.fx import _cashflow_rate_date
 from app.valuation.prices import (
     _canonical_base_currency,
@@ -47,17 +58,19 @@ def _serialize_net_worth(components: Dict[str, float]) -> Dict[str, float]:
     }
 
 
-def _card_liability_transaction_start(anchor_ts: datetime) -> datetime:
-    month_start = anchor_ts.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if (
-        anchor_ts.day == _configured_snapshot_day()
-        and anchor_ts.hour == 0
-        and anchor_ts.minute == 0
-        and anchor_ts.second == 0
-        and anchor_ts.microsecond == 0
-    ):
-        return _add_months(month_start, -1)
-    return month_start
+def _card_liability_transaction_start(anchor_ts: datetime) -> date:
+    """First day (user's calendar) of the card-spending window ending at
+    ``anchor_ts``: the previous month's 1st for a month-end snapshot anchor,
+    else the 1st of the anchor's own month (a live "now": its local month)."""
+    if _is_snapshot_anchor(anchor_ts):
+        anchor_day = anchor_ts.astimezone(timezone.utc).date()
+        month_start = date(anchor_day.year, anchor_day.month, 1)
+        if anchor_day.day == _configured_snapshot_day():
+            previous = month_start - timedelta(days=1)
+            return date(previous.year, previous.month, 1)
+        return month_start
+    local_day = _local_date(anchor_ts)
+    return date(local_day.year, local_day.month, 1)
 
 
 @valuation_cached()
@@ -88,11 +101,15 @@ def _credit_card_liability_component(
     if not cards:
         return 0.0, set()
 
-    transaction_start = _card_liability_transaction_start(anchor_ts)
+    # The month boundary is midnight in the user's timezone (#202); the query
+    # takes a day of slack either side and _card_transaction_in_window decides.
+    start_day = _card_liability_transaction_start(anchor_ts)
+    query_start = datetime.combine(start_day - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    query_end = anchor_ts.astimezone(timezone.utc) + timedelta(days=1)
     transaction_rows = db.execute(
         text(
             """
-            SELECT t.account_id, t.amount, t.currency
+            SELECT t.account_id, t.amount, t.currency, t.ts
             FROM transactions t
             JOIN accounts a ON a.id = t.account_id
             WHERE t.ts >= :start
@@ -102,8 +119,12 @@ def _credit_card_liability_component(
               AND """
             + account_scope_sql("a")
         ),
-        {"start": transaction_start, "anchor": anchor_ts, "current_user_id": current_user_id},
+        {"start": query_start, "anchor": query_end, "current_user_id": current_user_id},
     ).mappings().all()
+    transaction_rows = [
+        row for row in transaction_rows
+        if _card_transaction_in_window(_normalize_ts(row["ts"]) or row["ts"], start_day, anchor_ts)
+    ]
 
     currencies = {
         str(card["account_currency"] or base_currency).upper()

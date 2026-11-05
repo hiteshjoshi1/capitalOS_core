@@ -566,6 +566,9 @@ def setup_db():
               user_id INTEGER PRIMARY KEY,
               theme TEXT NOT NULL DEFAULT 'dark',
               accent_color TEXT NOT NULL DEFAULT '#0f7a5c',
+              timezone TEXT,
+              timezone_from_app BOOLEAN NOT NULL DEFAULT 0,
+              base_currency TEXT,
               updated_at TIMESTAMP
             )
             """
@@ -1054,6 +1057,7 @@ def clear_db():
             "account_statement_identities",
             "wealth_monthly_rollups",
             "wealth_rollup_dirty",
+            "user_preferences",  # a home timezone (#202) must not leak into the next test
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
