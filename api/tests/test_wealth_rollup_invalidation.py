@@ -442,3 +442,71 @@ def test_new_or_corrected_past_fx_rate_marks_history_dirty_and_unchanged_rate_do
 
     fx._store_rows([{**row, "rate_date": date(2026, 3, 10)}])  # today: no stored month affected
     assert _dirty(db_engine) == (date(2026, 2, 1), 2)
+
+
+def test_ibkr_statement_fx_rate_marks_every_user_and_drops_cached_rates_only_when_it_changes(
+    db_engine, tmp_path, monkeypatch
+):
+    """#197 (as #188 for provider rates): a new or corrected IBKR statement rate
+    marks every user's History dirty from its date (FX rates are shared) and drops
+    the in-process rates cached from that date on. Re-importing the same rate does
+    neither."""
+    from app import fx
+    from tests.test_ibkr_flex_phase1 import _valid_flex_xml
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users (id, username, display_name, is_active) VALUES "
+                "(1, 'flex-owner', 'Owner', 1), (2, 'other-user', 'Other', 1)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country) VALUES "
+                "(974, 'Synthetic IBKR', 'IBKR', 1, 'BROKER', 'SGD', 'SG')"
+            )
+        )
+    statement_day = date(2026, 2, 20)  # the ConversionRate date in _valid_flex_xml (USD->SGD 1.35)
+    later_key = ("rate", date(2026, 2, 25), "SGD", "USD")
+    earlier_key = ("rate", date(2026, 2, 19), "SGD", "USD")
+
+    def _import(xml: str) -> None:
+        db = Session(bind=db_engine)
+        try:
+            run_ibkr_flex_import_from_xml(
+                db, current_user_id=1, legacy_account_id=974, xml_text=xml, cutover_date=date(2026, 2, 1)
+            )
+        finally:
+            db.close()
+
+    def _other_user_dirty() -> date | None:
+        db = Session(bind=db_engine)
+        try:
+            return dirty_state(db, 2)[0]
+        finally:
+            db.close()
+
+    def _clear_marks_and_seed_cache() -> None:
+        with db_engine.begin() as conn:
+            conn.execute(text("UPDATE wealth_rollup_dirty SET from_date = NULL"))
+        for key in (later_key, earlier_key):
+            fx._CACHE[key] = (0.0, 10**9, None)
+
+    _import(_valid_flex_xml())  # a new rate
+    assert _other_user_dirty() == statement_day
+
+    _clear_marks_and_seed_cache()
+    _import(_valid_flex_xml())  # the same rate again: nothing changed
+    assert _other_user_dirty() is None
+    assert later_key in fx._CACHE and earlier_key in fx._CACHE
+
+    corrected = _valid_flex_xml().replace(
+        'fromCurrency="USD" toCurrency="SGD" rate="1.35"', 'fromCurrency="USD" toCurrency="SGD" rate="1.3612"'
+    )
+    assert corrected != _valid_flex_xml()
+    _import(corrected)
+    assert _other_user_dirty() == statement_day
+    assert later_key not in fx._CACHE  # resolves to (or past) the corrected row: dropped
+    assert earlier_key in fx._CACHE  # can't resolve to it: kept
