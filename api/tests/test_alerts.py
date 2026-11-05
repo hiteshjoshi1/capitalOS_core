@@ -28,8 +28,8 @@ def _hours_ago(n: int) -> datetime:
 def _insert_account(db, account_id: int, name: str, platform: str = "DBS"):
     db.execute(
         text(
-            "INSERT OR IGNORE INTO accounts (id, name, platform, account_type, currency) "
-            "VALUES (:id, :name, :platform, 'BANK', 'SGD')"
+            "INSERT OR IGNORE INTO accounts (id, name, platform, account_type, currency, user_id) "
+            "VALUES (:id, :name, :platform, 'BANK', 'SGD', 1)"
         ),
         {"id": account_id, "name": name, "platform": platform},
     )

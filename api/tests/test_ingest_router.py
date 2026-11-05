@@ -14,8 +14,8 @@ def test_ingest_upload_and_register(client: TestClient, db_engine, tmp_path: Pat
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(400, 'DBS Test', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(400, 'DBS Test', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         db.commit()
@@ -59,8 +59,8 @@ def test_ingest_upload_prefers_account_platform_over_generic_platform_code(
         )
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) VALUES "
-                "(902, 'DBS Vickers Test', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG', 901)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+                "(902, 'DBS Vickers Test', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG', 901, 1)"
             )
         )
         db.commit()

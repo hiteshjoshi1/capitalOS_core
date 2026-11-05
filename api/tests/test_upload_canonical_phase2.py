@@ -43,8 +43,8 @@ def _seed_account(db_engine, account_id: int, name: str, platform: str, currency
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) "
-                "VALUES (:id, :name, :platform, 'BROKER', :currency, 'XX')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) "
+                "VALUES (:id, :name, :platform, 'BROKER', :currency, 'XX', 1)"
             ),
             {"id": account_id, "name": name, "platform": platform, "currency": currency},
         )

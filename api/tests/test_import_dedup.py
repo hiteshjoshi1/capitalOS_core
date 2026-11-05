@@ -32,8 +32,8 @@ def _seed_bank_account(db_engine) -> None:
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'Test Bank', 'OCBC', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'Test Bank', 'OCBC', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": ACCOUNT_ID},
         )

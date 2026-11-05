@@ -30,9 +30,6 @@ jobs:
             touch .env
           fi
 
-      - name: Start postgres
-        run: docker compose up -d postgres
-
       - name: Lint
         run: make lint
 
@@ -49,10 +46,28 @@ jobs:
         run: |
           if [ -f web/playwright.config.ts ] || [ -f web/playwright.config.js ]; then
             cd web
-            npm install
+            npm ci
             npx playwright install --with-deps chromium
             cd ..
             make e2e
           else
             echo "Playwright config not found. Skipping e2e."
           fi
+
+  # #154: every migration applied to an empty Postgres 16 with the same runner as
+  # `make db-migrate`, a second run that must change nothing, the schema diffed against
+  # migrations/schema.sql, then the Postgres-marked tests (pytest -m postgres) against it,
+  # including the cross-user isolation sweep over every GET route. Same as `make db-schema-check`.
+  postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Ensure .env exists
+        run: touch .env
+
+      - name: Migrate an empty Postgres, check the schema, run the Postgres tests
+        run: make db-schema-check

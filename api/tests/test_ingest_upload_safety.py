@@ -37,8 +37,8 @@ def account_id(db_engine) -> int:
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(1320, 'Upload Safety Test', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(1320, 'Upload Safety Test', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         db.commit()

@@ -98,8 +98,8 @@ def test_dbs_credit_card_ingest_upload_and_idempotent(client: TestClient, db_eng
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )

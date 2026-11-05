@@ -319,7 +319,7 @@ def test_other_users_data_never_changes_my_numbers(client: TestClient, db_engine
 
 
 def test_user_b_sees_only_their_own_money(household, monkeypatch, db_engine):
-    as_user(monkeypatch, USER_B)
+    as_user(household, USER_B)
     nw = _summary(household, "2026-03")["current_net_worth"]
     usd = fx(MID.date(), "USD")
     # B: OCBC 17,000 SGD; wallet 1 ETH @ 3,000 + 700 USDT; card limit 5,000 - 4,200 available.

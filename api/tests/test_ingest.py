@@ -16,8 +16,8 @@ def test_ibkr_ingest_creates_transactions(client: TestClient, db_engine, tmp_pat
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(100, 'Test IBKR', 'IBKR', 'BROKER', 'USD', 'US')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(100, 'Test IBKR', 'IBKR', 'BROKER', 'USD', 'US', 1)"
             )
         )
         db.commit()
@@ -86,8 +86,8 @@ def test_ibkr_trade_ingestion_persists_asset_and_quantity(client: TestClient, db
     try:
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(101, 'IBKR Trade Test', 'IBKR', 'BROKER', 'USD', 'US')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(101, 'IBKR Trade Test', 'IBKR', 'BROKER', 'USD', 'US', 1)"
             )
         )
         db.commit()

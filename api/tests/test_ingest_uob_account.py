@@ -83,8 +83,8 @@ def test_uob_ingest_upload_and_import(client: TestClient, db_engine):
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )
@@ -137,8 +137,8 @@ def test_uob_ingest_idempotent(client: TestClient, db_engine):
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )
@@ -186,8 +186,8 @@ def test_uob_ingest_upload_with_legacy_platform_label(client: TestClient, db_eng
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'UOB One', 'UOB One Account', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'UOB One', 'UOB One Account', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )
@@ -220,8 +220,8 @@ def test_uob_ingested_data_appears_in_dashboard_and_cash_flow(client: TestClient
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'UOB One', 'UOB', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )
