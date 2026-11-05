@@ -376,15 +376,15 @@ jsonpatch==1.35 \
     # via
     #   -r orchestration/requirements.in
     #   langchain-core
-jsonpointer==3.2.1 \
-    --hash=sha256:47c846513b3a4ec46eecef1105207fba075e2a3659048e362bd7daff0fc33342 \
-    --hash=sha256:b19ee68644e9ffb51440448d8f7811af2b7406eea1db90603e93f5849323119a
+jsonpointer==3.3 \
+    --hash=sha256:1e9b099b883a4617561960f754879a1af62b6d2e0f4e4a8029e8326e923e6723 \
+    --hash=sha256:2d851da328132043289a03df1dbb1577b901ad9cd22911f515d17875fbc1773a
     # via
     #   -r orchestration/requirements.in
     #   jsonpatch
-langchain-core==1.6.10 \
-    --hash=sha256:14341bdd8b42d0dd9a53dbbcd8b0599ab47b0c718c7caa12e3eb5c50b32cffcb \
-    --hash=sha256:3ad7a64eab150c1fea9f8a748b1c076aa1a960c5cf7c28d81a841a2f2dbffad1
+langchain-core==1.6.12 \
+    --hash=sha256:39b07aed976baac14c47b7a21e3c7d4073362bccf06cf8799c585dcc9548547d \
+    --hash=sha256:dc6b2a965c351b4cc94df1c80220bcf3c5472e14437d2186c8290ea22f4d0219
     # via
     #   -r orchestration/requirements.in
     #   langgraph
@@ -418,9 +418,9 @@ langgraph-prebuilt==1.1.1 \
     --hash=sha256:f1b1a4772e7f9f15ba736411aad3877183ad40cd9349748df76bd2b9f58a83c7 \
     --hash=sha256:fae17c22562e501940eb7aa052a15c58a431febbabf33f8ad172e1b44354a7e4
     # via langgraph
-langgraph-sdk==0.4.7 \
-    --hash=sha256:6827560be31e38daae1514234e9aa12c345dd40d4d4b94aa1b443729bfccda69 \
-    --hash=sha256:a005c7ac662c318a3405e436e9effaa90c05343f9f4ae9e11dca19c9369727dd
+langgraph-sdk==0.4.8 \
+    --hash=sha256:6dd0c55d0d9040686716581c9e302c21c31ad6e2eebda0defc944a8bb38ec011 \
+    --hash=sha256:bef8ac54bdfe3ac2f7eba5be2f322dde296701b39e1c1aa403302f08d273fab5
     # via
     #   -r orchestration/requirements.in
     #   langgraph

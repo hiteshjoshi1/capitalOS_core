@@ -57,7 +57,7 @@ endif
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots reports-mask authority-window-move db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -498,6 +498,27 @@ db-schema-check-drop:
 db-migrations-applied:
 	@docker exec -i $(DB_CONTAINER) psql -X -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT filename FROM schema_migrations ORDER BY filename;"
 
+# Before applying migrations that add CHECK constraints (#158): which existing rows would each
+# pending constraint reject? Read-only (a READ ONLY session; it never writes). Checks the
+# migrations not yet recorded on that database, or MIGRATIONS="migrations/079_x.sql ...".
+# Exits non-zero, listing the constraint, table and offending values, when any row breaks one.
+# Another stack's database: make db-constraint-check DB_CONTAINER=<postgres container>.
+DB_READONLY_PSQL=docker exec -i -e PGOPTIONS='-c default_transaction_read_only=on' $(DB_CONTAINER) psql -X -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME)
+db-constraint-check: db-wait
+	@if [ -n "$(MIGRATIONS)" ]; then pending="$(MIGRATIONS)"; else \
+		applied=$$($(DB_READONLY_PSQL) -At -c "SELECT CASE WHEN to_regclass('public.schema_migrations') IS NULL THEN '' ELSE (SELECT string_agg(filename, ' ') FROM schema_migrations) END;") || exit 1; \
+		pending=""; for f in $$(ls -1 migrations/[0-9][0-9][0-9]_*.sql | sort); do \
+			case " $$applied " in *" $$(basename $$f) "*) ;; *) pending="$$pending $$f" ;; esac; \
+		done; \
+	fi; \
+	echo "Checking the CHECK constraints of:$${pending:- (no pending migrations)} on $(DB_CONTAINER) (read-only)"; \
+	$(PYTHON) api/app/scripts/constraint_precheck.py $$pending | $(DB_READONLY_PSQL)
+
+# #158 / #130 1.9: which candidate dead tables does the code still read or write, and how many
+# rows do they hold here? Read-only (static scan of the code + exact counts in a READ ONLY session).
+db-table-usage: db-wait
+	@$(PYTHON) scripts/db-table-usage.py --psql "$(DB_READONLY_PSQL)"
+
 db-adopt-migrations: db-wait
 	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) -c "CREATE TABLE IF NOT EXISTS schema_migrations (filename TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());" > /dev/null
 	@public_table_count=$$(docker exec -i $(DB_CONTAINER) psql -At -U $(DB_USER) -d $(DB_NAME) -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name <> 'schema_migrations';"); \
@@ -552,6 +573,15 @@ ownership-reassign:
 ibkr-rebuild-snapshots:
 	$(COMPOSE) exec api python -m app.scripts.rebuild_ibkr_flex_snapshots $(if $(APPLY),--apply,) $(if $(BROKER_ACCOUNT_ID),--broker-account-id $(BROKER_ACCOUNT_ID),) $(if $(RAW_DIR),--raw-dir "$(RAW_DIR)",)
 
+# #207: write each stored card statement's balance (DBS available limit, UOB statement balance)
+# as a dated credit_balance snapshot, as its upload now would, so past months read the statement
+# of their own date. Migration 078 already backfilled each card's current limits; this adds the
+# older statements from their files under data/. Dry run unless APPLY=1; idempotent (newest import
+# wins per date; a second run changes nothing); marks History dirty from the earliest changed date.
+# Prints job ids, actions and dates, never amounts. Runs in the running api container.
+card-balance-backfill:
+	$(COMPOSE) exec api python -m app.scripts.backfill_card_balances $(if $(filter 1,$(APPLY)),--apply,)
+
 # #190: mask account numbers in existing import reports (data/reports/*.json): parser_meta's
 # account fields and signature_debug only, never transaction descriptions. Dry run (lists files
 # and field names, never values) unless APPLY=1. Only this checkout's data/reports (the api
@@ -605,6 +635,8 @@ orch-lock:
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
 	scripts/check-pinned-refs.sh
+	$(PYTHON) scripts/check-migrations.py
+	PYTHON="$(PYTHON)" scripts/test-check-migrations.sh
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests

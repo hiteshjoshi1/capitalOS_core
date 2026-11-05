@@ -746,7 +746,7 @@ def test_failed_holdings_refresh_writes_a_prices_only_snapshot_dated_today(clien
             )
         )
 
-    monkeypatch.setattr("app.crypto.valuation._as_of_date", lambda: date(2026, 7, 6))
+    monkeypatch.setattr("app.crypto.ingest._as_of_date", lambda: date(2026, 7, 6))
     monkeypatch.setattr("app.crypto.refresh.ingest_wallet", lambda db, wallet_id: (_ for _ in ()).throw(RuntimeError("Alchemy 429")))
     monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: 150.0 if symbol == "ETH" else None)
     monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
@@ -824,7 +824,7 @@ def test_price_refresh_reprices_todays_snapshot_in_place(db_engine, monkeypatch)
     from app.crypto.valuation import refresh_latest_snapshot_prices
 
     _seed_priced_wallet(db_engine, "wallet-today", "2026-07-06", 9920)
-    monkeypatch.setattr("app.crypto.valuation._as_of_date", lambda: date(2026, 7, 6))
+    monkeypatch.setattr("app.crypto.ingest._as_of_date", lambda: date(2026, 7, 6))
     monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: 120.0)
     monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
     monkeypatch.setattr("app.crypto.valuation.price_by_mint", lambda mints: {})
@@ -847,7 +847,7 @@ def test_price_refresh_without_any_fresh_price_writes_nothing(db_engine, monkeyp
     from app.crypto.valuation import refresh_latest_snapshot_prices
 
     _seed_priced_wallet(db_engine, "wallet-noprice", "2026-07-03", 9930)
-    monkeypatch.setattr("app.crypto.valuation._as_of_date", lambda: date(2026, 7, 6))
+    monkeypatch.setattr("app.crypto.ingest._as_of_date", lambda: date(2026, 7, 6))
     monkeypatch.setattr("app.crypto.valuation.price_by_symbol", lambda symbol: None)
     monkeypatch.setattr("app.crypto.valuation.price_by_contract", lambda chain, contracts: {})
     monkeypatch.setattr("app.crypto.valuation.price_by_mint", lambda mints: {})

@@ -547,6 +547,22 @@ def _insert_user_rows(conn, user_id: int, through: date) -> None:
             ),
             [{"a": a, "n": n, "i": i, "l": lim, "av": av, "avd": avd} for a, n, i, lim, av, avd in cards],
         )
+        # The dated statement balance migration 078 backfills from those limits
+        # (#207): what the card owes, as a negative balance, on that date.
+        statements = [
+            {"a": a, "d": avd[:10], "c": "SGD", "b": av - lim}
+            for a, _n, _i, lim, av, avd in cards
+            if av is not None and avd is not None and _on_or_before(avd, through)
+        ]
+        if statements:
+            conn.execute(
+                text(
+                    "INSERT INTO account_balance_snapshots (account_id, as_of_date, currency, balance_type, "
+                    "balance_local, balance_base, fx_rate_to_base, authority_status, source_kind, metadata_json) "
+                    "VALUES (:a, :d, :c, 'credit_balance', :b, :b, 1, 'authoritative', 'backfill', '{}')"
+                ),
+                statements,
+            )
     conn.execute(
         text(
             "INSERT INTO crypto_wallets (id, user_id, chain_type, chain, address, label, status, created_at) "

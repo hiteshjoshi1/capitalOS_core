@@ -159,6 +159,10 @@ export default function AddAccount() {
     setCurrencies(c);
   }
 
+  function onAccountChanged(updated: Account) {
+    setAccounts((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+  }
+
   async function onCreatePlatform(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErr("");
@@ -403,8 +407,17 @@ export default function AddAccount() {
                 <DirectoryListRow
                   key={a.id}
                   title={a.name}
-                  meta={`${formatPlatformLabel(a.platform)} · ${formatEnumLabel(a.account_type)} · ${a.currency}`}
-                  right={<span className="statusPill statusPill--good">Active</span>}
+                  meta={
+                    <>
+                      {`${formatPlatformLabel(a.platform)} · ${formatEnumLabel(a.account_type)} · ${a.currency}`}
+                      {a.carried_forward_from ? (
+                        <span className="hint">
+                          {` · ${a.data_month ?? "Last month"} shows data from ${a.carried_forward_from} (carried forward)`}
+                        </span>
+                      ) : null}
+                    </>
+                  }
+                  right={<AccountCloseControl account={a} onChanged={onAccountChanged} />}
                 />
               ))
             )}
@@ -413,5 +426,74 @@ export default function AddAccount() {
         </div>
       )}
     </PageShell>
+  );
+}
+
+function todayIso(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/** Close an account on a date, or reopen it (#207). A closed account counts up to
+ * its close date and contributes nothing to later months. */
+function AccountCloseControl({ account, onChanged }: { account: Account; onChanged: (a: Account) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [closedOn, setClosedOn] = useState<string>(todayIso());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function save(value: string | null) {
+    setBusy(true);
+    setError("");
+    try {
+      onChanged(await api.updateAccount(account.id, { closed_on: value }));
+      setEditing(false);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (account.closed_on) {
+    return (
+      <span className="accountCloseControl">
+        <span className="statusPill statusPill--neutral">Closed {account.closed_on}</span>
+        <button type="button" className="linkBtn" disabled={busy} onClick={() => save(null)}>
+          Reopen
+        </button>
+        {error && <span className="hint" role="alert">{error}</span>}
+      </span>
+    );
+  }
+  if (editing) {
+    return (
+      <span className="accountCloseControl">
+        <input
+          className="input"
+          type="date"
+          value={closedOn}
+          max={todayIso()}
+          aria-label={`Close date for ${account.name}`}
+          onChange={(e) => setClosedOn(e.target.value)}
+        />
+        <button type="button" className="btn" disabled={busy || !closedOn} onClick={() => save(closedOn)}>
+          {busy ? "Saving…" : "Close account"}
+        </button>
+        <button type="button" className="linkBtn" disabled={busy} onClick={() => setEditing(false)}>
+          Cancel
+        </button>
+        {error && <span className="hint" role="alert">{error}</span>}
+      </span>
+    );
+  }
+  return (
+    <span className="accountCloseControl">
+      <span className="statusPill statusPill--good">Active</span>
+      <button type="button" className="linkBtn" onClick={() => setEditing(true)} aria-label={`Close ${account.name}`}>
+        Close…
+      </button>
+    </span>
   );
 }

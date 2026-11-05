@@ -10,7 +10,12 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import FxRates, fx_status, get_rates, get_rates_by_date, rate_date
-from app.valuation.clock import _anchor_ts
+from app.valuation.clock import (
+    _anchor_ts,
+    _transaction_in_month_window,
+    _transaction_month_key,
+    _transaction_query_bounds,
+)
 from app.valuation.facts import _networth_components
 from app.valuation.state import _effective_as_of
 from app.schemas.spending import (
@@ -153,10 +158,23 @@ def _row_ts(value: datetime | str) -> datetime:
 
 
 def _month_key(value: datetime | str) -> str:
-    if isinstance(value, datetime):
-        return value.strftime("%Y-%m")
-    as_text = str(value)
-    return as_text[:7]
+    """The month a transaction counts in, by the user's calendar (#211, D-49):
+    a date-only row (00:00 UTC) is its date's month, a timed one the month of
+    its instant in the user's timezone. Month starts (00:00 UTC) map to
+    themselves."""
+    try:
+        return _transaction_month_key(value)
+    except ValueError:
+        return str(value)[:7]
+
+
+def _window_rows(db: Session, query, params: dict, start: datetime, end: datetime, *, start_key: str = "start"):
+    """Rows of ``query`` whose transaction falls in the calendar window
+    [start, end) in the user's timezone (#211): the SQL takes a day of slack
+    either side and ``_transaction_in_month_window`` decides each row."""
+    query_start, query_end = _transaction_query_bounds(start, end)
+    rows = db.execute(query, {**params, start_key: query_start, "end": query_end}).mappings().all()
+    return [row for row in rows if _transaction_in_month_window(row["ts"], start, end)]
 
 
 def _cash_flow_rows(db: Session, start: datetime, end: datetime, current_user_id: int):
@@ -207,7 +225,7 @@ def _cash_flow_rows(db: Session, start: datetime, end: datetime, current_user_id
           AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST', 'TRANSFER')
         ORDER BY t.ts DESC, t.id DESC
     """)
-    return db.execute(cash_flow_q, {"start": start, "end": end, "current_user_id": current_user_id}).mappings().all()
+    return _window_rows(db, cash_flow_q, {"current_user_id": current_user_id}, start, end)
 
 
 def _is_transfer_resolved_category(row) -> bool:
@@ -803,10 +821,7 @@ def _spend_by_account(
             + """
           AND t.type IN ('EXPENSE','FEE','TAX','INTEREST')
     """)
-    spend_rows = db.execute(
-        spend_q,
-        {"start": start, "end": end, "current_user_id": current_user_id},
-    ).mappings().all()
+    spend_rows = _window_rows(db, spend_q, {"current_user_id": current_user_id}, start, end)
     rates_by_date = _build_row_rate_map(spend_rows, base_currency)
     spend: dict[int, float] = {}
     for row in spend_rows:
@@ -855,10 +870,7 @@ def _credit_card_analytics_rows(db: Session, start: datetime, end: datetime, cur
           AND t.type IN ('EXPENSE','TAX','FEE','INTEREST')
         ORDER BY t.ts DESC, t.id DESC
     """)
-    return db.execute(
-        rows_q,
-        {"start": start, "end": end, "current_user_id": current_user_id},
-    ).mappings().all()
+    return _window_rows(db, rows_q, {"current_user_id": current_user_id}, start, end)
 
 
 def _cc_transaction_item(row, base_amount: float) -> CreditCardTransactionItem:
@@ -916,10 +928,10 @@ def _credit_card_recurring_payments(
             + """
         ORDER BY t.ts DESC, t.id DESC
     """)
-    params = {"lookback_start": lookback_start, "end": end, "current_user_id": current_user_id}
+    params: dict = {"current_user_id": current_user_id}
     if account_id is not None:
         params["account_id"] = account_id
-    recurring_rows = db.execute(recurring_q, params).mappings().all()
+    recurring_rows = _window_rows(db, recurring_q, params, lookback_start, end, start_key="lookback_start")
     recurring_rates = _build_row_rate_map(recurring_rows, base_currency)
 
     recurring_index: dict[tuple[int, str], dict] = {}
@@ -1236,10 +1248,7 @@ def credit_card_transactions(
             + """
         ORDER BY t.ts DESC, t.id DESC
     """)
-    tx_rows = db.execute(
-        tx_q,
-        {"start": start, "end": end, "current_user_id": current_user.id},
-    ).mappings().all()
+    tx_rows = _window_rows(db, tx_q, {"current_user_id": current_user.id}, start, end)
     tx_rates = _build_row_rate_map(tx_rows, base_currency)
 
     transactions: list[CreditCardTransactionItem] = []

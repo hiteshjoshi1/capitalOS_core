@@ -37,6 +37,7 @@ from app.ingestion.account_checks import (
     link_statement_identity,
     statement_identity,
 )
+from app.ingestion.card_balances import CARD_BALANCE_PARSERS, write_card_statement_balance
 from app.ingestion.undo import card_limits_row, new_undo_log
 from app.models.import_job import ImportJob
 from app.wealth_rollup_dirty import mark_rollups_dirty
@@ -231,13 +232,6 @@ def _compose_notes(fp: str, parser_notes: Any) -> str:
     return f"{parser_notes} | fp:{fp}"
 
 
-def _snapshot_as_of() -> datetime:
-    snapshot_day = int(os.getenv("SNAPSHOT_DAY", "1"))
-    now = datetime.now(tz=timezone.utc)
-    safe_day = min(snapshot_day, 28)
-    return now.replace(day=safe_day, hour=0, minute=0, second=0, microsecond=0)
-
-
 def _normalize_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
@@ -250,12 +244,6 @@ def _normalize_datetime(value: Any) -> datetime | None:
             return None
         return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=timezone.utc)
     return None
-
-
-def _latest_transaction_ts(parsed: list[dict[str, Any]]) -> datetime | None:
-    candidates = [_normalize_datetime(tx.get("ts")) for tx in parsed]
-    normalized = [candidate for candidate in candidates if candidate is not None]
-    return max(normalized) if normalized else None
 
 
 def _persist_credit_card_limit_metadata(
@@ -273,10 +261,6 @@ def _persist_credit_card_limit_metadata(
     available_limit_as_of = _normalize_datetime(parser_meta.get("transactions_as_at"))
     if credit_limit is None or available_limit is None or available_limit_as_of is None:
         return
-    previous = db.execute(
-        text("SELECT available_limit_as_of FROM credit_card_accounts WHERE account_id = :account_id"),
-        {"account_id": account_id},
-    ).fetchone()
     before = card_limits_row(db, account_id) if undo is not None else None
     db.execute(
         text(
@@ -298,29 +282,9 @@ def _persist_credit_card_limit_metadata(
     if before is not None and undo is not None:
         # Removing this upload puts the earlier limits back (#180).
         undo["card_limits"] = {"before": before, "after": card_limits_row(db, account_id)}
-    if previous is not None:
-        # Anchors from the earlier of the old and new limit dates on read these
-        # limits (the old one stops applying, the new one starts) (#138).
-        previous_as_of = _normalize_datetime(previous[0])
-        changed_from = min(available_limit_as_of, previous_as_of) if previous_as_of else available_limit_as_of
-        mark_rollups_dirty(db, changed_from, account_id=account_id, reason="credit_card_limits")
-
-
-def _resolve_position_as_of(pos: Dict[str, Any], parser_meta: Dict[str, Any], parsed: list[dict[str, Any]]) -> datetime:
-    explicit = _normalize_datetime(pos.get("as_of"))
-    if explicit is not None:
-        return explicit
-
-    for key in ("statement_period_end", "report_date", "statement_date", "as_of", "latest_transaction_at"):
-        candidate = _normalize_datetime(parser_meta.get(key))
-        if candidate is not None:
-            return candidate
-
-    latest_tx = _latest_transaction_ts(parsed)
-    if latest_tx is not None:
-        return latest_tx.replace(hour=0, minute=0, second=0, microsecond=0)
-
-    return _snapshot_as_of()
+    # The limits are the card's current state, for the Spending page; valuation
+    # reads the dated statement balance (write_card_statement_balance, #207), so
+    # this row is no valuation input and marks nothing.
 
 
 def _get_or_create_asset(db: Session, pos: Dict[str, Any]) -> int | None:
@@ -783,6 +747,18 @@ def _run_ingestion_with_context(
                 undo=undo,
             )
             canonical_balances_written = (canonical_result or {}).get("counts", {}).get("balances", 0)
+
+        # The statement's dated balance, if it states one (#207): what the card
+        # owes from that date on, until a newer statement (D-29 mark from its date).
+        if parser_key in CARD_BALANCE_PARSERS and account_type == "CREDIT_CARD":
+            write_card_statement_balance(
+                db,
+                account_id=account_id,
+                import_job_id=int(job.id),
+                parser_key=parser_key,
+                parser_meta=parser_meta,
+                undo=undo,
+            )
 
         if identity is not None:
             # The first identified import links the account to the file's number;

@@ -14,11 +14,11 @@ coverage==7.16.2
 httpcore2==2.13.1
 httpx2==2.13.1
 jsonpatch==1.35
-jsonpointer==3.2.1
-langchain-core==1.6.10
+jsonpointer==3.3
+langchain-core==1.6.12
 langchain-protocol==0.0.19
 langgraph-checkpoint==4.3.0
-langgraph-sdk==0.4.7
+langgraph-sdk==0.4.8
 langsmith==0.14.11
 ormsgpack==1.13.0
 uuid-utils==0.17.1

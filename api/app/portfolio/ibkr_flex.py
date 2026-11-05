@@ -18,6 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import fx
+from app.portfolio.account_open import account_open_sql
 from app.portfolio.authority import (
     AuthorityWindow,
     authoritative_sql,
@@ -2687,6 +2688,7 @@ def latest_authoritative_nav_by_legacy_account(
                 AND {authoritative_sql("ns")}
                 AND ba.legacy_account_id IS NOT NULL
                 AND (acc.user_id = :current_user_id OR acc.user_id IS NULL)
+                AND {account_open_sql("acc")}
               GROUP BY ns.broker_account_id
             )
             SELECT
