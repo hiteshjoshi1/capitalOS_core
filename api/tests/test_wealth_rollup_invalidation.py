@@ -510,3 +510,89 @@ def test_ibkr_statement_fx_rate_marks_every_user_and_drops_cached_rates_only_whe
     assert _other_user_dirty() == statement_day
     assert later_key not in fx._CACHE  # resolves to (or past) the corrected row: dropped
     assert earlier_key in fx._CACHE  # can't resolve to it: kept
+
+
+def test_a_multi_day_multi_pair_statement_looks_up_stored_rates_once(db_engine, tmp_path, monkeypatch):
+    """#197: the stored statement rates are read with one query per import, not
+    one per rate (a year of ~40 pairs is ~14k rates), and the comparison still
+    finds the one corrected rate among them."""
+    import re
+
+    from sqlalchemy import event
+
+    from tests.test_ibkr_flex_phase1 import _valid_flex_xml
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO users (id, username, display_name, is_active) VALUES "
+                "(1, 'flex-owner', 'Owner', 1), (2, 'other-user', 'Other', 1)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country) VALUES "
+                "(975, 'Synthetic IBKR', 'IBKR', 1, 'BROKER', 'SGD', 'SG')"
+            )
+        )
+    days = [date(2026, 2, d) for d in (16, 17, 18, 19, 20)]
+    pairs = {"USD": 1.35, "HKD": 0.1728, "EUR": 1.4571, "JPY": 0.00893}
+
+    def _xml(bump: tuple[date, str] | None = None) -> str:
+        rows = "".join(
+            f'<ConversionRate reportDate="{d}" fromCurrency="{cur}" toCurrency="SGD" '
+            f'rate="{rate * (1.01 if bump == (d, cur) else 1.0):.8f}" />'
+            for d in days
+            for cur, rate in pairs.items()
+        )
+        out, count = re.subn(r"<ConversionRates>.*?</ConversionRates>", f"<ConversionRates>{rows}</ConversionRates>",
+                             _valid_flex_xml(), flags=re.S)
+        assert count == 1
+        return out
+
+    lookups: list[str] = []
+
+    def _count(_conn, _cursor, statement, *_args):  # noqa: ANN001
+        flat = " ".join(statement.split()).upper()
+        if flat.startswith("SELECT") and "FROM PORTFOLIO_FX_RATES" in flat:
+            lookups.append(flat)
+
+    def _import(xml: str) -> None:
+        db = Session(bind=db_engine)
+        try:
+            run_ibkr_flex_import_from_xml(
+                db, current_user_id=1, legacy_account_id=975, xml_text=xml, cutover_date=date(2026, 2, 1)
+            )
+        finally:
+            db.close()
+
+    def _other_user_dirty() -> date | None:
+        db = Session(bind=db_engine)
+        try:
+            return dirty_state(db, 2)[0]
+        finally:
+            db.close()
+
+    def _clear_marks() -> None:
+        with db_engine.begin() as conn:
+            conn.execute(text("UPDATE wealth_rollup_dirty SET from_date = NULL"))
+
+    event.listen(db_engine, "before_cursor_execute", _count)
+    try:
+        _import(_xml())  # 20 new rates
+        assert len(lookups) == 1
+        assert _other_user_dirty() == days[0]
+
+        _clear_marks()
+        lookups.clear()
+        _import(_xml())  # the same 20 rates
+        assert len(lookups) == 1
+        assert _other_user_dirty() is None
+
+        lookups.clear()
+        _import(_xml(bump=(days[2], "EUR")))  # one corrected rate among 20
+        assert len(lookups) == 1
+        assert _other_user_dirty() == days[2]
+    finally:
+        event.remove(db_engine, "before_cursor_execute", _count)

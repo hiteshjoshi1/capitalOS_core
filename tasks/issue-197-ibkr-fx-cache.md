@@ -8,7 +8,7 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/197
 - An identical re-import changes nothing FX-wise: no cache drop, no FX dirty mark.
 
 ## Architecture Decisions
-- `_insert_statement_facts` compares each statement rate with the stored IBKR row for the same
+- `_insert_statement_facts` loads the stored IBKR rates for the report's date range in one query (dict keyed by date + pair) and compares each statement rate with the stored row for the same
   (report date, pair) before replacing it, and returns the earliest date whose rate is new or changed.
   Equal means equal within 1e-12 (Postgres NUMERIC(38,18) pads zeros, SQLite returns a float).
 - On a successful import with a changed rate: `fx.forget_rates_from(date)` and
@@ -42,7 +42,7 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/197
 ## Deterministic Gate Results
 - New tests without the fix: all 4 fail (stale 1.35 rate served, other user not marked, History stale).
 - With the fix: `test_fx.py`, `test_wealth_rollup_invalidation.py`, `test_valuation_invariants.py` pass.
-- `make verify`: exit 0 (backend 808 passed, 1 skipped; frontend 394 passed in 55 files; lint + typecheck clean).
+- `make verify`: exit 0 (backend 809 passed, 1 skipped; frontend 394 passed in 55 files; lint + typecheck clean).
 
 ## Extra Files Changed
 - None outside `api/app/portfolio/ibkr_flex.py` and tests.

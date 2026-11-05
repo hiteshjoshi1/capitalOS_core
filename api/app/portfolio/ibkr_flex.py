@@ -1760,6 +1760,30 @@ def _same_rate(stored: Any, rate: Decimal) -> bool:
         return False
 
 
+def _stored_statement_rates(db: Session, fx_rates: list[FlexFxRate]) -> dict[tuple[str, str, str], Any]:
+    """The IBKR statement rates already stored for these rates' dates, keyed by
+    (ISO date, from, to). One query for the whole report: a year of daily rates
+    for ~40 pairs is ~14k rows, so a lookup per rate would be ~14k round trips."""
+    if not fx_rates:
+        return {}
+    pairs = {(r.from_currency, r.to_currency) for r in fx_rates}
+    rows = db.execute(
+        text(
+            """
+            SELECT report_date, from_currency, to_currency, rate FROM portfolio_fx_rates
+            WHERE report_date BETWEEN :lo AND :hi
+              AND source_platform = 'IBKR'
+            """
+        ),
+        {"lo": min(r.report_date for r in fx_rates), "hi": max(r.report_date for r in fx_rates)},
+    ).fetchall()
+    out: dict[tuple[str, str, str], Any] = {}
+    for row in rows:
+        if (row[1], row[2]) in pairs:
+            out[(str(row[0])[:10], row[1], row[2])] = row[3]
+    return out
+
+
 def _insert_statement_facts(
     db: Session,
     *,
@@ -1778,23 +1802,11 @@ def _insert_statement_facts(
     _clear_existing_authoritative_facts(db, broker_account_id, scopes)
 
     fx_changed: list[date] = []
+    stored_rates = _stored_statement_rates(db, statement.fx_rates)
     for fx_rate in statement.fx_rates:
-        stored = db.execute(
-            text(
-                """
-                SELECT rate FROM portfolio_fx_rates
-                WHERE report_date = :report_date
-                  AND from_currency = :from_currency
-                  AND to_currency = :to_currency
-                  AND source_platform = 'IBKR'
-                """
-            ),
-            {
-                "report_date": fx_rate.report_date,
-                "from_currency": fx_rate.from_currency,
-                "to_currency": fx_rate.to_currency,
-            },
-        ).scalar()
+        stored = stored_rates.get(
+            (fx_rate.report_date.isoformat(), fx_rate.from_currency, fx_rate.to_currency)
+        )
         if not _same_rate(stored, fx_rate.rate):
             fx_changed.append(fx_rate.report_date)
         db.execute(
