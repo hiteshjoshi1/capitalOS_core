@@ -7,11 +7,14 @@
  * even when rendered on its own in a test. It is persisted per browser in localStorage
  * and follows changes made in another tab.
  *
- * Saving it as a server preference (as theme and accent are) needs a `base_currency`
- * column on `user_preferences`, i.e. a migration; that is proposed in the PR instead.
+ * Since #202 it is also saved on the server (`user_preferences.base_currency`), so it
+ * follows the user across devices: the per-browser value is the first paint, and the
+ * server's value wins once the session loads (`syncServerBaseCurrency`). A choice made
+ * in the picker or in Settings is saved to both.
  */
 import { useSyncExternalStore } from "react";
 
+import { api } from "../lib/api";
 import { DEFAULT_BASE_CURRENCY, isBaseCurrency, type BaseCurrencyCode } from "../lib/format";
 
 export const BASE_CURRENCY_STORAGE_KEY = "capitalos.baseCurrency";
@@ -29,6 +32,20 @@ export function readStoredBaseCurrency(): BaseCurrencyCode {
   }
 }
 
+/** The value this browser has explicitly saved, or null (nothing saved, or unreadable). */
+function storedBaseCurrencyChoice(): BaseCurrencyCode | null {
+  try {
+    const stored = window.localStorage.getItem(BASE_CURRENCY_STORAGE_KEY);
+    return isBaseCurrency(stored) ? stored : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The value the server is known to hold (last applied from it or saved to it). */
+let serverValue: BaseCurrencyCode | null = null;
+
+/** Set the shared value in this browser only (no server write). */
 export function setBaseCurrency(currency: string): void {
   if (!isBaseCurrency(currency)) return;
   memoryValue = currency;
@@ -52,8 +69,43 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
-/** `[baseCurrency, setBaseCurrency]`, shared by every page and the header picker. */
+/** The user picked a base currency: set it here and save it on the server (#202). */
+export function chooseBaseCurrency(currency: string): void {
+  if (!isBaseCurrency(currency)) return;
+  setBaseCurrency(currency);
+  if (serverValue === currency || !api.isAuthenticated?.()) return;
+  serverValue = currency;
+  void api.patchPreferences?.({ base_currency: currency })?.catch(() => {
+    // Non-fatal: the per-browser value still holds; the next sign-in retries.
+    serverValue = null;
+  });
+}
+
+/**
+ * Apply the server's saved base currency after sign-in (#202): it wins over this
+ * browser's value. When the server has none yet (`null`), this browser's saved choice,
+ * if any, is sent up so the user's other devices get it. `undefined` (a server from
+ * before #202) leaves everything as it is.
+ */
+export function syncServerBaseCurrency(value: string | null | undefined): void {
+  if (value === undefined) return;
+  if (isBaseCurrency(value)) {
+    serverValue = value;
+    setBaseCurrency(value);
+    return;
+  }
+  serverValue = null;
+  const local = storedBaseCurrencyChoice();
+  if (local) chooseBaseCurrency(local);
+}
+
+/** Forget what the server holds (sign-out), so the next user's value is applied fresh. */
+export function resetServerBaseCurrency(): void {
+  serverValue = null;
+}
+
+/** `[baseCurrency, chooseBaseCurrency]`, shared by every page and the header picker. */
 export function useBaseCurrency(): readonly [BaseCurrencyCode, (currency: string) => void] {
   const baseCurrency = useSyncExternalStore(subscribe, readStoredBaseCurrency, () => DEFAULT_BASE_CURRENCY);
-  return [baseCurrency, setBaseCurrency] as const;
+  return [baseCurrency, chooseBaseCurrency] as const;
 }

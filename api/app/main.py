@@ -21,6 +21,7 @@ from app.routers.dividends import router as dividends_router
 from app.routers.realtime import router as realtime_router
 from app.core.logging import RequestIdMiddleware, configure_logging
 from app.valuation_cache import ValuationCacheMiddleware
+from app.core.clock import RequestTimezoneMiddleware
 from app.fx import FxNotesMiddleware
 from app.crypto.scheduler import start_scheduler, stop_scheduler
 from app.market_data.scheduler import start_scheduler as start_market_scheduler
@@ -94,6 +95,8 @@ app.add_middleware(RequestIdMiddleware)
 app.add_middleware(ValuationCacheMiddleware)
 # Per-request record of currencies valued without a (current) FX rate (#139).
 app.add_middleware(FxNotesMiddleware)
+# Per-request slot for the signed-in user's home timezone (#202, app.core.clock).
+app.add_middleware(RequestTimezoneMiddleware)
 
 app.include_router(health_router)
 app.include_router(auth_router)

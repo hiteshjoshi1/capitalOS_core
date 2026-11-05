@@ -7,7 +7,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.auth_context import CurrentUser, require_current_user
+from app.auth_context import CurrentUser, account_scope_sql, require_current_user
+from app.core.clock import default_timezone_name, normalize_timezone_name
 from app.db.session import get_db
 from app.schemas.auth import (
     AuthMeResponse,
@@ -34,6 +35,8 @@ from app.services.auth import (
 )
 from app.services.login_throttle import client_ip, login_throttle
 from app.services.passwords import set_user_password
+from app.services.user_preferences import BASE_CURRENCIES, timezone_source
+from app.wealth_rollup_dirty import mark_rollups_dirty
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -125,15 +128,39 @@ def _load_user(db: Session, user_id: int) -> AuthMeResponse | None:
     )
 
 
-def _read_preferences(db: Session, user_id: int) -> UserPreferencesResponse:
-    """The user's stored preferences, or the defaults GET /auth/preferences would create."""
-    row = db.execute(
-        text("SELECT theme, accent_color FROM user_preferences WHERE user_id = :user_id"),
+_PREFERENCE_COLUMNS = "theme, accent_color, timezone, timezone_from_app, base_currency"
+
+
+def _preferences_response(row) -> UserPreferencesResponse:  # noqa: ANN001
+    """The API shape of a user_preferences row (None: the defaults)."""
+    if row is None:
+        return UserPreferencesResponse(
+            theme=DEFAULT_THEME,
+            accent_color=DEFAULT_ACCENT_COLOR,
+            timezone=default_timezone_name(),
+            timezone_source=timezone_source(None, False),
+            base_currency=None,
+        )
+    stored_tz = normalize_timezone_name(row["timezone"])
+    return UserPreferencesResponse(
+        theme=str(row["theme"]),
+        accent_color=str(row["accent_color"]),
+        timezone=stored_tz or default_timezone_name(),
+        timezone_source=timezone_source(stored_tz, bool(row["timezone_from_app"])),
+        base_currency=str(row["base_currency"]) if row["base_currency"] else None,
+    )
+
+
+def _preferences_row(db: Session, user_id: int):  # noqa: ANN202
+    return db.execute(
+        text(f"SELECT {_PREFERENCE_COLUMNS} FROM user_preferences WHERE user_id = :user_id"),
         {"user_id": user_id},
     ).mappings().one_or_none()
-    if row is None:
-        return UserPreferencesResponse(theme=DEFAULT_THEME, accent_color=DEFAULT_ACCENT_COLOR)
-    return UserPreferencesResponse(theme=str(row["theme"]), accent_color=str(row["accent_color"]))
+
+
+def _read_preferences(db: Session, user_id: int) -> UserPreferencesResponse:
+    """The user's stored preferences, or the defaults GET /auth/preferences would create."""
+    return _preferences_response(_preferences_row(db, user_id))
 
 
 def _session_response(
@@ -448,10 +475,7 @@ def get_preferences(
     current_user: CurrentUser = Depends(require_current_user),
     db: Session = Depends(get_db),
 ):
-    row = db.execute(
-        text("SELECT theme, accent_color FROM user_preferences WHERE user_id = :user_id"),
-        {"user_id": current_user.id},
-    ).mappings().one_or_none()
+    row = _preferences_row(db, current_user.id)
 
     if row is None:
         now = datetime.now(tz=timezone.utc)
@@ -470,9 +494,24 @@ def get_preferences(
             },
         )
         db.commit()
-        return UserPreferencesResponse(theme=DEFAULT_THEME, accent_color=DEFAULT_ACCENT_COLOR)
+        return _preferences_response(None)
 
-    return UserPreferencesResponse(theme=str(row["theme"]), accent_color=str(row["accent_color"]))
+    return _preferences_response(row)
+
+
+def _earliest_card_transaction_date(db: Session, user_id: int):  # noqa: ANN202
+    """Where a timezone change starts to matter for stored History: card
+    spending is the one input whose month boundary is a local midnight (#202)."""
+    return db.execute(
+        text(
+            """
+            SELECT MIN(t.ts) FROM transactions t
+            JOIN accounts a ON a.id = t.account_id
+            WHERE a.account_type = 'CREDIT_CARD' AND """
+            + account_scope_sql("a")
+        ),
+        {"current_user_id": user_id},
+    ).scalar()
 
 
 @router.patch("/preferences", response_model=UserPreferencesResponse)
@@ -491,16 +530,26 @@ def patch_preferences(
             status_code=422,
             detail=f"accent_color must be one of: {', '.join(sorted(VALID_ACCENT_COLORS))}",
         )
+    new_timezone = None
+    if payload.timezone is not None:
+        new_timezone = normalize_timezone_name(payload.timezone)
+        if new_timezone is None:
+            raise HTTPException(
+                status_code=422,
+                detail="timezone must be an IANA timezone name, e.g. Asia/Singapore or America/New_York",
+            )
+    new_base_currency = None
+    if payload.base_currency is not None:
+        new_base_currency = payload.base_currency.strip().upper()
+        if new_base_currency not in BASE_CURRENCIES:
+            raise HTTPException(
+                status_code=422,
+                detail=f"base_currency must be one of: {', '.join(BASE_CURRENCIES)}",
+            )
 
-    row = db.execute(
-        text("SELECT theme, accent_color FROM user_preferences WHERE user_id = :user_id"),
-        {"user_id": current_user.id},
-    ).mappings().one_or_none()
-
+    row = _preferences_row(db, current_user.id)
     now = datetime.now(tz=timezone.utc)
     if row is None:
-        new_theme = payload.theme if payload.theme is not None else DEFAULT_THEME
-        new_accent = payload.accent_color if payload.accent_color is not None else DEFAULT_ACCENT_COLOR
         db.execute(
             text(
                 """
@@ -508,21 +557,37 @@ def patch_preferences(
                 VALUES (:user_id, :theme, :accent_color, :now)
                 """
             ),
-            {"user_id": current_user.id, "theme": new_theme, "accent_color": new_accent, "now": now},
+            {"user_id": current_user.id, "theme": DEFAULT_THEME, "accent_color": DEFAULT_ACCENT_COLOR, "now": now},
         )
-    else:
-        new_theme = payload.theme if payload.theme is not None else str(row["theme"])
-        new_accent = payload.accent_color if payload.accent_color is not None else str(row["accent_color"])
-        db.execute(
-            text(
-                """
-                UPDATE user_preferences
-                SET theme = :theme, accent_color = :accent_color, updated_at = :now
-                WHERE user_id = :user_id
-                """
-            ),
-            {"user_id": current_user.id, "theme": new_theme, "accent_color": new_accent, "now": now},
-        )
+        row = _preferences_row(db, current_user.id)
+    before = _preferences_response(row)
 
+    updates = {
+        "theme": payload.theme if payload.theme is not None else str(row["theme"]),
+        "accent_color": payload.accent_color if payload.accent_color is not None else str(row["accent_color"]),
+        "base_currency": new_base_currency if new_base_currency is not None else row["base_currency"],
+        "timezone": new_timezone if new_timezone is not None else row["timezone"],
+        # A timezone the user picks replaces "follow the app's TZ".
+        "timezone_from_app": False if new_timezone is not None else bool(row["timezone_from_app"]),
+    }
+    db.execute(
+        text(
+            """
+            UPDATE user_preferences
+            SET theme = :theme, accent_color = :accent_color, base_currency = :base_currency,
+                timezone = :timezone, timezone_from_app = :timezone_from_app, updated_at = :now
+            WHERE user_id = :user_id
+            """
+        ),
+        {**updates, "user_id": current_user.id, "now": now},
+    )
+    after = _preferences_response(_preferences_row(db, current_user.id))
+    if after.timezone != before.timezone:
+        # Months now end at another midnight: stored History rows are recomputed
+        # from the first one card spending can move (D-29). Which months are
+        # completed is decided on read, in the new timezone.
+        earliest = _earliest_card_transaction_date(db, current_user.id)
+        if earliest is not None:
+            mark_rollups_dirty(db, earliest, user_ids=[current_user.id], reason="timezone_changed")
     db.commit()
-    return UserPreferencesResponse(theme=new_theme, accent_color=new_accent)
+    return after

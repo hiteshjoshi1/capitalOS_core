@@ -45,7 +45,7 @@ def test_login_returns_user_and_preferences(client, db_engine, monkeypatch):
         "email": None,
         "is_admin": False,
     }
-    assert body["preferences"] == {"theme": "light", "accent_color": "#2b6ddb"}
+    assert body["preferences"].items() >= {"theme": "light", "accent_color": "#2b6ddb"}.items()  # #202 added fields
 
     # Same shapes as the dedicated endpoints.
     auth = {"Authorization": f"Bearer {body['access_token']}"}
@@ -65,7 +65,7 @@ def test_refresh_returns_user_and_preferences(client, db_engine, monkeypatch):
     assert TOKEN_KEYS <= body.keys()
     assert body["user"]["id"] == 1461
     assert body["user"]["username"] == "refresh_payload"
-    assert body["preferences"] == {"theme": "light", "accent_color": "#8650d9"}
+    assert body["preferences"].items() >= {"theme": "light", "accent_color": "#8650d9"}.items()  # #202 added fields
 
 
 def test_refresh_without_stored_preferences_returns_defaults(client, db_engine, monkeypatch):
@@ -75,7 +75,7 @@ def test_refresh_without_stored_preferences_returns_defaults(client, db_engine, 
 
     body = client.post("/auth/refresh").json()
     # Same as what GET /auth/preferences would return (and create) for this user.
-    assert body["preferences"] == {"theme": "dark", "accent_color": "#0f7a5c"}
+    assert body["preferences"].items() >= {"theme": "dark", "accent_color": "#0f7a5c"}.items()  # #202 added fields
 
 
 def test_grace_window_refresh_also_returns_user_and_preferences(client, db_engine, monkeypatch):
@@ -91,7 +91,7 @@ def test_grace_window_refresh_also_returns_user_and_preferences(client, db_engin
     assert second.status_code == 200
     body = second.json()
     assert body["user"]["username"] == "grace_payload"
-    assert body["preferences"] == {"theme": "light", "accent_color": "#b5842a"}
+    assert body["preferences"].items() >= {"theme": "light", "accent_color": "#b5842a"}.items()  # #202 added fields
 
 
 def test_refresh_failure_paths_unchanged(client, db_engine, monkeypatch):

@@ -46,6 +46,14 @@ DEFAULT_ACCENT_COLOR = "#0f7a5c"
 class UserPreferencesResponse(BaseModel):
     theme: str
     accent_color: str
+    # #202 (additive). ``timezone`` is the effective home timezone (IANA name):
+    # the user's own, or the app's TZ when they have none. ``timezone_source``
+    # says which: "user" (chosen or filled from the browser), "app" (an account
+    # from before #202, following the app's TZ) or "unset" (not filled yet; the
+    # web app fills it from the browser). ``base_currency`` is None until set.
+    timezone: str | None = None
+    timezone_source: str | None = None
+    base_currency: str | None = None
 
 
 class AuthSessionResponse(AuthTokenResponse):
@@ -63,4 +71,6 @@ class AuthSessionResponse(AuthTokenResponse):
 class UserPreferencesPatchRequest(BaseModel):
     theme: str | None = None
     accent_color: str | None = None
+    timezone: str | None = None  # IANA name, e.g. "America/New_York" (#202)
+    base_currency: str | None = None  # one of SGD, USD, HKD, INR (#202)
 
