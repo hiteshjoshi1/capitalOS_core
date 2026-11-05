@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link } from "react-router-dom";
+import { CURRENCY_OPTIONS } from "../../lib/format";
 
 type Theme = "dark" | "light";
 
@@ -14,7 +15,7 @@ type DashboardHeaderProps = {
   onToggleTheme: () => void;
 };
 
-const BASE_CURRENCY_OPTIONS = ["SGD", "USD", "HKD", "INR"] as const;
+const BASE_CURRENCY_OPTIONS = CURRENCY_OPTIONS;
 
 export default function DashboardHeader({
   health,

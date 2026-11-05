@@ -1,31 +1,17 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { UploadReminder } from "../lib/api";
+import { useApiResource } from "../lib/useApiResource";
 import "../App.css";
 import PageShell from "../components/PageShell";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
+import { formatPlatformLabel } from "../lib/platformLabels";
 
 export default function Alerts() {
-  const [state, setState] = useState<LoadState>("loading");
-  const [err, setErr] = useState<string>("");
-  const [reminders, setReminders] = useState<UploadReminder[]>([]);
-
-  // Initial hydration from backend
-  useEffect(() => {
-    void (async () => {
-      try {
-        setErr("");
-        const data = await api.alertNotifications();
-        setReminders(data.upload_reminders);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, []);
+  // #148: the same resource as the sidebar's alert badge, so opening Alerts shares one
+  // request instead of fetching /alerts/notifications twice.
+  const notifications = useApiResource("alertNotifications", () => api.alertNotifications());
+  const reminders = notifications.data?.upload_reminders ?? [];
+  const state = notifications.error ? "error" : notifications.data ? "ready" : "loading";
+  const err = notifications.error?.message ?? "";
 
   const totalCount = reminders.length;
 
@@ -64,7 +50,7 @@ export default function Alerts() {
                   <div className="alertCardHeader">
                     <span className="alertIcon" aria-hidden="true">⚠️</span>
                     <span className="alertAccountName">{r.account_name}</span>
-                    <span className="pill alertPlatformBadge">{r.platform}</span>
+                    <span className="pill alertPlatformBadge">{formatPlatformLabel(r.platform)}</span>
                     <span className="muted alertAccountType">{r.account_type}</span>
                   </div>
 

@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { WealthTimelinePoint, WealthTopMovers } from "../lib/api";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import type { ComponentDeltas, MonthFlags } from "../lib/wealthHistoryAnalysis";
+import * as fmt from "../lib/format";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -32,11 +33,7 @@ const COMPONENT_COLOR: Record<keyof ComponentDeltas, string> = {
 };
 
 function monthLongLabel(month: string): string {
-  const [y, m] = month.split("-");
-  const year = Number(y);
-  const mon = Number(m);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", { month: "long", year: "numeric" });
+  return fmt.formatMonth(month);
 }
 
 function assetClassMatchesComponent(assetClass: string, dominant: string | null): boolean {
@@ -48,6 +45,19 @@ function assetClassMatchesComponent(assetClass: string, dominant: string | null)
 }
 
 export default function WealthDrilldownPanel({ month, point, prevPoint, flags, baseCurrency, formatMoney, onClose }: Props) {
+  // #151: opening the panel moves focus to its heading (so keyboard and screen-reader
+  // users land on what they asked for); closing returns focus to where it came from.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    return () => {
+      if (opener && opener.isConnected) opener.focus();
+    };
+  }, []);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [month]);
+
   const [moversState, setMoversState] = useState<LoadState>("idle");
   const [movers, setMovers] = useState<WealthTopMovers | null>(null);
 
@@ -113,10 +123,21 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
       : movers;
 
   return (
-    <aside className="whDrillPanel" aria-label={`Details for ${monthLongLabel(month)}`}>
+    <aside
+      className="whDrillPanel"
+      aria-label={`Details for ${monthLongLabel(month)}`}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.stopPropagation();
+          onClose();
+        }
+      }}
+    >
       <div className="whDrillHead">
-        <h3>{monthLongLabel(month)}</h3>
-        <button type="button" className="whDrillClose" onClick={onClose} aria-label="Close">
+        <h3 ref={headingRef} tabIndex={-1}>
+          {monthLongLabel(month)}
+        </h3>
+        <button type="button" className="whDrillClose" onClick={onClose} aria-label="Close details">
           ×
         </button>
       </div>
@@ -132,11 +153,10 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
       ) : (
         <>
           <div className={`whDrillDelta ${delta >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}>
-            {delta >= 0 ? "+" : ""}
-            {formatMoney(delta)}
+            {fmt.formatSignedMoney(delta, baseCurrency)}
           </div>
           <div className="whDrillPct">
-            {pct != null ? `${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%` : "—"}
+            {fmt.formatPercent(pct, { signed: true, scale: "points" })}
             {flags.comparedToMonth ? ` vs ${monthLongLabel(flags.comparedToMonth)}` : ""}
           </div>
 
@@ -174,8 +194,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
                       />
                     </div>
                     <span className={`whWfVal ${v >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}>
-                      {v >= 0 ? "+" : ""}
-                      {formatMoney(v)}
+                      {fmt.formatSignedMoney(v, baseCurrency)}
                     </span>
                   </div>
                 );
@@ -186,7 +205,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
           <div className="whDrillSection">
             <h4>TOP MOVERS{flags.dominantComponent ? ` — ${COMPONENT_LABEL[flags.dominantComponent].toUpperCase()}` : ""}</h4>
             {moversState === "loading" ? (
-              <p className="muted">Loading…</p>
+              <p className="muted" role="status">Loading…</p>
             ) : moversToShow && (moversToShow.gainers.length > 0 || moversToShow.detractors.length > 0) ? (
               [...moversToShow.gainers, ...moversToShow.detractors]
                 .sort((a, b) => Math.abs(b.delta_abs) - Math.abs(a.delta_abs))
@@ -197,9 +216,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
                       <strong>{m.symbol}</strong> <span className="whMoverClass">{m.asset_class}</span>
                     </span>
                     <span className={m.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}>
-                      {m.delta_abs >= 0 ? "+" : ""}
-                      {formatMoney(m.delta_abs)}
-                      {m.delta_pct != null ? ` (${m.delta_pct >= 0 ? "+" : ""}${(m.delta_pct * 100).toFixed(1)}%)` : ""}
+                      {fmt.formatDelta(m.delta_abs, m.delta_pct, baseCurrency)}
                     </span>
                   </div>
                 ))
@@ -211,7 +228,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
           <div className="whDrillSection">
             <h4>THAT MONTH</h4>
             {contextState === "loading" ? (
-              <p className="muted">Loading…</p>
+              <p className="muted" role="status">Loading…</p>
             ) : (
               <>
                 <div className="whContextRow">

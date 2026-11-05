@@ -1,27 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { AssetClassFreshness, DashboardBootstrap, DashboardSummary, NetWorthFreshness, NetWorthSinceUpdate, PlatformAllocation, SpendingSummary } from "../lib/api";
+import type { AssetClassFreshness, NetWorthFreshness } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
+import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
-
-// Palette used for donut segments, matching the HTML design reference
-const DONUT_COLORS = [
-  "oklch(0.58 0.16 260)",
-  "oklch(0.55 0.13 160)",
-  "oklch(0.7 0.15 70)",
-  "oklch(0.55 0.18 320)",
-  "oklch(0.62 0.18 20)",
-  "oklch(0.62 0.13 190)",
-  "oklch(0.75 0.13 100)",
-  "oklch(0.58 0.14 290)",
-];
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
+import { describeShares } from "../lib/chartA11y";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
@@ -33,30 +27,10 @@ const DAILY_SOURCE_FRESH_DAYS = 3;
 // still counts as "fresh" for that kind of source.
 const MANUAL_SOURCE_FRESH_DAYS = 31;
 
-function buildConicGradient(items: { percent: number }[]): string {
-  let offset = 0;
-  const parts = items.map((item, idx) => {
-    const next = offset + Math.max(0, item.percent);
-    const color = DONUT_COLORS[idx % DONUT_COLORS.length];
-    const part = `${color} ${offset.toFixed(2)}% ${next.toFixed(2)}%`;
-    offset = next;
-    return part;
-  });
-  if (offset < 100) {
-    parts.push(
-      `color-mix(in srgb, var(--line) 60%, transparent 40%) ${offset.toFixed(2)}% 100%`,
-    );
-  }
-  return `conic-gradient(${parts.join(", ")})`;
-}
-
-function formatMoneyShort(prefix: string, value?: number | null): string {
-  if (value == null) return "—";
-  const abs = Math.abs(value);
-  const sign = value < 0 ? "-" : "";
-  if (abs >= 1_000_000) return `${sign}${prefix} ${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `${sign}${prefix} ${(abs / 1_000).toFixed(0)}K`;
-  return `${sign}${prefix} ${abs.toLocaleString()}`;
+/** Formats amounts in `currency`: each panel passes the currency its own data is in, so a
+ * panel still showing the previous currency (while a switch loads, #148) keeps its label. */
+function moneyFormatter(currency: string) {
+  return (value?: number | null) => fmt.formatMoney(value, currency);
 }
 
 function ageInDays(iso?: string | null): number | null {
@@ -71,7 +45,7 @@ function formatChipAsOf(iso?: string | null): string {
   if (days == null) return "no data";
   if (days === 0) return "today";
   if (days === 1) return "yesterday";
-  const label = new Date(iso as string).toLocaleString("en", { day: "numeric", month: "short" });
+  const label = fmt.formatDate(iso).replace(/ \d{4}$/, "");
   return `${label} · ${days}d`;
 }
 
@@ -130,94 +104,49 @@ export default function WealthOverview() {
   // no month selector here (see Wealth Timeline Phase 1 plan for why).
   const month = useMemo(() => currentMonthYYYYMM(), []);
 
-  const [bootstrapState, setBootstrapState] = useState<LoadState>("idle");
-  const [bootstrapErr, setBootstrapErr] = useState<string>("");
-  const [bootstrap, setBootstrap] = useState<DashboardBootstrap | null>(null);
-
-  const [summaryState, setSummaryState] = useState<LoadState>("idle");
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-
-  const [spendingState, setSpendingState] = useState<LoadState>("idle");
-  const [spendingSummary, setSpendingSummary] = useState<SpendingSummary | null>(null);
-
-  const [platformState, setPlatformState] = useState<LoadState>("idle");
-  const [platformAllocation, setPlatformAllocation] = useState<PlatformAllocation | null>(null);
-
-  const [sinceUpdateState, setSinceUpdateState] = useState<LoadState>("idle");
-  const [sinceUpdate, setSinceUpdate] = useState<NetWorthSinceUpdate | null>(null);
-
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
+  const allocDescId = useId();
   const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
   const [holdingsView, setHoldingsView] = useState<"holdings" | "movers" | "today">("holdings");
+
+  // #148: each panel is its own resource. Bootstrap is the lean call, so the hero renders
+  // as soon as it resolves without waiting on the heavier summary/spending/platform
+  // calls; on a currency switch every panel keeps its previous numbers until its own
+  // reply lands (and a slow earlier reply can never overwrite a later currency).
+  const bootstrapRes = useApiResource(resourceKey("dashboardBootstrap", month, baseCurrency), () =>
+    api.dashboardBootstrap(month, baseCurrency),
+  );
+  const summaryRes = useApiResource(
+    resourceKey("dashboardSummary", month, "prev_month,prev_year", baseCurrency),
+    () => api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+  );
+  const spendingRes = useApiResource(resourceKey("spendingSummary", month, baseCurrency), () =>
+    api.spendingSummary(month, baseCurrency),
+  );
+  // The platform-allocation response carries no base_currency, so remember it alongside.
+  const platformRes = useApiResource(resourceKey("platformAllocation", month, baseCurrency), async () => ({
+    currency: baseCurrency,
+    allocation: await api.platformAllocation(month, baseCurrency),
+  }));
+  const sinceUpdateRes = useApiResource(resourceKey("netWorthSinceUpdate", baseCurrency), () =>
+    api.netWorthSinceUpdate(baseCurrency),
+  );
+
+  const bootstrap = bootstrapRes.data ?? null;
+  const summary = summaryRes.data ?? null;
+  const spendingSummary = spendingRes.data ?? null;
+  const platformAllocation = platformRes.data?.allocation ?? null;
+  const sinceUpdate = sinceUpdateRes.data ?? null;
   const selectedBaseCurrency = baseCurrency || bootstrap?.base_currency || "SGD";
 
-  const fetchBootstrap = useCallback(async (silent = false) => {
-    if (!silent) setBootstrapState("loading");
-    try {
-      const data = await api.dashboardBootstrap(month, baseCurrency);
-      setBootstrap(data);
-      setBootstrapState("ready");
-    } catch (error: unknown) {
-      setBootstrapErr(error instanceof Error ? error.message : String(error));
-      setBootstrapState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchSummary = useCallback(async (silent = false) => {
-    if (!silent) setSummaryState("loading");
-    try {
-      const data = await api.dashboardSummary(month, "prev_month,prev_year", baseCurrency);
-      setSummary(data);
-      setSummaryState("ready");
-    } catch {
-      setSummaryState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchSpending = useCallback(async (silent = false) => {
-    if (!silent) setSpendingState("loading");
-    try {
-      const data = await api.spendingSummary(month, baseCurrency);
-      setSpendingSummary(data);
-      setSpendingState("ready");
-    } catch {
-      setSpendingState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchPlatform = useCallback(async (silent = false) => {
-    if (!silent) setPlatformState("loading");
-    try {
-      const data = await api.platformAllocation(month, baseCurrency);
-      setPlatformAllocation(data);
-      setPlatformState("ready");
-    } catch {
-      setPlatformState("error");
-    }
-  }, [month, baseCurrency]);
-
-  const fetchSinceUpdate = useCallback(async (silent = false) => {
-    if (!silent) setSinceUpdateState("loading");
-    try {
-      const data = await api.netWorthSinceUpdate(baseCurrency);
-      setSinceUpdate(data);
-      setSinceUpdateState("ready");
-    } catch {
-      setSinceUpdateState("error");
-    }
-  }, [baseCurrency]);
-
-  // First paint: bootstrap is the lean call, so the hero renders as soon as it
-  // resolves without waiting on the heavier summary/spending/platform calls.
+  const reloadAllRef = useRef<() => void>(() => undefined);
   useEffect(() => {
-    void (async () => {
-      void fetchBootstrap();
-      void fetchSummary();
-      void fetchSpending();
-      void fetchPlatform();
-      void fetchSinceUpdate();
-    })();
-  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform, fetchSinceUpdate]);
+    reloadAllRef.current = () => {
+      for (const res of [bootstrapRes, summaryRes, spendingRes, platformRes, sinceUpdateRes]) {
+        void res.reload().catch(() => undefined);
+      }
+    };
+  });
 
   const refreshTimerRef = useRef<number | null>(null);
   useEffect(() => {
@@ -225,11 +154,8 @@ export default function WealthOverview() {
       onEvent: () => {
         if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = window.setTimeout(() => {
-          void fetchBootstrap(true);
-          void fetchSummary(true);
-          void fetchSpending(true);
-          void fetchPlatform(true);
-          void fetchSinceUpdate(true);
+          // A background refresh: the numbers stay on screen until the new ones land.
+          reloadAllRef.current();
         }, PORTFOLIO_REFRESH_DEBOUNCE_MS);
       },
     });
@@ -238,13 +164,19 @@ export default function WealthOverview() {
       if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
       unsubscribe();
     };
-  }, [fetchBootstrap, fetchSummary, fetchSpending, fetchPlatform, fetchSinceUpdate]);
+  }, []);
 
-  const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
-  const formatMoney = (value?: number | null, maximumFractionDigits = 0) =>
-    value == null
-      ? "—"
-      : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  // #151: a panel whose call failed says so (with a retry) instead of showing "—",
+  // which read the same as zero (#130 finding 7.5).
+  const retry = (res: { reload: () => Promise<unknown> }) => () => void res.reload().catch(() => undefined);
+
+  const formatMoney = moneyFormatter(bootstrap?.base_currency || selectedBaseCurrency);
+  const summaryCurrency = summary?.base_currency || selectedBaseCurrency;
+  const sinceUpdateCurrency = sinceUpdate?.base_currency || selectedBaseCurrency;
+  const formatSummaryMoney = moneyFormatter(summaryCurrency);
+  const formatSpendingMoney = moneyFormatter(spendingSummary?.base_currency || selectedBaseCurrency);
+  const platformCurrency = platformRes.data?.currency || selectedBaseCurrency;
+  const formatPlatformMoney = moneyFormatter(platformCurrency);
 
   // Hero headline, freshness, liabilities, and the asset-class allocation view all
   // come from bootstrap — none of them need to wait on the heavier summary call.
@@ -288,6 +220,8 @@ export default function WealthOverview() {
   );
 
   const activeAllocItems = allocView === "platform" ? platformItems : assetClassItems;
+  const formatAllocMoney = allocView === "platform" ? formatPlatformMoney : formatMoney;
+  const allocCurrency = allocView === "platform" ? platformCurrency : bootstrap?.base_currency || selectedBaseCurrency;
   const allocTotal =
     allocView === "platform"
       ? (platformAllocation?.total ?? 0)
@@ -307,34 +241,21 @@ export default function WealthOverview() {
       title="Wealth Overview"
       subtitle="Portfolio composition and the most important balance-sheet signals."
       headerActions={
-        <label className="coPillBtn">
-          <span aria-hidden="true">{selectedBaseCurrency}</span>
-          <select
-            className="coPillBtnInput"
-            aria-label="Base currency"
-            value={selectedBaseCurrency}
-            onChange={(event) => setBaseCurrency(event.target.value)}
-          >
-            <option value="SGD">SGD</option>
-            <option value="USD">USD</option>
-            <option value="HKD">HKD</option>
-            <option value="INR">INR</option>
-          </select>
-        </label>
+        <BaseCurrencyPicker />
       }
     >
-      {bootstrapState === "loading" || bootstrapState === "idle" ? (
-        <div className="card">Loading…</div>
+      {bootstrapRes.isLoading ? (
+        <div className="card" role="status">Loading…</div>
       ) : null}
-      {bootstrapState === "error" ? (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{bootstrapErr}</pre>
-        </div>
+      {bootstrapRes.error ? (
+        <LoadError title="Couldn't load net worth" error={bootstrapRes.error.message} onRetry={() => void bootstrapRes.reload().catch(() => undefined)} />
       ) : null}
 
-      {bootstrapState === "ready" && bootstrap ? (
-        <div className="wealthOverviewLayout">
+      {bootstrap ? (
+        <RefreshingRegion
+          className="wealthOverviewLayout"
+          busy={[bootstrapRes, summaryRes, spendingRes, platformRes, sinceUpdateRes].some((r) => r.isFetching && r.data !== undefined)}
+        >
 
           {/* ── Hero card ─────────────────────────────────────────────── */}
           <article className="coHeroCard">
@@ -342,15 +263,12 @@ export default function WealthOverview() {
               <p className="coHeroEyebrow">CURRENT NET WORTH</p>
             </div>
             <div className="coHeroValueRow">
-              <span className="coHeroValue">{formatMoney(currentNetWorth?.total, 2)}</span>
+              <span className="coHeroValue">{formatMoney(currentNetWorth?.total)}</span>
               {prevMonthChange ? (
                 <span
                   className={`coChip${prevMonthChange.abs >= 0 ? " coChipPositive" : " coChipNegative"}`}
                 >
-                  {prevMonthChange.abs >= 0 ? "+" : "-"}
-                  {prevMonthChange.pct == null
-                    ? "—"
-                    : `${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%`}
+                  {fmt.formatPercent(prevMonthChange.pct, { signed: true })}
                 </span>
               ) : null}
             </div>
@@ -362,7 +280,7 @@ export default function WealthOverview() {
             </div>
 
             {currentNetWorthAsOf ? (
-              <p className="coHeroFreshness">As of {currentNetWorthAsOf.slice(0, 10)}</p>
+              <p className="coHeroFreshness">As of {fmt.formatDate(currentNetWorthAsOf)}</p>
             ) : null}
             <FxNote sources={[bootstrap, summary]} />
 
@@ -377,17 +295,18 @@ export default function WealthOverview() {
                       sinceUpdate.net_worth_change.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
                     }
                   >
-                    {sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}
-                    {formatMoney(Math.abs(sinceUpdate.net_worth_change.abs))}
-                    {sinceUpdate.net_worth_change.pct != null
-                      ? ` (${sinceUpdate.net_worth_change.abs >= 0 ? "+" : "-"}${Math.abs(sinceUpdate.net_worth_change.pct * 100).toFixed(1)}%)`
-                      : ""}
+                    {fmt.formatDelta(sinceUpdate.net_worth_change.abs, sinceUpdate.net_worth_change.pct, sinceUpdateCurrency)}
                   </strong>
                 </div>
-              ) : sinceUpdateState === "loading" ? (
+              ) : sinceUpdateRes.isLoading ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
                   <strong className="muted">…</strong>
+                </div>
+              ) : sinceUpdateRes.error ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">SINCE LAST UPDATE</span>
+                  <LoadError compact title="Couldn't load" onRetry={retry(sinceUpdateRes)} />
                 </div>
               ) : null}
               {prevMonthChange ? (
@@ -398,17 +317,18 @@ export default function WealthOverview() {
                       prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
                     }
                   >
-                    {prevMonthChange.abs >= 0 ? "+" : "-"}
-                    {formatMoney(Math.abs(prevMonthChange.abs))}
-                    {prevMonthChange.pct != null
-                      ? ` (${prevMonthChange.abs >= 0 ? "+" : "-"}${Math.abs(prevMonthChange.pct * 100).toFixed(1)}%)`
-                      : ""}
+                    {fmt.formatDelta(prevMonthChange.abs, prevMonthChange.pct, summaryCurrency)}
                   </strong>
                 </div>
-              ) : summaryState === "loading" ? (
+              ) : summaryRes.isLoading ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">VS LAST MONTH</span>
                   <strong className="muted">…</strong>
+                </div>
+              ) : summaryRes.error ? (
+                <div className="coHeroDelta">
+                  <span className="coHeroDeltaLabel">VS LAST MONTH</span>
+                  <LoadError compact title="Couldn't load" onRetry={retry(summaryRes)} />
                 </div>
               ) : null}
               {prevYearChange ? (
@@ -419,8 +339,7 @@ export default function WealthOverview() {
                       prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
                     }
                   >
-                    {prevYearChange.abs >= 0 ? "+" : ""}
-                    {formatMoney(prevYearChange.abs)}
+                    {fmt.formatSignedMoney(prevYearChange.abs, summaryCurrency)}
                   </strong>
                 </div>
               ) : null}
@@ -457,19 +376,29 @@ export default function WealthOverview() {
               </div>
             </div>
 
-            {allocView === "platform" && platformState === "loading" ? (
-              <p className="muted">Loading allocation…</p>
+            {allocView === "platform" && platformRes.isLoading ? (
+              <p className="muted" role="status">Loading allocation…</p>
+            ) : allocView === "platform" && platformRes.error && !platformAllocation ? (
+              <LoadError compact title="Couldn't load the allocation" error={platformRes.error} onRetry={retry(platformRes)} />
             ) : activeAllocItems.length > 0 ? (
               <div className="coAllocationCard">
                 <div
                   className="coAllocationDonut"
-                  style={{ background: buildConicGradient(activeAllocItems) }}
+                  style={{ background: donutGradient(activeAllocItems.map((item) => item.percent)) }}
+                  role="img"
                   aria-label="Allocation donut chart"
+                  aria-describedby={allocDescId}
                 >
+                  <span id={allocDescId} className="srOnly">
+                    {describeShares(
+                      allocView === "platform" ? "Allocation by platform" : "Allocation by asset class",
+                      activeAllocItems,
+                    )}
+                  </span>
                   <div className="coAllocationInner">
                     <span className="coAllocationTotalLabel">TOTAL</span>
                     <strong className="coAllocationTotalValue">
-                      {formatMoneyShort(currencyPrefix, allocTotal)}
+                      {fmt.formatMoneyCompact(allocTotal, allocCurrency)}
                     </strong>
                   </div>
                 </div>
@@ -480,14 +409,14 @@ export default function WealthOverview() {
                       <div className="coAllocationRowLeft">
                         <span
                           className="coAllocationDot"
-                          style={{ background: DONUT_COLORS[idx % DONUT_COLORS.length] }}
+                          style={{ background: chartColor(idx) }}
                           aria-hidden="true"
                         />
                         <span className="coAllocationName">{item.label}</span>
                       </div>
                       <div className="coAllocationRowRight">
-                        <span className="coAllocationValue">{formatMoney(item.value)}</span>
-                        <strong className="coAllocationPct">{item.percent.toFixed(1)}%</strong>
+                        <span className="coAllocationValue">{formatAllocMoney(item.value)}</span>
+                        <strong className="coAllocationPct">{fmt.formatPercent(item.percent, { scale: "points" })}</strong>
                       </div>
                     </div>
                   ))}
@@ -510,14 +439,16 @@ export default function WealthOverview() {
             <div className="coSignalsGrid">
               <article className="coSignalCard">
                 <p className="coSignalEyebrow">CASH FLOW</p>
-                {spendingState === "loading" ? (
-                  <p className="muted">Loading…</p>
+                {spendingRes.isLoading ? (
+                  <p className="muted" role="status">Loading…</p>
+                ) : spendingRes.error && !spendingSummary ? (
+                  <LoadError compact title="Couldn't load cash flow" error={spendingRes.error} onRetry={retry(spendingRes)} />
                 ) : (
                   <>
-                    <p className="coSignalValue">{formatMoney(spendingSummary?.net)}</p>
+                    <p className="coSignalValue">{formatSpendingMoney(spendingSummary?.net)}</p>
                     <p className="coSignalMeta">
                       {spendingSummary
-                        ? `Income ${formatMoney(spendingSummary.income_total)} · Expenses ${formatMoney(spendingSummary.expense_total)} · Saved ${spendingSummary.savings_rate == null ? "—" : `${(spendingSummary.savings_rate * 100).toFixed(1)}%`}`
+                        ? `Income ${formatSpendingMoney(spendingSummary.income_total)} · Expenses ${formatSpendingMoney(spendingSummary.expense_total)} · Saved ${fmt.formatPercent(spendingSummary.savings_rate)}`
                         : "—"}
                     </p>
                     <FxNote sources={[spendingSummary]} />
@@ -567,8 +498,10 @@ export default function WealthOverview() {
               </div>
 
               <div className="coHoldingsList">
-                {summaryState === "loading" ? (
-                  <p className="muted">Loading holdings…</p>
+                {summaryRes.isLoading ? (
+                  <p className="muted" role="status">Loading holdings…</p>
+                ) : holdingsView !== "today" && summaryRes.error && !summary ? (
+                  <LoadError compact title="Couldn't load positions" error={summaryRes.error} onRetry={retry(summaryRes)} />
                 ) : holdingsView === "holdings" ? (
                   topHoldings.length > 0 ? (
                     topHoldings.map((h) => (
@@ -578,9 +511,9 @@ export default function WealthOverview() {
                           <span className="coHoldingClass">{h.asset_class.toUpperCase()}</span>
                         </div>
                         <div className="coHoldingRight">
-                          <strong className="coHoldingValue">{formatMoney(h.value)}</strong>
+                          <strong className="coHoldingValue">{formatSummaryMoney(h.value)}</strong>
                           <span className="coHoldingPct">
-                            {h.percent_of_networth.toFixed(1)}%
+                            {fmt.formatPercent(h.percent_of_networth, { scale: "points" })}
                           </span>
                         </div>
                       </div>
@@ -606,13 +539,12 @@ export default function WealthOverview() {
                           <strong
                             className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                           >
-                            {row.delta_abs >= 0 ? "+" : "-"}
-                            {formatMoney(Math.abs(row.delta_abs))}
+                            {fmt.formatSignedMoney(row.delta_abs, summaryCurrency)}
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
                               ? `vs ${row.compare_month}`
-                              : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                              : fmt.formatPercent(row.delta_pct, { signed: true })}
                           </span>
                         </div>
                       </div>
@@ -620,8 +552,10 @@ export default function WealthOverview() {
                   ) : (
                     <p className="muted">No mover data for this period.</p>
                   )
-                ) : sinceUpdateState === "loading" ? (
-                  <p className="muted">Loading today's movers…</p>
+                ) : sinceUpdateRes.isLoading ? (
+                  <p className="muted" role="status">Loading today's movers…</p>
+                ) : sinceUpdateRes.error && !sinceUpdate ? (
+                  <LoadError compact title="Couldn't load today's movers" error={sinceUpdateRes.error} onRetry={retry(sinceUpdateRes)} />
                 ) : sinceUpdate?.top_movers ? (
                   [
                     ...(sinceUpdate.top_movers.gainers ?? []).slice(0, 3),
@@ -643,13 +577,12 @@ export default function WealthOverview() {
                           <strong
                             className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
                           >
-                            {row.delta_abs >= 0 ? "+" : "-"}
-                            {formatMoney(Math.abs(row.delta_abs))}
+                            {fmt.formatSignedMoney(row.delta_abs, sinceUpdateCurrency)}
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
                               ? "—"
-                              : `${row.delta_pct >= 0 ? "+" : ""}${(row.delta_pct * 100).toFixed(1)}%`}
+                              : fmt.formatPercent(row.delta_pct, { signed: true })}
                           </span>
                         </div>
                       </div>
@@ -663,7 +596,7 @@ export default function WealthOverview() {
               </div>
             </article>
           </section>
-        </div>
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

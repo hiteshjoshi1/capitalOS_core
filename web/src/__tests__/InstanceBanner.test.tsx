@@ -19,19 +19,19 @@ describe("InstanceBanner", () => {
     expect(document.title).toBe("[TEST] CapitalOS");
   });
 
-  it("links each #N to its PR when a repo URL is set", () => {
+  it("links each #N to its issue when a repo URL is set (#200)", () => {
     render(
-      <InstanceBanner label="TEST test/20261030 · PRs #96 #101" repoUrl="https://github.com/o/r" />,
+      <InstanceBanner label="TEST test/20261030 · Issues #96 #101" repoUrl="https://github.com/o/r" />,
     );
     const banner = screen.getByRole("status", { name: "Instance" });
-    expect(banner).toHaveTextContent("TEST test/20261030 · PRs #96 #101 · not the real app");
+    expect(banner).toHaveTextContent("TEST test/20261030 · Issues #96 #101 · not the real app");
     expect(screen.getByRole("link", { name: "#96" })).toHaveAttribute(
       "href",
-      "https://github.com/o/r/pull/96",
+      "https://github.com/o/r/issues/96",
     );
     expect(screen.getByRole("link", { name: "#101" })).toHaveAttribute(
       "href",
-      "https://github.com/o/r/pull/101",
+      "https://github.com/o/r/issues/101",
     );
   });
 

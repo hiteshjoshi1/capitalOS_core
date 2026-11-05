@@ -9,6 +9,7 @@ import type { CryptoWallet, CryptoAllowlistItem } from "../lib/api";
 import "../App.css";
 import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
+import LoadError from "../components/LoadError";
 
 const MOBILE_BREAKPOINT_PX = 900;
 
@@ -331,10 +332,7 @@ export default function CryptoWallets() {
     >
       <div className="wealthOverviewLayout">
       {error && (
-        <div className="card error">
-          <div className="cardTitle">Error</div>
-          <pre className="pre">{error}</pre>
-        </div>
+        <LoadError title="Error" error={error} />
       )}
 
       {status && (

@@ -1,4 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { controlledCalls } from "./raceHelpers";
+import type { DividendsByCompany, DividendsSummary, ExpectedDividendsOverview } from "../lib/api";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
@@ -164,7 +166,7 @@ describe("Dividends", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load dividends")).toBeInTheDocument();
     expect(screen.getByText("dividends failed")).toBeInTheDocument();
   });
 
@@ -236,5 +238,54 @@ describe("Dividends", () => {
       expect.any(String),
       "SGD",
     );
+  });
+});
+
+// #148: the realized-this-month hero follows the selected month, whatever order replies land in.
+describe("Dividends races", () => {
+  const totals = { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 };
+  const summaryFor = (month: string, payout: number): DividendsSummary => ({
+    from_month: "2025-01",
+    to_month: month,
+    period: "month",
+    base_currency: "SGD",
+    assumed_tax_rate: 0.1,
+    country_tax_rates: {},
+    buckets: [{ bucket: month, gross: payout, withholding: 0, net_received: payout, estimated_tax: 0, payout_minus_tax: payout }],
+    totals,
+  });
+
+  it("a slow earlier month never renders under the later month", async () => {
+    vi.clearAllMocks();
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-02");
+    const summaries = controlledCalls<DividendsSummary>();
+    mockApi.dividendsSummary.mockImplementation(summaries.impl as typeof api.dividendsSummary);
+    mockApi.dividendsByCompany.mockResolvedValue({
+      from_month: "2026-01", to_month: "2026-01", base_currency: "SGD", assumed_tax_rate: 0.1,
+      country_tax_rates: {}, items: [], totals,
+    } as DividendsByCompany);
+    mockApi.expectedDividendsOverview.mockResolvedValue({
+      from_month: "2025-01", to_month: "2026-01", base_currency: "SGD", assumed_tax_rate: 0.1,
+      country_tax_rates: {}, holdings_considered: 0, assets_with_actions: 0, actions_evaluated: 0,
+      yearly: { period: "year", buckets: [], gross: 0, estimated_tax: 0, payout_minus_tax: 0 },
+      companies: [],
+    } as unknown as ExpectedDividendsOverview);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Dividends />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
+    const feb = summaries.find((a) => a[1] === "2026-02");
+    const jan = summaries.find((a) => a[1] === "2026-01");
+
+    await act(async () => jan.resolve(summaryFor("2026-01", 111)));
+    expect((await screen.findAllByText("S$ 111")).length).toBeGreaterThan(0);
+    await act(async () => feb.resolve(summaryFor("2026-02", 999)));
+    expect(screen.queryByText("S$ 999")).not.toBeInTheDocument();
+    await waitFor(() => expect(feb.signal?.aborted).toBe(true));
   });
 });

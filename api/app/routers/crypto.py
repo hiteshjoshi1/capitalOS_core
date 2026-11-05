@@ -30,6 +30,10 @@ from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refre
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.crypto.valuation import latest_wallet_valuation
 from app.fx import fx_status, get_rates_by_date, rate_date
+from app.valuation import clock as valuation_clock
+from app.valuation.clock import _add_months, _month_window
+from app.valuation.clock import _anchor_ts as _anchor_date
+from app.valuation.clock import _configured_snapshot_day as _snapshot_day
 from app.wealth_rollup_dirty import mark_wallet_history_dirty
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
@@ -510,50 +514,22 @@ def _refresh_wallet(wallet_id: str):
 
 def _parse_month_start(month: str | None) -> datetime:
     if not month:
-        now = datetime.now(tz=timezone.utc)
-        return now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        return valuation_clock._month_start_of(valuation_clock._app_today())
     try:
         return datetime.strptime(f"{month}-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM.") from exc
 
 
-def _add_months(dt: datetime, months: int) -> datetime:
-    year = dt.year + (dt.month - 1 + months) // 12
-    month = (dt.month - 1 + months) % 12 + 1
-    return dt.replace(year=year, month=month)
-
-
-def _snapshot_day() -> int:
-    raw = os.getenv("SNAPSHOT_DAY", "1")
-    try:
-        day = int(raw)
-    except ValueError:
-        day = 1
-    return max(1, min(day, 31))
-
-
-def _anchor_date(month_start: datetime) -> datetime:
-    next_month_start = _add_months(month_start, 1).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    last_day = (_add_months(next_month_start, 1) - timedelta(days=1)).day
-    return next_month_start.replace(day=min(_snapshot_day(), last_day))
-
-
-def _month_window(end_month_start: datetime, months: int = 6) -> list[datetime]:
-    return [_add_months(end_month_start, offset) for offset in range(-(months - 1), 1)]
-
-
 def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
     """The anchor a "browse holdings as of {month}" view should use, and whether
-    it's live. The current (or any future) calendar month shows live data — the
-    freshest computable state; any past month shows that month's own completed
-    snapshot boundary, not "now". Mirrors dashboard.py's helper of the same name
-    (duplicated, not imported — this router keeps its own month/anchor helpers).
+    it's live: the dashboard's rule (app.valuation.clock, one clock in the app
+    timezone, #143). The current (or any future) month shows live data; any
+    past month shows that month's own completed snapshot boundary. The live
+    anchor is reported in UTC, as this page always has.
     """
-    now = datetime.now(tz=timezone.utc)
-    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if month_start >= current_month_start:
-        return now, True
+    if valuation_clock._is_open_or_future_month(month_start):
+        return datetime.now(tz=timezone.utc), True
     return _anchor_date(month_start), False
 
 

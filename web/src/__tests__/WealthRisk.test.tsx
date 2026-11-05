@@ -59,7 +59,7 @@ describe("WealthRisk route", () => {
     expect(screen.getByText("Where the wealth is booked")).toBeInTheDocument();
     expect(screen.getByText("Mapped")).toBeInTheDocument();
     expect(screen.getByText("S$ 100K")).toBeInTheDocument();
-    expect(screen.getByText("As of Feb 6, 2026")).toBeInTheDocument();
+    expect(screen.getByText("As of 6 Feb 2026")).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "Geographic exposure pie chart" })).toBeInTheDocument();
     expect(screen.getByText(/Stocks S\$ 40,000/)).toBeInTheDocument();
   });
@@ -117,7 +117,7 @@ describe("WealthRisk route", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByText("API error")).toBeInTheDocument();
+    expect(await screen.findByText("Couldn't load risk")).toBeInTheDocument();
     expect(screen.getByText("risk unavailable")).toBeInTheDocument();
   });
 });

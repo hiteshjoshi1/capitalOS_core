@@ -834,6 +834,50 @@
           "stocks_funds": 11516.3878,
           "total": 90449.6347,
           "uploads": []
+        },
+        {
+          "anchor_date": "2026-04-01",
+          "cash": 60407.8341,
+          "computed_at": "<volatile>",
+          "crypto": 21154.4931,
+          "freshness_status": "carried",
+          "liabilities": 1045.55,
+          "month": "2026-03",
+          "source_freshness": [
+            {
+              "as_of": "2026-03-15",
+              "days_old": 17,
+              "platform": "CRYPTO",
+              "status": "carried"
+            },
+            {
+              "as_of": "2026-03-31",
+              "days_old": 1,
+              "platform": "DBS",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-03-10",
+              "days_old": 22,
+              "platform": "HSBC",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-03-31",
+              "days_old": 1,
+              "platform": "IBKR",
+              "status": "fresh"
+            },
+            {
+              "as_of": "2026-03-15",
+              "days_old": 17,
+              "platform": "SHAREKHAN",
+              "status": "fresh"
+            }
+          ],
+          "stocks_funds": 13143.3186,
+          "total": 93660.0957,
+          "uploads": []
         }
       ]
     },
@@ -1061,7 +1105,7 @@
         },
         {
           "month": "2026-03",
-          "value": 11516.3878
+          "value": 13143.3186
         },
         {
           "month": "2026-04",
@@ -1088,7 +1132,7 @@
         "net": -3492.7656,
         "savings_rate": -7.6749
       },
-      "cash_percent": 67.44,
+      "cash_percent": 64.5,
       "current_net_worth": {
         "cash": 60407.8341,
         "crypto": 21154.4931,
@@ -1099,16 +1143,16 @@
       "current_net_worth_as_of": "2026-04-01T06:00:00+08:00",
       "current_net_worth_change": {
         "vs_prev_month": {
-          "abs": 4274.0666,
-          "compare_as_of": "2026-02-28T00:00:00+00:00",
-          "compare_month": "2026-02",
+          "abs": 1063.6056,
+          "compare_as_of": "2026-03-31T00:00:00+00:00",
+          "compare_month": "2026-03",
           "current_as_of": "2026-04-01T06:00:00+08:00",
-          "pct": 0.0473
+          "pct": 0.0114
         },
         "vs_prev_year": {
           "abs": 94723.7013,
           "compare_as_of": null,
-          "compare_month": "2025-02",
+          "compare_month": "2025-03",
           "current_as_of": "2026-04-01T06:00:00+08:00",
           "pct": null
         }
@@ -1160,56 +1204,56 @@
         }
       ],
       "net_worth": {
-        "cash": 61000.8589,
-        "crypto": 18237.788,
-        "liabilities": 305.4,
-        "stocks_funds": 11516.3878,
-        "total": 90449.6347
+        "cash": 60407.8341,
+        "crypto": 21154.4931,
+        "liabilities": 1045.55,
+        "stocks_funds": 13143.3186,
+        "total": 93660.0957
       },
-      "net_worth_as_of": "2026-03-01T00:00:00+00:00",
-      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
+      "net_worth_as_of": "2026-04-01T00:00:00+00:00",
+      "net_worth_boundary_at": "2026-04-01T00:00:00+00:00",
       "net_worth_boundary_exact": false,
       "net_worth_change": {
         "vs_prev_month": {
-          "abs": 13712.1273,
-          "compare_as_of": "2026-01-31T00:00:00+00:00",
-          "compare_month": "2026-01",
-          "current_as_of": "2026-02-28T00:00:00+00:00",
-          "pct": 0.1787
+          "abs": 3210.461,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-31T00:00:00+00:00",
+          "pct": 0.0355
         },
         "vs_prev_year": {
-          "abs": 90449.6347,
+          "abs": 93660.0957,
           "compare_as_of": null,
-          "compare_month": "2025-02",
-          "current_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2025-03",
+          "current_as_of": "2026-03-31T00:00:00+00:00",
           "pct": null
         }
       },
       "net_worth_component_change": {
         "cash": {
-          "abs": 4293.8948,
-          "compare_as_of": "2026-01-31T00:00:00+00:00",
-          "compare_month": "2026-01",
-          "current_as_of": "2026-02-28T00:00:00+00:00",
-          "pct": 0.0757
+          "abs": -593.0248,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-31T00:00:00+00:00",
+          "pct": -0.0097
         },
         "crypto": {
-          "abs": 8215.0607,
-          "compare_as_of": "2026-01-31T00:00:00+00:00",
-          "compare_month": "2026-01",
-          "current_as_of": "2026-02-28T00:00:00+00:00",
-          "pct": 0.8196
+          "abs": 2916.7051,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-31T00:00:00+00:00",
+          "pct": 0.1599
         },
         "stocks_funds": {
-          "abs": 548.5718,
-          "compare_as_of": "2026-01-31T00:00:00+00:00",
-          "compare_month": "2026-01",
-          "current_as_of": "2026-02-28T00:00:00+00:00",
-          "pct": 0.05
+          "abs": 1626.9307,
+          "compare_as_of": "2026-02-28T00:00:00+00:00",
+          "compare_month": "2026-02",
+          "current_as_of": "2026-03-31T00:00:00+00:00",
+          "pct": 0.1413
         }
       },
       "net_worth_freshness_status": "synthetic",
-      "net_worth_snapshot_as_of": "2026-02-28T00:00:00+00:00",
+      "net_worth_snapshot_as_of": "2026-03-31T00:00:00+00:00",
       "snapshot_day": 1,
       "top_holdings": [
         {
@@ -1390,59 +1434,59 @@
         }
       ],
       "top_movers": {
-        "compare_month": "2026-01",
+        "compare_month": "2026-02",
         "detractors": [
           {
             "asset_class": "CRYPTO",
             "asset_id": null,
-            "compare_month": "2026-01",
-            "current_value": 7509.6774,
-            "delta_abs": -508.5044,
-            "delta_pct": -0.0634,
-            "previous_value": 8018.1818,
-            "symbol": "ETH"
+            "compare_month": "2026-02",
+            "current_value": 1475.1152,
+            "delta_abs": -1206.9124,
+            "delta_pct": -0.45,
+            "previous_value": 2682.0276,
+            "symbol": "USDC"
           },
           {
             "asset_class": "STOCK",
-            "asset_id": 4,
-            "compare_month": "2026-01",
-            "current_value": 502.4918,
-            "delta_abs": -8.8125,
-            "delta_pct": -0.0172,
-            "previous_value": 511.3043,
-            "symbol": "INFY"
+            "asset_id": 2,
+            "compare_month": "2026-02",
+            "current_value": 5239.3743,
+            "delta_abs": -243.1432,
+            "delta_pct": -0.0443,
+            "previous_value": 5482.5175,
+            "symbol": "0700"
           }
         ],
         "gainers": [
           {
             "asset_class": "CRYPTO",
             "asset_id": null,
-            "compare_month": "2026-01",
-            "current_value": 8046.0829,
-            "delta_abs": 8046.0829,
-            "delta_pct": null,
-            "previous_value": 0.0,
-            "symbol": "SOL"
+            "compare_month": "2026-02",
+            "current_value": 10225.2304,
+            "delta_abs": 2715.553,
+            "delta_pct": 0.3616,
+            "previous_value": 7509.6774,
+            "symbol": "ETH"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 1,
+            "compare_month": "2026-02",
+            "current_value": 6839.1705,
+            "delta_abs": 1760.9887,
+            "delta_pct": 0.3468,
+            "previous_value": 5078.1818,
+            "symbol": "AAPL"
           },
           {
             "asset_class": "CRYPTO",
             "asset_id": null,
-            "compare_month": "2026-01",
-            "current_value": 2682.0276,
-            "delta_abs": 677.4822,
-            "delta_pct": 0.338,
-            "previous_value": 2004.5455,
-            "symbol": "USDC"
-          },
-          {
-            "asset_class": "STOCK",
-            "asset_id": 2,
-            "compare_month": "2026-01",
-            "current_value": 5482.5175,
-            "delta_abs": 311.9293,
-            "delta_pct": 0.0603,
-            "previous_value": 5170.5882,
-            "symbol": "0700"
+            "compare_month": "2026-02",
+            "current_value": 9118.894,
+            "delta_abs": 1072.8111,
+            "delta_pct": 0.1333,
+            "previous_value": 8046.0829,
+            "symbol": "SOL"
           }
         ]
       }
@@ -1477,16 +1521,16 @@
       "current_net_worth_as_of": "2026-04-01T06:00:00+08:00",
       "current_net_worth_change": {
         "vs_prev_month": {
-          "abs": 4274.0666,
-          "compare_as_of": "2026-02-28T00:00:00+00:00",
-          "compare_month": "2026-02",
+          "abs": 1063.6056,
+          "compare_as_of": "2026-03-31T00:00:00+00:00",
+          "compare_month": "2026-03",
           "current_as_of": "2026-04-01T06:00:00+08:00",
-          "pct": 0.0473
+          "pct": 0.0114
         },
         "vs_prev_year": {
           "abs": 94723.7013,
           "compare_as_of": null,
-          "compare_month": "2025-02",
+          "compare_month": "2025-03",
           "current_as_of": "2026-04-01T06:00:00+08:00",
           "pct": null
         }

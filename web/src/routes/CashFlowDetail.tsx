@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { api } from "../lib/api";
 import type {
@@ -11,6 +11,10 @@ import type {
   CategoryTaxonomy,
 } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
+import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -18,8 +22,11 @@ import HeroMetricCard from "../components/HeroMetricCard";
 import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
+import { describeShares } from "../lib/chartA11y";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
 type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
 
@@ -28,18 +35,8 @@ type CategoryGroup = {
   options: CategoryTaxonomy[];
 };
 
-type FormatMoney = (value?: number | null, maximumFractionDigits?: number) => string;
+type FormatMoney = (value?: number | null, decimals?: number) => string;
 
-const CHART_COLORS = [
-  "#4f8cff",
-  "#1fb981",
-  "#f59f43",
-  "#7d67ff",
-  "#ef6ca8",
-  "#2ebac6",
-  "#f4cf5d",
-  "#8f9db2",
-];
 
 const DINING_CATEGORY_KEYWORDS = [
   "dining",
@@ -53,7 +50,7 @@ const DINING_CATEGORY_KEYWORDS = [
 ];
 
 function asDate(ts: string) {
-  return ts.slice(0, 10);
+  return fmt.formatDate(ts.slice(0, 10));
 }
 
 function groupCategories(categories: CategoryTaxonomy[]) {
@@ -103,41 +100,19 @@ function defaultSelectionValue(transaction: CashFlowTransaction) {
 }
 
 function formatPercent(value?: number | null) {
-  return value == null ? "—" : `${(value * 100).toFixed(1)}%`;
+  return fmt.formatPercent(value);
 }
 
 function formatMonthName(month: string): string {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  return new Date(year, monthIndex, 1).toLocaleString(undefined, { month: "long" });
+  return fmt.formatMonth(month).replace(/ \d{4}$/, "");
 }
 
 function formatMonthYear(month: string): string {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  return new Date(year, monthIndex, 1).toLocaleString(undefined, { month: "long", year: "numeric" });
+  return fmt.formatMonth(month);
 }
 
 function conicGradient(items: CashFlowBreakdownItem[]) {
-  let offset = 0;
-  const parts: string[] = [];
-  items.forEach((item, idx) => {
-    const next = Math.min(100, offset + Math.max(0, item.percent * 100));
-    parts.push(`${CHART_COLORS[idx % CHART_COLORS.length]} ${offset.toFixed(2)}% ${next.toFixed(2)}%`);
-    offset = next;
-  });
-  if (offset < 100) {
-    parts.push(`color-mix(in srgb, var(--line) 65%, transparent 35%) ${offset.toFixed(2)}% 100%`);
-  }
-  return `conic-gradient(${parts.join(", ")})`;
+  return donutGradient(items.map((item) => item.percent * 100));
 }
 
 function isDiningExpenseTransaction(transaction: CashFlowTransaction) {
@@ -205,6 +180,7 @@ function DonutSection({
   ariaLabel: string;
   formatMoney: FormatMoney;
 }) {
+  const descId = useId();
   return (
     <section>
       <div className="cashFlowSectionHeading">
@@ -212,8 +188,17 @@ function DonutSection({
         <h2 className="cashFlowSectionTitle">{title}</h2>
       </div>
       {items.length > 0 ? (
-        <div className="card cashFlowDonutLayout" style={{ padding: 28 }} aria-label={ariaLabel}>
-          <div className="cashFlowDonutChart" style={{ background: conicGradient(items) }}>
+        <div className="card cashFlowDonutLayout" style={{ padding: 28 }}>
+          <div
+            className="cashFlowDonutChart"
+            style={{ background: conicGradient(items) }}
+            role="img"
+            aria-label={ariaLabel}
+            aria-describedby={descId}
+          >
+            <span id={descId} className="srOnly">
+              {describeShares(ariaLabel, items.map((item) => ({ label: item.label, percent: item.percent * 100 })))}
+            </span>
             <div className="cashFlowDonutCenter">
               <span className="label">Total</span>
               <strong>{formatMoney(total)}</strong>
@@ -223,7 +208,7 @@ function DonutSection({
             {items.map((item, idx) => (
               <div className="cashFlowLegendRow" key={item.label}>
                 <span className="cashFlowLegendLabel">
-                  <i style={{ background: CHART_COLORS[idx % CHART_COLORS.length] }} />
+                  <i style={{ background: chartColor(idx) }} />
                   <span className="cashFlowLegendText">{item.label}</span>
                 </span>
                 <span className="muted">
@@ -296,7 +281,7 @@ function MerchantRows({ items, formatMoney }: { items: CashFlowBreakdownItem[]; 
           <span className="cashFlowMerchantLabel">{item.label}</span>
           <div className="cashFlowMerchantTrack">
             <span
-              style={{ width: `${Math.max(6, (item.amount / maxAmount) * 100)}%`, background: CHART_COLORS[idx % CHART_COLORS.length] }}
+              style={{ width: `${Math.max(6, (item.amount / maxAmount) * 100)}%`, background: chartColor(idx) }}
             />
           </div>
           <strong className="cashFlowMerchantAmount">{formatMoney(item.amount)}</strong>
@@ -360,7 +345,7 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
       <div className="card" style={{ padding: "28px 24px 20px" }}>
         {waterfall.snapshot_start_as_of && waterfall.snapshot_end_as_of ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            Reconciled across available cash snapshots from {waterfall.snapshot_start_as_of.slice(0, 10)} to {waterfall.snapshot_end_as_of.slice(0, 10)}.
+            Reconciled across available cash snapshots from {fmt.formatDate(waterfall.snapshot_start_as_of)} to {fmt.formatDate(waterfall.snapshot_end_as_of)}.
           </p>
         ) : null}
 
@@ -550,7 +535,7 @@ function OverviewTab({
     delta == null
       ? null
       : {
-          text: `${delta >= 0 ? "+" : "-"}${formatMoney(Math.abs(delta))}${
+          text: `${fmt.formatSignedMoney(delta, detail.base_currency)}${
             detail.analytics.prior_month ? ` vs ${formatMonthName(detail.analytics.prior_month)}` : ""
           }`,
           positive: delta >= 0,
@@ -560,7 +545,7 @@ function OverviewTab({
     <>
       <HeroMetricCard
         eyebrow="Net cash flow this month"
-        value={`${detail.net >= 0 ? "+" : ""}${formatMoney(detail.net)}`}
+        value={fmt.formatSignedMoney(detail.net, detail.base_currency)}
         deltaChip={deltaChip}
         insightText={`Saved ${formatPercent(detail.savings_rate)} of income · Burn rate ${formatPercent(detail.analytics.burn_rate)}`}
       />
@@ -809,51 +794,39 @@ function ExpensesTab({
 export default function CashFlowDetailRoute() {
   const location = useLocation();
   const workspaceTab = resolveWorkspaceTab(location.pathname);
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [detail, setDetail] = useState<CashFlowDetail | null>(null);
-  const [categories, setCategories] = useState<CategoryTaxonomy[]>([]);
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [pendingOverrides, setPendingOverrides] = useState<Record<number, boolean>>({});
   const [overrideErrors, setOverrideErrors] = useState<Record<number, string>>({});
   const [overrideSelections, setOverrideSelections] = useState<Record<number, string>>({});
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setState("loading");
-      setErr("");
-      setPendingOverrides({});
-      setOverrideErrors({});
-      setOverrideSelections({});
+  // #148: categories and the detail are separate cached resources. Switching between the
+  // Overview / Income / Expenses tabs no longer remounts this route (AppShell's pathname
+  // key is gone), so a tab switch costs no request and keeps any edit in progress.
+  const categoriesRes = useApiResource("categories", () => api.categories());
+  const detailRes = useApiResource(resourceKey("cashFlowDetail", month, baseCurrency), () =>
+    api.cashFlowDetail(month, baseCurrency),
+  );
+  const categories = useMemo(() => categoriesRes.data ?? [], [categoriesRes.data]);
+  const detail = detailRes.data ?? null;
+  // A failed load blocks the page only when there is nothing to show; a failed refresh
+  // after a save (data still on screen) is reported next to the row instead.
+  const loadError = (detailRes.data ? null : detailRes.error) ?? (categoriesRes.data ? null : categoriesRes.error);
 
-      try {
-        const [taxonomy, data] = await Promise.all([
-          api.categories(),
-          api.cashFlowDetail(month, baseCurrency),
-        ]);
-        if (cancelled) return;
-        setCategories(taxonomy);
-        setDetail(data);
-        setState("ready");
-      } catch (e: unknown) {
-        if (cancelled) return;
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [month, baseCurrency]);
+  // Unsaved category picks belong to one month and currency: reset them on a switch.
+  const viewKey = `${month}|${baseCurrency}`;
+  const [editsViewKey, setEditsViewKey] = useState(viewKey);
+  if (editsViewKey !== viewKey) {
+    setEditsViewKey(viewKey);
+    setPendingOverrides({});
+    setOverrideErrors({});
+    setOverrideSelections({});
+  }
 
   const categoryGroups = useMemo(() => groupCategories(categories), [categories]);
   const effectiveBaseCurrency = detail?.base_currency || baseCurrency;
-  const currencyPrefix = effectiveBaseCurrency === "SGD" ? "S$" : effectiveBaseCurrency;
-  const formatMoney: FormatMoney = (value, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  const formatMoney: FormatMoney = (value, decimals = 0) =>
+    fmt.formatMoney(value, effectiveBaseCurrency, { decimals });
 
   const shellTitle =
     workspaceTab === "income"
@@ -880,8 +853,7 @@ export default function CashFlowDetailRoute() {
     let succeeded = false;
     try {
       await api.categoryOverride({ transaction_id: transactionId, category_id: categoryId });
-      const refreshed = await api.cashFlowDetail(month, baseCurrency);
-      setDetail(refreshed);
+      await detailRes.reload();
       setOverrideSelections((current) => {
         const next = { ...current };
         delete next[transactionId];
@@ -911,34 +883,18 @@ export default function CashFlowDetailRoute() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {!loadError && (detailRes.isLoading || categoriesRes.isLoading) && <div className="card" role="status">Loading…</div>}
 
-      {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">Cash flow detail unavailable</div>
-          <pre className="pre">{err}</pre>
-        </div>
+      {loadError && (
+        <LoadError title="Cash flow detail unavailable" error={loadError.message} onRetry={() => { void detailRes.reload().catch(() => undefined); void categoriesRes.reload().catch(() => undefined); }} />
       )}
 
-      {state === "ready" && detail ? (
-        <div className="wealthOverviewLayout">
+      {!loadError && detail && categoriesRes.data ? (
+        <RefreshingRegion className="wealthOverviewLayout" busy={detailRes.isFetching}>
           <FxNote sources={[detail]} />
           {workspaceTab === "overview" ? <OverviewTab detail={detail} formatMoney={formatMoney} /> : null}
           {workspaceTab === "income" ? (
@@ -969,7 +925,7 @@ export default function CashFlowDetailRoute() {
               onSave={handleSave}
             />
           ) : null}
-        </div>
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

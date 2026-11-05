@@ -1,4 +1,6 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { api } from "../lib/api";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { lazy, type ReactElement } from "react";
@@ -299,6 +301,83 @@ describe("AppShell", () => {
     });
     expect(await screen.findByText("Lazy Page Content")).toBeInTheDocument();
     expect(screen.queryByText("Loading…")).not.toBeInTheDocument();
+  });
+});
+
+describe("AppShell route content (#148)", () => {
+  it("keeps Cash Flow mounted across its tabs: no refetch, same data", async () => {
+    vi.mocked(api.cashFlowDetail).mockClear();
+    vi.mocked(api.categories).mockClear();
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/cash-flow"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/cash-flow" element={<CashFlowDetail />} />
+              <Route path="/cash-flow/income" element={<CashFlowDetail />} />
+              <Route path="/cash-flow/expenses" element={<CashFlowDetail />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Cash Flow Overview" })).toBeInTheDocument();
+    expect(await screen.findByText("Net cash flow this month")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("link", { name: "Income" }));
+    expect(await screen.findByRole("heading", { name: "Income" })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("link", { name: "Expenses" }));
+    expect(await screen.findByRole("heading", { name: "Expenses" })).toBeInTheDocument();
+
+    expect(api.cashFlowDetail).toHaveBeenCalledTimes(1);
+    expect(api.categories).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("AppShell accessibility (#151)", () => {
+  function renderShell(child: ReactElement = <div>Overview Content</div>) {
+    return render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/wealth"]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path="/wealth" element={child} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+  }
+
+  it("has a skip link to the page content", () => {
+    renderShell();
+    const skip = screen.getByRole("link", { name: "Skip to content" });
+    expect(skip).toHaveAttribute("href", "#main-content");
+    expect(document.getElementById("main-content")).toContainElement(screen.getByText("Overview Content"));
+  });
+
+  it("marks the active theme with aria-pressed", async () => {
+    renderShell();
+    const group = screen.getByRole("group", { name: "Theme" });
+    const light = within(group).getByRole("button", { name: "Light" });
+    const dark = within(group).getByRole("button", { name: "Dark" });
+    await userEvent.click(light);
+    expect(light).toHaveAttribute("aria-pressed", "true");
+    expect(dark).toHaveAttribute("aria-pressed", "false");
+    await userEvent.click(dark);
+    expect(dark).toHaveAttribute("aria-pressed", "true");
+    expect(light).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("a page that throws while rendering shows an error card, not a blank app", () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    function Broken(): ReactElement {
+      throw new Error("boom");
+    }
+    renderShell(<Broken />);
+    expect(screen.getByRole("alert")).toHaveTextContent("This page failed to load");
+    expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
+    spy.mockRestore();
   });
 });
 

@@ -1,5 +1,6 @@
 import type { DashboardSummary } from "../../lib/api";
 import { Link } from "react-router-dom";
+import { formatPercent } from "../../lib/format";
 
 type NetWorthHeroCardProps = {
   summary: DashboardSummary | null;
@@ -25,7 +26,7 @@ export default function NetWorthHeroCard({
 
   const formatDelta = (abs: number, pct: number | null) => {
     const sign = abs >= 0 ? "+" : "-";
-    const percentValue = pct == null ? "" : ` (${pct >= 0 ? "+" : "-"}${Math.abs(pct * 100).toFixed(1)}%)`;
+    const percentValue = pct == null ? "" : ` (${formatPercent(pct, { signed: true })})`;
     return `${sign}${formatMoney(Math.abs(abs))}${percentValue}`;
   };
 

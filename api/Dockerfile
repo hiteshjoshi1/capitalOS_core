@@ -39,8 +39,12 @@ USER app
 FROM base AS runtime
 
 # pip (and the urllib3/msgpack/setuptools copies vendored inside it) is only
-# needed to build the image.
-RUN pip uninstall -y pip
+# needed to build the image. apt and its library too: the running API never
+# installs packages, and keeping them only carries their CVEs (#204).
+RUN pip uninstall -y pip \
+    && dpkg --purge --force-remove-protected --force-remove-essential --force-depends \
+       apt $(dpkg-query -W -f='${Package}\n' 'libapt-pkg*' 2>/dev/null) \
+    && rm -rf /var/lib/apt /var/cache/apt /etc/apt
 
 COPY app /app/app
 

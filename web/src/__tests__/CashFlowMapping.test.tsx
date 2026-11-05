@@ -1,4 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { controlledCalls } from "./raceHelpers";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -104,7 +105,7 @@ describe("CashFlowMapping route", () => {
     expect(await screen.findByText("3 transactions across 2 merchants still need a category")).toBeInTheDocument();
     expect(screen.getByText("NTUC FairPrice")).toBeInTheDocument();
     expect(screen.getByText("Grab")).toBeInTheDocument();
-    expect(screen.getByText((_, element) => element?.textContent === "2 transactions · S$ 42.5")).toBeInTheDocument();
+    expect(screen.getByText((_, element) => element?.textContent === "2 transactions · S$ 42.50")).toBeInTheDocument();
   });
 
   it("shows loading state while category and queue data are still in flight", async () => {
@@ -173,5 +174,31 @@ describe("CashFlowMapping route", () => {
         (_, element) => element?.tagName === "SPAN" && element?.textContent === "1 transactions across 1 merchants still need a category",
       ).length,
     ).toBeGreaterThan(0);
+  });
+});
+
+// #148: the mapping queue is a work list: it never shows another month's rows.
+describe("CashFlowMapping races", () => {
+  it("does not keep the previous month's queue, and ignores a late earlier reply", async () => {
+    vi.setSystemTime(new Date("2026-02-17T00:00:00Z"));
+    window.localStorage.clear();
+    mockApi.categories.mockResolvedValue(categoryFixture);
+    const queue = controlledCalls<UnmappedTransaction[]>();
+    mockApi.unmappedTransactions.mockImplementation(queue.impl as typeof api.unmappedTransactions);
+    renderRoute();
+    await act(async () => queue.find((a) => a[0] === "2026-02").resolve(unmappedFixture));
+    expect(await screen.findByText("Grab")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-01" } });
+    expect(screen.queryByText("Grab")).not.toBeInTheDocument();
+    expect(screen.getByText("Loading…")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2025-12" } });
+    const jan = queue.find((a) => a[0] === "2026-01");
+    await act(async () => queue.find((a) => a[0] === "2025-12").resolve([]));
+    expect(await screen.findByText("All transactions mapped for 2025-12.")).toBeInTheDocument();
+    await act(async () => jan.resolve(unmappedFixture));
+    expect(screen.queryByText("Grab")).not.toBeInTheDocument();
+    await waitFor(() => expect(jan.signal?.aborted).toBe(true));
   });
 });

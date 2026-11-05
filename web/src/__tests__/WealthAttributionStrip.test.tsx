@@ -86,8 +86,34 @@ describe("WealthAttributionStrip", () => {
     );
     const columns = container.querySelectorAll(".whAttribCol");
     fireEvent.pointerEnter(columns[columns.length - 1]);
-    expect(getByText(/Jun 26 Δ vs May 26/)).toBeInTheDocument();
+    expect(getByText(/Jun '26 Δ vs May '26/)).toBeInTheDocument();
     expect(getByText("S$ 90")).toBeInTheDocument(); // stocks_funds delta
     expect(getByText("S$ 10")).toBeInTheDocument(); // cash delta
+  });
+});
+
+// #151: keyboard drill-down on the attribution strip.
+describe("WealthAttributionStrip keyboard drill-down", () => {
+  it("arrows move between months with a column, Enter inspects", () => {
+    const points = [
+      point({ month: "2026-04", total: 900, cash: 300, stocks_funds: 500, crypto: 100 }),
+      point({ month: "2026-05", total: 950, cash: 310, stocks_funds: 540, crypto: 100 }),
+      point({ month: "2026-06", total: 1000, cash: 300, stocks_funds: 600, crypto: 100 }),
+    ];
+    const onSelectMonth = vi.fn();
+    const { getByRole, container } = render(
+      <WealthAttributionStrip points={points} formatMoney={formatMoney} selectedMonth={null} onSelectMonth={onSelectMonth} />,
+    );
+    const host = getByRole("group", { name: /Month-over-month change/ });
+    const live = container.querySelector("[aria-live=polite]")!;
+    fireEvent.focus(host);
+    expect(live.textContent).toContain("June 2026");
+    fireEvent.keyDown(host, { key: "ArrowLeft" });
+    expect(live.textContent).toContain("May 2026: stocks and funds S$ 40");
+    // The first month has no column (nothing to compare with), so Left stops at May.
+    fireEvent.keyDown(host, { key: "ArrowLeft" });
+    expect(live.textContent).toContain("May 2026");
+    fireEvent.keyDown(host, { key: "Enter" });
+    expect(onSelectMonth).toHaveBeenCalledWith("2026-05");
   });
 });

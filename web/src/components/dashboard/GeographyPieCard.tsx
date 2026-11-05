@@ -1,20 +1,14 @@
 import type { GeographyExposure } from "../../lib/api";
+import * as fmt from "../../lib/format";
+import { chartColor } from "../../lib/chartColors";
+import { useId } from "react";
+import { describeShares } from "../../lib/chartA11y";
 
 type GeographyPieCardProps = {
   exposure: GeographyExposure | null;
   formatMoney: (value?: number, maximumFractionDigits?: number) => string;
 };
 
-const PIE_COLORS = [
-  "#4f8cff",
-  "#1fb981",
-  "#f59f43",
-  "#7d67ff",
-  "#ef6ca8",
-  "#2ebac6",
-  "#f4cf5d",
-  "#8f9db2",
-];
 
 type PieSlice = {
   item: GeographyExposure["items"][number];
@@ -40,7 +34,7 @@ function conicGradient(slices: PieSlice[]): string {
   const parts: string[] = [];
   slices.forEach((slice) => {
     const next = slice.end;
-    parts.push(`${PIE_COLORS[slice.idx % PIE_COLORS.length]} ${offset.toFixed(2)}% ${next.toFixed(2)}%`);
+    parts.push(`${chartColor(slice.idx)} ${offset.toFixed(2)}% ${next.toFixed(2)}%`);
     offset = next;
   });
   if (offset < 100) {
@@ -50,24 +44,18 @@ function conicGradient(slices: PieSlice[]): string {
 }
 
 function compactMappedTotal(total: number, currency: string | undefined): string {
-  const prefix = currency === "SGD" ? "S$" : currency ?? "";
-  const value = new Intl.NumberFormat(undefined, {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(total);
-  return `${prefix} ${value}`.trim();
+  return fmt.formatMoneyCompact(total, currency);
 }
 
 function formatAsOf(asOf: string | null | undefined): string {
   if (!asOf) return "Latest snapshot";
-  const date = new Date(asOf);
-  if (Number.isNaN(date.getTime())) return asOf;
-  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][date.getUTCMonth()];
-  return `As of ${month} ${date.getUTCDate()}, ${date.getUTCFullYear()}`;
+  const label = fmt.formatDate(asOf);
+  return label === fmt.MISSING ? asOf : `As of ${label}`;
 }
 
 export default function GeographyPieCard({ exposure, formatMoney }: GeographyPieCardProps) {
   const items = exposure?.items ?? [];
+  const descId = useId();
   const total = exposure?.total ?? 0;
   const slices = buildPieSlices(items);
   const pieStyle = items.length > 0 ? { background: conicGradient(slices) } : undefined;
@@ -88,7 +76,16 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
         <>
           <div className="geographyExposureLayout">
             <div className="geographyPieChartWrap">
-              <div className="geographyPieChart" style={pieStyle} role="img" aria-label="Geographic exposure pie chart">
+              <div
+                className="geographyPieChart"
+                style={pieStyle}
+                role="img"
+                aria-label="Geographic exposure pie chart"
+                aria-describedby={descId}
+              >
+                <span id={descId} className="srOnly">
+                  {describeShares("Geographic exposure", items.map((item) => ({ label: item.country, percent: item.percent })))}
+                </span>
                 <div className="geographyPieCenter">
                   <div className="label">Mapped</div>
                   <div className="val">{compactMappedTotal(total, exposure?.base_currency)}</div>
@@ -108,14 +105,14 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
                   <div className="geographyLegendRow" key={item.country}>
                     <div className="geographyLegendMain">
                       <span className="geographyLegendCountry">
-                        <i style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }}></i>
+                        <i style={{ background: chartColor(idx) }}></i>
                         {item.country}
                       </span>
                       <span className="geographyLegendMeta">{breakdown.join(" · ") || "—"}</span>
                     </div>
                     <div className="geographyLegendValue">
                       <span>{formatMoney(item.total)}</span>
-                      <strong>{item.percent.toFixed(1)}%</strong>
+                      <strong>{fmt.formatPercent(item.percent, { scale: "points" })}</strong>
                     </div>
                   </div>
                 );

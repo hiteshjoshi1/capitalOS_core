@@ -2,6 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import type { WealthTimeline, WealthTimelinePoint } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { computeMonthFlags, isCarriedPoint, isGapPoint } from "../lib/wealthHistoryAnalysis";
+import * as fmt from "../lib/format";
 
 export type WealthHistoryChartMode = "total" | "comp";
 
@@ -33,11 +34,7 @@ const W = 900;
 const H = 320;
 
 function monthLabel(month: string): string {
-  const [y, m] = month.split("-");
-  const year = Number(y);
-  const mon = Number(m);
-  if (!Number.isFinite(year) || !Number.isFinite(mon)) return month;
-  return new Date(year, mon - 1, 1).toLocaleString("en", { month: "short", year: "2-digit" });
+  return fmt.formatMonth(month, "short");
 }
 
 function niceStep(range: number): number {
@@ -115,6 +112,31 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
     setHoverIdx(best);
   };
 
+  // #151: the chart is one keyboard stop. Arrow keys move between months (and "now"),
+  // Home/End jump to the ends, Enter or Space inspects the month, Escape lets go. The
+  // focused month is announced, so the drill-down no longer needs a mouse.
+  const handleKeyDown = (evt: React.KeyboardEvent<HTMLDivElement>) => {
+    if (n === 0) return;
+    const current = hoverIdx ?? n - 1;
+    let next: number | null = null;
+    if (evt.key === "ArrowRight") next = Math.min(n, current + 1);
+    else if (evt.key === "ArrowLeft") next = Math.max(0, current - 1);
+    else if (evt.key === "Home") next = 0;
+    else if (evt.key === "End") next = n;
+    else if (evt.key === "Escape") {
+      setHoverIdx(null);
+      return;
+    } else if (evt.key === "Enter" || evt.key === " ") {
+      evt.preventDefault();
+      if (hoverIdx != null && hoverIdx < n && onSelectMonth) onSelectMonth(points[hoverIdx].month);
+      return;
+    }
+    if (next != null) {
+      evt.preventDefault();
+      setHoverIdx(next);
+    }
+  };
+
   const hoverPoint = hoverIdx != null && hoverIdx < n ? points[hoverIdx] : null;
   const isHoverNow = hoverIdx === n;
   // The still-open month has no stored point (#138): its uploads sit on "now".
@@ -124,12 +146,29 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
     <div className="whChartWrap">
       <div
         className="whChartSvgHost"
+        tabIndex={n > 0 ? 0 : undefined}
+        role="group"
+        aria-label={`Net worth by month${onSelectMonth ? ". Use the arrow keys to move between months and Enter to inspect one." : ". Use the arrow keys to move between months."}`}
         onPointerMove={handlePointerMove}
         onPointerLeave={() => setHoverIdx(null)}
+        onFocus={() => {
+          if (hoverIdx == null && n > 0) setHoverIdx(n - 1);
+        }}
+        onBlur={() => setHoverIdx(null)}
+        onKeyDown={handleKeyDown}
         onClick={() => {
           if (hoverPoint && onSelectMonth) onSelectMonth(hoverPoint.month);
         }}
       >
+        <span className="srOnly" aria-live="polite">
+          {isHoverNow
+            ? `Now, live prices: total ${formatMoney(now.total)}`
+            : hoverPoint
+              ? isGapPoint(hoverPoint)
+                ? `${fmt.formatMonth(hoverPoint.month)}: no data`
+                : `${fmt.formatMonth(hoverPoint.month)}: total ${formatMoney(hoverPoint.total)}, stocks and funds ${formatMoney(hoverPoint.stocks_funds)}, cash ${formatMoney(hoverPoint.cash)}, crypto ${formatMoney(hoverPoint.crypto)}${isCarriedPoint(hoverPoint) ? ", partially carried" : ""}`
+              : ""}
+        </span>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Net worth over time">
           {gridLines.map((v) => (
             <g key={v}>
@@ -344,7 +383,7 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
                         ⚠ Catch-up month — includes drift accrued since the last upload
                       </div>
                     ) : null}
-                    {onSelectMonth ? <div className="whTooltipHint">Click to inspect this month →</div> : null}
+                    {onSelectMonth ? <div className="whTooltipHint">Click or press Enter to inspect this month →</div> : null}
                   </>
                 )}
               </>

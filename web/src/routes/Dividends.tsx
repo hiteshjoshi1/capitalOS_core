@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { DividendCompanyItem, DividendsByCompany, DividendsSummary, ExpectedDividendCompany, ExpectedDividendsOverview } from "../lib/api";
+import type { DividendCompanyItem, DividendsSummary, ExpectedDividendCompany } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
@@ -9,8 +12,10 @@ import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
 type CompanyTab = "realized" | "expected";
 
 function shiftMonth(month: string, delta: number): string {
@@ -24,65 +29,47 @@ function shiftMonth(month: string, delta: number): string {
 }
 
 export default function Dividends() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [monthSummary, setMonthSummary] = useState<DividendsSummary | null>(null);
-  const [companySummary, setCompanySummary] = useState<DividendsByCompany | null>(null);
-  const [expectedOverview, setExpectedOverview] = useState<ExpectedDividendsOverview | null>(null);
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [companyTab, setCompanyTab] = useState<CompanyTab>("realized");
 
   const fromMonth = useMemo(() => shiftMonth(month, -11), [month]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        setState("loading");
-        setErr("");
-        const [monthData, companyData, expectedData] = await Promise.all([
-          api.dividendsSummary(fromMonth, month, "month", baseCurrency),
-          api.dividendsByCompany(month, month, baseCurrency),
-          api.expectedDividendsOverview(fromMonth, month, baseCurrency),
-        ]);
-        setMonthSummary(monthData);
-        setCompanySummary(companyData);
-        setExpectedOverview(expectedData);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
-  }, [fromMonth, month, baseCurrency]);
+  // #148: three independent resources. The page renders once the monthly summary is in;
+  // the company and expected sections show their own loading/error state.
+  const monthRes = useApiResource(resourceKey("dividendsSummary", fromMonth, month, baseCurrency), () =>
+    api.dividendsSummary(fromMonth, month, "month", baseCurrency),
+  );
+  const companyRes = useApiResource(resourceKey("dividendsByCompany", month, baseCurrency), () =>
+    api.dividendsByCompany(month, month, baseCurrency),
+  );
+  const expectedRes = useApiResource(resourceKey("expectedDividends", fromMonth, month, baseCurrency), () =>
+    api.expectedDividendsOverview(fromMonth, month, baseCurrency),
+  );
+  const monthSummary = monthRes.data ?? null;
+  const companySummary = companyRes.data ?? null;
+  const expectedOverview = expectedRes.data ?? null;
+  // Derive periods from the month the summary is for: while the next month loads, the
+  // previous month's summary stays on screen and must be read as that month.
+  const shownMonth = monthSummary?.to_month || month;
 
-  const currencyPrefix = baseCurrency === "SGD" ? "S$" : `${baseCurrency} `;
-  const formatMoney = useCallback(
-    (value?: number, maximumFractionDigits = 0) =>
-      value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`,
-    [currencyPrefix],
-  );
+  const shownCurrency = monthSummary?.base_currency || baseCurrency;
+  const formatMoney = useCallback((value?: number | null) => fmt.formatMoney(value, shownCurrency), [shownCurrency]);
   const formatCompactMoney = useCallback(
-    (value?: number | null) =>
-      value == null
-        ? "—"
-        : `${currencyPrefix} ${value.toLocaleString(undefined, { notation: "compact", maximumFractionDigits: 1 })}`,
-    [currencyPrefix],
+    (value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency),
+    [shownCurrency],
   );
-  const formatNumber = (value?: number, maximumFractionDigits = 4) =>
-    typeof value === "number" && Number.isFinite(value)
-      ? value.toLocaleString(undefined, { maximumFractionDigits })
-      : "—";
+  const formatNumber = (value?: number) => fmt.formatNumber(value, 4);
 
   const topCompanies: DividendCompanyItem[] = (companySummary?.items ?? []).slice(0, 20);
   const expectedCompanies: ExpectedDividendCompany[] = useMemo(
     () => expectedOverview?.companies ?? [],
     [expectedOverview?.companies],
   );
-  const monthKey = month;
-  const yearKey = month.slice(0, 4);
+  const monthKey = shownMonth;
+  const yearKey = shownMonth.slice(0, 4);
   const quarterKey = (() => {
-    const parts = month.split("-");
+    const parts = shownMonth.split("-");
     const year = parts[0] ?? "";
     const monthNumber = Number(parts[1] ?? "1");
     const quarter = Math.floor((Math.max(1, monthNumber) - 1) / 3) + 1;
@@ -109,7 +96,7 @@ export default function Dividends() {
         { gross: 0, withholding: 0, net_received: 0, payout_minus_tax: 0 },
       );
   const realizedMonth = sumRealized((bucket) => bucket.bucket === monthKey);
-  const realizedPrevMonth = sumRealized((bucket) => bucket.bucket === shiftMonth(month, -1));
+  const realizedPrevMonth = sumRealized((bucket) => bucket.bucket === shiftMonth(shownMonth, -1));
   const realizedQuarter = sumRealized((bucket) => toQuarterKey(bucket.bucket) === quarterKey);
   const realizedYear = sumRealized((bucket) => bucket.bucket.startsWith(`${yearKey}-`));
   const realizedTrailing12 = sumRealized(() => true);
@@ -148,38 +135,26 @@ export default function Dividends() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{baseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={baseCurrency}
-              onChange={(e) => setBaseCurrency(e.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
-      {state === "loading" && <div className="card">Loading…</div>}
-      {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+      {monthRes.isLoading && <div className="card" role="status">Loading…</div>}
+      {monthRes.error && (
+        <LoadError title="Couldn't load dividends" error={monthRes.error.message} onRetry={() => void monthRes.reload().catch(() => undefined)} />
       )}
 
-      {state === "ready" && (
-        <div className="wealthOverviewLayout">
+      {monthSummary && (
+        <RefreshingRegion
+          className="wealthOverviewLayout"
+          busy={monthRes.isFetching || companyRes.isFetching || expectedRes.isFetching}
+        >
           <HeroMetricCard
             eyebrow="REALIZED THIS MONTH"
             value={formatMoney(realizedMonth.payout_minus_tax)}
             deltaChip={{
-              text: `${momDeltaAbs >= 0 ? "+" : "-"}${momDeltaPct == null ? "—" : Math.abs(momDeltaPct * 100).toFixed(1) + "%"}`,
+              // No baseline is "—", not "+—" (#131).
+              text: fmt.formatPercent(momDeltaPct, { signed: true }),
               positive: momDeltaAbs >= 0,
             }}
             insightText={`Gross ${formatMoney(realizedMonth.gross)} · Withholding ${formatMoney(realizedMonth.withholding)}`}
@@ -200,10 +175,13 @@ export default function Dividends() {
             <div className="dividendSignalGrid">
               <article className="card dividendSignalCard">
                 <p className="dividendSignalLabel">Expected, next 12 months</p>
-                <p className="dividendSignalValue">{formatMoney(expectedYear.payout_minus_tax)}</p>
+                {expectedRes.error ? (
+                  <p className="dividendSignalContext">Couldn't load expected dividends: {expectedRes.error.message}</p>
+                ) : null}
+                <p className="dividendSignalValue">{expectedOverview ? formatMoney(expectedYear.payout_minus_tax) : "—"}</p>
                 <p className="dividendSignalContext">
-                  <span className={expectedVsTrailingPct != null && expectedVsTrailingPct >= 0 ? "good" : "bad"}>
-                    {expectedVsTrailingPct == null ? "—" : `${expectedVsTrailingPct >= 0 ? "+" : "-"}${Math.abs(expectedVsTrailingPct * 100).toFixed(0)}%`}
+                  <span className={fmt.directionClass(expectedVsTrailingPct)}>
+                    {fmt.formatPercent(expectedVsTrailingPct, { signed: true, decimals: 0 })}
                   </span>{" "}
                   vs trailing 12 months ({formatMoney(realizedTrailing12.payout_minus_tax)}), based on current holdings and yields.
                 </p>
@@ -214,7 +192,7 @@ export default function Dividends() {
                   {expectedOverview?.assets_with_actions ?? 0} / {expectedOverview?.holdings_considered ?? 0}
                 </p>
                 <p className="dividendSignalContext">
-                  Holdings currently paying a dividend · {avgYieldPct == null ? "—" : `${avgYieldPct.toFixed(1)}%`} average yield.
+                  Holdings currently paying a dividend · {fmt.formatPercent(avgYieldPct, { scale: "points" })} average yield.
                 </p>
               </article>
             </div>
@@ -262,7 +240,13 @@ export default function Dividends() {
                   : "Annualized dividend estimates based on current holdings and available yields."}
               </p>
               <div className="listRows">
-              {companyTab === "realized" ? (
+              {(companyTab === "realized" ? companyRes : expectedRes).error ? (
+                <div className="muted" role="alert">
+                  Couldn't load companies: {(companyTab === "realized" ? companyRes : expectedRes).error?.message}
+                </div>
+              ) : (companyTab === "realized" ? companySummary : expectedOverview) == null ? (
+                <div className="muted" role="status">Loading…</div>
+              ) : companyTab === "realized" ? (
                 topCompanies.length === 0 ? (
                   <div className="muted">No company-level dividend records yet.</div>
                 ) : (
@@ -271,7 +255,7 @@ export default function Dividends() {
                       <div className="listRowMain">
                         <span className="listRowTitle">
                           {item.company}
-                          {item.yield_pct != null ? <span className="tag">{item.yield_pct.toFixed(2)}%</span> : null}
+                          {item.yield_pct != null ? <span className="tag">{fmt.formatPercent(item.yield_pct, { scale: "points", decimals: 2 })}</span> : null}
                         </span>
                         <span className="listRowMeta">
                           <span>{item.symbol ?? "—"}</span>
@@ -295,7 +279,7 @@ export default function Dividends() {
                     <div className="listRowMain">
                       <span className="listRowTitle">
                         {item.company}
-                        {item.yield_pct != null ? <span className="tag">{item.yield_pct.toFixed(2)}%</span> : null}
+                        {item.yield_pct != null ? <span className="tag">{fmt.formatPercent(item.yield_pct, { scale: "points", decimals: 2 })}</span> : null}
                       </span>
                       <span className="listRowMeta">
                         <span>{item.symbol}</span>
@@ -314,7 +298,7 @@ export default function Dividends() {
               </div>
             </div>
           </section>
-        </div>
+        </RefreshingRegion>
       )}
     </PageShell>
   );

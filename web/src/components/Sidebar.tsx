@@ -1,27 +1,18 @@
-import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { api } from "../lib/api";
+import { useApiResource } from "../lib/useApiResource";
 import { APP_SECTIONS, UTILITY_NAV_ITEMS, findActiveSection, isNavItemActive } from "../lib/navigation";
 
 export default function Sidebar() {
   const location = useLocation();
-  const [alertCount, setAlertCount] = useState<number>(0);
   const activeSection = findActiveSection(location.pathname);
-
-  const hydrateAlertCount = useCallback(() => {
-    api
-      .alertNotifications()
-      .then((response) => setAlertCount(response.total_count))
-      .catch(() => {
-        api.uploadReminderCount?.()
-          ?.then((response) => setAlertCount(response.count))
-          .catch(() => {});
-      });
-  }, []);
-
-  useEffect(() => {
-    hydrateAlertCount();
-  }, [hydrateAlertCount]);
+  // Shared with the Alerts page (#148). The older reminder-count endpoint is only asked
+  // when the notifications call fails.
+  const notifications = useApiResource("alertNotifications", () => api.alertNotifications());
+  const reminderCount = useApiResource(notifications.error ? "uploadReminderCount" : null, () =>
+    api.uploadReminderCount(),
+  );
+  const alertCount = notifications.data?.total_count ?? reminderCount.data?.count ?? 0;
 
   return (
     <aside className="sidebar" aria-label="Main navigation">

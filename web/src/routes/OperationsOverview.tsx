@@ -7,6 +7,8 @@ import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import type { StatusPillTone } from "../components/StatusPill";
+import * as fmt from "../lib/format";
+import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type RefreshStatus = "idle" | "running" | "done" | "error";
@@ -42,9 +44,9 @@ const JOB_STATE_PILL: Record<string, { tone: StatusPillTone; label: string }> = 
 function formatWhen(value?: string | null): string {
   if (!value) return "never";
   // A bare date (statement / trade date) stays a date; timestamps show local time.
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return fmt.formatDate(value);
+  const label = fmt.formatDateTime(value);
+  return label === fmt.MISSING ? value : label;
 }
 
 function jobStatusDetail(job: DataHubJobStatus): string | null {
@@ -151,7 +153,7 @@ export default function OperationsOverview() {
           label: "Import health",
           value: summary.import_health.pending_count === 0 ? "0 pending" : `${summary.import_health.pending_count} pending`,
           meta: summary.import_health.last_import_at
-            ? `Last import ${summary.import_health.last_import_at} · ${summary.import_health.last_import_platform ?? "—"}`
+            ? `Last import ${formatWhen(summary.import_health.last_import_at)} · ${summary.import_health.last_import_platform ?? "—"}`
             : "No imports yet",
         },
         {
@@ -172,12 +174,9 @@ export default function OperationsOverview() {
       title="Data Hub"
       subtitle="Connections, imports, and market data health at a glance."
     >
-      {state === "loading" && <div className="card">Loading…</div>}
+      {state === "loading" && <div className="card" role="status">Loading…</div>}
       {state === "error" && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+        <LoadError title="Couldn't load the Data Hub" error={err} />
       )}
 
       {state === "ready" && (
@@ -325,7 +324,7 @@ export default function OperationsOverview() {
                     key={`${item.kind}-${idx}`}
                     title={item.title}
                     meta={item.meta}
-                    right={item.occurred_at}
+                    right={formatWhen(item.occurred_at)}
                   />
                 ))
               ) : (

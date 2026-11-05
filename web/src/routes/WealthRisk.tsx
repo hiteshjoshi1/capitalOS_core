@@ -1,7 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { api } from "../lib/api";
-import type { DashboardSummary, GeographyExposure } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
+import { resourceKey, useApiResource } from "../lib/useApiResource";
+import RefreshingRegion from "../components/RefreshingRegion";
+import * as fmt from "../lib/format";
 import {
   buildTopNDistribution,
   computeLargestPositionRisk,
@@ -19,46 +21,31 @@ import GeographyPieCard from "../components/dashboard/GeographyPieCard";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import SegmentedToggle from "../components/SegmentedToggle";
-
-type LoadState = "idle" | "loading" | "ready" | "error";
+import { useBaseCurrency } from "../context/CurrencyContext";
+import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import LoadError from "../components/LoadError";
 
 export default function WealthRisk() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [summary, setSummary] = useState<DashboardSummary | null>(null);
-  const [geographyExposure, setGeographyExposure] = useState<GeographyExposure | null>(null);
   const [month, setMonth] = useSelectedMonth();
-  const [baseCurrency, setBaseCurrency] = useState<string>("SGD");
+  const [baseCurrency] = useBaseCurrency();
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
+  // #148: the summary resource is the same key Wealth Overview reads, so moving between
+  // the two pages reuses one cached response (and revalidates it in the background).
+  const summaryRes = useApiResource(
+    resourceKey("dashboardSummary", month, "prev_month,prev_year", baseCurrency),
+    () => api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+  );
+  const geographyRes = useApiResource(resourceKey("geographyExposure", month, baseCurrency), () =>
+    api.dashboardGeographyExposure(month, baseCurrency),
+  );
+  const summary = summaryRes.data ?? null;
+  const geographyExposure = geographyRes.data ?? null;
+  const loadError = summaryRes.error ?? geographyRes.error;
   const selectedBaseCurrency = baseCurrency || summary?.base_currency || "SGD";
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setState("loading");
-        const [summaryData, geographyData] = await Promise.all([
-          api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
-          api.dashboardGeographyExposure(month, baseCurrency),
-        ]);
-        if (cancelled) return;
-        setSummary(summaryData);
-        setGeographyExposure(geographyData);
-        setState("ready");
-      } catch (error: unknown) {
-        if (cancelled) return;
-        setErr(error instanceof Error ? error.message : String(error));
-        setState("error");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [month, baseCurrency]);
-
-  const currencyPrefix = selectedBaseCurrency === "SGD" ? "S$" : selectedBaseCurrency;
-  const formatMoney = (value?: number, maximumFractionDigits = 0) =>
-    value == null ? "—" : `${currencyPrefix} ${value.toLocaleString(undefined, { maximumFractionDigits })}`;
+  // The currency the shown numbers are in (the previous one while a switch loads).
+  const shownCurrency = summary?.base_currency || selectedBaseCurrency;
+  const formatMoney = (value?: number | null) => fmt.formatMoney(value, shownCurrency);
 
   const netWorthTotal = summary?.net_worth.total ?? 0;
   const cashPct = netWorthTotal ? ((summary?.net_worth.cash ?? 0) / netWorthTotal) * 100 : 0;
@@ -76,37 +63,21 @@ export default function WealthRisk() {
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
-          <label className="coPillBtn">
-                        <span aria-hidden="true">{selectedBaseCurrency}</span>
-            <select
-              className="coPillBtnInput"
-              aria-label="Base currency"
-              value={selectedBaseCurrency}
-              onChange={(event) => setBaseCurrency(event.target.value)}
-            >
-              <option value="SGD">SGD</option>
-              <option value="USD">USD</option>
-              <option value="HKD">HKD</option>
-              <option value="INR">INR</option>
-            </select>
-          </label>
+          <BaseCurrencyPicker />
         </>
       )}
     >
-      {state === "loading" ? <div className="card">Loading…</div> : null}
-      {state === "error" ? (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{err}</pre>
-        </div>
+      {summaryRes.isLoading && !loadError ? <div className="card" role="status">Loading…</div> : null}
+      {loadError ? (
+        <LoadError title="Couldn't load risk" error={loadError.message} onRetry={() => { void summaryRes.reload().catch(() => undefined); void geographyRes.reload().catch(() => undefined); }} />
       ) : null}
 
-      {state === "ready" && summary ? (
-        <div className="wealthOverviewLayout">
+      {summary ? (
+        <RefreshingRegion className="wealthOverviewLayout" busy={summaryRes.isFetching || geographyRes.isFetching}>
           <section className="grid g-mid">
             <div className="card">
               <h2>Cash buffer</h2>
-              <div className="big small">{cashPct.toFixed(1)}%</div>
+              <div className="big small">{fmt.formatPercent(cashPct, { scale: "points" })}</div>
               <div className="muted">{formatMoney(summary?.net_worth.cash)} of {formatMoney(netWorthTotal)} net worth</div>
             </div>
 
@@ -176,7 +147,7 @@ export default function WealthRisk() {
           </section>
 
           <GeographyPieCard exposure={geographyExposure} formatMoney={formatMoney} />
-        </div>
+        </RefreshingRegion>
       ) : null}
     </PageShell>
   );

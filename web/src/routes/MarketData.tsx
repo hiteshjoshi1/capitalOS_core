@@ -4,6 +4,8 @@ import type { MarketDataExchangeStatus, MarketDataRun } from "../lib/api";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import "../App.css";
+import * as fmt from "../lib/format";
+import LoadError from "../components/LoadError";
 
 const REASON_LABELS = {
   RATE_LIMITED: "Rate limited",
@@ -16,7 +18,7 @@ function formatRunStarted(ts?: string | null): string {
   if (!ts) return "—";
   const date = new Date(ts);
   if (Number.isNaN(date.getTime())) return "—";
-  return date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+  return fmt.formatDateTime(ts);
 }
 
 export default function MarketData() {
@@ -90,12 +92,9 @@ export default function MarketData() {
         </button>
       )}
     >
-      {loading && <div className="card">Loading…</div>}
+      {loading && <div className="card" role="status">Loading…</div>}
       {error && (
-        <div className="card error">
-          <div className="cardTitle">API error</div>
-          <pre className="pre">{error}</pre>
-        </div>
+        <LoadError title="Couldn't load market data" error={error} />
       )}
 
       {!loading && !error && (

@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { describeShares } from "../lib/chartA11y";
 
 type StackedBarSegment = {
   key: string;
@@ -21,7 +22,12 @@ type StackedBarProps = {
 export default function StackedBar({ segments, ariaLabel, layout = "wrap" }: StackedBarProps) {
   return (
     <div>
-      <div className="bar stackedBarTrack" title={ariaLabel}>
+      <div
+        className="bar stackedBarTrack"
+        title={ariaLabel}
+        role="img"
+        aria-label={describeShares(ariaLabel, segments.map((s) => ({ label: s.label, percent: s.percent })))}
+      >
         {segments.map((segment) => (
           <span
             key={segment.key}

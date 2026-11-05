@@ -444,7 +444,7 @@ def test_dashboard_summary_sharekhan_canonical_positions_included(
         rates["INR"] = 0.016  # rough INR to SGD
         return rates
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=SGD")
     assert resp.status_code == 200
@@ -472,13 +472,13 @@ def test_dashboard_no_double_counting_when_canonical_and_legacy_both_present(
     When an account has both legacy and canonical data, the value should
     appear only once (from canonical), not doubled.
     """
-    from app.routers.dashboard import _networth_components
+    from app.valuation.facts import _networth_components
     from datetime import datetime, timezone
 
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
@@ -498,13 +498,13 @@ def test_top_holdings_includes_ibkr_flex_canonical_positions(
     db_engine, ibkr_flex_canonical_account, monkeypatch
 ):
     """Stock holdings list should show IBKR Flex positions while totals still use NAV elsewhere."""
-    from app.routers.dashboard import _top_holdings
+    from app.valuation.holdings import _top_holdings
     from datetime import datetime, timezone
 
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
@@ -527,13 +527,13 @@ def test_stock_exposure_allocates_ibkr_flex_nav_by_position_country(
     db_engine, ibkr_flex_canonical_account, monkeypatch
 ):
     """IBKR NAV-backed stock totals should use Flex position countries for geography buckets."""
-    from app.routers.dashboard import _stock_exposure
+    from app.valuation.holdings import _stock_exposure
     from datetime import datetime, timezone
 
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
@@ -561,12 +561,14 @@ def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
     facts exist at the read date. Once Flex facts exist, Flex NAV supersedes
     older legacy-backfill rows for the same legacy account.
     """
-    from app.routers.dashboard import _networth_components, _platform_allocation, _stock_exposure
+    from app.valuation.exposure import _platform_allocation
+    from app.valuation.facts import _networth_components
+    from app.valuation.holdings import _stock_exposure
 
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     with db_engine.begin() as conn:
         conn.execute(
@@ -743,7 +745,7 @@ def test_platform_allocation_includes_sharekhan_canonical(
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/platform-allocation?month=2026-02")
     assert resp.status_code == 200
@@ -761,7 +763,7 @@ def test_stock_exposure_includes_sharekhan_canonical(
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/stock-exposure?month=2026-02")
     assert resp.status_code == 200
@@ -776,7 +778,7 @@ def test_geography_exposure_includes_sharekhan_canonical(
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/geography-exposure?month=2026-02")
     assert resp.status_code == 200
@@ -818,7 +820,7 @@ def test_dashboard_summary_exposes_completeness_indicators(
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     resp = client.get("/dashboard/summary?month=2026-02")
     assert resp.status_code == 200
@@ -842,13 +844,13 @@ def test_dbs_vickers_canonical_positions_no_double_count(
     db_engine, dbs_vickers_canonical_account, monkeypatch
 ):
     """DBS Vickers canonical positions should not be double-counted with legacy."""
-    from app.routers.dashboard import _networth_components
+    from app.valuation.facts import _networth_components
     from datetime import datetime, timezone
 
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
 
     Session = sessionmaker(bind=db_engine)
     db = Session()
@@ -873,9 +875,9 @@ def test_stock_holdings_current_value_uses_latest_quote_for_stale_upload_holding
     def fake_rates(_dt, base, currencies):
         return {c: 1.0 for c in currencies}
 
-    monkeypatch.setattr("app.routers.dashboard.get_rates", fake_rates)
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
     monkeypatch.setattr(
-        "app.routers.dashboard._current_anchor_ts",
+        "app.valuation.clock._current_anchor_ts",
         lambda: datetime(2026, 3, 1, tzinfo=timezone.utc),
     )
 

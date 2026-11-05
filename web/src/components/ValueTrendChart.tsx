@@ -1,3 +1,6 @@
+import { useId } from "react";
+import * as fmt from "../lib/format";
+import { describeSeries } from "../lib/chartA11y";
 type ValueTrendPoint = {
   month: string;
   value?: number | null;
@@ -10,16 +13,7 @@ type ValueTrendChartProps = {
   formatCompactMoney: (value?: number | null) => string;
 };
 
-const formatTrendMonth = (month: string) => {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  if (!Number.isFinite(year) || !Number.isFinite(monthIndex)) {
-    return month;
-  }
-  const date = new Date(year, monthIndex, 1);
-  return `${date.toLocaleString(undefined, { month: "short" })} '${String(year).slice(-2)}`;
-};
+const formatTrendMonth = (month: string) => fmt.formatMonth(month, "short");
 
 export default function ValueTrendChart({
   points,
@@ -27,6 +21,7 @@ export default function ValueTrendChart({
   formatMoney,
   formatCompactMoney,
 }: ValueTrendChartProps) {
+  const descId = useId();
   const numericPoints = points.reduce<Array<{ month: string; value: number; index: number }>>((acc, point) => {
     const value = point.value == null ? null : Number(point.value);
     if (value != null && Number.isFinite(value)) {
@@ -49,7 +44,13 @@ export default function ValueTrendChart({
   };
 
   return (
-    <div className="valueTrendChart" aria-label={ariaLabel}>
+    <div className="valueTrendChart" role="img" aria-label={ariaLabel} aria-describedby={descId}>
+      <span id={descId} className="srOnly">
+        {describeSeries(
+          ariaLabel,
+          numericPoints.map((p) => ({ label: formatTrendMonth(p.month), value: formatMoney(p.value) })),
+        )}
+      </span>
       <div
         className="valueTrendBars"
         style={{ gridTemplateColumns: `repeat(${numericPoints.length}, minmax(0, 1fr))` }}
