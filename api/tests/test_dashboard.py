@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -2154,6 +2154,76 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
     assert body["net_worth_change"]["abs"] == pytest.approx(0.0)
     assert body["top_movers"]["gainers"] == []
     assert body["top_movers"]["detractors"] == []
+
+
+def test_net_worth_since_update_shows_crypto_change(client: TestClient, db_engine, monkeypatch):
+    """#206: the compare side reads the wallet valuation as of the previous
+    update, not the newest one, so a crypto move shows up, and the total change
+    is the sum of the component changes."""
+    _seed_single_stock_with_two_daily_prices(
+        db_engine,
+        account_id=20304,
+        asset_id=20304,
+        platform_id=20304,
+        symbol="MSFT",
+        today="2026-07-10",
+        yesterday="2026-07-09",
+        price_today=110,
+        price_yesterday=100,
+    )
+    fetched = datetime(2026, 7, 9, 12, 0, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
+                "('wallet-206', 'evm', 'ethereum', '0x206', 'Test wallet', 'active', :ts)"
+            ),
+            {"ts": fetched},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshots (id, wallet_id, as_of_date, fetched_at, total_usd) VALUES "
+                "(20601, 'wallet-206', '2026-07-09', :d1, 300), "
+                "(20602, 'wallet-206', '2026-07-10', :d2, 360)"
+            ),
+            {"d1": fetched, "d2": fetched + timedelta(days=1)},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO crypto_wallet_snapshot_items "
+                "(id, snapshot_id, chain_type, chain, asset_kind, symbol, normalized_amount, value_usd) VALUES "
+                "(20601, 20601, 'evm', 'ethereum', 'native', 'ETH', 1, 300), "
+                "(20602, 20602, 'evm', 'ethereum', 'native', 'ETH', 1, 360)"
+            )
+        )
+
+    def fake_rates(_date, base, symbols):
+        return {symbol: 1.0 for symbol in symbols}
+
+    monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
+    monkeypatch.setattr(
+        "app.valuation.clock._current_anchor_ts",
+        lambda: datetime(2026, 7, 10, 15, 0, tzinfo=timezone.utc),
+    )
+
+    resp = client.get("/dashboard/net-worth-since-update?base_currency=USD")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    components = body["component_change"]
+    assert components["crypto"]["abs"] == pytest.approx(60.0)
+    assert components["crypto"]["pct"] == pytest.approx(0.2)
+    assert components["stocks_funds"]["abs"] == pytest.approx(100.0)
+    assert components["cash"]["abs"] == pytest.approx(0.0)
+    assert body["net_worth_change"]["abs"] == pytest.approx(160.0)
+    assert body["net_worth_change"]["abs"] == pytest.approx(sum(c["abs"] for c in components.values()))
+    eth = next(row for row in body["top_movers"]["gainers"] if row["symbol"] == "ETH")
+    assert eth["delta_abs"] == pytest.approx(components["crypto"]["abs"])
+
+    # "Now" stays on the newest valuation.
+    bootstrap = client.get("/dashboard/bootstrap?month=2026-07&base_currency=USD")
+    assert bootstrap.status_code == 200
+    assert bootstrap.json()["current_net_worth"]["crypto"] == pytest.approx(360.0)
 
 
 # --- #133: comparisons for the open (current) month are like for like -------------
