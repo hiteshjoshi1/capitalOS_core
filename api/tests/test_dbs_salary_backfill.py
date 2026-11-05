@@ -96,8 +96,8 @@ def test_dbs_salary_backfill_is_idempotent_and_restores_cash_flow(
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(1, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(1, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(

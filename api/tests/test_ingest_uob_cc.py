@@ -139,8 +139,8 @@ def test_uob_cc_ingest_upload_and_idempotent(client: TestClient, db_engine):
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'UOB One Card', 'UOB', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'UOB One Card', 'UOB', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )

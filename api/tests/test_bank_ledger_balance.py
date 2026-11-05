@@ -82,8 +82,8 @@ def _seed_dbs_account(db_engine, statement: Path) -> None:
         register_signature(db, sig, "dbs_transaction_history_csv_v1", 1)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'Test DBS Savings', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'Test DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": ACCOUNT_ID},
         )

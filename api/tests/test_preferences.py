@@ -178,7 +178,8 @@ def test_patch_preferences_preserves_existing_on_partial_update(client, db_engin
     assert body["accent_color"] == "#2b6ddb"
 
 
-def test_preferences_require_authentication(client, monkeypatch):
+def test_preferences_require_authentication(anon_client, monkeypatch):
+    client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
 

@@ -39,7 +39,8 @@ def _cookie_value(set_cookie_header: str, name: str) -> str:
     raise AssertionError(f"Cookie {name} not found in header: {set_cookie_header}")
 
 
-def test_auth_signup_login_me_logout(client, db_engine, monkeypatch):
+def test_auth_signup_login_me_logout(anon_client, db_engine, monkeypatch):
+    client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
     monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")
@@ -492,7 +493,8 @@ def test_change_password_keeps_this_session_and_signs_out_others(client, db_engi
     assert int(reasons) == 1
 
 
-def test_change_password_rejects_bad_requests(client, db_engine, monkeypatch):
+def test_change_password_rejects_bad_requests(anon_client, db_engine, monkeypatch):
+    client = anon_client  # these checks need a request with no credentials (#154)
     monkeypatch.delenv("AUTH_BYPASS_USER_ID", raising=False)
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
     monkeypatch.setenv("AUTH_ACCESS_TOKEN_SECRET", "test-access-secret")

@@ -85,6 +85,12 @@ From the main checkout:
 - Frontend code: `cd web && npx vitest run <file>` (fast) or `npm test -- --run` (full).
 - New/changed migration: add `migrations/NNN_*.sql` (no `BEGIN`/`COMMIT` of its own), then `make db-migrate`
   (each file + its `schema_migrations` row in one transaction; stops at the first failure; already-applied files are skipped).
+  Then `make db-schema-update` and commit `migrations/schema.sql` with it (#154).
+- Postgres check (#154, CI job `postgres`): `make db-schema-check` migrates an empty throwaway Postgres 16 (own
+  container/port, removed after), re-runs the migrations (must be a no-op), diffs against `migrations/schema.sql`,
+  then runs `pytest -m postgres` against it. Backend tests run with production-like auth: no bypass, no
+  NULL-owner rows (the `client` fixture signs in with a real token; `tests/auth_helpers.py` for other users), and
+  `tests/test_cross_user_isolation.py` checks every GET route as a second user.
 - `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
 - Python dependency change: edit `api/requirements*.in` / `orchestration/requirements.in` (direct pins),
   then `make api-lock` / `make orch-lock` regenerates the hashed lock `requirements*.txt` the image and venv

@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.valuation import clock as valuation_clock, fx as valuation_fx
 from app import fx, valuation_cache
 from app.valuation_cache import request_scope, valuation_cached
+from tests.auth_helpers import auth_headers, ensure_user
 from tests.canonical_test_helpers import (
     seed_canonical_account_balance_for_test,
     seed_canonical_position_snapshot_for_test,
@@ -53,8 +54,8 @@ def _seed_extras(db_engine):
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(40, 'Test Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(40, 'Test Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -208,12 +209,11 @@ def test_shared_cache_never_serves_another_users_data(client: TestClient, db_eng
     seed_canonical_account_balance_for_test(db_engine, account_id=72, as_of="2026-03-01", currency="SGD", balance_base=2000)
     path = "/dashboard/cash-deposits?month=2026-03&base_currency=SGD"
 
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", "71")
-    first_user = client.get(path).json()
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", "72")
-    second_user = client.get(path).json()  # no write in between: same watermark
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", "71")
-    first_user_again = client.get(path).json()
+    ensure_user(db_engine, 71)
+    ensure_user(db_engine, 72)
+    first_user = client.get(path, headers=auth_headers(71)).json()
+    second_user = client.get(path, headers=auth_headers(72)).json()  # no write in between: same watermark
+    first_user_again = client.get(path, headers=auth_headers(71)).json()
 
     assert first_user["current_total"] == 1000.0
     assert second_user["current_total"] == 2000.0
@@ -280,8 +280,8 @@ def test_expected_dividends_batched_reads_pick_latest_rows_per_asset(client: Tes
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(520, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(520, 'IBKR Main', 'IBKR', 'BROKER', 'USD', 'US', 1)"
             )
         )
         conn.execute(
@@ -350,16 +350,16 @@ def test_cash_trend_stablecoins_use_each_months_latest_snapshot(client: TestClie
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(530, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(530, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at) VALUES "
-                "('w-a', 'evm', 'ethereum', '0xa', 'A', 'active', '2026-01-01'), "
-                "('w-b', 'evm', 'base', '0xb', 'B', 'active', '2026-01-01'), "
-                "('w-off', 'evm', 'base', '0xc', 'Off', 'inactive', '2026-01-01')"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, user_id) VALUES "
+                "('w-a', 'evm', 'ethereum', '0xa', 'A', 'active', '2026-01-01', 1), "
+                "('w-b', 'evm', 'base', '0xb', 'B', 'active', '2026-01-01', 1), "
+                "('w-off', 'evm', 'base', '0xc', 'Off', 'inactive', '2026-01-01', 1)"
             )
         )
         conn.execute(

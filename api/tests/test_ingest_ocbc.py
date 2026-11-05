@@ -153,8 +153,8 @@ def test_ocbc_ingest_upload_and_import(client: TestClient, db_engine):
         account_id = _next_account_id(db)
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(:id, 'OCBC 360', 'OCBC', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(:id, 'OCBC 360', 'OCBC', 'BANK', 'SGD', 'SG', 1)"
             ),
             {"id": account_id},
         )

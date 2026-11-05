@@ -66,8 +66,8 @@ def test_crypto_summary_uses_snapshots(client: TestClient, db_engine):
         conn.execute(
             text(
                 """
-                INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at)
-                VALUES ('w1', 'evm', 'ethereum', '0xabc', 'active', :now)
+                INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at, user_id)
+                VALUES ('w1', 'evm', 'ethereum', '0xabc', 'active', :now, 1)
                 """
             ),
             {"now": datetime.now(tz=timezone.utc)},
@@ -367,8 +367,8 @@ def test_crypto_summary_exposes_snapshot_delta_and_refresh_movements(client: Tes
         conn.execute(
             text(
                 """
-                INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at)
-                VALUES ('w-delta', 'evm', 'ethereum', '0xdelta', 'active', :now)
+                INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at, user_id)
+                VALUES ('w-delta', 'evm', 'ethereum', '0xdelta', 'active', :now, 1)
                 """
             ),
             {"now": datetime(2026, 5, 23, tzinfo=timezone.utc)},
@@ -464,8 +464,8 @@ def test_crypto_summary_does_not_trigger_refresh(client: TestClient, db_engine):
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, refresh_in_progress) "
-                "VALUES (:id, 'evm', 'ethereum', '0xNOREFRESH', 'Test', 'active', :now, FALSE)"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, label, status, created_at, refresh_in_progress, user_id) "
+                "VALUES (:id, 'evm', 'ethereum', '0xNOREFRESH', 'Test', 'active', :now, FALSE, 1)"
             ),
             {"id": wallet_id, "now": as_of},
         )

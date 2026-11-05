@@ -106,8 +106,8 @@ def test_credit_card_recurring_payments_require_stable_monthly_amounts(client: T
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(510, 'UOB One Card', 'UOB', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(510, 'UOB One Card', 'UOB', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -135,8 +135,8 @@ def test_credit_card_endpoints_include_credit_card_accounts_without_metadata(cli
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(500, 'Citi CC', 'CITI', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(500, 'Citi CC', 'CITI', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -169,10 +169,10 @@ def test_dbs_credit_card_pages_and_cash_flow_match_database_totals(client: TestC
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(810, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(811, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG'), "
-                "(812, 'DBS Vickers Cash Upfront', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(810, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG', 1), "
+                "(811, 'DBS Credit Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1), "
+                "(812, 'DBS Vickers Cash Upfront', 'DBS_VICKERS', 'BROKER', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -261,8 +261,8 @@ def test_cash_flow_infers_signed_non_internal_transfer_rows(client: TestClient, 
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(700, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(700, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -288,8 +288,8 @@ def test_cash_flow_counts_rent_standing_instruction_as_expense(client: TestClien
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(701, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(701, 'DBS Multiplier', 'DBS', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -417,8 +417,8 @@ def test_cash_flow_saved_vs_spent_answer_handles_negative_net_without_absurd_per
         )
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(910, 'UOB Spend', 'UOB', 'BANK', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(910, 'UOB Spend', 'UOB', 'BANK', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -470,10 +470,10 @@ def _seed_credit_card_analytics(db_engine) -> None:
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(92000, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(92001, 'Amex Platinum', 'AMEX', 'CREDIT_CARD', 'SGD', 'SG'), "
-                "(92002, 'DBS Card', 'DBS', 'CREDIT_CARD', 'USD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(92000, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 1), "
+                "(92001, 'Amex Platinum', 'AMEX', 'CREDIT_CARD', 'SGD', 'SG', 1), "
+                "(92002, 'DBS Card', 'DBS', 'CREDIT_CARD', 'USD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -697,8 +697,8 @@ def test_credit_card_analytics_excludes_fee_reversals_and_credits_from_spend_but
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(92200, 'Citibank Credit Card', 'CITI', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(92200, 'Citibank Credit Card', 'CITI', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(
@@ -738,9 +738,9 @@ def test_credit_card_analytics_includes_recurring_payments_scoped_by_card(client
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(92300, 'Amex Platinum', 'AMEX', 'CREDIT_CARD', 'SGD', 'SG'), "
-                "(92301, 'DBS Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(92300, 'Amex Platinum', 'AMEX', 'CREDIT_CARD', 'SGD', 'SG', 1), "
+                "(92301, 'DBS Card', 'DBS', 'CREDIT_CARD', 'SGD', 'SG', 1)"
             )
         )
         conn.execute(

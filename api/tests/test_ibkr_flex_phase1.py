@@ -31,8 +31,8 @@ def _seed_ibkr_account(db_engine, account_id: int = 300) -> None:
         )
         db.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id) "
-                "VALUES (:id, 'IBKR Flex Test', 'IBKR', 'BROKER', 'SGD', 'SG', 30)"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) "
+                "VALUES (:id, 'IBKR Flex Test', 'IBKR', 'BROKER', 'SGD', 'SG', 30, 1)"
             ),
             {"id": account_id},
         )

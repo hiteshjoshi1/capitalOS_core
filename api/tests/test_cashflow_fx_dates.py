@@ -32,10 +32,10 @@ def _seed(db_engine, *, with_unknown_currency: bool = False) -> None:
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                f"({BANK_SGD}, 'Home Bank', 'HBANK', 'BANK', 'SGD', 'SG'), "
-                f"({BANK_USD}, 'Dollar Bank', 'DBANK', 'BANK', 'USD', 'US'), "
-                f"({CARD_USD}, 'Dollar Card', 'DBANK', 'CREDIT_CARD', 'USD', 'US')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                f"({BANK_SGD}, 'Home Bank', 'HBANK', 'BANK', 'SGD', 'SG', 1), "
+                f"({BANK_USD}, 'Dollar Bank', 'DBANK', 'BANK', 'USD', 'US', 1), "
+                f"({CARD_USD}, 'Dollar Card', 'DBANK', 'CREDIT_CARD', 'USD', 'US', 1)"
             )
         )
         conn.execute(

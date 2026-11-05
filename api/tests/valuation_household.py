@@ -46,7 +46,7 @@ from tests.canonical_test_helpers import seed_canonical_position_snapshot_for_te
 
 SGT = ZoneInfo("Asia/Singapore")
 
-USER_A = 1
+USER_A = 1  # = conftest.TEST_USER_ID: the user the `client` fixture signs in as (#154)
 USER_B = 2
 
 DBS_SAVINGS = 101
@@ -476,7 +476,8 @@ def _insert_shared_data(conn, through: date) -> None:
     _seed_fx_rates(conn)
     conn.execute(
         text(
-            "INSERT INTO users (id, username, display_name, is_active, is_admin) VALUES "
+            # OR IGNORE: the `client` fixture has already created the user it signs in as.
+            "INSERT OR IGNORE INTO users (id, username, display_name, is_active, is_admin) VALUES "
             "(:a, 'household_a', 'Household A', 1, 0), (:b, 'household_b', 'Household B', 1, 0)"
         ),
         {"a": USER_A, "b": USER_B},
@@ -646,7 +647,6 @@ def household_env(monkeypatch, when: datetime) -> None:
     monkeypatch.setenv("TZ", "Asia/Singapore")
     monkeypatch.setenv("SNAPSHOT_DAY", "1")
     monkeypatch.setenv("AUTH_ALLOW_LEGACY_NULL_OWNERSHIP", "0")
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", str(USER_A))
     monkeypatch.setattr(fx_module, "remote_enabled", lambda: False)
     fx_module._CACHE.clear()
     freeze_clock(monkeypatch, when)
@@ -668,5 +668,8 @@ def _postgres_date_types(monkeypatch) -> None:
     monkeypatch.setattr(history, "_crypto_snapshot_coverage_as_of", _typed)
 
 
-def as_user(monkeypatch, user_id: int) -> None:
-    monkeypatch.setenv("AUTH_BYPASS_USER_ID", str(user_id))
+def as_user(client, user_id: int) -> None:  # noqa: ANN001
+    """Sign the test client in as user_id with a real access token (#154)."""
+    from tests.auth_helpers import auth_headers
+
+    client.headers.update(auth_headers(user_id))

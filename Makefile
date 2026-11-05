@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -471,6 +471,28 @@ db-migrate: db-wait
 			echo "Migration $$f FAILED: rolled back, not recorded; later migrations not run." >&2; exit 1; }; \
 	done
 	@echo "Migrations complete."
+
+# Postgres schema check (#154; CI job "postgres" in pr-validate.yml): a throwaway Postgres 16
+# (own compose project, container, port, volume; never the real stack's), every migration applied
+# to the empty database with db-migrate, a second run that must be a no-op, the schema diffed
+# against migrations/schema.sql, then the Postgres-marked tests against it. Removed afterwards
+# (KEEP=1 leaves it; db-schema-check-drop removes it). db-schema-update rewrites schema.sql after
+# a new migration: commit it with the migration.
+ifeq ($(CHECKOUT),worktree)
+PGCI_NAME?=$(ISO_NAME)-pgci
+PGCI_PG_PORT?=$(shell echo $$((15500 + $(PORT_OFFSET))))
+else
+PGCI_NAME?=capitalos-pgci
+PGCI_PG_PORT?=15599
+endif
+db-schema-check:
+	@PGCI_NAME=$(PGCI_NAME) PGCI_PG_PORT=$(PGCI_PG_PORT) MAKE="$(MAKE)" scripts/db-schema-check.sh check
+
+db-schema-update:
+	@PGCI_NAME=$(PGCI_NAME) PGCI_PG_PORT=$(PGCI_PG_PORT) MAKE="$(MAKE)" scripts/db-schema-check.sh update
+
+db-schema-check-drop:
+	@PGCI_NAME=$(PGCI_NAME) PGCI_PG_PORT=$(PGCI_PG_PORT) MAKE="$(MAKE)" scripts/db-schema-check.sh drop
 
 # Applied migration filenames, one per line (deploy names the ones a failed batch left applied).
 db-migrations-applied:

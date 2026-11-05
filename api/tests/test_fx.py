@@ -285,9 +285,9 @@ def _seed_xyz_cash(db_engine):
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(7101, 'Home Bank', 'DBS', 'BANK', 'SGD', 'SG'), "
-                "(7102, 'Exotic Bank', 'XBANK', 'BANK', 'XYZ', 'XX')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(7101, 'Home Bank', 'DBS', 'BANK', 'SGD', 'SG', 1), "
+                "(7102, 'Exotic Bank', 'XBANK', 'BANK', 'XYZ', 'XX', 1)"
             )
         )
     seed_canonical_account_balance_for_test(db_engine, account_id=7101, as_of="2026-02-06", currency="SGD", balance_base=1000)
@@ -310,8 +310,8 @@ def test_provider_down_pages_load_from_stored_rates_and_flag_stale(client, db_en
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO accounts (id, name, platform, account_type, currency, country) VALUES "
-                "(7201, 'US Bank', 'CHASE', 'BANK', 'USD', 'US')"
+                "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) VALUES "
+                "(7201, 'US Bank', 'CHASE', 'BANK', 'USD', 'US', 1)"
             )
         )
     seed_canonical_account_balance_for_test(db_engine, account_id=7201, as_of="2026-02-06", currency="USD", balance_base=100)
@@ -345,8 +345,8 @@ def test_crypto_summary_converts_each_balance_at_its_anchor_date(client, db_engi
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at) "
-                "VALUES ('w-fx', 'evm', 'ethereum', '0xfx', 'active', '2026-04-01T00:00:00+00:00')"
+                "INSERT INTO crypto_wallets (id, chain_type, chain, address, status, created_at, user_id) "
+                "VALUES ('w-fx', 'evm', 'ethereum', '0xfx', 'active', '2026-04-01T00:00:00+00:00', 1)"
             )
         )
         conn.execute(
