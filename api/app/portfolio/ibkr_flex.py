@@ -16,6 +16,8 @@ from typing import Any
 import httpx
 from sqlalchemy import text
 from sqlalchemy.orm import Session
+
+from app import fx
 from app.portfolio.authority import (
     AuthorityWindow,
     authoritative_sql,
@@ -1746,6 +1748,42 @@ def _insert_cash_balance_snapshot(
     )
 
 
+def _same_rate(stored: Any, rate: Decimal) -> bool:
+    """Is the stored statement rate this one? NUMERIC(38,18) pads with zeros and
+    SQLite hands back a float, so compare as numbers with a tolerance far below
+    any real rate change."""
+    if stored is None:
+        return False
+    try:
+        return abs(Decimal(str(stored)) - rate) <= Decimal("1e-12")
+    except (ArithmeticError, ValueError):
+        return False
+
+
+def _stored_statement_rates(db: Session, fx_rates: list[FlexFxRate]) -> dict[tuple[str, str, str], Any]:
+    """The IBKR statement rates already stored for these rates' dates, keyed by
+    (ISO date, from, to). One query for the whole report: a year of daily rates
+    for ~40 pairs is ~14k rows, so a lookup per rate would be ~14k round trips."""
+    if not fx_rates:
+        return {}
+    pairs = {(r.from_currency, r.to_currency) for r in fx_rates}
+    rows = db.execute(
+        text(
+            """
+            SELECT report_date, from_currency, to_currency, rate FROM portfolio_fx_rates
+            WHERE report_date BETWEEN :lo AND :hi
+              AND source_platform = 'IBKR'
+            """
+        ),
+        {"lo": min(r.report_date for r in fx_rates), "hi": max(r.report_date for r in fx_rates)},
+    ).fetchall()
+    out: dict[tuple[str, str, str], Any] = {}
+    for row in rows:
+        if (row[1], row[2]) in pairs:
+            out[(str(row[0])[:10], row[1], row[2])] = row[3]
+    return out
+
+
 def _insert_statement_facts(
     db: Session,
     *,
@@ -1755,11 +1793,22 @@ def _insert_statement_facts(
     raw_document_id: int,
     statement: FlexStatement,
     authority_window: AuthorityWindow,
-) -> None:
+) -> date | None:
+    """Writes the statement's facts. Returns the earliest date whose IBKR
+    statement FX rate is new or changed (None when every rate was already stored
+    as is): FX rates are shared by every user, so the caller drops the cached
+    rates and marks History dirty from that date (#197)."""
     scopes = _fact_scopes(statement)
     _clear_existing_authoritative_facts(db, broker_account_id, scopes)
 
+    fx_changed: list[date] = []
+    stored_rates = _stored_statement_rates(db, statement.fx_rates)
     for fx_rate in statement.fx_rates:
+        stored = stored_rates.get(
+            (fx_rate.report_date.isoformat(), fx_rate.from_currency, fx_rate.to_currency)
+        )
+        if not _same_rate(stored, fx_rate.rate):
+            fx_changed.append(fx_rate.report_date)
         db.execute(
             text(
                 """
@@ -1924,6 +1973,8 @@ def _insert_statement_facts(
             completeness_status=completeness_status,
             missing_reason=missing_reason,
         )
+
+    return min(fx_changed, default=None)
 
 
 def _insert_cash_ledger_entries(
@@ -2437,7 +2488,7 @@ def run_ibkr_flex_import_from_xml(
     try:
         _record_parser_warnings()
         _validate_statement(statement)
-        _insert_statement_facts(
+        fx_changed_from = _insert_statement_facts(
             db,
             broker_account_id=broker_account_id,
             legacy_account_id=legacy_account_id,
@@ -2456,8 +2507,19 @@ def run_ibkr_flex_import_from_xml(
             account_id=legacy_account_id,
             reason="ibkr_flex",
         )
+        if fx_changed_from is not None:
+            # A new or corrected statement FX rate changes every user's History
+            # from its date on (FX rates are shared), and the in-process rate
+            # cache must not serve the old rate to that recompute (#197, as #188
+            # does for provider rates): drop it before marking.
+            fx.forget_rates_from(fx_changed_from)
+            mark_rollups_dirty(db, fx_changed_from, reason="fx")
         _release_lock(db, broker_account_id, lock_owner)
         db.commit()
+        if fx_changed_from is not None:
+            # Again once committed: a read between the first drop and the commit
+            # could have re-cached the old row.
+            fx.forget_rates_from(fx_changed_from)
     except IbkrFlexImportError as exc:
         # Nothing written for this statement survives a failed import (#136);
         # the warnings and the error are recorded afresh.
