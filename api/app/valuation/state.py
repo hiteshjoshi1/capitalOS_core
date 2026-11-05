@@ -12,7 +12,7 @@ from app.auth_context import account_scope_sql
 from app.crypto.valuation import latest_wallet_valuation
 from app.portfolio.canonical_reads import canonical_account_balance_rows, canonical_snapshot_coverage_as_of
 from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
-from app.valuation import fx
+from app.valuation import clock, fx
 from app.valuation.clock import _date_only, _iso_value, _normalize_ts
 from app.valuation.prices import _canonical_base_currency
 from app.valuation_cache import valuation_cached
@@ -134,8 +134,13 @@ _NAV_CASH_TOLERANCE = 0.005  # base-currency units: below this the NAV's cash ro
 
 def _wallet_valuation(db: Session, anchor_ts: datetime, current_user_id: int, *, price_overlay: bool) -> Dict[str, Any]:
     """The crypto valuation net worth uses at this anchor; allocation and geography
-    use the same one so their totals add up to net worth's."""
-    if price_overlay:
+    use the same one so their totals add up to net worth's.
+
+    With the price overlay, "now" (an anchor on today's date) reads the newest
+    valuation; an earlier anchor, such as the "since last update" compare side,
+    reads the valuation as of its date, else both sides read the same one and
+    crypto never moves (#206)."""
+    if price_overlay and clock._local_date(anchor_ts) >= clock._app_today():
         return latest_wallet_valuation(db, current_user_id)
     return latest_wallet_valuation(db, current_user_id, as_of_date=anchor_ts.date())
 
