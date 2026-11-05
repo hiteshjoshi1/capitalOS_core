@@ -507,6 +507,7 @@ def setup_db():
               currency TEXT NOT NULL,
               country TEXT,
               platform_id INTEGER,
+              closed_on DATE,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
             """

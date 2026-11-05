@@ -57,7 +57,7 @@ endif
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots reports-mask authority-window-move db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -551,6 +551,15 @@ ownership-reassign:
 # BROKER_ACCOUNT_ID=<broker_accounts.id>, RAW_DIR=<container dir holding the <hash>.xml files>.
 ibkr-rebuild-snapshots:
 	$(COMPOSE) exec api python -m app.scripts.rebuild_ibkr_flex_snapshots $(if $(APPLY),--apply,) $(if $(BROKER_ACCOUNT_ID),--broker-account-id $(BROKER_ACCOUNT_ID),) $(if $(RAW_DIR),--raw-dir "$(RAW_DIR)",)
+
+# #207: write each stored card statement's balance (DBS available limit, UOB statement balance)
+# as a dated credit_balance snapshot, as its upload now would, so past months read the statement
+# of their own date. Migration 078 already backfilled each card's current limits; this adds the
+# older statements from their files under data/. Dry run unless APPLY=1; idempotent (newest import
+# wins per date; a second run changes nothing); marks History dirty from the earliest changed date.
+# Prints job ids, actions and dates, never amounts. Runs in the running api container.
+card-balance-backfill:
+	$(COMPOSE) exec api python -m app.scripts.backfill_card_balances $(if $(filter 1,$(APPLY)),--apply,)
 
 # #190: mask account numbers in existing import reports (data/reports/*.json): parser_meta's
 # account fields and signature_debug only, never transaction descriptions. Dry run (lists files

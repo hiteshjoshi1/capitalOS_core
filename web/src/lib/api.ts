@@ -306,6 +306,19 @@ export type Account = {
   account_type: string;  // BANK | BROKER | EXCHANGE | WALLET | CREDIT_CARD | LOAN | MUTUAL_FUND
   currency: string;
   country?: string | null;
+  /** #207: closed on this date (YYYY-MM-DD); counts up to it, nothing after. */
+  closed_on?: string | null;
+  /** #207: the month (YYYY-MM) the two fields below describe (default: latest completed). */
+  data_month?: string | null;
+  /** #207: date of the newest fact that month's valuation reads for the account. */
+  last_data_as_of?: string | null;
+  /** #207: set when that fact predates the month: its value is carried forward from this date. */
+  carried_forward_from?: string | null;
+};
+
+/** PATCH /accounts/{id} (#207): a close date, or null to reopen. */
+export type AccountUpdate = {
+  closed_on: string | null;
 };
 
 /** Additive FX fields (#139) on responses with base-currency totals.
@@ -1541,6 +1554,8 @@ export const api = {
   accountOptions: () => req<AccountOptions>("/accounts/options"),
   createAccount: (payload: AccountCreate) =>
     req<Account>("/accounts", { method: "POST", body: JSON.stringify(payload) }),
+  updateAccount: (id: number, patch: AccountUpdate) =>
+    req<Account>(`/accounts/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   currencies: () => req<Currency[]>("/currencies"),
   createCurrency: (payload: CurrencyCreate) =>
     req<Currency>("/currencies", {

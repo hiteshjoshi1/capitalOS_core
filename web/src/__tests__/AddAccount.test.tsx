@@ -15,6 +15,7 @@ vi.mock("../lib/api", () => ({
     accountOptions: vi.fn(),
     platformOptions: vi.fn(),
     createAccount: vi.fn(),
+    updateAccount: vi.fn(),
     createPlatform: vi.fn(),
     createCurrency: vi.fn(),
     currencies: vi.fn(),
@@ -225,5 +226,52 @@ describe("AddAccount", () => {
 
     expect(await screen.findByText("Load error")).toBeInTheDocument();
     expect(screen.getByText(/No options/)).toBeInTheDocument();
+  });
+
+  function renderWithAccounts(accounts: Parameters<typeof mockApi.accounts.mockResolvedValueOnce>[0]) {
+    mockApi.platforms.mockResolvedValueOnce(platformsFixture);
+    mockApi.accountOptions.mockResolvedValueOnce(optionsFixture);
+    mockApi.platformOptions.mockResolvedValueOnce(platformOptionsFixture);
+    mockApi.currencies.mockResolvedValueOnce([]);
+    mockApi.accounts.mockResolvedValueOnce(accounts);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <AddAccount />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+  }
+
+  it("closes an account on a date and reopens it (#207)", async () => {
+    const open = { id: 7, name: "Old Saver", platform: "CITI", account_type: "BANK", currency: "SGD", closed_on: null };
+    renderWithAccounts([open]);
+    mockApi.updateAccount.mockResolvedValueOnce({ ...open, closed_on: "2026-02-10" });
+
+    await userEvent.click(await screen.findByRole("button", { name: "Close Old Saver" }));
+    const dateInput = screen.getByLabelText("Close date for Old Saver");
+    await userEvent.clear(dateInput);
+    await userEvent.type(dateInput, "2026-02-10");
+    await userEvent.click(screen.getByRole("button", { name: "Close account" }));
+
+    expect(mockApi.updateAccount).toHaveBeenCalledWith(7, { closed_on: "2026-02-10" });
+    expect(await screen.findByText("Closed 2026-02-10")).toBeInTheDocument();
+
+    mockApi.updateAccount.mockResolvedValueOnce({ ...open, closed_on: null });
+    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
+    expect(mockApi.updateAccount).toHaveBeenLastCalledWith(7, { closed_on: null });
+    expect(await screen.findByText("Active")).toBeInTheDocument();
+  });
+
+  it("flags an account whose value is carried forward (#207)", async () => {
+    renderWithAccounts([
+      {
+        id: 8, name: "Quiet Account", platform: "CITI", account_type: "BANK", currency: "SGD",
+        data_month: "2026-02", last_data_as_of: "2025-12-20", carried_forward_from: "2025-12-20",
+      },
+    ]);
+    expect(
+      await screen.findByText(/2026-02 shows data from 2025-12-20 \(carried forward\)/)
+    ).toBeInTheDocument();
   });
 });

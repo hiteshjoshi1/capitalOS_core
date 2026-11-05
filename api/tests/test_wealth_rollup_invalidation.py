@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.crypto.ingest import SnapshotResult, upsert_snapshot
 from app.ingestion.parsers.base import ParseResult
+from app.ingestion.card_balances import write_card_statement_balance
 from app.ingestion.runner import _persist_credit_card_limit_metadata
 from app.portfolio.ibkr_flex import run_ibkr_flex_import_from_xml
 from app.portfolio.upload_canonical import run_upload_balance_canonical_adapter
@@ -362,7 +363,10 @@ def test_crypto_snapshot_marks_from_its_date(db_engine, monkeypatch):
         db.close()
 
 
-def test_card_limit_update_marks_from_the_earlier_limit_date(db_engine):
+def test_card_statement_balance_marks_from_its_own_date(db_engine):
+    """#207: a card's liability is its dated statement balance, read by anchors on
+    or after that date only, so a statement marks History from its own date; the
+    limits row (the Spending page's current state) is no valuation input."""
     with db_engine.begin() as conn:
         conn.execute(
             text(
@@ -377,16 +381,17 @@ def test_card_limit_update_marks_from_the_earlier_limit_date(db_engine):
             ),
             {"t": datetime(2026, 1, 10, tzinfo=timezone.utc)},
         )
+    meta = {"credit_limit": 1000, "available_limit": 600, "transactions_as_at": "2026-02-15T00:00:00+00:00"}
     db = Session(bind=db_engine)
     try:
-        _persist_credit_card_limit_metadata(
-            db,
-            account_id=972,
-            parser_key="dbs_credit_card_csv_v1",
-            parser_meta={"credit_limit": 1000, "available_limit": 600, "transactions_as_at": "2026-02-15T00:00:00+00:00"},
+        _persist_credit_card_limit_metadata(db, account_id=972, parser_key="dbs_credit_card_csv_v1", parser_meta=meta)
+        db.commit()
+        assert dirty_state(db, 1)[0] is None
+        write_card_statement_balance(
+            db, account_id=972, import_job_id=None, parser_key="dbs_credit_card_csv_v1", parser_meta=meta
         )
         db.commit()
-        assert dirty_state(db, 1)[0] == date(2026, 1, 10)
+        assert dirty_state(db, 1)[0] == date(2026, 2, 15)
     finally:
         db.close()
 
