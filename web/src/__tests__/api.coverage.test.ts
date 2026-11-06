@@ -47,6 +47,7 @@ describe("api client coverage", () => {
     await api.dashboardBootstrap("2026-03", "USD");
     await api.dashboardNetWorthChange("2026-03", "USD", "prev_month");
     await api.dashboardSummary("2026-03", "prev_month,prev_year", "USD", true);
+    await api.riskSummary("2026-03", "SGD");
     await api.stockHoldingsSummary("2026-03", "USD");
     await api.cashDeposits("2026-03", "USD");
     await api.platformAllocation("2026-03", "USD");
@@ -84,6 +85,7 @@ describe("api client coverage", () => {
 
     await api.spendingSummary("2026-03", "USD");
     await api.cashFlowDetail("2026-03", "USD");
+    await api.cashFlowTrend("2026-03", "USD");
     await api.creditCardSummary("2026-03", "USD");
     await api.creditCardTransactions("2026-03", "USD");
 
@@ -107,6 +109,7 @@ describe("api client coverage", () => {
     await api.solanaSubmit({ tx_b64: "Zm9v" });
     await api.solanaPreflight({ tx_b64: "YmFy" });
     await api.cryptoSummary(undefined, "USD");
+    await api.cryptoStablecoins("2026-03", "SGD");
     await api.cryptoRefreshNow("admin-key");
     await api.cryptoAllowlist();
     await api.cryptoAllowlistAdd({ chain: "ethereum", contract_address: "0xabc" });
@@ -116,6 +119,7 @@ describe("api client coverage", () => {
     await api.marketDataRefreshNow("admin-key");
     await api.uploadReminders();
     await api.uploadReminderCount();
+    await api.alertNotificationsCount();
 
     await api.dividendsSummary("2026-01", "2026-03", "quarter", "USD", 0.1, "SG:0,US:0.15");
     await api.dividendsByCompany("2026-01", "2026-03", "USD", 0.1, "SG:0");
@@ -128,6 +132,11 @@ describe("api client coverage", () => {
     expect(urls.some((url) => url.includes("/ingest/upload?account_id=12"))).toBe(true);
     expect(urls.some((url) => url.includes("/crypto/wallets/verify"))).toBe(true);
     expect(urls.some((url) => url.includes("/dividends/expected/overview"))).toBe(true);
+    // #149: the lean twins.
+    expect(urls.some((url) => url.includes("/spending/cash-flow-trend?month=2026-03&base_currency=USD"))).toBe(true);
+    expect(urls.some((url) => url.includes("/crypto/stablecoins?base_currency=SGD&month=2026-03"))).toBe(true);
+    expect(urls.some((url) => url.includes("/alerts/notifications/count"))).toBe(true);
+    expect(urls.some((url) => url.includes("/dashboard/risk-summary?month=2026-03&base_currency=SGD"))).toBe(true);
   });
 
   it("retries once after refresh on 401 and updates bearer token", async () => {

@@ -1,4 +1,4 @@
-import type { DashboardSummary } from "./api";
+import type { RiskHolding } from "./api";
 
 export const RISK_LARGEST_POSITION_WARN_PCT = 15;
 export const RISK_TOP5_TARGET_MIN_PCT = 35;
@@ -36,7 +36,8 @@ export type RiskDistributionItem = {
   percent: number;
 };
 
-type Holding = DashboardSummary["top_holdings"][number];
+/** A position as the Risk page reads it (#149: from /dashboard/risk-summary). */
+type Holding = RiskHolding;
 
 function toPercent(value: number, total: number): number {
   if (total <= 0) {

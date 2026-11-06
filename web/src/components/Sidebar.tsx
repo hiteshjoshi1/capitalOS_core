@@ -6,13 +6,9 @@ import { APP_SECTIONS, UTILITY_NAV_ITEMS, findActiveSection, isNavItemActive } f
 export default function Sidebar() {
   const location = useLocation();
   const activeSection = findActiveSection(location.pathname);
-  // Shared with the Alerts page (#148). The older reminder-count endpoint is only asked
-  // when the notifications call fails.
-  const notifications = useApiResource("alertNotifications", () => api.alertNotifications());
-  const reminderCount = useApiResource(notifications.error ? "uploadReminderCount" : null, () =>
-    api.uploadReminderCount(),
-  );
-  const alertCount = notifications.data?.total_count ?? reminderCount.data?.count ?? 0;
+  // #149: the badge needs only the count, not the whole notifications list.
+  const notificationsCount = useApiResource("alertNotificationsCount", () => api.alertNotificationsCount());
+  const alertCount = notificationsCount.data?.total_count ?? 0;
 
   return (
     <aside className="sidebar" aria-label="Main navigation">

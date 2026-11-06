@@ -340,6 +340,42 @@ def summary(
     }
 
 
+def risk_summary(
+    db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
+) -> Dict[str, Any]:
+    """/dashboard/risk-summary (#149): /summary's ``net_worth`` and ``top_holdings``,
+    computed exactly as ``summary`` computes them, without the rest of its work
+    (geography, cash flow, comparisons, movers, completeness)."""
+    anchor = _anchor_ts(_completed_snapshot_month_start(month_start))
+    nw = _networth_components(db, anchor, base_currency, current_user_id)
+    view_anchor, is_live = _month_view_anchor(month_start)
+    # summary's view_total: the live headline total (``_current_networth_state``'s
+    # components, at the same live anchor) for the open month, else the month-end's.
+    view_total = (
+        _networth_components(db, view_anchor, base_currency, current_user_id, price_overlay=True)["total"]
+        if is_live
+        else nw["total"]
+    )
+    top = _top_holdings(
+        db,
+        view_anchor,
+        view_total,
+        base_currency,
+        current_user_id,
+        limit=_summary_top_holdings_limit(),
+        price_overlay=is_live,
+    )
+    return {
+        "as_of_month": month,
+        "base_currency": base_currency,
+        "snapshot_day": _configured_snapshot_day(),
+        "is_live": is_live,
+        "net_worth": _serialize_net_worth(nw),
+        "top_holdings": top,
+        **fx_status(),
+    }
+
+
 def stock_holdings(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
     # is live "now" data (current/future month) or a completed historical boundary.

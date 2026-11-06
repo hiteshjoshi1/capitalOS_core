@@ -17,6 +17,7 @@ from app.schemas.dashboard import (
     NetWorthChangeResponse,
     NetWorthSinceUpdateResponse,
     PlatformAllocationOut,
+    RiskSummaryResponse,
     StockExposureOut,
     StockHoldingsResponse,
     TopMovers,
@@ -123,6 +124,18 @@ def dashboard_summary(
     if skip_networth:
         return JSONResponse(content=pages.summary_without_net_worth(db, current_user.id, month, month_start, base_currency))
     return pages.summary(db, current_user.id, month, month_start, base_currency, compare)
+
+
+@router.get("/risk-summary", response_model=RiskSummaryResponse)
+def dashboard_risk_summary(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Lean twin of /summary for the Risk page (#149): net_worth, and top_holdings cut to
+    symbol / class / value, the same values as /summary for the same month and currency."""
+    return pages.risk_summary(db, current_user.id, month, _parse_month(month), base_currency)
 
 
 @router.get("/stock-holdings", response_model=StockHoldingsResponse)

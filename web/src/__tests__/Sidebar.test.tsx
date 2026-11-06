@@ -12,6 +12,7 @@ vi.mock("../lib/api", () => ({
       upload_reminders: [],
       total_count: 0,
     }),
+    alertNotificationsCount: vi.fn().mockResolvedValue({ total_count: 0 }),
   },
 }));
 
@@ -72,26 +73,23 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: "Toggle theme" })).not.toBeInTheDocument();
   });
 
-  it("shows no alert badge when alertNotifications returns total_count 0", async () => {
-    mockApi.alertNotifications.mockResolvedValueOnce({
-      upload_reminders: [],
-      total_count: 0,
-    });
+  it("shows no alert badge when the notifications count is 0", async () => {
+    mockApi.alertNotificationsCount.mockResolvedValueOnce({ total_count: 0 });
     renderSidebar("/alerts");
     await waitFor(() => {
-      expect(screen.queryByLabelText(/\d+ alerts/i)).not.toBeInTheDocument();
+      expect(mockApi.alertNotificationsCount).toHaveBeenCalled();
     });
+    expect(screen.queryByLabelText(/\d+ alerts/i)).not.toBeInTheDocument();
   });
 
-  it("shows alert badge when alertNotifications returns total_count > 0", async () => {
-    mockApi.alertNotifications.mockResolvedValueOnce({
-      upload_reminders: [{ account_id: 1 } as never],
-      total_count: 1,
-    });
-    renderSidebar("/alerts");
+  it("shows the alert badge from the lean notifications count (#149)", async () => {
+    mockApi.alertNotificationsCount.mockResolvedValueOnce({ total_count: 3 });
+    renderSidebar("/wealth");
     await waitFor(() => {
-      expect(screen.getByLabelText(/1 alerts/i)).toBeInTheDocument();
+      expect(screen.getByLabelText(/3 alerts/i)).toBeInTheDocument();
     });
+    // The badge never pulls the whole notifications list.
+    expect(mockApi.alertNotifications).not.toHaveBeenCalled();
   });
 
   it("does not use polling for alert badge refresh (no setInterval)", () => {

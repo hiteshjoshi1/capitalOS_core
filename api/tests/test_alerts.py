@@ -236,3 +236,32 @@ class TestUploadReminders:
                       "last_upload_date", "last_transaction_date", "days_since_upload", "message"):
             assert field in alert, f"Missing field: {field}"
 
+
+
+class TestNotificationsCount:
+    """GET /alerts/notifications/count (#149): the sidebar badge, without the list."""
+
+    @pytest.mark.parametrize("with_month", [False, True])
+    def test_count_equals_notifications_total(self, client: TestClient, db_engine, with_month):
+        Session = sessionmaker(bind=db_engine)
+        db = Session()
+        try:
+            _insert_account(db, 901, "Stale Account")
+            _insert_import_job(db, 9001, 901, "IMPORTED", _days_ago(35))
+            _insert_account(db, 902, "Second Stale Account")
+            _insert_import_job(db, 9002, 902, "IMPORTED", _days_ago(40))
+            _insert_account(db, 903, "Fresh Account")
+            _insert_import_job(db, 9003, 903, "IMPORTED", _hours_ago(2))
+        finally:
+            db.close()
+
+        # With a month: accounts with no upload since that month began (here: the two stale ones).
+        query = f"?month={datetime.now(tz=timezone.utc):%Y-%m}" if with_month else ""
+        full = client.get(f"/alerts/notifications{query}")
+        lean = client.get(f"/alerts/notifications/count{query}")
+        assert full.status_code == 200 and lean.status_code == 200
+        assert full.json()["total_count"] >= 2
+        assert lean.json() == {"total_count": full.json()["total_count"]}
+
+    def test_count_is_zero_without_reminders(self, client: TestClient):
+        assert client.get("/alerts/notifications/count").json() == {"total_count": 0}

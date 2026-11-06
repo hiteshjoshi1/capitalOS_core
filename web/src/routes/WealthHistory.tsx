@@ -134,9 +134,10 @@ export default function WealthHistory() {
     })();
     void (async () => {
       try {
-        const data = await api.cashFlowDetail(currentMonth(), baseCurrency);
+        // #149: the trend only, not the month's whole cash-flow detail.
+        const data = await api.cashFlowTrend(currentMonth(), baseCurrency);
         if (ignore) return;
-        setCashFlowTrend(data.analytics.trend);
+        setCashFlowTrend(data.trend);
         setCashFlowFx(data);
         setCashFlowState("ready");
       } catch {

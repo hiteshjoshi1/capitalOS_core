@@ -23,3 +23,9 @@ class UploadReminderCountResponse(BaseModel):
 class UnifiedAlertsResponse(BaseModel):
     upload_reminders: List[UploadReminderAlert]
     total_count: int
+
+
+class UnifiedAlertsCountResponse(BaseModel):
+    """GET /alerts/notifications/count (#149): /alerts/notifications' total_count only."""
+
+    total_count: int

@@ -2,7 +2,7 @@ import { act, render, renderHook, screen, waitFor } from "@testing-library/react
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { currentAbortSignal } from "../lib/abortScope";
-import { clearApiCache, useApiResource } from "../lib/useApiResource";
+import { clearApiCache, loadApiResource, useApiResource } from "../lib/useApiResource";
 
 type Deferred<T> = { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void };
 function deferred<T>(): Deferred<T> {
@@ -218,5 +218,51 @@ describe("useApiResource", () => {
     act(() => clearApiCache());
     await act(async () => f.calls[0].d.resolve("previous user's numbers"));
     expect(first.result.current.data).toBeUndefined();
+  });
+});
+
+// #149: pages that load in an effect read shared lists (e.g. /accounts) through the cache.
+describe("loadApiResource", () => {
+  it("joins a request already in flight instead of sending a second one (StrictMode's double effect)", async () => {
+    const f = controllableFetcher<string>();
+    const first = loadApiResource("accounts", f.make("accounts"));
+    const second = loadApiResource("accounts", f.make("accounts"));
+    expect(f.calls).toHaveLength(1);
+    await act(async () => f.calls[0].d.resolve("list"));
+    await expect(first).resolves.toBe("list");
+    await expect(second).resolves.toBe("list");
+  });
+
+  it("stores the answer for useApiResource readers of the same key", async () => {
+    const f = controllableFetcher<string>();
+    const loading = loadApiResource("accounts", f.make("accounts"));
+    const { result } = renderHook(() => useApiResource("accounts", f.make("accounts")));
+    // The hook joins the imperative request.
+    expect(f.calls).toHaveLength(1);
+    await act(async () => f.calls[0].d.resolve("list"));
+    await loading;
+    expect(result.current.data).toBe("list");
+  });
+
+  it("isn't aborted when a hook reading the same key unmounts meanwhile", async () => {
+    const f = controllableFetcher<string>();
+    const { unmount } = renderHook(() => useApiResource("accounts", f.make("accounts")));
+    const loading = loadApiResource("accounts", f.make("accounts"));
+    unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(f.calls[0].signal?.aborted).toBe(false);
+    await act(async () => f.calls[0].d.resolve("list"));
+    await expect(loading).resolves.toBe("list");
+  });
+
+  it("force sends a new request (after a write)", async () => {
+    const f = controllableFetcher<string>();
+    const stale = loadApiResource("accounts", f.make("accounts"));
+    const fresh = loadApiResource("accounts", f.make("accounts"), { force: true });
+    expect(f.calls).toHaveLength(2);
+    expect(f.calls[0].signal?.aborted).toBe(true);
+    stale.catch(() => undefined);
+    await act(async () => f.calls[1].d.resolve("after write"));
+    await expect(fresh).resolves.toBe("after write");
   });
 });
