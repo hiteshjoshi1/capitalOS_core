@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import OperationsOverview from "../routes/OperationsOverview";
 import { api } from "../lib/api";
 import type { Account, DataHubSummary } from "../lib/api";
+import { clearApiCache } from "../lib/useApiResource";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -13,6 +14,7 @@ vi.mock("../lib/api", () => ({
     marketDataRefreshNow: vi.fn(),
     ibkrFlexImportNow: vi.fn(),
     cryptoRefreshNow: vi.fn(),
+    sourceFreshness: vi.fn(),
   },
 }));
 
@@ -56,7 +58,10 @@ function renderPage() {
 describe("OperationsOverview (Data Hub Overview)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearApiCache();
     mockApi.accounts.mockResolvedValue([ibkrAccountFixture]);
+    // The source freshness table (#252) has its own tests (SourceFreshness.test.tsx).
+    mockApi.sourceFreshness.mockResolvedValue({ as_of: "2026-11-06", overdue_count: 0, cadences: [], sources: [] });
   });
 
   it("renders live stat cards, quick actions, and recent activity", async () => {

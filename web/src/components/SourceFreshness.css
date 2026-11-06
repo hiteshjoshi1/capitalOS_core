@@ -1,0 +1,151 @@
+/* Source freshness (#252): the Data Hub table and the Overview line. Its own file so
+   the pages' styles stay untouched; uses the theme tokens from index.css. */
+
+/* ── Overview: one line, only when something is overdue ── */
+.sourceFreshnessStrip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sourceFreshnessStrip a {
+  color: var(--warn);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* ── Data Hub table ── */
+.sourceFreshnessCard {
+  min-width: 0;
+}
+
+.sourceFreshnessTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.sourceFreshnessTable th {
+  text-align: left;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 0 10px 8px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.sourceFreshnessTable td {
+  padding: 10px 10px 10px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  vertical-align: top;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.sourceFreshnessTable tr:last-child td {
+  border-bottom: none;
+}
+
+.sourceFreshnessName {
+  font-weight: 700;
+}
+
+.sourceFreshnessMeta {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.sourceFreshnessEditBtn {
+  display: block;
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 4px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  text-align: left;
+}
+
+.sourceFreshnessEditor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.sourceFreshnessEditor .field {
+  min-width: 0;
+}
+
+.sourceFreshnessEditor .input {
+  max-width: 100%;
+}
+
+.sourceFreshnessGrace {
+  width: 6em;
+}
+
+.sourceFreshnessError {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--bad);
+  font-size: 12px;
+}
+
+/* Phone: each row is a block (source, then its dates and status) instead of columns. */
+@media (max-width: 640px) {
+  .sourceFreshnessTable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .sourceFreshnessTable,
+  .sourceFreshnessTable tbody,
+  .sourceFreshnessTable tr,
+  .sourceFreshnessTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .sourceFreshnessTable tr {
+    padding: 10px 0;
+    border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  }
+
+  .sourceFreshnessTable tr:last-child {
+    border-bottom: none;
+  }
+
+  .sourceFreshnessTable td {
+    padding: 2px 0;
+    border-bottom: none;
+  }
+
+  .sourceFreshnessTable td[data-label]::before {
+    content: attr(data-label) ": ";
+    color: var(--muted);
+    font-size: 12px;
+  }
+}

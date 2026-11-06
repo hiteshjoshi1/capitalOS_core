@@ -1623,6 +1623,49 @@ export type DataHubUnpricedHolding = {
   reason: "no_asset" | "no_symbol" | "no_quote" | string;
 };
 
+// Source freshness (#252, D-67): one row per data source (/dashboard/source-freshness).
+export type SourceFreshnessKind =
+  | "ibkr_flex"
+  | "broker_statement"
+  | "bank_statement"
+  | "card_statement"
+  | "account_statement"
+  | "crypto_wallet"
+  | "market_data"
+  | "fx";
+
+export type SourceFreshnessCadence = "daily" | "weekdays" | "weekly" | "monthly" | "quarterly" | "off";
+
+export type SourceFreshnessStatus = "on_time" | "overdue" | "never_loaded" | "no_schedule";
+
+export type SourceFreshnessRow = {
+  source_key: string;
+  kind: SourceFreshnessKind | string;
+  label: string;
+  platform?: string | null;
+  /** ISO date of the newest data, or null when the source has never loaded. */
+  last_data_date?: string | null;
+  cadence: SourceFreshnessCadence | string;
+  /** Business days for "weekdays", calendar days otherwise. */
+  grace_days: number;
+  default_cadence: SourceFreshnessCadence | string;
+  default_grace_days: number;
+  overridden: boolean;
+  /** The last day the newest data is on time. */
+  due_date?: string | null;
+  status: SourceFreshnessStatus | string;
+  /** True for overdue and never-loaded sources. */
+  overdue: boolean;
+  days_overdue?: number | null;
+};
+
+export type SourceFreshness = {
+  as_of: string;
+  overdue_count: number;
+  cadences: string[];
+  sources: SourceFreshnessRow[];
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -1879,6 +1922,14 @@ export const api = {
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
     req<NetWorthSinceUpdate>(`/dashboard/net-worth-since-update?base_currency=${encodeURIComponent(baseCurrency)}`),
   dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
+  sourceFreshness: () => req<SourceFreshness>("/dashboard/source-freshness"),
+  setSourceFreshnessCadence: (sourceKey: string, body: { cadence: string; grace_days: number }) =>
+    req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  resetSourceFreshnessCadence: (sourceKey: string) =>
+    req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, { method: "DELETE" }),
   cashDeposits: (month: string, baseCurrency = "SGD") =>
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>

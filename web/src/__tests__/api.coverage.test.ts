@@ -51,6 +51,9 @@ describe("api client coverage", () => {
     await api.riskThresholds();
     await api.saveRiskThresholds({ largest_position_warn_pct: 20, top_n_warn_pct: null, platform_warn_pct: null });
     await api.monthBridge("2026-03", "USD");
+    await api.sourceFreshness();
+    await api.setSourceFreshnessCadence("account:1", { cadence: "weekly", grace_days: 2 });
+    await api.resetSourceFreshnessCadence("wallet:abc");
     await api.stockHoldingsSummary("2026-03", "USD");
     await api.cashDeposits("2026-03", "USD");
     await api.platformAllocation("2026-03", "USD");
