@@ -931,22 +931,13 @@ def _exchange_for(country: Any, currency: Any) -> str | None:
     return None
 
 
-def unpriced_held_positions(
-    db: Session,
-    *,
-    user_id: int | None = None,
-    exchange_code: str | None = None,
-) -> list[dict[str, Any]]:
-    """Held stocks and funds that the quote refresh can't price (#222), one row
-    per instrument: not linked to an asset, no ticker on a configured exchange,
-    or never quoted. Held means a non-zero quantity in its account's newest
-    authoritative position snapshot, in an open account. ``user_id`` limits it
-    to that user's accounts (None: every account, for the refresh job's own
-    check); ``exchange_code`` to the exchange each position would be priced on
-    (its symbol map's, else the one its country or currency points to)."""
+def held_position_rows(db: Session, *, today: date, user_id: int | None) -> list[dict[str, Any]]:
+    """Held stocks and funds on ``today``, one row per instrument: a non-zero
+    quantity in its broker account's newest authoritative position snapshot, in
+    an open account (``user_id``'s accounts, or every account when None)."""
     scope = ""
     params: dict[str, Any] = {
-        "today": datetime.now(tz=timezone.utc).date(),
+        "today": today,
         **{f"st{i}": t for i, t in enumerate(_PRICEABLE_SECURITY_TYPES)},
     }
     if user_id is not None:
@@ -991,6 +982,23 @@ def unpriced_held_positions(
         ),
         params,
     ).mappings().all()
+    return [dict(row) for row in rows]
+
+
+def unpriced_held_positions(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    exchange_code: str | None = None,
+) -> list[dict[str, Any]]:
+    """Held stocks and funds that the quote refresh can't price (#222), one row
+    per instrument: not linked to an asset, no ticker on a configured exchange,
+    or never quoted. Held means a non-zero quantity in its account's newest
+    authoritative position snapshot, in an open account. ``user_id`` limits it
+    to that user's accounts (None: every account, for the refresh job's own
+    check); ``exchange_code`` to the exchange each position would be priced on
+    (its symbol map's, else the one its country or currency points to)."""
+    rows = held_position_rows(db, today=datetime.now(tz=timezone.utc).date(), user_id=user_id)
     if not rows:
         return []
 

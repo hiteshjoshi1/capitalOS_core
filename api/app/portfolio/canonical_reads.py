@@ -28,7 +28,7 @@ Phase 4 additions:
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -37,6 +37,8 @@ from sqlalchemy.orm import Session
 from app.auth_context import account_scope_sql
 from app.portfolio.account_open import account_open_sql
 from app.portfolio.authority import FLEX_FACT_SCOPE, FLEX_SOURCE_KIND, authoritative_sql, window_covers_sql
+from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
+from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account  # noqa: F401  (one read layer)
 from app.valuation_cache import valuation_cached
 
 _IBKR_FLEX_SOURCE_KIND = FLEX_SOURCE_KIND
@@ -750,4 +752,41 @@ def get_data_completeness_status(
         """
     )
     rows = db.execute(q, {"anchor_date": anchor_date, "current_user_id": current_user_id}).mappings().all()
+    return [dict(r) for r in rows]
+
+
+@valuation_cached(shared=True)
+def canonical_card_statement_rows(
+    db: Session,
+    *,
+    current_user_id: int,
+    anchor_date: date,
+) -> list[dict[str, Any]]:
+    """Card statement balances (``credit_balance`` snapshots, #207) within
+    CARD_STATEMENT_MAX_AGE_DAYS on or before the anchor."""
+    rows = db.execute(
+        text(
+            """
+            SELECT abs.account_id, abs.as_of_date, abs.currency, abs.balance_local
+            FROM account_balance_snapshots abs
+            JOIN accounts a ON a.id = abs.account_id
+            WHERE a.account_type = 'CREDIT_CARD'
+              AND abs.balance_type = 'credit_balance'
+              AND """
+            + authoritative_sql("abs")
+            + """
+              AND abs.as_of_date <= :anchor_date
+              AND abs.as_of_date >= :oldest
+              AND """
+            + account_open_sql("a")
+            + """
+              AND """
+            + account_scope_sql("a")
+        ),
+        {
+            "anchor_date": anchor_date,
+            "oldest": anchor_date - timedelta(days=CARD_STATEMENT_MAX_AGE_DAYS),
+            "current_user_id": current_user_id,
+        },
+    ).mappings().all()
     return [dict(r) for r in rows]
