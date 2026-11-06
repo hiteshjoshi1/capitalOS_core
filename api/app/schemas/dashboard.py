@@ -147,6 +147,44 @@ class RiskHolding(BaseModel):
     percent_of_networth: float
 
 
+class CurrencyExposureItem(BaseModel):
+    """Net worth held in one currency (#253). ``currency`` is an ISO code, or
+    ``CRYPTO`` for crypto other than USD stablecoins (which count as USD)."""
+
+    currency: str
+    cash: float
+    stocks_funds: float
+    stablecoins: float
+    crypto: float
+    liabilities: float
+    # cash + stocks_funds + stablecoins + crypto - liabilities, and its share of net worth.
+    value: float
+    percent: float
+
+
+class CurrencyExposure(BaseModel):
+    # The sum of the items' values: the net worth the shares divide by.
+    total: float
+    items: List[CurrencyExposureItem]
+
+
+class PlatformConcentration(BaseModel):
+    """Gross assets by platform (#253): /dashboard/platform-allocation's split."""
+
+    total: float
+    items: List["PlatformAllocationItem"]
+
+
+class RiskThresholds(BaseModel):
+    """The Risk page's concentration thresholds (#253, D-68): the percent above
+    which a figure is "concentrated". None: the app's default (web/src/lib/risk.ts).
+    Largest position and top N are shares of net worth; platform, of gross assets."""
+
+    largest_position_warn_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    top_n_warn_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    platform_warn_pct: Optional[float] = Field(default=None, gt=0, le=100)
+
+
 class RiskSummaryResponse(FxStatusFields):
     """GET /dashboard/risk-summary (#149): what the Risk page reads from
     /dashboard/summary (net_worth, and per position its symbol, class and value),
@@ -169,6 +207,11 @@ class RiskSummaryResponse(FxStatusFields):
     basis: Optional[str] = None
     view_net_worth: Optional[NetWorth] = None
     net_worth_boundary_at: Optional[str] = None
+    # #253, at the same point in time: net worth by currency (USD stablecoins as
+    # USD; its total is view_net_worth's) and gross assets by platform (the
+    # Overview platform donut's split).
+    currency_exposure: Optional[CurrencyExposure] = None
+    platform_concentration: Optional[PlatformConcentration] = None
 
 
 class NetWorthSinceUpdateResponse(BaseModel):
@@ -599,3 +642,8 @@ class MonthBridgeResponse(FxStatusFields):
     liabilities_change: float
     movers: List[BridgeMover]
     trades: List[BridgeTrade] = []
+
+
+# #253: PlatformConcentration names PlatformAllocationItem, defined after it.
+PlatformConcentration.model_rebuild()
+RiskSummaryResponse.model_rebuild()

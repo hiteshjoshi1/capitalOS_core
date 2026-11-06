@@ -21,7 +21,10 @@ the figures the pages show for one month are one set of numbers:
   residual add up to the difference;
 - Risk (#241) divides by the headline (live: the Overview hero; a past month:
   that month-end) and its geography splits the same gross assets, at one point
-  in time, which it names;
+  in time, which it names; its largest position and top N (#253) are Overview's
+  largest positions (every asset class, same order, same shares), its currency
+  exposure splits the headline (stablecoins as USD) and its platform
+  concentration is Overview's platform split;
 - the six-month trends on the Stocks, Crypto and Cash pages (#241, D-61): the
   open month's bar is the live headline (month to date, marked live), every
   other bar is History's point for a completed month-end, and a month whose
@@ -189,6 +192,7 @@ def _check_month(pages: _Pages, month: str, *, live: bool) -> None:
     geography = pages.get(f"/dashboard/geography-exposure?month={month}")
     assert geography["is_live"] is live, where
     assert geography["total"] == pytest.approx(gross, abs=TOL), where
+    _check_risk_concentration(risk, summary, allocation, headline, where)
 
     # A past month: every page is taken at the month-end Overview shows.
     if not live:
@@ -198,6 +202,65 @@ def _check_month(pages: _Pages, month: str, *, live: bool) -> None:
 
     _check_trends(pages, month, live=live, bootstrap=bootstrap, headline=headline, stocks=stocks, crypto=crypto, cash=cash)
     _check_previous_figures(pages, month, live=live, summary=summary, stocks=stocks, crypto=crypto, cash=cash)
+
+
+OVERVIEW_LARGEST_POSITIONS = 4  # WealthOverview.tsx: summary.top_holdings.slice(0, 4)
+
+
+def _ranked(holdings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """lib/risk.ts ``rankedHoldings``: largest value first, ties in the server's order."""
+    return sorted(holdings, key=lambda row: -row["value"])
+
+
+def _check_risk_concentration(
+    risk: dict[str, Any],
+    summary: dict[str, Any],
+    allocation: dict[str, Any],
+    headline: dict[str, float],
+    where: str,
+) -> None:
+    """#253: Risk's position figures are Overview's, its currency exposure splits
+    the headline and its platform concentration is Overview's platform split."""
+    # Largest position and top N: every asset class, the positions (and shares)
+    # Overview's "Largest positions" lists, in its order.
+    ranked = _ranked(risk["top_holdings"])
+    overview = summary["top_holdings"][:OVERVIEW_LARGEST_POSITIONS]
+    shown = [(row["symbol"], row["asset_class"], row["percent_of_networth"]) for row in ranked[: len(overview)]]
+    assert shown == [(row["symbol"], row["asset_class"], row["percent_of_networth"]) for row in overview], where
+    for n in (3, 5):
+        risk_top = sum(row["value"] for row in ranked[:n]) / headline["total"] * 100
+        overview_top = sum(row["value"] for row in summary["top_holdings"][:n]) / headline["total"] * 100
+        assert risk_top == pytest.approx(overview_top, abs=1e-9), (where, n)
+    for row in ranked:
+        assert row["percent_of_networth"] == pytest.approx(row["value"] / headline["total"] * 100, abs=0.01), where
+    classes = {row["asset_class"] for row in risk["top_holdings"]}
+    if headline["crypto"] > TOL:
+        assert "CRYPTO" in classes, where
+
+    # Currency exposure: the headline, by currency.
+    currency = risk["currency_exposure"]
+    items = currency["items"]
+    assert currency["total"] == pytest.approx(headline["total"], abs=TOL), where
+    assert sum(item["value"] for item in items) == pytest.approx(headline["total"], abs=TOL), where
+
+    def part(key: str) -> float:
+        return sum(item[key] for item in items)
+
+    assert part("cash") == pytest.approx(headline["cash"], abs=TOL), where
+    assert part("stocks_funds") == pytest.approx(headline["stocks_funds"], abs=TOL), where
+    assert part("stablecoins") + part("crypto") == pytest.approx(headline["crypto"], abs=TOL), where
+    assert part("liabilities") == pytest.approx(headline["liabilities"], abs=TOL), where
+    for item in items:
+        if item["stablecoins"]:
+            assert item["currency"] == "USD", where
+        if item["crypto"]:
+            assert item["currency"] == "CRYPTO", where
+        assert item["percent"] == pytest.approx(item["value"] / headline["total"] * 100, abs=0.01), where
+
+    # Platform concentration: Overview's platform split (gross assets).
+    platforms = risk["platform_concentration"]
+    assert platforms["total"] == pytest.approx(allocation["total"], abs=TOL), where
+    assert platforms["items"] == allocation["items"], where
 
 
 def _assert_bar(point: dict[str, Any], figure: float, where: Any) -> None:
@@ -355,3 +418,12 @@ def test_the_contract_is_not_over_zeros(client: TestClient, db_engine, monkeypat
     cash = _get(client, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
     assert cash["current_stablecoin_total"] > 0
     assert cash["snapshot_stablecoin_total"] > 0
+    # #253: Risk's positions include crypto, and its currency exposure has more than
+    # one currency, stablecoins and a card balance to place.
+    risk = _get(client, "/dashboard/risk-summary?month=2026-03&base_currency=SGD")
+    assert {row["asset_class"] for row in risk["top_holdings"]} >= {"STOCK", "CRYPTO"}
+    exposure = risk["currency_exposure"]["items"]
+    assert len({item["currency"] for item in exposure} - {"CRYPTO"}) > 1
+    assert sum(item["stablecoins"] for item in exposure) > 0
+    assert sum(item["liabilities"] for item in exposure) > 0
+    assert len(risk["platform_concentration"]["items"]) > 1

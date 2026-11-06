@@ -465,6 +465,16 @@ def _quote_freshness_summary(top_holdings: list[dict[str, Any]], *, is_live: boo
     return summary
 
 
+def _holding_currency(row: Dict[str, Any], quote: Dict[str, Any] | None, fallback: str) -> str:
+    """The currency a holding is denominated in (#253): the quote's currency when a
+    quote values it, else the instrument's quote currency, else the currency its
+    statement amounts are in."""
+    for candidate in ((quote or {}).get("currency"), row.get("quote_currency")):
+        if candidate:
+            return str(candidate).upper()
+    return _canonical_base_currency(row, fallback)
+
+
 @valuation_cached(shared=True, date_args=("anchor_ts",))
 def _stock_exposure(
     db: Session,
@@ -486,7 +496,14 @@ def _stock_exposure(
         include_nav_accounts=True,
     )
     if not canonical_nav_rows and not canonical_pos_rows:
-        return {"as_of": None, "base_currency": base_currency, "total": 0.0, "by_country": [], "by_platform": []}
+        return {
+            "as_of": None,
+            "base_currency": base_currency,
+            "total": 0.0,
+            "by_country": [],
+            "by_platform": [],
+            "by_currency": [],
+        }
     latest_prices = _latest_prices_for_positions(db, anchor_ts, canonical_pos_rows, enabled=price_overlay)
     currencies = {_canonical_base_currency(row, base_currency) for row in canonical_pos_rows}
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
@@ -496,6 +513,8 @@ def _stock_exposure(
 
     by_country: Dict[str, float] = {}
     by_platform: Dict[str, float] = {}
+    # #253: the same values by the currency each holding is denominated in.
+    by_currency: Dict[str, float] = {}
     total = 0.0
     nav_position_rows_by_account: Dict[int, list[dict[str, Any]]] = {}
     for row in canonical_pos_rows:
@@ -517,17 +536,21 @@ def _stock_exposure(
         by_platform[platform] = by_platform.get(platform, 0.0) + value
 
         detail_buckets: Dict[str, float] = {}
+        currency_buckets: Dict[str, float] = {}
         detail_total = 0.0
         for detail in nav_position_rows_by_account.get(int(row["legacy_account_id"]), []):
             asset_class = str(detail.get("asset_class") or "STOCK").upper()
             if asset_class not in {"STOCK", "FUND"}:
                 continue
+            quote = None
             if latest_prices:
-                _quote, _reason, detail_value, _snapshot = _nav_row_live_price(detail, latest_prices, rates, base_currency)
+                quote, _reason, detail_value, _snapshot = _nav_row_live_price(detail, latest_prices, rates, base_currency)
             else:
                 detail_value = _canonical_position_value(detail, rates, base_currency)
             if detail_value <= 0:
                 continue
+            detail_currency = _holding_currency(detail, quote, nav_currency)
+            currency_buckets[detail_currency] = currency_buckets.get(detail_currency, 0.0) + detail_value
             country = _infer_country(
                 detail.get("symbol"),
                 detail.get("home_country"),
@@ -541,9 +564,12 @@ def _stock_exposure(
             scale = value / detail_total
             for country, detail_value in detail_buckets.items():
                 by_country[country] = by_country.get(country, 0.0) + (detail_value * scale)
+            for currency, detail_value in currency_buckets.items():
+                by_currency[currency] = by_currency.get(currency, 0.0) + (detail_value * scale)
         else:
             country = row.get("country") or "UNKNOWN"
             by_country[country] = by_country.get(country, 0.0) + value
+            by_currency[nav_currency] = by_currency.get(nav_currency, 0.0) + value
 
     for row in canonical_pos_rows:
         if row.get("has_nav_snapshot"):
@@ -551,7 +577,9 @@ def _stock_exposure(
         asset_class = str(row.get("asset_class") or "STOCK").upper()
         if asset_class not in {"STOCK", "FUND"}:
             continue
-        value = _canonical_position_value(row, rates, base_currency, latest_prices)
+        # _canonical_position_value's valuation, keeping the quote it used.
+        priced = price_position(row, latest_prices or None, rates, base_currency)
+        value = priced.value
         if value <= 0:
             continue
         platform = row.get("platform") or "UNKNOWN"
@@ -561,6 +589,8 @@ def _stock_exposure(
         total += value
         by_platform[platform] = by_platform.get(platform, 0.0) + value
         by_country[country] = by_country.get(country, 0.0) + value
+        currency = _holding_currency(row, priced.quote, base_currency)
+        by_currency[currency] = by_currency.get(currency, 0.0) + value
 
     def _to_items(bucket: Dict[str, float]) -> list[dict]:
         items = []
@@ -575,6 +605,7 @@ def _stock_exposure(
         "total": total,
         "by_country": _to_items(by_country),
         "by_platform": _to_items(by_platform),
+        "by_currency": _to_items(by_currency),
     }
 
 

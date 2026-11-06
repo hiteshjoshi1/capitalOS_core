@@ -2195,7 +2195,11 @@ CREATE TABLE public.user_preferences (
     timezone text,
     timezone_from_app boolean DEFAULT false NOT NULL,
     base_currency text,
-    CONSTRAINT user_preferences_base_currency_format CHECK (((base_currency IS NULL) OR (base_currency ~ '^[A-Z]{3}$'::text)))
+    risk_largest_position_warn_pct numeric(5,2),
+    risk_top_n_warn_pct numeric(5,2),
+    risk_platform_warn_pct numeric(5,2),
+    CONSTRAINT user_preferences_base_currency_format CHECK (((base_currency IS NULL) OR (base_currency ~ '^[A-Z]{3}$'::text))),
+    CONSTRAINT user_preferences_risk_thresholds_range CHECK ((((risk_largest_position_warn_pct IS NULL) OR ((risk_largest_position_warn_pct > (0)::numeric) AND (risk_largest_position_warn_pct <= (100)::numeric))) AND ((risk_top_n_warn_pct IS NULL) OR ((risk_top_n_warn_pct > (0)::numeric) AND (risk_top_n_warn_pct <= (100)::numeric))) AND ((risk_platform_warn_pct IS NULL) OR ((risk_platform_warn_pct > (0)::numeric) AND (risk_platform_warn_pct <= (100)::numeric)))))
 );
 
 

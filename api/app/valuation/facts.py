@@ -124,8 +124,9 @@ def _credit_card_liability_details(
     A newer statement never changes an earlier anchor: only snapshots on or
     before an anchor are read. A credit balance (overpaid card) owes nothing.
 
-    Each entry: account_id, method (statement | transactions | closed),
-    as_of_date (the statement's date, else None), value (>= 0).
+    Each entry: account_id, currency (the card's), method (statement |
+    transactions | closed), as_of_date (the statement's date, else None),
+    value (>= 0).
     """
     anchor_date = anchor_ts.date()
     cards = db.execute(
@@ -194,9 +195,13 @@ def _credit_card_liability_details(
     out: list[Dict[str, Any]] = []
     for card in cards:
         account_id = int(card["account_id"])
+        # The card's own currency (#253: currency exposure subtracts what it owes there).
+        card_currency = str(card["account_currency"] or base_currency).upper()
         closed_on = _date_only(card["closed_on"])
         if closed_on is not None and closed_on < anchor_date:
-            out.append({"account_id": account_id, "method": "closed", "as_of_date": None, "value": 0.0})
+            out.append(
+                {"account_id": account_id, "currency": card_currency, "method": "closed", "as_of_date": None, "value": 0.0}
+            )
             continue
         if account_id in statement_balances:
             # A card's balance is negative while money is owed (the holder's view,
@@ -205,6 +210,7 @@ def _credit_card_liability_details(
             out.append(
                 {
                     "account_id": account_id,
+                    "currency": card_currency,
                     "method": "statement",
                     "as_of_date": newest_statement[account_id],
                     "value": max(outstanding, 0.0),
@@ -214,6 +220,7 @@ def _credit_card_liability_details(
         out.append(
             {
                 "account_id": account_id,
+                "currency": card_currency,
                 "method": "transactions",
                 "as_of_date": None,
                 "value": max(transaction_outstanding.get(account_id, 0.0), 0.0),
