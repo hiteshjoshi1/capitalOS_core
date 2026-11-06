@@ -499,7 +499,7 @@ describe("StockHoldings", () => {
     expect(note).toHaveTextContent("Price+S$ 3,400HKD 140.00 → HKD 150.12 (+HKD 106.26)");
     expect(note).toHaveTextContent("Quantity");
     expect(note).toHaveTextContent("no shares added or sold");
-    expect(note).toHaveTextContent("FX-S$ 400HKD -0.17% vs SGD");
+    expect(note).toHaveTextContent("FX-S$ 400.00HKD -0.17% vs SGD");
     expect(note).toHaveTextContent("vs S$ 117,000 at 28 Feb 2026 close");
   });
 
@@ -531,7 +531,7 @@ describe("StockHoldings", () => {
     expect(hkCard.getByText("+S$ 3,000 (+2.6%)")).toBeInTheDocument();
     expect(hkCard.getByText("Price +S$ 3,400")).toBeInTheDocument();
     expect(hkCard.getByText("Quantity S$ 0")).toBeInTheDocument();
-    expect(hkCard.getByText("FX -S$ 400")).toBeInTheDocument();
+    expect(hkCard.getByText("FX -S$ 400.00")).toBeInTheDocument();
 
     const soldCard = within(screen.getByText("Apple").closest(".stockHoldingsMobileCard") as HTMLElement);
     expect(soldCard.getByText("Sold")).toBeInTheDocument();

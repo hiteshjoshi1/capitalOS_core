@@ -264,7 +264,7 @@ describe("WealthRisk route", () => {
     expect(currency.getByText("USD")).toBeInTheDocument();
     expect(currency.getByText("48.0%")).toBeInTheDocument();
     expect(currency.getByText("Stocks S$ 40,000 · Cash S$ 5,000 · Stablecoins S$ 3,000")).toBeInTheDocument();
-    expect(currency.getByText("Stocks S$ 30,000 · Cash S$ 10,000 · Cards owed -S$ 500")).toBeInTheDocument();
+    expect(currency.getByText("Stocks S$ 30,000 · Cash S$ 10,000 · Cards owed -S$ 500.00")).toBeInTheDocument();
     expect(currency.getByText("Crypto (not stablecoins)")).toBeInTheDocument();
 
     const platforms = within(screen.getByRole("region", { name: "Platform concentration" }));
