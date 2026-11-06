@@ -41,6 +41,8 @@
       "snapshot_day": 1,
       "snapshot_delta_base": 8215.0607,
       "snapshot_delta_pct": 0.8196,
+      "snapshot_missing": false,
+      "snapshot_missing_reason": null,
       "snapshot_total_base": 10022.7273,
       "snapshot_total_usd": 7500.0,
       "sol": {
@@ -318,6 +320,8 @@
       "snapshot_day": 1,
       "snapshot_delta_base": 2916.7051,
       "snapshot_delta_pct": 0.1599,
+      "snapshot_missing": false,
+      "snapshot_missing_reason": null,
       "snapshot_total_base": 18237.788,
       "snapshot_total_usd": 13600.0,
       "sol": {
@@ -731,6 +735,7 @@
       ],
       "snapshot_cash_as_of": "2026-01-31T00:00:00+00:00",
       "snapshot_day": 1,
+      "snapshot_missing": false,
       "snapshot_total": 58711.5095,
       "total": 63682.8865,
       "trend": [
@@ -835,6 +840,7 @@
       ],
       "snapshot_cash_as_of": "2026-02-28T00:00:00+00:00",
       "snapshot_day": 1,
+      "snapshot_missing": false,
       "snapshot_total": 63682.8865,
       "total": 62218.2027,
       "trend": [
@@ -912,15 +918,19 @@
       "net_worth_change": {
         "vs_prev_month": {
           "abs": 13712.1273,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 76737.5074,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.1787
         },
         "vs_prev_year": {
           "abs": 90449.6347,
+          "baseline_missing": true,
           "compare_as_of": null,
           "compare_month": "2025-02",
+          "compare_value": 0.0,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": null
         }
@@ -934,22 +944,28 @@
       "component_change": {
         "cash": {
           "abs": -915.8986,
+          "baseline_missing": false,
           "compare_as_of": "2026-03-16T00:00:00+00:00",
           "compare_month": "2026-03-16T00:00:00+00:00",
+          "compare_value": 61323.7327,
           "current_as_of": "2026-03-31T00:00:00+00:00",
           "pct": -0.0149
         },
         "crypto": {
           "abs": -33.5253,
+          "baseline_missing": false,
           "compare_as_of": "2026-03-16T00:00:00+00:00",
           "compare_month": "2026-03-16T00:00:00+00:00",
+          "compare_value": 21188.0184,
           "current_as_of": "2026-03-31T00:00:00+00:00",
           "pct": -0.0016
         },
         "stocks_funds": {
           "abs": -200.61,
+          "baseline_missing": false,
           "compare_as_of": "2026-03-16T00:00:00+00:00",
           "compare_month": "2026-03-16T00:00:00+00:00",
+          "compare_value": 13361.9841,
           "current_as_of": "2026-03-31T00:00:00+00:00",
           "pct": -0.015
         }
@@ -957,8 +973,10 @@
       "current_as_of": "2026-03-31T00:00:00+00:00",
       "net_worth_change": {
         "abs": -1150.0339,
+        "baseline_missing": false,
         "compare_as_of": "2026-03-16T00:00:00+00:00",
         "compare_month": "2026-03-16T00:00:00+00:00",
+        "compare_value": 94828.1852,
         "current_as_of": "2026-03-31T00:00:00+00:00",
         "pct": -0.0121
       },
@@ -1258,10 +1276,13 @@
       "quote_freshness_summary": {
         "fresh": 0,
         "missing": 0,
+        "no_live_price": null,
         "stale": 4
       },
+      "quote_stale_days": 3,
       "snapshot_day": 1,
       "stock_current_total": 11516.3878,
+      "stock_snapshot_missing": false,
       "stock_snapshot_total": 10967.8161,
       "top_holdings": [
         {
@@ -1275,6 +1296,7 @@
           "name": "Tencent Holdings",
           "percent_of_networth": 6.06,
           "platform": "IBKR",
+          "price_basis": "statement",
           "price_fallback_reason": null,
           "price_provider": "ibkr",
           "price_source": "ibkr_flex",
@@ -1297,6 +1319,7 @@
           "name": "Apple Inc.",
           "percent_of_networth": 5.61,
           "platform": "IBKR",
+          "price_basis": "statement",
           "price_fallback_reason": null,
           "price_provider": "ibkr",
           "price_source": "ibkr_flex",
@@ -1319,6 +1342,7 @@
           "name": "Infosys",
           "percent_of_networth": 0.56,
           "platform": "SHAREKHAN",
+          "price_basis": "statement",
           "price_fallback_reason": null,
           "price_provider": "canonical",
           "price_source": "canonical_snapshot",
@@ -1341,6 +1365,7 @@
           "name": "Reliance Industries",
           "percent_of_networth": 0.5,
           "platform": "SHAREKHAN",
+          "price_basis": "statement",
           "price_fallback_reason": null,
           "price_provider": "canonical",
           "price_source": "canonical_snapshot",
@@ -1490,10 +1515,13 @@
       "quote_freshness_summary": {
         "fresh": 4,
         "missing": 0,
+        "no_live_price": 0,
         "stale": 0
       },
+      "quote_stale_days": 3,
       "snapshot_day": 1,
       "stock_current_total": 13161.3742,
+      "stock_snapshot_missing": false,
       "stock_snapshot_total": 11516.3878,
       "top_holdings": [
         {
@@ -1507,6 +1535,7 @@
           "name": "Apple Inc.",
           "percent_of_networth": 7.37,
           "platform": "IBKR",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1529,6 +1558,7 @@
           "name": "Tencent Holdings",
           "percent_of_networth": 5.52,
           "platform": "IBKR",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1551,6 +1581,7 @@
           "name": "Reliance Industries",
           "percent_of_networth": 0.6,
           "platform": "SHAREKHAN",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1573,6 +1604,7 @@
           "name": "Infosys",
           "percent_of_networth": 0.56,
           "platform": "SHAREKHAN",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1643,15 +1675,19 @@
       "current_net_worth_change": {
         "vs_prev_month": {
           "abs": 3228.5166,
+          "baseline_missing": false,
           "compare_as_of": "2026-02-28T00:00:00+00:00",
           "compare_month": "2026-02",
+          "compare_value": 90449.6347,
           "current_as_of": "2026-03-31T18:00:00-04:00",
           "pct": 0.0357
         },
         "vs_prev_year": {
           "abs": 93678.1513,
+          "baseline_missing": true,
           "compare_as_of": null,
           "compare_month": "2025-02",
+          "compare_value": 0.0,
           "current_as_of": "2026-03-31T18:00:00-04:00",
           "pct": null
         }
@@ -1715,15 +1751,19 @@
       "net_worth_change": {
         "vs_prev_month": {
           "abs": 13712.1273,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 76737.5074,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.1787
         },
         "vs_prev_year": {
           "abs": 90449.6347,
+          "baseline_missing": true,
           "compare_as_of": null,
           "compare_month": "2025-02",
+          "compare_value": 0.0,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": null
         }
@@ -1731,22 +1771,28 @@
       "net_worth_component_change": {
         "cash": {
           "abs": 4293.8948,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 56706.9641,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.0757
         },
         "crypto": {
           "abs": 8215.0607,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 10022.7273,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.8196
         },
         "stocks_funds": {
           "abs": 548.5718,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 10967.8161,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.05
         }
@@ -1766,6 +1812,7 @@
           "name": "ETH",
           "percent_of_networth": 10.92,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -1788,6 +1835,7 @@
           "name": "SOL",
           "percent_of_networth": 9.73,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -1810,6 +1858,7 @@
           "name": "Apple Inc.",
           "percent_of_networth": 7.37,
           "platform": "IBKR",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1832,6 +1881,7 @@
           "name": "Tencent Holdings",
           "percent_of_networth": 5.52,
           "platform": "IBKR",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1854,6 +1904,7 @@
           "name": "USDC",
           "percent_of_networth": 1.57,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -1876,6 +1927,7 @@
           "name": "Reliance Industries",
           "percent_of_networth": 0.6,
           "platform": "SHAREKHAN",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1898,6 +1950,7 @@
           "name": "Infosys",
           "percent_of_networth": 0.56,
           "platform": "SHAREKHAN",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -1920,6 +1973,7 @@
           "name": "USDT",
           "percent_of_networth": 0.36,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -2021,15 +2075,19 @@
       "current_net_worth_change": {
         "vs_prev_month": {
           "abs": 3228.5166,
+          "baseline_missing": false,
           "compare_as_of": "2026-02-28T00:00:00+00:00",
           "compare_month": "2026-02",
+          "compare_value": 90449.6347,
           "current_as_of": "2026-03-31T18:00:00-04:00",
           "pct": 0.0357
         },
         "vs_prev_year": {
           "abs": 93678.1513,
+          "baseline_missing": true,
           "compare_as_of": null,
           "compare_month": "2025-02",
+          "compare_value": 0.0,
           "current_as_of": "2026-03-31T18:00:00-04:00",
           "pct": null
         }
@@ -2093,15 +2151,19 @@
       "net_worth_change": {
         "vs_prev_month": {
           "abs": 13712.1273,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 76737.5074,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.1787
         },
         "vs_prev_year": {
           "abs": 90449.6347,
+          "baseline_missing": true,
           "compare_as_of": null,
           "compare_month": "2025-02",
+          "compare_value": 0.0,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": null
         }
@@ -2109,22 +2171,28 @@
       "net_worth_component_change": {
         "cash": {
           "abs": 4293.8948,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 56706.9641,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.0757
         },
         "crypto": {
           "abs": 8215.0607,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 10022.7273,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.8196
         },
         "stocks_funds": {
           "abs": 548.5718,
+          "baseline_missing": false,
           "compare_as_of": "2026-01-31T00:00:00+00:00",
           "compare_month": "2026-01",
+          "compare_value": 10967.8161,
           "current_as_of": "2026-02-28T00:00:00+00:00",
           "pct": 0.05
         }
@@ -2144,6 +2212,7 @@
           "name": "ETH",
           "percent_of_networth": 10.92,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -2166,6 +2235,7 @@
           "name": "SOL",
           "percent_of_networth": 9.73,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -2188,6 +2258,7 @@
           "name": "Apple Inc.",
           "percent_of_networth": 7.37,
           "platform": "IBKR",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -2210,6 +2281,7 @@
           "name": "Tencent Holdings",
           "percent_of_networth": 5.52,
           "platform": "IBKR",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -2232,6 +2304,7 @@
           "name": "USDC",
           "percent_of_networth": 1.57,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,
@@ -2254,6 +2327,7 @@
           "name": "Reliance Industries",
           "percent_of_networth": 0.6,
           "platform": "SHAREKHAN",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -2276,6 +2350,7 @@
           "name": "Infosys",
           "percent_of_networth": 0.56,
           "platform": "SHAREKHAN",
+          "price_basis": "quote",
           "price_fallback_reason": null,
           "price_provider": "synthetic",
           "price_source": "synthetic",
@@ -2298,6 +2373,7 @@
           "name": "USDT",
           "percent_of_networth": 0.36,
           "platform": "CRYPTO",
+          "price_basis": null,
           "price_fallback_reason": null,
           "price_provider": null,
           "price_source": null,

@@ -163,6 +163,7 @@ def _top_holdings(
                 "valued_at_cost": bool(row.get("valued_at_cost")),
                 "price_provider": _price_provider(row.get("price_source")),
                 "quote_freshness_status": _quote_freshness_status(row.get("latest_trade_date")),
+                "price_basis": row.get("price_basis"),
                 "exchange_code": row.get("exchange_code"),
             }
         if not agg[key].get("name") and row.get("name"):
@@ -225,6 +226,7 @@ def _top_holdings(
             "price_source": price_source,
             "price_fallback_reason": price_fallback_reason,
             "valued_at_cost": priced.valued_at_cost,
+            "price_basis": "quote" if price_row else "statement",
             "exchange_code": cr.get("exchange_code"),
             "geo": _infer_country(
                 cr.get("symbol"),
@@ -441,13 +443,20 @@ def _stock_platform_breakdown(
     )
 
 
-def _quote_freshness_summary(top_holdings: list[dict[str, Any]]) -> dict[str, int]:
-    summary = {"fresh": 0, "stale": 0, "missing": 0}
+def _quote_freshness_summary(top_holdings: list[dict[str, Any]], *, is_live: bool = True) -> dict[str, Any]:
+    summary: dict[str, Any] = {"fresh": 0, "stale": 0, "missing": 0}
+    no_live_price = 0
     for holding in top_holdings:
         status = str(holding.get("quote_freshness_status") or "missing").lower()
         if status not in summary:
             status = "missing"
         summary[status] += 1
+        # No live price (#224): no fresh quote from the price job, including a
+        # holding priced only from its statement or an upload (#222).
+        if holding.get("price_basis") != "quote" or status != "fresh":
+            no_live_price += 1
+    # Only a live view has "live" prices; a past month is valued at its statements.
+    summary["no_live_price"] = no_live_price if is_live else None
     return summary
 
 

@@ -3,13 +3,15 @@ import { api } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
-import { directionClass, formatDate, formatDelta, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent } from "../lib/format";
+import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent } from "../lib/format";
+import { noDataFor, noRateFor } from "../lib/delta";
 import { chartColor } from "../lib/chartColors";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
+import Delta from "../components/Delta";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
@@ -30,12 +32,10 @@ export default function CryptoHoldings() {
   const shownCurrency = summary?.base_currency || baseCurrency;
   const money = useCallback((value?: number | null) => formatMoney(value, shownCurrency), [shownCurrency]);
   const compactMoney = useCallback((value?: number | null) => formatMoneyCompact(value, shownCurrency), [shownCurrency]);
-  /** A holding's change, with the % computed from the same (base-currency) amounts, so the
-   * two never disagree in sign (#131: "-S$ 13,764 (+3.1%)"). */
-  const holdingDelta = (valueBase?: number | null, changeBase?: number | null) => {
-    const previous = valueBase != null && changeBase != null ? valueBase - changeBase : null;
-    return formatDelta(changeBase, previous ? (changeBase as number) / Math.abs(previous) : null, shownCurrency);
-  };
+  /** A holding's base-currency value last month: the % comes from it, in the same currency
+   * as the amount, so the two never disagree (#131: "-S$ 13,764 (+3.1%)"). */
+  const previousBase = (valueBase?: number | null, changeBase?: number | null) =>
+    valueBase != null && changeBase != null ? valueBase - changeBase : null;
 
   const allHoldings = useMemo(() => summary?.top_holdings ?? [], [summary?.top_holdings]);
   const visibleHoldings = useMemo(
@@ -60,7 +60,12 @@ export default function CryptoHoldings() {
     [summary, compactMoney],
   );
 
-  const deltaPositive = (summary?.snapshot_delta_base ?? 0) >= 0;
+  // #224: no baseline is a sentence, not a delta the size of the whole holding.
+  const missingReason = summary?.snapshot_missing
+    ? summary.snapshot_missing_reason === "no_fx_rate"
+      ? noRateFor(summary.compare_month)
+      : noDataFor(summary.compare_month)
+    : null;
 
   return (
     <PageShell
@@ -85,9 +90,11 @@ export default function CryptoHoldings() {
           <HeroMetricCard
             eyebrow={summary?.is_live ? "CURRENT CRYPTO VALUE" : `CRYPTO VALUE — ${summary?.month ?? month}`}
             value={money(summary?.total_crypto_base)}
-            deltaChip={{
-              text: formatPercent(summary?.snapshot_delta_pct, { signed: true }),
-              positive: deltaPositive,
+            delta={{
+              abs: summary?.snapshot_delta_base,
+              compareValue: summary?.snapshot_total_base,
+              currency: shownCurrency,
+              missingReason,
             }}
             insightText={
               summary?.is_live
@@ -186,9 +193,15 @@ export default function CryptoHoldings() {
                         {h.wallet_label ? <span>{h.wallet_label}</span> : null}
                       </span>
                     </div>
-                    <div className={`listRowValue ${directionClass(h.value_change_base) || "good"}`}>
+                    <div className="listRowValue">
                       {money(h.value_base)}
-                      <span className="listRowValueSecondary">{holdingDelta(h.value_base, h.value_change_base)}</span>
+                      <span className="listRowValueSecondary">
+                        <Delta
+                          abs={h.value_change_base}
+                          compareValue={previousBase(h.value_base, h.value_change_base)}
+                          currency={shownCurrency}
+                        />
+                      </span>
                     </div>
                   </div>
                 ))

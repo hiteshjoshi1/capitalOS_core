@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import Delta from "./Delta";
+import type { DeltaProps } from "./Delta";
 
 type HeroDelta = {
   label: string;
@@ -9,7 +11,8 @@ type HeroDelta = {
 type HeroMetricCardProps = {
   eyebrow: string;
   value: string;
-  deltaChip?: { text: string; positive: boolean } | null;
+  /** The headline's change, shown as a chip next to it (#224: one <Delta> everywhere). */
+  delta?: DeltaProps | null;
   insightText?: string | null;
   deltaRow?: HeroDelta[];
   children?: ReactNode;
@@ -18,7 +21,7 @@ type HeroMetricCardProps = {
 export default function HeroMetricCard({
   eyebrow,
   value,
-  deltaChip,
+  delta,
   insightText,
   deltaRow,
   children,
@@ -30,11 +33,7 @@ export default function HeroMetricCard({
       </div>
       <div className="coHeroValueRow">
         <span className="coHeroValue">{value}</span>
-        {deltaChip ? (
-          <span className={`coChip${deltaChip.positive ? " coChipPositive" : " coChipNegative"}`}>
-            {deltaChip.text}
-          </span>
-        ) : null}
+        {delta ? <Delta show="pct" variant="chip" {...delta} /> : null}
       </div>
       {insightText ? <p className="coHeroFreshness">{insightText}</p> : null}
       {deltaRow && deltaRow.length > 0 ? (

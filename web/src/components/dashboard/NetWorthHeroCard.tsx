@@ -1,6 +1,7 @@
 import type { DashboardSummary } from "../../lib/api";
 import { Link } from "react-router-dom";
-import { formatPercent } from "../../lib/format";
+import Delta from "../Delta";
+import { missingBaselineReason } from "../../lib/delta";
 
 type NetWorthHeroCardProps = {
   summary: DashboardSummary | null;
@@ -23,12 +24,7 @@ export default function NetWorthHeroCard({
 }: NetWorthHeroCardProps) {
   const prevMonthChange = summary?.net_worth_change?.vs_prev_month;
   const prevYearChange = summary?.net_worth_change?.vs_prev_year;
-
-  const formatDelta = (abs: number, pct: number | null) => {
-    const sign = abs >= 0 ? "+" : "-";
-    const percentValue = pct == null ? "" : ` (${formatPercent(pct, { signed: true })})`;
-    return `${sign}${formatMoney(Math.abs(abs))}${percentValue}`;
-  };
+  const currency = summary?.base_currency;
 
   return (
     <div className="card netWorthCard">
@@ -39,17 +35,23 @@ export default function NetWorthHeroCard({
           {prevMonthChange ? (
             <div className="netWorthDelta">
               <span className="label">vs {prevMonthChange.compare_month}</span>
-              <span className={prevMonthChange.abs >= 0 ? "good" : "bad"}>
-                {formatDelta(prevMonthChange.abs, prevMonthChange.pct)}
-              </span>
+              <Delta
+                abs={prevMonthChange.abs}
+                pct={prevMonthChange.pct}
+                currency={currency}
+                missingReason={missingBaselineReason(prevMonthChange)}
+              />
             </div>
           ) : null}
           {prevYearChange ? (
             <div className="netWorthDelta">
               <span className="label">vs {prevYearChange.compare_month}</span>
-              <span className={prevYearChange.abs >= 0 ? "good" : "bad"}>
-                {formatDelta(prevYearChange.abs, prevYearChange.pct)}
-              </span>
+              <Delta
+                abs={prevYearChange.abs}
+                pct={prevYearChange.pct}
+                currency={currency}
+                missingReason={missingBaselineReason(prevYearChange)}
+              />
             </div>
           ) : null}
         </div>

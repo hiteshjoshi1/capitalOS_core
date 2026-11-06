@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
@@ -6,7 +7,10 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
+import { deltaPercent, noDataFor } from "../lib/delta";
+import { hasLivePrice, holdingPriceAge } from "../lib/priceAge";
 import "../App.css";
+import Delta from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PriceFallbackInfo from "../components/PriceFallbackInfo";
@@ -199,6 +203,14 @@ export default function StockHoldings() {
     return `${status.slice(0, 1).toUpperCase()}${status.slice(1).toLowerCase()}`;
   };
   const holdings = useMemo(() => summary?.top_holdings ?? [], [summary]);
+  // #224: freshness only means something on the live month; a past month is valued
+  // at its statements.
+  const isLive = summary?.is_live === true;
+  const noLivePriceCount = isLive
+    ? (summary?.quote_freshness_summary?.no_live_price ?? holdings.filter((h) => !hasLivePrice(h)).length)
+    : 0;
+  const stockSnapshotTotal = summary?.stock_snapshot_total;
+  const stockMissingReason = summary?.stock_snapshot_missing ? noDataFor(summary.compare_month) : null;
   const escapeCsvValue = (value: string | number | null | undefined): string => {
     if (value == null) return "";
     const text = String(value);
@@ -316,20 +328,42 @@ export default function StockHoldings() {
             </div>
             <div className="coHeroValueRow">
               <span className="coHeroValue">{formatMoney(summary?.stock_current_total)}</span>
-              {summary?.stock_current_total != null && summary?.stock_snapshot_total != null && summary.stock_snapshot_total > 0 ? (() => {
-                const delta = summary.stock_current_total - summary.stock_snapshot_total;
-                const pct = (delta / summary.stock_snapshot_total) * 100;
-                return (
-                  <span className={`coChip${delta >= 0 ? " coChipPositive" : " coChipNegative"}`}>
-                    {fmt.formatPercent(pct, { signed: true, scale: "points" })}
-                  </span>
-                );
-              })() : null}
+              {summary?.stock_current_total != null && stockSnapshotTotal != null ? (
+                <Delta
+                  variant="chip"
+                  show="pct"
+                  abs={summary.stock_current_total - stockSnapshotTotal}
+                  compareValue={stockSnapshotTotal}
+                  currency={shownCurrency}
+                  missingReason={stockMissingReason}
+                />
+              ) : null}
             </div>
-            {summary?.stock_snapshot_total != null ? (
+            {stockSnapshotTotal != null && !stockMissingReason ? (
               <p className="coHeroFreshness">
-                vs {summary.compare_month ? fmt.formatMonth(summary.compare_month, "medium") : "last month"}: {formatMoney(summary.stock_snapshot_total)}
-                {summary.quote_freshness_summary ? ` · ${summary.quote_freshness_summary.fresh} fresh · ${summary.quote_freshness_summary.stale} stale` : ""}
+                vs {summary.compare_month ? fmt.formatMonth(summary.compare_month, "medium") : "last month"} ({formatMoney(stockSnapshotTotal)}):{" "}
+                <Delta
+                  abs={(summary.stock_current_total ?? 0) - stockSnapshotTotal}
+                  compareValue={stockSnapshotTotal}
+                  currency={shownCurrency}
+                />
+              </p>
+            ) : null}
+            {isLive && summary.quote_freshness_summary ? (
+              <p className="coHeroFreshness" data-testid="stock-price-freshness">
+                Prices: {summary.quote_freshness_summary.fresh} fresh · {summary.quote_freshness_summary.stale} stale
+                {noLivePriceCount > 0 ? (
+                  <>
+                    {" · "}
+                    <strong className="priceAge--stale">
+                      {noLivePriceCount} {noLivePriceCount === 1 ? "holding" : "holdings"} without a live price
+                    </strong>{" "}
+                    (statement or old quote) ·{" "}
+                    <Link className="wealthInlineLink" to="/operations">
+                      Fix in Data Hub
+                    </Link>
+                  </>
+                ) : null}
               </p>
             ) : null}
           </article>
@@ -387,13 +421,11 @@ export default function StockHoldings() {
                         <span className="coHoldingClass">{formatMoney(item.current_value)}</span>
                       </div>
                       <div className="coHoldingRight">
-                        <strong
-                          className={`coHoldingValue ${item.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
-                        >
-                          {fmt.formatSignedMoney(item.delta_abs, shownCurrency)}
+                        <strong className="coHoldingValue">
+                          <Delta abs={item.delta_abs} compareValue={item.snapshot_value} currency={shownCurrency} show="abs" />
                         </strong>
                         <span className="coHoldingPct">
-                          {fmt.formatPercent(item.delta_pct, { signed: true })}
+                          {fmt.formatPercent(deltaPercent(item.delta_abs, item.snapshot_value), { signed: true })}
                         </span>
                       </div>
                     </div>
@@ -472,6 +504,7 @@ export default function StockHoldings() {
                 <div className="stockHoldingsMobileList">
                   {visibleHoldings.map((h, idx) => {
                     const mobilePnl = formatMobilePnl(h);
+                    const priceAge = holdingPriceAge(h, isLive);
                     return (
                       <article className="stockHoldingsMobileCard" key={h.asset_id ?? `${h.symbol}-${idx}`}>
                         <div className="stockHoldingsMobileHeader">
@@ -486,9 +519,11 @@ export default function StockHoldings() {
                           </div>
                         </div>
                         <div className="stockHoldingsMobileMetrics">
-                          <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
-                            {formatFreshnessLabel(h.quote_freshness_status)}
-                          </span>
+                          {isLive ? (
+                            <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
+                              {formatFreshnessLabel(h.quote_freshness_status)}
+                            </span>
+                          ) : null}
                           {h.price_fallback_reason && (
                             <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} platform={h.platform} />
                           )}
@@ -501,6 +536,9 @@ export default function StockHoldings() {
                             {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
                           </div>
                         </div>
+                        <small className={`priceAge stockHoldingsMobilePriceAge${priceAge.stale ? " priceAge--stale" : ""}`}>
+                          {priceAge.text}
+                        </small>
                       </article>
                     );
                   })}
@@ -525,6 +563,7 @@ export default function StockHoldings() {
                     <tbody>
                       {visibleHoldings.map((h, idx) => {
                         const pnl = formatPnl(h);
+                        const priceAge = holdingPriceAge(h, isLive);
                         return (
                           <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
                             <td>
@@ -564,11 +603,8 @@ export default function StockHoldings() {
                             )}
                             {visibleColumns.quoteFreshness && (
                               <td>
-                                <div>{h.quote_freshness_status ?? "missing"}</div>
-                                <small className="muted">
-                                  {fmt.formatDate(h.latest_trade_date)}
-                                  {h.price_provider ? ` · ${h.price_provider}` : ""}
-                                </small>
+                                {isLive ? <div>{h.quote_freshness_status ?? "missing"}</div> : null}
+                                <small className={`priceAge${priceAge.stale ? " priceAge--stale" : ""}`}>{priceAge.text}</small>
                               </td>
                             )}
                           </tr>

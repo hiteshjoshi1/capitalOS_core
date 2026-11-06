@@ -16,6 +16,8 @@ import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
+import Delta from "../components/Delta";
+import { missingBaselineReason } from "../lib/delta";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
@@ -265,11 +267,14 @@ export default function WealthOverview() {
             <div className="coHeroValueRow">
               <span className="coHeroValue">{formatMoney(currentNetWorth?.total)}</span>
               {prevMonthChange ? (
-                <span
-                  className={`coChip${prevMonthChange.abs >= 0 ? " coChipPositive" : " coChipNegative"}`}
-                >
-                  {fmt.formatPercent(prevMonthChange.pct, { signed: true })}
-                </span>
+                <Delta
+                  variant="chip"
+                  show="pct"
+                  abs={prevMonthChange.abs}
+                  pct={prevMonthChange.pct}
+                  currency={summaryCurrency}
+                  missingReason={missingBaselineReason(prevMonthChange)}
+                />
               ) : null}
             </div>
 
@@ -290,12 +295,13 @@ export default function WealthOverview() {
                   <span className="coHeroDeltaLabel">
                     SINCE LAST UPDATE{sinceUpdate.compare_as_of ? ` (${formatChipAsOf(sinceUpdate.compare_as_of)})` : ""}
                   </span>
-                  <strong
-                    className={
-                      sinceUpdate.net_worth_change.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                    }
-                  >
-                    {fmt.formatDelta(sinceUpdate.net_worth_change.abs, sinceUpdate.net_worth_change.pct, sinceUpdateCurrency)}
+                  <strong>
+                    <Delta
+                      abs={sinceUpdate.net_worth_change.abs}
+                      pct={sinceUpdate.net_worth_change.pct}
+                      currency={sinceUpdateCurrency}
+                      missingReason={sinceUpdate.net_worth_change.baseline_missing ? "no earlier update to compare with" : null}
+                    />
                   </strong>
                 </div>
               ) : sinceUpdateRes.isLoading ? (
@@ -312,12 +318,13 @@ export default function WealthOverview() {
               {prevMonthChange ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">VS LAST MONTH</span>
-                  <strong
-                    className={
-                      prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                    }
-                  >
-                    {fmt.formatDelta(prevMonthChange.abs, prevMonthChange.pct, summaryCurrency)}
+                  <strong>
+                    <Delta
+                      abs={prevMonthChange.abs}
+                      pct={prevMonthChange.pct}
+                      currency={summaryCurrency}
+                      missingReason={missingBaselineReason(prevMonthChange)}
+                    />
                   </strong>
                 </div>
               ) : summaryRes.isLoading ? (
@@ -334,12 +341,13 @@ export default function WealthOverview() {
               {prevYearChange ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">VS LAST YEAR</span>
-                  <strong
-                    className={
-                      prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                    }
-                  >
-                    {fmt.formatSignedMoney(prevYearChange.abs, summaryCurrency)}
+                  <strong>
+                    <Delta
+                      abs={prevYearChange.abs}
+                      pct={prevYearChange.pct}
+                      currency={summaryCurrency}
+                      missingReason={missingBaselineReason(prevYearChange)}
+                    />
                   </strong>
                 </div>
               ) : null}
@@ -536,10 +544,8 @@ export default function WealthOverview() {
                           <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
                         </div>
                         <div className="coHoldingRight">
-                          <strong
-                            className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
-                          >
-                            {fmt.formatSignedMoney(row.delta_abs, summaryCurrency)}
+                          <strong className="coHoldingValue">
+                            <Delta abs={row.delta_abs} currency={summaryCurrency} show="abs" />
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
@@ -574,10 +580,8 @@ export default function WealthOverview() {
                           <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
                         </div>
                         <div className="coHoldingRight">
-                          <strong
-                            className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
-                          >
-                            {fmt.formatSignedMoney(row.delta_abs, sinceUpdateCurrency)}
+                          <strong className="coHoldingValue">
+                            <Delta abs={row.delta_abs} currency={sinceUpdateCurrency} show="abs" />
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null

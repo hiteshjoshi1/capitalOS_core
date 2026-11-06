@@ -531,14 +531,14 @@ function OverviewTab({
   formatMoney: FormatMoney;
 }) {
   const delta = detail.analytics.free_cash_flow_change_vs_prior_month;
-  const deltaChip =
+  const heroDelta =
     delta == null
       ? null
       : {
-          text: `${fmt.formatSignedMoney(delta, detail.base_currency)}${
-            detail.analytics.prior_month ? ` vs ${formatMonthName(detail.analytics.prior_month)}` : ""
-          }`,
-          positive: delta >= 0,
+          abs: delta,
+          currency: detail.base_currency,
+          show: "abs" as const,
+          baseline: detail.analytics.prior_month ? `vs ${formatMonthName(detail.analytics.prior_month)}` : null,
         };
 
   return (
@@ -546,7 +546,7 @@ function OverviewTab({
       <HeroMetricCard
         eyebrow="Net cash flow this month"
         value={fmt.formatSignedMoney(detail.net, detail.base_currency)}
-        deltaChip={deltaChip}
+        delta={heroDelta}
         insightText={`Saved ${formatPercent(detail.savings_rate)} of income · Burn rate ${formatPercent(detail.analytics.burn_rate)}`}
       />
 

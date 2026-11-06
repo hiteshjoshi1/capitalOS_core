@@ -16,6 +16,9 @@
   --bad: oklch(68% 0.15 25);
   /* #150: "down" is one colour everywhere (#131: blue in the hero, red in the pill). */
   --trend-negative: var(--bad);
+  /* #224: the one up/down pair every <Delta> uses. */
+  --delta-up: var(--good);
+  --delta-down: var(--bad);
   --warn: #f7c97b;
   --shadow: rgba(0, 0, 0, 0.5);
   --surface-glow: rgba(255, 255, 255, 0.03);
@@ -45,6 +48,8 @@
   --good: #1e6b47;
   --bad: #a3501f; /* #151: was #b55d2d, 4.39:1 on light panels (#131 contrast probe) */
   --trend-negative: var(--bad);
+  --delta-up: var(--good);
+  --delta-down: var(--bad);
   --warn: #a3501f; /* #151: was #b55d2d (4.39:1) */
   --shadow: rgba(31, 36, 33, 0.06);
   --surface-glow: rgba(15, 122, 92, 0.04);
@@ -4454,6 +4459,72 @@ a.btn {
 .coChipNegative {
   color: var(--bad);
   background: color-mix(in srgb, var(--bad) 14%, transparent 86%);
+}
+
+/* <Delta> (#224): ▲/▼ + one colour pair; a missing baseline is muted text. */
+.delta {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.delta--up {
+  color: var(--delta-up);
+}
+
+.delta--down {
+  color: var(--delta-down);
+}
+
+.delta--flat,
+.delta--missing {
+  color: var(--muted);
+}
+
+.delta--missing {
+  font-weight: 500;
+}
+
+.deltaArrow {
+  font-size: 0.8em;
+}
+
+.deltaBaseline {
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.deltaChip {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--muted) 12%, transparent 88%);
+}
+
+.deltaChip.delta--up {
+  background: color-mix(in srgb, var(--delta-up) 14%, transparent 86%);
+}
+
+.deltaChip.delta--down {
+  background: color-mix(in srgb, var(--delta-down) 14%, transparent 86%);
+}
+
+.deltaChip.delta--missing {
+  font-size: 12px;
+}
+
+/* Price age per holding (#224). */
+.priceAge {
+  display: block;
+  color: var(--muted);
+}
+
+.priceAge--stale {
+  color: var(--warn);
+  font-weight: 600;
 }
 
 .coHeroFreshness {

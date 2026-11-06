@@ -736,6 +736,14 @@ def crypto_summary(
     total_base = total_usd * rate
     snapshot_total_base = snapshot_total_usd * snapshot_rate
     snapshot_delta_base = total_base - snapshot_total_base
+    # #224: a comparison with nothing to compare against says so, instead of a
+    # delta the size of the whole holding. no_data: no wallet snapshot by the
+    # compare anchor; no_fx_rate: a USD value but no USD->base rate that day (D-30).
+    snapshot_missing_reason: str | None = None
+    if not _has_value(snapshot_wallet_rows):
+        snapshot_missing_reason = "no_data"
+    elif snapshot_total_usd > 0 and snapshot_rate <= 0:
+        snapshot_missing_reason = "no_fx_rate"
 
     previous_lookup = {
         (str(item["wallet_id"]), str(item.get("symbol") or "").upper(), str(item.get("chain") or "").lower()): item
@@ -886,6 +894,8 @@ def crypto_summary(
         "snapshot_total_usd": snapshot_total_usd,
         "snapshot_delta_base": snapshot_delta_base,
         "snapshot_delta_pct": (snapshot_delta_base / snapshot_total_base) if snapshot_total_base > 0 else None,
+        "snapshot_missing": snapshot_missing_reason is not None,
+        "snapshot_missing_reason": snapshot_missing_reason,
         "base_currency": base_currency,
         "eth_exposure_usd": eth_usd,
         "eth_exposure_base": eth_usd * rate,
