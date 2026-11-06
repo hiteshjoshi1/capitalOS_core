@@ -23,6 +23,7 @@ from app.core.job_runs import (
     JOB_FX,
     JOB_MARKET_DATA,
     STATUS_FAILED,
+    STATUS_NO_NEW_DATA,
     STATUS_PARTIAL,
     STATUS_SUCCESS,
     TRIGGER_SCHEDULED,
@@ -31,7 +32,7 @@ from app.core.job_runs import (
 from app.core.logging import job_context
 from app import fx
 from app.db.session import SessionLocal
-from app.market_data.service import configured_exchanges, run_all_exchanges
+from app.market_data.service import configured_exchanges, run_all_exchanges, unpriced_summary
 
 logger = logging.getLogger("capitalos.market_data")
 _scheduler: BackgroundScheduler | None = None
@@ -77,11 +78,16 @@ def _latest_success_for_exchanges(exchanges: list[str]) -> datetime | None:
 
 def exchange_run_status(item: dict) -> str:
     """A job_runs status for one exchange's refresh result (#156): "failed" when
-    symbols were requested and no quote arrived (the data didn't advance)."""
+    symbols were requested and no quote arrived (the data didn't advance);
+    "no_new_data" when nothing was requested although positions held there
+    can't be priced (#222): the Data Hub shows it amber, and since it isn't a
+    failure the window isn't retried all day (#137)."""
     requested = int(item.get("requested_symbols") or 0)
     upserted = int(item.get("upserted_rows") or 0)
     if item.get("status") == "failed" or (requested > 0 and upserted == 0):
         return STATUS_FAILED
+    if requested == 0 and int(item.get("unpriced_holdings") or 0) > 0:
+        return STATUS_NO_NEW_DATA
     if item.get("status") == "success":
         return STATUS_SUCCESS
     return STATUS_PARTIAL
@@ -118,11 +124,16 @@ def record_exchange_runs(
         requested = int(item.get("requested_symbols") or 0)
         upserted = int(item.get("upserted_rows") or 0)
         missing = int(item.get("missing_symbols") or 0)
+        unpriced = int(item.get("unpriced_holdings") or 0)
         message = None
         if status == STATUS_FAILED:
             message = f"No quotes received for {requested} symbol{'s' if requested != 1 else ''}"
+        elif status == STATUS_NO_NEW_DATA:
+            message = unpriced_summary(exchange, unpriced)
         elif status == STATUS_PARTIAL:
             message = f"{missing} of {requested} symbols missing, {int(item.get('deferred_symbols') or 0)} deferred"
+            if unpriced:
+                message += f"; {unpriced_summary(exchange, unpriced)}"
         record_job_run(
             db,
             job=JOB_MARKET_DATA,
@@ -130,10 +141,15 @@ def record_exchange_runs(
             trigger=trigger,
             status=status,
             started_at=started_at,
-            data_as_of=item.get("trade_date") if status != STATUS_FAILED else None,
+            data_as_of=item.get("trade_date") if status not in (STATUS_FAILED, STATUS_NO_NEW_DATA) else None,
             data_advanced=upserted > 0,
             error=message,
-            details={"requested_symbols": requested, "upserted_rows": upserted, "missing_symbols": missing},
+            details={
+                "requested_symbols": requested,
+                "upserted_rows": upserted,
+                "missing_symbols": missing,
+                "unpriced_holdings": unpriced,
+            },
         )
 
 

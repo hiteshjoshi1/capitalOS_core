@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx import fx_status, get_rates, get_rates_by_date, rate_date
-from app.market_data.service import YAHOO_SUFFIX
+from app.market_data.service import YAHOO_QUALIFIED_SUFFIXES, YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.valuation import clock as valuation_clock
 # The holdings' market value under the dashboard's price rule (D-21, #144), from the valuation service.
@@ -497,7 +497,7 @@ def _to_yahoo_symbol(symbol: str, exchange_code: str | None) -> str:
     ex = exchange_code.strip().upper()
     suffix = YAHOO_SUFFIX.get(ex, "")
     out = base
-    if suffix and not out.endswith(suffix):
+    if suffix and not out.endswith(YAHOO_QUALIFIED_SUFFIXES):
         out = f"{out}{suffix}"
     if ex == "HKEX" and out.endswith(".HK"):
         hk_base = out[:-3]

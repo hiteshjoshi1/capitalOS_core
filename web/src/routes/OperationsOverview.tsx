@@ -49,13 +49,31 @@ function formatWhen(value?: string | null): string {
   return label === fmt.MISSING ? value : label;
 }
 
+const UNPRICED_REASON_LABELS: Record<string, string> = {
+  no_asset: "Not linked to an asset",
+  no_symbol: "No ticker on a configured exchange",
+  no_quote: "No quote from any provider",
+};
+
 function jobStatusDetail(job: DataHubJobStatus): string | null {
   if (job.consecutive_failures > 0) {
     const runs = `${job.consecutive_failures} failed run${job.consecutive_failures === 1 ? "" : "s"} in a row`;
     return job.last_error ? `${runs}: ${job.last_error}` : runs;
   }
+  // A scope whose last run brought nothing, e.g. an exchange with held positions
+  // but no symbol to price (#222): say why.
+  const quiet = (job.scopes ?? []).find((scope) => scope.last_run_status === "no_new_data" && scope.last_error);
+  if (quiet?.last_error) return quiet.last_error;
   if (job.last_run_status === "no_new_data") return "Last run brought no new data.";
   return null;
+}
+
+function marketDataMeta(summary: DataHubSummary): string {
+  const unpriced = summary.market_data.unpriced ?? 0;
+  const parts: string[] = [];
+  if (summary.market_data.stale > 0) parts.push(`${summary.market_data.stale} stale`);
+  if (unpriced > 0) parts.push(`${unpriced} holding${unpriced === 1 ? "" : "s"} unpriced`);
+  return parts.length > 0 ? parts.join(" · ") : "All quotes fresh";
 }
 
 export default function OperationsOverview() {
@@ -159,7 +177,7 @@ export default function OperationsOverview() {
         {
           label: "Market data",
           value: `${summary.market_data.fresh} / ${summary.market_data.fresh + summary.market_data.stale} fresh`,
-          meta: summary.market_data.stale > 0 ? `${summary.market_data.stale} stale` : "All quotes fresh",
+          meta: marketDataMeta(summary),
         },
         {
           label: "Crypto wallets",
@@ -192,6 +210,30 @@ export default function OperationsOverview() {
               ))}
             </div>
           </section>
+
+          {summary && (summary.market_data.unpriced_holdings ?? []).length > 0 && (
+            <section aria-label="Unpriced holdings">
+              <div className="coSectionHeader">
+                <div>
+                  <p className="coEyebrow">MARKET DATA</p>
+                  <h2 className="coSectionTitle">Holdings without a live price</h2>
+                </div>
+              </div>
+              <div className="card" data-testid="unpriced-holdings">
+                <p className="muted">
+                  These stay at the price in their last statement until they can be quoted.
+                </p>
+                {(summary.market_data.unpriced_holdings ?? []).map((item, idx) => (
+                  <DirectoryListRow
+                    key={`${item.platform ?? ""}-${item.symbol ?? idx}`}
+                    title={item.symbol ?? "—"}
+                    meta={[item.name, item.platform, item.exchange_code ?? item.currency].filter(Boolean).join(" · ")}
+                    right={<StatusPill tone="warn" label={UNPRICED_REASON_LABELS[item.reason] ?? item.reason} />}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
 
           {summary && summary.job_status.some((job) => job.state !== "not_configured") && (
             <section aria-label="Job status">

@@ -1328,6 +1328,17 @@ export type DataHubJobStatus = {
   scopes: DataHubJobScopeStatus[];
 };
 
+// A held stock or fund with no live price (#222): not linked to an asset,
+// no ticker on a configured exchange, or never quoted.
+export type DataHubUnpricedHolding = {
+  symbol?: string | null;
+  name?: string | null;
+  currency?: string | null;
+  exchange_code?: string | null;
+  platform?: string | null;
+  reason: "no_asset" | "no_symbol" | "no_quote" | string;
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -1340,6 +1351,9 @@ export type DataHubSummary = {
   market_data: {
     fresh: number;
     stale: number;
+    // Held stocks/funds the quote refresh can't price (#222).
+    unpriced?: number;
+    unpriced_holdings?: DataHubUnpricedHolding[];
   };
   connected_wallet_count: number;
   connected_wallet_labels: string[];

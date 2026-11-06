@@ -120,6 +120,36 @@ def _normalize_columns(columns: list[str]) -> Dict[str, str]:
     return mapping
 
 
+def _cell_text(value: Any) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    text = str(value).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def code_and_name_swapped(pairs: list[tuple[Any, Any]]) -> bool:
+    """Whether the (code column, name column) values hold the name first (#222).
+
+    Sharekhan's export labels its first two columns ``SKScripCode | Stock Name``
+    but each data row holds the company name first and the scrip code second.
+    A scrip code never has a space and a company name nearly always does, so the
+    columns are swapped when more rows look like (name, code) than (code, name).
+    Rows where neither or both values have a space (a one-word company name)
+    don't count either way.
+    """
+    swapped = straight = 0
+    for code, name in pairs:
+        code_text, name_text = _cell_text(code), _cell_text(name)
+        if not code_text or not name_text:
+            continue
+        code_spaced, name_spaced = " " in code_text, " " in name_text
+        if code_spaced and not name_spaced:
+            swapped += 1
+        elif name_spaced and not code_spaced:
+            straight += 1
+    return swapped > straight
+
+
 def _select_html_table(tables: list[pd.DataFrame]) -> tuple[pd.DataFrame, SheetSelection] | None:
     for idx, raw in enumerate(tables):
         if raw.empty:
@@ -179,6 +209,14 @@ def parse_sharekhan_holdings_xls(file_path: str) -> ParseResult:
     df = df.dropna(how="all")
     columns = [str(c).strip() for c in df.columns.tolist()]
     col_map = _normalize_columns(columns)
+    # The scrip-code and name columns trade places in Sharekhan's rows (#222).
+    columns_swapped = (
+        "symbol" in col_map
+        and "name" in col_map
+        and code_and_name_swapped(list(zip(df[col_map["symbol"]].tolist(), df[col_map["name"]].tolist())))
+    )
+    if columns_swapped:
+        col_map["symbol"], col_map["name"] = col_map["name"], col_map["symbol"]
 
     positions: List[Dict] = []
     preview: List[Dict] = []
@@ -241,6 +279,7 @@ def parse_sharekhan_holdings_xls(file_path: str) -> ParseResult:
         "sheet_name": selection.name,
         "header_row_index": selection.header_row,
         "preview_positions": preview,
+        "code_name_columns_swapped": columns_swapped,
     }
     if stated_as_of is not None:
         meta["as_of"] = stated_as_of.isoformat()

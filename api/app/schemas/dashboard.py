@@ -292,9 +292,24 @@ class DataHubImportHealth(BaseModel):
     last_import_at: Optional[str] = None
 
 
+class DataHubUnpricedHolding(BaseModel):
+    """A held stock or fund the quote refresh can't price (#222). `reason`:
+    no_asset (not linked to an asset), no_symbol (no ticker on a configured
+    exchange) or no_quote (no provider has returned a price)."""
+
+    symbol: Optional[str] = None
+    name: Optional[str] = None
+    currency: Optional[str] = None
+    exchange_code: Optional[str] = None
+    platform: Optional[str] = None
+    reason: str
+
+
 class DataHubMarketData(BaseModel):
     fresh: int
     stale: int
+    unpriced: int = 0
+    unpriced_holdings: List[DataHubUnpricedHolding] = []
 
 
 class DataHubJobScopeStatus(BaseModel):
