@@ -13,7 +13,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
-from app.market_data.providers import EODHDProvider, FinnhubProvider, YahooProvider, YFinanceProvider, EodQuote
+from app.market_data.providers import (
+    YAHOO_QUALIFIED_SUFFIXES,
+    EODHDProvider,
+    EodQuote,
+    FinnhubProvider,
+    YahooProvider,
+    YFinanceProvider,
+)
 
 
 YAHOO_SUFFIX = {
@@ -129,14 +136,14 @@ def _default_yahoo_symbol(exchange_symbol: str, exchange_code: str) -> str:
         base = f"{base[:-4]}.NS"
     if base.endswith(".SGX"):
         base = f"{base[:-4]}.SI"
-    if ex == "US" and "." in base and not base.endswith((".NS", ".SI", ".HK")):
+    if ex == "US" and "." in base and not base.endswith(YAHOO_QUALIFIED_SUFFIXES):
         # Yahoo uses dashed class-share tickers for US equities (e.g. BRK-B).
         parts = base.split(".")
         if len(parts) == 2 and parts[0] and parts[1]:
             base = f"{parts[0]}-{parts[1]}"
     suffix = YAHOO_SUFFIX.get(ex, "")
     symbol = base
-    if suffix and not symbol.endswith(suffix):
+    if suffix and not symbol.endswith(YAHOO_QUALIFIED_SUFFIXES):
         symbol = f"{symbol}{suffix}"
     if ex == "HKEX" and symbol.endswith(".HK"):
         hk_base = symbol[:-3]
@@ -909,6 +916,143 @@ def scope_exchange_diagnostics(diagnostics: dict[str, Any], asset_ids: set[int])
     return {**diagnostics, "diagnostics_summary": _diagnostics_summary(items), "symbols": items}
 
 
+# Why a held position gets no live price (#222).
+UNPRICED_NO_ASSET = "no_asset"  # its instrument isn't linked to an asset
+UNPRICED_NO_SYMBOL = "no_symbol"  # the asset has no ticker on a configured exchange
+UNPRICED_NO_QUOTE = "no_quote"  # it has a ticker, but no provider has returned a price
+_PRICEABLE_SECURITY_TYPES = ("STK", "STOCK", "FUND", "ETF", "MF")
+
+
+def _exchange_for(country: Any, currency: Any) -> str | None:
+    row = {"home_country": country, "quote_currency": currency}
+    for exchange_code in configured_exchanges():
+        if _asset_matches_exchange(row, exchange_code):
+            return exchange_code
+    return None
+
+
+def unpriced_held_positions(
+    db: Session,
+    *,
+    user_id: int | None = None,
+    exchange_code: str | None = None,
+) -> list[dict[str, Any]]:
+    """Held stocks and funds that the quote refresh can't price (#222), one row
+    per instrument: not linked to an asset, no ticker on a configured exchange,
+    or never quoted. Held means a non-zero quantity in its account's newest
+    authoritative position snapshot, in an open account. ``user_id`` limits it
+    to that user's accounts (None: every account, for the refresh job's own
+    check); ``exchange_code`` to the exchange each position would be priced on
+    (its symbol map's, else the one its country or currency points to)."""
+    scope = ""
+    params: dict[str, Any] = {
+        "today": datetime.now(tz=timezone.utc).date(),
+        **{f"st{i}": t for i, t in enumerate(_PRICEABLE_SECURITY_TYPES)},
+    }
+    if user_id is not None:
+        scope = "AND " + account_scope_sql("acc")
+        params["current_user_id"] = user_id
+    security_types = ",".join(f":st{i}" for i in range(len(_PRICEABLE_SECURITY_TYPES)))
+    rows = db.execute(
+        text(
+            f"""
+            WITH latest AS (
+              SELECT ps.broker_account_id, MAX(ps.report_date) AS report_date
+              FROM portfolio_position_snapshots ps
+              WHERE ps.authority_status = 'authoritative'
+                AND ps.report_date <= :today
+              GROUP BY ps.broker_account_id
+            )
+            SELECT DISTINCT
+              bi.id AS instrument_id,
+              bi.asset_id,
+              COALESCE(a.symbol, bi.symbol) AS symbol,
+              COALESCE(a.name, bi.description, bi.symbol) AS name,
+              COALESCE(a.quote_currency, bi.currency) AS currency,
+              COALESCE(a.home_country, bi.country) AS country,
+              bi.platform_code
+            FROM portfolio_position_snapshots ps
+            JOIN latest l
+              ON l.broker_account_id = ps.broker_account_id AND l.report_date = ps.report_date
+            JOIN broker_accounts ba ON ba.id = ps.broker_account_id
+            JOIN accounts acc ON acc.id = ba.legacy_account_id
+            JOIN broker_instruments bi ON bi.id = ps.broker_instrument_id
+            LEFT JOIN assets a ON a.id = bi.asset_id
+            WHERE ps.authority_status = 'authoritative'
+              AND ps.quantity IS NOT NULL
+              AND CAST(ps.quantity AS DOUBLE PRECISION) <> 0
+              AND (acc.closed_on IS NULL OR acc.closed_on >= :today)
+              AND (
+                CAST(a.asset_class AS TEXT) IN ('STOCK', 'FUND')
+                OR (a.id IS NULL AND UPPER(COALESCE(bi.security_type, '')) IN ({security_types}))
+              )
+              {scope}
+            """
+        ),
+        params,
+    ).mappings().all()
+    if not rows:
+        return []
+
+    asset_ids = {int(row["asset_id"]) for row in rows if row["asset_id"] is not None}
+    tickers: dict[int, str] = {}
+    if asset_ids:
+        placeholders = ",".join(str(asset_id) for asset_id in sorted(asset_ids))
+        exchanges = set(configured_exchanges())
+        map_rows = db.execute(
+            text(
+                f"""
+                SELECT m.asset_id, m.exchange_code, m.exchange_symbol, a.symbol AS asset_symbol
+                FROM market_symbol_map m
+                JOIN assets a ON a.id = m.asset_id
+                WHERE m.is_active = TRUE AND m.asset_id IN ({placeholders})
+                ORDER BY m.asset_id, m.exchange_code
+                """
+            )
+        ).mappings().all()
+        for map_row in map_rows:
+            ex, sym = _resolved_exchange_symbol(map_row)
+            if sym and ex in exchanges:
+                tickers.setdefault(int(map_row["asset_id"]), ex)
+    quoted = set(_latest_price_details(db, set(tickers)).keys())
+
+    wanted = exchange_code.upper() if exchange_code else None
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        asset_id = int(row["asset_id"]) if row["asset_id"] is not None else None
+        if asset_id is None:
+            reason, ex = UNPRICED_NO_ASSET, _exchange_for(row["country"], row["currency"])
+        elif asset_id not in tickers:
+            reason, ex = UNPRICED_NO_SYMBOL, _exchange_for(row["country"], row["currency"])
+        elif asset_id not in quoted:
+            reason, ex = UNPRICED_NO_QUOTE, tickers[asset_id]
+        else:
+            continue
+        if wanted is not None and ex != wanted:
+            continue
+        out.append(
+            {
+                "instrument_id": int(row["instrument_id"]),
+                "asset_id": asset_id,
+                "symbol": row["symbol"],
+                "name": row["name"],
+                "currency": row["currency"],
+                "exchange_code": ex,
+                "platform": row["platform_code"],
+                "reason": reason,
+            }
+        )
+    out.sort(key=lambda item: (item["exchange_code"] or "", str(item["symbol"] or "")))
+    return out
+
+
+def unpriced_summary(exchange_code: str, count: int) -> str:
+    return (
+        f"{count} held position{'s' if count != 1 else ''} on {exchange_code} "
+        "can't be priced (no linked asset, ticker or quote)"
+    )
+
+
 def _fetch_quotes(
     provider_name: str,
     *,
@@ -957,13 +1101,25 @@ def run_exchange_refresh(
     deferred_symbols = all_symbols[len(symbols) :] if not full_coverage else []
     if not symbols:
         run_ids_empty: dict[str, int] = {}
+        unpriced = len(unpriced_held_positions(db, exchange_code=exchange_code))
         if not all_symbols:
             # Nothing to fetch on this exchange (#137): still record the run, as a
-            # 0-symbol success by provider "none", so the scheduler's done-check
-            # (a success row per exchange since the window's close) is satisfied
-            # and the window runs once a day, not every retry interval.
+            # 0-symbol run by provider "none", so the scheduler's done-check (a
+            # success or partial row per exchange since the window's close) is
+            # satisfied and the window runs once a day, not every retry interval.
+            # Held positions that should have been priced here make it "partial"
+            # with the reason, not a silent success (#222, D-54).
             run_id = _insert_run(db, provider=EMPTY_EXCHANGE_PROVIDER, exchange_code=exchange_code, trade_date=trade_date)
-            _finish_run(db, run_id, status="success", requested_symbols=0, received_rows=0, upserted_rows=0, missing_symbols=0)
+            _finish_run(
+                db,
+                run_id,
+                status="partial" if unpriced else "success",
+                requested_symbols=0,
+                received_rows=0,
+                upserted_rows=0,
+                missing_symbols=0,
+                error_summary=unpriced_summary(exchange_code, unpriced) if unpriced else None,
+            )
             run_ids_empty[EMPTY_EXCHANGE_PROVIDER] = run_id
         diagnostics = _exchange_diagnostics(
             db,
@@ -981,7 +1137,8 @@ def run_exchange_refresh(
             "dividend_rows_upserted": 0,
             "missing_symbols": 0,
             "backfilled_symbols": backfilled_symbols,
-            "status": "partial" if deferred_symbols else "success",
+            "status": "partial" if (deferred_symbols or unpriced) else "success",
+            "unpriced_holdings": unpriced,
             "providers": [],
             "run_ids": run_ids_empty,
             "daily_limit": daily_limit,
@@ -1161,6 +1318,7 @@ def run_exchange_refresh(
         attempted_asset_ids=attempted_asset_ids,
         deferred_asset_ids={row.asset_id for row in deferred_symbols},
     )
+    unpriced = len(unpriced_held_positions(db, exchange_code=exchange_code))
     db.commit()
     return {
         "exchange_code": exchange_code,
@@ -1171,7 +1329,10 @@ def run_exchange_refresh(
         "dividend_rows_upserted": dividend_rows_upserted,
         "missing_symbols": len(unresolved) + total_invalid,
         "backfilled_symbols": backfilled_symbols,
-        "status": "success" if (not unresolved and total_invalid == 0 and not deferred_symbols) else "partial",
+        "status": (
+            "success" if (not unresolved and total_invalid == 0 and not deferred_symbols and not unpriced) else "partial"
+        ),
+        "unpriced_holdings": unpriced,
         "providers": providers_used,
         "run_ids": run_ids,
         "daily_limit": daily_limit,

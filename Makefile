@@ -57,7 +57,7 @@ endif
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-window-move db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -581,6 +581,24 @@ ibkr-rebuild-snapshots:
 # Prints job ids, actions and dates, never amounts. Runs in the running api container.
 card-balance-backfill:
 	$(COMPOSE) exec api python -m app.scripts.backfill_card_balances $(if $(filter 1,$(APPLY)),--apply,)
+
+# #222: Sharekhan instruments imported before the parser fix hold the company name as their
+# symbol and the scrip code as their name, and no asset, so the NSE refresh never priced them.
+# This swaps them back, renames the synthetic broker_instrument_id to <TICKER>_INR (the row id
+# stays), links/creates the INR asset (home country IN) and marks History dirty from the
+# earliest affected snapshot. Dry run unless APPLY=1; idempotent. Prints counts and ids, never
+# holdings. Then refresh prices (Data Hub, or POST /market-data/refresh-now) to price them.
+sharekhan-instrument-repair:
+	$(COMPOSE) exec api python -m app.scripts.repair_sharekhan_instruments $(if $(filter 1,$(APPLY)),--apply,)
+
+# #222: quote one asset under another Yahoo symbol, e.g. an Indian holding Yahoo lists only on
+# BSE: make market-symbol-override SYMBOL=<CODE> CURRENCY=INR EXCHANGE=NSE YAHOO=<CODE>.BO
+# (CLEAR=1 instead of YAHOO removes it). Dry run unless APPLY=1. The Data Hub lists holdings
+# that still can't be priced.
+market-symbol-override:
+	@test -n "$(SYMBOL)" -a -n "$(CURRENCY)" -a -n "$(EXCHANGE)" || { echo "Usage: make market-symbol-override SYMBOL=<asset symbol> CURRENCY=<ccy> EXCHANGE=<US|SGX|HKEX|NSE> (YAHOO=<yahoo symbol> | CLEAR=1) [APPLY=1]" >&2; exit 2; }
+	@test -n "$(YAHOO)$(filter 1,$(CLEAR))" || { echo "Give YAHOO=<yahoo symbol> or CLEAR=1" >&2; exit 2; }
+	$(COMPOSE) exec api python -m app.scripts.set_market_symbol_override --symbol "$(SYMBOL)" --currency "$(CURRENCY)" --exchange "$(EXCHANGE)" $(if $(filter 1,$(CLEAR)),--clear,--yahoo "$(YAHOO)") $(if $(filter 1,$(APPLY)),--apply,)
 
 # #190: mask account numbers in existing import reports (data/reports/*.json): parser_meta's
 # account fields and signature_debug only, never transaction descriptions. Dry run (lists files

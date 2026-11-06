@@ -1,0 +1,98 @@
+
+
+
+
+
+<html>
+<body>
+<table border="0">
+
+<tr><td style="font-size:14px;color:Orange"><b>Equity: My Trade Folder</b></td></tr>
+
+<tr><td><b>Name:</b>&nbsp;Test&nbsp;Investor </td><td><b>Customer ID:</b>&nbsp;0000000 </td><td><b>Login ID:</b>&nbsp;testuser00</td><td><b>Year:</b>&nbsp;2026-2027</td></tr>
+<tr></tr>
+
+</table>
+
+
+
+<table border="1">
+<tr>
+	<tr>		 	
+		<td><b>SKScripCode</b></td>
+		<td><b>Stock Name</b></td>
+		<td><b>Current Qty</b></td>
+		<td><b>Investment Price</b></td>
+		<td><b>Current Market Price</b></td>
+		<td><b>Holding Value</b></td>
+		<td><b>Market Value</b></td>
+		<td><b>Realized Gain/Loss</b></td>
+		<td><b>UnRealized Gain/Loss</b></td>
+		<td><b>Percent UnRealized Gain/Loss</b></td>
+	</tr>
+					<tr>
+						<td>&nbsp;ACME CHEMICALS LTD</td>
+						<td>&nbsp;ACMECHEM</td>
+						<td>&nbsp;12</td>
+						<td>&nbsp;1500.00</td>
+						<td>&nbsp;1625.50</td>
+						<td>&nbsp;18000.00</td>
+						<td>&nbsp;19506.00</td>
+						<td>&nbsp;0.0</td>
+						<td>&nbsp;1506.00</td>
+						<td>&nbsp;8.37</td>
+					</tr>		
+					<tr>
+						<td>&nbsp;ZENITH PAPER (I) LTD</td>
+						<td>&nbsp;ZENPAPER</td>
+						<td>&nbsp;250</td>
+						<td>&nbsp;82.40</td>
+						<td>&nbsp;91.15</td>
+						<td>&nbsp;20600.00</td>
+						<td>&nbsp;22787.50</td>
+						<td>&nbsp;0.0</td>
+						<td>&nbsp;2187.50</td>
+						<td>&nbsp;10.62</td>
+					</tr>		
+					<tr>
+						<td>&nbsp;NORTHWIND TRADERS</td>
+						<td>&nbsp;NWTRADE</td>
+						<td>&nbsp;40</td>
+						<td>&nbsp;410.00</td>
+						<td>&nbsp;398.75</td>
+						<td>&nbsp;16400.00</td>
+						<td>&nbsp;15950.00</td>
+						<td>&nbsp;0.0</td>
+						<td>&nbsp;-450.00</td>
+						<td>&nbsp;-2.74</td>
+					</tr>		
+					<tr>
+						<td>&nbsp;ORBIT</td>
+						<td>&nbsp;ORBITLTD</td>
+						<td>&nbsp;5</td>
+						<td>&nbsp;2200.00</td>
+						<td>&nbsp;2310.00</td>
+						<td>&nbsp;11000.00</td>
+						<td>&nbsp;11550.00</td>
+						<td>&nbsp;0.0</td>
+						<td>&nbsp;550.00</td>
+						<td>&nbsp;5.00</td>
+					</tr>		
+    <tr>
+	<td>&nbsp;</td>
+	<td>&nbsp;</td>
+	<td>&nbsp;</td>
+	<td>&nbsp;</td>
+	<td style="background-color: #000000;color: #ffffff;">&nbsp;<b>Total:</b></td>
+	<td style="background-color: #000000;color: #ffffff;">&nbsp;<b>66000.00</b></td>
+	<td style="background-color: #000000;color: #ffffff;">&nbsp;<b>69793.50</b></td>
+	<td style="background-color: #000000;color: #ffffff;">&nbsp;<b>0.00</b></td>
+	<td style="background-color: #000000;color: #ffffff;">&nbsp;<b>3793.50</b></td>
+	<td style="background-color: #000000;color: #ffffff;">&nbsp;<b>5.75%</b></td>
+	</tr>
+
+</table>
+	
+
+</body>
+</html>
