@@ -418,6 +418,49 @@ def test_the_dummy_seed_reruns_and_clears_under_restrict(pg_engine):  # noqa: F8
     assert _count(pg_engine, "SELECT COUNT(*) FROM portfolio_position_snapshots") == 0
 
 
+@pytest.mark.postgres
+def test_the_dummy_cleanup_marks_history_dirty_from_the_earliest_dummy_price(pg_engine):  # noqa: F811
+    """#221: DUMMY prices are shared, so the cleanup marks every user's History from the
+    earliest DUMMY price date, and the dummy rows' owner (demo) from all of history."""
+    seed = (_migrations() / "seed_dummy.sql").read_text(encoding="utf-8")
+    cleanup = (_migrations() / "seed_dummy_cleanup.sql").read_text(encoding="utf-8")
+    with pg_engine.begin() as conn:
+        conn.execute(text("INSERT INTO users (username) VALUES ('real_a'), ('real_b'), ('real_c')"))
+        # real_b has a later mark pending (it moves earlier), real_c an earlier one (it stays).
+        conn.execute(text(
+            "INSERT INTO wealth_rollup_dirty (user_id, from_date, generation, marked_at, reason) "
+            "SELECT id, CASE username WHEN 'real_b' THEN DATE '2099-01-01' ELSE DATE '1990-01-01' END, 5, now(), 'earlier' "
+            "FROM users WHERE username IN ('real_b', 'real_c')"
+        ))
+    raw = pg_engine.raw_connection()
+    try:
+        raw.autocommit = True
+        cursor = raw.cursor()
+        cursor.execute(seed)
+        cursor.execute(
+            "SELECT MIN(LEAST(trade_date, (ts AT TIME ZONE 'UTC')::date)) FROM prices WHERE source = 'DUMMY'"
+        )
+        earliest = cursor.fetchone()[0]
+        assert earliest is not None
+        cursor.execute(cleanup)
+    finally:
+        raw.close()
+    with pg_engine.connect() as conn:
+        marks = {
+            row.username: row
+            for row in conn.execute(text(
+                "SELECT u.username, d.from_date, d.generation, d.reason "
+                "FROM users u LEFT JOIN wealth_rollup_dirty d ON d.user_id = u.id"
+            ))
+        }
+    assert _count(pg_engine, "SELECT COUNT(*) FROM prices WHERE source = 'DUMMY'") == 0
+    assert str(marks["demo"].from_date) == "1970-01-01"
+    assert marks["real_a"].from_date == earliest and marks["real_a"].reason == "dummy_cleanup"
+    assert marks["real_b"].from_date == earliest and marks["real_b"].generation == 6
+    assert str(marks["real_c"].from_date) == "1990-01-01" and marks["real_c"].generation == 6
+    assert all(row.from_date is not None for row in marks.values()), "every user is marked"
+
+
 
 @pytest.mark.postgres
 def test_precheck_names_a_constraint_to_drop_that_is_not_there(pg_engine):  # noqa: F811
