@@ -10,6 +10,19 @@ export function currentMonthYYYYMM() {
   return currentMonth();
 }
 
+/** `month` (`YYYY-MM`) moved by `delta` months. */
+export function shiftMonth(month: string, delta: number): string {
+  const [yearRaw, monthRaw] = month.split("-");
+  const dt = new Date(Date.UTC(Number(yearRaw), Number(monthRaw) - 1 + delta, 1));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Whether `month` is before the current month: a page following it shows that month-end
+ * snapshot rather than live data (#223). The same test as MonthControl's "Past month" callout. */
+export function isPastMonth(month: string): boolean {
+  return month < currentMonthYYYYMM();
+}
+
 function isValidMonth(value: string | null): value is string {
   return value != null && MONTH_PATTERN.test(value);
 }

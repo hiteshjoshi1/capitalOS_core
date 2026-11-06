@@ -155,8 +155,7 @@ def platform_allocation(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
-    _parse_month(month)
-    return PlatformAllocationOut(**pages.platform_allocation(db, current_user.id, base_currency))
+    return PlatformAllocationOut(**pages.platform_allocation(db, current_user.id, month, _parse_month(month), base_currency))
 
 
 @router.get("/cash-deposits", response_model=CashDepositsOut)
@@ -176,8 +175,7 @@ def stock_exposure(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
-    _parse_month(month)
-    return StockExposureOut(**pages.stock_exposure(db, current_user.id, base_currency))
+    return StockExposureOut(**pages.stock_exposure(db, current_user.id, _parse_month(month), base_currency))
 
 
 @router.get("/geography-exposure", response_model=GeographyExposureOut)

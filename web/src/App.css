@@ -4463,6 +4463,34 @@ a.btn {
   line-height: 1.4;
 }
 
+/* #223: a past month on Overview is a month-end snapshot, said in the hero (in the
+   #127 "Past month" callout's colour), with a way back to the live month. */
+.coHeroPastMonth {
+  margin: 10px 0 0;
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--warn);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.coHeroBackToLive {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Per-source freshness chips — replaces a single "As of ..." line so each
    source's own staleness is visible instead of averaged away. */
 .coFreshnessRow {
@@ -5706,6 +5734,18 @@ html, body {
 .whAxisLabelNow {
   fill: var(--accent);
   font-weight: 600;
+}
+
+/* #223: the app's selected month on the History chart: a soft column and a bold label. */
+.whSelectedCol {
+  fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  stroke: color-mix(in srgb, var(--accent) 45%, transparent);
+  stroke-width: 1;
+}
+
+.whAxisLabelSelected {
+  fill: var(--text);
+  font-weight: 700;
 }
 
 .whUploadMark {

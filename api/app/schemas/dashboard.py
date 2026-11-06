@@ -100,6 +100,9 @@ class DashboardSummaryResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    # #223: true for the open (or a future) month, whose geography, top_holdings
+    # and cash_balances are live; false for a past month (its month-end snapshot).
+    is_live: Optional[bool] = None
     current_net_worth_as_of: Optional[str] = None
     current_net_worth: Optional[NetWorth] = None
     current_net_worth_freshness: Optional[NetWorthFreshness] = None
@@ -194,6 +197,10 @@ class PlatformAllocationItem(BaseModel):
 
 class PlatformAllocationOut(BaseModel):
     as_of: str | None = None
+    # #223: the requested month, and whether it is the open month (live, quote
+    # priced) or a past month (its month-end snapshot).
+    as_of_month: str | None = None
+    is_live: bool | None = None
     total: float
     items: list[PlatformAllocationItem]
 
@@ -230,6 +237,7 @@ class StockExposureItem(BaseModel):
 
 class StockExposureOut(BaseModel):
     as_of: str | None = None
+    is_live: bool | None = None
     base_currency: str
     total: float
     by_country: list[StockExposureItem]
@@ -359,6 +367,9 @@ class BootstrapResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    # #223: true for the open (or a future) month (the page headline is
+    # current_net_worth); false for a past month (net_worth, its month-end).
+    is_live: Optional[bool] = None
     current_net_worth_as_of: Optional[str] = None
     current_net_worth: Optional[NetWorth] = None
     current_net_worth_freshness: Optional[NetWorthFreshness] = None
