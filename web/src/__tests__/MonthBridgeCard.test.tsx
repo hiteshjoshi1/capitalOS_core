@@ -82,9 +82,13 @@ function makeBridge(overrides: Partial<MonthBridge> = {}): MonthBridge {
     }),
     liabilities_change: 350,
     movers: [
-      { asset_id: 1, symbol: "NVDA", name: "NVDA", asset_class: "STOCK", start_value: 44_100, end_value: 48_200, change: 4100, price_effect: 4350, quantity_effect: 0, fx_effect: -250, cause: "price" },
-      { asset_id: null, symbol: "ETH", name: "ETH", asset_class: "CRYPTO", start_value: 9000, end_value: 12_200, change: 3200, price_effect: 3200, quantity_effect: 0, fx_effect: 0, cause: "price" },
-      { asset_id: 3, symbol: "MMF", name: "MMF", asset_class: "FUND", start_value: 0, end_value: 5000, change: 5000, price_effect: 0, quantity_effect: 5000, fx_effect: 0, cause: "quantity" },
+      { asset_id: 1, symbol: "NVDA", name: "NVDA", asset_class: "STOCK", start_value: 44_100, end_value: 48_200, change: 4100, price_effect: 4350, quantity_effect: 0, fx_effect: -250, market_effect: 4100, cause: "price" },
+      { asset_id: null, symbol: "ETH", name: "ETH", asset_class: "CRYPTO", start_value: 9000, end_value: 12_200, change: 3200, price_effect: 3200, quantity_effect: 0, fx_effect: 0, market_effect: 3200, cause: "price" },
+      { asset_id: 4, symbol: "ABT", name: "ABT", asset_class: "STOCK", start_value: 15_000, end_value: 0, change: -15_000, price_effect: 600, quantity_effect: -15_600, fx_effect: 0, market_effect: 600, cause: "price" },
+    ],
+    trades: [
+      { asset_id: 4, symbol: "ABT", name: "ABT", asset_class: "STOCK", amount: -15_600, side: "sold", cash_recorded: true },
+      { asset_id: 3, symbol: "MMF", name: "MMF", asset_class: "FUND", amount: 5000, side: "bought", cash_recorded: false },
     ],
     fx_incomplete: false,
     fx_missing_currencies: [],
@@ -177,7 +181,17 @@ describe("<MonthBridgeCard>", () => {
     renderCard();
     const nvda = await screen.findByTestId("bridge-mover-NVDA");
     expect(nvda).toHaveTextContent("NVDA ▲+S$ 4,100 (price)");
-    expect(screen.getByTestId("bridge-mover-MMF")).toHaveTextContent("(quantity)");
+    // A holding sold this month shows its market move, not the sale.
+    expect(screen.getByTestId("bridge-mover-ABT")).toHaveTextContent("ABT ▲+S$ 600 (price)");
+  });
+
+  it("lists purchases and sales apart, not as gains or losses", async () => {
+    mockApi.monthBridge.mockResolvedValue(makeBridge());
+    renderCard();
+    expect(await screen.findByText("BOUGHT AND SOLD")).toBeInTheDocument();
+    expect(screen.getByTestId("bridge-trade-ABT")).toHaveTextContent("Sold ABT S$ 15,600 (to cash)");
+    expect(screen.getByTestId("bridge-trade-MMF")).toHaveTextContent("Bought MMF S$ 5,000");
+    expect(screen.getByTestId("bridge-trade-MMF")).not.toHaveTextContent("from cash");
   });
 
   it("names a past month's month-end instead of now", async () => {

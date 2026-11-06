@@ -503,7 +503,22 @@ export type BridgeMover = {
   price_effect: number;
   quantity_effect: number;
   fx_effect: number;
+  /** price_effect + fx_effect: what the market did. Movers are ranked by it. */
+  market_effect?: number;
   cause: "price" | "quantity" | "fx" | "unknown" | string;
+};
+
+/** A holding bought, sold or (crypto) moved in or out this month: its quantity effect,
+ * not a gain or loss. `cash_recorded`: the account's cash is recorded, so a sale's money
+ * is in that cash (#240). */
+export type BridgeTrade = {
+  asset_id: number | null;
+  symbol: string;
+  name: string | null;
+  asset_class: string;
+  amount: number;
+  side: "bought" | "sold" | "moved_in" | "moved_out" | string;
+  cash_recorded: boolean;
 };
 
 /** GET /dashboard/month-bridge (#240, D-60): start + sum(lines) + unexplained = end. */
@@ -521,6 +536,7 @@ export type MonthBridge = FxStatus & {
   unexplained: BridgeLine;
   liabilities_change: number;
   movers: BridgeMover[];
+  trades?: BridgeTrade[];
 };
 
 export type DashboardNetWorthChange = {

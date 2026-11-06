@@ -2,7 +2,7 @@ import { useId, useState } from "react";
 import { Link } from "react-router-dom";
 
 import { api } from "../lib/api";
-import type { BridgeLine, BridgeMover, MonthBridge } from "../lib/api";
+import type { BridgeLine, BridgeMover, BridgeTrade, MonthBridge } from "../lib/api";
 import * as fmt from "../lib/format";
 import { noDataFor } from "../lib/delta";
 import { BRIDGE_LINKS } from "../lib/monthBridge";
@@ -103,10 +103,34 @@ function BridgeRow({
 }
 
 function MoverChip({ mover, currency }: { mover: BridgeMover; currency: string }) {
+  // What the market did (price + FX); buying or selling is listed under trades.
+  const amount = mover.market_effect ?? mover.change;
   return (
     <li className="monthBridgeMover" data-testid={`bridge-mover-${mover.symbol}`}>
-      <strong>{mover.symbol}</strong> <Delta abs={mover.change} currency={currency} show="abs" />{" "}
+      <strong>{mover.symbol}</strong> <Delta abs={amount} currency={currency} show="abs" />{" "}
       <span className="muted">({CAUSE_LABEL[mover.cause] ?? mover.cause})</span>
+    </li>
+  );
+}
+
+const TRADE_LABEL: Record<string, string> = {
+  bought: "Bought",
+  sold: "Sold",
+  moved_in: "Moved in",
+  moved_out: "Moved out",
+};
+
+function TradeChip({ trade, currency }: { trade: BridgeTrade; currency: string }) {
+  const note = trade.side === "sold" && trade.cash_recorded
+    ? "to cash"
+    : trade.side === "bought" && trade.cash_recorded
+      ? "from cash"
+      : null;
+  return (
+    <li className="monthBridgeMover" data-testid={`bridge-trade-${trade.symbol}`}>
+      {TRADE_LABEL[trade.side] ?? trade.side} <strong>{trade.symbol}</strong>{" "}
+      {fmt.formatMoney(Math.abs(trade.amount), currency)}
+      {note ? <span className="muted"> ({note})</span> : null}
     </li>
   );
 }
@@ -186,6 +210,16 @@ export default function MonthBridgeCard({ month, baseCurrency }: { month: string
               <ul>
                 {bridge.movers.map((mover) => (
                   <MoverChip key={`${mover.asset_class}-${mover.symbol}`} mover={mover} currency={currency} />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {(bridge.trades ?? []).length > 0 ? (
+            <div className="monthBridgeMovers">
+              <span className="coSignalEyebrow">BOUGHT AND SOLD</span>
+              <ul>
+                {(bridge.trades ?? []).map((trade) => (
+                  <TradeChip key={`${trade.asset_class}-${trade.symbol}`} trade={trade} currency={currency} />
                 ))}
               </ul>
             </div>

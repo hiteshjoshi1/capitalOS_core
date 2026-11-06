@@ -76,6 +76,8 @@ _EPS = 1e-9
 # The line's "N holding(s) without a price" note counts holdings whose unsplit change is
 # at least this much in the base currency (dust tokens that lost their quote don't).
 UNSPLIT_COUNT_MIN = 1.0
+# A change in quantity at least this big (base currency) is listed as a trade.
+TRADE_MIN = 1.0
 
 
 @dataclass
@@ -590,6 +592,7 @@ def month_bridge(
             "quantity_effect": 0.0,
             "fx_effect": 0.0,
             "unsplit": 0.0,
+            "cash_recorded": False,
         })
 
     for key in set(stocks0) | set(stocks1):
@@ -613,6 +616,8 @@ def month_bridge(
         mover["quantity_effect"] += split.quantity
         mover["fx_effect"] += split.fx
         mover["unsplit"] += split.unsplit + split.gap
+        if held.account_id is not None and held.account_id in cash_accounts:
+            mover["cash_recorded"] = True
 
     crypto_price = crypto_fx = crypto_moved = 0.0
     for key in set(crypto0) | set(crypto1):
@@ -760,17 +765,40 @@ def month_bridge(
         notes=notes,
     )
 
+    # Movers rank what the market did to each holding (price + FX). Buying or selling
+    # isn't a gain or a loss (a sale where the cash is recorded moves the money to cash),
+    # so a change in quantity is listed apart, under trades.
     mover_rows = []
+    trade_rows = []
     for mover in movers.values():
         mover["change"] = mover["end_value"] - mover["start_value"]
-        if abs(mover["change"]) < 0.005:
-            continue
-        effects = {"price": mover["price_effect"], "quantity": mover["quantity_effect"], "fx": mover["fx_effect"]}
         unsplit_part = mover.pop("unsplit")
+        cash_recorded = mover.pop("cash_recorded")
+        quantity = mover["quantity_effect"]
+        if abs(quantity) >= TRADE_MIN:
+            crypto = mover["asset_class"] == "CRYPTO"
+            trade_rows.append({
+                "asset_id": mover["asset_id"],
+                "symbol": mover["symbol"],
+                "name": mover["name"],
+                "asset_class": mover["asset_class"],
+                "amount": quantity,
+                "side": ("moved_in" if quantity > 0 else "moved_out") if crypto else ("bought" if quantity > 0 else "sold"),
+                "cash_recorded": cash_recorded,
+            })
+        market = mover["price_effect"] + mover["fx_effect"]
+        mover["market_effect"] = market
+        if abs(market) < 0.005 and abs(unsplit_part) < 0.005:
+            continue
+        effects = {"price": mover["price_effect"], "fx": mover["fx_effect"]}
         dominant = max(effects, key=lambda name: abs(effects[name]))
-        mover["cause"] = "unknown" if abs(unsplit_part) > abs(effects[dominant]) else dominant
+        mover["cause"] = "unknown" if abs(unsplit_part) > abs(market) else dominant
+        mover["_rank"] = max(abs(market), abs(unsplit_part))
         mover_rows.append(mover)
-    mover_rows.sort(key=lambda m: (-abs(m["change"]), str(m["symbol"]).lower()))
+    mover_rows.sort(key=lambda m: (-m["_rank"], str(m["symbol"]).lower()))
+    for mover in mover_rows:
+        mover.pop("_rank")
+    trade_rows.sort(key=lambda t: (-abs(t["amount"]), str(t["symbol"]).lower()))
 
     end_month = month_start if is_live else _completed_snapshot_month_start(month_start)
     return {
@@ -801,5 +829,6 @@ def month_bridge(
         "unexplained": unexplained,
         "liabilities_change": liabilities_change,
         "movers": mover_rows[:movers_limit],
+        "trades": trade_rows[:movers_limit],
         **fx.fx_status(),
     }
