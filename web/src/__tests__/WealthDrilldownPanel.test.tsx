@@ -6,6 +6,7 @@ import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
 import { api } from "../lib/api";
 import type { WealthTimelinePoint } from "../lib/api";
 import type { MonthFlags } from "../lib/wealthHistoryAnalysis";
+import { formatMoney as fmtMoney } from "../lib/format";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -43,7 +44,7 @@ const baseFlags: MonthFlags = {
   comparedToMonth: "2026-05",
 };
 
-const formatMoney = (value?: number | null) => (value == null ? "—" : `S$ ${value.toLocaleString()}`);
+const formatMoney = (value?: number | null) => fmtMoney(value, "SGD");
 
 function renderPanel(props: Partial<React.ComponentProps<typeof WealthDrilldownPanel>> = {}) {
   const onClose = vi.fn();
@@ -97,13 +98,13 @@ describe("WealthDrilldownPanel", () => {
   it("renders the delta, percent change, and comparison month heading", async () => {
     renderPanel();
     expect(await screen.findByLabelText("Details for June 2026")).toBeInTheDocument();
-    expect(screen.getByText("+S$ 100")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 100.00")).toBeInTheDocument();
     expect(screen.getByText(/vs May 2026/)).toBeInTheDocument();
   });
 
   it("shows a negative delta without a leading plus sign", async () => {
     renderPanel({ flags: { ...baseFlags, delta: -50 } });
-    expect(await screen.findByText("-S$ 50")).toBeInTheDocument();
+    expect(await screen.findByText("-S$ 50.00")).toBeInTheDocument();
   });
 
   it("shows the outlier banner attributing the dominant component", async () => {
@@ -119,9 +120,9 @@ describe("WealthDrilldownPanel", () => {
   it("renders a waterfall row per component with signed values", async () => {
     renderPanel();
     await screen.findByLabelText("Details for June 2026");
-    expect(screen.getByText("+S$ 80")).toBeInTheDocument(); // stocks_funds
-    expect(screen.getByText("+S$ 15")).toBeInTheDocument(); // cash
-    expect(screen.getByText("+S$ 5")).toBeInTheDocument(); // crypto
+    expect(screen.getByText("+S$ 80.00")).toBeInTheDocument(); // stocks_funds
+    expect(screen.getByText("+S$ 15.00")).toBeInTheDocument(); // cash
+    expect(screen.getByText("+S$ 5.00")).toBeInTheDocument(); // crypto
   });
 
   it("lists top movers sorted by absolute delta once loaded", async () => {
@@ -152,7 +153,7 @@ describe("WealthDrilldownPanel", () => {
 
   it("renders dividends received and net cash flow for the month once fetched", async () => {
     renderPanel();
-    expect(await screen.findByText("S$ 50")).toBeInTheDocument();
+    expect(await screen.findByText("S$ 50.00")).toBeInTheDocument();
     expect(screen.getByText("S$ 1,200")).toBeInTheDocument();
     expect(mockApi.dividendsSummary).toHaveBeenCalledWith("2026-06", "2026-06", "month", "SGD");
     expect(mockApi.spendingSummary).toHaveBeenCalledWith("2026-06", "SGD");
@@ -171,7 +172,7 @@ describe("WealthDrilldownPanel", () => {
       point: point({ month: "2026-07", anchor_date: "2026-07-01", uploads: ["OCBC"] }),
     });
 
-    expect(screen.getByText("Uses data through 2026-07-01; recent uploads apply next month.")).toBeInTheDocument();
+    expect(screen.getByText("Uses data through 1 Jul 2026; recent uploads apply next month.")).toBeInTheDocument();
     vi.useRealTimers();
   });
 

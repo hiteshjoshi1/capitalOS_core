@@ -1,4 +1,5 @@
 import type { RiskHolding } from "./api";
+import { formatPercent } from "./format";
 
 export const RISK_LARGEST_POSITION_WARN_PCT = 15;
 export const RISK_TOP5_TARGET_MIN_PCT = 35;
@@ -149,7 +150,7 @@ export function buildTopNDistribution(
 }
 
 export function formatRiskPercent(percent: number): string {
-  return `${percent.toFixed(1)}%`;
+  return formatPercent(percent, { scale: "points" });
 }
 
 export function formatLargestPosition(risk: LargestPositionRisk): string {

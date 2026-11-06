@@ -5,7 +5,6 @@ import type {
   CashFlowBreakdownItem,
   CashFlowCategoryDeltaItem,
   CashFlowDetail,
-  CashFlowDiagnosticAnswer,
   CashFlowTransaction,
   CashFlowWaterfall,
   CategoryTaxonomy,
@@ -26,7 +25,7 @@ import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
-import { cashFlowNarrative, cashFlowPeriodView, periodEyebrow } from "../lib/cashFlowPeriod";
+import { cashFlowNarrative, cashFlowPeriodView, inflowsHeadline, outflowsHeadline, periodEyebrow } from "../lib/cashFlowPeriod";
 
 type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
@@ -107,14 +106,6 @@ function defaultSelectionValue(transaction: CashFlowTransaction) {
   return transaction.resolved_category_id == null ? "" : String(transaction.resolved_category_id);
 }
 
-function formatPercent(value?: number | null) {
-  return fmt.formatPercent(value);
-}
-
-function formatMonthYear(month: string): string {
-  return fmt.formatMonth(month);
-}
-
 function conicGradient(items: CashFlowBreakdownItem[]) {
   return donutGradient(items.map((item) => item.percent * 100));
 }
@@ -162,10 +153,6 @@ function resolveWorkspaceTab(pathname: string): CashFlowWorkspaceTab {
     return "expenses";
   }
   return "overview";
-}
-
-function findAnswer(answers: CashFlowDiagnosticAnswer[], question: string) {
-  return answers.find((answer) => answer.question === question)?.answer ?? "Not enough data to answer this question for the selected month yet.";
 }
 
 /** Full-width donut + legend, used standalone by each tab (Where the income came from / Top expense categories). */
@@ -216,7 +203,7 @@ function DonutSection({
                   <span className="cashFlowLegendText">{item.label}</span>
                 </span>
                 <span className="muted">
-                  {formatMoney(item.amount)} <strong>{formatPercent(item.percent)}</strong>
+                  {formatMoney(item.amount)} <strong>{fmt.formatPercent(item.percent)}</strong>
                 </span>
               </div>
             ))}
@@ -260,7 +247,7 @@ function SplitBar({
             {items.map((item, idx) => (
               <span className="cashFlowSplitBarLegendItem" key={item.label}>
                 <i style={{ background: palette[idx % palette.length] }} />
-                {item.label} — {formatMoney(item.amount)} ({formatPercent(item.percent)})
+                {item.label} — {formatMoney(item.amount)} ({fmt.formatPercent(item.percent)})
               </span>
             ))}
           </div>
@@ -289,7 +276,7 @@ function MerchantRows({ items, formatMoney }: { items: CashFlowBreakdownItem[]; 
             />
           </div>
           <strong className="cashFlowMerchantAmount">{formatMoney(item.amount)}</strong>
-          <span className="cashFlowMerchantPercent">{formatPercent(item.percent)}</span>
+          <span className="cashFlowMerchantPercent">{fmt.formatPercent(item.percent)}</span>
         </div>
       ))}
     </div>
@@ -554,7 +541,7 @@ function OverviewTab({
         eyebrow={periodEyebrow("Net cash flow", period)}
         value={fmt.formatSignedMoney(detail.net, detail.base_currency)}
         delta={heroDelta}
-        insightText={`Saved ${formatPercent(detail.savings_rate)} of income`}
+        insightText={`Saved ${fmt.formatPercent(detail.savings_rate)} of income`}
       />
 
       <section>
@@ -575,9 +562,9 @@ function OverviewTab({
           </article>
           <article className="card cashFlowKpiCard">
             <p className="wealthEyebrow">Savings rate{toDate}</p>
-            <p className="cashFlowKpiValue">{formatPercent(detail.savings_rate)}</p>
+            <p className="cashFlowKpiValue">{fmt.formatPercent(detail.savings_rate)}</p>
             {period.priorSavingsRate != null && period.priorLabel ? (
-              <p className="muted" style={KPI_PRIOR_STYLE}>{capitalize(period.priorLabel)}: {formatPercent(period.priorSavingsRate)}</p>
+              <p className="muted" style={KPI_PRIOR_STYLE}>{capitalize(period.priorLabel)}: {fmt.formatPercent(period.priorSavingsRate)}</p>
             ) : null}
           </article>
         </div>
@@ -592,7 +579,7 @@ function OverviewTab({
             <p className="wealthEyebrow">History</p>
             <h2 className="cashFlowSectionTitle">Six-month net cash flow</h2>
           </div>
-          <span className="muted">Ending {formatMonthYear(detail.month)}</span>
+          <span className="muted">Ending {fmt.formatMonth(detail.month)}</span>
         </div>
         {detail.analytics.trend.length > 0 ? (
           <div className="card">
@@ -651,7 +638,7 @@ function IncomeTab({
       <HeroMetricCard
         eyebrow={periodEyebrow("Total inflows", cashFlowPeriodView(detail))}
         value={formatMoney(detail.income_total)}
-        insightText={findAnswer(detail.analytics.answers, "What percentage of inflows came from salary, dividends, and transfers?")}
+        insightText={inflowsHeadline(detail.analytics.inflow_source_mix, detail.base_currency)}
       />
 
       <DonutSection
@@ -673,7 +660,7 @@ function IncomeTab({
 
       <TransactionListSection
         title={`Income transactions (${detail.income.transaction_count})`}
-        emptyMessage={`No income transactions for ${detail.month}.`}
+        emptyMessage={`No income transactions for ${fmt.formatMonth(detail.month)}.`}
         transactions={detail.income.transactions}
         categoryGroups={categoryGroups}
         overrideSelections={overrideSelections}
@@ -720,7 +707,7 @@ function ExpensesTab({
       <HeroMetricCard
         eyebrow={periodEyebrow("Total outflows", period)}
         value={formatMoney(detail.expense_total)}
-        insightText={findAnswer(detail.analytics.answers, "Where did my money go this month?")}
+        insightText={outflowsHeadline(detail.analytics.outflow_categories, detail.base_currency)}
       />
 
       <DonutSection
@@ -789,7 +776,7 @@ function ExpensesTab({
 
       <TransactionListSection
         title={`Expense transactions (${detail.expenses.transaction_count})`}
-        emptyMessage={`No expense transactions for ${detail.month}.`}
+        emptyMessage={`No expense transactions for ${fmt.formatMonth(detail.month)}.`}
         transactions={detail.expenses.transactions}
         categoryGroups={categoryGroups}
         overrideSelections={overrideSelections}
@@ -839,7 +826,7 @@ export default function CashFlowDetailRoute() {
 
   const categoryGroups = useMemo(() => groupCategories(categories), [categories]);
   const effectiveBaseCurrency = detail?.base_currency || baseCurrency;
-  const formatMoney: FormatMoney = (value, decimals = 0) =>
+  const formatMoney: FormatMoney = (value, decimals) =>
     fmt.formatMoney(value, effectiveBaseCurrency, { decimals });
 
   const shellTitle =

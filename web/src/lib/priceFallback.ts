@@ -1,3 +1,5 @@
+import { formatDate } from "./format";
+
 // D-21 (#124; every holding since #144): a live view prices a holding at its own
 // statement price (IBKR's Flex report, an uploaded holdings file) only when the
 // price job had no usable quote. This "i" says so, and why, on click.
@@ -14,7 +16,7 @@ export function priceFallbackMessage(
   platform?: string | null,
 ): string {
   const why = REASON_TEXT[reason] ?? "the price job had no usable quote for it";
-  const date = asOf ? ` of ${asOf.slice(0, 10)}` : "";
+  const date = asOf ? ` of ${formatDate(asOf.slice(0, 10))}` : "";
   const source = platform && platform.trim() ? platform.trim() : "IBKR";
   return `Stale price for ${symbol}: taken from ${source}'s statement${date}, because ${why}.`;
 }

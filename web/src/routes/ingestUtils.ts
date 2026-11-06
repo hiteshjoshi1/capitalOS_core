@@ -1,3 +1,5 @@
+import { formatDate } from "../lib/format";
+
 type PlatformParserConfig = { label: string; parserKey: string };
 type SignatureDebug = { header?: unknown; file_kind?: unknown };
 
@@ -145,8 +147,9 @@ export type AsOfSource = "file" | "user" | "fallback";
 /** How the import report says where its snapshot date came from (#141). */
 export function describeAsOf(asOfDate: string | null | undefined, source: string | null | undefined): string | null {
   if (!asOfDate) return null;
-  if (source === "file") return `Dated ${asOfDate} (from the file)`;
-  if (source === "user") return `Dated ${asOfDate} (the date you chose; the file states none)`;
-  if (source === "fallback") return `Dated ${asOfDate} (upload day; the file states no date)`;
-  return `Dated ${asOfDate}`;
+  const date = formatDate(asOfDate);
+  if (source === "file") return `Dated ${date} (from the file)`;
+  if (source === "user") return `Dated ${date} (the date you chose; the file states none)`;
+  if (source === "fallback") return `Dated ${date} (upload day; the file states no date)`;
+  return `Dated ${date}`;
 }

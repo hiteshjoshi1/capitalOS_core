@@ -346,7 +346,7 @@ export default function WealthHistoryChart({
                       !
                     </text>
                     <title>
-                      {`${p.month}: ${f.delta != null && f.delta < 0 ? "down" : "up"} sharply` +
+                      {`${fmt.formatMonth(p.month)}: ${f.delta != null && f.delta < 0 ? "down" : "up"} sharply` +
                         (f.dominantComponent ? ` — driven by ${COMPONENT_LABEL[f.dominantComponent]}` : "")}
                     </title>
                   </g>

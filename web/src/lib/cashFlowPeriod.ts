@@ -8,7 +8,7 @@
  * back to the full-month fields it always had. Money and percentages go through
  * `lib/format.ts` (#150).
  */
-import type { CashFlowCategoryDeltaItem, CashFlowDetail } from "./api";
+import type { CashFlowBreakdownItem, CashFlowCategoryDeltaItem, CashFlowDetail } from "./api";
 import * as fmt from "./format";
 
 export type CashFlowPeriodView = {
@@ -143,4 +143,28 @@ export function cashFlowNarrative(view: CashFlowPeriodView, month: string, curre
     parts.push("Savings rate can't be compared: one of the periods has no recorded inflows.");
   }
   return parts.join(" ");
+}
+
+/** "A (…), B (…) and C (…)": the top `limit` items (already sorted, largest first). */
+function breakdownList(items: CashFlowBreakdownItem[], currency: string, limit: number): string | null {
+  const shown = items.filter((item) => item.amount > 0).slice(0, limit);
+  if (shown.length === 0) return null;
+  const parts = shown.map((item) => `${item.label} ${fmt.formatMoney(item.amount, currency)} (${fmt.formatPercent(item.percent)})`);
+  return parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * The Expenses headline, e.g. "Most outflows went to Rent S$ 2,500 (64.6%), Dining S$ 800
+ * (20.7%) and Transport S$ 560 (14.5%)." (#254: the API's own answer prints raw numbers,
+ * "Rent (64.6% / 2500)").
+ */
+export function outflowsHeadline(categories: CashFlowBreakdownItem[], currency: string): string {
+  const list = breakdownList(categories, currency, 3);
+  return list ? `Most outflows went to ${list}.` : "No outflows recorded yet.";
+}
+
+/** The Income headline, e.g. "Inflows came from Salary S$ 120,000 (95.8%) and Dividends S$ 5,200 (4.2%)." */
+export function inflowsHeadline(sources: CashFlowBreakdownItem[], currency: string): string {
+  const list = breakdownList(sources, currency, 3);
+  return list ? `Inflows came from ${list}.` : "No inflows recorded yet.";
 }
