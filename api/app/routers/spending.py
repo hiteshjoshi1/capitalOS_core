@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, timezone, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,6 +13,7 @@ from app.db.session import get_db
 from app.fx import FxRates, fx_status, get_rates, get_rates_by_date, rate_date
 from app.valuation.clock import (
     _anchor_ts,
+    _app_today,
     _transaction_in_month_window,
     _transaction_month_key,
     _transaction_query_bounds,
@@ -23,6 +25,7 @@ from app.schemas.spending import (
     CashFlowAnalyticsOut,
     CashFlowBreakdownItem,
     CashFlowCategoryDeltaItem,
+    CashFlowComparisonOut,
     CashFlowDiagnosticAnswer,
     CashFlowDetailOut,
     CashFlowDetailSection,
@@ -491,6 +494,155 @@ def _cash_flow_trend(lookback_rows, month: str, base_currency: str) -> list[Cash
     return trend
 
 
+def _deterioration_items(current: dict[str, float], prior: dict[str, float]) -> list[CashFlowCategoryDeltaItem]:
+    """Categories whose net effect on free cash flow got worse (income down or
+    spending up), worst first. ``current``/``prior`` are signed impacts per
+    category: income positive, spending negative."""
+    items: list[CashFlowCategoryDeltaItem] = []
+    for label in set(current) | set(prior):
+        current_value = current.get(label, 0.0)
+        prior_value = prior.get(label, 0.0)
+        delta = current_value - prior_value
+        if delta >= 0:
+            continue
+        items.append(
+            CashFlowCategoryDeltaItem(
+                label=label,
+                current_amount=current_value,
+                prior_amount=prior_value,
+                delta_amount=delta,
+                delta_percent=(delta / prior_value) if prior_value not in (0, 0.0) else None,
+                direction="deteriorated",
+            )
+        )
+    items.sort(key=lambda item: (item.delta_amount, item.label.lower()))
+    return items
+
+
+def _days_in_month(month_start: datetime) -> int:
+    return (_month_end(month_start) - timedelta(days=1)).day
+
+
+@dataclass(frozen=True)
+class _ComparisonWindow:
+    """Which days of the month and of the month before a comparison counts (#243, D-63)."""
+
+    basis: str  # "month_to_date" | "full_month"
+    month_days: int
+    through_day: int
+    prior_month_start: datetime
+    prior_month_days: int
+    prior_through_day: int
+
+    @property
+    def prior_end(self) -> datetime:
+        """The exclusive end of the prior window: 00:00 UTC of the day after its
+        last counted day, as ``_transaction_in_month_window`` takes it."""
+        return self.prior_month_start + timedelta(days=self.prior_through_day)
+
+
+def _comparison_window(month_start: datetime, today: date) -> _ComparisonWindow:
+    """Like-for-like comparison window for ``month_start`` given ``today`` (the
+    user's date, ``_app_today``). The open month compares days 1..today with the
+    previous month's days 1..today, clamped to that month's length (31 Mar vs
+    February is all of February). Any other month: whole month vs whole month."""
+    prior_month_start = _add_months(month_start, -1)
+    month_days = _days_in_month(month_start)
+    prior_month_days = _days_in_month(prior_month_start)
+    if (today.year, today.month) == (month_start.year, month_start.month):
+        through_day = today.day
+        return _ComparisonWindow(
+            basis="month_to_date",
+            month_days=month_days,
+            through_day=through_day,
+            prior_month_start=prior_month_start,
+            prior_month_days=prior_month_days,
+            prior_through_day=min(through_day, prior_month_days),
+        )
+    return _ComparisonWindow(
+        basis="full_month",
+        month_days=month_days,
+        through_day=month_days,
+        prior_month_start=prior_month_start,
+        prior_month_days=prior_month_days,
+        prior_through_day=prior_month_days,
+    )
+
+
+def _period_flows(rows, base_currency: str) -> tuple[float, float, dict[str, float], dict[str, float]]:
+    """Inflows, outflows, outflows per category and signed impact per category
+    (income +, spending -) of ``rows``, each at its own date's FX rate."""
+    rates = _build_row_rate_map(rows, base_currency)
+    inflows = 0.0
+    outflows = 0.0
+    outflow_categories: dict[str, float] = defaultdict(float)
+    impacts: dict[str, float] = defaultdict(float)
+    for row in rows:
+        bucket = _cash_flow_bucket(row)
+        if bucket is None:
+            continue
+        amount = _bucket_magnitude(row, _row_base_amount(row, base_currency, rates))
+        category = row["resolved_category"] or "Uncategorized"
+        if bucket == "income":
+            inflows += amount
+            impacts[category] += amount
+        elif bucket == "expense":
+            outflows += amount
+            outflow_categories[category] += amount
+            impacts[category] -= amount
+    return inflows, outflows, outflow_categories, impacts
+
+
+def _cash_flow_comparison(
+    *,
+    month: str,
+    lookback_rows,
+    prior_month_rows,
+    base_currency: str,
+    income_total: float,
+    expense_total: float,
+    net: float,
+    outflow_categories: dict[str, float],
+    category_impacts: dict[str, float],
+) -> CashFlowComparisonOut:
+    """The month's figures against the month before, like for like (#243, D-63)."""
+    window = _comparison_window(_parse_month(month), _app_today())
+    if window.basis == "full_month":
+        prior_rows = prior_month_rows
+    else:
+        prior_rows = [
+            row
+            for row in lookback_rows
+            if _transaction_in_month_window(row["ts"], window.prior_month_start, window.prior_end)
+        ]
+    prior_inflows, prior_outflows, prior_outflow_categories, prior_impacts = _period_flows(prior_rows, base_currency)
+    prior_net = prior_inflows - prior_outflows
+    return CashFlowComparisonOut(
+        basis=window.basis,
+        month=month,
+        month_days=window.month_days,
+        through_day=window.through_day,
+        prior_month=_month_key(window.prior_month_start),
+        prior_month_days=window.prior_month_days,
+        prior_through_day=window.prior_through_day,
+        prior_start=window.prior_month_start.date().isoformat(),
+        prior_end=(window.prior_end - timedelta(days=1)).date().isoformat(),
+        inflows=income_total,
+        outflows=expense_total,
+        net=net,
+        savings_rate=(net / income_total) if income_total > 0 else None,
+        prior_inflows=prior_inflows,
+        prior_outflows=prior_outflows,
+        prior_net=prior_net,
+        prior_savings_rate=(prior_net / prior_inflows) if prior_inflows > 0 else None,
+        inflows_change=income_total - prior_inflows,
+        outflows_change=expense_total - prior_outflows,
+        net_change=net - prior_net,
+        outflow_category_deltas=_category_delta_items(outflow_categories, prior_outflow_categories, deterioration_only=True),
+        deterioration_drivers=_deterioration_items(category_impacts, prior_impacts)[:5],
+    )
+
+
 def _analytics_for_month(
     *,
     current_rows,
@@ -626,24 +778,7 @@ def _analytics_for_month(
         key=lambda entry: (-entry[1], entry[0].lower()),
     )[:5]
 
-    deterioration_items: list[CashFlowCategoryDeltaItem] = []
-    for label in set(category_impacts_current) | set(category_impacts_prior):
-        current_value = category_impacts_current.get(label, 0.0)
-        prior_value = category_impacts_prior.get(label, 0.0)
-        delta = current_value - prior_value
-        if delta >= 0:
-            continue
-        deterioration_items.append(
-            CashFlowCategoryDeltaItem(
-                label=label,
-                current_amount=current_value,
-                prior_amount=prior_value,
-                delta_amount=delta,
-                delta_percent=(delta / prior_value) if prior_value not in (0, 0.0) else None,
-                direction="deteriorated",
-            )
-        )
-    deterioration_items.sort(key=lambda item: (item.delta_amount, item.label.lower()))
+    deterioration_items = _deterioration_items(category_impacts_current, category_impacts_prior)
 
     top_outflows = _sorted_breakdown_items(outflow_categories, expense_total, limit=3)
     recurring_outflows = _sorted_breakdown_items(recurring_expense_categories, expense_total, limit=3)
@@ -782,6 +917,17 @@ def _analytics_for_month(
             ending_cash=ending_cash,
         ),
         answers=answers,
+        comparison=_cash_flow_comparison(
+            month=month,
+            lookback_rows=lookback_rows,
+            prior_month_rows=prior_rows,
+            base_currency=base_currency,
+            income_total=income_total,
+            expense_total=expense_total,
+            net=net,
+            outflow_categories=outflow_categories,
+            category_impacts=category_impacts_current,
+        ),
     )
 
 

@@ -114,6 +114,37 @@ const detailFixture: CashFlowDetailResponse = {
       { question: "What percentage of inflows came from salary, dividends, and transfers?", answer: "Salary 96.2%, dividends 3.8%, transfers 0.0%." },
       { question: "Which categories explain most of the deterioration in free cash flow?", answer: "Dining (-1780), Rent (-400)" },
     ],
+    // A past month (#243): whole month vs whole month, the same figures as the fields above.
+    comparison: {
+      basis: "full_month",
+      month: "2026-02",
+      month_days: 28,
+      through_day: 28,
+      prior_month: "2026-01",
+      prior_month_days: 31,
+      prior_through_day: 31,
+      prior_start: "2026-01-01",
+      prior_end: "2026-01-31",
+      inflows: 12480,
+      outflows: 8710,
+      net: 3770,
+      savings_rate: 0.3020833333,
+      prior_inflows: 10300,
+      prior_outflows: 4118,
+      prior_net: 6182,
+      prior_savings_rate: 0.6001941748,
+      inflows_change: 2180,
+      outflows_change: 4592,
+      net_change: -2412,
+      outflow_category_deltas: [
+        { label: "Dining", current_amount: 1780, prior_amount: 0, delta_amount: 1780, delta_percent: null, direction: "deteriorated" },
+        { label: "Rent", current_amount: 3200, prior_amount: 2800, delta_amount: 400, delta_percent: 400 / 2800, direction: "deteriorated" },
+      ],
+      deterioration_drivers: [
+        { label: "Dining", current_amount: -1780, prior_amount: 0, delta_amount: -1780, delta_percent: null, direction: "deteriorated" },
+        { label: "Rent", current_amount: -3200, prior_amount: -2800, delta_amount: -400, delta_percent: 400 / 2800, direction: "deteriorated" },
+      ],
+    },
   },
   income: {
     total: 12480,
@@ -179,6 +210,42 @@ const detailFixture: CashFlowDetailResponse = {
         notes: null,
       },
     ],
+  },
+};
+
+// The open month (#243): day 17 of 28, compared with 1-17 January.
+const monthToDateFixture: CashFlowDetailResponse = {
+  ...detailFixture,
+  analytics: {
+    ...detailFixture.analytics,
+    comparison: {
+      basis: "month_to_date",
+      month: "2026-02",
+      month_days: 28,
+      through_day: 17,
+      prior_month: "2026-01",
+      prior_month_days: 31,
+      prior_through_day: 17,
+      prior_start: "2026-01-01",
+      prior_end: "2026-01-17",
+      inflows: 12480,
+      outflows: 8710,
+      net: 3770,
+      savings_rate: 0.3020833333,
+      prior_inflows: 9000,
+      prior_outflows: 2500,
+      prior_net: 6500,
+      prior_savings_rate: 6500 / 9000,
+      inflows_change: 3480,
+      outflows_change: 6210,
+      net_change: -2730,
+      outflow_category_deltas: [
+        { label: "Dining", current_amount: 1780, prior_amount: 600, delta_amount: 1180, delta_percent: 1180 / 600, direction: "deteriorated" },
+      ],
+      deterioration_drivers: [
+        { label: "Dining", current_amount: -1780, prior_amount: -600, delta_amount: -1180, delta_percent: -1180 / 600, direction: "deteriorated" },
+      ],
+    },
   },
 };
 
@@ -293,27 +360,38 @@ describe("CashFlowDetail route", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Cash Flow Overview" })).toBeInTheDocument();
 
-    // Hero: value, delta chip, and the savings/burn insight sentence
+    // Hero: value, delta chip, and the savings insight (no burn rate, #243)
     expect(await screen.findByText("Net cash flow this month")).toBeInTheDocument();
     expect(screen.getByText("+S$ 3,770")).toBeInTheDocument();
     // One <Delta> (#224): ▼ + the amount + its baseline, in the down colour.
     const chip = screen.getByText("-S$ 2,412").closest(".delta");
     expect(chip).toHaveClass("deltaChip", "delta--down");
     expect(chip).toHaveTextContent("▼-S$ 2,412vs January");
-    expect(screen.getByText("Saved 30.2% of income · Burn rate 69.8%")).toBeInTheDocument();
+    expect(screen.getByText("Saved 30.2% of income")).toBeInTheDocument();
 
-    // 4 KPI tiles
+    // 3 KPI tiles, each with the previous month's figure; the Burn-rate tile is gone (#243)
     expect(screen.getByText("Total inflows")).toBeInTheDocument();
     expect(screen.getByText("Total outflows")).toBeInTheDocument();
     expect(screen.getByText("Savings rate")).toBeInTheDocument();
-    expect(screen.getByText("Burn rate")).toBeInTheDocument();
+    expect(screen.queryByText("Burn rate")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Burn rate/)).not.toBeInTheDocument();
+    expect(screen.getByText("January: S$ 10,300")).toBeInTheDocument();
+    expect(screen.getByText("January: S$ 4,118")).toBeInTheDocument();
+    expect(screen.getByText("January: 60.0%")).toBeInTheDocument();
 
     // Six-month trend chart
     expect(screen.getByLabelText("Net cash flow trend by month")).toBeInTheDocument();
 
     // Vs. last month narrative + driver rows
     expect(screen.getByRole("heading", { name: "Vs. last month" })).toBeInTheDocument();
-    expect(screen.getByText(/Net cash flow was 3770 this month versus 6182/)).toBeInTheDocument();
+    // A past month: whole month vs whole month, in the shared money format.
+    expect(
+      screen.getByText(
+        "Net cash flow was +S$ 3,770 in February versus +S$ 6,182 in January: a -S$ 2,412 change. " +
+          "Inflows changed by +S$ 2,180 and outflows by +S$ 4,592. Savings rate moved from 60.0% to 30.2%.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/\b3770\b|\b6182\b/)).not.toBeInTheDocument();
     const driversSection = screen.getByText("Vs. last month").closest("section") as HTMLElement;
     expect(within(driversSection).getByText("Dining")).toBeInTheDocument();
     expect(within(driversSection).getByText("+S$ 1,780")).toBeInTheDocument();
@@ -326,6 +404,44 @@ describe("CashFlowDetail route", () => {
     // No audit trail on the overview tab
     expect(screen.queryByText("Expense transactions (2)")).not.toBeInTheDocument();
     expect(screen.queryByText("Income transactions (1)")).not.toBeInTheDocument();
+  });
+
+  it("labels the open month as month to date and compares it with the same days last month (#243)", async () => {
+    mockApi.cashFlowDetail.mockResolvedValue(monthToDateFixture);
+    renderRoute("/cash-flow");
+
+    expect(await screen.findByText("Net cash flow, month to date (day 17 of 28)")).toBeInTheDocument();
+    const chip = screen.getByText("-S$ 2,730").closest(".delta");
+    expect(chip).toHaveTextContent("▼-S$ 2,730vs 1–17 Jan");
+    // Not the full-month change against the whole of January.
+    expect(screen.queryByText("-S$ 2,412")).not.toBeInTheDocument();
+
+    expect(screen.getByText("Total inflows to date")).toBeInTheDocument();
+    expect(screen.getByText("Total outflows to date")).toBeInTheDocument();
+    expect(screen.getByText("1–17 Jan: S$ 9,000")).toBeInTheDocument();
+    expect(screen.getByText("1–17 Jan: S$ 2,500")).toBeInTheDocument();
+    expect(screen.queryByText(/Burn rate/)).not.toBeInTheDocument();
+
+    expect(
+      screen.getByText(
+        "Net cash flow is +S$ 3,770 so far (day 17 of 28), versus +S$ 6,500 over 1–17 Jan: a -S$ 2,730 change. " +
+          "Inflows changed by +S$ 3,480 and outflows by +S$ 6,210 over the same days. Savings rate moved from 72.2% to 30.2%.",
+      ),
+    ).toBeInTheDocument();
+    // Drivers compare like for like: Dining 1,780 vs 600 by day 17.
+    const driversSection = screen.getByText("Vs. last month").closest("section") as HTMLElement;
+    expect(within(driversSection).getByText("+S$ 1,180")).toBeInTheDocument();
+    expect(within(driversSection).queryByText("Rent")).not.toBeInTheDocument();
+  });
+
+  it("compares the expenses tab's categories like for like in the open month (#243)", async () => {
+    mockApi.cashFlowDetail.mockResolvedValue(monthToDateFixture);
+    renderRoute("/cash-flow/expenses");
+
+    expect(await screen.findByText("Total outflows, month to date (day 17 of 28)")).toBeInTheDocument();
+    const section = screen.getByRole("heading", { name: "Categories trending up" }).closest("section") as HTMLElement;
+    expect(within(section).getByText("Compared with 1–17 Jan.")).toBeInTheDocument();
+    expect(within(section).getByText("+S$ 1,180")).toBeInTheDocument();
   });
 
   it("notes currencies left out of the totals for lack of an FX rate (#170)", async () => {

@@ -619,7 +619,38 @@ export type CashFlowDiagnosticAnswer = {
   answer: string;
 };
 
+/** The month vs the month before, like for like (#243, D-63): the open month is month to
+ * date (days 1..through_day) against the previous month's days 1..prior_through_day (the
+ * same day, clamped to that month's length); any other month is whole vs whole. */
+export type CashFlowComparison = {
+  basis: "month_to_date" | "full_month" | string;
+  month: string;
+  month_days: number;
+  through_day: number;
+  prior_month: string;
+  prior_month_days: number;
+  prior_through_day: number;
+  /** ISO date, first day counted. */
+  prior_start: string;
+  /** ISO date, last day counted (inclusive). */
+  prior_end: string;
+  inflows: number;
+  outflows: number;
+  net: number;
+  savings_rate: number | null;
+  prior_inflows: number;
+  prior_outflows: number;
+  prior_net: number;
+  prior_savings_rate: number | null;
+  inflows_change: number;
+  outflows_change: number;
+  net_change: number;
+  outflow_category_deltas: CashFlowCategoryDeltaItem[];
+  deterioration_drivers: CashFlowCategoryDeltaItem[];
+};
+
 export type CashFlowAnalytics = {
+  /** Still returned (fields are only added); the page no longer shows it (#243). */
   burn_rate: number | null;
   prior_month: string | null;
   prior_month_net: number | null;
@@ -637,6 +668,8 @@ export type CashFlowAnalytics = {
   trend: CashFlowTrendPoint[];
   waterfall: CashFlowWaterfall;
   answers: CashFlowDiagnosticAnswer[];
+  /** #243: always sent by the API; optional here like its Python default. */
+  comparison?: CashFlowComparison | null;
 };
 
 export type CashFlowDetail = FxStatus & {
