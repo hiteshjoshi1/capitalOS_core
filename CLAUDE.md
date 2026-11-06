@@ -73,7 +73,9 @@ From the main checkout:
   It links the main checkout's `.env` (API keys, IBKR Flex) so refreshes work; a `DATABASE_URL` there is refused (#120).
 - A conflict stops and is named: resolve and commit in that worktree, then `make test-instance-start`.
 - `make test-instance-status`, then `make test-instance-pr` (one PR test/<date> → main, `Closes`
-  every batch issue), then `make test-instance-drop`.
+  every issue the batch closes, `Part of` the ones it only works on, #219), then `make test-instance-drop`.
+  The TEST banner lists the same issues: per PR, what it closes, else its `Part of #N` / `Refs #N`,
+  else the `(#N)` ending its title, else the PR itself (`scripts/test-test-instance.sh`).
 - Every worktree's `make web-up` shows an amber DEV banner the same way (`VITE_INSTANCE_LABEL`).
 - Each dev/test instance has its own login cookie (`capitalos_refresh_<instance>`; the real app keeps
   `capitalos_refresh`). Browsers don't scope cookies by port, so a shared name logged each other out (#65).
