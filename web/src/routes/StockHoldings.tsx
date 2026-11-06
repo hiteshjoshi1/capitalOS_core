@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { StockHoldingsSummary } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
-import { useSelectedMonth } from "../lib/selectedMonth";
+import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
@@ -321,7 +321,7 @@ export default function StockHoldings() {
           {/* ── Hero: stock value summary ─────────────────────────────── */}
           <article className="coHeroCard">
             <div className="coHeroCardHeader">
-              <p className="coHeroEyebrow">{summary?.is_live ? "CURRENT STOCK VALUE" : `STOCK VALUE — ${summary?.as_of_month ?? month}`}</p>
+              <p className="coHeroEyebrow">{summary?.is_live ? "CURRENT STOCK VALUE" : `STOCK VALUE — ${snapshotMonthOf(summary?.net_worth_boundary_at, summary?.as_of_month ?? month)}`}</p>
               <span className="muted" style={{ fontSize: "12px" }}>
                 {summary?.is_live ? `as of ${fmt.formatDate(summary?.net_worth_as_of)}` : "historical snapshot"}
               </span>
@@ -341,7 +341,9 @@ export default function StockHoldings() {
             </div>
             {stockSnapshotTotal != null && !stockMissingReason ? (
               <p className="coHeroFreshness">
-                vs {summary.compare_month ? fmt.formatMonth(summary.compare_month, "medium") : "last month"} ({formatMoney(stockSnapshotTotal)}):{" "}
+                {/* #232: the previous figure names its month and the date of its holdings. */}
+                vs {summary.compare_month ? fmt.formatMonth(summary.compare_month, "medium") : "last month"} ({formatMoney(stockSnapshotTotal)}
+                {summary.stock_snapshot_as_of ? `, holdings as of ${fmt.formatDate(summary.stock_snapshot_as_of)}` : ""}):{" "}
                 <Delta
                   abs={(summary.stock_current_total ?? 0) - stockSnapshotTotal}
                   compareValue={stockSnapshotTotal}

@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import { useSelectedMonth } from "../lib/selectedMonth";
+import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent } from "../lib/format";
@@ -88,7 +88,7 @@ export default function CryptoHoldings() {
       {summary && (
         <RefreshingRegion className="wealthOverviewLayout" busy={resource.isFetching}>
           <HeroMetricCard
-            eyebrow={summary?.is_live ? "CURRENT CRYPTO VALUE" : `CRYPTO VALUE — ${summary?.month ?? month}`}
+            eyebrow={summary?.is_live ? "CURRENT CRYPTO VALUE" : `CRYPTO VALUE — ${snapshotMonthOf(summary?.as_of, summary?.month ?? month)}`}
             value={money(summary?.total_crypto_base)}
             delta={{
               abs: summary?.snapshot_delta_base,
@@ -97,9 +97,12 @@ export default function CryptoHoldings() {
               missingReason,
             }}
             insightText={
-              summary?.is_live
+              (summary?.is_live
                 ? `${formatMoney(summary?.total_crypto_usd, "USD")} · Holdings as of ${formatDate(summary?.holdings_as_of ?? summary?.last_refreshed_at)} (${holdingsFresh ? "fresh" : "stale"}) · Prices as of ${formatDate(summary?.price_as_of ?? summary?.last_refreshed_at)} (${pricesFresh ? "fresh" : "stale"}${summary?.refresh_triggered ? ", refreshing" : ""})`
-                : `${formatMoney(summary?.total_crypto_usd, "USD")} · historical snapshot as of ${formatDate(summary?.as_of)} · vs ${summary?.compare_month ? formatMonth(summary.compare_month, "medium") : "last month"}`
+                : `${formatMoney(summary?.total_crypto_usd, "USD")} · historical snapshot as of ${formatDate(summary?.as_of)}`) +
+              // #232: the previous figure names its month and the date of its snapshot.
+              ` · vs ${summary?.compare_month ? formatMonth(summary.compare_month, "medium") : "last month"}` +
+              (summary?.snapshot_as_of && !summary?.snapshot_missing ? ` (${formatDate(summary.snapshot_as_of)})` : "")
             }
           />
           <FxNote sources={[summary]} />

@@ -393,8 +393,51 @@ describe("WealthOverview", () => {
 
     // Signals section shows LIABILITIES with the value
     expect(await screen.findByText("LIABILITIES")).toBeInTheDocument();
-    expect(screen.getByText("Outstanding obligations vs current net worth.")).toBeInTheDocument();
+    expect(screen.getByText("What the cards owe, taken off the net worth above.")).toBeInTheDocument();
     expect(screen.getByText("S$ 261")).toBeInTheDocument();
+  });
+
+  // #232: one number everywhere. The Liabilities card is the liability in the headline (live:
+  // today's, not last month-end's), and both donuts split gross assets, with the headline
+  // reconciled under the legend.
+  it("shows the headline's liabilities and gross assets in both donuts (#232)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    const bootstrap = makeBootstrap(100, 50); // live: cash 10 + stocks 140 - liabilities 50
+    mockApi.dashboardBootstrap.mockResolvedValue({
+      ...bootstrap,
+      net_worth: { ...bootstrap.net_worth, liabilities: 300 }, // last month-end's: not shown live
+    } as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100, 100, 50) as never);
+    mockApi.platformAllocation.mockResolvedValue({
+      as_of: null,
+      total: 150,
+      items: [
+        { platform: "IBKR", platform_type: "BROKER", country: "US", value: 140, percent: 93.33 },
+        { platform: "DBS", platform_type: "BANK", country: "SG", value: 10, percent: 6.67 },
+      ],
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    const card = (await screen.findByText("LIABILITIES")).closest("article") as HTMLElement;
+    expect(within(card).getByText("S$ 50")).toBeInTheDocument();
+    expect(within(card).queryByText("S$ 300")).not.toBeInTheDocument();
+
+    const totalOf = () => (screen.getByText("GROSS ASSETS").nextElementSibling as HTMLElement).textContent;
+    await waitFor(() => expect(screen.getAllByText("IBKR")).not.toHaveLength(0));
+    const platformTotal = totalOf();
+    fireEvent.click(screen.getByRole("button", { name: "By asset class" }));
+    expect(totalOf()).toBe(platformTotal);
+    expect(screen.getByTestId("allocation-net-worth-line")).toHaveTextContent(
+      "Gross assets S$ 150 − liabilities S$ 50 = net worth S$ 100",
+    );
+    // Shares of gross assets add up to 100%.
+    const donut = screen.getByRole("img", { name: "Allocation donut chart" });
+    expect(donut).toHaveAccessibleDescription(/Stocks & Funds 93\.3%, Cash 6\.7%/);
   });
 
   it("renders a since-last-update delta strip on the hero card", async () => {
@@ -450,9 +493,10 @@ describe("WealthOverview", () => {
       </MemoryRouter>,
     );
 
-    const monthLabel = await screen.findByText("VS LAST MONTH");
+    // #232: the live comparisons name their baseline month-end too.
+    const monthLabel = await screen.findByText("VS MAY 2026 MONTH-END");
     expect(monthLabel.parentElement).toHaveTextContent("+S$ 7");
-    expect(screen.getByText("VS LAST YEAR").parentElement).toHaveTextContent("+S$ 9");
+    expect(screen.getByText("VS MAY 2025 MONTH-END").parentElement).toHaveTextContent("+S$ 9");
     expect(screen.queryByText(/S\$ 111/)).not.toBeInTheDocument();
     expect(screen.queryByText(/S\$ 222/)).not.toBeInTheDocument();
   });
@@ -624,11 +668,11 @@ describe("WealthOverview panel errors", () => {
       </MemoryRouter>,
     );
 
-    const yearRow = (await screen.findByText("VS LAST YEAR")).parentElement as HTMLElement;
+    const yearRow = (await screen.findByText("VS APR 2025 MONTH-END")).parentElement as HTMLElement;
     expect(yearRow).toHaveTextContent("no comparison: no data for Apr 2025");
     expect(yearRow).not.toHaveTextContent("S$ 100");
     // Last month is real: ▼, the down colour, amount and % together.
-    const monthDelta = (screen.getByText("VS LAST MONTH").parentElement as HTMLElement).querySelector(".delta");
+    const monthDelta = (screen.getByText("VS APR 2026 MONTH-END").parentElement as HTMLElement).querySelector(".delta");
     expect(monthDelta).toHaveClass("delta--down");
     expect(monthDelta).toHaveTextContent("▼-S$ 4 (-4.0%)");
     // The hero chip is the same <Delta>, in the same colour.

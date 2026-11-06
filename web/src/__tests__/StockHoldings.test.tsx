@@ -367,6 +367,21 @@ describe("StockHoldings", () => {
     expect(screen.getByText("+S$ 25,000 (+13.5%)")).toBeInTheDocument();
   });
 
+  // #232: the previous figure names its month and the date of its holdings.
+  it("dates the compare month's figure (#232)", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...liveFixture, stock_snapshot_as_of: "2026-02-27" });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText(/vs Feb 2026 \(S\$ 185,000, holdings as of 27 Feb 2026\)/)).toBeInTheDocument();
+  });
+
   it.each([
     ["desktop", 1024],
     ["mobile", 480],
@@ -571,7 +586,7 @@ describe("StockHoldings races", () => {
     const feb = summaries.find((a) => a[0] === "2026-02");
     const jan = summaries.find((a) => a[0] === "2026-01");
 
-    await act(async () => jan.resolve({ ...summaryFixture, as_of_month: "2026-01", is_live: false }));
+    await act(async () => jan.resolve({ ...summaryFixture, as_of_month: "2026-01", is_live: false, net_worth_boundary_at: "2026-02-01T00:00:00+00:00" }));
     expect(await screen.findByText("STOCK VALUE — 2026-01")).toBeInTheDocument();
     await act(async () => feb.resolve({ ...summaryFixture, as_of_month: "2026-02", is_live: false }));
     expect(screen.queryByText("STOCK VALUE — 2026-02")).not.toBeInTheDocument();

@@ -31,7 +31,7 @@ from app.crypto.pricing import lookup_contract_metadata, price_by_contract, pric
 from app.crypto.valuation import latest_wallet_valuation
 from app.fx import fx_status, get_rates_by_date, rate_date
 from app.valuation import clock as valuation_clock
-from app.valuation.clock import _add_months, _month_window
+from app.valuation.clock import _month_window
 from app.valuation.clock import _anchor_ts as _anchor_date
 from app.valuation.clock import _configured_snapshot_day as _snapshot_day
 from app.wealth_rollup_dirty import mark_wallet_history_dirty
@@ -524,13 +524,14 @@ def _parse_month_start(month: str | None) -> datetime:
 def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
     """The anchor a "browse holdings as of {month}" view should use, and whether
     it's live: the dashboard's rule (app.valuation.clock, one clock in the app
-    timezone, #143). The current (or any future) month shows live data; any
-    past month shows that month's own completed snapshot boundary. The live
-    anchor is reported in UTC, as this page always has.
+    timezone, #143; ``_month_view_anchor``, #232). The current (or any future)
+    month shows live data; a past month shows the completed snapshot boundary
+    its net worth uses. The live anchor is reported in UTC, as this page always has.
     """
     if valuation_clock._is_open_or_future_month(month_start):
         return datetime.now(tz=timezone.utc), True
-    return _anchor_date(month_start), False
+    # The completed month-end Overview shows for that month (D-55, #232).
+    return valuation_clock._completed_snapshot_anchor_ts(month_start), False
 
 
 def _iso_date_value(value: Any) -> str | None:
@@ -689,7 +690,8 @@ def crypto_summary(
     # month" comparison (not "vs whatever month happens to be picked").
     selected_month_start = _parse_month_start(month)
     effective_anchor, is_live = _effective_anchor_for_month(selected_month_start)
-    compare_month_start = _add_months(selected_month_start, -1)
+    # The month Overview's headline compares with (D-24, #232).
+    compare_month_start = valuation_clock._month_view_compare_month_start(selected_month_start)
     snapshot_anchor = _anchor_date(compare_month_start)
 
     display_valuation = latest_wallet_valuation(

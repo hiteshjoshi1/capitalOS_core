@@ -191,6 +191,8 @@ class StockHoldingsResponse(FxStatusFields):
     platform_breakdown: list[StockBreakdownItem] = []
     stock_current_total: float = 0.0
     stock_snapshot_total: float = 0.0
+    # The date of the holdings stock_snapshot_total is taken from (#232).
+    stock_snapshot_as_of: Optional[str] = None
     quote_freshness_summary: Optional["QuoteFreshnessSummary"] = None
     trend: list["MiniTrendPoint"] = []
     # No stock data at all for the compare month (not a real zero), #224.
@@ -230,11 +232,18 @@ class CashDepositsOut(BaseModel):
     base_currency: Optional[str] = None
     snapshot_day: Optional[int] = None
     is_live: bool = False
+    # The anchor the figures are taken at (a past month's month-end boundary,
+    # or "now"), as on the Stocks page (#232).
+    net_worth_boundary_at: Optional[str] = None
     compare_month: Optional[str] = None
     current_cash_as_of: Optional[str] = None
     snapshot_cash_as_of: Optional[str] = None
     current_total: Optional[float] = None
     snapshot_total: Optional[float] = None
+    # The stablecoins (USDC/USDT) in current_total / snapshot_total: the Cash
+    # page counts them as cash, net worth as crypto (D-42, #232).
+    current_stablecoin_total: Optional[float] = None
+    snapshot_stablecoin_total: Optional[float] = None
     delta_abs: Optional[float] = None
     delta_pct: Optional[float] = None
     trend: list["MiniTrendPoint"] = []
