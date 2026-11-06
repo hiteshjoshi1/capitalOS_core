@@ -99,3 +99,28 @@ def test_month_view_compares_with_the_month_end_before_the_one_shown(singapore, 
     monkeypatch.setenv("SNAPSHOT_DAY", snapshot_day)
     _freeze(monkeypatch, datetime(2026, 3, 3, 2, 0, tzinfo=timezone.utc))
     assert clock._month_view_compare_month_start(clock._parse_month(month)).strftime("%Y-%m") == expected
+
+
+def test_trend_point_anchor_is_live_for_the_open_month_and_never_unpassed(singapore, monkeypatch):
+    """#241 (D-61): a trend bar is the open month live, a completed month-end, or
+    nothing, never an anchor that hasn't passed."""
+    _freeze(monkeypatch, FIRST_SGT_MORNING)  # 1 April 06:00 SGT
+    now = clock._current_anchor_ts()
+    assert clock._trend_point_anchor(clock._parse_month("2026-04")) == (now, True)
+    march_anchor, march_live = clock._trend_point_anchor(clock._parse_month("2026-03"))
+    assert (march_anchor.date(), march_live) == (date(2026, 4, 1), False)
+    assert clock._trend_point_anchor(clock._parse_month("2026-05")) == (None, False)
+
+
+def test_trend_point_anchor_before_a_later_snapshot_day(singapore, monkeypatch):
+    """SNAPSHOT_DAY=5 on 3 March: February's month-end (5 March) hasn't passed, so
+    February has no bar; January's (5 February) has."""
+    monkeypatch.setenv("SNAPSHOT_DAY", "5")
+    _freeze(monkeypatch, datetime(2026, 3, 3, 2, 0, tzinfo=timezone.utc))
+    assert clock._trend_point_anchor(clock._parse_month("2026-03"))[1] is True
+    assert clock._trend_point_anchor(clock._parse_month("2026-02")) == (None, False)
+    january_anchor, january_live = clock._trend_point_anchor(clock._parse_month("2026-01"))
+    assert (january_anchor.date(), january_live) == (date(2026, 2, 5), False)
+    for month in ("2025-10", "2025-11", "2025-12", "2026-01", "2026-02"):
+        anchor, live = clock._trend_point_anchor(clock._parse_month(month))
+        assert anchor is None or live or clock._anchor_passed(anchor), month

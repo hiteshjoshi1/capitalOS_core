@@ -158,8 +158,17 @@ class RiskSummaryResponse(FxStatusFields):
     # As /summary: top_holdings are live for the open (or a future) month, the
     # month-end snapshot for a past month (#223). Same rows, same order.
     is_live: Optional[bool] = None
+    # /summary's month-end net worth (for the open month, the last completed one).
     net_worth: NetWorth
     top_holdings: List[RiskHolding]
+    # #241: one point in time per month. The basis of every Risk figure: "live"
+    # for the open (or a future) month, "month_end" for a past month; the net
+    # worth the shares divide by at that point (live: the Overview headline,
+    # /summary's current_net_worth; a past month: its month-end net_worth);
+    # and the anchor they're taken at (the live instant, or the month-end boundary).
+    basis: Optional[str] = None
+    view_net_worth: Optional[NetWorth] = None
+    net_worth_boundary_at: Optional[str] = None
 
 
 class NetWorthSinceUpdateResponse(BaseModel):
@@ -306,6 +315,9 @@ class GeographyExposureOut(BaseModel):
     base_currency: str
     total: float
     items: list[GeographyExposureItem]
+    # #241: live (quote-priced) for the open month, like the Overview headline; a
+    # past month is its month-end snapshot (D-55's rule).
+    is_live: Optional[bool] = None
 
 
 class QuoteFreshnessSummary(BaseModel):
@@ -328,6 +340,10 @@ class StockGeographyBreakdownItem(BaseModel):
 class MiniTrendPoint(BaseModel):
     month: str
     value: Optional[float] = None
+    # #241 (D-61): the open month's bar is live, month to date (the page's live
+    # headline); every other bar is a completed month-end, or None when that
+    # month-end hasn't passed.
+    is_live: bool = False
 
 
 class CashCurrencyBreakdownItem(BaseModel):

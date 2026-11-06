@@ -1249,7 +1249,7 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
     assert data["current_total"] == 1650.0
     assert data["snapshot_total"] == 1300.0
     assert data["delta_abs"] == 350.0
-    assert data["trend"][-1] == {"month": "2026-05", "value": 1650.0}
+    assert data["trend"][-1] == {"month": "2026-05", "value": 1650.0, "is_live": False}
     currency_breakdown = {item["currency"]: item for item in data["currency_breakdown"]}
     assert currency_breakdown["SGD"]["current_value"] == 1200.0
     assert currency_breakdown["SGD"]["snapshot_value"] == 1000.0

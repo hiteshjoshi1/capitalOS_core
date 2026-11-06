@@ -56,6 +56,8 @@ export default function CryptoHoldings() {
           value: point.value as number,
           displayValue: compactMoney(point.value),
           tone: "neutral" as const,
+          // #241 (D-61): the open month is live, month to date.
+          isLive: point.is_live === true,
         })),
     [summary, compactMoney],
   );
@@ -156,7 +158,10 @@ export default function CryptoHoldings() {
           <div className="card">
             <div className="stockHoldingsHeader">
               <h2>Six-month value trend</h2>
-              <div className="muted stockHoldingsMeta">Snapshot history ending {summary?.month ?? month}</div>
+              <div className="muted stockHoldingsMeta">
+                Month-end snapshots ending {summary?.month ?? month}
+                {trendPoints.some((point) => point.isLive) ? " · MTD: this month to date, live" : ""}
+              </div>
             </div>
             <TrendBarChart points={trendPoints} ariaLabel="Six-month crypto trend" />
           </div>

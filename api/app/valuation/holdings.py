@@ -12,7 +12,7 @@ from app.auth_context import account_scope_sql
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account, latest_authoritative_nav_by_legacy_account
 from app.portfolio.position_pricing import price_position
 from app.valuation import fx, prices
-from app.valuation.clock import _add_months, _completed_snapshot_anchor_ts, _iso_value
+from app.valuation.clock import _add_months, _iso_value, _trend_point_anchor
 from app.valuation.prices import (
     _canonical_base_currency,
     _canonical_position_value,
@@ -415,16 +415,22 @@ def _stock_trend(
     current_user_id: int,
     months: int = 6,
 ) -> list[dict[str, Any]]:
+    """Stock value per month (#241, D-61): a month-end for each completed month,
+    the open month live (month to date, the Stocks headline), and no value for a
+    month whose month-end hasn't passed."""
     trend_start = _add_months(month_start, -(months - 1))
     points: list[dict[str, Any]] = []
     for offset in range(months):
         point_month = _add_months(trend_start, offset)
-        anchor = _completed_snapshot_anchor_ts(point_month)
-        exposure = _stock_exposure(db, anchor, base_currency, current_user_id)
-        total = float(exposure.get("total") or 0.0)
+        anchor, is_live = _trend_point_anchor(point_month)
+        total = 0.0
+        if anchor is not None:
+            exposure = _stock_exposure(db, anchor, base_currency, current_user_id, price_overlay=is_live)
+            total = float(exposure.get("total") or 0.0)
         points.append({
             "month": point_month.strftime("%Y-%m"),
             "value": total if total > 0 else None,
+            "is_live": is_live,
         })
     return points
 

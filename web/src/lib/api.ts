@@ -461,7 +461,24 @@ export type RiskSummary = FxStatus &
   Pick<DashboardSummary, "as_of_month" | "base_currency" | "is_live" | "net_worth"> & {
     snapshot_day?: number | null;
     top_holdings: RiskHolding[];
+    /** #241: one point in time per month. "live" for the open (or a future) month,
+     * "month_end" for a past month. */
+    basis?: "live" | "month_end" | null;
+    /** The net worth Risk's shares divide by, at the positions' point in time: live, the
+     * Overview headline (`current_net_worth`); a past month, its month-end `net_worth`. */
+    view_net_worth?: DashboardSummary["net_worth"] | null;
+    /** The anchor the figures are taken at: the live instant, or the month-end boundary. */
+    net_worth_boundary_at?: string | null;
   };
+
+/** One bar of a page's six-month trend (Stocks, Crypto, Cash). #241 (D-61): the open
+ * month's bar is live, month to date (the page's live headline); every other bar is a
+ * completed month-end, or has no value when that month-end hasn't passed yet. */
+export type MiniTrendPoint = {
+  month: string;
+  value?: number | null;
+  is_live?: boolean;
+};
 
 export type DashboardNetWorthChange = {
   as_of_month: string;
@@ -521,10 +538,7 @@ export type StockHoldingsSummary = FxStatus & {
     /** Live view only (null on a past month): holdings without a fresh quote, statement-only ones included (#224). */
     no_live_price?: number | null;
   } | null;
-  trend?: Array<{
-    month: string;
-    value?: number | null;
-  }>;
+  trend?: MiniTrendPoint[];
   /** No stock data at all for compare_month (not a real zero), #224. */
   stock_snapshot_missing?: boolean;
   /** QUOTE_STALE_DAYS: a price older than this is stale (#224). */
@@ -864,6 +878,8 @@ export type PlatformAllocation = {
 export type GeographyExposure = {
   as_of: string | null;
   base_currency: string;
+  /** #241: live (quote-priced) for the open month, else the month-end snapshot. */
+  is_live?: boolean | null;
   total: number;
   items: Array<{
     country: string;
@@ -899,10 +915,7 @@ export type CashDeposits = {
   snapshot_stablecoin_total?: number | null;
   delta_abs?: number | null;
   delta_pct?: number | null;
-  trend?: Array<{
-    month: string;
-    value?: number | null;
-  }>;
+  trend?: MiniTrendPoint[];
   currency_breakdown?: Array<{
     currency: string;
     current_value: number;
@@ -960,10 +973,7 @@ export type CryptoSummary = FxStatus & {
   token_exposure_base?: number;
   token_count?: number;
   priced_token_count?: number;
-  trend?: Array<{
-    month: string;
-    value?: number | null;
-  }>;
+  trend?: MiniTrendPoint[];
   eth: { balance: number; value_usd: number; value_base: number };
   sol: { balance: number; value_usd: number; value_base: number };
   top5_holdings: Array<{
