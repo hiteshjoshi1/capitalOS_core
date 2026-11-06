@@ -479,3 +479,89 @@ class WealthTimelineResponse(BaseModel):
 class WealthTimelineBackfillResponse(BaseModel):
     months_written: int
     base_currency: str
+
+
+# ─── This month's bridge (#240, D-60) ────────────────────────────────────────
+
+
+class BridgePart(BaseModel):
+    """One part of a bridge line; a line's parts add up to its amount."""
+
+    key: str
+    label: str
+    amount: float
+
+
+class BridgeNote(BaseModel):
+    """Context for a line that is not part of its amount (e.g. transfers between
+    your own accounts, sources with no data in the period)."""
+
+    key: str
+    label: str
+    amount: Optional[float] = None
+
+
+class BridgeLine(BaseModel):
+    """One cause of the change. ``status`` is ok | partial | unavailable; when it
+    isn't ok, ``reason`` says why and what couldn't be computed is in ``unexplained``."""
+
+    key: str
+    label: str
+    amount: float
+    status: str = "ok"
+    reason: Optional[str] = None
+    parts: List[BridgePart] = Field(default_factory=list)
+    notes: List[BridgeNote] = Field(default_factory=list)
+
+
+class BridgeEndpoint(BaseModel):
+    """The bridge's start (the month-end close Overview compares with) or end
+    (Overview's headline: live now, or that month's month-end)."""
+
+    month: str
+    # The anchor the value is taken at: a month-end anchor (00:00Z of its date) or
+    # the live instant; ``as_of`` is the newest data at or before it.
+    boundary_at: str
+    as_of: Optional[str] = None
+    value: float
+    net_worth: NetWorth
+    # No data at all at or before the start's anchor (#224).
+    baseline_missing: bool = False
+
+
+class BridgeMover(BaseModel):
+    asset_id: Optional[int] = None
+    symbol: str
+    name: Optional[str] = None
+    asset_class: str
+    start_value: float
+    end_value: float
+    change: float
+    price_effect: float
+    quantity_effect: float
+    fx_effect: float
+    # The largest of the three effects: price | quantity | fx; unknown when the
+    # holding has no price or quantity to split by.
+    cause: str
+
+
+class MonthBridgeResponse(FxStatusFields):
+    """GET /dashboard/month-bridge (#240): start + sum(lines) + unexplained = end."""
+
+    as_of_month: str
+    base_currency: str
+    snapshot_day: int
+    is_live: bool
+    # Flows count from this date (the start's anchor date) up to period_end (the
+    # end's boundary: a month-end anchor, or now).
+    period_start: str
+    period_end: str
+    start: BridgeEndpoint
+    end: BridgeEndpoint
+    change: float
+    lines: List[BridgeLine]
+    unexplained: BridgeLine
+    # What the cards owe at the end minus at the start (context: card spending is
+    # in "cash kept", so this is not a line of its own).
+    liabilities_change: float
+    movers: List[BridgeMover]

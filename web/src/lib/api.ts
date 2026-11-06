@@ -463,6 +463,66 @@ export type RiskSummary = FxStatus &
     top_holdings: RiskHolding[];
   };
 
+/** One part of a bridge line; a line's parts add up to its amount (#240). */
+export type BridgePart = { key: string; label: string; amount: number };
+
+/** Context for a bridge line that is not part of its amount. */
+export type BridgeNote = { key: string; label: string; amount: number | null };
+
+export type BridgeLineStatus = "ok" | "partial" | "unavailable";
+
+/** One cause of the month's change; when `status` isn't ok, `reason` says why and the
+ * part that couldn't be computed is in the bridge's `unexplained`. */
+export type BridgeLine = {
+  key: string;
+  label: string;
+  amount: number;
+  status: BridgeLineStatus | string;
+  reason: string | null;
+  parts: BridgePart[];
+  notes: BridgeNote[];
+};
+
+export type BridgeEndpoint = {
+  month: string;
+  boundary_at: string;
+  as_of: string | null;
+  value: number;
+  net_worth: NetWorthBreakdown;
+  baseline_missing: boolean;
+};
+
+export type BridgeMover = {
+  asset_id: number | null;
+  symbol: string;
+  name: string | null;
+  asset_class: string;
+  start_value: number;
+  end_value: number;
+  change: number;
+  price_effect: number;
+  quantity_effect: number;
+  fx_effect: number;
+  cause: "price" | "quantity" | "fx" | "unknown" | string;
+};
+
+/** GET /dashboard/month-bridge (#240, D-60): start + sum(lines) + unexplained = end. */
+export type MonthBridge = FxStatus & {
+  as_of_month: string;
+  base_currency: string;
+  snapshot_day: number;
+  is_live: boolean;
+  period_start: string;
+  period_end: string;
+  start: BridgeEndpoint;
+  end: BridgeEndpoint;
+  change: number;
+  lines: BridgeLine[];
+  unexplained: BridgeLine;
+  liabilities_change: number;
+  movers: BridgeMover[];
+};
+
 export type DashboardNetWorthChange = {
   as_of_month: string;
   base_currency: string;
@@ -1642,6 +1702,8 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   riskSummary: (month: string, baseCurrency = "SGD") =>
     req<RiskSummary>(`/dashboard/risk-summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  monthBridge: (month: string, baseCurrency = "SGD") =>
+    req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
