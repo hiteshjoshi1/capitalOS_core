@@ -12,7 +12,8 @@
 #   test-instance.sh start              after a conflict is resolved by hand in the worktree
 #                                       (and committed): the remaining PRs, then the rest of `up`.
 #   test-instance.sh pr                 after Hitesh's test: push test/<date> and open ONE PR to
-#                                       main that `Closes` every issue the batch closes. Merged on
+#                                       main that `Closes` every issue the batch closes (and
+#                                       names the ones it is only "Part of"). Merged on
 #                                       his word, as tested, so main's tree is the tested tip.
 #   test-instance.sh status             what's in the batch, where it's served.
 #   test-instance.sh drop               stop it: web server, containers and volumes, the
@@ -133,8 +134,9 @@ serve() {
   stop_web
   local label repo_url
   label="TEST $(git -C "$TW" branch --show-current) · Issues$(for n in $(banner_refs); do printf ' #%s' "$n"; done)"
-  # The banner lists the issues the batch closes and links each #N to it (#200; GitHub sends
-  # /issues/N on to the PR when N is a PR, used for a PR that closes no issue).
+  # The banner lists the batch's issues and links each #N to it (#200, #219: the issues a PR
+  # closes, else the one it's "Part of"; GitHub sends /issues/N on to the PR when N is a PR,
+  # used for a PR that names no issue at all).
   repo_url=$(cd "$TW" && gh repo view --json url --jq .url 2>/dev/null || true)
   (cd "$TW" && nohup make -s web-up INSTANCE_LABEL="$label" INSTANCE_REPO_URL="$repo_url" >"$TW/.test-instance-web.log" 2>&1 & echo $! >"$TW/.test-instance-web.pid")
   for _ in $(seq 1 90); do curl -sf -o /dev/null "http://127.0.0.1:$ISO_WEB_PORT/" && break; sleep 2; done
@@ -158,22 +160,52 @@ stop_web() {
   done
 }
 
-banner_refs() {  # the issues each merged PR closes, in batch order; the PR itself when it closes none
-  local pr issues seen=" "
+# The issues a batch PR belongs to (#219). Args: PR number, title, the issue numbers GitHub
+# says it closes (closingIssuesReferences); its body on stdin. Prints one "<kind> <n>" line each:
+#   close <n>  an issue it closes: GitHub's closing references plus Closes/Fixes/Resolves #n
+#              in the body;
+#   part <n>   when it closes none: "Part of #n" / "Refs #n" in the body, else the "(#n)" that
+#              ends its title (a Dependabot batch titled "... (#49)");
+#   pr <n>     when it names none of those: the PR itself.
+pr_issue_refs() {
+  local pr=$1 title=$2 closing=$3 body found
+  body=$(cat)
+  found=$( { printf '%s\n' $closing
+             printf '%s\n' "$body" | grep -oiE '(^|[^[:alnum:]_])(close[sd]?|fix(e[sd])?|resolve[sd]?):?[[:space:]]+#[0-9]+' | grep -oE '[0-9]+$' || true
+           } | awk 'NF && !seen[$0]++')
+  if [ -n "$found" ]; then printf 'close %s\n' $found; return 0; fi
+  found=$(printf '%s\n' "$body" | grep -oiE '(^|[^[:alnum:]_])(part[[:space:]]+of|refs?):?[[:space:]]+#[0-9]+' | grep -oE '[0-9]+$' | awk '!seen[$0]++' || true)
+  if [ -z "$found" ] && [[ $title =~ \(#([0-9]+)\)[[:space:]]*$ ]]; then found=${BASH_REMATCH[1]}; fi
+  if [ -n "$found" ]; then printf 'part %s\n' $found; else printf 'pr %s\n' "$pr"; fi
+}
+
+batch_refs() {  # pr_issue_refs for every merged PR, in batch order; "error <pr>" if gh can't read one
+  local pr info
   for pr in $(state_get merged); do
-    issues=$(gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number' 2>/dev/null || true)
-    [ -n "$issues" ] || issues=$pr
-    for n in $issues; do
-      case "$seen" in *" $n "*) ;; *) seen="$seen$n "; printf '%s\n' "$n" ;; esac
-    done
+    # One call: the closing numbers on line 1, the title on line 2, the body after.
+    if ! info=$(gh pr view "$pr" --json closingIssuesReferences,title,body \
+      --jq '([.closingIssuesReferences[].number | tostring] | join(" ")), .title, .body' 2>/dev/null); then
+      printf 'error %s\n' "$pr"; continue
+    fi
+    printf '%s\n' "$info" | { read -r closing || true; read -r title || true; pr_issue_refs "$pr" "$title" "$closing"; }
   done
 }
 
-batch_issues() {  # "Closes #n" lines for every issue the batch's PRs close
-  local pr
-  for pr in $(state_get merged); do
-    gh pr view "$pr" --json closingIssuesReferences --jq '.closingIssuesReferences[].number'
-  done | sort -un | sed 's/^/Closes #/'
+banner_refs() {  # the batch's issues (closed or "part of"), else the PR, in batch order, once each
+  batch_refs | awk '!seen[$2]++ { print $2 }'   # a PR gh can't read shows as itself
+}
+
+# The test PR's issue lines: "Closes #n" for every issue the batch closes, then "Part of #n" for
+# the issues the banner shows that the batch only works on (never closed by merging it).
+batch_issues() {
+  local refs
+  refs=$(batch_refs)
+  if printf '%s\n' "$refs" | grep -q '^error '; then
+    echo "can't read PR(s)$(printf '%s\n' "$refs" | sed -n 's/^error / #/p' | tr -d '\n') from GitHub" >&2; return 1
+  fi
+  printf '%s\n' "$refs" | awk '$1 == "close" { print $2 }' | sort -un | sed 's/^/Closes #/'
+  printf '%s\n' "$refs" | awk '$1 == "close" { c[$2] = 1 } $1 == "part" { p[$2] = 1 }
+    END { for (n in p) if (!(n in c)) print n }' | sort -un | sed 's/^/Part of #/'
 }
 
 status() {
@@ -189,6 +221,9 @@ status() {
   echo "  API:         http://127.0.0.1:$ISO_API_PORT   Postgres: 127.0.0.1:$ISO_PG_PORT"
   echo "  After testing: make test-instance-pr (one PR to main), then make test-instance-drop"
 }
+
+# Sourced (by scripts/test-test-instance.sh): the functions only.
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0
 
 case "${1:-}" in
   up)
@@ -220,9 +255,10 @@ case "${1:-}" in
     [ -d "$TW" ] || die "no test instance"
     [ -z "$(state_get pending)$(state_get conflict)" ] || die "the batch isn't fully merged yet"
     branch=$(git -C "$TW" branch --show-current)
+    issues=$(batch_issues) || die "the batch's issues are unknown, so nothing was pushed or opened"
     git -C "$TW" push -q -u origin "$branch"
     body=$(printf 'The tested batch: main plus%s, merged in order and served on the test instance (%s). Merge only after Hitesh has tested it there (AGENTS.md § Process Rules).\n\nMerging this PR merges the batch PRs as tested.\n\n%s\n' \
-      "$(for p in $(state_get merged); do printf ' #%s' "$p"; done)" "$(state_get served)" "$(batch_issues)")
+      "$(for p in $(state_get merged); do printf ' #%s' "$p"; done)" "$(state_get served)" "$issues")
     gh pr create --base main --head "$branch" --title "Test batch $branch:$(for p in $(state_get merged); do printf ' #%s' "$p"; done)" --body "$body"
     ;;
   status) status ;;
@@ -246,5 +282,5 @@ case "${1:-}" in
     docker image ls --format '{{.Repository}}' | grep -x "$ISO_NAME-api\|$ISO_NAME-api-dev" | xargs -r docker image rm >/dev/null 2>&1 || true
     echo "Dropped the test instance ($branch)."
     ;;
-  *) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
+  *) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 2 ;;
 esac

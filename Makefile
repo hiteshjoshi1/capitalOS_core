@@ -669,6 +669,7 @@ lint: web-deps
 	PYTHON="$(PYTHON)" scripts/test-check-migrations.sh
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
+	scripts/test-test-instance.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
 typecheck: web-deps
