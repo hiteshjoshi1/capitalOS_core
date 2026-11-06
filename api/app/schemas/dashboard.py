@@ -171,13 +171,44 @@ class RiskSummaryResponse(FxStatusFields):
     net_worth_boundary_at: Optional[str] = None
 
 
+class SinceUpdateTopMover(TopMover):
+    # #249 (D-65): what the compare value was priced at: "quote" (the last quote
+    # on or before the compare date) or "statement" (the holding's own statement
+    # price, D-21's fallback); None for crypto or an asset not held then. The date
+    # of that price, and whether it is a statement older than the compare date
+    # while the holding is quote-priced now (its move then starts at that statement).
+    compare_price_basis: Optional[str] = None
+    compare_price_as_of: Optional[str] = None
+    compare_price_fallback: bool = False
+
+
+class SinceUpdateTopMovers(TopMovers):
+    gainers: List[SinceUpdateTopMover]
+    detractors: List[SinceUpdateTopMover]
+
+
+class SinceUpdateCompareBasis(BaseModel):
+    # #249 (D-65): the compare side's stocks and funds (per asset), priced on or
+    # before price_date: at a quote, or at their own statement price; and how many
+    # of those are statements older than price_date while quote-priced now.
+    price_date: Optional[str] = None
+    holdings: int = 0
+    quoted: int = 0
+    statement_priced: int = 0
+    older_statement_priced: int = 0
+
+
 class NetWorthSinceUpdateResponse(BaseModel):
     base_currency: str
     current_as_of: Optional[str] = None
     compare_as_of: Optional[str] = None
     net_worth_change: NetWorthChange
     component_change: Dict[str, NetWorthChange]
-    top_movers: Optional[TopMovers] = None
+    top_movers: Optional[SinceUpdateTopMovers] = None
+    # #249 (D-65): "quoted_at_compare_date": the compare side is valued at the
+    # compare date (compare_as_of), each holding at its last quote on or before it.
+    basis: Optional[str] = None
+    compare_basis: Optional[SinceUpdateCompareBasis] = None
 
     class Config:
         populate_by_name = True

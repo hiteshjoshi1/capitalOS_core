@@ -1041,7 +1041,15 @@
     },
     "/dashboard/net-worth-since-update?base_currency=SGD": {
       "base_currency": "SGD",
+      "basis": "quoted_at_compare_date",
       "compare_as_of": "2026-03-16T00:00:00+00:00",
+      "compare_basis": {
+        "holdings": 4,
+        "older_statement_priced": 2,
+        "price_date": "2026-03-16",
+        "quoted": 0,
+        "statement_priced": 4
+      },
       "component_change": {
         "cash": {
           "abs": 0.0,
@@ -1053,38 +1061,118 @@
           "pct": 0.0
         },
         "crypto": {
-          "abs": 0.0,
+          "abs": 1542.1659,
           "baseline_missing": false,
           "compare_as_of": "2026-03-16T00:00:00+00:00",
           "compare_month": "2026-03-16T00:00:00+00:00",
-          "compare_value": 21188.0184,
+          "compare_value": 19645.8525,
           "current_as_of": "2026-03-16T00:00:00+00:00",
-          "pct": 0.0
+          "pct": 0.0785
         },
         "stocks_funds": {
-          "abs": 0.0,
+          "abs": 266.8756,
           "baseline_missing": false,
           "compare_as_of": "2026-03-16T00:00:00+00:00",
           "compare_month": "2026-03-16T00:00:00+00:00",
-          "compare_value": 13361.9841,
+          "compare_value": 13095.1086,
           "current_as_of": "2026-03-16T00:00:00+00:00",
-          "pct": 0.0
+          "pct": 0.0204
         }
       },
       "current_as_of": "2026-03-16T00:00:00+00:00",
       "net_worth_change": {
-        "abs": 0.0,
+        "abs": 1809.0415,
         "baseline_missing": false,
         "compare_as_of": "2026-03-16T00:00:00+00:00",
         "compare_month": "2026-03-16T00:00:00+00:00",
-        "compare_value": 94903.1852,
+        "compare_value": 93094.1438,
         "current_as_of": "2026-03-16T00:00:00+00:00",
-        "pct": 0.0
+        "pct": 0.0194
       },
       "top_movers": {
         "compare_month": "2026-03-16T00:00:00+00:00",
-        "detractors": [],
-        "gainers": []
+        "detractors": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-03-16T00:00:00+00:00",
+            "compare_price_as_of": null,
+            "compare_price_basis": null,
+            "compare_price_fallback": false,
+            "current_value": 1341.0138,
+            "delta_abs": -1341.0138,
+            "delta_pct": -0.5,
+            "previous_value": 2682.0276,
+            "symbol": "USDC"
+          }
+        ],
+        "gainers": [
+          {
+            "asset_class": "CRYPTO",
+            "asset_id": null,
+            "compare_month": "2026-03-16T00:00:00+00:00",
+            "compare_price_as_of": null,
+            "compare_price_basis": null,
+            "compare_price_fallback": false,
+            "current_value": 10392.8571,
+            "delta_abs": 2883.1797,
+            "delta_pct": 0.3839,
+            "previous_value": 7509.6774,
+            "symbol": "ETH"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 1,
+            "compare_month": "2026-03-16T00:00:00+00:00",
+            "compare_price_as_of": "2026-03-16",
+            "compare_price_basis": "statement",
+            "compare_price_fallback": false,
+            "current_value": 6872.6959,
+            "delta_abs": 167.6268,
+            "delta_pct": 0.025,
+            "previous_value": 6705.0691,
+            "symbol": "AAPL"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 2,
+            "compare_month": "2026-03-16T00:00:00+00:00",
+            "compare_price_as_of": "2026-03-16",
+            "compare_price_basis": "statement",
+            "compare_price_fallback": false,
+            "current_value": 5411.157,
+            "delta_abs": 85.8914,
+            "delta_pct": 0.0161,
+            "previous_value": 5325.2656,
+            "symbol": "0700"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 4,
+            "compare_month": "2026-03-16T00:00:00+00:00",
+            "compare_price_as_of": "2026-03-15",
+            "compare_price_basis": "statement",
+            "compare_price_fallback": true,
+            "current_value": 524.7541,
+            "delta_abs": 9.541,
+            "delta_pct": 0.0185,
+            "previous_value": 515.2131,
+            "symbol": "INFY"
+          },
+          {
+            "asset_class": "STOCK",
+            "asset_id": 3,
+            "compare_month": "2026-03-16T00:00:00+00:00",
+            "compare_price_as_of": "2026-03-15",
+            "compare_price_basis": "statement",
+            "compare_price_fallback": true,
+            "current_value": 553.377,
+            "delta_abs": 3.8164,
+            "delta_pct": 0.0069,
+            "previous_value": 549.5607,
+            "symbol": "RELIANCE"
+          }
+        ]
       }
     },
     "/dashboard/net-worth-timeline/2026-02/movers?base_currency=SGD": {

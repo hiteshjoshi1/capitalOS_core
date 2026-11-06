@@ -17,6 +17,7 @@ from app.valuation import clock
 from app.valuation.clock import (
     _add_months,
     _anchor_ts,
+    _compare_date_anchor_ts,
     _completed_snapshot_anchor_ts,
     _completed_snapshot_month_start,
     _configured_snapshot_day,
@@ -466,17 +467,99 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
     }
 
 
+SINCE_UPDATE_BASIS = "quoted_at_compare_date"  # D-65
+
+
+def _holding_key(row: Dict[str, Any]) -> tuple:
+    return (row.get("asset_id"), row["symbol"], row["asset_class"])
+
+
+def _compared_with_older_statement(
+    prior: Optional[Dict[str, Any]], current: Optional[Dict[str, Any]], price_date: Optional[str]
+) -> bool:
+    """A holding compared with its own statement from before the compare date
+    while it is quote-priced now (#249): its move then includes the market moves
+    between that statement and the compare date. (Statement-priced on both
+    sides, it doesn't move unless a new statement arrives.)"""
+    if not prior or not price_date or prior.get("price_basis") != "statement":
+        return False
+    price_as_of = str(prior.get("latest_trade_date") or "")[:10]
+    return bool(price_as_of and price_as_of < price_date and current and current.get("price_basis") == "quote")
+
+
+def _since_update_basis_counts(
+    current_holdings: list[Dict[str, Any]], compare_holdings: list[Dict[str, Any]], price_date: Optional[str]
+) -> Dict[str, Any]:
+    """How the compare side's stocks and funds were priced (#249, D-65), per asset:
+    at a quote on or before the compare date, or at their own statement price
+    (D-21: no quote by then, the newest one older than the statement, or one over
+    2x off), and how many of those are compared with an older statement while
+    quote-priced now (``_compared_with_older_statement``)."""
+    current_by_key = {_holding_key(row): row for row in current_holdings}
+    quoted = statement_priced = older = 0
+    for row in compare_holdings:
+        if str(row.get("asset_class") or "").upper() not in {"STOCK", "FUND"}:
+            continue
+        if row.get("price_basis") == "quote":
+            quoted += 1
+            continue
+        statement_priced += 1
+        if _compared_with_older_statement(row, current_by_key.get(_holding_key(row)), price_date):
+            older += 1
+    return {
+        "price_date": price_date,
+        "holdings": quoted + statement_priced,
+        "quoted": quoted,
+        "statement_priced": statement_priced,
+        "older_statement_priced": older,
+    }
+
+
+def _since_update_movers(
+    current_holdings: list[Dict[str, Any]],
+    compare_holdings: list[Dict[str, Any]],
+    compare_label: str,
+    price_date: Optional[str],
+) -> Dict[str, Any]:
+    """Top movers, each saying what its compare value was priced at (#249): a
+    quote or its statement, the date of that price, and whether it is compared
+    with an older statement (``compare_price_fallback``)."""
+    movers = _top_movers_from_holdings(current_holdings, compare_holdings, compare_label, limit=5)
+    prior_by_key = {_holding_key(row): row for row in compare_holdings}
+    current_by_key = {_holding_key(row): row for row in current_holdings}
+    for row in [*movers["gainers"], *movers["detractors"]]:
+        prior = prior_by_key.get(_holding_key(row))
+        basis = prior.get("price_basis") if prior else None  # None: crypto, or not held then
+        price_as_of = (str(prior.get("latest_trade_date") or "")[:10] or None) if prior and basis else None
+        row["compare_price_basis"] = basis
+        row["compare_price_as_of"] = price_as_of
+        row["compare_price_fallback"] = _compared_with_older_statement(
+            prior, current_by_key.get(_holding_key(row)), price_date
+        )
+    return movers
+
+
 def net_worth_since_update(db: Session, current_user_id: int, base_currency: str) -> Dict[str, Any]:
     """Since-last-update net-worth delta: current live state vs. the last
     available prior data point (not a fixed calendar day — if prices haven't
     refreshed in days, both anchors resolve to the same data and the delta is 0).
+
+    The compare point is the newest statement date at or before yesterday
+    (``compare_as_of``, the label), and the compare side is valued at that date
+    (#249, D-65): its holdings, each priced at its last quote on or before that
+    date (D-21's rule, as the live headline is), its wallets and card balances as
+    of that date. So the change is market movement since that date for every
+    holding, whichever broker's statement is older; a holding with no usable quote
+    by then is at its statement price and counted in ``compare_basis``.
     """
     top_holdings_limit = _summary_top_holdings_limit()
     current_anchor = clock._current_anchor_ts()
-    compare_anchor = _previous_update_anchor_ts(current_anchor)
+    previous_anchor = _previous_update_anchor_ts(current_anchor)
     current_as_of = _effective_as_of(db, current_anchor, current_user_id)
-    compare_as_of = _effective_as_of(db, compare_anchor, current_user_id)
+    compare_as_of = _effective_as_of(db, previous_anchor, current_user_id)
     compare_label = compare_as_of.isoformat() if compare_as_of else "unknown"
+    compare_anchor = _compare_date_anchor_ts(previous_anchor, compare_as_of)
+    price_date = compare_anchor.date().isoformat() if compare_as_of else None
 
     # price_overlay=True on both sides (unlike the monthly comparisons elsewhere)
     # so the delta reflects the anchor-scoped `prices` table rather than a frozen
@@ -520,7 +603,9 @@ def net_worth_since_update(db: Session, current_user_id: int, base_currency: str
         "compare_as_of": compare_as_of.isoformat() if compare_as_of else None,
         "net_worth_change": _change(current_nw["total"], compare_nw["total"]),
         "component_change": {key: _change(current_nw[key], compare_nw[key]) for key in ("cash", "stocks_funds", "crypto")},
-        "top_movers": _top_movers_from_holdings(snapshot_top, prev_top, compare_label, limit=5),
+        "top_movers": _since_update_movers(snapshot_top, prev_top, compare_label, price_date),
+        "basis": SINCE_UPDATE_BASIS,
+        "compare_basis": _since_update_basis_counts(snapshot_top, prev_top, price_date),
     }
 
 

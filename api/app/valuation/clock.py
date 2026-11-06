@@ -192,6 +192,19 @@ def _previous_update_anchor_ts(anchor_ts: datetime) -> datetime:
     return anchor_ts - timedelta(days=1)
 
 
+def _compare_date_anchor_ts(compare_anchor_ts: datetime, compare_as_of: Optional[datetime]) -> datetime:
+    """The instant "since last update" values its compare side at (#249, D-65):
+    the compare date (``compare_as_of``, the newest statement date at or before
+    ``compare_anchor_ts``) at ``compare_anchor_ts``'s time of day, so every
+    holding is priced at its last quote on or before that date rather than on
+    or before the day before now. The same instant when there is no data or the
+    newest statement is already on the compare anchor's date."""
+    if compare_as_of is None:
+        return compare_anchor_ts
+    days = (compare_anchor_ts.date() - compare_as_of.date()).days
+    return compare_anchor_ts - timedelta(days=days) if days > 0 else compare_anchor_ts
+
+
 def _completed_snapshot_month_start(month_start: datetime) -> datetime:
     """The month whose anchor a snapshot view of `month_start` actually uses.
 

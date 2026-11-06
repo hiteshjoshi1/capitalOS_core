@@ -1835,40 +1835,40 @@
    "current_as_of": "2026-11-06T00:00:00+00:00",
    "compare_as_of": "2026-10-06T00:00:00+00:00",
    "net_worth_change": {
-    "abs": 485784.46458001994,
-    "pct": 0.030937913302777814,
+    "abs": 489709.07177322917,
+    "pct": 0.031195654989377285,
     "current_as_of": "2026-11-06T00:00:00+00:00",
     "compare_as_of": "2026-10-06T00:00:00+00:00",
     "compare_month": "2026-10-06T00:00:00+00:00",
-    "compare_value": 15701914.341339981,
+    "compare_value": 15697989.734146772,
     "baseline_missing": false
    },
    "component_change": {
     "cash": {
-     "abs": 58546.51767640794,
-     "pct": 0.031046617040669723,
+     "abs": 58635.5026089272,
+     "pct": 0.03109527215384712,
      "current_as_of": "2026-11-06T00:00:00+00:00",
      "compare_as_of": "2026-10-06T00:00:00+00:00",
      "compare_month": "2026-10-06T00:00:00+00:00",
-     "compare_value": 1885761.5823235922,
+     "compare_value": 1885672.597391073,
      "baseline_missing": false
     },
     "stocks_funds": {
-     "abs": 375372.96449092403,
-     "pct": 0.03114333633954557,
+     "abs": 376404.8388532717,
+     "pct": 0.03123162098749901,
      "current_as_of": "2026-11-06T00:00:00+00:00",
      "compare_as_of": "2026-10-06T00:00:00+00:00",
      "compare_month": "2026-10-06T00:00:00+00:00",
-     "compare_value": 12053074.866429077,
+     "compare_value": 12052042.99206673,
      "baseline_missing": false
     },
     "crypto": {
-     "abs": 55058.98241268727,
-     "pct": 0.0311861129648381,
+     "abs": 55240.130311030196,
+     "pct": 0.03129192814736706,
      "current_as_of": "2026-11-06T00:00:00+00:00",
      "compare_as_of": "2026-10-06T00:00:00+00:00",
      "compare_month": "2026-10-06T00:00:00+00:00",
-     "compare_value": 1765496.7925873126,
+     "compare_value": 1765315.6446889697,
      "baseline_missing": false
     }
    },
@@ -1880,40 +1880,52 @@
       "symbol": "0700",
       "asset_class": "STOCK",
       "current_value": 2682924.3,
-      "previous_value": 2601784.7469707765,
-      "delta_abs": 81139.55302922335,
-      "delta_pct": 0.0311861129648381,
-      "compare_month": "2026-10-06T00:00:00+00:00"
+      "previous_value": 2601517.7921732184,
+      "delta_abs": 81406.50782678137,
+      "delta_pct": 0.03129192814736707,
+      "compare_month": "2026-10-06T00:00:00+00:00",
+      "compare_price_basis": "statement",
+      "compare_price_as_of": "2026-10-06",
+      "compare_price_fallback": false
      },
      {
       "asset_id": 35,
       "symbol": "9988",
       "asset_class": "STOCK",
       "current_value": 1839719.5199999998,
-      "previous_value": 1784080.9693513897,
-      "delta_abs": 55638.55064861011,
-      "delta_pct": 0.031186112964837993,
-      "compare_month": "2026-10-06T00:00:00+00:00"
+      "previous_value": 1783897.9146330643,
+      "delta_abs": 55821.60536693549,
+      "delta_pct": 0.03129192814736689,
+      "compare_month": "2026-10-06T00:00:00+00:00",
+      "compare_price_basis": "statement",
+      "compare_price_as_of": "2026-10-06",
+      "compare_price_fallback": false
      },
      {
       "asset_id": 36,
       "symbol": "0388",
       "asset_class": "STOCK",
       "current_value": 1405852.3332,
-      "previous_value": 1363335.207412687,
-      "delta_abs": 42517.125787313096,
-      "delta_pct": 0.031186112964838145,
-      "compare_month": "2026-10-06T00:00:00+00:00"
+      "previous_value": 1363195.3230987666,
+      "delta_abs": 42657.010101233376,
+      "delta_pct": 0.03129192814736702,
+      "compare_month": "2026-10-06T00:00:00+00:00",
+      "compare_price_basis": "statement",
+      "compare_price_as_of": "2026-10-06",
+      "compare_price_fallback": false
      },
      {
       "asset_id": null,
       "symbol": "ETH",
       "asset_class": "CRYPTO",
       "current_value": 638791.5,
-      "previous_value": 619472.5588025659,
-      "delta_abs": 19318.94119743409,
-      "delta_pct": 0.03118611296483803,
-      "compare_month": "2026-10-06T00:00:00+00:00"
+      "previous_value": 619408.9981364807,
+      "delta_abs": 19382.501863519312,
+      "delta_pct": 0.03129192814736696,
+      "compare_month": "2026-10-06T00:00:00+00:00",
+      "compare_price_basis": null,
+      "compare_price_as_of": null,
+      "compare_price_fallback": false
      },
      {
       "asset_id": 29,
@@ -1923,10 +1935,21 @@
       "previous_value": 611100,
       "delta_abs": 18900,
       "delta_pct": 0.030927835051546393,
-      "compare_month": "2026-10-06T00:00:00+00:00"
+      "compare_month": "2026-10-06T00:00:00+00:00",
+      "compare_price_basis": "quote",
+      "compare_price_as_of": "2026-10-06",
+      "compare_price_fallback": false
      }
     ],
     "detractors": []
+   },
+   "basis": "quoted_at_compare_date",
+   "compare_basis": {
+    "price_date": "2026-10-06",
+    "holdings": 33,
+    "quoted": 30,
+    "statement_priced": 3,
+    "older_statement_priced": 0
    }
   }
  },

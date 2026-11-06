@@ -187,6 +187,17 @@ export default function WealthOverview() {
   const formatMoney = moneyFormatter(bootstrap?.base_currency || selectedBaseCurrency);
   const summaryCurrency = summary?.base_currency || selectedBaseCurrency;
   const sinceUpdateCurrency = sinceUpdate?.base_currency || selectedBaseCurrency;
+  // #249 (D-65): "since last update" is market movement since the compare date,
+  // every holding against its last quote on or before it.
+  const sinceUpdateBasisText =
+    sinceUpdate?.basis === "quoted_at_compare_date" && sinceUpdate.compare_basis?.price_date
+      ? `Moves since ${fmt.formatDate(sinceUpdate.compare_basis.price_date)}, each holding at its last quote on or before that date.`
+      : null;
+  const olderStatementCount = sinceUpdate?.compare_basis?.older_statement_priced ?? 0;
+  const todayFallbackShown = [
+    ...(sinceUpdate?.top_movers?.gainers ?? []).slice(0, 3),
+    ...(sinceUpdate?.top_movers?.detractors ?? []).slice(0, 2),
+  ].some((row) => row.compare_price_fallback);
   const formatSummaryMoney = moneyFormatter(summaryCurrency);
   const formatSpendingMoney = moneyFormatter(spendingSummary?.base_currency || selectedBaseCurrency);
   const platformCurrency = platformRes.data?.currency || selectedBaseCurrency;
@@ -335,7 +346,7 @@ export default function WealthOverview() {
             <div className="coHeroDeltaRow">
               {!isLive ? null : sinceUpdate?.net_worth_change ? (
                 <div className="coHeroDelta">
-                  <span className="coHeroDeltaLabel">
+                  <span className="coHeroDeltaLabel" title={sinceUpdateBasisText ?? undefined}>
                     SINCE LAST UPDATE{sinceUpdate.compare_as_of ? ` (${formatChipAsOf(sinceUpdate.compare_as_of)})` : ""}
                   </span>
                   <strong>
@@ -346,6 +357,11 @@ export default function WealthOverview() {
                       missingReason={sinceUpdate.net_worth_change.baseline_missing ? "no earlier update to compare with" : null}
                     />
                   </strong>
+                  {olderStatementCount > 0 ? (
+                    <span className="coHeroDeltaNote">
+                      {olderStatementCount === 1 ? "1 holding" : `${olderStatementCount} holdings`} vs an older statement price
+                    </span>
+                  ) : null}
                 </div>
               ) : sinceUpdateRes.isLoading ? (
                 <div className="coHeroDelta">
@@ -638,10 +654,18 @@ export default function WealthOverview() {
                           <strong className="coHoldingValue">
                             <Delta abs={row.delta_abs} currency={sinceUpdateCurrency} show="abs" />
                           </strong>
-                          <span className="coHoldingPct">
+                          <span
+                            className="coHoldingPct"
+                            title={
+                              row.compare_price_fallback
+                                ? `Compared with its statement price of ${fmt.formatDate(row.compare_price_as_of)}`
+                                : undefined
+                            }
+                          >
                             {row.delta_pct == null
                               ? "—"
                               : fmt.formatPercent(row.delta_pct, { signed: true })}
+                            {row.compare_price_fallback ? " *" : ""}
                           </span>
                         </div>
                       </div>
@@ -652,6 +676,14 @@ export default function WealthOverview() {
                 ) : (
                   <p className="muted">No mover data yet.</p>
                 )}
+                {shownHoldingsView === "today" && sinceUpdateBasisText ? (
+                  <p className="coHoldingsNote">
+                    {sinceUpdateBasisText}
+                    {todayFallbackShown && sinceUpdate?.compare_basis?.price_date
+                      ? ` * No quote on or before ${fmt.formatDate(sinceUpdate.compare_basis.price_date)}: compared with its own, older statement price.`
+                      : ""}
+                  </p>
+                ) : null}
               </div>
             </article>
           </section>
