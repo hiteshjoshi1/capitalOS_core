@@ -19,6 +19,7 @@ import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 import Delta from "../components/Delta";
 import MonthBridgeCard from "../components/MonthBridgeCard";
+import SourceFreshnessStrip from "../components/SourceFreshnessStrip";
 import { missingBaselineReason } from "../lib/delta";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
@@ -277,6 +278,7 @@ export default function WealthOverview() {
         </>
       }
     >
+      <SourceFreshnessStrip />
       {bootstrapRes.isLoading ? (
         <div className="card" role="status">Loading…</div>
       ) : null}

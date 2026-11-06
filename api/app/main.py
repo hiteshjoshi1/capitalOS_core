@@ -9,6 +9,7 @@ from app.routers.auth import router as auth_router
 from app.routers.platforms import router as platforms_router
 from app.routers.accounts import router as accounts_router
 from app.routers.dashboard import router as dashboard_router
+from app.routers.source_freshness import router as source_freshness_router
 from app.routers.currencies import router as currencies_router
 from app.routers.categories import router as categories_router
 from app.routers.spending import router as spending_router
@@ -103,6 +104,7 @@ app.include_router(auth_router)
 app.include_router(platforms_router)
 app.include_router(accounts_router)
 app.include_router(dashboard_router)
+app.include_router(source_freshness_router)
 app.include_router(currencies_router)
 app.include_router(categories_router)
 app.include_router(spending_router)

@@ -423,3 +423,79 @@ def canonical_card_statement_rows(
         },
     ).mappings().all()
     return [dict(r) for r in rows]
+
+
+@valuation_cached(shared=True)
+def canonical_latest_fact_dates(
+    db: Session,
+    *,
+    current_user_id: int,
+    anchor_date: date,
+) -> list[dict[str, Any]]:
+    """Each open account's newest counting fact date on or before the anchor
+    (``account_id``, ``as_of_date``), for the source freshness table (#252).
+
+    The same facts ``valuation.account_status.account_data_status`` reports, from
+    one grouped query instead of the full readers: positions (Flex-routed, a NAV
+    account's own included), NAV, uploaded balances (not of an account Flex owns;
+    not a card's), broker cash (Flex-routed; only for an account without an
+    uploaded balance, as ``canonical_account_balance_rows`` merges them) and a
+    card's statement balance. One difference: the card statement has **no age
+    limit** here. Valuation stops carrying it after CARD_STATEMENT_MAX_AGE_DAYS
+    (D-52), but "when was the last statement" needs it however old it is.
+    Accounts with no counting fact are absent."""
+    by_account = ("ba.id", "acc.id")  # the broker account's newest (D-62), reported per account
+    parts = [
+        (
+            "owner_1",
+            ef.latest_per_account_sql(
+                ef.POSITIONS,
+                by_account,
+                where=[ef.flex_routed_sql("ba"), ef.nav_rule_sql("ba", include_nav_accounts="TRUE")],
+            ),
+        ),
+        ("owner_1", ef.latest_per_account_sql(ef.NAV, by_account)),
+        (
+            "owner_0",
+            ef.latest_per_account_sql(
+                ef.BALANCES,
+                ef.BALANCE_OWNER,
+                where=["acc.account_type <> 'CREDIT_CARD'", ef.not_flex_owned_sql("acc.id")],
+            ),
+        ),
+        (
+            "owner_1",
+            ef.latest_per_account_sql(
+                ef.BROKER_CASH,
+                by_account,
+                where=[
+                    ef.flex_routed_sql("ba"),
+                    "ba.legacy_account_id NOT IN (SELECT account_id FROM balance_covered)",
+                ],
+            ),
+        ),
+        (
+            "owner_0",
+            ef.latest_per_account_sql(
+                ef.BALANCES,
+                ef.BALANCE_OWNER,
+                where=["acc.account_type = 'CREDIT_CARD'", "abs.balance_type = 'credit_balance'"],
+            ),
+        ),
+    ]
+    q = text(
+        "WITH flex_authority_accounts AS ("
+        + ef.flex_authority_accounts_cte()
+        + "),\nbalance_covered AS (SELECT DISTINCT account_id FROM ("
+        + ef.effective_uploaded_balances_sql()
+        + ") _abs),\nlatest AS (\n"
+        + "\nUNION ALL\n".join(
+            f"SELECT {owner} AS account_id, as_of_date FROM ({sql}) _component_{i}"
+            for i, (owner, sql) in enumerate(parts)
+        )
+        + "\n)\nSELECT account_id, MAX(as_of_date) AS as_of_date FROM latest GROUP BY account_id ORDER BY account_id"
+    )
+    rows = db.execute(
+        q, {"anchor_date": anchor_date, "current_user_id": current_user_id, **ef.flex_binds()}
+    ).mappings().all()
+    return [dict(r) for r in rows]
