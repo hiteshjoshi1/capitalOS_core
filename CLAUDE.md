@@ -54,7 +54,9 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   `make backup-prune` keeps every verified set of the last 14 days plus the first of each month for
   12 months (and the newest), dump and archive together, never the older unmarked dumps
   (`DRY_RUN=1` lists). Restore: `make db-restore BACKUP_FILE=<dump>` (database and `data/`; the
-  current `data/` is moved to `data.pre-restore-<ts>/`).
+  current `data/` is moved to `data.pre-restore-<ts>/`). The database part is one transaction, committed
+  only when every table's count matches the dump's snapshot; grants to a role the target lacks (e.g.
+  `capitalos_mcp_ro` on a new stack: run `make db-create-mcp-role` after) are left out and named (#233).
 - `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
   is down).
 

@@ -285,7 +285,8 @@ describe("WealthHistory selected month", () => {
     expect(await screen.findByLabelText(/Details for May 2026/)).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toHaveValue("2026-05");
     expect(screen.getByTestId("wh-selected-month")).toHaveTextContent("Selected month: May 2026");
-    expect(mockApi.netWorthTimelineMovers).toHaveBeenCalledWith("2026-05", "SGD", 8);
+    // The drill-down fetches its movers from an effect that can run after the panel paints (#233).
+    await waitFor(() => expect(mockApi.netWorthTimelineMovers).toHaveBeenCalledWith("2026-05", "SGD", 8));
   });
 
   it("the open month marks the live point and opens no drill-down", async () => {
