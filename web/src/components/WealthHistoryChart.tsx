@@ -26,6 +26,8 @@ type Props = {
   mode: WealthHistoryChartMode;
   formatMoney: (value?: number | null, maximumFractionDigits?: number) => string;
   formatMoneyShort: (value?: number | null) => string;
+  /** The app's selected month (#223), marked on the chart: its point, or "now" for the open month. */
+  selectedMonth?: string | null;
   onSelectMonth?: (month: string) => void;
 };
 
@@ -46,7 +48,15 @@ function niceStep(range: number): number {
   return step * magnitude;
 }
 
-export default function WealthHistoryChart({ points, now, mode, formatMoney, formatMoneyShort, onSelectMonth }: Props) {
+export default function WealthHistoryChart({
+  points,
+  now,
+  mode,
+  formatMoney,
+  formatMoneyShort,
+  selectedMonth = null,
+  onSelectMonth,
+}: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -94,6 +104,22 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
   for (let v = Math.ceil(lo / gridStep) * gridStep; v <= hi; v += gridStep) gridLines.push(v);
 
   const xLabelEvery = n <= 8 ? 1 : n <= 16 ? 2 : Math.ceil(n / 8);
+
+  // #223: where the selected month sits: a stored point, or "now" (index n) for the open
+  // (or a future) month, which has no stored point. Older than the range: not marked.
+  const selectedIdx = useMemo(() => {
+    if (!selectedMonth) return null;
+    const idx = points.findIndex((p) => p.month === selectedMonth);
+    if (idx >= 0) return idx;
+    return selectedMonth >= fmt.currentMonth() ? n : null;
+  }, [points, selectedMonth, n]);
+  const xSelected = selectedIdx == null ? null : selectedIdx === n ? xNow : xAt(selectedIdx);
+  // Axis labels thin out on long ranges; the selected month's label (and its neighbours'
+  // room) wins, so it is always named.
+  const showMonthLabel = (i: number) =>
+    selectedIdx != null && selectedIdx < n
+      ? i === selectedIdx || (i % xLabelEvery === 0 && Math.abs(i - selectedIdx) >= Math.max(1, Math.ceil(xLabelEvery / 2)))
+      : i % xLabelEvery === 0;
 
   const handlePointerMove = (evt: React.PointerEvent<HTMLDivElement>) => {
     const svg = svgRef.current;
@@ -170,6 +196,23 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
               : ""}
         </span>
         <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} role="img" aria-label="Net worth over time">
+          {xSelected != null ? (
+            <rect
+              x={xSelected - Math.min(step, 40) / 2}
+              y={M.t}
+              width={Math.min(step, 40)}
+              height={innerH}
+              rx={4}
+              className="whSelectedCol"
+              data-testid="wh-selected-month"
+            >
+              <title>
+                {selectedIdx === n
+                  ? "Selected month: now (the open month)"
+                  : `Selected month: ${fmt.formatMonth(points[selectedIdx as number].month)}`}
+              </title>
+            </rect>
+          ) : null}
           {gridLines.map((v) => (
             <g key={v}>
               <line x1={M.l} x2={W - M.r} y1={y(v)} y2={y(v)} className="whGridLine" />
@@ -180,13 +223,24 @@ export default function WealthHistoryChart({ points, now, mode, formatMoney, for
           ))}
 
           {points.map((p, i) =>
-            i % xLabelEvery === 0 ? (
-              <text key={p.month} x={xAt(i)} y={H - 8} textAnchor="middle" className="whAxisLabel">
+            showMonthLabel(i) ? (
+              <text
+                key={p.month}
+                x={xAt(i)}
+                y={H - 8}
+                textAnchor="middle"
+                className={`whAxisLabel${i === selectedIdx ? " whAxisLabelSelected" : ""}`}
+              >
                 {monthLabel(p.month)}
               </text>
             ) : null,
           )}
-          <text x={xNow} y={H - 8} textAnchor="middle" className="whAxisLabel whAxisLabelNow">
+          <text
+            x={xNow}
+            y={H - 8}
+            textAnchor="middle"
+            className={`whAxisLabel whAxisLabelNow${selectedIdx === n ? " whAxisLabelSelected" : ""}`}
+          >
             now
           </text>
 

@@ -10,7 +10,9 @@ import { computeMonthFlags, isGapPoint } from "../lib/wealthHistoryAnalysis";
 import "../App.css";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import MonthControl from "../components/MonthControl";
 import * as fmt from "../lib/format";
+import { shiftMonth, useSelectedMonth } from "../lib/selectedMonth";
 import LoadError from "../components/LoadError";
 
 type LoadState = "loading" | "ready" | "error";
@@ -22,18 +24,22 @@ const RANGE_OPTIONS: { label: string; months: number }[] = [
   { label: "All", months: 60 },
 ];
 
-function shiftMonth(month: string, delta: number): string {
-  const [yearRaw, monthRaw] = month.split("-");
-  const year = Number(yearRaw);
-  const monthIndex = Number(monthRaw) - 1;
-  const dt = new Date(Date.UTC(year, monthIndex + delta, 1));
-  const nextYear = dt.getUTCFullYear();
-  const nextMonth = String(dt.getUTCMonth() + 1).padStart(2, "0");
-  return `${nextYear}-${nextMonth}`;
-}
-
 function currentMonth(): string {
   return fmt.currentMonth();
+}
+
+function monthsBetween(from: string, to: string): number {
+  const [fy, fm] = from.split("-").map(Number);
+  const [ty, tm] = to.split("-").map(Number);
+  return (ty - fy) * 12 + (tm - fm);
+}
+
+/** `range`, widened to the smallest range option that reaches back to `month` (#223), so a
+ * selected month older than the range is still on the chart. Never narrowed. */
+function rangeCovering(month: string, range: number): number {
+  const needed = monthsBetween(month, currentMonth()) + 1;
+  if (needed <= range) return range;
+  return RANGE_OPTIONS.find((opt) => opt.months >= needed)?.months ?? RANGE_OPTIONS[RANGE_OPTIONS.length - 1].months;
 }
 
 function monthLabel(month: string): string {
@@ -41,7 +47,11 @@ function monthLabel(month: string): string {
 }
 
 export default function WealthHistory() {
-  const [range, setRange] = useState<number>(24);
+  // #223: the shared selected month (the pill every page shows). It is marked on the chart
+  // and opens its drill-down; picking a month on the chart sets it for every page.
+  const [selectedMonth, setSelectedMonth] = useSelectedMonth();
+  const [drilldownOpen, setDrilldownOpen] = useState(true);
+  const [range, setRange] = useState<number>(() => rangeCovering(selectedMonth, 24));
   const [mode, setMode] = useState<WealthHistoryChartMode>("total");
   const [baseCurrency] = useBaseCurrency();
 
@@ -59,18 +69,35 @@ export default function WealthHistory() {
   const [cashFlowTrend, setCashFlowTrend] = useState<CashFlowTrendPoint[]>([]);
   const [cashFlowFx, setCashFlowFx] = useState<FxStatus | null>(null);
 
-  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-
-  // Range/currency changes refetch everything (back to loading) and invalidate any drill-down selection
-  // from the previous data. Adjusted while rendering, not in an effect, so no stale frame is committed.
-  const [prevInputs, setPrevInputs] = useState({ range, baseCurrency });
-  if (prevInputs.range !== range || prevInputs.baseCurrency !== baseCurrency) {
-    setPrevInputs({ range, baseCurrency });
-    setTimelineState("loading");
-    setDividendsState("loading");
-    setCashFlowState("loading");
-    setSelectedMonth(null);
+  // Range/currency changes refetch everything (back to loading); a currency change closes the
+  // drill-down (its figures were in the other currency). A new selected month opens its
+  // drill-down and widens the range to reach it. Adjusted while rendering, not in an effect,
+  // so no stale frame is committed.
+  const [prevInputs, setPrevInputs] = useState({ range, baseCurrency, selectedMonth });
+  if (
+    prevInputs.range !== range ||
+    prevInputs.baseCurrency !== baseCurrency ||
+    prevInputs.selectedMonth !== selectedMonth
+  ) {
+    const nextRange = prevInputs.selectedMonth !== selectedMonth ? rangeCovering(selectedMonth, range) : range;
+    setPrevInputs({ range: nextRange, baseCurrency, selectedMonth });
+    if (nextRange !== range) setRange(nextRange);
+    if (prevInputs.range !== nextRange || prevInputs.baseCurrency !== baseCurrency) {
+      setTimelineState("loading");
+      setDividendsState("loading");
+      setCashFlowState("loading");
+    }
+    if (prevInputs.selectedMonth !== selectedMonth) setDrilldownOpen(true);
+    else if (prevInputs.baseCurrency !== baseCurrency) setDrilldownOpen(false);
   }
+
+  const selectMonth = useCallback(
+    (month: string) => {
+      setSelectedMonth(month);
+      setDrilldownOpen(true);
+    },
+    [setSelectedMonth],
+  );
 
   // `ignore` drops a response that a newer request (or unmount) has superseded.
   useEffect(() => {
@@ -142,11 +169,12 @@ export default function WealthHistory() {
   const hasAnyData = useMemo(() => (timeline ? timeline.points.some((p) => !isGapPoint(p)) : false), [timeline]);
 
   const monthFlags = useMemo(() => computeMonthFlags(timeline?.points ?? []), [timeline]);
+  // The open month has no stored row (it is the "now" point), so it has no drill-down.
   const selectedPoint = useMemo(
-    () => (selectedMonth ? (timeline?.points.find((p) => p.month === selectedMonth) ?? null) : null),
-    [timeline, selectedMonth],
+    () => (drilldownOpen ? (timeline?.points.find((p) => p.month === selectedMonth) ?? null) : null),
+    [timeline, selectedMonth, drilldownOpen],
   );
-  const selectedFlags = selectedMonth ? monthFlags.get(selectedMonth) : null;
+  const selectedFlags = selectedPoint ? monthFlags.get(selectedPoint.month) : null;
   const selectedPrevPoint = useMemo(() => {
     if (!selectedFlags?.comparedToMonth) return null;
     return timeline?.points.find((p) => p.month === selectedFlags.comparedToMonth) ?? null;
@@ -171,7 +199,10 @@ export default function WealthHistory() {
       title="History"
       subtitle="How your wealth evolved — and why. Carried data is shown dashed; gaps stay gaps."
       headerActions={
-        <BaseCurrencyPicker />
+        <>
+          <MonthControl month={selectedMonth} onMonthChange={setSelectedMonth} />
+          <BaseCurrencyPicker />
+        </>
       }
     >
       <div className="whFilters">
@@ -250,7 +281,8 @@ export default function WealthHistory() {
                 mode={mode}
                 formatMoney={formatMoney}
                 formatMoneyShort={formatMoneyShort}
-                onSelectMonth={setSelectedMonth}
+                selectedMonth={selectedMonth}
+                onSelectMonth={selectMonth}
               />
 
               <div className="whAttribDivider" />
@@ -258,7 +290,7 @@ export default function WealthHistory() {
                 points={timeline.points}
                 formatMoney={formatMoney}
                 selectedMonth={selectedMonth}
-                onSelectMonth={setSelectedMonth}
+                onSelectMonth={selectMonth}
               />
 
               <details className="whTableView">
@@ -386,7 +418,7 @@ export default function WealthHistory() {
               flags={selectedFlags}
               baseCurrency={baseCurrency}
               formatMoney={formatMoney}
-              onClose={() => setSelectedMonth(null)}
+              onClose={() => setDrilldownOpen(false)}
             />
           ) : null}
           </div>

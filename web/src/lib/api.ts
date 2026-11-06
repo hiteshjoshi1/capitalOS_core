@@ -334,6 +334,9 @@ export type FxStatus = {
 export type DashboardSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
+  /** #223: true for the open (or a future) month, whose geography/top_holdings/cash_balances
+   * are live; false for a past month (its month-end snapshot). */
+  is_live?: boolean | null;
   current_net_worth_as_of?: string | null;
   current_net_worth?: NetWorthBreakdown | null;
   current_net_worth_freshness?: NetWorthFreshness | null;
@@ -830,6 +833,9 @@ export type ImportJobDetail = {
 
 export type PlatformAllocation = {
   as_of: string | null;
+  /** #223: the requested month, and whether it is live (open month) or a past month-end. */
+  as_of_month?: string | null;
+  is_live?: boolean | null;
   total: number;
   items: Array<{
     platform: string;
@@ -1090,6 +1096,9 @@ export type DashboardBootstrap = FxStatus & {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
+  /** #223: true for the open (or a future) month (headline: current_net_worth); false for a
+   * past month (headline: net_worth, its month-end snapshot). */
+  is_live?: boolean | null;
   current_net_worth_as_of?: string | null;
   current_net_worth?: NetWorthBreakdown | null;
   current_net_worth_freshness?: NetWorthFreshness | null;
@@ -1239,6 +1248,7 @@ export type StockExposureItem = {
 
 export type StockExposure = {
   as_of: string | null;
+  is_live?: boolean | null;
   base_currency: string;
   total: number;
   by_country: StockExposureItem[];

@@ -22,6 +22,7 @@ from app.valuation.clock import (
     _configured_snapshot_day,
     _effective_anchor_for_month,
     _iso_value,
+    _month_view_anchor,
     _previous_update_anchor_ts,
 )
 from app.valuation.exposure import _geography, _geography_exposure, _platform_allocation
@@ -111,6 +112,9 @@ def bootstrap(db: Session, current_user_id: int, month: str, month_start: dateti
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": _configured_snapshot_day(),
+        # Whether `month` is the open (or a future) month, whose page shows the
+        # live headline; a past month shows its month-end `net_worth` (#223).
+        "is_live": _month_view_anchor(month_start)[1],
         **_current_header(current_state),
         **snapshot_header,
         "net_worth": _serialize_net_worth(nw),
@@ -185,29 +189,31 @@ def timeline_movers(db: Session, current_user_id: int, month_start: datetime, ba
 def summary_without_net_worth(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
 ) -> Dict[str, Any]:
-    """/summary?skip_networth=true: the live geography, holdings, cash and cash flow only."""
+    """/summary?skip_networth=true: the geography, holdings, cash and cash flow
+    only. Live for the open month; a past month's month-end snapshot (#223)."""
     month_end = _add_months(month_start, 1)
-    current_anchor = clock._current_anchor_ts()
-    current_nw = _networth_components(db, current_anchor, base_currency, current_user_id, price_overlay=True)
-    geo = _geography(db, current_anchor, current_nw["total"], base_currency, current_user_id, price_overlay=True)
+    view_anchor, is_live = _month_view_anchor(month_start)
+    view_nw = _networth_components(db, view_anchor, base_currency, current_user_id, price_overlay=is_live)
+    geo = _geography(db, view_anchor, view_nw["total"], base_currency, current_user_id, price_overlay=is_live)
     top = _top_holdings(
         db,
-        current_anchor,
-        current_nw["total"],
+        view_anchor,
+        view_nw["total"],
         base_currency,
         current_user_id,
         limit=_summary_top_holdings_limit(),
-        price_overlay=True,
+        price_overlay=is_live,
     )
     return {
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": _configured_snapshot_day(),
+        "is_live": is_live,
         "geography": geo,
         "cash_flow": _cashflow(db, month_start, month_end, base_currency, current_user_id),
         "top_holdings": top,
-        "cash_balances": _cash_balances(db, current_anchor, base_currency, current_user_id),
-        "cash_percent": _cash_percent(current_nw),
+        "cash_balances": _cash_balances(db, view_anchor, base_currency, current_user_id),
+        "cash_percent": _cash_percent(view_nw),
         **fx_status(),
     }
 
@@ -230,17 +236,22 @@ def summary(
     current_nw = current_state["net_worth"]
 
     nw = _networth_components(db, anchor, base_currency, current_user_id)
-    geo = _geography(db, current_anchor, current_nw["total"], base_currency, current_user_id, price_overlay=True)
+    # Geography, positions and cash balances: live for the open month (as the
+    # headline is); a past month's are its month-end snapshot, the same anchor
+    # and prices as its net worth (#223).
+    view_anchor, is_live = _month_view_anchor(month_start)
+    view_total = current_nw["total"] if is_live else nw["total"]
+    geo = _geography(db, view_anchor, view_total, base_currency, current_user_id, price_overlay=is_live)
     top = _top_holdings(
         db,
-        current_anchor,
-        current_nw["total"],
+        view_anchor,
+        view_total,
         base_currency,
         current_user_id,
         limit=top_holdings_limit,
-        price_overlay=True,
+        price_overlay=is_live,
     )
-    cash_balances = _cash_balances(db, current_anchor, base_currency, current_user_id)
+    cash_balances = _cash_balances(db, view_anchor, base_currency, current_user_id)
     cf = _cashflow(db, month_start, month_end, base_currency, current_user_id)
 
     compare_set = _compare_set(compare)
@@ -309,6 +320,7 @@ def summary(
         "as_of_month": month,
         "base_currency": base_currency,
         "snapshot_day": _configured_snapshot_day(),
+        "is_live": is_live,
         **_current_header(current_state),
         **snapshot_header,
         "net_worth": _serialize_net_worth(nw),
@@ -456,11 +468,22 @@ def net_worth_since_update(db: Session, current_user_id: int, base_currency: str
     }
 
 
-def platform_allocation(db: Session, current_user_id: int, base_currency: str) -> Dict[str, Any]:
-    anchor = clock._current_anchor_ts()
+def platform_allocation(
+    db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
+) -> Dict[str, Any]:
+    # Live (quote-priced) for the open month, like the Overview headline; a past
+    # month is its month-end snapshot at statement prices, the same anchor as
+    # its net worth (#223; this used to discard `month`, see #197).
+    anchor, is_live = _month_view_anchor(month_start)
     as_of = _effective_as_of(db, anchor, current_user_id)
-    payload = _platform_allocation(db, anchor, base_currency, current_user_id, price_overlay=True)
-    return {"as_of": as_of.isoformat() if as_of else None, "total": payload["total"], "items": payload["items"]}
+    payload = _platform_allocation(db, anchor, base_currency, current_user_id, price_overlay=is_live)
+    return {
+        "as_of": as_of.isoformat() if as_of else None,
+        "as_of_month": month,
+        "is_live": is_live,
+        "total": payload["total"],
+        "items": payload["items"],
+    }
 
 
 def cash_deposits(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
@@ -500,12 +523,14 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
     }
 
 
-def stock_exposure(db: Session, current_user_id: int, base_currency: str) -> Dict[str, Any]:
-    anchor = clock._current_anchor_ts()
+def stock_exposure(db: Session, current_user_id: int, month_start: datetime, base_currency: str) -> Dict[str, Any]:
+    # Same rule as platform_allocation (#223; this used to discard `month`).
+    anchor, is_live = _month_view_anchor(month_start)
     as_of = _positions_coverage_as_of(db, anchor, current_user_id)
-    payload = _stock_exposure(db, anchor, base_currency, current_user_id, price_overlay=True)
+    payload = _stock_exposure(db, anchor, base_currency, current_user_id, price_overlay=is_live)
     return {
         "as_of": as_of.isoformat() if as_of else None,
+        "is_live": is_live,
         "base_currency": base_currency,
         "total": payload["total"],
         "by_country": payload["by_country"],
