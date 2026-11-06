@@ -73,6 +73,9 @@ STOCK_CLASSES = frozenset({"STOCK", "FUND"})
 # its quantity x price and the stored rate is used instead.
 RATE_TOLERANCE = 0.01
 _EPS = 1e-9
+# The line's "N holding(s) without a price" note counts holdings whose unsplit change is
+# at least this much in the base currency (dust tokens that lost their quote don't).
+UNSPLIT_COUNT_MIN = 1.0
 
 
 @dataclass
@@ -144,8 +147,19 @@ def _split(start: Optional[_Holding], end: Optional[_Holding]) -> _Split:
     if end is None:
         return _Split(quantity=-start.value)
     r0, r1 = start.rate(), end.rate()
-    if r0 is None or r1 is None:
+    if r0 is None and r1 is None:
         return _Split(unsplit=end.value - start.value)
+    if r0 is None or r1 is None:
+        # Priced on one side only (e.g. no quote at the month-end): a change in
+        # quantity is still a quantity effect, at the priced side's price and rate;
+        # the rest (the unpriced side's value) can't be split.
+        if start.quantity is None or end.quantity is None:
+            return _Split(unsplit=end.value - start.value)
+        priced = end if r1 is not None else start
+        rate = r1 if r1 is not None else r0
+        assert rate is not None and priced.price is not None
+        quantity = (float(end.quantity) - float(start.quantity)) * priced.price * rate
+        return _Split(quantity=quantity, unsplit=end.value - start.value - quantity)
     q0, p0 = float(start.quantity or 0.0), float(start.price or 0.0)
     q1, p1 = float(end.quantity or 0.0), float(end.price or 0.0)
     gap = (end.value - q1 * p1 * r1) - (start.value - q0 * p0 * r0)
@@ -588,7 +602,7 @@ def month_bridge(
         valuation_gap += split.gap
         if split.unsplit:
             unsplit += split.unsplit
-            unsplit_count += 1
+            unsplit_count += int(abs(split.unsplit) >= UNSPLIT_COUNT_MIN)
         if split.quantity and (held.account_id is None or held.account_id not in cash_accounts):
             untracked_trades += split.quantity
             untracked_platforms.add(held.platform)
@@ -612,7 +626,7 @@ def month_bridge(
         valuation_gap += split.gap
         if split.unsplit:
             unsplit += split.unsplit
-            unsplit_count += 1
+            unsplit_count += int(abs(split.unsplit) >= UNSPLIT_COUNT_MIN)
         mover = _mover(held)
         mover["start_value"] += h0.value if h0 else 0.0
         mover["end_value"] += h1.value if h1 else 0.0

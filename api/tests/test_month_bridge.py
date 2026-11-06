@@ -262,7 +262,22 @@ def test_split_is_exact():
     # New and sold holdings are all quantity; one without a price can't be split.
     assert _split(None, end).quantity == end.value
     assert _split(start, None).quantity == -start.value
-    assert _split(_holding(10, None, 500.0), end).unsplit == pytest.approx(end.value - 500.0)
+    no_price = _split(_holding(10, None, 500.0), end)
+    assert no_price.quantity == pytest.approx(2 * 110 * 1.35)
+    assert no_price.unsplit == pytest.approx(end.value - 500.0 - 2 * 110 * 1.35)
+    # Neither side priced (or a quantity missing): nothing can be split.
+    assert _split(_holding(10, None, 500.0), _holding(12, None, 700.0)).unsplit == pytest.approx(200.0)
+    assert _split(_holding(None, 100.0, 500.0), end).unsplit == pytest.approx(end.value - 500.0)
+    # Priced on one side only: the change in quantity is split at that side's price
+    # and rate; the unpriced side's value is what can't be split.
+    unpriced = _holding(5, 0.0, 0.0)
+    bought = _holding(60, 80.0, 60 * 80.0 * 1.3)
+    split = _split(unpriced, bought)
+    assert split.quantity == pytest.approx(55 * 80.0 * 1.3)
+    assert split.unsplit == pytest.approx(5 * 80.0 * 1.3)
+    assert split.total == pytest.approx(bought.value)
+    lost = _split(_holding(2, 0.25, 0.5), _holding(2, 0.0, 0.0))
+    assert (lost.quantity, lost.unsplit) == pytest.approx((0.0, -0.5))
     # A value that doesn't match its quantity x price (over 1% from the stored rate):
     # the stored rate splits it, and the mismatch is a gap, not FX.
     odd = _holding(10, 100.0, 970.0, fx_rate=1.0)
