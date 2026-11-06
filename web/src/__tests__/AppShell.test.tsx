@@ -227,7 +227,7 @@ describe("AppShell", () => {
     expect(screen.queryByRole("navigation", { name: "Liabilities tabs" })).toBeEmptyDOMElement();
   });
 
-  it("renders the wealth page currency control inside the shell top bar, with no month picker", async () => {
+  it("renders the wealth page month and currency controls inside the shell top bar", async () => {
     render(
       <ThemeProvider>
         <MemoryRouter initialEntries={["/wealth"]}>
@@ -242,8 +242,8 @@ describe("AppShell", () => {
 
     expect(await screen.findByRole("link", { name: "Overview" })).toBeInTheDocument();
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
-    // Wealth Overview always shows the current month — there is no month picker.
-    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
+    // #223: Wealth Overview follows the shared selected month, with the month pill.
+    expect(screen.getByLabelText("Month")).toBeInTheDocument();
   });
 
   it("keeps sidebar width at 248px for shell layout stability", () => {

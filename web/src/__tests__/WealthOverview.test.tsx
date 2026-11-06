@@ -80,6 +80,20 @@ function makeBootstrap(currentTotal: number, liabilities = 0) {
   };
 }
 
+/** A past month's bootstrap (#223): `net_worth` is that month-end, `current_*` stay live. */
+function makePastBootstrap(monthEndTotal: number, liveTotal: number) {
+  const live = makeBootstrap(liveTotal);
+  return {
+    ...live,
+    as_of_month: "2026-04",
+    is_live: false,
+    net_worth_as_of: "2026-05-01T00:00:00+00:00",
+    net_worth_snapshot_as_of: "2026-04-28T00:00:00+00:00",
+    net_worth_boundary_at: "2026-05-01T00:00:00+00:00",
+    net_worth: { total: monthEndTotal, cash: 10, stocks_funds: monthEndTotal - 10, crypto: 0, liabilities: 0 },
+  };
+}
+
 function makeSummary(snapshotTotal: number, currentTotal = snapshotTotal, liabilities = 0) {
   return {
     as_of_month: "2026-05",
@@ -171,11 +185,14 @@ describe("WealthOverview", () => {
     } as never);
   });
 
-  it("always fetches the current month and never renders a month picker", async () => {
+  // #223: Overview follows the shared selected month (the same one Stocks, Cash, Risk... use).
+  it("fetches every panel for the shared selected month and shows the month pill", async () => {
     window.localStorage.setItem("capitalos.selectedMonth", "2026-04");
     mockSubscribe.mockImplementation(() => () => {});
-    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
-    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    mockApi.dashboardBootstrap.mockImplementation(((month: string) =>
+      Promise.resolve(month === "2026-04" ? makePastBootstrap(80, 100) : makeBootstrap(100))) as never);
+    mockApi.dashboardSummary.mockImplementation(((month: string) =>
+      Promise.resolve(month === "2026-04" ? { ...makeSummary(80, 100), as_of_month: "2026-04", is_live: false } : makeSummary(100))) as never);
 
     render(
       <MemoryRouter>
@@ -184,15 +201,93 @@ describe("WealthOverview", () => {
     );
 
     await waitFor(() => {
-      expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-05", "SGD");
-      expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-05", "prev_month,prev_year", "SGD");
-      expect(mockApi.platformAllocation).toHaveBeenCalledWith("2026-05", "SGD");
+      expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-04", "SGD");
+      expect(mockApi.dashboardSummary).toHaveBeenCalledWith("2026-04", "prev_month,prev_year", "SGD");
+      expect(mockApi.platformAllocation).toHaveBeenCalledWith("2026-04", "SGD");
+      expect(mockApi.spendingSummary).toHaveBeenCalledWith("2026-04", "SGD");
     });
-    // No MonthControl anywhere on this page, and nothing writes a wealth-specific
-    // month preference — the page has no concept of a selectable month.
-    expect(screen.queryByLabelText("Month")).not.toBeInTheDocument();
-    expect(window.localStorage.getItem("capitalos.selectedMonth.wealth")).toBeNull();
-    expect(await screen.findAllByText("DBS Vickers")).not.toHaveLength(0);
+    expect(screen.getByLabelText("Month")).toHaveValue("2026-04");
+    // The #127 callout beside the pill.
+    expect(screen.getByText("Past month")).toBeInTheDocument();
+    // Never requested for the current month while a past one is selected.
+    expect(mockApi.dashboardBootstrap).not.toHaveBeenCalledWith("2026-05", "SGD");
+    // "Since last update" is live only.
+    expect(mockApi.netWorthSinceUpdate).not.toHaveBeenCalled();
+  });
+
+  it("shows a past month as its month-end snapshot, with that month's comparisons", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-04");
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makePastBootstrap(80, 100) as never);
+    const change = (abs: number, compareMonth: string) => ({
+      abs,
+      pct: null,
+      current_as_of: "2026-05-01T00:00:00+00:00",
+      compare_as_of: null,
+      compare_month: compareMonth,
+    });
+    mockApi.dashboardSummary.mockResolvedValue({
+      ...makeSummary(80, 100),
+      as_of_month: "2026-04",
+      is_live: false,
+      // That month-end vs the month-end before it and a year before (D-24).
+      net_worth_change: { vs_prev_month: change(11, "2026-03"), vs_prev_year: change(22, "2025-04") },
+      // The live comparisons belong to the live headline, not to April.
+      current_net_worth_change: { vs_prev_month: change(777, "2026-04"), vs_prev_year: change(999, "2025-04") },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("NET WORTH · APR 2026 MONTH-END")).toBeInTheDocument();
+    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 80");
+    expect(screen.getByRole("note")).toHaveTextContent("Viewing Apr 2026 (month-end snapshot)");
+    expect(screen.queryByText("CURRENT NET WORTH")).not.toBeInTheDocument();
+    // Freshness chips and "since last update" are about live data.
+    expect(screen.queryByLabelText("Data freshness by asset class")).not.toBeInTheDocument();
+    expect(screen.queryByText(/SINCE LAST UPDATE/)).not.toBeInTheDocument();
+    // Comparisons name their baseline.
+    expect((await screen.findByText("VS MAR 2026 MONTH-END")).parentElement).toHaveTextContent("+S$ 11");
+    expect(screen.getByText("VS APR 2025 MONTH-END").parentElement).toHaveTextContent("+S$ 22");
+    expect(screen.queryByText(/S\$ 777/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/S\$ 999/)).not.toBeInTheDocument();
+    // Today's movers are live only.
+    expect(screen.getByRole("button", { name: "Movers" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Today" })).not.toBeInTheDocument();
+  });
+
+  it("changing the month refetches with it and writes the shared month; Back to live returns", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockImplementation(((month: string) =>
+      Promise.resolve(month === "2026-04" ? makePastBootstrap(80, 100) : makeBootstrap(100))) as never);
+    mockApi.dashboardSummary.mockImplementation(((month: string) =>
+      Promise.resolve(month === "2026-04" ? { ...makeSummary(80, 100), as_of_month: "2026-04", is_live: false } : makeSummary(100))) as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText("CURRENT NET WORTH")).toBeInTheDocument();
+    expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-05", "SGD");
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-04" } });
+    await waitFor(() => {
+      expect(mockApi.dashboardBootstrap).toHaveBeenCalledWith("2026-04", "SGD");
+      expect(mockApi.platformAllocation).toHaveBeenCalledWith("2026-04", "SGD");
+    });
+    // The same key every other page reads, so Stocks/Cash/Risk follow.
+    expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-04");
+    expect(await screen.findByText("NET WORTH · APR 2026 MONTH-END")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Back to live" }));
+    expect(await screen.findByText("CURRENT NET WORTH")).toBeInTheDocument();
+    expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-05");
+    expect(screen.getByLabelText("Month")).toHaveValue("2026-05");
   });
 
   it("renders per-source freshness chips on the hero from bootstrap data", async () => {
@@ -500,5 +595,45 @@ describe("WealthOverview panel errors", () => {
     );
     const donut = await screen.findByRole("img", { name: "Allocation donut chart" });
     await waitFor(() => expect(donut).toHaveAccessibleDescription(/IBKR 80.0%, DBS Vickers 20.0%/));
+  });
+
+  it("says 'no data for <month>' when a comparison has no baseline (#224)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    const change = (abs: number, pct: number | null, compareMonth: string, baselineMissing: boolean) => ({
+      abs,
+      pct,
+      current_as_of: "2026-05-15T00:00:00+00:00",
+      compare_as_of: baselineMissing ? null : "2026-05-01T00:00:00+00:00",
+      compare_month: compareMonth,
+      compare_value: baselineMissing ? 0 : 100 - abs,
+      baseline_missing: baselineMissing,
+    });
+    mockApi.dashboardSummary.mockResolvedValue({
+      ...makeSummary(100),
+      current_net_worth_change: {
+        vs_prev_month: change(-4, -0.04, "2026-04", false),
+        // A year back has no data at all: the whole figure, not a change.
+        vs_prev_year: change(100, null, "2025-04", true),
+      },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    const yearRow = (await screen.findByText("VS LAST YEAR")).parentElement as HTMLElement;
+    expect(yearRow).toHaveTextContent("no comparison: no data for Apr 2025");
+    expect(yearRow).not.toHaveTextContent("S$ 100");
+    // Last month is real: ▼, the down colour, amount and % together.
+    const monthDelta = (screen.getByText("VS LAST MONTH").parentElement as HTMLElement).querySelector(".delta");
+    expect(monthDelta).toHaveClass("delta--down");
+    expect(monthDelta).toHaveTextContent("▼-S$ 4 (-4.0%)");
+    // The hero chip is the same <Delta>, in the same colour.
+    const chip = document.querySelector(".coHeroValueRow .deltaChip");
+    expect(chip).toHaveClass("delta--down");
+    expect(chip).toHaveTextContent("▼-4.0%");
   });
 });

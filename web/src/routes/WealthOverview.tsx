@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import type { AssetClassFreshness, NetWorthFreshness } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
-import { currentMonthYYYYMM } from "../lib/selectedMonth";
+import { currentMonthYYYYMM, isPastMonth, shiftMonth, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
@@ -14,8 +14,11 @@ import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
+import MonthControl from "../components/MonthControl";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
+import Delta from "../components/Delta";
+import { missingBaselineReason } from "../lib/delta";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
 const PORTFOLIO_REFRESH_DEBOUNCE_MS = 750;
@@ -100,9 +103,9 @@ function AssetFreshnessChip({
 }
 
 export default function WealthOverview() {
-  // Pinned once per page load — this page always shows the current month; there is
-  // no month selector here (see Wealth Timeline Phase 1 plan for why).
-  const month = useMemo(() => currentMonthYYYYMM(), []);
+  // #223: the shared selected month, like every other page. The current month shows the
+  // live headline; a past month shows that month-end snapshot, with that month's comparisons.
+  const [month, setMonth] = useSelectedMonth();
 
   const [baseCurrency] = useBaseCurrency();
   const allocDescId = useId();
@@ -128,16 +131,28 @@ export default function WealthOverview() {
     currency: baseCurrency,
     allocation: await api.platformAllocation(month, baseCurrency),
   }));
-  const sinceUpdateRes = useApiResource(resourceKey("netWorthSinceUpdate", baseCurrency), () =>
-    api.netWorthSinceUpdate(baseCurrency),
+  // "Since last update" and today's movers are live only: not fetched for a past month.
+  const sinceUpdateRes = useApiResource(
+    isPastMonth(month) ? null : resourceKey("netWorthSinceUpdate", baseCurrency),
+    () => api.netWorthSinceUpdate(baseCurrency),
   );
 
   const bootstrap = bootstrapRes.data ?? null;
   const summary = summaryRes.data ?? null;
   const spendingSummary = spendingRes.data ?? null;
   const platformAllocation = platformRes.data?.allocation ?? null;
-  const sinceUpdate = sinceUpdateRes.data ?? null;
   const selectedBaseCurrency = baseCurrency || bootstrap?.base_currency || "SGD";
+
+  // Live or a past month-end, by the month the hero data is for (while a new month loads,
+  // the previous month's numbers stay on screen with their own labels).
+  const shownMonth = bootstrap?.as_of_month ?? month;
+  const isLive = bootstrap?.is_live ?? !isPastMonth(shownMonth);
+  const sinceUpdate = isLive ? (sinceUpdateRes.data ?? null) : null;
+  // The month-end actually used: the month before the anchor date (last month, before
+  // SNAPSHOT_DAY, still reads the month-end before it, as the backend does).
+  const snapshotMonth = bootstrap?.net_worth_boundary_at
+    ? shiftMonth(bootstrap.net_worth_boundary_at.slice(0, 7), -1)
+    : shownMonth;
 
   const reloadAllRef = useRef<() => void>(() => undefined);
   useEffect(() => {
@@ -180,8 +195,13 @@ export default function WealthOverview() {
 
   // Hero headline, freshness, liabilities, and the asset-class allocation view all
   // come from bootstrap — none of them need to wait on the heavier summary call.
-  const currentNetWorth = bootstrap?.current_net_worth ?? bootstrap?.net_worth ?? null;
-  const currentNetWorthAsOf = bootstrap?.current_net_worth_as_of ?? bootstrap?.net_worth_as_of ?? null;
+  // A past month's headline is its month-end snapshot (`net_worth`), not today's value.
+  const currentNetWorth = isLive
+    ? (bootstrap?.current_net_worth ?? bootstrap?.net_worth ?? null)
+    : (bootstrap?.net_worth ?? null);
+  const currentNetWorthAsOf = isLive
+    ? (bootstrap?.current_net_worth_as_of ?? bootstrap?.net_worth_as_of ?? null)
+    : (bootstrap?.net_worth_as_of ?? null);
   const currentFreshness: NetWorthFreshness | null = bootstrap?.current_net_worth_freshness ?? null;
   const currentNetWorthTotal = currentNetWorth?.total ?? 0;
 
@@ -227,11 +247,23 @@ export default function WealthOverview() {
       ? (platformAllocation?.total ?? 0)
       : (currentNetWorth?.total ?? 0);
 
-  // The hero headline is the live net worth, so its deltas are the live comparisons
-  // (live vs the latest completed month-end, and that month-end a year earlier), #133.
-  const heroChange = summary?.current_net_worth_change ?? summary?.net_worth_change;
+  // The live headline's deltas are the live comparisons (live vs the latest completed
+  // month-end, and that month-end a year earlier), #133. A past month's headline is a
+  // month-end, so its deltas are that month-end vs the one before and a year before (D-24),
+  // labelled with their baseline. Only a summary for the month on screen is used.
+  const summaryForMonth = summary && summary.as_of_month === shownMonth ? summary : null;
+  const heroChange = isLive
+    ? (summaryForMonth?.current_net_worth_change ?? summaryForMonth?.net_worth_change)
+    : summaryForMonth?.net_worth_change;
   const prevMonthChange = heroChange?.vs_prev_month;
   const prevYearChange = heroChange?.vs_prev_year;
+  const prevMonthLabel = isLive || !prevMonthChange
+    ? "VS LAST MONTH"
+    : `VS ${fmt.formatMonth(prevMonthChange.compare_month, "medium").toUpperCase()} MONTH-END`;
+  const prevYearLabel = isLive || !prevYearChange
+    ? "VS LAST YEAR"
+    : `VS ${fmt.formatMonth(prevYearChange.compare_month, "medium").toUpperCase()} MONTH-END`;
+  const shownHoldingsView = !isLive && holdingsView === "today" ? "holdings" : holdingsView;
   const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
   const topMovers = summary?.top_movers ?? null;
   const liabilities = bootstrap?.net_worth?.liabilities ?? null;
@@ -241,7 +273,10 @@ export default function WealthOverview() {
       title="Wealth Overview"
       subtitle="Portfolio composition and the most important balance-sheet signals."
       headerActions={
-        <BaseCurrencyPicker />
+        <>
+          <MonthControl month={month} onMonthChange={setMonth} />
+          <BaseCurrencyPicker />
+        </>
       }
     >
       {bootstrapRes.isLoading ? (
@@ -260,24 +295,39 @@ export default function WealthOverview() {
           {/* ── Hero card ─────────────────────────────────────────────── */}
           <article className="coHeroCard">
             <div className="coHeroCardHeader">
-              <p className="coHeroEyebrow">CURRENT NET WORTH</p>
+              <p className="coHeroEyebrow">
+                {isLive ? "CURRENT NET WORTH" : `NET WORTH · ${fmt.formatMonth(snapshotMonth, "medium").toUpperCase()} MONTH-END`}
+              </p>
             </div>
             <div className="coHeroValueRow">
               <span className="coHeroValue">{formatMoney(currentNetWorth?.total)}</span>
               {prevMonthChange ? (
-                <span
-                  className={`coChip${prevMonthChange.abs >= 0 ? " coChipPositive" : " coChipNegative"}`}
-                >
-                  {fmt.formatPercent(prevMonthChange.pct, { signed: true })}
-                </span>
+                <Delta
+                  variant="chip"
+                  show="pct"
+                  abs={prevMonthChange.abs}
+                  pct={prevMonthChange.pct}
+                  currency={summaryCurrency}
+                  missingReason={missingBaselineReason(prevMonthChange)}
+                />
               ) : null}
             </div>
 
-            <div className="coFreshnessRow" aria-label="Data freshness by asset class">
-              <AssetFreshnessChip label="Stocks" freshness={currentFreshness?.stocks} freshDays={DAILY_SOURCE_FRESH_DAYS} />
-              <AssetFreshnessChip label="Crypto" freshness={currentFreshness?.crypto} freshDays={DAILY_SOURCE_FRESH_DAYS} />
-              <AssetFreshnessChip label="Cash" freshness={currentFreshness?.cash} freshDays={MANUAL_SOURCE_FRESH_DAYS} />
-            </div>
+            {isLive ? (
+              <div className="coFreshnessRow" aria-label="Data freshness by asset class">
+                <AssetFreshnessChip label="Stocks" freshness={currentFreshness?.stocks} freshDays={DAILY_SOURCE_FRESH_DAYS} />
+                <AssetFreshnessChip label="Crypto" freshness={currentFreshness?.crypto} freshDays={DAILY_SOURCE_FRESH_DAYS} />
+                <AssetFreshnessChip label="Cash" freshness={currentFreshness?.cash} freshDays={MANUAL_SOURCE_FRESH_DAYS} />
+              </div>
+            ) : (
+              // #223 (mock-up B in #131): a past month says what it is, with a way back.
+              <p className="coHeroPastMonth" role="note">
+                Viewing {fmt.formatMonth(snapshotMonth, "medium")} (month-end snapshot) ·{" "}
+                <button type="button" className="coHeroBackToLive" onClick={() => setMonth(currentMonthYYYYMM())}>
+                  Back to live
+                </button>
+              </p>
+            )}
 
             {currentNetWorthAsOf ? (
               <p className="coHeroFreshness">As of {fmt.formatDate(currentNetWorthAsOf)}</p>
@@ -285,17 +335,18 @@ export default function WealthOverview() {
             <FxNote sources={[bootstrap, summary]} />
 
             <div className="coHeroDeltaRow">
-              {sinceUpdate?.net_worth_change ? (
+              {!isLive ? null : sinceUpdate?.net_worth_change ? (
                 <div className="coHeroDelta">
                   <span className="coHeroDeltaLabel">
                     SINCE LAST UPDATE{sinceUpdate.compare_as_of ? ` (${formatChipAsOf(sinceUpdate.compare_as_of)})` : ""}
                   </span>
-                  <strong
-                    className={
-                      sinceUpdate.net_worth_change.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                    }
-                  >
-                    {fmt.formatDelta(sinceUpdate.net_worth_change.abs, sinceUpdate.net_worth_change.pct, sinceUpdateCurrency)}
+                  <strong>
+                    <Delta
+                      abs={sinceUpdate.net_worth_change.abs}
+                      pct={sinceUpdate.net_worth_change.pct}
+                      currency={sinceUpdateCurrency}
+                      missingReason={sinceUpdate.net_worth_change.baseline_missing ? "no earlier update to compare with" : null}
+                    />
                   </strong>
                 </div>
               ) : sinceUpdateRes.isLoading ? (
@@ -311,13 +362,14 @@ export default function WealthOverview() {
               ) : null}
               {prevMonthChange ? (
                 <div className="coHeroDelta">
-                  <span className="coHeroDeltaLabel">VS LAST MONTH</span>
-                  <strong
-                    className={
-                      prevMonthChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                    }
-                  >
-                    {fmt.formatDelta(prevMonthChange.abs, prevMonthChange.pct, summaryCurrency)}
+                  <span className="coHeroDeltaLabel">{prevMonthLabel}</span>
+                  <strong>
+                    <Delta
+                      abs={prevMonthChange.abs}
+                      pct={prevMonthChange.pct}
+                      currency={summaryCurrency}
+                      missingReason={missingBaselineReason(prevMonthChange)}
+                    />
                   </strong>
                 </div>
               ) : summaryRes.isLoading ? (
@@ -333,13 +385,14 @@ export default function WealthOverview() {
               ) : null}
               {prevYearChange ? (
                 <div className="coHeroDelta">
-                  <span className="coHeroDeltaLabel">VS LAST YEAR</span>
-                  <strong
-                    className={
-                      prevYearChange.abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"
-                    }
-                  >
-                    {fmt.formatSignedMoney(prevYearChange.abs, summaryCurrency)}
+                  <span className="coHeroDeltaLabel">{prevYearLabel}</span>
+                  <strong>
+                    <Delta
+                      abs={prevYearChange.abs}
+                      pct={prevYearChange.pct}
+                      currency={summaryCurrency}
+                      missingReason={missingBaselineReason(prevYearChange)}
+                    />
                   </strong>
                 </div>
               ) : null}
@@ -475,34 +528,37 @@ export default function WealthOverview() {
                 <div className="coSegmentedControl" role="group" aria-label="Holdings view">
                   <button
                     type="button"
-                    className={`coSegmentedBtn${holdingsView === "holdings" ? " coSegmentedBtnActive" : ""}`}
+                    className={`coSegmentedBtn${shownHoldingsView === "holdings" ? " coSegmentedBtnActive" : ""}`}
                     onClick={() => setHoldingsView("holdings")}
                   >
                     Holdings
                   </button>
                   <button
                     type="button"
-                    className={`coSegmentedBtn${holdingsView === "movers" ? " coSegmentedBtnActive" : ""}`}
+                    className={`coSegmentedBtn${shownHoldingsView === "movers" ? " coSegmentedBtnActive" : ""}`}
                     onClick={() => setHoldingsView("movers")}
                   >
                     Movers
                   </button>
-                  <button
-                    type="button"
-                    className={`coSegmentedBtn${holdingsView === "today" ? " coSegmentedBtnActive" : ""}`}
-                    onClick={() => setHoldingsView("today")}
-                  >
-                    Today
-                  </button>
+                  {/* Today's movers are live only: no Today tab on a past month. */}
+                  {isLive ? (
+                    <button
+                      type="button"
+                      className={`coSegmentedBtn${shownHoldingsView === "today" ? " coSegmentedBtnActive" : ""}`}
+                      onClick={() => setHoldingsView("today")}
+                    >
+                      Today
+                    </button>
+                  ) : null}
                 </div>
               </div>
 
               <div className="coHoldingsList">
                 {summaryRes.isLoading ? (
                   <p className="muted" role="status">Loading holdings…</p>
-                ) : holdingsView !== "today" && summaryRes.error && !summary ? (
+                ) : shownHoldingsView !== "today" && summaryRes.error && !summary ? (
                   <LoadError compact title="Couldn't load positions" error={summaryRes.error} onRetry={retry(summaryRes)} />
-                ) : holdingsView === "holdings" ? (
+                ) : shownHoldingsView === "holdings" ? (
                   topHoldings.length > 0 ? (
                     topHoldings.map((h) => (
                       <div key={h.asset_id ?? h.symbol} className="coHoldingRow">
@@ -521,7 +577,7 @@ export default function WealthOverview() {
                   ) : (
                     <p className="muted">No holdings returned for this period.</p>
                   )
-                ) : holdingsView === "movers" ? (
+                ) : shownHoldingsView === "movers" ? (
                   topMovers ? (
                     [
                       ...(topMovers.gainers ?? []).slice(0, 2),
@@ -536,10 +592,8 @@ export default function WealthOverview() {
                           <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
                         </div>
                         <div className="coHoldingRight">
-                          <strong
-                            className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
-                          >
-                            {fmt.formatSignedMoney(row.delta_abs, summaryCurrency)}
+                          <strong className="coHoldingValue">
+                            <Delta abs={row.delta_abs} currency={summaryCurrency} show="abs" />
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
@@ -574,10 +628,8 @@ export default function WealthOverview() {
                           <span className="coHoldingClass">{row.asset_class.toUpperCase()}</span>
                         </div>
                         <div className="coHoldingRight">
-                          <strong
-                            className={`coHoldingValue ${row.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}
-                          >
-                            {fmt.formatSignedMoney(row.delta_abs, sinceUpdateCurrency)}
+                          <strong className="coHoldingValue">
+                            <Delta abs={row.delta_abs} currency={sinceUpdateCurrency} show="abs" />
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null

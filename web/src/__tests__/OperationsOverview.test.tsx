@@ -188,4 +188,58 @@ describe("OperationsOverview (Data Hub Overview)", () => {
     await waitFor(() => expect(screen.getByText("Linked accounts")).toBeInTheDocument());
     expect(screen.queryByText("Job status")).toBeNull();
   });
+  it("lists held positions without a live price and says why (#222)", async () => {
+    mockApi.dataHubSummary.mockResolvedValue({
+      ...summaryFixture,
+      market_data: {
+        fresh: 39,
+        stale: 0,
+        unpriced: 2,
+        unpriced_holdings: [
+          { symbol: "ACMECHEM", name: "ACME CHEMICALS LTD", currency: "INR", exchange_code: "NSE", platform: "SHAREKHAN", reason: "no_asset" },
+          { symbol: "ZENPAPER", name: "ZENITH PAPER LTD", currency: "INR", exchange_code: "NSE", platform: "SHAREKHAN", reason: "no_quote" },
+        ],
+      },
+      job_status: [
+        {
+          job: "market_data",
+          label: "Quote refresh",
+          state: "warning",
+          failure_threshold: 3,
+          last_run_status: "success",
+          consecutive_failures: 0,
+          scopes: [
+            { scope: "exchange:US", label: "US", last_run_status: "success", consecutive_failures: 0 },
+            {
+              scope: "exchange:NSE",
+              label: "NSE",
+              last_run_status: "no_new_data",
+              consecutive_failures: 0,
+              last_error: "2 held positions on NSE can't be priced (no linked asset, ticker or quote)",
+            },
+          ],
+        },
+      ],
+    });
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("Holdings without a live price")).toBeInTheDocument());
+    expect(screen.getByText("2 holdings unpriced")).toBeInTheDocument();
+    const list = screen.getByTestId("unpriced-holdings");
+    expect(list).toHaveTextContent("ACMECHEM");
+    expect(list).toHaveTextContent("ACME CHEMICALS LTD · SHAREKHAN · NSE");
+    expect(list).toHaveTextContent("Not linked to an asset");
+    expect(list).toHaveTextContent("No quote from any provider");
+    const quotes = screen.getByTestId("job-status-market_data");
+    expect(quotes).toHaveTextContent("Needs a look");
+    expect(quotes).toHaveTextContent("2 held positions on NSE can't be priced");
+  });
+
+  it("shows no unpriced section when every holding is priced", async () => {
+    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
+    renderPage();
+    await waitFor(() => expect(screen.getByText("Linked accounts")).toBeInTheDocument());
+    expect(screen.queryByTestId("unpriced-holdings")).toBeNull();
+    expect(screen.getByText("3 stale")).toBeInTheDocument();
+  });
 });

@@ -331,9 +331,25 @@ export type FxStatus = {
   fx_stale_currencies?: string[];
 };
 
+/** One comparison of a value with a baseline (net worth or a component). */
+export type NetWorthChange = {
+  abs: number;
+  pct: number | null;
+  current_as_of: string | null;
+  compare_as_of: string | null;
+  compare_month: string;
+  /** The baseline value, in the same currency as `abs` (#224). */
+  compare_value?: number | null;
+  /** No data at all for the baseline (not a real zero): show "no data for <month>" (#224). */
+  baseline_missing?: boolean;
+};
+
 export type DashboardSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
+  /** #223: true for the open (or a future) month, whose geography/top_holdings/cash_balances
+   * are live; false for a past month (its month-end snapshot). */
+  is_live?: boolean | null;
   current_net_worth_as_of?: string | null;
   current_net_worth?: NetWorthBreakdown | null;
   current_net_worth_freshness?: NetWorthFreshness | null;
@@ -386,6 +402,8 @@ export type DashboardSummary = FxStatus & {
     valued_at_cost?: boolean;
     price_provider?: string | null;
     quote_freshness_status?: string | null;
+    /** Where the shown price comes from: the price job's quote or the statement/upload (#224). */
+    price_basis?: "quote" | "statement" | null;
   }>;
   cash_balances?: Array<{
     currency: string;
@@ -394,46 +412,16 @@ export type DashboardSummary = FxStatus & {
   snapshot_day: number | null;
   net_worth_as_of: string | null;
   net_worth_change: null | {
-    vs_prev_month?: {
-      abs: number;
-      pct: number | null;
-      current_as_of: string | null;
-      compare_as_of: string | null;
-      compare_month: string;
-    };
-    vs_prev_year?: {
-      abs: number;
-      pct: number | null;
-      current_as_of: string | null;
-      compare_as_of: string | null;
-      compare_month: string;
-    };
+    vs_prev_month?: NetWorthChange;
+    vs_prev_year?: NetWorthChange;
   };
   /** Live current_net_worth vs the latest completed month-end (vs_prev_month) and the
    * same month-end a year earlier (vs_prev_year), whatever month was requested (#133). */
   current_net_worth_change?: DashboardSummary["net_worth_change"];
   net_worth_component_change?: null | {
-    cash?: {
-      abs: number;
-      pct: number | null;
-      current_as_of: string | null;
-      compare_as_of: string | null;
-      compare_month: string;
-    };
-    stocks_funds?: {
-      abs: number;
-      pct: number | null;
-      current_as_of: string | null;
-      compare_as_of: string | null;
-      compare_month: string;
-    };
-    crypto?: {
-      abs: number;
-      pct: number | null;
-      current_as_of: string | null;
-      compare_as_of: string | null;
-      compare_month: string;
-    };
+    cash?: NetWorthChange;
+    stocks_funds?: NetWorthChange;
+    crypto?: NetWorthChange;
   };
   top_movers?: null | {
     compare_month: string;
@@ -514,11 +502,17 @@ export type StockHoldingsSummary = FxStatus & {
     fresh: number;
     stale: number;
     missing: number;
+    /** Live view only (null on a past month): holdings without a fresh quote, statement-only ones included (#224). */
+    no_live_price?: number | null;
   } | null;
   trend?: Array<{
     month: string;
     value?: number | null;
   }>;
+  /** No stock data at all for compare_month (not a real zero), #224. */
+  stock_snapshot_missing?: boolean;
+  /** QUOTE_STALE_DAYS: a price older than this is stale (#224). */
+  quote_stale_days?: number | null;
 };
 
 export type SpendingSummary = FxStatus & {
@@ -830,6 +824,9 @@ export type ImportJobDetail = {
 
 export type PlatformAllocation = {
   as_of: string | null;
+  /** #223: the requested month, and whether it is live (open month) or a past month-end. */
+  as_of_month?: string | null;
+  is_live?: boolean | null;
   total: number;
   items: Array<{
     platform: string;
@@ -883,6 +880,8 @@ export type CashDeposits = {
     delta_abs: number;
     delta_pct?: number | null;
   }>;
+  /** No cash data at all for compare_month (not a real zero), #224. */
+  snapshot_missing?: boolean;
 };
 
 export type CryptoWallet = {
@@ -921,6 +920,9 @@ export type CryptoSummary = FxStatus & {
   snapshot_total_usd?: number;
   snapshot_delta_base?: number;
   snapshot_delta_pct?: number | null;
+  /** Nothing to compare with for compare_month (#224): no_data, or no_fx_rate (D-30). */
+  snapshot_missing?: boolean;
+  snapshot_missing_reason?: "no_data" | "no_fx_rate" | null;
   base_currency: string;
   eth_exposure_usd?: number;
   eth_exposure_base?: number;
@@ -1090,6 +1092,9 @@ export type DashboardBootstrap = FxStatus & {
   as_of_month: string;
   base_currency: string;
   snapshot_day: number | null;
+  /** #223: true for the open (or a future) month (headline: current_net_worth); false for a
+   * past month (headline: net_worth, its month-end snapshot). */
+  is_live?: boolean | null;
   current_net_worth_as_of?: string | null;
   current_net_worth?: NetWorthBreakdown | null;
   current_net_worth_freshness?: NetWorthFreshness | null;
@@ -1167,13 +1172,7 @@ export type WealthTopMovers = {
   detractors: WealthTopMover[];
 };
 
-export type NetWorthSinceUpdateChange = {
-  abs: number;
-  pct: number | null;
-  current_as_of: string | null;
-  compare_as_of: string | null;
-  compare_month: string;
-};
+export type NetWorthSinceUpdateChange = NetWorthChange;
 
 export type NetWorthSinceUpdate = {
   base_currency: string;
@@ -1239,6 +1238,7 @@ export type StockExposureItem = {
 
 export type StockExposure = {
   as_of: string | null;
+  is_live?: boolean | null;
   base_currency: string;
   total: number;
   by_country: StockExposureItem[];
@@ -1328,6 +1328,17 @@ export type DataHubJobStatus = {
   scopes: DataHubJobScopeStatus[];
 };
 
+// A held stock or fund with no live price (#222): not linked to an asset,
+// no ticker on a configured exchange, or never quoted.
+export type DataHubUnpricedHolding = {
+  symbol?: string | null;
+  name?: string | null;
+  currency?: string | null;
+  exchange_code?: string | null;
+  platform?: string | null;
+  reason: "no_asset" | "no_symbol" | "no_quote" | string;
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -1340,6 +1351,9 @@ export type DataHubSummary = {
   market_data: {
     fresh: number;
     stale: number;
+    // Held stocks/funds the quote refresh can't price (#222).
+    unpriced?: number;
+    unpriced_holdings?: DataHubUnpricedHolding[];
   };
   connected_wallet_count: number;
   connected_wallet_labels: string[];

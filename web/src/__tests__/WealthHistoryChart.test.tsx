@@ -207,6 +207,38 @@ describe("WealthHistoryChart keyboard drill-down", () => {
     expect(live.textContent).toBe("");
   });
 
+  it("marks the selected month (#223): its point, or 'now' for the open month", () => {
+    const { getByTestId, getByText, rerender, queryByTestId } = render(
+      <WealthHistoryChart points={points} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} selectedMonth="2026-05" />,
+    );
+    expect(getByTestId("wh-selected-month")).toHaveTextContent("Selected month: May 2026");
+    expect(getByText("May '26")).toHaveClass("whAxisLabelSelected");
+
+    rerender(
+      <WealthHistoryChart points={points} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} selectedMonth="2999-01" />,
+    );
+    expect(getByTestId("wh-selected-month")).toHaveTextContent("Selected month: now");
+    expect(getByText("now")).toHaveClass("whAxisLabelSelected");
+
+    // Older than the range: nothing to mark.
+    rerender(
+      <WealthHistoryChart points={points} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} selectedMonth="2020-01" />,
+    );
+    expect(queryByTestId("wh-selected-month")).not.toBeInTheDocument();
+  });
+
+  it("always names the selected month on a long, thinned-out axis", () => {
+    const many = Array.from({ length: 24 }, (_, i) => {
+      const month = `20${24 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, "0")}`;
+      return point({ month, total: 1000 + i });
+    });
+    const { getByText } = render(
+      <WealthHistoryChart points={many} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} selectedMonth="2024-02" />,
+    );
+    // 24 months show every third label; Feb '24 (index 1) is not one of them, but is selected.
+    expect(getByText("Feb '24")).toHaveClass("whAxisLabelSelected");
+  });
+
   it("an empty chart is not a tab stop", () => {
     const { getByRole } = render(
       <WealthHistoryChart points={[]} now={now} mode="total" formatMoney={formatMoney} formatMoneyShort={formatMoneyShort} />,

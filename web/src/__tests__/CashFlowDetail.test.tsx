@@ -296,7 +296,10 @@ describe("CashFlowDetail route", () => {
     // Hero: value, delta chip, and the savings/burn insight sentence
     expect(await screen.findByText("Net cash flow this month")).toBeInTheDocument();
     expect(screen.getByText("+S$ 3,770")).toBeInTheDocument();
-    expect(screen.getByText("-S$ 2,412 vs January")).toBeInTheDocument();
+    // One <Delta> (#224): ▼ + the amount + its baseline, in the down colour.
+    const chip = screen.getByText("-S$ 2,412").closest(".delta");
+    expect(chip).toHaveClass("deltaChip", "delta--down");
+    expect(chip).toHaveTextContent("▼-S$ 2,412vs January");
     expect(screen.getByText("Saved 30.2% of income · Burn rate 69.8%")).toBeInTheDocument();
 
     // 4 KPI tiles

@@ -928,6 +928,168 @@ def test_dashboard_geography_exposure_uses_requested_month_snapshot(client: Test
     ]
 
 
+def _seed_two_month_platforms(db_engine):
+    """May month-end: one holding at MAYBROKER (1,000). June adds a second
+    account at JUNBROKER (2,000). No quotes, so live values are the snapshots."""
+    with db_engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+                "(811, 'MAYBROKER', 'May Broker', 'BROKER', 'SG'), "
+                "(812, 'JUNBROKER', 'June Broker', 'BROKER', 'US')"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO accounts (id, name, platform, user_id, account_type, currency, country, platform_id) VALUES "
+                "(811, 'May Broker', 'MAYBROKER', 1, 'BROKER', 'USD', 'SG', 811), "
+                "(812, 'June Broker', 'JUNBROKER', 1, 'BROKER', 'USD', 'US', 812)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO assets (id, symbol, name, asset_class, quote_currency, home_country) VALUES "
+                "(811, 'MAYHOLD', 'May Holding', 'STOCK', 'USD', 'SG'), "
+                "(812, 'JUNHOLD', 'June Holding', 'STOCK', 'USD', 'US')"
+            )
+        )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=811,
+        asset_id=811,
+        as_of=datetime(2026, 5, 31, tzinfo=timezone.utc),
+        quantity=10,
+        market_value_base=1000,
+        market_price=100,
+        currency="USD",
+        platform_code="MAYBROKER",
+    )
+    seed_canonical_position_snapshot_for_test(
+        db_engine,
+        account_id=812,
+        asset_id=812,
+        as_of=datetime(2026, 6, 30, tzinfo=timezone.utc),
+        quantity=20,
+        market_value_base=2000,
+        market_price=100,
+        currency="USD",
+        platform_code="JUNBROKER",
+    )
+
+
+def _freeze_july_15(monkeypatch, snapshot_day: str = "1", now: datetime | None = None):
+    monkeypatch.setenv("SNAPSHOT_DAY", snapshot_day)
+    frozen = now or datetime(2026, 7, 15, tzinfo=timezone.utc)
+    monkeypatch.setattr("app.valuation.clock._current_anchor_ts", lambda: frozen)
+    monkeypatch.setattr(
+        "app.valuation.fx.get_rates",
+        lambda _date, _base, symbols: {symbol: 1.0 for symbol in symbols},
+    )
+
+
+def test_platform_allocation_uses_requested_month_snapshot(client: TestClient, db_engine, monkeypatch):
+    """#223: platform-allocation used to discard `month` (always live). A past
+    month is its month-end snapshot; the open month stays live."""
+    _seed_two_month_platforms(db_engine)
+    _freeze_july_15(monkeypatch)
+
+    may = client.get("/dashboard/platform-allocation?month=2026-05&base_currency=USD")
+    july = client.get("/dashboard/platform-allocation?month=2026-07&base_currency=USD")
+    assert may.status_code == 200, may.text
+    assert july.status_code == 200, july.text
+
+    may_body = may.json()
+    assert may_body["as_of_month"] == "2026-05"
+    assert may_body["is_live"] is False
+    assert may_body["as_of"] == "2026-05-31T00:00:00+00:00"
+    assert may_body["total"] == 1000.0
+    assert [(i["platform"], i["value"]) for i in may_body["items"] if i["value"] > 0] == [("MAYBROKER", 1000.0)]
+
+    july_body = july.json()
+    assert july_body["as_of_month"] == "2026-07"
+    assert july_body["is_live"] is True
+    assert july_body["total"] == 3000.0
+    assert sorted((i["platform"], i["value"]) for i in july_body["items"] if i["value"] > 0) == [
+        ("JUNBROKER", 2000.0),
+        ("MAYBROKER", 1000.0),
+    ]
+
+    # The donut and the hero of a past month show one month-end: the allocation
+    # adds up to that month's net worth (no cash, crypto or liabilities here).
+    boot = client.get("/dashboard/bootstrap?month=2026-05&base_currency=USD").json()
+    assert boot["is_live"] is False
+    assert boot["net_worth"]["total"] == may_body["total"]
+    assert client.get("/dashboard/bootstrap?month=2026-07&base_currency=USD").json()["is_live"] is True
+
+
+def test_platform_allocation_month_is_part_of_the_cache_key(client: TestClient, db_engine, monkeypatch):
+    """#147/#223: with the shared valuation cache on, two months read back to
+    back (and again, warm) each get their own figures."""
+    from app import valuation_cache
+
+    _seed_two_month_platforms(db_engine)
+    _freeze_july_15(monkeypatch)
+    monkeypatch.setenv("VALUATION_CACHE_ENABLED", "1")
+    valuation_cache.clear_shared_cache()
+
+    for _ in range(2):
+        may = client.get("/dashboard/platform-allocation?month=2026-05&base_currency=USD").json()
+        june = client.get("/dashboard/platform-allocation?month=2026-06&base_currency=USD").json()
+        july = client.get("/dashboard/platform-allocation?month=2026-07&base_currency=USD").json()
+        assert (may["total"], june["total"], july["total"]) == (1000.0, 3000.0, 3000.0)
+        assert (may["is_live"], june["is_live"], july["is_live"]) == (False, False, True)
+
+
+def test_platform_allocation_before_snapshot_day_reads_the_same_month_end_as_net_worth(
+    client: TestClient, db_engine, monkeypatch
+):
+    """Last month, before SNAPSHOT_DAY: its own anchor hasn't passed, so (like
+    its net worth, #133) it reads the completed month-end before it."""
+    _seed_two_month_platforms(db_engine)
+    _freeze_july_15(monkeypatch, snapshot_day="5", now=datetime(2026, 7, 3, tzinfo=timezone.utc))
+
+    june = client.get("/dashboard/platform-allocation?month=2026-06&base_currency=USD").json()
+    boot = client.get("/dashboard/bootstrap?month=2026-06&base_currency=USD").json()
+    assert june["is_live"] is False
+    assert boot["net_worth_boundary_at"].startswith("2026-06-05")
+    assert june["total"] == 1000.0 == boot["net_worth"]["total"]
+
+
+def test_summary_positions_follow_a_past_month(client: TestClient, db_engine, monkeypatch):
+    """#223: /summary's top_holdings, geography and cash_balances were always
+    live. A past month's are its month-end snapshot; the open month's stay live."""
+    _seed_two_month_platforms(db_engine)
+    _freeze_july_15(monkeypatch)
+
+    may = client.get("/dashboard/summary?month=2026-05&base_currency=USD&compare=prev_month,prev_year").json()
+    july = client.get("/dashboard/summary?month=2026-07&base_currency=USD&compare=prev_month,prev_year").json()
+
+    assert may["is_live"] is False
+    assert [h["symbol"] for h in may["top_holdings"]] == ["MAYHOLD"]
+    assert may["top_holdings"][0]["percent_of_networth"] == pytest.approx(100.0)
+    assert [g["country"] for g in may["geography"]] == ["SG"]
+    # The past month's movers and comparisons are its own (D-24): May vs April.
+    assert may["net_worth_change"]["vs_prev_month"]["compare_month"] == "2026-04"
+
+    assert july["is_live"] is True
+    assert sorted(h["symbol"] for h in july["top_holdings"]) == ["JUNHOLD", "MAYHOLD"]
+
+    lean = client.get("/dashboard/summary?month=2026-05&base_currency=USD&skip_networth=true").json()
+    assert lean["is_live"] is False
+    assert [h["symbol"] for h in lean["top_holdings"]] == ["MAYHOLD"]
+
+
+def test_stock_exposure_uses_requested_month_snapshot(client: TestClient, db_engine, monkeypatch):
+    """Same latent defect as platform-allocation (#197 notes): `month` was discarded."""
+    _seed_two_month_platforms(db_engine)
+    _freeze_july_15(monkeypatch)
+
+    may = client.get("/dashboard/stock-exposure?month=2026-05&base_currency=USD").json()
+    july = client.get("/dashboard/stock-exposure?month=2026-07&base_currency=USD").json()
+    assert (may["is_live"], may["total"]) == (False, 1000.0)
+    assert (july["is_live"], july["total"]) == (True, 3000.0)
+
+
 def test_dashboard_geography_exposure_counts_stablecoins_as_cash_in_us(client: TestClient, db_engine, monkeypatch):
     from datetime import datetime, timezone
     from sqlalchemy import text
@@ -1497,6 +1659,9 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
         return {"HKD": 1.0}
 
     monkeypatch.setattr("app.valuation.fx.get_rates", fake_rates)
+    # February is the open month, so the positions are live (quote priced). A
+    # past month's are its month-end snapshot at statement prices (#223).
+    monkeypatch.setattr(valuation_clock, "_current_anchor_ts", lambda: datetime(2026, 2, 10, tzinfo=timezone.utc))
 
     resp = client.get("/dashboard/summary?month=2026-02&base_currency=HKD")
     assert resp.status_code == 200

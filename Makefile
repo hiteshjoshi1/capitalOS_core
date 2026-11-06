@@ -57,7 +57,7 @@ endif
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-window-move db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -330,7 +330,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
+.PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
 # out every session of that user. In the main checkout this is the real app.
@@ -353,14 +353,25 @@ user-revoke-admin:
 	@test -n "$(USERNAME)" || { echo "Usage: make user-revoke-admin USERNAME=<name>" >&2; exit 2; }
 	$(COMPOSE) exec -T api python -m app.scripts.user_admin revoke-admin "$(USERNAME)"
 
-# The demo login (demo / Test@1234) is for dev and test stacks only (#152): migration 072
-# turns it off everywhere, this turns it back on. Refused on the real-data stack, whatever
-# DB_CONTAINER says.
+# Dev/test stacks only, refused on the real-data stack whatever DB_CONTAINER says:
+# - the demo login (demo / Test@1234, #152): migration 072 turns it off everywhere,
+#   demo-enable turns it back on;
+# - the dummy seed (#221): seed_dummy.sql writes DUMMY rows into the SHARED prices table,
+#   which can value real users' past months.
+# Refused when make parses the command line, before any recipe (db-wait included) runs, and
+# again in the demo-enable and db-seed-dummy recipes, for a run that reaches them as a
+# prerequisite (db-seed-demo, under make -j too).
 DEMO_REFUSED_CONTAINERS=capitalos-oss-postgres
+DEMO_ONLY_TARGETS=demo-enable db-seed-dummy db-seed-demo
+DEMO_REFUSED=$(or $(filter $(REAL_DATA_PROJECT),$(COMPOSE_PROJECT)),$(filter $(DEMO_REFUSED_CONTAINERS),$(DB_CONTAINER)))
+DEMO_REFUSAL=Refusing '$(1)': $(2) never goes on the real-data stack ($(COMPOSE_PROJECT) / $(DB_CONTAINER)). Use a worktree or the test instance.
+ifneq ($(filter $(DEMO_ONLY_TARGETS),$(MAKECMDGOALS)),)
+ifneq ($(DEMO_REFUSED),)
+$(error $(call DEMO_REFUSAL,$(filter $(DEMO_ONLY_TARGETS),$(MAKECMDGOALS)),demo login or dummy data))
+endif
+endif
 demo-enable: db-wait
-	@if [ "$(COMPOSE_PROJECT)" = "$(REAL_DATA_PROJECT)" ] || [ -n "$(filter $(DEMO_REFUSED_CONTAINERS),$(DB_CONTAINER))" ]; then \
-		echo "Refusing: the demo login (published password) is never enabled on the real-data stack ($(COMPOSE_PROJECT) / $(DB_CONTAINER))." >&2; exit 1; \
-	fi
+	@if [ -n "$(DEMO_REFUSED)" ]; then echo "$(call DEMO_REFUSAL,demo-enable,the demo login (published password))" >&2; exit 1; fi
 	@docker exec -i $(DB_CONTAINER) psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/demo-enable.sql > /dev/null
 	@echo "Demo login enabled on $(DB_CONTAINER): demo / Test@1234 (dev/test stacks only)."
 
@@ -543,6 +554,7 @@ db-reset:
 	$(MAKE) db-migrate
 
 db-seed-dummy: db-wait
+	@if [ -n "$(DEMO_REFUSED)" ]; then echo "$(call DEMO_REFUSAL,db-seed-dummy,dummy data (shared DUMMY prices))" >&2; exit 1; fi
 	@echo "Seeding dummy demo data..."
 	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy.sql
 	@echo "Dummy data seeded."
@@ -581,6 +593,24 @@ ibkr-rebuild-snapshots:
 # Prints job ids, actions and dates, never amounts. Runs in the running api container.
 card-balance-backfill:
 	$(COMPOSE) exec api python -m app.scripts.backfill_card_balances $(if $(filter 1,$(APPLY)),--apply,)
+
+# #222: Sharekhan instruments imported before the parser fix hold the company name as their
+# symbol and the scrip code as their name, and no asset, so the NSE refresh never priced them.
+# This swaps them back, renames the synthetic broker_instrument_id to <TICKER>_INR (the row id
+# stays), links/creates the INR asset (home country IN) and marks History dirty from the
+# earliest affected snapshot. Dry run unless APPLY=1; idempotent. Prints counts and ids, never
+# holdings. Then refresh prices (Data Hub, or POST /market-data/refresh-now) to price them.
+sharekhan-instrument-repair:
+	$(COMPOSE) exec api python -m app.scripts.repair_sharekhan_instruments $(if $(filter 1,$(APPLY)),--apply,)
+
+# #222: quote one asset under another Yahoo symbol, e.g. an Indian holding Yahoo lists only on
+# BSE: make market-symbol-override SYMBOL=<CODE> CURRENCY=INR EXCHANGE=NSE YAHOO=<CODE>.BO
+# (CLEAR=1 instead of YAHOO removes it). Dry run unless APPLY=1. The Data Hub lists holdings
+# that still can't be priced.
+market-symbol-override:
+	@test -n "$(SYMBOL)" -a -n "$(CURRENCY)" -a -n "$(EXCHANGE)" || { echo "Usage: make market-symbol-override SYMBOL=<asset symbol> CURRENCY=<ccy> EXCHANGE=<US|SGX|HKEX|NSE> (YAHOO=<yahoo symbol> | CLEAR=1) [APPLY=1]" >&2; exit 2; }
+	@test -n "$(YAHOO)$(filter 1,$(CLEAR))" || { echo "Give YAHOO=<yahoo symbol> or CLEAR=1" >&2; exit 2; }
+	$(COMPOSE) exec api python -m app.scripts.set_market_symbol_override --symbol "$(SYMBOL)" --currency "$(CURRENCY)" --exchange "$(EXCHANGE)" $(if $(filter 1,$(CLEAR)),--clear,--yahoo "$(YAHOO)") $(if $(filter 1,$(APPLY)),--apply,)
 
 # #190: mask account numbers in existing import reports (data/reports/*.json): parser_meta's
 # account fields and signature_debug only, never transaction descriptions. Dry run (lists files
@@ -639,6 +669,7 @@ lint: web-deps
 	PYTHON="$(PYTHON)" scripts/test-check-migrations.sh
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
+	scripts/test-test-instance.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
 typecheck: web-deps

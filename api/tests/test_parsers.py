@@ -174,6 +174,53 @@ def test_sharekhan_parser_html(tmp_path: Path):
     assert result.parser_meta["sheet_name"].startswith("HTML_TABLE")
 
 
+def test_sharekhan_parser_swaps_name_first_rows():
+    """Sharekhan's real layout (#222): the header says SKScripCode | Stock Name,
+    but each row holds the company name first and the scrip code second."""
+    fixture = Path(__file__).resolve().parent / "fixtures" / "sharekhan_holdings_synthetic.xls"
+    result = parse_sharekhan_holdings_xls(str(fixture))
+    assert result.parser_meta["code_name_columns_swapped"] is True
+    by_symbol = {p["symbol"]: p for p in result.positions}
+    # The total row is dropped; every row, the one-word name included, is swapped.
+    assert set(by_symbol) == {"ACMECHEM", "ZENPAPER", "NWTRADE", "ORBITLTD"}
+    assert by_symbol["ACMECHEM"]["name"] == "ACME CHEMICALS LTD"
+    assert by_symbol["ORBITLTD"]["name"] == "ORBIT"
+    acme = by_symbol["ACMECHEM"]
+    assert acme["quantity"] == 12
+    assert acme["avg_cost"] == 1500.0
+    assert acme["market_price"] == 1625.5
+    assert acme["market_value_base"] == 19506.0
+    assert acme["currency"] == "INR"
+    assert acme["home_country"] == "IN"
+    # The file states no holdings date (only a financial year).
+    assert "as_of" not in result.parser_meta
+
+
+def test_sharekhan_parser_keeps_code_first_rows(tmp_path: Path):
+    html = """<html><body>
+    <table>
+      <tr><th>SKScripCode</th><th>Stock Name</th><th>Current Qty</th><th>Investment Price</th><th>Market Value</th></tr>
+      <tr><td>ACMECHEM</td><td>ACME CHEMICALS LTD</td><td>3</td><td>100</td><td>330</td></tr>
+      <tr><td>ZENPAPER</td><td>ZENITH PAPER LTD</td><td>4</td><td>50</td><td>210</td></tr>
+    </table>
+    </body></html>"""
+    fixture = tmp_path / "sharekhan.xls"
+    fixture.write_text(html, encoding="utf-8")
+    result = parse_sharekhan_holdings_xls(str(fixture))
+    assert result.parser_meta["code_name_columns_swapped"] is False
+    assert [p["symbol"] for p in result.positions] == ["ACMECHEM", "ZENPAPER"]
+    assert result.positions[0]["name"] == "ACME CHEMICALS LTD"
+
+
+def test_code_and_name_swapped_votes_by_row():
+    from app.ingestion.parsers.sharekhan_holdings_xls_v1 import code_and_name_swapped
+
+    assert code_and_name_swapped([("ACME LTD", "ACME"), ("ORBIT", "ORBITLTD")]) is True
+    assert code_and_name_swapped([("ACME", "ACME LTD"), ("ORBITLTD", "ORBIT")]) is False
+    # Only one-word names: nothing says the columns are swapped.
+    assert code_and_name_swapped([("ORBIT", "ORBITLTD"), (None, "X")]) is False
+
+
 def test_dbs_vickers_parser_html(tmp_path: Path):
     html = """<html><body>
     <table>

@@ -15,6 +15,7 @@ from app.market_data.service import (
     configured_exchanges,
     freshness_counts_by_exchange,
     held_asset_ids,
+    unpriced_held_positions,
 )
 from app.schemas.dashboard import (
     DataHubActivityItem,
@@ -22,6 +23,7 @@ from app.schemas.dashboard import (
     DataHubJobStatus,
     DataHubMarketData,
     DataHubSummaryResponse,
+    DataHubUnpricedHolding,
 )
 
 
@@ -138,6 +140,9 @@ def data_hub_summary(db: Session, current_user: CurrentUser) -> DataHubSummaryRe
     market_freshness = freshness_counts_by_exchange(db, asset_ids=held_asset_ids(db, current_user.id))
     fresh_total = sum(counts["fresh"] for counts in market_freshness.values())
     stale_total = sum(counts["stale"] for counts in market_freshness.values())
+    # Held stocks/funds the quote refresh can't price, so they'd sit at their
+    # uploaded price unnoticed (#222). The caller's own holdings only.
+    unpriced = unpriced_held_positions(db, user_id=current_user.id)
 
     wallet_rows = db.execute(
         text(
@@ -264,7 +269,22 @@ def data_hub_summary(db: Session, current_user: CurrentUser) -> DataHubSummaryRe
             last_import_platform=last_import_row[0] if last_import_row else None,
             last_import_at=_as_dt(last_import_row[1]).isoformat() if last_import_row and last_import_row[1] else None,
         ),
-        market_data=DataHubMarketData(fresh=fresh_total, stale=stale_total),
+        market_data=DataHubMarketData(
+            fresh=fresh_total,
+            stale=stale_total,
+            unpriced=len(unpriced),
+            unpriced_holdings=[
+                DataHubUnpricedHolding(
+                    symbol=item["symbol"],
+                    name=item["name"],
+                    currency=item["currency"],
+                    exchange_code=item["exchange_code"],
+                    platform=item["platform"],
+                    reason=item["reason"],
+                )
+                for item in unpriced
+            ],
+        ),
         connected_wallet_count=len(connected_wallet_labels),
         connected_wallet_labels=connected_wallet_labels,
         recent_activity=[

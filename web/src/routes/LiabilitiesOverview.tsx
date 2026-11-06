@@ -222,11 +222,15 @@ export default function LiabilitiesOverview() {
               <HeroMetricCard
                 eyebrow={`Spent in ${monthLabel(data.month)}`}
                 value={formatMoney(data.total_spend)}
-                deltaChip={
+                delta={
                   delta != null
                     ? {
-                        text: `${delta >= 0 ? "↑" : "↓"} ${formatMoney(Math.abs(delta))} vs ${monthLabel(data.prior_month)}`,
-                        positive: delta <= 0,
+                        abs: delta,
+                        currency: shownCurrency,
+                        show: "abs",
+                        baseline: `vs ${monthLabel(data.prior_month)}`,
+                        // More card spend is the bad direction.
+                        tone: "inverse",
                       }
                     : null
                 }

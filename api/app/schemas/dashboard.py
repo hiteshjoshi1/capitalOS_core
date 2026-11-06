@@ -64,6 +64,9 @@ class TopHolding(BaseModel):
     valued_at_cost: bool = False
     price_provider: Optional[str] = None
     quote_freshness_status: Optional[str] = None
+    # Where the shown price comes from (#224): "quote" (the price job) or "statement"
+    # (the holding's statement or uploaded file). None for rows without a price.
+    price_basis: Optional[str] = None
 
 
 class CashBalance(BaseModel):
@@ -77,6 +80,11 @@ class NetWorthChange(BaseModel):
     current_as_of: Optional[str] = None
     compare_as_of: Optional[str] = None
     compare_month: str
+    # The baseline value itself (same currency as abs), and whether there is no data
+    # for it at all (no snapshot at or before the comparison anchor and a zero value):
+    # "no data for <month>" rather than a delta the size of the whole figure (#224).
+    compare_value: Optional[float] = None
+    baseline_missing: bool = False
 
 
 class TopMover(BaseModel):
@@ -100,6 +108,9 @@ class DashboardSummaryResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    # #223: true for the open (or a future) month, whose geography, top_holdings
+    # and cash_balances are live; false for a past month (its month-end snapshot).
+    is_live: Optional[bool] = None
     current_net_worth_as_of: Optional[str] = None
     current_net_worth: Optional[NetWorth] = None
     current_net_worth_freshness: Optional[NetWorthFreshness] = None
@@ -182,6 +193,10 @@ class StockHoldingsResponse(FxStatusFields):
     stock_snapshot_total: float = 0.0
     quote_freshness_summary: Optional["QuoteFreshnessSummary"] = None
     trend: list["MiniTrendPoint"] = []
+    # No stock data at all for the compare month (not a real zero), #224.
+    stock_snapshot_missing: bool = False
+    # QUOTE_STALE_DAYS: a price older than this many days is stale (#224).
+    quote_stale_days: Optional[int] = None
 
 
 class PlatformAllocationItem(BaseModel):
@@ -194,6 +209,10 @@ class PlatformAllocationItem(BaseModel):
 
 class PlatformAllocationOut(BaseModel):
     as_of: str | None = None
+    # #223: the requested month, and whether it is the open month (live, quote
+    # priced) or a past month (its month-end snapshot).
+    as_of_month: str | None = None
+    is_live: bool | None = None
     total: float
     items: list[PlatformAllocationItem]
 
@@ -220,6 +239,8 @@ class CashDepositsOut(BaseModel):
     delta_pct: Optional[float] = None
     trend: list["MiniTrendPoint"] = []
     currency_breakdown: list["CashCurrencyBreakdownItem"] = []
+    # No cash data at all for the compare month (not a real zero), #224.
+    snapshot_missing: bool = False
 
 
 class StockExposureItem(BaseModel):
@@ -230,6 +251,7 @@ class StockExposureItem(BaseModel):
 
 class StockExposureOut(BaseModel):
     as_of: str | None = None
+    is_live: bool | None = None
     base_currency: str
     total: float
     by_country: list[StockExposureItem]
@@ -256,6 +278,9 @@ class QuoteFreshnessSummary(BaseModel):
     fresh: int
     stale: int
     missing: int
+    # Live view only (None on a past month): holdings without a fresh quote from the
+    # price job, including those priced only from a statement or upload (#224).
+    no_live_price: Optional[int] = None
 
 
 class StockGeographyBreakdownItem(BaseModel):
@@ -292,9 +317,24 @@ class DataHubImportHealth(BaseModel):
     last_import_at: Optional[str] = None
 
 
+class DataHubUnpricedHolding(BaseModel):
+    """A held stock or fund the quote refresh can't price (#222). `reason`:
+    no_asset (not linked to an asset), no_symbol (no ticker on a configured
+    exchange) or no_quote (no provider has returned a price)."""
+
+    symbol: Optional[str] = None
+    name: Optional[str] = None
+    currency: Optional[str] = None
+    exchange_code: Optional[str] = None
+    platform: Optional[str] = None
+    reason: str
+
+
 class DataHubMarketData(BaseModel):
     fresh: int
     stale: int
+    unpriced: int = 0
+    unpriced_holdings: List[DataHubUnpricedHolding] = []
 
 
 class DataHubJobScopeStatus(BaseModel):
@@ -344,6 +384,9 @@ class BootstrapResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
     snapshot_day: Optional[int] = None
+    # #223: true for the open (or a future) month (the page headline is
+    # current_net_worth); false for a past month (net_worth, its month-end).
+    is_live: Optional[bool] = None
     current_net_worth_as_of: Optional[str] = None
     current_net_worth: Optional[NetWorth] = None
     current_net_worth_freshness: Optional[NetWorthFreshness] = None

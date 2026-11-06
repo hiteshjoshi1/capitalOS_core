@@ -35,6 +35,8 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - Demo login `demo` / `Test@1234`: **dev worktree stacks and test instances only** (#152). Migration
   072 turns it off everywhere; `make demo-enable` turns it back on (refused on the real-data stack;
   `make db-seed-demo` = demo-enable + demo data; `make test-instance` enables it on the copy).
+  The dummy seed (`db-seed-dummy`, `db-seed-demo`) is refused there too, before any DB call (#221:
+  it writes shared DUMMY prices). `make db-clear-dummy` removes it and marks History dirty.
 - Accounts (#152): signup is off by default (`AUTH_ALLOW_SIGNUP=1` opens it). `make user-create
   USERNAME=<name> ADMIN=1` makes one; `make user-grant-admin` / `user-revoke-admin USERNAME=<name>`.
   Shared-data writes (platforms, currencies, token allowlist, market-data refresh) are admin-only (403).
@@ -73,7 +75,9 @@ From the main checkout:
   It links the main checkout's `.env` (API keys, IBKR Flex) so refreshes work; a `DATABASE_URL` there is refused (#120).
 - A conflict stops and is named: resolve and commit in that worktree, then `make test-instance-start`.
 - `make test-instance-status`, then `make test-instance-pr` (one PR test/<date> → main, `Closes`
-  every batch issue), then `make test-instance-drop`.
+  every issue the batch closes, `Part of` the ones it only works on, #219), then `make test-instance-drop`.
+  The TEST banner lists the same issues: per PR, what it closes, else its `Part of #N` / `Refs #N`,
+  else the `(#N)` ending its title, else the PR itself (`scripts/test-test-instance.sh`).
 - Every worktree's `make web-up` shows an amber DEV banner the same way (`VITE_INSTANCE_LABEL`).
 - Each dev/test instance has its own login cookie (`capitalos_refresh_<instance>`; the real app keeps
   `capitalos_refresh`). Browsers don't scope cookies by port, so a shared name logged each other out (#65).

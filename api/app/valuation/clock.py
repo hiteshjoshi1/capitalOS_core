@@ -234,6 +234,22 @@ def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
     return _anchor_ts(month_start), False
 
 
+def _month_view_anchor(month_start: datetime) -> tuple[datetime, bool]:
+    """The anchor a page that follows the selected month reads its breakdowns
+    at (Overview, #223), and whether it's live. The open (or a future) month is
+    live "now", like its headline. A past month is the same completed snapshot
+    boundary as that month's net worth (``_completed_snapshot_anchor_ts``), so
+    the hero, the allocation and the positions all show one month-end.
+
+    Unlike ``_effective_anchor_for_month`` it never returns an anchor that hasn't
+    passed: last month, before SNAPSHOT_DAY, reads the month-end before it,
+    exactly as its net worth does.
+    """
+    if _is_open_or_future_month(month_start):
+        return _current_anchor_ts(), True
+    return _completed_snapshot_anchor_ts(month_start), False
+
+
 def _is_open_or_future_month(month_start: datetime) -> bool:
     """Whether ``month_start``'s month is today's month (app timezone) or later."""
     today = _app_today()

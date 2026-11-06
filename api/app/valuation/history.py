@@ -425,6 +425,13 @@ def _cached_networth_components(
     return nw_cache[anchor]
 
 
+def baseline_missing(compare_as_of: Any, compare_value: float) -> bool:
+    """No data at all for a comparison (#224): nothing at or before its anchor,
+    so its value is a placeholder zero, not a real one. Callers show
+    "no data for <month>" instead of a delta the size of the whole figure."""
+    return compare_as_of is None and abs(float(compare_value or 0.0)) < 1e-9
+
+
 def _snapshot_compare_months(snapshot_month_start: datetime, compare_set: set[str]) -> Dict[str, datetime]:
     """Comparison months for a value taken at `snapshot_month_start`'s anchor:
     the completed anchor one month and twelve months before it (#133)."""
@@ -480,6 +487,8 @@ def _compute_net_worth_changes(
             "current_as_of": as_of.isoformat() if as_of else None,
             "compare_as_of": other_as_of.isoformat() if other_as_of else None,
             "compare_month": other_month_start.strftime("%Y-%m"),
+            "compare_value": prev_value,
+            "baseline_missing": baseline_missing(other_as_of, prev_value),
         }
 
     for label, other_month_start in compare_months.items():
@@ -515,6 +524,8 @@ def _compute_component_changes(
             "current_as_of": as_of.isoformat() if as_of else None,
             "compare_as_of": prior_as_of.isoformat() if prior_as_of else None,
             "compare_month": prior_month_start.strftime("%Y-%m"),
+            "compare_value": prior_value,
+            "baseline_missing": baseline_missing(prior_as_of, prior_value),
         }
     return out
 

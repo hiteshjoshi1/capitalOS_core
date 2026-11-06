@@ -242,6 +242,9 @@ make db-migrate
 
 ### 6. (Optional) Seed dummy data
 
+Try-out/dev stacks only: the seed writes DUMMY rows into the shared prices table, so it is
+refused on the real-data stack. `make db-clear-dummy` removes it again.
+
 ```bash
 make db-seed-dummy
 ```

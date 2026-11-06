@@ -4,6 +4,8 @@ import { MemoryRouter } from "react-router-dom";
 
 import WealthHistory from "../routes/WealthHistory";
 import { api } from "../lib/api";
+import { currentMonth } from "../lib/format";
+import { shiftMonth } from "../lib/selectedMonth";
 import type { WealthTimeline, WealthTimelinePoint } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
@@ -118,6 +120,8 @@ const emptyCashFlow = {
 describe("WealthHistory route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // The selected month is shared per browser (#223): start each test on the current month.
+    window.localStorage.removeItem("capitalos.selectedMonth");
     mockApi.dividendsSummary.mockResolvedValue(emptyDividends as never);
     mockApi.cashFlowDetail.mockResolvedValue(emptyCashFlow as never);
     mockApi.spendingSummary.mockResolvedValue({ month: "2026-06", base_currency: "SGD", income_total: 0, expense_total: 0, net: 0, savings_rate: null, income_categories: [], expense_categories: [] } as never);
@@ -294,5 +298,87 @@ describe("WealthHistory route", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText(/Details for/)).not.toBeInTheDocument();
     });
+  });
+});
+
+// #223: History follows the shared selected month (the pill every page shows).
+describe("WealthHistory selected month", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.removeItem("capitalos.selectedMonth");
+    mockApi.dividendsSummary.mockResolvedValue(emptyDividends as never);
+    mockApi.cashFlowDetail.mockResolvedValue(emptyCashFlow as never);
+    mockApi.spendingSummary.mockResolvedValue({ month: "2026-05", base_currency: "SGD", income_total: 0, expense_total: 0, net: 0, savings_rate: null, income_categories: [], expense_categories: [] } as never);
+    mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-04", gainers: [], detractors: [] });
+    mockApi.netWorthTimeline.mockResolvedValue(
+      timeline([dataPoint("2026-04", { total: 900 }), dataPoint("2026-05", { total: 950 }), dataPoint("2026-06", { total: 1000 })]),
+    );
+  });
+
+  it("shows the month pill, marks the selected month on the chart and opens its drill-down", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", "2026-05");
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByLabelText(/Details for May 2026/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Month")).toHaveValue("2026-05");
+    expect(screen.getByTestId("wh-selected-month")).toHaveTextContent("Selected month: May 2026");
+    expect(mockApi.netWorthTimelineMovers).toHaveBeenCalledWith("2026-05", "SGD", 8);
+  });
+
+  it("the open month marks the live point and opens no drill-down", async () => {
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Net worth");
+    expect(screen.getByLabelText("Month")).toHaveValue(currentMonth());
+    expect(screen.getByTestId("wh-selected-month")).toHaveTextContent("Selected month: now");
+    expect(screen.queryByLabelText(/Details for/)).not.toBeInTheDocument();
+  });
+
+  it("picking a month on the pill opens its drill-down; picking one on the chart sets the shared month", async () => {
+    const { container } = render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Net worth");
+
+    fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2026-04" } });
+    expect(await screen.findByLabelText(/Details for April 2026/)).toBeInTheDocument();
+    expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-04");
+
+    // Closing the drill-down keeps the month; choosing a month on the chart moves it.
+    fireEvent.click(screen.getByRole("button", { name: "Close details" }));
+    await waitFor(() => expect(screen.queryByLabelText(/Details for/)).not.toBeInTheDocument());
+    expect(screen.getByLabelText("Month")).toHaveValue("2026-04");
+
+    const columns = container.querySelectorAll(".whAttribCol");
+    fireEvent.click(columns[columns.length - 1]);
+    expect(await screen.findByLabelText(/Details for June 2026/)).toBeInTheDocument();
+    // The same key every other page reads, so Overview and Stocks follow.
+    expect(window.localStorage.getItem("capitalos.selectedMonth")).toBe("2026-06");
+    expect(screen.getByLabelText("Month")).toHaveValue("2026-06");
+  });
+
+  it("widens the range to reach a selected month older than it", async () => {
+    window.localStorage.setItem("capitalos.selectedMonth", shiftMonth(currentMonth(), -30));
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText("Net worth");
+    expect(mockApi.netWorthTimeline).toHaveBeenCalledWith(60, "SGD");
+    expect(mockApi.netWorthTimeline).not.toHaveBeenCalledWith(24, "SGD");
   });
 });

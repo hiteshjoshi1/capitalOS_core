@@ -20,6 +20,12 @@ class MarketDataProvider(Protocol):
         ...
 
 
+# Yahoo market suffixes: a symbol already ending in one is fully qualified and is
+# quoted as it is, so an override such as "<CODE>.BO" (an Indian holding Yahoo
+# lists only on BSE) is never turned into "<CODE>.BO.NS" (#222).
+YAHOO_QUALIFIED_SUFFIXES = (".NS", ".BO", ".SI", ".HK")
+
+
 def _is_rate_limit_error(exc: BaseException) -> bool:
     current: BaseException | None = exc
     seen: set[int] = set()
@@ -369,11 +375,11 @@ class YFinanceProvider(GenericMarketDataProvider):
             upper = f"{upper[:-4]}.NS"
         if upper.endswith(".SGX"):
             upper = f"{upper[:-4]}.SI"
-        if exchange_code and exchange_code.upper() == "US" and "." in upper and not upper.endswith((".NS", ".SI", ".HK")):
+        if exchange_code and exchange_code.upper() == "US" and "." in upper and not upper.endswith(YAHOO_QUALIFIED_SUFFIXES):
             parts = upper.split(".")
             if len(parts) == 2 and parts[0] and parts[1]:
                 upper = f"{parts[0]}-{parts[1]}"
-        if exchange_code and exchange_code.upper() == "NSE" and not upper.endswith(".NS"):
+        if exchange_code and exchange_code.upper() == "NSE" and not upper.endswith((".NS", ".BO")):
             upper = f"{upper}.NS"
         if exchange_code and exchange_code.upper() == "SGX" and not upper.endswith(".SI"):
             upper = f"{upper}.SI"
