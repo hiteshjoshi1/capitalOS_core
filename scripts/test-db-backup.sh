@@ -90,6 +90,155 @@ mkdir "$tmp/stage3"
 if BACKUP_DATA_DIR=$tmp/absent swap_in_data "$tmp/stage3" 20261104_130000 >/dev/null && [ -d "$tmp/absent" ]; then
   ok "restore: no data/ yet: the restored one is put in place"; else bad "restore: no data/ yet: the restored one is put in place"; fi
 
+# Privileges on restore (#233): grants to a role the target lacks are left out, not fatal.
+schema=$tmp/schema.sql
+cat >"$schema" <<'SQL'
+--
+-- PostgreSQL database dump
+--
+
+\restrict synthetickey
+
+SET statement_timeout = 0;
+
+--
+-- Name: import_jobs; Type: TABLE; Schema: public; Owner: capitalos
+--
+
+CREATE TABLE public.import_jobs (
+    id integer NOT NULL
+);
+
+--
+-- Name: SCHEMA public; Type: ACL; Schema: -; Owner: pg_database_owner
+--
+
+GRANT USAGE ON SCHEMA public TO capitalos_mcp_ro;
+
+--
+-- Name: TABLE import_jobs; Type: ACL; Schema: public; Owner: capitalos
+--
+
+REVOKE ALL ON TABLE public.import_jobs FROM PUBLIC;
+GRANT SELECT ON TABLE public.import_jobs TO capitalos_mcp_ro;
+GRANT SELECT ON TABLE public.import_jobs TO "Report Reader";
+
+--
+-- Name: DEFAULT PRIVILEGES FOR TABLES; Type: DEFAULT ACL; Schema: public; Owner: capitalos
+--
+
+ALTER DEFAULT PRIVILEGES FOR ROLE capitalos IN SCHEMA public GRANT SELECT ON TABLES TO capitalos_mcp_ro;
+
+--
+-- PostgreSQL database dump complete
+--
+
+\unrestrict synthetickey
+SQL
+printf 'capitalos\nReport Reader\n' >"$tmp/roles"
+kept=$(acl_statements "$tmp/roles" "$tmp/skipped" <"$schema")
+if [ "$kept" = "$(printf 'REVOKE ALL ON TABLE public.import_jobs FROM PUBLIC;\nGRANT SELECT ON TABLE public.import_jobs TO "Report Reader";')" ] &&
+  [ "$(grep -c '^SKIPPED capitalos_mcp_ro|' "$tmp/skipped")" = 3 ]; then
+  ok "privileges: statements for a missing role are left out and listed, the rest kept (quoted names too)"
+else bad "privileges: missing role left out, rest kept (kept: $kept; skipped: $(cat "$tmp/skipped"))"; fi
+printf 'capitalos\ncapitalos_mcp_ro\nReport Reader\n' >"$tmp/roles-all"
+rm -f "$tmp/skipped"
+if [ "$(acl_statements "$tmp/roles-all" "$tmp/skipped" <"$schema" | grep -c .)" = 5 ] && [ ! -s "$tmp/skipped" ]; then
+  ok "privileges: every role present: every privilege statement kept, none listed"
+else bad "privileges: every role present: every statement kept"; fi
+printf -- '-- Name: TABLE x; Type: ACL; Schema: public; Owner: capitalos\nSET SESSION AUTHORIZATION gone;\nGRANT SELECT ON TABLE public.x TO capitalos;\nRESET SESSION AUTHORIZATION;\nGRANT SELECT ON TABLE public.y TO capitalos;\n' >"$tmp/as.sql"
+if [ "$(acl_statements "$tmp/roles" "$tmp/skipped" <"$tmp/as.sql")" = "GRANT SELECT ON TABLE public.y TO capitalos;" ]; then
+  ok "privileges: grants made as a missing role are left out up to its RESET"
+else bad "privileges: grants made as a missing role are left out"; fi
+printf -- '-- Name: TABLE x; Type: ACL; Schema: public; Owner: capitalos\nSECURITY LABEL ON TABLE public.x IS $$a$$;\n' >"$tmp/odd.sql"
+if acl_statements "$tmp/roles" "$tmp/skipped" <"$tmp/odd.sql" >/dev/null 2>&1; then
+  bad "privileges: an unknown statement form fails instead of being dropped"
+else ok "privileges: an unknown statement form fails instead of being dropped"; fi
+
+# restore() end to end against a fake Postgres (a docker function): the target has no MCP role.
+fake=$tmp/fake; mkdir -p "$fake"
+fake_roles=$(printf 'capitalos\nReport Reader')   # no capitalos_mcp_ro
+fake_psql_fails=""
+docker() {  # docker exec [-i] <container> <command> <args...>
+  [ "$1" = exec ] || return 99
+  shift; [ "$1" = -i ] && shift; shift
+  local cmd=$1 sql
+  case "$cmd" in
+    pg_restore)
+      cat >/dev/null
+      case " $* " in
+        *" --schema-only "*) cat "$schema" ;;
+        *" --no-privileges "*) printf '\\restrict k\nCREATE TABLE public.import_jobs (id integer);\n\\unrestrict k\n' ;;
+        *) echo "unexpected pg_restore $*" >&2; return 1 ;;
+      esac ;;
+    psql)
+      sql=${*: -1}
+      case " $* " in
+        *" -c "*)
+          case "$sql" in
+            *pg_roles*) printf '%s\n' "$fake_roles" ;;
+            *to_regclass*) echo t ;;
+            *"FROM import_jobs"*) echo "import_jobs|7|$up_hash|/app/data/raw/7/upload.csv" ;;
+            *"FROM raw_broker_documents"*) echo "raw_broker_documents|1|$flex_hash|/app/data/broker_raw/ibkr_flex/$flex_hash.xml" ;;
+          esac ;;
+        *)
+          cat >"$fake/applied.sql"
+          [ -z "$fake_psql_fails" ] || { echo 'ERROR:  synthetic failure' >&2; return 3; }
+          # Like Postgres: a grant to a role that doesn't exist is an error.
+          if grep -q 'TO capitalos_mcp_ro;' "$fake/applied.sql" && ! printf '%s\n' "$fake_roles" | grep -qx capitalos_mcp_ro; then
+            echo 'ERROR:  role "capitalos_mcp_ro" does not exist' >&2; return 3
+          fi ;;
+      esac ;;
+    *) echo "unexpected docker exec $cmd" >&2; return 99 ;;
+  esac
+}
+target=$tmp/target; rset=$tmp/rset
+new_target() {
+  rm -rf "$target" "$target".pre-restore-*; mkdir -p "$target"
+  printf 'current-only\n' >"$target/current.txt"; printf 'target-secret\n' >"$target/.auth_secret"
+}
+mkdir -p "$rset"
+printf 'synthetic dump\n' >"$rset/capitalos_20261104_030000.dump"
+printf 'import_jobs|1\n' >"$rset/capitalos_20261104_030000.dump.counts"
+cp "$tmp/backups/capitalos_20261104_030000.data.tar.gz" "$rset/"
+run_restore() { (trap cleanup EXIT; BACKUP_DATA_DIR=$target DB_CONTAINER=fake restore "$rset/capitalos_20261104_030000.dump") 2>&1; }
+
+new_target
+rc=0; out=$(run_restore) || rc=$?
+if [ "$rc" = 0 ] && [ -f "$target/raw/7/upload.csv" ] && [ ! -e "$target/current.txt" ] &&
+  [ -f "$(echo "$target".pre-restore-*)/current.txt" ] && [ "$(cat "$target/.auth_secret")" = target-secret ] &&
+  ! grep -q capitalos_mcp_ro "$fake/applied.sql" && printf '%s' "$out" | grep -q "Left out 3 privilege statement(s) .*capitalos_mcp_ro"; then
+  ok "restore: a target without the MCP role completes, data/ restored, the role's grants left out and named"
+else bad "restore: a target without the MCP role completes (exit $rc): $out"; fi
+if [ "$(head -1 "$fake/applied.sql")" = "BEGIN;" ] && [ "$(tail -1 "$fake/applied.sql")" = "COMMIT;" ] &&
+  grep -q 'pg_default_acl' "$fake/applied.sql"; then
+  ok "restore: one transaction, the target's default grants taken back before the dump's own"
+else bad "restore: one transaction with the default-grant reset"; fi
+if grep -q "row counts differ from the dump''s snapshot" "$fake/applied.sql" && grep -qF '$expected$import_jobs|1$expected$' "$fake/applied.sql" &&
+  printf '%s' "$out" | grep -q 'counts identical to the dump.s snapshot'; then
+  ok "restore: the snapshot counts are checked inside the transaction, before COMMIT"
+else bad "restore: the snapshot counts are checked before COMMIT: $out"; fi
+
+new_target
+fake_roles=$(printf 'capitalos\ncapitalos_mcp_ro\nReport Reader')
+rc=0; out=$(run_restore) || rc=$?
+reset_line=$(grep -n 'pg_default_acl' "$fake/applied.sql" | head -1 | cut -d: -f1)
+grant_line=$(grep -n 'TO capitalos_mcp_ro;' "$fake/applied.sql" | head -1 | cut -d: -f1)
+if [ "$rc" = 0 ] && [ "$(grep -c 'TO capitalos_mcp_ro;' "$fake/applied.sql")" = 3 ] && [ "$reset_line" -lt "$grant_line" ] &&
+  ! printf '%s' "$out" | grep -q 'Left out'; then
+  ok "restore: a target with the MCP role gets the dump's grants to it, after the reset"
+else bad "restore: a target with the MCP role gets its grants (exit $rc): $out"; fi
+
+new_target
+fake_psql_fails=1
+rc=0; out=$(run_restore) || rc=$?
+if [ "$rc" != 0 ] && [ -f "$target/current.txt" ] && [ ! -e "$target/raw" ] && ! ls -d "$target".pre-restore-* >/dev/null 2>&1 &&
+  ! ls -d "$target".restore-* >/dev/null 2>&1; then
+  ok "restore: a failed database restore leaves data/ untouched (and no staging folder behind)"
+else bad "restore: a failed database restore leaves data/ untouched (exit $rc): $out"; fi
+fake_psql_fails=""
+unset -f docker
+
 # Retention: every set from the last 14 days, the first of each of the last 12 months, the newest.
 names() { for d in "$@"; do echo "$tmp/b/capitalos_${d}_030000.dump"; done; }
 expect_pruned() {  # <description> <today> <expected pruned dates, space separated> <dates...>

@@ -285,7 +285,8 @@ describe("CryptoWallets route", () => {
 
     renderRoute();
     expect(await screen.findByText("No wallets added yet.")).toBeInTheDocument();
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    // The allowlist is its own request: wait for its rows, not only the wallet list's (#233).
+    expect((await screen.findAllByText("—")).length).toBeGreaterThan(0);
   });
 
   it("shows a desktop-only notice instead of the connect form on narrow viewports", async () => {

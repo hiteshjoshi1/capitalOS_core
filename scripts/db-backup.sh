@@ -37,15 +37,16 @@ CONTAINER_DATA_DIR=/app/data
 SECRET_FILE=.auth_secret
 
 # Exact row count of every table in public, one "table|count" line each, sorted.
-COUNTS_SQL="SELECT table_name || '|' || (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text
-FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name;"
+COUNTS_SELECT="SELECT table_name || '|' || (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text
+FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"
+COUNTS_SQL="$COUNTS_SELECT ORDER BY table_name;"
 
 # One cleanup for every exit path: the snapshot session, temp dirs, the scratch DB.
 WORK="" SESSION_PID="" SCRATCH="" UNPACK="" STAGE=""
 cleanup() {
   exec 3>&- 2>/dev/null || true
   if [ -n "$SESSION_PID" ]; then wait "$SESSION_PID" 2>/dev/null || true; fi
-  if [ -n "$WORK" ]; then rm -f "$WORK"/sql "$WORK"/session.out "$WORK"/session.err; rmdir "$WORK" 2>/dev/null || true; fi
+  if [ -n "$WORK" ]; then rm -f "$WORK"/sql "$WORK"/session.out "$WORK"/session.err "$WORK"/roles "$WORK"/acl.sql "$WORK"/skipped; rmdir "$WORK" 2>/dev/null || true; fi
   if [ -n "$UNPACK" ] && [ -d "$UNPACK" ]; then rm -rf "$UNPACK"; fi
   if [ -n "$STAGE" ] && [ -d "$STAGE" ]; then rm -rf "$STAGE"; fi
   if [ -n "$SCRATCH" ]; then
@@ -248,13 +249,108 @@ verify() {
 
 fail() { printf 'failed_at=%s\nreason=%s\n' "$(date -u +%FT%TZ)" "$2" >"$1.failed"; rm -f "$1.verified"; say "FAILED $1: $2" >&2; }
 
+# ---- privileges on restore (#233) ----
+# A dump carries GRANTs to roles that live outside the database, such as capitalos_mcp_ro
+# (make db-create-mcp-role). The schema and rows are restored without privileges, then the
+# dump's own privilege statements are applied, minus those naming a role the target doesn't
+# have (reported, not an error). On a target with the role, the restored objects get exactly
+# the dump's privileges: what the target's default privileges grant to a role on a re-created
+# table is revoked first (otherwise user_credentials would come back readable by the MCP role,
+# whose access the dump left out).
+
+# Reads pg_restore's schema-only SQL on stdin; prints the statements of its ACL and DEFAULT ACL
+# entries that name only roles listed in <roles file> (one name per line; PUBLIC always
+# exists). One "SKIPPED <role>|<statement>" line per left-out statement goes to <skipped file>.
+# A statement of a form it doesn't know fails the whole call (exit 2) rather than dropping it.
+acl_statements() {  # <roles file> <skipped file>
+  awk -v skipped="$2" -v q="'" '
+    function ident(s) {  # a role name as pg_dump writes it: plain lower-case or "double ""quoted"""
+      if (s ~ /^"/) { s = substr(s, 2, length(s) - 2); gsub(/""/, "\"", s) }
+      return s
+    }
+    function missing(stmt,   rest, r, name) {  # the first role the statement names that is absent
+      rest = stmt
+      while (match(rest, "(^| )(FOR ROLE|TO|FROM|AUTHORIZATION) (\"([^\"]|\"\")+\"|" q "[^" q "]+" q "|[a-z_][a-z0-9_$]*)")) {
+        r = substr(rest, RSTART, RLENGTH); rest = substr(rest, RSTART + RLENGTH)
+        sub(/^ ?(FOR ROLE|TO|FROM|AUTHORIZATION) /, "", r)
+        if (substr(r, 1, 1) == q) r = substr(r, 2, length(r) - 2); else r = ident(r)
+        if (r != "PUBLIC" && !(r in role)) return r
+      }
+      return ""
+    }
+    NR == FNR { role[$0] = 1; next }
+    /^-- .*Name: .*; Type: / { t = $0; sub(/.*; Type: /, "", t); sub(/;.*/, "", t); next }
+    /^-- / { t = ""; next }
+    t != "ACL" && t != "DEFAULT ACL" { next }
+    /^--/ || /^[[:space:]]*$/ || /^\\(un)?restrict / { next }
+    {
+      known = /^(GRANT|REVOKE|ALTER DEFAULT PRIVILEGES) .*;$/ || /^(SET|RESET) SESSION AUTHORIZATION/
+      if (!known) { print "acl_statements: unexpected privilege statement: " $0 > "/dev/stderr"; bad = 1; exit 2 }
+      if ($0 ~ /^RESET SESSION AUTHORIZATION/) { if (as_missing != "") { as_missing = ""; next } print; next }
+      if (as_missing != "") { print "SKIPPED " as_missing "|" $0 > skipped; next }
+      r = missing($0)
+      if (r != "") {
+        print "SKIPPED " r "|" $0 > skipped
+        if ($0 ~ /^SET SESSION AUTHORIZATION/) as_missing = r  # skip what it would have run as r
+        next
+      }
+      print
+    }
+    END { if (bad) exit 2 }' "$1" -
+}
+
+# SQL run after the restore, in its transaction, before the dump's own privileges: for every
+# role the target's default privileges grant to (other than the granting role), take back
+# what it got on the re-created tables, sequences and functions.
+RESET_DEFAULT_GRANTS_SQL="DO \$reset\$ DECLARE r record; BEGIN
+  FOR r IN SELECT DISTINCT a.grantee::regrole::text AS grantee, d.defaclobjtype AS objtype
+           FROM pg_catalog.pg_default_acl d, pg_catalog.aclexplode(d.defaclacl) a
+           WHERE a.grantee <> 0 AND a.grantee <> d.defaclrole AND d.defaclobjtype IN ('r', 'S', 'f') LOOP
+    EXECUTE pg_catalog.format('REVOKE ALL ON ALL %s IN SCHEMA public FROM %s',
+      CASE r.objtype WHEN 'r' THEN 'TABLES' WHEN 'S' THEN 'SEQUENCES' ELSE 'FUNCTIONS' END, r.grantee);
+  END LOOP;
+END \$reset\$;"
+
+# SQL that fails the restore's transaction unless every table's row count equals the dump's
+# snapshot counts (<dump>.counts): the same exact check as verify, before anything is committed.
+counts_check_sql() {  # <counts file>
+  printf '%s\n' "DO \$counts\$ DECLARE diff text; BEGIN
+  WITH expected(x) AS (SELECT line FROM pg_catalog.string_to_table(\$expected\$$(cat "$1")\$expected\$, E'\\n') line WHERE line <> ''),
+       restored(x) AS ($COUNTS_SELECT)
+  SELECT pg_catalog.string_agg(d, ', ' ORDER BY d) INTO diff FROM (
+    (SELECT 'dump ' || x AS d FROM (SELECT x FROM expected EXCEPT SELECT x FROM restored) e)
+    UNION ALL (SELECT 'restored ' || x FROM (SELECT x FROM restored EXCEPT SELECT x FROM expected) r)) both_ways;
+  IF diff IS NOT NULL THEN RAISE EXCEPTION 'row counts differ from the dump''s snapshot: %', pg_catalog.left(diff, 500); END IF;
+END \$counts\$;"
+}
+
+# The restore script for psql: one transaction, committed only if pg_restore produced the whole
+# script (a pg_restore failure leaves no COMMIT, so psql's session ends and rolls back) and,
+# when the dump has snapshot counts, every table's count matches them.
+restore_sql() {  # <dump> <acl sql file>
+  printf 'BEGIN;\n'
+  docker exec -i "$DB_CONTAINER" pg_restore --clean --if-exists --no-privileges -f - <"$1" || return 1
+  printf '%s\n' "$RESET_DEFAULT_GRANTS_SQL"
+  cat "$2"
+  [ ! -f "$1.counts" ] || counts_check_sql "$1.counts"
+  printf 'COMMIT;\n'
+}
+
 # Database first (data/ untouched if it fails), then data/ from the same set.
 restore() {
-  local dump=${1:?restore needs a dump file} archive ts rows result
+  local dump=${1:?restore needs a dump file} archive ts rows result roles acl skipped
   [ -f "$dump" ] || { say "FAILED: no such file $dump" >&2; return 1; }
   archive=$(archive_of "$dump")
   ts=$(date +%Y%m%d_%H%M%S)
   [ -f "$dump.verified" ] || say "WARNING: $dump has no .verified marker"
+  WORK=$(mktemp -d)
+  roles="$WORK/roles" acl="$WORK/acl.sql" skipped="$WORK/skipped"
+  psql_db -d "$DB_NAME" -c "SELECT rolname FROM pg_catalog.pg_roles" >"$roles" ||
+    { say "FAILED: could not list the roles of $DB_CONTAINER; nothing was changed" >&2; return 1; }
+  : >"$skipped"
+  if ! docker exec -i "$DB_CONTAINER" pg_restore --schema-only -f - <"$dump" | acl_statements "$roles" "$skipped" >"$acl"; then
+    say "FAILED: could not read the privileges in $dump; nothing was changed" >&2; return 1
+  fi
   if [ -f "$archive" ]; then
     STAGE="$BACKUP_DATA_DIR.restore-$ts"
     mkdir "$STAGE"
@@ -262,8 +358,20 @@ restore() {
   else
     say "WARNING: no data archive for $dump (backup predates #155): only the database is restored, $BACKUP_DATA_DIR/ is left as it is"
   fi
-  say "Restoring the database $DB_NAME in $DB_CONTAINER"
-  docker exec -i "$DB_CONTAINER" pg_restore -U "$DB_USER" -d "$DB_NAME" --clean --if-exists <"$dump"
+  say "Restoring the database $DB_NAME in $DB_CONTAINER (one transaction)"
+  if ! restore_sql "$dump" "$acl" |
+      docker exec -i "$DB_CONTAINER" psql -X -q -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" >/dev/null \
+      2> >(grep -vi collation >&2); then
+    say "FAILED: the database restore failed and was rolled back; $BACKUP_DATA_DIR/ is unchanged" >&2; return 1
+  fi
+  if [ -f "$dump.counts" ]; then
+    say "Database restored: $(wc -l <"$dump.counts" | tr -d ' ') tables, $(awk -F'|' '{s+=$2} END {print s+0}' "$dump.counts") rows, counts identical to the dump's snapshot; $(grep -c . "$acl" || true) of its privilege statements applied"
+  else
+    say "Database restored (no snapshot counts to compare: the dump predates #41); $(grep -c . "$acl" || true) of its privilege statements applied"
+  fi
+  if [ -s "$skipped" ]; then
+    say "Left out $(grep -c . "$skipped") privilege statement(s) for role(s) this Postgres doesn't have: $(sed 's/^SKIPPED \([^|]*\)|.*/\1/' "$skipped" | sort -u | tr '\n' ' ')(for capitalos_mcp_ro: make db-create-mcp-role grants them)"
+  fi
   [ -n "$STAGE" ] || return 0
   rows=$(mktemp)
   file_rows "$DB_NAME" >"$rows"
