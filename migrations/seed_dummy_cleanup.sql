@@ -2,6 +2,33 @@
 -- Run with: make db-clear-dummy
 BEGIN;
 
+-- History (#221, D-29): the months these rows could have valued are recomputed on the next
+-- read. DUMMY prices are in the SHARED prices table, so every user is marked from the earliest
+-- DUMMY price date (UTC or trade date, whichever is earlier). The owners of the dummy accounts
+-- and wallets (the demo user) lose whole accounts, so all of their history (1970-01-01,
+-- ALL_HISTORY in app/wealth_rollup_dirty.py). A pending mark only ever moves earlier.
+INSERT INTO wealth_rollup_dirty (user_id, from_date, generation, marked_at, reason)
+SELECT marks.user_id, MIN(marks.from_date), 1, now(), 'dummy_cleanup'
+FROM (
+  SELECT u.id AS user_id, p.from_date
+  FROM users u
+  CROSS JOIN (
+    SELECT MIN(LEAST(trade_date, (ts AT TIME ZONE 'UTC')::date)) AS from_date
+    FROM prices WHERE source = 'DUMMY'
+  ) p
+  WHERE p.from_date IS NOT NULL
+  UNION ALL
+  SELECT a.user_id, DATE '1970-01-01' FROM accounts a WHERE a.name LIKE 'DUMMY - %' AND a.user_id IS NOT NULL
+  UNION ALL
+  SELECT w.user_id, DATE '1970-01-01' FROM crypto_wallets w WHERE w.label LIKE 'DUMMY - %' AND w.user_id IS NOT NULL
+) marks
+GROUP BY marks.user_id
+ON CONFLICT (user_id) DO UPDATE SET
+  from_date = LEAST(COALESCE(wealth_rollup_dirty.from_date, EXCLUDED.from_date), EXCLUDED.from_date),
+  generation = wealth_rollup_dirty.generation + 1,
+  marked_at = EXCLUDED.marked_at,
+  reason = EXCLUDED.reason;
+
 DELETE FROM market_dividend_yields WHERE source = 'DUMMY';
 DELETE FROM prices WHERE source = 'DUMMY';
 

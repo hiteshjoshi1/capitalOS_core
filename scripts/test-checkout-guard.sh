@@ -55,6 +55,37 @@ expect_refused "worktree onto the real API port: refused" "$W" up ISO_API_PORT=8
 expect_refused "worktree onto the real Postgres port: refused" "$W" up ISO_PG_PORT=5433
 expect_command "worktree: test tooling never starts Postgres (--no-deps)" "$W" 'run --rm --build --no-deps api-dev pytest' test-backend
 if make -s -C "$M" instance-drop >/dev/null 2>&1; then bad "main: instance-drop refused"; else ok "main: instance-drop refused"; fi
+# #152, #221: the demo login and the dummy seed (shared DUMMY prices) never go on the real-data
+# stack. A stub `docker` on PATH logs every call and succeeds, so these runs (not dry runs) show
+# what would have reached the database; none can touch a real container.
+mkdir -p "$tmp/bin"
+printf '#!/bin/sh\necho "$*" >>"%s"\nexit 0\n' "$tmp/docker.log" >"$tmp/bin/docker"
+chmod +x "$tmp/bin/docker"
+expect_refused_untouched() {   # <description> <dir> <make args...>: refused, and no docker call at all
+  local d=$1 dir=$2; shift 2
+  : >"$tmp/docker.log"
+  if out=$(PATH="$tmp/bin:$PATH" make -s -C "$dir" "$@" 2>&1); then bad "$d (was allowed: $out)"
+  elif ! printf '%s' "$out" | grep -q 'Refusing'; then bad "$d (failed without the guard's message: $out)"
+  elif [ -s "$tmp/docker.log" ]; then bad "$d (docker was called first: $(tr '\n' ';' <"$tmp/docker.log"))"
+  else ok "$d"; fi
+}
+for t in demo-enable db-seed-dummy db-seed-demo; do
+  expect_refused_untouched "real-data stack on main: $t refused before any docker call" "$M" "$t"
+done
+expect_refused_untouched "real-data stack: db-seed-dummy refused even with ALLOW_BRANCH=1" "$M" db-seed-dummy ALLOW_BRANCH=1
+expect_refused_untouched "real-data container named from a fresh-clone stack: db-seed-dummy refused" "$M" db-seed-dummy \
+  COMPOSE_PROJECT=capitalos DB_CONTAINER=capitalos-oss-postgres
+# The same guard in the recipe, for a run that reaches db-seed-dummy as a prerequisite (the
+# command-line check switched off here to reach it): db-wait's readiness probe runs, psql never.
+d="real-data stack: db-seed-dummy's recipe refuses too, before psql"
+: >"$tmp/docker.log"
+if out=$(PATH="$tmp/bin:$PATH" make -s -C "$M" db-seed-dummy DEMO_ONLY_TARGETS= 2>&1); then bad "$d (was allowed: $out)"
+elif printf '%s' "$out" | grep -q "Refusing 'db-seed-dummy'" && ! grep -q psql "$tmp/docker.log"; then ok "$d"
+else bad "$d (got: $out; docker: $(tr '\n' ';' <"$tmp/docker.log"))"; fi
+expect_command "real-data stack on main: db-clear-dummy (the cleanup) allowed" "$M" 'capitalos-oss-postgres psql .*seed_dummy_cleanup\.sql' db-clear-dummy
+expect_command "worktree: db-seed-dummy allowed on its own stack" "$W" 'capitalos-wt-wt-postgres psql .*seed_dummy\.sql' db-seed-dummy
+expect_command "worktree: db-seed-demo allowed on its own stack" "$W" 'demo-enable\.sql' db-seed-demo
+
 # #65: an isolated instance has its own login cookie (parse-time `compose config`, no daemon).
 d="worktree: the API uses its own refresh cookie, not the real app's"
 if out=$(cd "$W" && ISO_NAME=capitalos-wt-wt ISO_API_PORT=1 ISO_PG_PORT=2 ISO_LOKI_PORT=3 ISO_GRAFANA_PORT=4 \

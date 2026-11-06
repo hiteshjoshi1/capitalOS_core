@@ -353,14 +353,25 @@ user-revoke-admin:
 	@test -n "$(USERNAME)" || { echo "Usage: make user-revoke-admin USERNAME=<name>" >&2; exit 2; }
 	$(COMPOSE) exec -T api python -m app.scripts.user_admin revoke-admin "$(USERNAME)"
 
-# The demo login (demo / Test@1234) is for dev and test stacks only (#152): migration 072
-# turns it off everywhere, this turns it back on. Refused on the real-data stack, whatever
-# DB_CONTAINER says.
+# Dev/test stacks only, refused on the real-data stack whatever DB_CONTAINER says:
+# - the demo login (demo / Test@1234, #152): migration 072 turns it off everywhere,
+#   demo-enable turns it back on;
+# - the dummy seed (#221): seed_dummy.sql writes DUMMY rows into the SHARED prices table,
+#   which can value real users' past months.
+# Refused when make parses the command line, before any recipe (db-wait included) runs, and
+# again in the demo-enable and db-seed-dummy recipes, for a run that reaches them as a
+# prerequisite (db-seed-demo, under make -j too).
 DEMO_REFUSED_CONTAINERS=capitalos-oss-postgres
+DEMO_ONLY_TARGETS=demo-enable db-seed-dummy db-seed-demo
+DEMO_REFUSED=$(or $(filter $(REAL_DATA_PROJECT),$(COMPOSE_PROJECT)),$(filter $(DEMO_REFUSED_CONTAINERS),$(DB_CONTAINER)))
+DEMO_REFUSAL=Refusing '$(1)': $(2) never goes on the real-data stack ($(COMPOSE_PROJECT) / $(DB_CONTAINER)). Use a worktree or the test instance.
+ifneq ($(filter $(DEMO_ONLY_TARGETS),$(MAKECMDGOALS)),)
+ifneq ($(DEMO_REFUSED),)
+$(error $(call DEMO_REFUSAL,$(filter $(DEMO_ONLY_TARGETS),$(MAKECMDGOALS)),demo login or dummy data))
+endif
+endif
 demo-enable: db-wait
-	@if [ "$(COMPOSE_PROJECT)" = "$(REAL_DATA_PROJECT)" ] || [ -n "$(filter $(DEMO_REFUSED_CONTAINERS),$(DB_CONTAINER))" ]; then \
-		echo "Refusing: the demo login (published password) is never enabled on the real-data stack ($(COMPOSE_PROJECT) / $(DB_CONTAINER))." >&2; exit 1; \
-	fi
+	@if [ -n "$(DEMO_REFUSED)" ]; then echo "$(call DEMO_REFUSAL,demo-enable,the demo login (published password))" >&2; exit 1; fi
 	@docker exec -i $(DB_CONTAINER) psql -q -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < scripts/demo-enable.sql > /dev/null
 	@echo "Demo login enabled on $(DB_CONTAINER): demo / Test@1234 (dev/test stacks only)."
 
@@ -543,6 +554,7 @@ db-reset:
 	$(MAKE) db-migrate
 
 db-seed-dummy: db-wait
+	@if [ -n "$(DEMO_REFUSED)" ]; then echo "$(call DEMO_REFUSAL,db-seed-dummy,dummy data (shared DUMMY prices))" >&2; exit 1; fi
 	@echo "Seeding dummy demo data..."
 	@docker exec -i $(DB_CONTAINER) psql -v ON_ERROR_STOP=1 -U $(DB_USER) -d $(DB_NAME) < migrations/seed_dummy.sql
 	@echo "Dummy data seeded."
