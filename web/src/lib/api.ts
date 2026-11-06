@@ -567,6 +567,40 @@ export type DashboardNetWorthChange = {
   net_worth_change: DashboardSummary["net_worth_change"];
 };
 
+/** A holding's change vs the compare month-end (#251), split as Overview's bridge splits
+ * it (D-60), in the base currency: abs = price_effect + quantity_effect + fx_effect + unsplit.
+ * Buying or selling is the quantity effect, not a gain or a loss. */
+export type StockMonthChange = {
+  abs: number;
+  /** abs / compare_value; null without a start value (a new holding). */
+  pct?: number | null;
+  price_effect: number;
+  quantity_effect: number;
+  fx_effect: number;
+  /** What can't be split: no price or quantity on one side, or a value that isn't quantity x price x rate. */
+  unsplit: number;
+  compare_value: number;
+  end_value: number;
+  compare_month?: string | null;
+  /** No stock data at all for compare_month (the page's stock_snapshot_missing). */
+  baseline_missing: boolean;
+  /** held | new (not held at the compare month-end) | sold (held then, not now). */
+  side: "held" | "new" | "sold";
+  start_quantity?: number | null;
+  end_quantity?: number | null;
+  /** Prices in price_currency; rates in base currency per unit of it. */
+  start_price?: number | null;
+  end_price?: number | null;
+  price_currency?: string | null;
+  start_rate?: number | null;
+  end_rate?: number | null;
+};
+
+/** A Stocks page row: a /summary top holding plus its change this month (#251). */
+export type StockHolding = DashboardSummary["top_holdings"][number] & {
+  month_change?: StockMonthChange | null;
+};
+
 export type StockHoldingsSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
@@ -579,7 +613,7 @@ export type StockHoldingsSummary = FxStatus & {
   net_worth_boundary_at?: string | null;
   net_worth_boundary_exact?: boolean | null;
   net_worth_freshness_status?: string | null;
-  top_holdings: DashboardSummary["top_holdings"];
+  top_holdings: StockHolding[];
   geography_breakdown?: Array<{
     geography: string;
     current_value: number;
@@ -619,6 +653,23 @@ export type StockHoldingsSummary = FxStatus & {
   stock_snapshot_missing?: boolean;
   /** QUOTE_STALE_DAYS: a price older than this is stale (#224). */
   quote_stale_days?: number | null;
+  /** #251: the compare month-end's anchor ("vs 31 Oct close"). */
+  compare_boundary_at?: string | null;
+  /** #251: held at the compare month-end, sold since (value 0, month_change.side "sold"). */
+  sold_holdings?: StockHolding[];
+  /** #251: the headline's change as the rows add up:
+   * abs = price_effect + quantity_effect + fx_effect + unsplit + not_in_holdings. */
+  month_change_total?: {
+    abs: number;
+    price_effect: number;
+    quantity_effect: number;
+    fx_effect: number;
+    unsplit: number;
+    not_in_holdings: number;
+    compare_value: number;
+    compare_month?: string | null;
+    baseline_missing: boolean;
+  } | null;
 };
 
 export type SpendingSummary = FxStatus & {

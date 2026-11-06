@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.portfolio.canonical_reads import get_data_completeness_status
 from app.valuation import clock
+from app.valuation.bridge import AssetChange, stock_asset_changes, stock_mover_key
 from app.valuation.clock import (
     _add_months,
     _anchor_ts,
@@ -386,6 +387,48 @@ def risk_summary(
     }
 
 
+def _stock_month_change(asset: AssetChange, *, compare_month: str, baseline_missing_flag: bool) -> Dict[str, Any]:
+    """One holding's change vs the compare month-end, split as the bridge splits it (#251)."""
+    compare_value = asset.start_value
+    return {
+        "abs": asset.change,
+        "pct": (asset.change / compare_value) if compare_value > 0 else None,
+        "price_effect": asset.price_effect,
+        "quantity_effect": asset.quantity_effect,
+        "fx_effect": asset.fx_effect,
+        "unsplit": asset.unsplit,
+        "compare_value": compare_value,
+        "end_value": asset.end_value,
+        "compare_month": compare_month,
+        "baseline_missing": baseline_missing_flag,
+        "side": asset.side,
+        "start_quantity": asset.start_quantity,
+        "end_quantity": asset.end_quantity,
+        "start_price": asset.start_price,
+        "end_price": asset.end_price,
+        "price_currency": asset.price_currency,
+        "start_rate": asset.start_rate,
+        "end_rate": asset.end_rate,
+    }
+
+
+def _sold_holding(asset: AssetChange, month_change: Dict[str, Any]) -> Dict[str, Any]:
+    """A holding held at the compare month-end and not now: listed at 0 so the rows'
+    changes add up, and read as a sale, not a loss (#251)."""
+    return {
+        "asset_id": asset.asset_id,
+        "symbol": asset.symbol,
+        "name": asset.name,
+        "asset_class": asset.asset_class,
+        "value": 0.0,
+        "percent_of_networth": 0.0,
+        "quantity": 0.0,
+        "quote_currency": asset.price_currency,
+        "platform": asset.platform,
+        "month_change": month_change,
+    }
+
+
 def stock_holdings(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
     # is live "now" data (current/future month) or a completed historical boundary.
@@ -422,6 +465,43 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
     quote_freshness_summary = _quote_freshness_summary(top, is_live=is_live)
     compare_holdings_as_of = _positions_coverage_as_of(db, compare_anchor, current_user_id)
     trend = _stock_trend(db, month_start, base_currency, current_user_id)
+    stock_snapshot_missing = baseline_missing(compare_holdings_as_of, compare_stock_exposure["total"])
+
+    # Each holding's change vs the compare month-end, split into price, quantity and
+    # FX by the Overview bridge's own split (#251, D-60); holdings sold since are
+    # listed at 0, so the rows add up to the bridge's stocks parts.
+    compare_month = compare_month_start.strftime("%Y-%m")
+    changes = stock_asset_changes(db, current_user_id, base_currency, compare_anchor, effective_anchor, live=is_live)
+    listed: set[tuple] = set()
+    for row in top:
+        key = stock_mover_key(row.get("asset_id"), row.get("symbol"))
+        asset = changes.get(key)
+        if asset is not None:
+            listed.add(key)
+            row["month_change"] = _stock_month_change(
+                asset, compare_month=compare_month, baseline_missing_flag=stock_snapshot_missing
+            )
+    sold = [
+        _sold_holding(asset, _stock_month_change(asset, compare_month=compare_month, baseline_missing_flag=stock_snapshot_missing))
+        for key, asset in changes.items()
+        if key not in listed and asset.side == "sold"
+    ]
+    sold.sort(key=lambda row: (row["month_change"]["abs"], str(row["symbol"]).lower()))
+    stock_change = stock_exposure["total"] - compare_stock_exposure["total"]
+    holdings_change = sum(asset.change for asset in changes.values())
+    month_change_total = {
+        "abs": stock_change,
+        "price_effect": sum(asset.price_effect for asset in changes.values()),
+        "quantity_effect": sum(asset.quantity_effect for asset in changes.values()),
+        "fx_effect": sum(asset.fx_effect for asset in changes.values()),
+        "unsplit": sum(asset.unsplit for asset in changes.values()),
+        # The statement totals beyond the holdings listed (e.g. an IBKR NAV's other
+        # asset types): the headline's change minus the holdings' changes.
+        "not_in_holdings": stock_change - holdings_change,
+        "compare_value": compare_stock_exposure["total"],
+        "compare_month": compare_month,
+        "baseline_missing": stock_snapshot_missing,
+    }
 
     geography_performance: list[dict[str, Any]] = []
     geography_performance_as_of: Optional[str] = None
@@ -461,7 +541,11 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "stock_snapshot_as_of": compare_holdings_as_of.isoformat() if compare_holdings_as_of else None,
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
-        "stock_snapshot_missing": baseline_missing(compare_holdings_as_of, compare_stock_exposure["total"]),
+        "stock_snapshot_missing": stock_snapshot_missing,
+        # The compare month-end's anchor (D-55): "vs 31 Oct close" (#251).
+        "compare_boundary_at": compare_anchor.isoformat(),
+        "sold_holdings": sold,
+        "month_change_total": month_change_total,
         "quote_stale_days": _quote_stale_days(),
         **fx_status(),
     }
