@@ -1674,6 +1674,10 @@ a.btn {
   color: var(--muted);
 }
 
+.riskThresholdRule {
+  margin-top: 6px;
+}
+
 .riskNoData {
   margin-top: 10px;
   font-size: 12px;
@@ -4015,6 +4019,12 @@ a.btn {
 
 .settingsThemeToggle {
   width: fit-content;
+}
+
+.settingsActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .settingsStack {

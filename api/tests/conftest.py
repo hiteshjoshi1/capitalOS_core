@@ -570,6 +570,9 @@ def setup_db():
               timezone TEXT,
               timezone_from_app BOOLEAN NOT NULL DEFAULT 0,
               base_currency TEXT,
+              risk_largest_position_warn_pct REAL,
+              risk_top_n_warn_pct REAL,
+              risk_platform_warn_pct REAL,
               updated_at TIMESTAMP
             )
             """

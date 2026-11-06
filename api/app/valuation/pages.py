@@ -27,7 +27,7 @@ from app.valuation.clock import (
     _month_view_compare_month_start,
     _previous_update_anchor_ts,
 )
-from app.valuation.exposure import _geography, _geography_exposure, _platform_allocation
+from app.valuation.exposure import _currency_exposure, _geography, _geography_exposure, _platform_allocation
 from app.valuation.facts import (
     _cash_balances,
     _cash_currency_breakdown,
@@ -352,7 +352,8 @@ def risk_summary(
     One point in time per month (#241): ``view_net_worth`` is the net worth at
     the positions' anchor, live for the open month (the Overview headline) and
     the month-end for a past month, so every share the page shows has its
-    numerator and denominator at one instant."""
+    numerator and denominator at one instant. Currency exposure and platform
+    concentration (#253) are taken at that instant too."""
     anchor = _anchor_ts(_completed_snapshot_month_start(month_start))
     nw = _networth_components(db, anchor, base_currency, current_user_id)
     view_anchor, is_live = _month_view_anchor(month_start)
@@ -373,6 +374,11 @@ def risk_summary(
         limit=_summary_top_holdings_limit(),
         price_overlay=is_live,
     )
+    # #253: currency exposure (shares of view_net_worth) and platform concentration
+    # (Overview's platform donut: shares of gross assets), at the same anchor and
+    # price mode as the positions.
+    currency = _currency_exposure(db, view_anchor, base_currency, current_user_id, price_overlay=is_live)
+    platforms = _platform_allocation(db, view_anchor, base_currency, current_user_id, price_overlay=is_live)
     return {
         "as_of_month": month,
         "base_currency": base_currency,
@@ -383,6 +389,8 @@ def risk_summary(
         "basis": "live" if is_live else "month_end",
         "view_net_worth": _serialize_net_worth(view_nw),
         "net_worth_boundary_at": view_anchor.isoformat(),
+        "currency_exposure": {"total": currency["total"], "items": currency["items"]},
+        "platform_concentration": {"total": platforms["total"], "items": platforms["items"]},
         **fx_status(),
     }
 

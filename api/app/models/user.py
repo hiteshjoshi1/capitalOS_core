@@ -1,4 +1,4 @@
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Text, false, func
+from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, Numeric, Text, false, func
 
 from .base import Base
 
@@ -58,4 +58,8 @@ class UserPreference(Base):
     timezone = Column(Text, nullable=True)
     timezone_from_app = Column(Boolean, nullable=False, default=False, server_default=false())
     base_currency = Column(Text, nullable=True)
+    # #253 (080): Risk page concentration thresholds, percent; NULL = the app's default.
+    risk_largest_position_warn_pct = Column(Numeric(5, 2), nullable=True)
+    risk_top_n_warn_pct = Column(Numeric(5, 2), nullable=True)
+    risk_platform_warn_pct = Column(Numeric(5, 2), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -1,5 +1,6 @@
 """Exposure: platform allocation and geography of gross assets (#144: both
-split the same cash, stocks/funds and crypto net worth adds up)."""
+split the same cash, stocks/funds and crypto net worth adds up), and net worth
+by currency (#253)."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account, latest_authoritative_nav_by_legacy_account
 from app.valuation import fx
+from app.valuation.facts import _credit_card_liability_details
 from app.valuation.holdings import _stock_exposure
 from app.valuation.prices import (
     _canonical_base_currency,
@@ -19,6 +21,12 @@ from app.valuation.prices import (
 )
 from app.valuation.state import CASH_KIND_BALANCE, _cash_positions, _wallet_valuation
 from app.valuation_cache import valuation_cached
+
+# USD stablecoins: cash in US dollars wherever exposure is split (geography: US
+# cash; currency exposure: USD). The list /crypto/stablecoins names (D-57).
+_STABLECOIN_SYMBOLS = {"USDC", "USDT"}
+# The currency exposure bucket for crypto other than stablecoins: not a currency.
+CRYPTO_EXPOSURE_KEY = "CRYPTO"
 
 
 @valuation_cached(shared=True, date_args=("anchor_ts",))
@@ -87,7 +95,7 @@ def _geography_exposure(
     stable_usd = sum(
         float(item.get("value_usd") or 0.0)
         for item in valuation.get("items", [])
-        if str(item.get("symbol") or "").upper() in {"USDC", "USDT"}
+        if str(item.get("symbol") or "").upper() in _STABLECOIN_SYMBOLS
     )
     if wallet_usd:
         us_bucket = _bucket("US")
@@ -190,3 +198,65 @@ def _platform_allocation(
         })
     return {"as_of": anchor_ts.isoformat(), "total": total, "items": items}
 
+
+
+def _currency_exposure(
+    db: Session,
+    anchor_ts: datetime,
+    base_currency: str,
+    current_user_id: int,
+    *,
+    price_overlay: bool = False,
+) -> Dict[str, Any]:
+    """Net worth at ``anchor_ts`` by currency (#253): stocks/funds by the currency
+    each holding is denominated in (_stock_exposure's split; an IBKR NAV by its
+    holdings' currencies), cash by the currency it is held in (_cash_positions,
+    net-worth scope), USD stablecoins as USD, other crypto as one ``CRYPTO``
+    bucket (not a currency), less each card's liability in the card's currency.
+    The same parts, anchor and price mode as _networth_components, so the values
+    add up to net worth; ``percent`` is the share of net worth."""
+    buckets: Dict[str, Dict[str, float]] = {}
+
+    def _add(currency: str | None, part: str, value: float) -> None:
+        key = str(currency or base_currency).upper()
+        bucket = buckets.setdefault(
+            key, {"cash": 0.0, "stocks_funds": 0.0, "stablecoins": 0.0, "crypto": 0.0, "liabilities": 0.0}
+        )
+        bucket[part] += value
+
+    stock_payload = _stock_exposure(db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay)
+    for row in stock_payload["by_currency"]:
+        _add(row["key"], "stocks_funds", float(row.get("value") or 0.0))
+
+    for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id):
+        _add(entry.get("currency"), "cash", float(entry["value"]))
+
+    valuation = _wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)
+    wallet_usd = float(valuation.get("total_usd") or 0.0)
+    if wallet_usd:
+        usd_rate = fx.get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 0.0)
+        stable_usd = sum(
+            float(item.get("value_usd") or 0.0)
+            for item in valuation.get("items", [])
+            if str(item.get("symbol") or "").upper() in _STABLECOIN_SYMBOLS
+        )
+        if stable_usd:
+            _add("USD", "stablecoins", stable_usd * usd_rate)
+        if wallet_usd - stable_usd:
+            _add(CRYPTO_EXPOSURE_KEY, "crypto", (wallet_usd - stable_usd) * usd_rate)
+
+    for card in _credit_card_liability_details(db, anchor_ts, base_currency, current_user_id):
+        if card["value"]:
+            _add(card.get("currency"), "liabilities", float(card["value"]))
+
+    items: List[Dict[str, Any]] = []
+    for currency, parts in buckets.items():
+        value = parts["cash"] + parts["stocks_funds"] + parts["stablecoins"] + parts["crypto"] - parts["liabilities"]
+        if abs(value) < 1e-9 and not any(parts.values()):
+            continue
+        items.append({"currency": currency, **parts, "value": value})
+    total = sum(item["value"] for item in items)
+    items.sort(key=lambda row: (-row["value"], row["currency"]))
+    for row in items:
+        row["percent"] = round((row["value"] / total) * 100, 2) if total > 0 else 0.0
+    return {"base_currency": base_currency, "total": total, "items": items}

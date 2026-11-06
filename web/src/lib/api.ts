@@ -469,7 +469,36 @@ export type RiskSummary = FxStatus &
     view_net_worth?: DashboardSummary["net_worth"] | null;
     /** The anchor the figures are taken at: the live instant, or the month-end boundary. */
     net_worth_boundary_at?: string | null;
+    /** #253, at the same point in time: net worth by currency (its total is
+     * `view_net_worth.total`; USD stablecoins count as USD). */
+    currency_exposure?: CurrencyExposure | null;
+    /** #253: gross assets by platform, the Overview platform donut's split. */
+    platform_concentration?: Pick<PlatformAllocation, "total" | "items"> | null;
   };
+
+/** One currency's part of net worth (#253). `currency` is an ISO code, or "CRYPTO" for
+ * crypto other than USD stablecoins (not a currency). `value` = cash + stocks_funds +
+ * stablecoins + crypto - liabilities; `percent` is its share of net worth. */
+export type CurrencyExposureItem = {
+  currency: string;
+  cash: number;
+  stocks_funds: number;
+  stablecoins: number;
+  crypto: number;
+  liabilities: number;
+  value: number;
+  percent: number;
+};
+
+export type CurrencyExposure = { total: number; items: CurrencyExposureItem[] };
+
+/** GET/PUT /dashboard/risk-thresholds (#253): the percent above which Risk calls a
+ * figure concentrated; null = the app's default (lib/risk.ts). */
+export type RiskThresholdsSetting = {
+  largest_position_warn_pct: number | null;
+  top_n_warn_pct: number | null;
+  platform_warn_pct: number | null;
+};
 
 /** One part of a bridge line; a line's parts add up to its amount (#240). */
 export type BridgePart = { key: string; label: string; amount: number };
@@ -1840,6 +1869,9 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   riskSummary: (month: string, baseCurrency = "SGD") =>
     req<RiskSummary>(`/dashboard/risk-summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  riskThresholds: () => req<RiskThresholdsSetting>("/dashboard/risk-thresholds"),
+  saveRiskThresholds: (payload: RiskThresholdsSetting) =>
+    req<RiskThresholdsSetting>("/dashboard/risk-thresholds", { method: "PUT", body: JSON.stringify(payload) }),
   monthBridge: (month: string, baseCurrency = "SGD") =>
     req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>

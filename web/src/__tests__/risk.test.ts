@@ -1,24 +1,29 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  buildCurrencyExposureRows,
   buildTopNDistribution,
   computeLargestPositionRisk,
+  computePlatformConcentrationRisk,
   computeTopNConcentrationRisk,
-  computeTop5ConcentrationRisk,
+  concentrationState,
+  DEFAULT_RISK_THRESHOLDS,
   formatLargestPosition,
   formatRiskPercent,
+  resolveRiskThresholds,
+  riskStateClassName,
+  thresholdRule,
 } from "../lib/risk";
-import type { DashboardSummary } from "../lib/api";
+import type { RiskHolding } from "../lib/api";
 
-type Holding = DashboardSummary["top_holdings"][number];
-
-function holding(symbol: string, value: number): Holding {
+function holding(symbol: string, value: number, assetClass = "STOCK", percent?: number): RiskHolding {
   return {
     asset_id: value,
     symbol,
-    asset_class: "STOCK",
+    asset_class: assetClass,
     value,
-    percent_of_networth: 0,
+    // As the server sends it when given; else the helpers divide by the total.
+    percent_of_networth: percent as number,
   };
 }
 
@@ -36,6 +41,7 @@ describe("risk helpers", () => {
     const largest = computeLargestPositionRisk(holdings, 700);
     expect(largest.hasData).toBe(true);
     expect(largest.symbol).toBe("AAPL");
+    expect(largest.value).toBe(120);
     expect(largest.percent).toBeCloseTo(17.1428, 3);
     expect(formatLargestPosition(largest)).toBe("AAPL — 17.1%");
 
@@ -44,7 +50,7 @@ describe("risk helpers", () => {
     expect(top3.hasFullSelection).toBe(true);
     expect(top3.percent).toBeCloseTo(43.5714, 3);
 
-    const top5 = computeTop5ConcentrationRisk(holdings, 700);
+    const top5 = computeTopNConcentrationRisk(holdings, 700, 5);
     expect(top5.hasData).toBe(true);
     expect(top5.percent).toBeCloseTo(65.0, 4);
     expect(formatRiskPercent(top5.percent)).toBe("65.0%");
@@ -55,11 +61,13 @@ describe("risk helpers", () => {
     expect(largest.hasData).toBe(false);
     expect(largest.symbol).toBeNull();
     expect(largest.percent).toBe(0);
+    expect(largest.state).toBe("muted");
     expect(formatLargestPosition(largest)).toBe("—");
 
     const top5 = computeTopNConcentrationRisk([], 1000, 5);
     expect(top5.hasData).toBe(false);
     expect(top5.percent).toBe(0);
+    expect(top5.state).toBe("muted");
     expect(formatRiskPercent(top5.percent)).toBe("0.0%");
   });
 
@@ -90,58 +98,95 @@ describe("risk helpers", () => {
     expect(formatRiskPercent(top5.percent)).toBe("56.0%");
   });
 
-  it("sorts ties deterministically by symbol asc", () => {
-    const holdings = [
-      holding("TSLA", 100),
-      holding("AAPL", 100),
-      holding("MSFT", 100),
-    ];
+  it("keeps the server's order for ties, as Overview does", () => {
+    const holdings = [holding("TSLA", 100), holding("AAPL", 100), holding("MSFT", 100)];
     const distribution = buildTopNDistribution(holdings, 1000, 3);
-
-    expect(distribution.map((item) => item.symbol)).toEqual(["AAPL", "MSFT", "TSLA"]);
+    expect(distribution.map((item) => item.symbol)).toEqual(["TSLA", "AAPL", "MSFT"]);
   });
 
-  it("excludes CASH holdings from concentration and distribution", () => {
-    const cashHolding: Holding = {
-      asset_id: 100,
-      symbol: "CASH",
-      asset_class: "CASH",
-      value: 200,
-      percent_of_networth: 0,
-    };
-    const holdings = [holding("AAPL", 100), cashHolding, holding("MSFT", 50)];
+  // #253: the same set as Overview's largest holdings, every asset class.
+  it("counts crypto positions in the largest position and the top N", () => {
+    const holdings = [holding("AAPL", 120), holding("ETH", 300, "CRYPTO"), holding("MSFT", 80)];
 
-    const top3 = computeTopNConcentrationRisk(holdings, 500, 3);
-    expect(top3.hasData).toBe(true);
-    // CASH should be excluded, so only AAPL (100) + MSFT (50) = 150
-    expect(top3.percent).toBeCloseTo(30.0, 4);
-
-    const distribution = buildTopNDistribution(holdings, 500, 3);
-    // CASH should not appear in distribution
-    expect(distribution.length).toBe(2);
-    expect(distribution[0].symbol).toBe("AAPL");
-    expect(distribution[0].assetClass).toBe("STOCK");
-    expect(distribution[1].symbol).toBe("MSFT");
-    expect(distribution[1].assetClass).toBe("STOCK");
-  });
-
-  it("excludes CRYPTO holdings from concentration and distribution", () => {
-    const cryptoHolding: Holding = {
-      asset_id: 101,
-      symbol: "ETH",
-      asset_class: "CRYPTO",
-      value: 300,
-      percent_of_networth: 0,
-    };
-    const holdings = [holding("AAPL", 120), cryptoHolding, holding("MSFT", 80)];
+    const largest = computeLargestPositionRisk(holdings, 1000);
+    expect(largest.symbol).toBe("ETH");
+    expect(largest.assetClass).toBe("CRYPTO");
+    expect(largest.percent).toBeCloseTo(30.0, 4);
 
     const top3 = computeTopNConcentrationRisk(holdings, 1000, 3);
-    expect(top3.hasData).toBe(true);
-    // CRYPTO should be excluded, so only AAPL + MSFT = 200
-    expect(top3.percent).toBeCloseTo(20.0, 4);
+    expect(top3.percent).toBeCloseTo(50.0, 4);
 
     const distribution = buildTopNDistribution(holdings, 1000, 3);
-    expect(distribution.length).toBe(2);
-    expect(distribution.map((item) => item.symbol)).toEqual(["AAPL", "MSFT"]);
+    expect(distribution.map((item) => [item.symbol, item.assetClass])).toEqual([
+      ["ETH", "CRYPTO"],
+      ["AAPL", "STOCK"],
+      ["MSFT", "STOCK"],
+    ]);
+  });
+
+  it("shows the server's percent_of_networth for a row, the figure Overview shows", () => {
+    // 56.49 / 1000 would round to 5.6%; the server's 5.65 shows as Overview shows it.
+    const holdings = [holding("ETH", 56.49, "CRYPTO", 5.65)];
+    const largest = computeLargestPositionRisk(holdings, 1000);
+    expect(largest.percent).toBe(5.65);
+    expect(buildTopNDistribution(holdings, 1000, 3)[0].percent).toBe(5.65);
+  });
+
+  it("only an upper threshold warns: low concentration is never flagged", () => {
+    const holdings = [holding("AAPL", 10), holding("MSFT", 10), holding("NVDA", 10)];
+    // 30% over three positions: below the default 50% for the top N, and 10% each below 15%.
+    const top3 = computeTopNConcentrationRisk(holdings, 100, 3);
+    expect(top3.state).toBe("ok");
+    expect(riskStateClassName(top3.state)).toBe("");
+    expect(computeLargestPositionRisk(holdings, 100).state).toBe("ok");
+
+    const concentrated = computeTopNConcentrationRisk([holding("AAPL", 60)], 100, 3);
+    expect(concentrated.state).toBe("warn");
+    expect(riskStateClassName(concentrated.state)).toBe("warn");
+
+    // At the threshold is not above it.
+    expect(concentrationState(15, 15)).toBe("ok");
+    expect(concentrationState(15.01, 15)).toBe("warn");
+    // A user's own threshold.
+    expect(computeLargestPositionRisk([holding("AAPL", 12)], 100, 10).state).toBe("warn");
+    expect(computeTopNConcentrationRisk([holding("AAPL", 40)], 100, 3, 35).state).toBe("warn");
+  });
+
+  it("resolves the user's thresholds over the defaults", () => {
+    expect(resolveRiskThresholds(undefined)).toEqual(DEFAULT_RISK_THRESHOLDS);
+    expect(
+      resolveRiskThresholds({ largest_position_warn_pct: 20, top_n_warn_pct: null, platform_warn_pct: 65.5 }),
+    ).toEqual({ largestPositionWarnPct: 20, topNWarnPct: DEFAULT_RISK_THRESHOLDS.topNWarnPct, platformWarnPct: 65.5 });
+    expect(thresholdRule(15)).toBe("Above 15%: concentrated");
+    expect(thresholdRule(12.5)).toBe("Above 12.5%: concentrated");
+  });
+
+  it("finds the largest platform and flags it only above its threshold", () => {
+    const platforms = {
+      total: 1000,
+      items: [
+        { platform: "DBS", platform_type: "BANK", country: "SG", value: 300, percent: 30 },
+        { platform: "IBKR", platform_type: "BROKER", country: "US", value: 700, percent: 70 },
+      ],
+    };
+    const risk = computePlatformConcentrationRisk(platforms);
+    expect(risk).toEqual({ platform: "IBKR", percent: 70, hasData: true, state: "warn" });
+    expect(computePlatformConcentrationRisk(platforms, 75).state).toBe("ok");
+    expect(computePlatformConcentrationRisk(null).hasData).toBe(false);
+  });
+
+  it("labels currency exposure rows and lists what each is made of", () => {
+    const rows = buildCurrencyExposureRows([
+      { currency: "USD", cash: 100, stocks_funds: 400, stablecoins: 50, crypto: 0, liabilities: 0, value: 550, percent: 55 },
+      { currency: "SGD", cash: 300, stocks_funds: 0, stablecoins: 0, crypto: 0, liabilities: 20, value: 280, percent: 28 },
+      { currency: "CRYPTO", cash: 0, stocks_funds: 0, stablecoins: 0, crypto: 170, liabilities: 0, value: 170, percent: 17 },
+    ]);
+    expect(rows.map((row) => row.label)).toEqual(["USD", "SGD", "Crypto (not stablecoins)"]);
+    expect(rows[0].parts.map((part) => part.label)).toEqual(["Stocks", "Cash", "Stablecoins"]);
+    expect(rows[1].parts).toEqual([
+      { key: "cash", label: "Cash", value: 300 },
+      { key: "liabilities", label: "Cards owed", value: 20 },
+    ]);
+    expect(buildCurrencyExposureRows(null)).toEqual([]);
   });
 });

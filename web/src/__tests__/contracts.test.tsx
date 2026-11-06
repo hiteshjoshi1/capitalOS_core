@@ -15,6 +15,7 @@ vi.mock("../lib/api", () => ({
     dashboardBootstrap: vi.fn(),
     dashboardSummary: vi.fn(),
     riskSummary: vi.fn(),
+    riskThresholds: vi.fn().mockResolvedValue({ largest_position_warn_pct: null, top_n_warn_pct: null, platform_warn_pct: null }),
     dashboardGeographyExposure: vi.fn(),
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
