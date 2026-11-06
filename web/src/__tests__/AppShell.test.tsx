@@ -1,7 +1,7 @@
 import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { api } from "../lib/api";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { lazy, type ReactElement } from "react";
 import { readFileSync } from "node:fs";
@@ -379,6 +379,71 @@ describe("AppShell accessibility (#151)", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("This page failed to load");
     expect(screen.getByRole("complementary", { name: "Main navigation" })).toBeInTheDocument();
     spy.mockRestore();
+  });
+});
+
+describe("AppShell on a phone-width screen (#239)", () => {
+  const originalMatchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    // Only the shell's narrow query matches, as on a 375px phone.
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(max-width: 980px)",
+      media: query,
+      onchange: null,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+  });
+
+  afterEach(() => {
+    window.matchMedia = originalMatchMedia;
+  });
+
+  function renderPhoneShell(path: string, child: ReactElement) {
+    return render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route element={<AppShell />}>
+              <Route path={path} element={child} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+  }
+
+  it("puts the page's month and currency controls under its title, not in the top bar", async () => {
+    const { container } = renderPhoneShell("/wealth", <WealthOverview />);
+    const month = await screen.findByLabelText("Month");
+    expect(screen.getAllByLabelText("Month")).toHaveLength(1);
+    const topbar = container.querySelector(".appShellTopbar") as HTMLElement;
+    expect(topbar).not.toContainElement(month);
+    const pageHeader = container.querySelector(".pageShellWrap .dashboardHeader") as HTMLElement;
+    expect(pageHeader).toContainElement(month);
+    expect(pageHeader).toContainElement(screen.getByLabelText("Base currency"));
+  });
+
+  it("moves the theme switch into the account menu", async () => {
+    renderPhoneShell("/wealth", <div>Overview Content</div>);
+    expect(screen.queryByRole("group", { name: "Theme" })).not.toBeInTheDocument();
+    const toggle = screen.getByRole("button", { name: /^(Dark|Light) mode$/ });
+    const before = document.documentElement.getAttribute("data-theme");
+    await userEvent.click(toggle);
+    expect(document.documentElement.getAttribute("data-theme")).not.toBe(before);
+    // The account pill keeps its name for screen readers while the label is hidden.
+    expect(screen.getByText("User")).toBeInTheDocument();
+  });
+
+  it("labels the Cash Flow bottom tab Flow, so it doesn't clash with Wealth → Cash", () => {
+    renderPhoneShell("/wealth", <div>Overview Content</div>);
+    const nav = screen.getByRole("navigation", { name: "Mobile navigation" });
+    expect(within(nav).getByRole("link", { name: "Flow" })).toHaveAttribute("href", "/cash-flow");
+    expect(within(nav).queryByRole("link", { name: "Cash" })).not.toBeInTheDocument();
   });
 });
 

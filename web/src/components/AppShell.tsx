@@ -7,6 +7,7 @@ import { useAuth } from "../context/useAuth";
 import { useTheme } from "../context/ThemeContext";
 import { ShellHeaderProvider } from "../context/ShellHeaderContext";
 import { findActiveSection, isNavItemActive } from "../lib/navigation";
+import { NARROW_SHELL_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 
 export default function AppShell() {
   const location = useLocation();
@@ -14,6 +15,10 @@ export default function AppShell() {
   const { theme, setTheme } = useTheme();
   const activeSection = findActiveSection(location.pathname);
   const [headerActions, setHeaderActions] = useState<ReactNode>(null);
+  // #239 (D-64): on a phone the top bar holds only the brand and the account menu. The
+  // page's own controls (month pill, currency, CSV) go in a row under its title
+  // (PageShell), and the theme switch moves into the account menu.
+  const narrow = useMediaQuery(NARROW_SHELL_QUERY);
 
   return (
     <div className="appShell">
@@ -23,7 +28,7 @@ export default function AppShell() {
       </a>
       <Sidebar />
       <main className="appShellMain">
-        <ShellHeaderProvider setHeaderActions={setHeaderActions}>
+        <ShellHeaderProvider setHeaderActions={setHeaderActions} actionsInPage={narrow}>
           {/* Always render the topbar — mobile brand + controls must show on every page */}
           <header className="appShellTopbar">
             {/* Mobile-only brand wordmark — hidden on desktop via CSS */}
@@ -52,25 +57,27 @@ export default function AppShell() {
             )}
 
             <div className="appShellTopbarMeta">
-              {headerActions ? <div className="appShellTopbarActions">{headerActions}</div> : null}
-              <div className="coThemeToggle" role="group" aria-label="Theme">
-                <button
-                  type="button"
-                  className={`coThemeBtn${theme === "light" ? " coThemeBtnActive" : ""}`}
-                  aria-pressed={theme === "light"}
-                  onClick={() => setTheme("light")}
-                >
-                  Light
-                </button>
-                <button
-                  type="button"
-                  className={`coThemeBtn${theme === "dark" ? " coThemeBtnActive" : ""}`}
-                  aria-pressed={theme === "dark"}
-                  onClick={() => setTheme("dark")}
-                >
-                  Dark
-                </button>
-              </div>
+              {headerActions && !narrow ? <div className="appShellTopbarActions">{headerActions}</div> : null}
+              {narrow ? null : (
+                <div className="coThemeToggle" role="group" aria-label="Theme">
+                  <button
+                    type="button"
+                    className={`coThemeBtn${theme === "light" ? " coThemeBtnActive" : ""}`}
+                    aria-pressed={theme === "light"}
+                    onClick={() => setTheme("light")}
+                  >
+                    Light
+                  </button>
+                  <button
+                    type="button"
+                    className={`coThemeBtn${theme === "dark" ? " coThemeBtnActive" : ""}`}
+                    aria-pressed={theme === "dark"}
+                    onClick={() => setTheme("dark")}
+                  >
+                    Dark
+                  </button>
+                </div>
+              )}
               <details className="userMenu">
                 <summary className="userMenuSummary appShellUserPill">
                   <span className="appShellUserAvatarFrame" aria-hidden="true">
@@ -87,6 +94,18 @@ export default function AppShell() {
                         <span className="material-symbols-outlined userMenuActionIcon" aria-hidden="true">settings</span>
                         <span>Settings</span>
                       </Link>
+                      {narrow ? (
+                        <button
+                          className="btn userMenuAction"
+                          type="button"
+                          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+                        >
+                          <span className="material-symbols-outlined userMenuActionIcon" aria-hidden="true">
+                            {theme === "dark" ? "light_mode" : "dark_mode"}
+                          </span>
+                          <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+                        </button>
+                      ) : null}
                       <button
                         className="btn appShellLogoutButton userMenuAction"
                         type="button"
@@ -132,7 +151,8 @@ export default function AppShell() {
           to="/cash-flow"
         >
           <span className="coMobileBottomNavDot" aria-hidden="true" />
-          <span className="coMobileBottomNavLabel">Cash</span>
+          {/* "Flow", not "Cash" (#239): Wealth → Cash is the balances page. */}
+          <span className="coMobileBottomNavLabel">Flow</span>
         </Link>
         <Link
           className={`coMobileBottomNavItem${location.pathname.startsWith("/liabilities") ? " coMobileBottomNavItemActive" : ""}`}
