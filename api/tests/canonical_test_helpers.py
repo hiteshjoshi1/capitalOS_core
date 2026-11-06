@@ -50,11 +50,12 @@ def _canonical_broker_ids(conn, account_id: int, platform_code: str | None, base
                   (user_id, platform_code, connection_type, display_name, status, metadata_json)
                 VALUES
                   (:user_id, :platform_code, 'test_fixture', :display_name, 'active', '{}')
+                RETURNING id
                 """
             ),
             {"user_id": user_id, "platform_code": platform, "display_name": f"{platform} Fixture"},
         )
-        connection_id = int(result.lastrowid)
+        connection_id = int(result.scalar_one())
 
     broker_account_key = f"fixture:{account_id}"
     broker_account = conn.execute(
@@ -76,6 +77,7 @@ def _canonical_broker_ids(conn, account_id: int, platform_code: str | None, base
                   (connection_id, legacy_account_id, broker_account_id, base_currency, status, metadata_json)
                 VALUES
                   (:connection_id, :legacy_account_id, :broker_account_id, :base_currency, 'active', '{}')
+                RETURNING id
                 """
             ),
             {
@@ -85,7 +87,7 @@ def _canonical_broker_ids(conn, account_id: int, platform_code: str | None, base
                 "base_currency": currency,
             },
         )
-        broker_account_id = int(result.lastrowid)
+        broker_account_id = int(result.scalar_one())
     return broker_account_id, connection_id
 
 
@@ -142,6 +144,7 @@ def seed_canonical_position_snapshot_for_test(
                       (platform_code, broker_instrument_id, asset_id, symbol, description, security_type, currency, metadata_json)
                     VALUES
                       (:platform_code, :broker_instrument_id, :asset_id, :symbol, :description, :security_type, :currency, '{}')
+                    RETURNING id
                     """
                 ),
                 {
@@ -154,7 +157,7 @@ def seed_canonical_position_snapshot_for_test(
                     "currency": row_currency,
                 },
             )
-            broker_instrument_id = int(result.lastrowid)
+            broker_instrument_id = int(result.scalar_one())
 
         result = conn.execute(
             text(
@@ -162,12 +165,19 @@ def seed_canonical_position_snapshot_for_test(
                 INSERT INTO broker_import_runs
                   (broker_account_id, legacy_account_id, platform_code, source_type, import_scope, status, metadata_json)
                 VALUES
-                  (:broker_account_id, :legacy_account_id, :platform_code, 'test_fixture', 'daily', 'completed', '{}')
+                  (:broker_account_id, :legacy_account_id, :platform_code, :source_type, 'daily', 'completed', '{}')
+                RETURNING id
                 """
             ),
-            {"broker_account_id": broker_account_id, "legacy_account_id": account_id, "platform_code": platform},
+            {
+                "broker_account_id": broker_account_id,
+                "legacy_account_id": account_id,
+                "platform_code": platform,
+                # Postgres checks source_type against the importers' values (D-53).
+                "source_type": "DUMMY" if conn.dialect.name == "postgresql" else "test_fixture",
+            },
         )
-        import_run_id = int(result.lastrowid)
+        import_run_id = int(result.scalar_one())
         report_date = _as_date(as_of)
         price = market_price
         if price is None and quantity:

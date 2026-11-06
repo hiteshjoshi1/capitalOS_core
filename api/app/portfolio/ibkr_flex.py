@@ -18,15 +18,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app import fx
-from app.portfolio.account_open import account_open_sql
 from app.portfolio.authority import (
     AuthorityWindow,
-    authoritative_sql,
     close_windows_superseded_by,
     ensure_window,
     window_covers_sql,
 )
-from app.valuation_cache import valuation_cached
+# The NAV reader lives with the other canonical readers (#231); importable from here too.
+from app.portfolio.canonical_reads import latest_authoritative_nav_by_legacy_account  # noqa: F401
 from app.wealth_rollup_dirty import mark_rollups_dirty
 
 PARSER_VERSION = "ibkr_flex_v1"
@@ -2667,48 +2666,3 @@ def run_ibkr_flex_import_from_config(
         cutover_date=cutover_date,
         reference_code=reference_code,
     )
-
-
-@valuation_cached(shared=True)
-def latest_authoritative_nav_by_legacy_account(
-    db: Session,
-    *,
-    current_user_id: int,
-    anchor_date: date,
-) -> list[dict[str, Any]]:
-    rows = db.execute(
-        text(
-            f"""
-            WITH latest AS (
-              SELECT ns.broker_account_id, MAX(ns.report_date) AS report_date
-              FROM portfolio_nav_snapshots ns
-              JOIN broker_accounts ba ON ba.id = ns.broker_account_id
-              JOIN accounts acc ON acc.id = ba.legacy_account_id
-              WHERE ns.report_date <= :anchor_date
-                AND {authoritative_sql("ns")}
-                AND ba.legacy_account_id IS NOT NULL
-                AND (acc.user_id = :current_user_id OR acc.user_id IS NULL)
-                AND {account_open_sql("acc")}
-              GROUP BY ns.broker_account_id
-            )
-            SELECT
-              ba.legacy_account_id,
-              ns.broker_account_id,
-              ns.report_date,
-              ns.base_currency,
-              ns.cash_base,
-              ns.stock_base,
-              ns.total_nav_base,
-              COALESCE(pl.code, acc.platform) AS platform,
-              pl.platform_type AS platform_type,
-              COALESCE(pl.country, acc.country) AS country
-            FROM portfolio_nav_snapshots ns
-            JOIN latest l ON l.broker_account_id = ns.broker_account_id AND l.report_date = ns.report_date
-            JOIN broker_accounts ba ON ba.id = ns.broker_account_id
-            JOIN accounts acc ON acc.id = ba.legacy_account_id
-            LEFT JOIN platforms pl ON pl.id = acc.platform_id
-            """
-        ),
-        {"anchor_date": anchor_date, "current_user_id": current_user_id},
-    ).mappings().all()
-    return [dict(row) for row in rows]

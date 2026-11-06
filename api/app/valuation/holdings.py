@@ -9,8 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
-from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account, latest_authoritative_nav_by_legacy_account
 from app.portfolio.position_pricing import price_position
 from app.valuation import fx, prices
 from app.valuation.clock import _add_months, _completed_snapshot_anchor_ts, _iso_value
