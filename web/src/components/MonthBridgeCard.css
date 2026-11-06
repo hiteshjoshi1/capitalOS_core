@@ -1,0 +1,143 @@
+/* Overview's "This month" bridge (#240). Its own file so the Overview page's styles
+   stay untouched; uses the theme tokens from index.css. */
+.monthBridgeCard {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255, 255, 255, 0.04) 6%) 0%, var(--panel2) 100%);
+  box-shadow: 0 14px 30px var(--shadow);
+  min-width: 0;
+}
+
+.monthBridgeList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.monthBridgeRow {
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  padding: 8px 0;
+  min-width: 0;
+}
+
+.monthBridgeRow:first-child {
+  border-top: none;
+}
+
+.monthBridgeRowMain {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.monthBridgeLabel {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.monthBridgeAmount {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.monthBridgeEnd .monthBridgeLabel,
+.monthBridgeEnd .monthBridgeAmount {
+  font-weight: 700;
+}
+
+.monthBridgeRowMuted .monthBridgeLabel {
+  color: var(--muted);
+}
+
+.monthBridgeToggle {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.monthBridgeToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.monthBridgeStatus {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 50%, transparent);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+
+.monthBridgeSummary,
+.monthBridgeFoot,
+.monthBridgeNote,
+.monthBridgeReason {
+  margin: 2px 0 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.monthBridgeReason {
+  color: var(--warn);
+}
+
+.monthBridgeDetail {
+  margin: 6px 0 2px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.monthBridgeParts {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+
+.monthBridgeParts li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+}
+
+.monthBridgeParts li span:last-child {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.monthBridgeMovers ul {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 13px;
+}
+
+@media (max-width: 640px) {
+  .monthBridgeCard {
+    padding: 16px;
+  }
+}

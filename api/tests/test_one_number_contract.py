@@ -15,7 +15,10 @@ the figures the pages show for one month are one set of numbers:
   cash + stocks_funds + crypto: net worth plus liabilities;
 - every "previous" figure (vs last month, since last update, the pages' compare
   month) names its month and the date of its data, unless there is no data for
-  it at all (``baseline_missing``, #224), and is History's point for that month.
+  it at all (``baseline_missing``, #224), and is History's point for that month;
+- Overview's "This month" bridge (#240, D-60) starts at the hero's "vs last
+  month" figure and ends at the headline, and its lines plus the unexplained
+  residual add up to the difference.
 
 The figure helpers mirror what the web pages read (web/src/routes/*).
 """
@@ -199,6 +202,7 @@ def _check_previous_figures(
             point = pages.history_point(figure["compare_month"])
             assert figure["compare_value"] == pytest.approx(point["total"], abs=TOL), (where, label)
     prev_month = change["vs_prev_month"]["compare_month"]
+    _check_bridge(pages, month, live=live, figure=change["vs_prev_month"])
 
     if live:
         since = pages.get("/dashboard/net-worth-since-update")
@@ -222,6 +226,28 @@ def _check_previous_figures(
     _assert_dated(cash, date_key="snapshot_cash_as_of", missing=cash["snapshot_missing"], where=f"{where} cash")
     assert cash["snapshot_total"] - cash["snapshot_stablecoin_total"] == pytest.approx(previous["cash"], abs=TOL), where
     assert cash["delta_abs"] == pytest.approx(cash["current_total"] - cash["snapshot_total"], abs=TOL), where
+
+
+def _check_bridge(pages: _Pages, month: str, *, live: bool, figure: dict[str, Any]) -> None:
+    """The bridge's start is the hero's "vs last month" figure, its end the
+    headline, and start + lines + unexplained = end."""
+    where = f"{pages.base} {month} ({'live' if live else 'past'}) bridge"
+    bootstrap = pages.get(f"/dashboard/bootstrap?month={month}")
+    headline = _overview_headline(bootstrap)
+    bridge = pages.get(f"/dashboard/month-bridge?month={month}")
+    assert bridge["is_live"] is live and bridge["base_currency"] == pages.base, where
+    assert _nw(bridge["end"]["net_worth"]) == pytest.approx(headline, abs=TOL), where
+    assert bridge["end"]["value"] == pytest.approx(headline["total"], abs=TOL), where
+    start = bridge["start"]
+    assert start["month"] == figure["compare_month"], where
+    assert start["value"] == pytest.approx(figure["compare_value"], abs=TOL), where
+    assert start["as_of"] == figure["compare_as_of"], where
+    assert start["baseline_missing"] is figure["baseline_missing"], where
+    if start["month"] in pages.points:
+        assert _nw(start["net_worth"]) == pytest.approx(pages.history_point(start["month"]), abs=TOL), where
+    total = start["value"] + sum(line["amount"] for line in bridge["lines"]) + bridge["unexplained"]["amount"]
+    assert total == pytest.approx(bridge["end"]["value"], abs=1e-6), where
+    assert bridge["change"] == pytest.approx(bridge["end"]["value"] - start["value"], abs=1e-6), where
 
 
 @pytest.mark.parametrize("base", BASES)
