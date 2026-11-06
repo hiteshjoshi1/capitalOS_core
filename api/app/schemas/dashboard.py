@@ -206,6 +206,59 @@ class StockBreakdownItem(BaseModel):
     percent: float
 
 
+class StockMonthChange(BaseModel):
+    """A holding's change vs the compare month-end (#251), split as Overview's
+    bridge splits it (D-60): abs = price_effect + quantity_effect + fx_effect + unsplit,
+    in the base currency. Buying or selling is the quantity effect, not a gain or loss."""
+
+    abs: float
+    # abs / compare_value; None without a start value (a new holding).
+    pct: Optional[float] = None
+    price_effect: float = 0.0
+    quantity_effect: float = 0.0
+    fx_effect: float = 0.0
+    # What can't be split: no price or quantity on one side, or a value that isn't
+    # its own quantity x price x rate.
+    unsplit: float = 0.0
+    compare_value: float = 0.0
+    end_value: float = 0.0
+    compare_month: Optional[str] = None
+    # No stock data at all for compare_month (the page's stock_snapshot_missing).
+    baseline_missing: bool = False
+    # held | new (not held at the compare month-end) | sold (held then, not now).
+    side: str = "held"
+    start_quantity: Optional[float] = None
+    end_quantity: Optional[float] = None
+    # Prices in price_currency, rates in base currency per unit of it.
+    start_price: Optional[float] = None
+    end_price: Optional[float] = None
+    price_currency: Optional[str] = None
+    start_rate: Optional[float] = None
+    end_rate: Optional[float] = None
+
+
+class StockHolding(TopHolding):
+    """A Stocks page row: a /summary top holding plus its change this month (#251)."""
+
+    month_change: Optional[StockMonthChange] = None
+
+
+class StockMonthChangeTotal(BaseModel):
+    """The Stocks headline's change vs the compare month-end, as the rows add up (#251):
+    abs = price_effect + quantity_effect + fx_effect + unsplit + not_in_holdings."""
+
+    abs: float
+    price_effect: float = 0.0
+    quantity_effect: float = 0.0
+    fx_effect: float = 0.0
+    unsplit: float = 0.0
+    # The statement totals beyond the holdings listed (e.g. an IBKR NAV's other asset types).
+    not_in_holdings: float = 0.0
+    compare_value: float = 0.0
+    compare_month: Optional[str] = None
+    baseline_missing: bool = False
+
+
 class StockHoldingsResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
@@ -218,7 +271,7 @@ class StockHoldingsResponse(FxStatusFields):
     net_worth_boundary_at: Optional[str] = None
     net_worth_boundary_exact: Optional[bool] = None
     net_worth_freshness_status: Optional[str] = None
-    top_holdings: List[TopHolding]
+    top_holdings: List[StockHolding]
     geography_breakdown: list["StockGeographyBreakdownItem"] = []
     geography_performance: list["StockGeographyBreakdownItem"] = []
     geography_performance_as_of: Optional[str] = None
@@ -233,6 +286,11 @@ class StockHoldingsResponse(FxStatusFields):
     stock_snapshot_missing: bool = False
     # QUOTE_STALE_DAYS: a price older than this many days is stale (#224).
     quote_stale_days: Optional[int] = None
+    # #251: the compare month-end's anchor; the holdings held then and sold since
+    # (value 0, month_change.side "sold"); and the headline's change as the rows add up.
+    compare_boundary_at: Optional[str] = None
+    sold_holdings: List[StockHolding] = []
+    month_change_total: Optional[StockMonthChangeTotal] = None
 
 
 class PlatformAllocationItem(BaseModel):

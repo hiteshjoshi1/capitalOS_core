@@ -1,0 +1,169 @@
+/* Stocks: a holding's change vs the compare month-end (#251). Its own file so the
+   shared stylesheet stays untouched; uses the theme tokens from index.css. */
+.stockMonthChange {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.stockMonthChange--card {
+  align-items: flex-start;
+  width: 100%;
+}
+
+.stockMonthChange--missing {
+  color: var(--muted);
+}
+
+.stockMonthChangeToggle {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.stockMonthChangeToggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.stockMonthChangeHeadline {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: inherit;
+  gap: 3px;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px dotted color-mix(in srgb, var(--muted) 70%, transparent);
+}
+
+.stockMonthChange--cell .stockMonthChangeHeadline {
+  align-items: flex-end;
+}
+
+.stockMonthChange--cell .stockMonthChangeToggle {
+  white-space: nowrap;
+}
+
+.stockMonthChange--cell .stockMonthChangeNote {
+  width: 260px;
+}
+
+.stockMonthChange--card .stockMonthChangeHeadline {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.stockMonthChangeNeutral {
+  color: var(--text);
+}
+
+.stockMonthChangeSub {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stockMonthChangeTag {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent 16%);
+  border-radius: 999px;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--panel2) 70%, transparent 30%);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stockMonthChangeParts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stockMonthChangeNote {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+}
+
+.stockMonthChange--card .stockMonthChangeNote {
+  max-width: 100%;
+}
+
+.stockMonthChangeNoteRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 12px;
+  min-width: 0;
+}
+
+.stockMonthChangeNoteLabel {
+  font-weight: 700;
+}
+
+.stockMonthChangeNoteAmount {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.stockMonthChangeNoteDetail {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.stockMonthChangeNoteFoot {
+  color: var(--muted);
+  border-top: 1px solid color-mix(in srgb, var(--line) 60%, transparent);
+  padding-top: 6px;
+}
+
+/* The Stocks page's mobile card row and sold table rows. */
+.stockHoldingsMobileChange {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.stockHoldingsMobileChange > .muted {
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stockHoldingsSoldRow .stockHoldingsSymbol {
+  color: var(--muted);
+}
