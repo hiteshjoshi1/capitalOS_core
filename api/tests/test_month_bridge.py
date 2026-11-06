@@ -63,9 +63,18 @@ def _assert_adds_up(bridge: dict[str, Any], where: str) -> None:
             assert line["reason"], (where, line["key"])
         if line["parts"]:
             assert sum(p["amount"] for p in line["parts"]) == pytest.approx(line["amount"], abs=1e-6), (where, line["key"])
+    ranks = []
     for mover in bridge["movers"]:
-        assert mover["cause"] in {"price", "quantity", "fx", "unknown"}, where
+        # Movers are what the market did: a change in quantity is a trade, not a cause.
+        assert mover["cause"] in {"price", "fx", "unknown"}, where
         assert mover["change"] == pytest.approx(mover["end_value"] - mover["start_value"], abs=1e-6), where
+        assert mover["market_effect"] == pytest.approx(mover["price_effect"] + mover["fx_effect"], abs=1e-6), where
+        ranks.append(abs(mover["market_effect"]))
+    if all(m["cause"] != "unknown" for m in bridge["movers"]):
+        assert ranks == sorted(ranks, reverse=True), where
+    for trade in bridge["trades"]:
+        assert trade["side"] in {"bought", "sold", "moved_in", "moved_out"}, where
+        assert (trade["amount"] > 0) == (trade["side"] in {"bought", "moved_in"}), where
 
 
 @pytest.mark.parametrize("base", ("SGD", "USD"))
@@ -121,7 +130,15 @@ def test_open_month_lines_by_hand(mid: TestClient):
     assert aapl["price_effect"] == pytest.approx(20 * (205.0 - 190.0) * usd, abs=TOL)
     assert aapl["fx_effect"] == pytest.approx(20 * 190.0 * (usd - fx_feb), abs=TOL)
     assert aapl["quantity_effect"] == pytest.approx(5 * 205.0 * usd, abs=TOL)
-    assert aapl["cause"] == "quantity"
+    # The five bought aren't a market move: AAPL moved on price, and the purchase is a
+    # trade (IBKR records its cash, so it came from cash). RELIANCE was bought at
+    # Sharekhan, where no cash is recorded.
+    assert aapl["cause"] == "price"
+    assert aapl["market_effect"] == pytest.approx(aapl["price_effect"] + aapl["fx_effect"], abs=TOL)
+    trades = {t["symbol"]: t for t in bridge["trades"]}
+    assert trades["AAPL"]["side"] == "bought" and trades["AAPL"]["cash_recorded"] is True
+    assert trades["AAPL"]["amount"] == pytest.approx(aapl["quantity_effect"], abs=TOL)
+    assert trades["RELIANCE"]["side"] == "bought" and trades["RELIANCE"]["cash_recorded"] is False
     # Crypto: ETH 2 @2800 -> 2.5 @3100, SOL 40 @150 -> @170; USDC 2000 -> 1000, USDT 0 -> 250.
     markets = _line(bridge, "markets")
     assert _part(markets, "crypto") == pytest.approx((2 * 300.0 + 40 * 20.0) * usd, abs=TOL)

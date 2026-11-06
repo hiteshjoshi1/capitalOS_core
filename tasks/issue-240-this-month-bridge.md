@@ -47,6 +47,12 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/240
   unsplit, and the note counts holdings whose unsplit change is at least 1 in the base currency
   (`UNSPLIT_COUNT_MIN`). Sums unchanged (start + lines + unexplained = end).
 
+- Test-instance follow-up 2 (owner's review): a holding sold this month showed as a top mover of
+  minus its whole value (e.g. a stock sold into IBKR cash). Movers now rank the market effect
+  (price + FX, new `market_effect` field; cause price | fx | unknown), and changes in quantity are
+  a new `trades` list (bought / sold, crypto moved in / out, `cash_recorded`), shown on the card as
+  "Bought and sold" ("Sold X ... (to cash)"). D-60 updated.
+
 ## Deterministic Gate Results (Codex Mutable)
 - `lint`: `pass` — `make verify`
 - `typecheck`: `pass` — `make verify`

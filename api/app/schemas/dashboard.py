@@ -556,9 +556,26 @@ class BridgeMover(BaseModel):
     price_effect: float
     quantity_effect: float
     fx_effect: float
-    # The largest of the three effects: price | quantity | fx; unknown when the
-    # holding has no price or quantity to split by.
+    # What the market did to the holding: price_effect + fx_effect. Movers are ranked
+    # by it; a change in quantity (buying, selling) is listed under ``trades``.
+    market_effect: float = 0.0
+    # The larger of the price and FX effects: price | fx; unknown when the part that
+    # can't be split (no price or quantity on one side) is larger than the market effect.
     cause: str
+
+
+class BridgeTrade(BaseModel):
+    """A holding bought, sold or (crypto) moved in or out this month: its quantity
+    effect. Not a gain or loss: where the account's cash is recorded the money moved
+    to or from that cash."""
+
+    asset_id: Optional[int] = None
+    symbol: str
+    name: Optional[str] = None
+    asset_class: str
+    amount: float
+    side: str  # bought | sold | moved_in | moved_out
+    cash_recorded: bool = False
 
 
 class MonthBridgeResponse(FxStatusFields):
@@ -581,3 +598,4 @@ class MonthBridgeResponse(FxStatusFields):
     # in "cash kept", so this is not a line of its own).
     liabilities_change: float
     movers: List[BridgeMover]
+    trades: List[BridgeTrade] = []
