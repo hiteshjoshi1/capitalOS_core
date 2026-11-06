@@ -13,6 +13,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
+from app.core.clock import app_today
 from app.market_data.providers import (
     YAHOO_QUALIFIED_SUFFIXES,
     EODHDProvider,
@@ -982,11 +983,15 @@ def unpriced_held_positions(
     """Held stocks and funds that the quote refresh can't price (#222), one row
     per instrument: not linked to an asset, no ticker on a configured exchange,
     or never quoted. Held means a non-zero quantity in its account's newest
-    authoritative position snapshot, in an open account. ``user_id`` limits it
+    authoritative position snapshot on or before today, in an open account.
+    "Today" is the app clock's date (the request user's timezone, else ``TZ``;
+    D-62), the calendar uploads are dated by (D-34), not the UTC date: between
+    00:00 and 08:00 in Singapore a statement dated today already counts.
+    ``user_id`` limits it
     to that user's accounts (None: every account, for the refresh job's own
     check); ``exchange_code`` to the exchange each position would be priced on
     (its symbol map's, else the one its country or currency points to)."""
-    rows = held_position_rows(db, today=datetime.now(tz=timezone.utc).date(), user_id=user_id)
+    rows = held_position_rows(db, today=app_today(), user_id=user_id)
     if not rows:
         return []
 

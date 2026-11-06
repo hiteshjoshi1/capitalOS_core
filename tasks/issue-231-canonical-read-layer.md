@@ -34,6 +34,8 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/231
 - **Parity first**: `tests/canonical_reads_reference.py` is a verbatim copy of the old readers; `tests/test_canonical_read_parity.py` compares every live reader to it over the golden household plus edge cases, both users, every day (SQLite) / every other day (Postgres) from 2025-12-01 to 2026-04-15. Committed and green against the old readers before any reader was switched.
 
 ## Kept differences (not changed; candidates for a later decision)
+> **Update (#242, D-62):** differences 1-3 are resolved: one owner key (each broker account's newest) for positions, NAV and broker cash; the coverage date is Flex-routed; held positions take "today" from the app clock. See `tasks/issue-242-owner-key-unify.md` and [D-62](../docs/decisions.md). 4-6 remain as listed.
+
 1. **Owner key.** Positions take the newest date across all broker accounts of a legacy account; NAV and broker cash count each broker account's newest. Only differs for a legacy account with two broker accounts holding authoritative facts that Flex routing doesn't separate. On a restored copy of the real data there are none, for positions, NAV or cash.
 2. **Coverage date without Flex routing.** `canonical_snapshot_coverage_as_of` counts every account's facts, including uploaded balances of an account Flex owns. It's the MAX over all accounts, so this matters only when such a fact is the newest of all; on the real-data copy there are none.
 3. **Held positions for pricing** use the newest snapshot per broker account, no routing, no NAV rule (deliberate: everything held needs a price), and "today" is the UTC date (a clock question, not this issue's).
@@ -83,4 +85,4 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/231
 ## Human Action Summary (Codex Mutable)
 - Next expected action: review the PR, then batch it on the test instance and compare pages and History.
 - Open questions:
-  - Kept differences 1-3 above: unify the owner key (one rule for positions, NAV and cash) and route the coverage date? Each is a small behaviour change on edge data (none on today's real data); recommendation: yes, as one follow-up with its own before/after, so this PR stays a pure refactor.
+  - Kept differences 1-3 above: unify the owner key (one rule for positions, NAV and cash) and route the coverage date? Each is a small behaviour change on edge data (none on today's real data); recommendation: yes, as one follow-up with its own before/after, so this PR stays a pure refactor. **Answered by #242 (D-62).**
