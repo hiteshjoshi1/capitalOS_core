@@ -1,0 +1,232 @@
+Cases for scripts/test-pretooluse-guard.sh (#255): each one is fed to .claude/hooks/pretooluse-guard.sh
+as a Bash tool call and must be blocked or pass.
+
+Format: a header line "=== block: <description>" or "=== pass: <description>", then the command,
+taken literally (it may span lines: heredocs, several commands) up to the next header. Trailing blank
+lines are dropped. Lines before the first header (these) are ignored.
+
+=== block: --force
+git push --force
+=== block: -f
+git push -f
+=== block: -f before the remote
+git push -f origin main
+=== block: -f after the refspec
+git push origin main -f
+=== block: -f combined with -u
+git push -fu origin feature/x
+=== block: -f last in a cluster
+git push -uf origin feature/x
+=== block: -f among other short flags
+git push -v -f origin main
+=== block: -f after a push option and its value
+git push -o ci.skip -f origin main
+=== block: --force-with-lease
+git push --force-with-lease
+=== block: --force-with-lease with a value
+git push --force-with-lease=main:abc123 origin main
+=== block: --force-if-includes
+git push --force-if-includes --force-with-lease origin main
+=== block: an abbreviated --force
+git push --forc origin main
+=== block: --mirror
+git push --mirror backup
+=== block: +refspec
+git push origin +main
+=== block: +refspec with a destination
+git push origin +HEAD:refs/heads/main
+=== block: +refspec after --
+git push origin -- +main
+=== block: a quoted flag
+git push "--force" origin main
+=== block: a quoted +refspec
+git push origin '+main'
+=== block: push spelled with quotes (the shell joins them)
+git p"ush" -f
+=== block: push spelled with a backslash
+git pu\sh --force
+=== block: git -C dir push
+git -C /some/repo push -f
+=== block: git -C and -c before push
+git -C ../other -c push.default=current push --force
+=== block: git by path
+/usr/bin/git push -f
+=== block: git in capitals (case-insensitive file systems run it)
+GIT push --force
+=== block: after a commit with -m
+git commit -m "x" && git push -f
+=== block: after ;
+git add -A ; git push --force origin main
+=== block: after ||
+git pull --rebase || git push -f
+=== block: piped into tail
+git push -f 2>&1 | tail -3
+=== block: in the background
+nohup git push --force-with-lease &
+=== block: on the second line
+git status
+git push -f origin main
+=== block: after a continued line
+git commit -m "x" \
+  && git push --force
+=== block: with an environment variable
+GIT_TRACE=1 git push -f
+=== block: through env
+env GIT_SSH_COMMAND=ssh git push --force
+=== block: through timeout
+timeout 60 git push -f
+=== block: through xargs
+echo main | xargs -n1 git push -f origin
+=== block: inside if
+if true; then git push -f; fi
+=== block: in a subshell
+(cd repo && git push -f)
+=== block: in braces
+{ git fetch; git push --force; }
+=== block: bash -c
+bash -c "git push -f"
+=== block: sh -c with a single-quoted string
+sh -c 'cd repo && git push --force origin main'
+=== block: bash -lc
+bash -lc 'git push -f'
+=== block: eval
+eval "git push -f"
+=== block: command substitution
+echo "$(git push -f)"
+=== block: command substitution whose output is an argument
+git push origin "$(git branch --show-current)" --force
+=== block: backquotes
+x=`git push --force`
+=== block: process substitution
+cat <(git push -f)
+=== block: a heredoc read by bash
+bash <<'EOF'
+cd repo
+git push -f
+EOF
+=== block: a here-string read by bash
+bash <<< "git push --force"
+=== block: echo piped into a shell
+echo "git push -f" | bash
+=== block: ssh remote command
+ssh host 'cd repo && git push -f'
+=== block: an unquoted heredoc runs its backquotes
+cat > notes.md <<EOF
+Run `git push -f` now
+EOF
+=== block: an unquoted heredoc runs its $(...)
+cat <<EOF
+$(git push --force)
+EOF
+=== block: after a heredoc ends
+cat > msg.txt <<'EOF'
+message
+EOF
+git push -f
+=== block: a heredoc that never ends is read as commands
+cat <<EOF
+git push -f
+=== pass: the issue: a commit with a message file, then a plain push
+git commit -F msg.txt && git push
+=== pass: commit -F with a path, then push -u
+git commit -F /private/tmp/msg.txt && git push -u origin feature/issue-255-hook-force-push
+=== pass: commit -F from a heredoc, then push
+git commit -F - <<'EOF'
+Fix the guard (#255)
+EOF
+git push
+=== pass: a commit message from $(cat <<'EOF' ...), then push -u
+git commit -m "$(cat <<'EOF'
+Guard: a commit -F before a push isn't a forced push (#255)
+
+It used to refuse git push -f look-alikes (and +main) anywhere in the line.
+EOF
+)" && git push -u origin feature/issue-255-hook-force-push
+=== block: a commit message from $(cat <<'EOF' ...), then a forced push
+git commit -m "$(cat <<'EOF'
+Guard (#255)
+EOF
+)" && git push --force-with-lease origin feature/x
+=== pass: an apostrophe inside double quotes, then push
+git commit -m "don't force it" && git push
+=== pass: a PR body file, then push
+gh pr create --body-file /private/tmp/body.md && git push
+=== pass: plain push
+git push
+=== pass: -u
+git push -u origin feature/issue-255-hook-force-push
+=== pass: --set-upstream
+git push --set-upstream origin feature/x
+=== pass: --follow-tags
+git push --follow-tags
+=== pass: a push option
+git push -o ci.skip origin main
+=== pass: a push option whose value is f
+git push -o f origin main
+=== pass: --push-option with its value
+git push --push-option f origin main
+=== pass: --recurse-submodules with its value
+git push --recurse-submodules check origin main
+=== pass: --no-force-with-lease
+git push --no-force-with-lease origin main
+=== pass: --delete
+git push --delete origin old-branch
+=== pass: --dry-run
+git push --dry-run --porcelain origin main
+=== pass: a refspec with a destination
+git push origin HEAD:refs/heads/feature/x
+=== pass: a branch whose name ends in -f
+git push origin feature-f
+=== pass: git -C dir push -u
+git -C ../other push -u origin feature/x
+=== pass: push piped into tail
+git push origin HEAD 2>&1 | tail -5
+=== pass: a fetch with -f, then a plain push
+git fetch -f origin && git push
+=== pass: grep -F, then push
+grep -F "x" file.txt && git push
+=== pass: printf of -f, then push
+printf '%s\n' "-f" && git push
+=== pass: a commit message that mentions a forced push
+git commit -m "fix: git push -f is no longer refused after commit -F" && git push
+=== pass: an issue body that mentions forced pushes
+gh issue create --title "Hook" --body "Never run git push --force or git push -f, or push origin +main."
+=== pass: a PR body in $(cat <<'EOF' ...) with quotes and parentheses
+gh pr create --title "Guard (#255)" --body "$(cat <<'EOF'
+## Summary
+It doesn't refuse `git commit -F msg && git push` any more (it was refused as a force push).
+`git push --force`, `git push -f` and `git push origin +main` are still refused.
+EOF
+)"
+=== pass: an issue body from a quoted heredoc
+gh issue create --title "Hook" --body-file - <<'EOF'
+git push --force origin +main
+EOF
+=== pass: a quoted heredoc's backquotes are text
+cat > notes.md <<'EOF'
+Run `git push -f` only by hand
+EOF
+=== pass: gh's own -f flag with a body that mentions a forced push
+gh api repos/o/r/issues -f title=x -f body='git push -f is blocked'
+=== pass: echo of a single-quoted push into a file
+echo 'git push -f' > notes.txt
+=== pass: a comment after the push
+git push origin main # never --force here
+=== pass: git log, then push
+git log --format=%f -1 && git push
+=== block: other rules: rm -rf outside the scratchpad
+rm -rf build
+=== pass: other rules: rm -rf in the scratchpad
+rm -rf /private/tmp/claude-test/x
+=== block: other rules: make db-reset
+make db-reset
+=== block: other rules: make db-clear-dummy
+make db-clear-dummy
+=== block: other rules: DROP TABLE
+psql -c "DROP TABLE accounts"
+=== block: other rules: TRUNCATE
+psql -c "TRUNCATE accounts"
+=== block: other rules: DELETE FROM without WHERE
+psql -c "DELETE FROM accounts"
+=== pass: other rules: DELETE FROM with WHERE
+psql -c "DELETE FROM accounts WHERE id = 1"
