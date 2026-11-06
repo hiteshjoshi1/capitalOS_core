@@ -1,6 +1,6 @@
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { useContext } from "react";
 import { AuthProvider } from "../context/AuthContext";
 import { AuthContext } from "../context/authContextObject";
@@ -109,6 +109,8 @@ describe("AuthProvider", () => {
     mockRefreshSessionNow.mockResolvedValueOnce(tokenOnlySession("token"));
     mockRefreshAccessTokenNow.mockResolvedValue("token");
     mockApi.authMe.mockResolvedValueOnce({ id: 1, username: "demo", is_admin: false });
+    const addListener = vi.spyOn(document, "addEventListener");
+    onTestFinished(() => addListener.mockRestore());
 
     renderWithProviders(
       <AuthProvider>
@@ -122,6 +124,12 @@ describe("AuthProvider", () => {
     expect(mockRefreshSessionNow).toHaveBeenCalledTimes(1);
     expect(mockRefreshAccessTokenNow).not.toHaveBeenCalled();
 
+    // #233: "demo" is on screen at commit, but the listener is attached by an effect that
+    // runs after it (React's scheduler, setImmediate in Node). Under load waitFor can return
+    // first, and an event dispatched then is missed. Wait for the listener itself.
+    await waitFor(() => {
+      expect(addListener).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    });
     document.dispatchEvent(new Event("visibilitychange"));
 
     await waitFor(() => {

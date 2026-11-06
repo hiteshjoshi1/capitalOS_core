@@ -137,6 +137,31 @@ class DashboardSummaryResponse(FxStatusFields):
         populate_by_name = True
 
 
+class RiskHolding(BaseModel):
+    """A /summary top_holdings row cut to what the Risk page reads (#149); same values."""
+
+    asset_id: Optional[int] = None
+    symbol: str
+    asset_class: str
+    value: float
+    percent_of_networth: float
+
+
+class RiskSummaryResponse(FxStatusFields):
+    """GET /dashboard/risk-summary (#149): what the Risk page reads from
+    /dashboard/summary (net_worth, and per position its symbol, class and value),
+    with the same values, and nothing else."""
+
+    as_of_month: str
+    base_currency: str
+    snapshot_day: Optional[int] = None
+    # As /summary: top_holdings are live for the open (or a future) month, the
+    # month-end snapshot for a past month (#223). Same rows, same order.
+    is_live: Optional[bool] = None
+    net_worth: NetWorth
+    top_holdings: List[RiskHolding]
+
+
 class NetWorthSinceUpdateResponse(BaseModel):
     base_currency: str
     current_as_of: Optional[str] = None
@@ -191,6 +216,8 @@ class StockHoldingsResponse(FxStatusFields):
     platform_breakdown: list[StockBreakdownItem] = []
     stock_current_total: float = 0.0
     stock_snapshot_total: float = 0.0
+    # The date of the holdings stock_snapshot_total is taken from (#232).
+    stock_snapshot_as_of: Optional[str] = None
     quote_freshness_summary: Optional["QuoteFreshnessSummary"] = None
     trend: list["MiniTrendPoint"] = []
     # No stock data at all for the compare month (not a real zero), #224.
@@ -230,11 +257,18 @@ class CashDepositsOut(BaseModel):
     base_currency: Optional[str] = None
     snapshot_day: Optional[int] = None
     is_live: bool = False
+    # The anchor the figures are taken at (a past month's month-end boundary,
+    # or "now"), as on the Stocks page (#232).
+    net_worth_boundary_at: Optional[str] = None
     compare_month: Optional[str] = None
     current_cash_as_of: Optional[str] = None
     snapshot_cash_as_of: Optional[str] = None
     current_total: Optional[float] = None
     snapshot_total: Optional[float] = None
+    # The stablecoins (USDC/USDT) in current_total / snapshot_total: the Cash
+    # page counts them as cash, net worth as crypto (D-42, #232).
+    current_stablecoin_total: Optional[float] = None
+    snapshot_stablecoin_total: Optional[float] = None
     delta_abs: Optional[float] = None
     delta_pct: Optional[float] = None
     trend: list["MiniTrendPoint"] = []

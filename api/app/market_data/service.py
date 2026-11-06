@@ -21,6 +21,7 @@ from app.market_data.providers import (
     YahooProvider,
     YFinanceProvider,
 )
+from app.portfolio.effective_facts import BROKER_ACCOUNT_OWNER, POSITIONS, effective_rows_sql
 
 
 YAHOO_SUFFIX = {
@@ -931,6 +932,47 @@ def _exchange_for(country: Any, currency: Any) -> str | None:
     return None
 
 
+def held_position_rows(db: Session, *, today: date, user_id: int | None) -> list[dict[str, Any]]:
+    """Held stocks and funds on ``today``, one row per instrument: a non-zero
+    quantity in its broker account's newest position snapshot on or before
+    ``today`` (the read layer's rules, newest per broker account, without Flex
+    routing or NAV coverage: every held instrument needs a price), in an open
+    account (``user_id``'s accounts, or every account when None)."""
+    params: dict[str, Any] = {
+        "today": today,
+        **{f"st{i}": t for i, t in enumerate(_PRICEABLE_SECURITY_TYPES)},
+    }
+    if user_id is not None:
+        params["current_user_id"] = user_id
+    security_types = ",".join(f":st{i}" for i in range(len(_PRICEABLE_SECURITY_TYPES)))
+    held = effective_rows_sql(POSITIONS, BROKER_ACCOUNT_OWNER, anchor=":today", scoped=user_id is not None)
+    rows = db.execute(
+        text(
+            f"""
+            SELECT DISTINCT
+              bi.id AS instrument_id,
+              bi.asset_id,
+              COALESCE(a.symbol, bi.symbol) AS symbol,
+              COALESCE(a.name, bi.description, bi.symbol) AS name,
+              COALESCE(a.quote_currency, bi.currency) AS currency,
+              COALESCE(a.home_country, bi.country) AS country,
+              bi.platform_code
+            FROM ({held}) ps
+            JOIN broker_instruments bi ON bi.id = ps.broker_instrument_id
+            LEFT JOIN assets a ON a.id = bi.asset_id
+            WHERE ps.quantity IS NOT NULL
+              AND CAST(ps.quantity AS DOUBLE PRECISION) <> 0
+              AND (
+                CAST(a.asset_class AS TEXT) IN ('STOCK', 'FUND')
+                OR (a.id IS NULL AND UPPER(COALESCE(bi.security_type, '')) IN ({security_types}))
+              )
+            """
+        ),
+        params,
+    ).mappings().all()
+    return [dict(row) for row in rows]
+
+
 def unpriced_held_positions(
     db: Session,
     *,
@@ -944,53 +986,7 @@ def unpriced_held_positions(
     to that user's accounts (None: every account, for the refresh job's own
     check); ``exchange_code`` to the exchange each position would be priced on
     (its symbol map's, else the one its country or currency points to)."""
-    scope = ""
-    params: dict[str, Any] = {
-        "today": datetime.now(tz=timezone.utc).date(),
-        **{f"st{i}": t for i, t in enumerate(_PRICEABLE_SECURITY_TYPES)},
-    }
-    if user_id is not None:
-        scope = "AND " + account_scope_sql("acc")
-        params["current_user_id"] = user_id
-    security_types = ",".join(f":st{i}" for i in range(len(_PRICEABLE_SECURITY_TYPES)))
-    rows = db.execute(
-        text(
-            f"""
-            WITH latest AS (
-              SELECT ps.broker_account_id, MAX(ps.report_date) AS report_date
-              FROM portfolio_position_snapshots ps
-              WHERE ps.authority_status = 'authoritative'
-                AND ps.report_date <= :today
-              GROUP BY ps.broker_account_id
-            )
-            SELECT DISTINCT
-              bi.id AS instrument_id,
-              bi.asset_id,
-              COALESCE(a.symbol, bi.symbol) AS symbol,
-              COALESCE(a.name, bi.description, bi.symbol) AS name,
-              COALESCE(a.quote_currency, bi.currency) AS currency,
-              COALESCE(a.home_country, bi.country) AS country,
-              bi.platform_code
-            FROM portfolio_position_snapshots ps
-            JOIN latest l
-              ON l.broker_account_id = ps.broker_account_id AND l.report_date = ps.report_date
-            JOIN broker_accounts ba ON ba.id = ps.broker_account_id
-            JOIN accounts acc ON acc.id = ba.legacy_account_id
-            JOIN broker_instruments bi ON bi.id = ps.broker_instrument_id
-            LEFT JOIN assets a ON a.id = bi.asset_id
-            WHERE ps.authority_status = 'authoritative'
-              AND ps.quantity IS NOT NULL
-              AND CAST(ps.quantity AS DOUBLE PRECISION) <> 0
-              AND (acc.closed_on IS NULL OR acc.closed_on >= :today)
-              AND (
-                CAST(a.asset_class AS TEXT) IN ('STOCK', 'FUND')
-                OR (a.id IS NULL AND UPPER(COALESCE(bi.security_type, '')) IN ({security_types}))
-              )
-              {scope}
-            """
-        ),
-        params,
-    ).mappings().all()
+    rows = held_position_rows(db, today=datetime.now(tz=timezone.utc).date(), user_id=user_id)
     if not rows:
         return []
 

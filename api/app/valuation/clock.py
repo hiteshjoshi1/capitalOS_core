@@ -250,6 +250,18 @@ def _month_view_anchor(month_start: datetime) -> tuple[datetime, bool]:
     return _completed_snapshot_anchor_ts(month_start), False
 
 
+def _month_view_compare_month_start(month_start: datetime) -> datetime:
+    """The month a month view's "vs last month" compares with (#232): the
+    completed month-end before the figures shown, as Overview's headline does
+    (D-24). Live: the latest completed month-end; a past month: the completed
+    month-end before the one ``_month_view_anchor`` reads. With SNAPSHOT_DAY=1
+    this is always the calendar month before ``month_start``; with a later
+    SNAPSHOT_DAY, before that day, it is one month earlier, like the anchor."""
+    if _is_open_or_future_month(month_start):
+        return _latest_completed_month_start(_current_anchor_ts())
+    return _add_months(_completed_snapshot_month_start(month_start), -1)
+
+
 def _is_open_or_future_month(month_start: datetime) -> bool:
     """Whether ``month_start``'s month is today's month (app timezone) or later."""
     today = _app_today()

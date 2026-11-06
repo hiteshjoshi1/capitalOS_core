@@ -27,6 +27,7 @@ from app.schemas.spending import (
     CashFlowDetailOut,
     CashFlowDetailSection,
     CashFlowMerchantItem,
+    CashFlowTrendOut,
     CashFlowTrendPoint,
     CashFlowTransactionItem,
     CashFlowWaterfallOut,
@@ -460,6 +461,36 @@ def _merchant_month_sets(rows) -> dict[tuple[str, str], set[str]]:
     return months
 
 
+def _cash_flow_trend(lookback_rows, month: str, base_currency: str) -> list[CashFlowTrendPoint]:
+    """The six months ending at ``month``: inflows, outflows, net and rates per month.
+    ``lookback_rows`` are ``_cash_flow_rows`` from five months before ``month`` to its
+    end. One function for /cash-flow-detail's ``analytics.trend`` and
+    /cash-flow-trend (#149), so the two can't drift."""
+    trend_start = _add_months(_parse_month(month), -5)
+    trend_end = _month_end(_parse_month(month))
+    trend_rows = [
+        row
+        for row in lookback_rows
+        if trend_start <= _parse_month(_month_key(row["ts"])) < trend_end
+    ]
+    trend_metrics = _month_metrics(trend_rows, base_currency)
+    trend: list[CashFlowTrendPoint] = []
+    for offset in range(6):
+        point_month = _month_key(_add_months(trend_start, offset))
+        values = trend_metrics.get(point_month, {})
+        trend.append(
+            CashFlowTrendPoint(
+                month=point_month,
+                inflows=float(values.get("inflows") or 0.0),
+                outflows=float(values.get("outflows") or 0.0),
+                net=float(values.get("net") or 0.0),
+                savings_rate=values.get("savings_rate"),  # type: ignore[arg-type]
+                burn_rate=values.get("burn_rate"),  # type: ignore[arg-type]
+            )
+        )
+    return trend
+
+
 def _analytics_for_month(
     *,
     current_rows,
@@ -531,28 +562,7 @@ def _analytics_for_month(
         elif bucket == "income":
             category_impacts_prior[category] += amount
 
-    trend_start = _add_months(_parse_month(month), -5)
-    trend_end = _month_end(_parse_month(month))
-    trend_rows = [
-        row
-        for row in lookback_rows
-        if trend_start <= _parse_month(_month_key(row["ts"])) < trend_end
-    ]
-    trend_metrics = _month_metrics(trend_rows, base_currency)
-    trend: list[CashFlowTrendPoint] = []
-    for offset in range(6):
-        point_month = _month_key(_add_months(trend_start, offset))
-        values = trend_metrics.get(point_month, {})
-        trend.append(
-            CashFlowTrendPoint(
-                month=point_month,
-                inflows=float(values.get("inflows") or 0.0),
-                outflows=float(values.get("outflows") or 0.0),
-                net=float(values.get("net") or 0.0),
-                savings_rate=values.get("savings_rate"),  # type: ignore[arg-type]
-                burn_rate=values.get("burn_rate"),  # type: ignore[arg-type]
-            )
-        )
+    trend = _cash_flow_trend(lookback_rows, month, base_currency)
 
     prior_metrics = _month_metrics(prior_rows, base_currency).get(
         prior_month,
@@ -1172,6 +1182,25 @@ def cash_flow_detail(
             included_types=list(EXPENSE_TYPES),
             transactions=expense_transactions,
         ),
+        **fx_status(),
+    )
+
+
+@router.get("/cash-flow-trend", response_model=CashFlowTrendOut)
+def cash_flow_trend(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Lean twin of /cash-flow-detail (#149): its ``analytics.trend`` only, the same
+    numbers, without the month's transactions, breakdowns or cash reconciliation."""
+    start = _parse_month(month)
+    lookback_rows = _cash_flow_rows(db, _add_months(start, -5), _month_end(start), current_user.id)
+    return CashFlowTrendOut(
+        month=month,
+        base_currency=base_currency,
+        trend=_cash_flow_trend(lookback_rows, month, base_currency),
         **fx_status(),
     )
 

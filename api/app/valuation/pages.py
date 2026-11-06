@@ -20,9 +20,9 @@ from app.valuation.clock import (
     _completed_snapshot_anchor_ts,
     _completed_snapshot_month_start,
     _configured_snapshot_day,
-    _effective_anchor_for_month,
     _iso_value,
     _month_view_anchor,
+    _month_view_compare_month_start,
     _previous_update_anchor_ts,
 )
 from app.valuation.exposure import _geography, _geography_exposure, _platform_allocation
@@ -340,14 +340,52 @@ def summary(
     }
 
 
+def risk_summary(
+    db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
+) -> Dict[str, Any]:
+    """/dashboard/risk-summary (#149): /summary's ``net_worth`` and ``top_holdings``,
+    computed exactly as ``summary`` computes them, without the rest of its work
+    (geography, cash flow, comparisons, movers, completeness)."""
+    anchor = _anchor_ts(_completed_snapshot_month_start(month_start))
+    nw = _networth_components(db, anchor, base_currency, current_user_id)
+    view_anchor, is_live = _month_view_anchor(month_start)
+    # summary's view_total: the live headline total (``_current_networth_state``'s
+    # components, at the same live anchor) for the open month, else the month-end's.
+    view_total = (
+        _networth_components(db, view_anchor, base_currency, current_user_id, price_overlay=True)["total"]
+        if is_live
+        else nw["total"]
+    )
+    top = _top_holdings(
+        db,
+        view_anchor,
+        view_total,
+        base_currency,
+        current_user_id,
+        limit=_summary_top_holdings_limit(),
+        price_overlay=is_live,
+    )
+    return {
+        "as_of_month": month,
+        "base_currency": base_currency,
+        "snapshot_day": _configured_snapshot_day(),
+        "is_live": is_live,
+        "net_worth": _serialize_net_worth(nw),
+        "top_holdings": top,
+        **fx_status(),
+    }
+
+
 def stock_holdings(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
     # is live "now" data (current/future month) or a completed historical boundary.
     # stock_current_total/top_holdings/geography_breakdown/platform_breakdown are all
     # anchored to that same point; stock_snapshot_total is the PRIOR month, for a
     # stable "vs last month" comparison (not "vs whatever month happens to be picked").
-    effective_anchor, is_live = _effective_anchor_for_month(month_start)
-    compare_anchor = _anchor_ts(_add_months(month_start, -1))
+    # The same anchor and compare month as Overview's headline (#232, D-55).
+    effective_anchor, is_live = _month_view_anchor(month_start)
+    compare_month_start = _month_view_compare_month_start(month_start)
+    compare_anchor = _anchor_ts(compare_month_start)
     as_of = _effective_as_of(db, effective_anchor, current_user_id)
     holdings_as_of = _positions_coverage_as_of(db, effective_anchor, current_user_id)
     reporting_as_of = effective_anchor if as_of is not None else None
@@ -395,7 +433,7 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "base_currency": base_currency,
         "snapshot_day": _configured_snapshot_day(),
         "is_live": is_live,
-        "compare_month": _add_months(month_start, -1).strftime("%Y-%m"),
+        "compare_month": compare_month_start.strftime("%Y-%m"),
         "current_holdings_as_of": holdings_as_of.isoformat() if holdings_as_of else None,
         "net_worth_as_of": reporting_as_of.isoformat() if reporting_as_of else None,
         "net_worth_snapshot_as_of": _iso_value(_effective_as_of(db, compare_anchor, current_user_id)),
@@ -409,6 +447,8 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "platform_breakdown": platform_breakdown,
         "stock_current_total": stock_exposure["total"],
         "stock_snapshot_total": compare_stock_exposure["total"],
+        # The date of the holdings behind stock_snapshot_total (#232).
+        "stock_snapshot_as_of": compare_holdings_as_of.isoformat() if compare_holdings_as_of else None,
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
         "stock_snapshot_missing": baseline_missing(compare_holdings_as_of, compare_stock_exposure["total"]),
@@ -499,15 +539,17 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
     # The "Where cash sits" breakdown (payload/items) and current_total both follow
     # that same point; snapshot_total is the PRIOR month, for a stable "vs last
     # month" comparison (not "vs whatever month happens to be picked").
-    effective_anchor, is_live = _effective_anchor_for_month(month_start)
-    compare_anchor = _anchor_ts(_add_months(month_start, -1))
+    # The same anchor and compare month as Overview's headline (#232, D-55).
+    effective_anchor, is_live = _month_view_anchor(month_start)
+    compare_month_start = _month_view_compare_month_start(month_start)
+    compare_anchor = _anchor_ts(compare_month_start)
     payload = _cash_deposits(db, effective_anchor, base_currency, current_user_id)
-    snapshot_balances = _cash_balances(db, compare_anchor, base_currency, current_user_id) + _stablecoin_cash_balances(
-        db, compare_anchor, base_currency, current_user_id
-    )
-    current_balances = _cash_balances(db, effective_anchor, base_currency, current_user_id) + _stablecoin_cash_balances(
-        db, effective_anchor, base_currency, current_user_id
-    )
+    # Stablecoins count as cash here and as crypto in net worth (D-42); their
+    # part of each total is reported, so the page can say so (#232).
+    snapshot_stablecoins = _stablecoin_cash_balances(db, compare_anchor, base_currency, current_user_id)
+    current_stablecoins = _stablecoin_cash_balances(db, effective_anchor, base_currency, current_user_id)
+    snapshot_balances = _cash_balances(db, compare_anchor, base_currency, current_user_id) + snapshot_stablecoins
+    current_balances = _cash_balances(db, effective_anchor, base_currency, current_user_id) + current_stablecoins
     current_total = _sum_balances(current_balances)
     snapshot_total = _sum_balances(snapshot_balances)
     delta_abs = current_total - snapshot_total
@@ -519,11 +561,16 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
         "base_currency": base_currency,
         "snapshot_day": _configured_snapshot_day(),
         "is_live": is_live,
-        "compare_month": _add_months(month_start, -1).strftime("%Y-%m"),
+        # The anchor the figures are taken at, as on the Stocks page (#232):
+        # a past month's month-end boundary, or "now" for the live month.
+        "net_worth_boundary_at": effective_anchor.isoformat(),
+        "compare_month": compare_month_start.strftime("%Y-%m"),
         "current_cash_as_of": _iso_value(_effective_as_of(db, effective_anchor, current_user_id)),
         "snapshot_cash_as_of": _iso_value(snapshot_cash_as_of),
         "current_total": current_total,
         "snapshot_total": snapshot_total,
+        "current_stablecoin_total": _sum_balances(current_stablecoins),
+        "snapshot_stablecoin_total": _sum_balances(snapshot_stablecoins),
         "delta_abs": delta_abs,
         "delta_pct": (delta_abs / snapshot_total) if snapshot_total > 0 else None,
         "trend": _cash_trend(db, month_start, base_currency, current_user_id),

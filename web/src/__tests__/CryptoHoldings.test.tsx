@@ -379,4 +379,27 @@ describe("CryptoHoldings races", () => {
     // The header chip: +S$ 800 on S$ 10,400.
     expect(document.querySelector(".coHeroValueRow .deltaChip")).toHaveTextContent("▲+7.7%");
   });
+
+  // #232: the previous figure names its month and the date of its snapshot, live or past.
+  it.each([
+    ["live", true],
+    ["past", false],
+  ])("dates the compare month's figure (%s, #232)", async (_label, isLive) => {
+    mockApi.cryptoSummary.mockResolvedValueOnce({
+      ...cryptoSummaryFixture,
+      is_live: isLive,
+      as_of: "2026-03-01T00:00:00+00:00",
+      snapshot_as_of: "2026-01-30",
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText(/vs Jan 2026 \(30 Jan 2026\)/)).toBeInTheDocument();
+  });
 });

@@ -11,10 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 from app.crypto.valuation import latest_wallet_valuation
-from app.portfolio.account_open import account_open_sql
-from app.portfolio.authority import authoritative_sql
-from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.canonical_reads import (
+    canonical_card_statement_rows,
+    canonical_position_rows_by_legacy_account,
+    latest_authoritative_nav_by_legacy_account,
+)
+from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
 from app.valuation import clock, fx
 from app.valuation.clock import (
     _add_months,
@@ -77,12 +79,31 @@ def _card_liability_transaction_start(anchor_ts: datetime) -> date:
     return date(local_day.year, local_day.month, 1)
 
 
-# A card statement balance (a dated ``credit_balance`` snapshot, #207) is the
-# card's liability at an anchor when it is the newest one on or before the
-# anchor's date and at most this many days older than it: about one statement
-# cycle plus two weeks, so a monthly statement always reaches the next month-end.
-# An older one is not carried forward: the card falls back to its transactions.
-CARD_STATEMENT_MAX_AGE_DAYS = 45
+# CARD_STATEMENT_MAX_AGE_DAYS (D-52's 45 days) is defined by the read layer,
+# app.portfolio.effective_facts, and imported above.
+
+
+def _card_statements_by_account(
+    rows: List[Dict[str, Any]], base_currency: str
+) -> Dict[int, tuple[date, list[tuple[str, float]]]]:
+    """Per card: (its statement date, [(currency, balance)]) from the rows of
+    ``canonical_card_statement_rows`` (each card's newest statement, D-52)."""
+    newest_statement: dict[int, date] = {}
+    for row in rows:
+        as_of = _date_only(row["as_of_date"])
+        if as_of is None:
+            continue
+        account_id = int(row["account_id"])
+        if account_id not in newest_statement or as_of > newest_statement[account_id]:
+            newest_statement[account_id] = as_of
+    statement_balances: dict[int, list[tuple[str, float]]] = {}
+    for row in rows:
+        account_id = int(row["account_id"])
+        if _date_only(row["as_of_date"]) == newest_statement.get(account_id):
+            statement_balances.setdefault(account_id, []).append(
+                (str(row["currency"] or base_currency).upper(), float(row["balance_local"] or 0.0))
+            )
+    return {account_id: (newest_statement[account_id], balances) for account_id, balances in statement_balances.items()}
 
 
 @valuation_cached()
@@ -125,46 +146,12 @@ def _credit_card_liability_details(
     if not cards:
         return []
 
-    statement_rows = db.execute(
-        text(
-            """
-            SELECT abs.account_id, abs.as_of_date, abs.currency, abs.balance_local
-            FROM account_balance_snapshots abs
-            JOIN accounts a ON a.id = abs.account_id
-            WHERE a.account_type = 'CREDIT_CARD'
-              AND abs.balance_type = 'credit_balance'
-              AND """
-            + authoritative_sql("abs")
-            + """
-              AND abs.as_of_date <= :anchor_date
-              AND abs.as_of_date >= :oldest
-              AND """
-            + account_open_sql("a")
-            + """
-              AND """
-            + account_scope_sql("a")
-        ),
-        {
-            "anchor_date": anchor_date,
-            "oldest": anchor_date - timedelta(days=CARD_STATEMENT_MAX_AGE_DAYS),
-            "current_user_id": current_user_id,
-        },
-    ).mappings().all()
-    newest_statement: dict[int, date] = {}
-    for row in statement_rows:
-        as_of = _date_only(row["as_of_date"])
-        if as_of is None:
-            continue
-        account_id = int(row["account_id"])
-        if account_id not in newest_statement or as_of > newest_statement[account_id]:
-            newest_statement[account_id] = as_of
-    statement_balances: dict[int, list[tuple[str, float]]] = {}
-    for row in statement_rows:
-        account_id = int(row["account_id"])
-        if _date_only(row["as_of_date"]) == newest_statement.get(account_id):
-            statement_balances.setdefault(account_id, []).append(
-                (str(row["currency"] or base_currency).upper(), float(row["balance_local"] or 0.0))
-            )
+    statements = _card_statements_by_account(
+        canonical_card_statement_rows(db, current_user_id=current_user_id, anchor_date=anchor_date),
+        base_currency,
+    )
+    newest_statement = {account_id: as_of for account_id, (as_of, _balances) in statements.items()}
+    statement_balances = {account_id: balances for account_id, (_as_of, balances) in statements.items()}
 
     # The month boundary is midnight in the user's timezone (#202); the query
     # takes a day of slack either side and _card_transaction_in_window decides.

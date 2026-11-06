@@ -30,6 +30,7 @@ module that reads it.
 """
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from datetime import datetime as _real_datetime
@@ -485,9 +486,10 @@ def _insert_shared_data(conn, through: date) -> None:
     _seed_fx_rates(conn)
     conn.execute(
         text(
-            # OR IGNORE: the `client` fixture has already created the user it signs in as.
-            "INSERT OR IGNORE INTO users (id, username, display_name, is_active, is_admin) VALUES "
-            "(:a, 'household_a', 'Household A', 1, 0), (:b, 'household_b', 'Household B', 1, 0)"
+            # DO NOTHING: the `client` fixture has already created the user it signs in as.
+            "INSERT INTO users (id, username, display_name, is_active, is_admin) VALUES "
+            "(:a, 'household_a', 'Household A', TRUE, FALSE), (:b, 'household_b', 'Household B', TRUE, FALSE) "
+            "ON CONFLICT (id) DO NOTHING"
         ),
         {"a": USER_A, "b": USER_B},
     )
@@ -523,6 +525,14 @@ def _insert_shared_data(conn, through: date) -> None:
             if _on_or_before(d, through)
         ],
     )
+
+
+def _wallet_db_id(conn, wallet_id: str) -> str:
+    """The wallet's id as stored: its name on SQLite (the goldens show it), a
+    UUID derived from it on Postgres, where the column is a uuid."""
+    if conn.dialect.name == "postgresql":
+        return str(uuid.uuid5(uuid.NAMESPACE_URL, f"capitalos-household:{wallet_id}"))
+    return wallet_id
 
 
 def _insert_user_rows(conn, user_id: int, through: date) -> None:
@@ -569,7 +579,7 @@ def _insert_user_rows(conn, user_id: int, through: date) -> None:
             "VALUES (:id, :u, :ct, :ch, :addr, :label, :status, '2026-01-01 00:00:00+00:00')"
         ),
         [
-            {"id": w, "u": u, "ct": ct, "ch": ch, "addr": addr, "label": label, "status": status}
+            {"id": _wallet_db_id(conn, w), "u": u, "ct": ct, "ch": ch, "addr": addr, "label": label, "status": status}
             for w, u, ct, ch, addr, label, status in WALLETS
             if u == user_id
         ],
@@ -586,7 +596,7 @@ def _insert_user_rows(conn, user_id: int, through: date) -> None:
                 "VALUES (:w, :d, :f, :t, :sv) RETURNING id"
             ),
             {
-                "w": wallet_id, "d": as_of, "f": fetched_at, "t": total,
+                "w": _wallet_db_id(conn, wallet_id), "d": as_of, "f": fetched_at, "t": total,
                 "sv": f'{{"holdings_as_of": "{fetched_at}", "price_as_of": "{fetched_at}"}}',
             },
         ).scalar_one()
@@ -624,8 +634,8 @@ def set_user_timezone(db_engine, user_id: int, timezone_name: str) -> None:
         conn.execute(
             text(
                 "INSERT INTO user_preferences (user_id, theme, accent_color, timezone, timezone_from_app, updated_at) "
-                "VALUES (:u, 'dark', '#0f7a5c', :tz, 0, '2026-01-01 00:00:00+00:00') "
-                "ON CONFLICT (user_id) DO UPDATE SET timezone = excluded.timezone, timezone_from_app = 0"
+                "VALUES (:u, 'dark', '#0f7a5c', :tz, FALSE, '2026-01-01 00:00:00+00:00') "
+                "ON CONFLICT (user_id) DO UPDATE SET timezone = excluded.timezone, timezone_from_app = FALSE"
             ),
             {"u": user_id, "tz": timezone_name},
         )
@@ -640,6 +650,10 @@ def build_user(db_engine, user_id: int, *, now: datetime, timezone_name: str | N
     through = now.astimezone(ZoneInfo(timezone_name) if timezone_name else SGT).date()
     with db_engine.begin() as conn:
         _insert_user_rows(conn, user_id, through)
+        if db_engine.dialect.name == "postgresql":
+            conn.exec_driver_sql(
+                "SELECT setval(pg_get_serial_sequence('accounts', 'id'), (SELECT MAX(id) FROM accounts))"
+            )
     for account_id, as_of, currency, amount in BANK_BALANCES:
         if _OWNER[account_id] == user_id and _on_or_before(as_of, through):
             upload_balance(db_engine, account_id, as_of, currency, amount)
@@ -673,11 +687,29 @@ def build_household(
 
     Call after ``household_env`` so write-side timestamps are frozen too. Runs
     on the empty per-test database the suite's ``clear_db`` leaves."""
+    postgres = db_engine.dialect.name == "postgresql"
     with db_engine.begin() as conn:
-        # Autoincrement ids restart for every build, so ids in responses are
-        # the same whichever test ran before.
-        conn.exec_driver_sql("DELETE FROM sqlite_sequence")
+        if not postgres:
+            # Autoincrement ids restart for every build, so ids in responses are
+            # the same whichever test ran before. (A Postgres test gets its own
+            # fresh database copy, #154.)
+            conn.exec_driver_sql("DELETE FROM sqlite_sequence")
+        else:
+            # The migrated database comes with seed rows (platforms, a sample
+            # asset, the demo user's card) that would collide with the
+            # household's fixed ids or join its user's accounts.
+            conn.exec_driver_sql("DELETE FROM credit_card_accounts WHERE account_id IS NOT NULL")
+            conn.exec_driver_sql("DELETE FROM accounts WHERE id IS NOT NULL")
+            conn.exec_driver_sql("DELETE FROM market_symbol_map WHERE asset_id IS NOT NULL")
+            conn.exec_driver_sql("DELETE FROM assets WHERE id IS NOT NULL")
+            conn.exec_driver_sql("DELETE FROM platforms WHERE id IS NOT NULL")
         _insert_shared_data(conn, now.astimezone(SGT).date())
+        if postgres:
+            # Rows inserted with explicit ids don't move Postgres sequences.
+            for table in ("platforms", "assets"):
+                conn.exec_driver_sql(
+                    f"SELECT setval(pg_get_serial_sequence('{table}', 'id'), (SELECT MAX(id) FROM {table}))"
+                )
     build_user(db_engine, USER_A, now=now, timezone_name=timezone_name)
     if include_user_b:
         build_user(db_engine, USER_B, now=now, timezone_name=timezone_name)

@@ -17,6 +17,13 @@ export function shiftMonth(month: string, delta: number): string {
   return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}`;
 }
 
+/** The month whose month-end a past-month view shows: the month before its anchor date
+ * (`net_worth_boundary_at`, or the crypto summary's `as_of`). With SNAPSHOT_DAY=1 that is the
+ * selected month; before a later SNAPSHOT_DAY it is the month before (#232, D-55). */
+export function snapshotMonthOf(boundaryAt: string | null | undefined, fallbackMonth: string): string {
+  return boundaryAt && MONTH_PATTERN.test(boundaryAt.slice(0, 7)) ? shiftMonth(boundaryAt.slice(0, 7), -1) : fallbackMonth;
+}
+
 /** Whether `month` is before the current month: a page following it shows that month-end
  * snapshot rather than live data (#223). The same test as MonthControl's "Past month" callout. */
 export function isPastMonth(month: string): boolean {

@@ -431,6 +431,9 @@ backup-now:
 # aside to data.pre-restore-<ts>/, never deleted. The API is stopped meanwhile (its data/ bind
 # mount must be re-made onto the restored folder) and started again afterwards, also on failure.
 # A dump from before #155 has no archive: the database is restored and data/ left as is (warned).
+# The database part is one transaction (#233): committed only with every table's count equal to
+# the dump's snapshot; grants to roles this Postgres lacks (capitalos_mcp_ro on a new stack) are
+# left out and named, and the restored tables carry exactly the dump's grants.
 db-restore: db-wait
 	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump" && exit 2)
 	@test -f "$(BACKUP_FILE)" || (echo "Backup file not found: $(BACKUP_FILE)" && exit 2)

@@ -7,11 +7,12 @@ import { MemoryRouter } from "react-router-dom";
 import CashOverview from "../routes/CashOverview";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { CashDeposits, CryptoSummary } from "../lib/api";
+import type { CashDeposits, CryptoStablecoins } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     cashDeposits: vi.fn(),
+    cryptoStablecoins: vi.fn(),
     cryptoSummary: vi.fn(),
   },
 }));
@@ -25,26 +26,14 @@ function currentMonthYYYYMM() {
   return `${y}-${m}`;
 }
 
-const cryptoSummaryFixture: CryptoSummary = {
+const stablecoinsFixture: CryptoStablecoins = {
   month: "2026-02",
-  snapshot_day: 6,
-  snapshot_as_of: "2026-02-06",
-  total_crypto_usd: 0,
-  total_crypto_base: 0,
-  snapshot_total_base: 0,
-  snapshot_total_usd: 0,
-  snapshot_delta_base: 0,
-  snapshot_delta_pct: 0,
+  is_live: true,
+  as_of: "2026-02-21T00:00:00+00:00",
   base_currency: "SGD",
-  trend: [],
-  eth: { balance: 0, value_usd: 0, value_base: 0 },
-  sol: { balance: 0, value_usd: 0, value_base: 0 },
-  top5_holdings: [],
-  top_holdings: [],
-  chain_exposure: [],
-  last_refreshed_at: "2026-02-06T00:00:00+00:00",
-  is_stale: false,
-  refresh_triggered: false,
+  symbols: ["USDC", "USDT"],
+  total_base: 0,
+  holdings: [],
 };
 
 const cashDepositsFixture: CashDeposits = {
@@ -79,7 +68,7 @@ const cashDepositsFixture: CashDeposits = {
 describe("CashOverview route", () => {
   beforeEach(() => {
     mockApi.cashDeposits.mockResolvedValue(cashDepositsFixture);
-    mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+    mockApi.cryptoStablecoins.mockResolvedValue(stablecoinsFixture);
   });
 
   it("uses dashboard+ingest nav and keeps month fixed", async () => {
@@ -113,13 +102,15 @@ describe("CashOverview route", () => {
     expect(screen.getAllByText("S$ 35K").length).toBeGreaterThan(0);
 
     expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
-    expect(mockApi.cryptoSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
+    expect(mockApi.cryptoStablecoins).toHaveBeenCalledWith(currentMonthYYYYMM(), "SGD");
     expect(screen.getByLabelText("Month")).toHaveValue(currentMonthYYYYMM());
 
     await user.selectOptions(screen.getByLabelText("Base currency"), "USD");
 
     expect(mockApi.cashDeposits).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
-    expect(mockApi.cryptoSummary).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
+    expect(mockApi.cryptoStablecoins).toHaveBeenCalledWith(currentMonthYYYYMM(), "USD");
+    // #149: the stablecoin card never pulls the whole crypto summary.
+    expect(mockApi.cryptoSummary).not.toHaveBeenCalled();
   });
 });
 
@@ -137,7 +128,7 @@ describe("CashOverview races", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
-    mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+    mockApi.cryptoStablecoins.mockResolvedValue(stablecoinsFixture);
   });
 
   it("a slow earlier month never renders under the later month, and is aborted", async () => {
@@ -191,7 +182,7 @@ describe("CashOverview races", () => {
 describe("CashOverview shared currency", () => {
   it("loads in the currency chosen elsewhere, and formats deltas with the shared rules", async () => {
     window.localStorage.setItem("capitalos.baseCurrency", "USD");
-    mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+    mockApi.cryptoStablecoins.mockResolvedValue(stablecoinsFixture);
     mockApi.cashDeposits.mockResolvedValue({ ...cashDepositsFixture, base_currency: "USD" });
     render(
       <ThemeProvider>
@@ -212,7 +203,7 @@ describe("CashOverview shared currency", () => {
 describe("CashOverview chart accessibility", () => {
   it("exposes the donut as an image described by its shares", async () => {
     mockApi.cashDeposits.mockResolvedValue(cashDepositsFixture);
-    mockApi.cryptoSummary.mockResolvedValue(cryptoSummaryFixture);
+    mockApi.cryptoStablecoins.mockResolvedValue(stablecoinsFixture);
     render(
       <ThemeProvider>
         <MemoryRouter>
@@ -260,5 +251,65 @@ describe("CashOverview chart accessibility", () => {
     const chip = document.querySelector(".coHeroValueRow .deltaChip");
     expect(chip).toHaveClass("delta--up");
     expect(chip).toHaveTextContent("▲+11.1%");
+  });
+
+  // #232: the Cash headline counts stablecoins, which net worth counts under Crypto (D-42).
+  it("says how much of the headline is stablecoins counted under Crypto in net worth (#232)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({ ...cashDepositsFixture, current_stablecoin_total: 2500 });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(
+      await screen.findByText(/Includes S\$ 2,500 in stablecoins, which net worth counts under Crypto/),
+    ).toBeInTheDocument();
+  });
+
+  it("names no stablecoins when there are none (#232)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({ ...cashDepositsFixture, current_stablecoin_total: 0 });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    await screen.findByText("CURRENT CASH");
+    expect(screen.queryByText(/in stablecoins/)).not.toBeInTheDocument();
+  });
+});
+
+// #149: the stablecoin card reads the lean /crypto/stablecoins.
+describe("CashOverview stablecoins", () => {
+  it("lists the stablecoin rows and shows their total", async () => {
+    mockApi.cashDeposits.mockResolvedValue(cashDepositsFixture);
+    mockApi.cryptoStablecoins.mockResolvedValue({
+      ...stablecoinsFixture,
+      total_base: 1500,
+      holdings: [
+        { symbol: "USDC", chain: "ethereum", amount: 1000, value_usd: 750, value_base: 1000, asset_class: "CRYPTO", wallet_id: "w1" },
+        { symbol: "USDT", chain: "solana", amount: 500, value_usd: 375, value_base: 500, asset_class: "CRYPTO", wallet_id: "w2" },
+      ],
+    });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    expect(await screen.findByText("S$ 1,500")).toBeInTheDocument();
+    expect(screen.getByText("USDC / USDT")).toBeInTheDocument();
+    expect(screen.getByText("ETHEREUM")).toBeInTheDocument();
+    expect(screen.getByText("SOLANA")).toBeInTheDocument();
+    expect(screen.getByText("S$ 1,000")).toBeInTheDocument();
+    expect(screen.getByText("S$ 500")).toBeInTheDocument();
   });
 });

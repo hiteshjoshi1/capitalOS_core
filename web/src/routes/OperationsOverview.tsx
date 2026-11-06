@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Account, DataHubJobStatus, DataHubSummary } from "../lib/api";
+import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
 import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
@@ -101,7 +102,7 @@ export default function OperationsOverview() {
     (async () => {
       try {
         setState("loading");
-        const [data, accounts] = await Promise.all([api.dataHubSummary(), api.accounts()]);
+        const [data, accounts] = await Promise.all([api.dataHubSummary(), loadApiResource("accounts", () => api.accounts())]);
         setSummary(data);
         const ibkr = accounts.filter((a) => a.platform === "IBKR");
         setIbkrAccounts(ibkr);

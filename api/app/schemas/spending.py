@@ -129,6 +129,15 @@ class CashFlowDetailOut(FxStatusFields):
     expenses: CashFlowDetailSection
 
 
+class CashFlowTrendOut(FxStatusFields):
+    """GET /spending/cash-flow-trend (#149): only the six-month trend of
+    /spending/cash-flow-detail (its ``analytics.trend``), for History."""
+
+    month: str
+    base_currency: str
+    trend: list[CashFlowTrendPoint]
+
+
 class CreditCardItem(BaseModel):
     account_id: int
     account_name: str

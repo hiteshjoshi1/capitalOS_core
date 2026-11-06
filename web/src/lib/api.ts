@@ -449,6 +449,20 @@ export type DashboardSummary = FxStatus & {
   cash_percent: number;
 };
 
+/** A `DashboardSummary.top_holdings` row cut to what the Risk page reads (#149). */
+export type RiskHolding = Pick<
+  DashboardSummary["top_holdings"][number],
+  "asset_id" | "symbol" | "asset_class" | "value" | "percent_of_networth"
+>;
+
+/** GET /dashboard/risk-summary (#149): what the Risk page reads from /dashboard/summary,
+ * with the same values (same rows, same order). */
+export type RiskSummary = FxStatus &
+  Pick<DashboardSummary, "as_of_month" | "base_currency" | "is_live" | "net_worth"> & {
+    snapshot_day?: number | null;
+    top_holdings: RiskHolding[];
+  };
+
 export type DashboardNetWorthChange = {
   as_of_month: string;
   base_currency: string;
@@ -498,6 +512,8 @@ export type StockHoldingsSummary = FxStatus & {
   }>;
   stock_current_total?: number;
   stock_snapshot_total?: number;
+  // #232: the date of the holdings stock_snapshot_total is taken from.
+  stock_snapshot_as_of?: string | null;
   quote_freshness_summary?: {
     fresh: number;
     stale: number;
@@ -634,6 +650,14 @@ export type CashFlowDetail = FxStatus & {
   analytics: CashFlowAnalytics;
   income: CashFlowDetailSection;
   expenses: CashFlowDetailSection;
+};
+
+/** GET /spending/cash-flow-trend (#149): /spending/cash-flow-detail's `analytics.trend`
+ * only (the same numbers), for History. */
+export type CashFlowTrend = FxStatus & {
+  month: string;
+  base_currency: string;
+  trend: CashFlowTrendPoint[];
 };
 
 export type CreditCardSummary = FxStatus & {
@@ -862,11 +886,17 @@ export type CashDeposits = {
   base_currency?: string | null;
   snapshot_day?: number | null;
   is_live?: boolean;
+  // #232: the anchor the figures are taken at (a past month's month-end boundary, or "now").
+  net_worth_boundary_at?: string | null;
   compare_month?: string | null;
   current_cash_as_of?: string | null;
   snapshot_cash_as_of?: string | null;
   current_total?: number | null;
   snapshot_total?: number | null;
+  // #232: the stablecoins (USDC/USDT) in current_total / snapshot_total. The Cash page counts
+  // them as cash; net worth (Overview, History) counts them under Crypto (D-42).
+  current_stablecoin_total?: number | null;
+  snapshot_stablecoin_total?: number | null;
   delta_abs?: number | null;
   delta_pct?: number | null;
   trend?: Array<{
@@ -1002,6 +1032,33 @@ export type CryptoSummary = FxStatus & {
   stale_prices?: boolean;
   is_stale: boolean;
   refresh_triggered: boolean;
+};
+
+/** One stablecoin row: the same values as its row in `CryptoSummary.top_holdings`. */
+export type StablecoinHolding = {
+  symbol: string;
+  chain: string;
+  amount: number;
+  value_usd: number;
+  value_base: number;
+  asset_class: string;
+  wallet_id: string;
+  wallet_label?: string | null;
+  holdings_as_of?: string | null;
+  price_as_of?: string | null;
+};
+
+/** GET /crypto/stablecoins (#149): the stablecoin rows of /crypto/summary's top_holdings
+ * (same month, anchor and FX rate) and their total, for the Cash page. */
+export type CryptoStablecoins = FxStatus & {
+  month: string;
+  is_live: boolean;
+  as_of: string;
+  base_currency: string;
+  /** The symbols counted as stablecoins, in display order. */
+  symbols: string[];
+  total_base: number;
+  holdings: StablecoinHolding[];
 };
 
 export type CryptoAllowlistItem = {
@@ -1381,6 +1438,11 @@ export type UnifiedAlertsResponse = {
   total_count: number;
 };
 
+/** GET /alerts/notifications/count (#149): /alerts/notifications' total_count only. */
+export type UnifiedAlertsCount = {
+  total_count: number;
+};
+
 export type DividendTotals = {
   gross: number;
   withholding: number;
@@ -1578,6 +1640,8 @@ export const api = {
     }),
   dashboardSummary: (month: string, compare?: string, baseCurrency = "SGD", skipNetworth = false) =>
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
+  riskSummary: (month: string, baseCurrency = "SGD") =>
+    req<RiskSummary>(`/dashboard/risk-summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
@@ -1595,6 +1659,8 @@ export const api = {
     req<SpendingSummary>(`/spending/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   cashFlowDetail: (month: string, baseCurrency = "SGD") =>
     req<CashFlowDetail>(`/spending/cash-flow-detail?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  cashFlowTrend: (month: string, baseCurrency = "SGD") =>
+    req<CashFlowTrend>(`/spending/cash-flow-trend?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardSummary: (month: string, baseCurrency = "SGD") =>
     req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardTransactions: (month: string, baseCurrency = "SGD") =>
@@ -1695,6 +1761,8 @@ export const api = {
     }),
   cryptoSummary: (month?: string, baseCurrency = "USD") =>
     req<CryptoSummary>(`/crypto/summary?base_currency=${encodeURIComponent(baseCurrency)}${month ? `&month=${encodeURIComponent(month)}` : ""}`),
+  cryptoStablecoins: (month?: string, baseCurrency = "USD") =>
+    req<CryptoStablecoins>(`/crypto/stablecoins?base_currency=${encodeURIComponent(baseCurrency)}${month ? `&month=${encodeURIComponent(month)}` : ""}`),
   cryptoRefreshNow: (adminKey?: string) =>
     req<Record<string, unknown>>("/crypto/refresh-now", {
       method: "POST",
@@ -1725,6 +1793,8 @@ export const api = {
     req<UploadReminderCount>(`/alerts/upload-reminders/count${month ? `?month=${encodeURIComponent(month)}` : ""}`),
   alertNotifications: (month?: string) =>
     req<UnifiedAlertsResponse>(`/alerts/notifications${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  alertNotificationsCount: (month?: string) =>
+    req<UnifiedAlertsCount>(`/alerts/notifications/count${month ? `?month=${encodeURIComponent(month)}` : ""}`),
   dividendsSummary: (
     fromMonth: string,
     toMonth: string,
