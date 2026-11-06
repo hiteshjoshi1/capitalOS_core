@@ -6,11 +6,11 @@ import { MemoryRouter } from "react-router-dom";
 import WealthRisk from "../routes/WealthRisk";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { DashboardSummary, GeographyExposure } from "../lib/api";
+import type { GeographyExposure, RiskSummary } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
-    dashboardSummary: vi.fn(),
+    riskSummary: vi.fn(),
     dashboardGeographyExposure: vi.fn(),
   },
 }));
@@ -26,7 +26,7 @@ const summaryFixture = {
     { symbol: "GOOGL", asset_class: "STOCK", value: 8000, geo: "US", platform: "IBKR" },
     { symbol: "BTC", asset_class: "CRYPTO", value: 15000, geo: "US", platform: "CRYPTO" },
   ],
-} as unknown as DashboardSummary;
+} as unknown as RiskSummary;
 
 const geographyFixture: GeographyExposure = {
   as_of: "2026-02-06",
@@ -37,7 +37,7 @@ const geographyFixture: GeographyExposure = {
 
 describe("WealthRisk route", () => {
   beforeEach(() => {
-    mockApi.dashboardSummary.mockResolvedValue(summaryFixture);
+    mockApi.riskSummary.mockResolvedValue(summaryFixture);
     mockApi.dashboardGeographyExposure.mockResolvedValue(geographyFixture);
   });
 
@@ -51,6 +51,7 @@ describe("WealthRisk route", () => {
     );
 
     expect(await screen.findByText("Cash buffer")).toBeInTheDocument();
+    expect(mockApi.riskSummary).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}$/), "SGD");
     expect(screen.getByText("15.0%")).toBeInTheDocument();
     expect(screen.getByText("AAPL — 22.0%")).toBeInTheDocument();
     expect(screen.getByText("Where the top positions sit")).toBeInTheDocument();
@@ -107,7 +108,7 @@ describe("WealthRisk route", () => {
   });
 
   it("shows API error state when fetch fails", async () => {
-    mockApi.dashboardSummary.mockRejectedValueOnce(new Error("risk unavailable"));
+    mockApi.riskSummary.mockRejectedValueOnce(new Error("risk unavailable"));
 
     render(
       <ThemeProvider>

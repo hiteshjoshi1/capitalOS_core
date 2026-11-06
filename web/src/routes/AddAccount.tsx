@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { Account, AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
+import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
 import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
@@ -60,7 +61,7 @@ export default function AddAccount() {
           api.accountOptions(),
           api.platformOptions(),
           api.currencies(),
-          api.accounts(),
+          loadApiResource("accounts", () => api.accounts()),
         ]);
         setPlatforms(p);
         setOptions(o);
@@ -136,7 +137,7 @@ export default function AddAccount() {
       setForm(EMPTY_FORM);
       setCurrencySearch("");
       setCountrySearch("");
-      const refreshedAccounts = await api.accounts();
+      const refreshedAccounts = await loadApiResource("accounts", () => api.accounts(), { force: true });
       setAccounts(refreshedAccounts);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -161,6 +162,8 @@ export default function AddAccount() {
 
   function onAccountChanged(updated: Account) {
     setAccounts((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
+    // Other pages read the cached list (#149): refresh it so they see the change too.
+    void loadApiResource("accounts", () => api.accounts(), { force: true }).catch(() => undefined);
   }
 
   async function onCreatePlatform(e: React.FormEvent<HTMLFormElement>) {

@@ -29,11 +29,10 @@ export default function WealthRisk() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency] = useBaseCurrency();
   const [selectedTopN, setSelectedTopN] = useState<TopN>(5);
-  // #148: the summary resource is the same key Wealth Overview reads, so moving between
-  // the two pages reuses one cached response (and revalidates it in the background).
-  const summaryRes = useApiResource(
-    resourceKey("dashboardSummary", month, "prev_month,prev_year", baseCurrency),
-    () => api.dashboardSummary(month, "prev_month,prev_year", baseCurrency),
+  // #149: the lean /dashboard/risk-summary (net worth and positions, the same values as
+  // /dashboard/summary) instead of the whole Overview summary.
+  const summaryRes = useApiResource(resourceKey("riskSummary", month, baseCurrency), () =>
+    api.riskSummary(month, baseCurrency),
   );
   const geographyRes = useApiResource(resourceKey("geographyExposure", month, baseCurrency), () =>
     api.dashboardGeographyExposure(month, baseCurrency),

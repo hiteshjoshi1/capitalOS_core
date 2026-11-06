@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.schemas.alert import (
+    UnifiedAlertsCountResponse,
     UnifiedAlertsResponse,
     UploadReminderAlert,
     UploadReminderCountResponse,
@@ -144,6 +145,12 @@ def _fetch_stale_accounts(
     return alerts
 
 
+def _notification_items(db: Session, current_user_id: int, month: str | None) -> List[UploadReminderAlert]:
+    """Everything /alerts/notifications lists (today: upload reminders). Its count
+    endpoint counts the same list, so the badge and the Alerts page agree."""
+    return _fetch_stale_accounts(db, _stale_days(), current_user_id, month)
+
+
 @router.get("/upload-reminders", response_model=List[UploadReminderAlert])
 def get_upload_reminders(
     month: str | None = None,
@@ -173,11 +180,21 @@ def get_notifications(
 ) -> UnifiedAlertsResponse:
     """Return a unified read model: upload-reminder alerts.
 
-    This is the primary endpoint for the Alerts page and the sidebar badge count.
+    The Alerts page reads this; the sidebar badge reads /notifications/count (#149).
     """
-    reminders = _fetch_stale_accounts(db, _stale_days(), current_user.id, month)
+    reminders = _notification_items(db, current_user.id, month)
 
     return UnifiedAlertsResponse(
         upload_reminders=reminders,
         total_count=len(reminders),
     )
+
+
+@router.get("/notifications/count", response_model=UnifiedAlertsCountResponse)
+def get_notifications_count(
+    month: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+) -> UnifiedAlertsCountResponse:
+    """/alerts/notifications' ``total_count`` without the list (#149): the sidebar badge."""
+    return UnifiedAlertsCountResponse(total_count=len(_notification_items(db, current_user.id, month)))

@@ -14,6 +14,7 @@ vi.mock("../lib/api", () => ({
   api: {
     dashboardBootstrap: vi.fn(),
     dashboardSummary: vi.fn(),
+    riskSummary: vi.fn(),
     dashboardGeographyExposure: vi.fn(),
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("../lib/api", () => ({
       upload_reminders: [],
       total_count: 0,
     }),
+    alertNotificationsCount: vi.fn().mockResolvedValue({ total_count: 0 }),
   },
 }));
 
@@ -149,6 +151,17 @@ function mockWealthApis() {
       { asset_id: 2, symbol: "BTC", asset_class: "CRYPTO", value: 12000, percent_of_networth: 12 },
     ],
     cash_balances: [{ currency: "SGD", value: 25000 }],
+  });
+  // #149: Risk reads the lean twin of /summary (its net_worth and top_holdings).
+  vi.mocked(api.riskSummary).mockResolvedValue({
+    as_of_month: "2026-02",
+    base_currency: "SGD",
+    snapshot_day: null,
+    net_worth: { total: 100000, cash: 25000, stocks_funds: 50000, crypto: 25000, liabilities: -5000 },
+    top_holdings: [
+      { asset_id: 1, symbol: "AAPL", asset_class: "STOCK", value: 22000, percent_of_networth: 22 },
+      { asset_id: 2, symbol: "BTC", asset_class: "CRYPTO", value: 12000, percent_of_networth: 12 },
+    ],
   });
   vi.mocked(api.spendingSummary).mockResolvedValue({
     month: "2026-02",
@@ -321,6 +334,8 @@ describe("frontend contracts", () => {
 
     expect(await screen.findByRole("heading", { name: "Largest position" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Where the wealth is booked" })).toBeInTheDocument();
+    expect(api.riskSummary).toHaveBeenCalled();
+    expect(api.dashboardSummary).not.toHaveBeenCalled();
   });
 
   it("renders Cash Flow as a dedicated workspace route", async () => {

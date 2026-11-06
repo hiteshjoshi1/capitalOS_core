@@ -15,6 +15,7 @@ vi.mock("../lib/api", () => ({
     netWorthTimelineMovers: vi.fn(),
     dividendsSummary: vi.fn(),
     cashFlowDetail: vi.fn(),
+    cashFlowTrend: vi.fn(),
     spendingSummary: vi.fn(),
   },
 }));
@@ -72,50 +73,7 @@ function timeline(points: WealthTimelinePoint[]): WealthTimeline {
 }
 
 const emptyDividends = { from_month: "2026-01", to_month: "2026-06", period: "month" as const, base_currency: "SGD", assumed_tax_rate: 0, country_tax_rates: {}, buckets: [] };
-const emptyCashFlow = {
-  month: "2026-06",
-  base_currency: "SGD",
-  income_total: 0,
-  expense_total: 0,
-  net: 0,
-  savings_rate: null,
-  calculation: "transactions",
-  analytics: {
-    burn_rate: null,
-    prior_month: null,
-    prior_month_net: null,
-    free_cash_flow_change_vs_prior_month: null,
-    outflow_categories: [],
-    inflow_categories: [],
-    outflow_recurring_split: [],
-    inflow_recurring_split: [],
-    outflow_fixed_variable_split: [],
-    inflow_source_mix: [],
-    top_outflow_merchants: [],
-    largest_inflow_drivers: [],
-    outflow_category_deltas: [],
-    deterioration_drivers: [],
-    trend: [],
-    waterfall: {
-      starting_cash: null,
-      snapshot_start_as_of: null,
-      snapshot_start_boundary_at: null,
-      inflows: 0,
-      outflows: 0,
-      transfers_and_funding: null,
-      investment_and_fx_effects: null,
-      other_cash_movements: null,
-      snapshot_end_as_of: null,
-      snapshot_end_boundary_at: null,
-      boundary_exact: false,
-      availability_message: null,
-      ending_cash: null,
-    },
-    answers: [],
-  },
-  income: { total: 0, categories: [] },
-  expenses: { total: 0, categories: [] },
-} as never;
+const emptyCashFlow = { month: "2026-06", base_currency: "SGD", trend: [] } as never;
 
 describe("WealthHistory route", () => {
   beforeEach(() => {
@@ -123,7 +81,7 @@ describe("WealthHistory route", () => {
     // The selected month is shared per browser (#223): start each test on the current month.
     window.localStorage.removeItem("capitalos.selectedMonth");
     mockApi.dividendsSummary.mockResolvedValue(emptyDividends as never);
-    mockApi.cashFlowDetail.mockResolvedValue(emptyCashFlow as never);
+    mockApi.cashFlowTrend.mockResolvedValue(emptyCashFlow as never);
     mockApi.spendingSummary.mockResolvedValue({ month: "2026-06", base_currency: "SGD", income_total: 0, expense_total: 0, net: 0, savings_rate: null, income_categories: [], expense_categories: [] } as never);
     mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-05", gainers: [], detractors: [] });
   });
@@ -307,7 +265,7 @@ describe("WealthHistory selected month", () => {
     vi.clearAllMocks();
     window.localStorage.removeItem("capitalos.selectedMonth");
     mockApi.dividendsSummary.mockResolvedValue(emptyDividends as never);
-    mockApi.cashFlowDetail.mockResolvedValue(emptyCashFlow as never);
+    mockApi.cashFlowTrend.mockResolvedValue(emptyCashFlow as never);
     mockApi.spendingSummary.mockResolvedValue({ month: "2026-05", base_currency: "SGD", income_total: 0, expense_total: 0, net: 0, savings_rate: null, income_categories: [], expense_categories: [] } as never);
     mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-04", gainers: [], detractors: [] });
     mockApi.netWorthTimeline.mockResolvedValue(
@@ -380,5 +338,36 @@ describe("WealthHistory selected month", () => {
     await screen.findByText("Net worth");
     expect(mockApi.netWorthTimeline).toHaveBeenCalledWith(60, "SGD");
     expect(mockApi.netWorthTimeline).not.toHaveBeenCalledWith(24, "SGD");
+  });
+});
+
+// #149: the income-vs-spending card reads the lean trend, not the month's whole cash-flow detail.
+describe("WealthHistory cash-flow trend", () => {
+  it("draws income vs spending from /spending/cash-flow-trend", async () => {
+    vi.clearAllMocks();
+    window.localStorage.removeItem("capitalos.selectedMonth");
+    mockApi.dividendsSummary.mockResolvedValue(emptyDividends as never);
+    mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-05", gainers: [], detractors: [] });
+    mockApi.netWorthTimeline.mockResolvedValue(timeline([dataPoint("2026-05", { total: 950 }), dataPoint("2026-06", { total: 1000 })]));
+    mockApi.cashFlowTrend.mockResolvedValue({
+      month: currentMonth(),
+      base_currency: "SGD",
+      trend: [
+        { month: "2026-05", inflows: 5000, outflows: 3000, net: 2000, savings_rate: 0.4, burn_rate: 0.6 },
+        { month: "2026-06", inflows: 4000, outflows: 4500, net: -500, savings_rate: -0.125, burn_rate: 1.125 },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(mockApi.cashFlowTrend).toHaveBeenCalledWith(currentMonth(), "SGD"));
+    const chart = await screen.findByRole("img", { name: "Income vs spending" });
+    expect(within(chart).getByTitle(/May '26 income: S\$ 5,000/)).toBeInTheDocument();
+    expect(within(chart).getByTitle(/Jun '26 spending: S\$ 4,500/)).toBeInTheDocument();
+    expect(mockApi.cashFlowDetail).not.toHaveBeenCalled();
   });
 });

@@ -156,6 +156,26 @@ function release(key: string): void {
   }, 0);
 }
 
+/**
+ * Read `key` through the same cache from an event handler or a page's load effect (#149):
+ * joins a request for `key` already in flight (another component, or StrictMode running the
+ * effect twice) instead of sending a second one, and stores the answer for every
+ * `useApiResource(key)` reader. `force` sends a new request (after a write). While it is
+ * pending the key is held, so a reader unmounting meanwhile doesn't abort it.
+ */
+export async function loadApiResource<T>(
+  key: string,
+  fetcher: () => Promise<T>,
+  options: { force?: boolean } = {},
+): Promise<T> {
+  retain(key);
+  try {
+    return await startFetch(key, fetcher, options.force ?? false);
+  } finally {
+    release(key);
+  }
+}
+
 /** Forget every cached response and abort every request (sign-in, sign-out, tests). */
 export function clearApiCache(): void {
   generation += 1;

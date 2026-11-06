@@ -2,6 +2,7 @@ import { useEffect, useState, type DragEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, UploadRefusedError } from "../lib/api";
 import type { Account, ImportJobListItem, UploadRefusal } from "../lib/api";
+import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
@@ -60,7 +61,7 @@ export default function Ingest() {
     (async () => {
       try {
         setState("loading");
-        const [a, j] = await Promise.all([api.accounts(), api.ingestJobs()]);
+        const [a, j] = await Promise.all([loadApiResource("accounts", () => api.accounts()), api.ingestJobs()]);
         setAccounts(a);
         setJobs(j);
         if (requestedAccountId && a.some((account) => String(account.id) === requestedAccountId)) {

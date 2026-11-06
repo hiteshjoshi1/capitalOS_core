@@ -30,6 +30,7 @@ from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refre
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.crypto.valuation import latest_wallet_valuation
 from app.fx import fx_status, get_rates_by_date, rate_date
+from app.schemas.crypto import StablecoinsResponse
 from app.valuation import clock as valuation_clock
 from app.valuation.clock import _month_window
 from app.valuation.clock import _anchor_ts as _anchor_date
@@ -37,6 +38,8 @@ from app.valuation.clock import _configured_snapshot_day as _snapshot_day
 from app.wealth_rollup_dirty import mark_wallet_history_dirty
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
+# Crypto counted as cash on the Cash page (#149): /crypto/stablecoins returns these.
+STABLECOIN_SYMBOLS = ("USDC", "USDT")
 
 router = APIRouter(prefix="/crypto", tags=["crypto"], dependencies=[Depends(require_current_user)])
 logger = logging.getLogger("capitalos.crypto.router")
@@ -930,6 +933,61 @@ def crypto_summary(
         "stale_prices": bool(display_valuation["stale_prices"]),
         "is_stale": is_stale,
         "refresh_triggered": False,
+        **fx_status(),
+    }
+
+
+@router.get("/stablecoins", response_model=StablecoinsResponse)
+def crypto_stablecoins(
+    month: str | None = None,
+    base_currency: str = "USD",
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Lean twin of /crypto/summary for the Cash page (#149): its top_holdings rows
+    whose symbol is in STABLECOIN_SYMBOLS, with the same values, and their total.
+    Reads only the selected month's wallet valuation (no prior-month snapshot, no
+    six-month trend), converted at the same anchor-date rate as /summary (#139)."""
+    selected_month_start = _parse_month_start(month)
+    effective_anchor, is_live = _effective_anchor_for_month(selected_month_start)
+    valuation = latest_wallet_valuation(
+        db, current_user.id, as_of_date=None if is_live else effective_anchor.date()
+    )
+    # /summary looks a rate up for the anchor only when a wallet has a value then.
+    has_value = any(row.get("total_usd") is not None for row in valuation["wallets"])
+    usd_by_date = get_rates_by_date([effective_anchor] if has_value else [], base_currency, {"USD"})
+    rates = usd_by_date.get(rate_date(effective_anchor))
+    rate = rates.get("USD", 0.0) if rates is not None else 0.0
+
+    holdings: list[dict[str, Any]] = []
+    for row in sorted(valuation["items"], key=lambda item: float(item.get("value_usd") or 0.0), reverse=True):
+        symbol = str(row.get("symbol") or "").upper()
+        if symbol not in STABLECOIN_SYMBOLS:
+            continue
+        value_usd = float(row["value_usd"]) if row.get("value_usd") is not None else 0.0
+        holdings.append(
+            {
+                "symbol": symbol,
+                "chain": str(row.get("chain") or "").lower(),
+                "amount": float(row["normalized_amount"]) if row.get("normalized_amount") is not None else 0.0,
+                "value_usd": value_usd,
+                "value_base": value_usd * rate,
+                "asset_class": "CRYPTO",
+                "wallet_id": str(row["wallet_id"]),
+                "wallet_label": row.get("label"),
+                "holdings_as_of": row["holdings_as_of"].isoformat() if row.get("holdings_as_of") else None,
+                "price_as_of": row["price_as_of"].isoformat() if row.get("price_as_of") else None,
+            }
+        )
+
+    return {
+        "month": selected_month_start.strftime("%Y-%m"),
+        "is_live": is_live,
+        "as_of": effective_anchor.isoformat(),
+        "base_currency": base_currency,
+        "symbols": list(STABLECOIN_SYMBOLS),
+        "total_base": sum(item["value_base"] for item in holdings),
+        "holdings": holdings,
         **fx_status(),
     }
 

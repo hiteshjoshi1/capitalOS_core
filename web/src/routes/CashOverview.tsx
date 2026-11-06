@@ -17,21 +17,23 @@ import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 
-const STABLECOINS = new Set(["USDC", "USDT"]);
+/** Shown until /crypto/stablecoins answers with the symbols it counts. */
+const STABLECOIN_LABEL_FALLBACK = ["USDC", "USDT"];
 export default function CashOverview() {
   const [month, setMonth] = useSelectedMonth();
   const donutDescId = useId();
   const [baseCurrency] = useBaseCurrency();
-  // #148: one resource per call, so the stablecoin card (crypto summary) never holds up
-  // the cash numbers, and the previous month stays on screen while the next one loads.
+  // #148: one resource per call, so the stablecoin card never holds up the cash numbers,
+  // and the previous month stays on screen while the next one loads. #149: the card reads
+  // the lean /crypto/stablecoins, not the whole crypto summary.
   const deposits = useApiResource(resourceKey("cashDeposits", month, baseCurrency), () =>
     api.cashDeposits(month, baseCurrency),
   );
-  const crypto = useApiResource(resourceKey("cryptoSummary", month, baseCurrency), () =>
-    api.cryptoSummary(month, baseCurrency),
+  const crypto = useApiResource(resourceKey("cryptoStablecoins", month, baseCurrency), () =>
+    api.cryptoStablecoins(month, baseCurrency),
   );
   const cashDeposits = deposits.data ?? null;
-  const cryptoSummary = crypto.data ?? null;
+  const cryptoStablecoins = crypto.data ?? null;
 
   // Label amounts with the currency they were computed in: while a currency switch loads,
   // the previous currency's numbers stay on screen and must keep their own prefix.
@@ -39,12 +41,9 @@ export default function CashOverview() {
   const money = useCallback((value?: number | null) => formatMoney(value, shownCurrency), [shownCurrency]);
   const compactMoney = useCallback((value?: number | null) => formatMoneyCompact(value, shownCurrency), [shownCurrency]);
 
-  const stablecoins = useMemo(() => {
-    const tokens = (cryptoSummary?.top_holdings ?? []).filter((t) => STABLECOINS.has((t.symbol || "").toUpperCase()));
-    return tokens;
-  }, [cryptoSummary]);
-
-  const stablecoinTotal = stablecoins.reduce((acc, t) => acc + (t.value_base ?? 0), 0);
+  const stablecoins = cryptoStablecoins?.holdings ?? [];
+  const stablecoinTotal = cryptoStablecoins?.total_base ?? 0;
+  const stablecoinLabel = (cryptoStablecoins?.symbols ?? STABLECOIN_LABEL_FALLBACK).join(" / ");
 
   const accountItems = useMemo(
     () => (cashDeposits?.items ?? []).map((item) => ({ label: item.source, value: item.value, percent: item.percent })),
@@ -172,13 +171,13 @@ export default function CashOverview() {
               <div className="card" style={{ padding: 24 }}>
                 <div className="cashFlowCardHeader" style={{ marginBottom: 6 }}>
                   <p className="cashFlowCardTitle" style={{ margin: 0 }}>Stablecoins</p>
-                  <span className="muted">USDC / USDT</span>
+                  <span className="muted">{stablecoinLabel}</span>
                 </div>
-                <div className="big small">{cryptoSummary ? money(stablecoinTotal) : "—"}</div>
+                <div className="big small">{cryptoStablecoins ? money(stablecoinTotal) : "—"}</div>
                 <div className="listRows" style={{ marginTop: 8 }}>
                   {crypto.error ? (
                     <p className="muted">Stablecoin balances couldn't load: {crypto.error.message}</p>
-                  ) : !cryptoSummary ? (
+                  ) : !cryptoStablecoins ? (
                     <p className="muted" role="status">Loading stablecoins…</p>
                   ) : stablecoins.length === 0 ? (
                     <p className="muted">No stablecoin balances found.</p>

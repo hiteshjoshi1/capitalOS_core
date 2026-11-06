@@ -137,6 +137,31 @@ class DashboardSummaryResponse(FxStatusFields):
         populate_by_name = True
 
 
+class RiskHolding(BaseModel):
+    """A /summary top_holdings row cut to what the Risk page reads (#149); same values."""
+
+    asset_id: Optional[int] = None
+    symbol: str
+    asset_class: str
+    value: float
+    percent_of_networth: float
+
+
+class RiskSummaryResponse(FxStatusFields):
+    """GET /dashboard/risk-summary (#149): what the Risk page reads from
+    /dashboard/summary (net_worth, and per position its symbol, class and value),
+    with the same values, and nothing else."""
+
+    as_of_month: str
+    base_currency: str
+    snapshot_day: Optional[int] = None
+    # As /summary: top_holdings are live for the open (or a future) month, the
+    # month-end snapshot for a past month (#223). Same rows, same order.
+    is_live: Optional[bool] = None
+    net_worth: NetWorth
+    top_holdings: List[RiskHolding]
+
+
 class NetWorthSinceUpdateResponse(BaseModel):
     base_currency: str
     current_as_of: Optional[str] = None
