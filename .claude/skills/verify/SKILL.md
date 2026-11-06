@@ -40,6 +40,14 @@ cd web && npx tsc -b --pretty false   # typecheck
 cd web && npx eslint .
 ```
 
+## Safety hook (`.claude/hooks/pretooluse-guard.sh`, `pretooluse-force-push.awk`)
+```bash
+scripts/test-pretooluse-guard.sh      # also run by `make lint`
+```
+Add a must-block or must-pass case to `scripts/test-pretooluse-guard.cases` for each new
+rule or false positive. Put force-push strings in that file, not on a Bash command line: the
+live hook in the main checkout reads every command you run.
+
 ## Migrations (`migrations/NNN_*.sql`)
 Add the numbered file, then:
 ```bash
