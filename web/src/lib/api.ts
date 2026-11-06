@@ -498,6 +498,8 @@ export type StockHoldingsSummary = FxStatus & {
   }>;
   stock_current_total?: number;
   stock_snapshot_total?: number;
+  // #232: the date of the holdings stock_snapshot_total is taken from.
+  stock_snapshot_as_of?: string | null;
   quote_freshness_summary?: {
     fresh: number;
     stale: number;
@@ -862,11 +864,17 @@ export type CashDeposits = {
   base_currency?: string | null;
   snapshot_day?: number | null;
   is_live?: boolean;
+  // #232: the anchor the figures are taken at (a past month's month-end boundary, or "now").
+  net_worth_boundary_at?: string | null;
   compare_month?: string | null;
   current_cash_as_of?: string | null;
   snapshot_cash_as_of?: string | null;
   current_total?: number | null;
   snapshot_total?: number | null;
+  // #232: the stablecoins (USDC/USDT) in current_total / snapshot_total. The Cash page counts
+  // them as cash; net worth (Overview, History) counts them under Crypto (D-42).
+  current_stablecoin_total?: number | null;
+  snapshot_stablecoin_total?: number | null;
   delta_abs?: number | null;
   delta_pct?: number | null;
   trend?: Array<{

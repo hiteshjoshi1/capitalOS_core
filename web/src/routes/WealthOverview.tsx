@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import type { AssetClassFreshness, NetWorthFreshness } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
 import { subscribeToRealtimeTopic } from "../lib/realtime";
-import { currentMonthYYYYMM, isPastMonth, shiftMonth, useSelectedMonth } from "../lib/selectedMonth";
+import { currentMonthYYYYMM, isPastMonth, snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
@@ -150,9 +150,7 @@ export default function WealthOverview() {
   const sinceUpdate = isLive ? (sinceUpdateRes.data ?? null) : null;
   // The month-end actually used: the month before the anchor date (last month, before
   // SNAPSHOT_DAY, still reads the month-end before it, as the backend does).
-  const snapshotMonth = bootstrap?.net_worth_boundary_at
-    ? shiftMonth(bootstrap.net_worth_boundary_at.slice(0, 7), -1)
-    : shownMonth;
+  const snapshotMonth = snapshotMonthOf(bootstrap?.net_worth_boundary_at, shownMonth);
 
   const reloadAllRef = useRef<() => void>(() => undefined);
   useEffect(() => {
@@ -203,17 +201,15 @@ export default function WealthOverview() {
     ? (bootstrap?.current_net_worth_as_of ?? bootstrap?.net_worth_as_of ?? null)
     : (bootstrap?.net_worth_as_of ?? null);
   const currentFreshness: NetWorthFreshness | null = bootstrap?.current_net_worth_freshness ?? null;
-  const currentNetWorthTotal = currentNetWorth?.total ?? 0;
+  // #232: both donuts split gross assets (cash + stocks & funds + crypto), the platform
+  // allocation's total; the headline is that minus liabilities, shown under the legend.
+  const grossAssets = currentNetWorth
+    ? currentNetWorth.cash + currentNetWorth.stocks_funds + currentNetWorth.crypto
+    : 0;
 
-  const stocksPct = currentNetWorthTotal
-    ? ((currentNetWorth?.stocks_funds ?? 0) / currentNetWorthTotal) * 100
-    : 0;
-  const cryptoPct = currentNetWorthTotal
-    ? ((currentNetWorth?.crypto ?? 0) / currentNetWorthTotal) * 100
-    : 0;
-  const cashPct = currentNetWorthTotal
-    ? ((currentNetWorth?.cash ?? 0) / currentNetWorthTotal) * 100
-    : 0;
+  const stocksPct = grossAssets ? ((currentNetWorth?.stocks_funds ?? 0) / grossAssets) * 100 : 0;
+  const cryptoPct = grossAssets ? ((currentNetWorth?.crypto ?? 0) / grossAssets) * 100 : 0;
+  const cashPct = grossAssets ? ((currentNetWorth?.cash ?? 0) / grossAssets) * 100 : 0;
 
   const assetClassItems = useMemo(
     () =>
@@ -242,10 +238,7 @@ export default function WealthOverview() {
   const activeAllocItems = allocView === "platform" ? platformItems : assetClassItems;
   const formatAllocMoney = allocView === "platform" ? formatPlatformMoney : formatMoney;
   const allocCurrency = allocView === "platform" ? platformCurrency : bootstrap?.base_currency || selectedBaseCurrency;
-  const allocTotal =
-    allocView === "platform"
-      ? (platformAllocation?.total ?? 0)
-      : (currentNetWorth?.total ?? 0);
+  const allocTotal = allocView === "platform" ? (platformAllocation?.total ?? 0) : grossAssets;
 
   // The live headline's deltas are the live comparisons (live vs the latest completed
   // month-end, and that month-end a year earlier), #133. A past month's headline is a
@@ -257,16 +250,20 @@ export default function WealthOverview() {
     : summaryForMonth?.net_worth_change;
   const prevMonthChange = heroChange?.vs_prev_month;
   const prevYearChange = heroChange?.vs_prev_year;
-  const prevMonthLabel = isLive || !prevMonthChange
-    ? "VS LAST MONTH"
-    : `VS ${fmt.formatMonth(prevMonthChange.compare_month, "medium").toUpperCase()} MONTH-END`;
-  const prevYearLabel = isLive || !prevYearChange
-    ? "VS LAST YEAR"
-    : `VS ${fmt.formatMonth(prevYearChange.compare_month, "medium").toUpperCase()} MONTH-END`;
+  // #232: every comparison names its baseline, live or past (live compares with the latest
+  // completed month-end, D-24).
+  const prevMonthLabel = prevMonthChange
+    ? `VS ${fmt.formatMonth(prevMonthChange.compare_month, "medium").toUpperCase()} MONTH-END`
+    : "VS LAST MONTH";
+  const prevYearLabel = prevYearChange
+    ? `VS ${fmt.formatMonth(prevYearChange.compare_month, "medium").toUpperCase()} MONTH-END`
+    : "VS LAST YEAR";
   const shownHoldingsView = !isLive && holdingsView === "today" ? "holdings" : holdingsView;
   const topHoldings = (summary?.top_holdings ?? []).slice(0, 4);
   const topMovers = summary?.top_movers ?? null;
-  const liabilities = bootstrap?.net_worth?.liabilities ?? null;
+  // #232: the liabilities taken off the headline above (live: today's; a past month: its
+  // month-end's), not always the last month-end's.
+  const liabilities = currentNetWorth?.liabilities ?? null;
 
   return (
     <PageShell
@@ -449,7 +446,7 @@ export default function WealthOverview() {
                     )}
                   </span>
                   <div className="coAllocationInner">
-                    <span className="coAllocationTotalLabel">TOTAL</span>
+                    <span className="coAllocationTotalLabel">GROSS ASSETS</span>
                     <strong className="coAllocationTotalValue">
                       {fmt.formatMoneyCompact(allocTotal, allocCurrency)}
                     </strong>
@@ -473,6 +470,12 @@ export default function WealthOverview() {
                       </div>
                     </div>
                   ))}
+                  {currentNetWorth ? (
+                    <p className="coAllocationNetLine muted" data-testid="allocation-net-worth-line">
+                      Gross assets {formatMoney(grossAssets)} − liabilities {formatMoney(currentNetWorth.liabilities)} = net worth{" "}
+                      {formatMoney(currentNetWorth.total)}
+                    </p>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -515,7 +518,7 @@ export default function WealthOverview() {
               <article className="coSignalCard">
                 <p className="coSignalEyebrow">LIABILITIES</p>
                 <p className="coSignalValue">{formatMoney(liabilities)}</p>
-                <p className="coSignalMeta">Outstanding obligations vs current net worth.</p>
+                <p className="coSignalMeta">What the cards owe, taken off the net worth above.</p>
                 <Link className="wealthInlineLink" to="/liabilities">
                   Open liabilities
                 </Link>

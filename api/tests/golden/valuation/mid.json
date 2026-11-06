@@ -708,6 +708,7 @@
         }
       ],
       "current_cash_as_of": "2026-02-28T00:00:00+00:00",
+      "current_stablecoin_total": 2682.0276,
       "current_total": 63682.8865,
       "delta_abs": 4971.377,
       "delta_pct": 0.0847,
@@ -734,9 +735,11 @@
           "value": 2682.0276
         }
       ],
+      "net_worth_boundary_at": "2026-03-01T00:00:00+00:00",
       "snapshot_cash_as_of": "2026-01-31T00:00:00+00:00",
       "snapshot_day": 1,
       "snapshot_missing": false,
+      "snapshot_stablecoin_total": 2004.5455,
       "snapshot_total": 58711.5095,
       "total": 63682.8865,
       "trend": [
@@ -808,6 +811,7 @@
         }
       ],
       "current_cash_as_of": "2026-03-16T00:00:00+00:00",
+      "current_stablecoin_total": 1676.2673,
       "current_total": 63000.0,
       "delta_abs": -682.8866,
       "delta_pct": -0.0107,
@@ -839,9 +843,11 @@
           "value": 335.2535
         }
       ],
+      "net_worth_boundary_at": "2026-03-18T10:00:00+08:00",
       "snapshot_cash_as_of": "2026-02-28T00:00:00+00:00",
       "snapshot_day": 1,
       "snapshot_missing": false,
+      "snapshot_stablecoin_total": 2682.0276,
       "snapshot_total": 63682.8865,
       "total": 63000.0,
       "trend": [
@@ -1444,6 +1450,7 @@
       "quote_stale_days": 3,
       "snapshot_day": 1,
       "stock_current_total": 11516.3878,
+      "stock_snapshot_as_of": "2026-01-31T00:00:00+00:00",
       "stock_snapshot_missing": false,
       "stock_snapshot_total": 10967.8161,
       "top_holdings": [
@@ -1683,6 +1690,7 @@
       "quote_stale_days": 3,
       "snapshot_day": 1,
       "stock_current_total": 13361.9841,
+      "stock_snapshot_as_of": "2026-02-28T00:00:00+00:00",
       "stock_snapshot_missing": false,
       "stock_snapshot_total": 11516.3878,
       "top_holdings": [

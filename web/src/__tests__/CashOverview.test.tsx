@@ -261,4 +261,36 @@ describe("CashOverview chart accessibility", () => {
     expect(chip).toHaveClass("delta--up");
     expect(chip).toHaveTextContent("▲+11.1%");
   });
+
+  // #232: the Cash headline counts stablecoins, which net worth counts under Crypto (D-42).
+  it("says how much of the headline is stablecoins counted under Crypto in net worth (#232)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({ ...cashDepositsFixture, current_stablecoin_total: 2500 });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(
+      await screen.findByText(/Includes S\$ 2,500 in stablecoins, which net worth counts under Crypto/),
+    ).toBeInTheDocument();
+  });
+
+  it("names no stablecoins when there are none (#232)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({ ...cashDepositsFixture, current_stablecoin_total: 0 });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    await screen.findByText("CURRENT CASH");
+    expect(screen.queryByText(/in stablecoins/)).not.toBeInTheDocument();
+  });
 });

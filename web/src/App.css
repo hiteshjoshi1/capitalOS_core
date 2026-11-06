@@ -4759,6 +4759,16 @@ a.btn {
   gap: 14px;
 }
 
+/* #232: gross assets − liabilities = the headline, under the donut legend. */
+.coAllocationNetLine {
+  margin: 4px 0 0;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
 .coAllocationRow {
   display: flex;
   align-items: center;

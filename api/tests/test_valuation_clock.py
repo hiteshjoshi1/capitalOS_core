@@ -78,3 +78,24 @@ def test_open_month_follows_the_app_timezone_west_of_utc(monkeypatch):
 def test_latest_completed_month_start_uses_the_local_date(singapore, monkeypatch, snapshot_day, now, expected):
     monkeypatch.setenv("SNAPSHOT_DAY", snapshot_day)
     assert clock._latest_completed_month_start(now).strftime("%Y-%m") == expected
+
+
+@pytest.mark.parametrize(
+    ("snapshot_day", "month", "expected"),
+    [
+        # SNAPSHOT_DAY=1 on 3 March: always the calendar month before.
+        ("1", "2026-03", "2026-02"),
+        ("1", "2026-02", "2026-01"),
+        # SNAPSHOT_DAY=5 on 3 March: February's month-end (5 March) hasn't passed, so the live
+        # month compares with January's, and February (shown at January's month-end) with December's.
+        ("5", "2026-03", "2026-01"),
+        ("5", "2026-02", "2025-12"),
+        ("5", "2026-01", "2025-12"),
+    ],
+)
+def test_month_view_compares_with_the_month_end_before_the_one_shown(singapore, monkeypatch, snapshot_day, month, expected):
+    """#232: a month view's "vs last month" is the completed month-end before
+    the figures it shows, the one Overview's headline compares with (D-24)."""
+    monkeypatch.setenv("SNAPSHOT_DAY", snapshot_day)
+    _freeze(monkeypatch, datetime(2026, 3, 3, 2, 0, tzinfo=timezone.utc))
+    assert clock._month_view_compare_month_start(clock._parse_month(month)).strftime("%Y-%m") == expected

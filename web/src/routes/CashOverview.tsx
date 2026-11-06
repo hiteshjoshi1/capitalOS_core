@@ -1,6 +1,6 @@
 import { useCallback, useId, useMemo } from "react";
 import { api } from "../lib/api";
-import { useSelectedMonth } from "../lib/selectedMonth";
+import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
 import MonthControl from "../components/MonthControl";
@@ -76,6 +76,14 @@ export default function CashOverview() {
     [cashDeposits, compactMoney],
   );
 
+  // #232: the headline counts stablecoins as cash; net worth (Overview, History) counts them
+  // under Crypto (D-42). Say so, with the amount, so the two "cash" figures can be reconciled.
+  const stablecoinsInTotal = cashDeposits?.current_stablecoin_total ?? 0;
+  const stablecoinNote =
+    stablecoinsInTotal > 0
+      ? ` · Includes ${money(stablecoinsInTotal)} in stablecoins, which net worth counts under Crypto`
+      : "";
+
   // #224: a compare month with no cash data says so; it isn't a zero baseline.
   const missingReason = cashDeposits?.snapshot_missing ? noDataFor(cashDeposits.compare_month) : null;
 
@@ -100,7 +108,7 @@ export default function CashOverview() {
       {cashDeposits && (
         <RefreshingRegion className="wealthOverviewLayout" busy={deposits.isFetching || crypto.isFetching}>
           <HeroMetricCard
-            eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${cashDeposits?.as_of_month ?? month}`}
+            eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${snapshotMonthOf(cashDeposits?.net_worth_boundary_at, cashDeposits?.as_of_month ?? month)}`}
             value={money(cashDeposits?.current_total)}
             delta={{
               abs: cashDeposits?.delta_abs,
@@ -108,7 +116,7 @@ export default function CashOverview() {
               currency: shownCurrency,
               missingReason,
             }}
-            insightText={`As of ${formatDate(cashDeposits?.current_cash_as_of)} · vs ${cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month"} (${formatDate(cashDeposits?.snapshot_cash_as_of)})`}
+            insightText={`As of ${formatDate(cashDeposits?.current_cash_as_of)} · vs ${cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month"} (${formatDate(cashDeposits?.snapshot_cash_as_of)})${stablecoinNote}`}
           />
 
           <section>
