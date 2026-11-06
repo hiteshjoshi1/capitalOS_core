@@ -212,10 +212,13 @@ def test_summary_geography_adds_up_to_assets(household):
 
 
 def test_geography_exposure_total_is_assets(household):
-    """Geography exposure for a month splits that month's gross assets."""
-    for month in ("2026-02", "2026-03"):
-        nw = _summary(household, month)["net_worth"]
+    """Geography exposure for a month splits the gross assets shown for it: live for
+    the open month (2026-03, like the headline, #241), a past month's month-end."""
+    for month, live in (("2026-02", False), ("2026-03", True)):
+        summary = _summary(household, month)
+        nw = summary["current_net_worth"] if live else summary["net_worth"]
         geo = _get(household, f"/dashboard/geography-exposure?month={month}&base_currency=SGD")
+        assert geo["is_live"] is live, month
         assert geo["total"] == pytest.approx(nw["cash"] + nw["stocks_funds"] + nw["crypto"], abs=TOL), month
 
 

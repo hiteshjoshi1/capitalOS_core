@@ -411,8 +411,8 @@ def test_crypto_summary_converts_each_balance_at_its_anchor_date(client, db_engi
     assert body["total_crypto_base"] == pytest.approx(3600 * 1.4)
     assert body["snapshot_total_base"] == pytest.approx(3000 * 1.3)
     assert body["snapshot_delta_base"] == pytest.approx(3600 * 1.4 - 3000 * 1.3)
-    assert body["trend"][-1] == {"month": "2026-05", "value": pytest.approx(3600 * 1.4)}
-    assert body["trend"][-2] == {"month": "2026-04", "value": pytest.approx(3000 * 1.3)}
+    assert body["trend"][-1] == {"month": "2026-05", "value": pytest.approx(3600 * 1.4), "is_live": False}
+    assert body["trend"][-2] == {"month": "2026-04", "value": pytest.approx(3000 * 1.3), "is_live": False}
     assert body["fx_incomplete"] is False, body["fx_missing_currencies"]
 
 

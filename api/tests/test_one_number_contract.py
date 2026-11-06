@@ -18,7 +18,14 @@ the figures the pages show for one month are one set of numbers:
   it at all (``baseline_missing``, #224), and is History's point for that month;
 - Overview's "This month" bridge (#240, D-60) starts at the hero's "vs last
   month" figure and ends at the headline, and its lines plus the unexplained
-  residual add up to the difference.
+  residual add up to the difference;
+- Risk (#241) divides by the headline (live: the Overview hero; a past month:
+  that month-end) and its geography splits the same gross assets, at one point
+  in time, which it names;
+- the six-month trends on the Stocks, Crypto and Cash pages (#241, D-61): the
+  open month's bar is the live headline (month to date, marked live), every
+  other bar is History's point for a completed month-end, and a month whose
+  month-end hasn't passed has no bar.
 
 The figure helpers mirror what the web pages read (web/src/routes/*).
 """
@@ -171,12 +178,82 @@ def _check_month(pages: _Pages, month: str, *, live: bool) -> None:
     stablecoins_counted_as_crypto = cash["current_stablecoin_total"]
     assert 0 <= stablecoins_counted_as_crypto <= headline["crypto"] + TOL, where
 
+    # Risk (#241): its shares divide by the headline, at the positions' point in
+    # time, and its geography splits the same gross assets.
+    risk = pages.get(f"/dashboard/risk-summary?month={month}")
+    assert risk["is_live"] is live, where
+    assert risk["basis"] == ("live" if live else "month_end"), where
+    assert _nw(risk["view_net_worth"]) == pytest.approx(headline, abs=TOL), where
+    risk_stocks = sum(row["value"] for row in risk["top_holdings"] if row["asset_class"] in {"STOCK", "FUND"})
+    assert risk_stocks == pytest.approx(headline["stocks_funds"], abs=TOL), where
+    geography = pages.get(f"/dashboard/geography-exposure?month={month}")
+    assert geography["is_live"] is live, where
+    assert geography["total"] == pytest.approx(gross, abs=TOL), where
+
     # A past month: every page is taken at the month-end Overview shows.
     if not live:
         boundary = bootstrap["net_worth_boundary_at"]
         assert stocks["net_worth_boundary_at"] == cash["net_worth_boundary_at"] == crypto["as_of"] == boundary, where
+        assert risk["net_worth_boundary_at"] == boundary, where
 
+    _check_trends(pages, month, live=live, bootstrap=bootstrap, headline=headline, stocks=stocks, crypto=crypto, cash=cash)
     _check_previous_figures(pages, month, live=live, summary=summary, stocks=stocks, crypto=crypto, cash=cash)
+
+
+def _assert_bar(point: dict[str, Any], figure: float, where: Any) -> None:
+    """A trend bar shows ``figure``; a zero figure has no bar (the trends' rule)."""
+    if figure > TOL:
+        assert point["value"] == pytest.approx(figure, abs=TOL), where
+    else:
+        assert point["value"] in (None, 0), where
+
+
+def _check_trends(
+    pages: _Pages,
+    month: str,
+    *,
+    live: bool,
+    bootstrap: dict[str, Any],
+    headline: dict[str, float],
+    stocks: dict[str, Any],
+    crypto: dict[str, Any],
+    cash: dict[str, Any],
+) -> None:
+    """The six-month trends (#241, D-61): one point in time per bar."""
+    where = f"{pages.base} {month} ({'live' if live else 'past'})"
+    shown_month = month if live else _overview_month(bootstrap)
+    trends = {
+        "stocks": (stocks["trend"], headline["stocks_funds"], stocks["stock_snapshot_total"], "stocks_funds"),
+        "crypto": (crypto["trend"], headline["crypto"], crypto["snapshot_total_base"], "crypto"),
+        # The Cash page's cash includes stablecoins (D-42), so its bars are
+        # checked against the page's own figures, not History's cash.
+        "cash": (cash["trend"], cash["current_total"], cash["snapshot_total"], None),
+    }
+    for name, (trend, current, previous, component) in trends.items():
+        label = f"{where} {name} trend"
+        assert len(trend) == 6 and trend[-1]["month"] == month, label
+        bars = {point["month"]: point for point in trend}
+        live_bars = [point["month"] for point in trend if point["is_live"]]
+        # Only the open month is live, and only when it's in the window.
+        assert live_bars == ([month] if live else []), label
+        # The month the page shows is its headline; the month it compares with,
+        # its previous figure.
+        if shown_month in bars:
+            _assert_bar(bars[shown_month], current, (label, shown_month))
+        prev_month = stocks["compare_month"]
+        if prev_month in bars:
+            _assert_bar(bars[prev_month], previous, (label, prev_month))
+        for point in trend:
+            if point["is_live"]:
+                continue
+            if point["month"] in pages.points:
+                # A completed month-end: History's point for that month.
+                if component is not None:
+                    _assert_bar(point, pages.history_point(point["month"])[component], (label, point["month"]))
+            elif point["month"] > min(pages.points):
+                # Inside History's range but no point: its month-end hasn't
+                # passed, so no bar either.
+                assert point["value"] is None, (label, point["month"])
 
 
 def _check_previous_figures(

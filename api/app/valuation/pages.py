@@ -345,17 +345,23 @@ def risk_summary(
 ) -> Dict[str, Any]:
     """/dashboard/risk-summary (#149): /summary's ``net_worth`` and ``top_holdings``,
     computed exactly as ``summary`` computes them, without the rest of its work
-    (geography, cash flow, comparisons, movers, completeness)."""
+    (geography, cash flow, comparisons, movers, completeness).
+
+    One point in time per month (#241): ``view_net_worth`` is the net worth at
+    the positions' anchor, live for the open month (the Overview headline) and
+    the month-end for a past month, so every share the page shows has its
+    numerator and denominator at one instant."""
     anchor = _anchor_ts(_completed_snapshot_month_start(month_start))
     nw = _networth_components(db, anchor, base_currency, current_user_id)
     view_anchor, is_live = _month_view_anchor(month_start)
-    # summary's view_total: the live headline total (``_current_networth_state``'s
-    # components, at the same live anchor) for the open month, else the month-end's.
-    view_total = (
-        _networth_components(db, view_anchor, base_currency, current_user_id, price_overlay=True)["total"]
+    # summary's current_net_worth (``_current_networth_state``'s components, at
+    # the same live anchor) for the open month, else the month-end's.
+    view_nw = (
+        _networth_components(db, view_anchor, base_currency, current_user_id, price_overlay=True)
         if is_live
-        else nw["total"]
+        else nw
     )
+    view_total = view_nw["total"]
     top = _top_holdings(
         db,
         view_anchor,
@@ -372,6 +378,9 @@ def risk_summary(
         "is_live": is_live,
         "net_worth": _serialize_net_worth(nw),
         "top_holdings": top,
+        "basis": "live" if is_live else "month_end",
+        "view_net_worth": _serialize_net_worth(view_nw),
+        "net_worth_boundary_at": view_anchor.isoformat(),
         **fx_status(),
     }
 
@@ -595,14 +604,16 @@ def stock_exposure(db: Session, current_user_id: int, month_start: datetime, bas
 
 
 def geography_exposure(db: Session, current_user_id: int, month_start: datetime, base_currency: str) -> Dict[str, Any]:
-    anchor = _completed_snapshot_anchor_ts(month_start)
+    # Same rule as platform_allocation (#241, D-55): live (quote-priced) for the
+    # open month, like the Risk page's positions and the Overview headline; a past
+    # month is valued like that month's net worth, at its statements' prices (#144).
+    anchor, is_live = _month_view_anchor(month_start)
     as_of = _effective_as_of(db, anchor, current_user_id)
-    # A completed month-end: valued like that month's net worth, at its
-    # statements' prices, not today's quotes (#144).
-    payload = _geography_exposure(db, anchor, base_currency, current_user_id, price_overlay=False)
+    payload = _geography_exposure(db, anchor, base_currency, current_user_id, price_overlay=is_live)
     return {
         "as_of": as_of.isoformat() if as_of else None,
         "base_currency": base_currency,
         "total": payload["total"],
         "items": payload["items"],
+        "is_live": is_live,
     }

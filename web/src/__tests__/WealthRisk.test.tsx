@@ -107,6 +107,58 @@ describe("WealthRisk route", () => {
     expect(await screen.findByText(/Stocks S\$ 30,000/)).toBeInTheDocument();
   });
 
+  // #241: one point in time per month.
+  it("open month: divides live positions by the live net worth and says Live", async () => {
+    mockApi.riskSummary.mockResolvedValue({
+      ...summaryFixture,
+      is_live: true,
+      basis: "live",
+      // The month-end net worth stays in net_worth; the shares use the live one.
+      view_net_worth: { total: 200000, cash: 50000, stocks_funds: 130000, crypto: 20000, liabilities: 0 },
+      net_worth_boundary_at: "2026-11-06T10:00:00+08:00",
+    } as RiskSummary);
+    mockApi.dashboardGeographyExposure.mockResolvedValue({ ...geographyFixture, is_live: true });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <WealthRisk />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("Concentration signals and geographic exposure · Live.")).toBeInTheDocument();
+    expect(screen.getByText("25.0%")).toBeInTheDocument();
+    expect(screen.getByText("S$ 50,000 of S$ 200,000 net worth")).toBeInTheDocument();
+    expect(screen.getByText("AAPL — 11.0%")).toBeInTheDocument();
+    expect(screen.getByText("Live")).toBeInTheDocument();
+    expect(screen.queryByText(/current snapshot/)).not.toBeInTheDocument();
+  });
+
+  it("past month: states the month-end close it is taken at", async () => {
+    mockApi.riskSummary.mockResolvedValue({
+      ...summaryFixture,
+      is_live: false,
+      basis: "month_end",
+      view_net_worth: summaryFixture.net_worth,
+      net_worth_boundary_at: "2026-11-01T00:00:00+00:00",
+    } as RiskSummary);
+    mockApi.dashboardGeographyExposure.mockResolvedValue({ ...geographyFixture, is_live: false });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <WealthRisk />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(
+      await screen.findByText("Concentration signals and geographic exposure · As of 31 Oct 2026 close."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("15.0%")).toBeInTheDocument();
+    expect(screen.getByText("AAPL — 22.0%")).toBeInTheDocument();
+    expect(screen.getByText("As of 6 Feb 2026")).toBeInTheDocument();
+  });
+
   it("shows API error state when fetch fails", async () => {
     mockApi.riskSummary.mockRejectedValueOnce(new Error("risk unavailable"));
 

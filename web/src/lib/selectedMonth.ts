@@ -24,6 +24,16 @@ export function snapshotMonthOf(boundaryAt: string | null | undefined, fallbackM
   return boundaryAt && MONTH_PATTERN.test(boundaryAt.slice(0, 7)) ? shiftMonth(boundaryAt.slice(0, 7), -1) : fallbackMonth;
 }
 
+/** The last day a month-end snapshot closes: the day before its anchor date
+ * (`net_worth_boundary_at`), as `YYYY-MM-DD`. With SNAPSHOT_DAY=1, October's month-end
+ * (anchor 1 Nov) is "31 Oct close" (#241). Null without a boundary. */
+export function monthEndCloseDate(boundaryAt: string | null | undefined): string | null {
+  const match = boundaryAt ? /^(\d{4})-(\d{2})-(\d{2})/.exec(boundaryAt) : null;
+  if (!match) return null;
+  const day = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]) - 1));
+  return day.toISOString().slice(0, 10);
+}
+
 /** Whether `month` is before the current month: a page following it shows that month-end
  * snapshot rather than live data (#223). The same test as MonthControl's "Past month" callout. */
 export function isPastMonth(month: string): boolean {

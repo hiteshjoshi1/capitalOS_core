@@ -47,7 +47,9 @@ function compactMappedTotal(total: number, currency: string | undefined): string
   return fmt.formatMoneyCompact(total, currency);
 }
 
-function formatAsOf(asOf: string | null | undefined): string {
+function formatAsOf(asOf: string | null | undefined, isLive?: boolean | null): string {
+  // #241: the open month is live (today's prices), like the rest of the Risk page.
+  if (isLive) return "Live";
   if (!asOf) return "Latest snapshot";
   const label = fmt.formatDate(asOf);
   return label === fmt.MISSING ? asOf : `As of ${label}`;
@@ -91,7 +93,7 @@ export default function GeographyPieCard({ exposure, formatMoney }: GeographyPie
                   <div className="val">{compactMappedTotal(total, exposure?.base_currency)}</div>
                 </div>
               </div>
-              <div className="muted geographyPieTotal">{formatAsOf(exposure?.as_of)}</div>
+              <div className="muted geographyPieTotal">{formatAsOf(exposure?.as_of, exposure?.is_live)}</div>
             </div>
 
             <div className="geographyLegendList">

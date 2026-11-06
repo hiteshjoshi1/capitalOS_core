@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../lib/api";
-import { useSelectedMonth } from "../lib/selectedMonth";
+import { monthEndCloseDate, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
@@ -46,8 +46,19 @@ export default function WealthRisk() {
   const shownCurrency = summary?.base_currency || selectedBaseCurrency;
   const formatMoney = (value?: number | null) => fmt.formatMoney(value, shownCurrency);
 
-  const netWorthTotal = summary?.net_worth.total ?? 0;
-  const cashPct = netWorthTotal ? ((summary?.net_worth.cash ?? 0) / netWorthTotal) * 100 : 0;
+  // #241: one point in time per month. The shares divide by the net worth at the
+  // positions' point: live for the open month (the Overview headline), else that month-end.
+  const netWorth = summary?.view_net_worth ?? summary?.net_worth ?? null;
+  const netWorthTotal = netWorth?.total ?? 0;
+  const cashPct = netWorthTotal ? ((netWorth?.cash ?? 0) / netWorthTotal) * 100 : 0;
+  const closeDate = monthEndCloseDate(summary?.net_worth_boundary_at);
+  const basisLabel = !summary
+    ? null
+    : summary.is_live
+      ? "Live"
+      : closeDate
+        ? `As of ${fmt.formatDate(closeDate)} close`
+        : "Month-end snapshot";
 
   const holdings = summary?.top_holdings ?? [];
   const riskLargest = computeLargestPositionRisk(holdings, netWorthTotal);
@@ -58,7 +69,7 @@ export default function WealthRisk() {
   return (
     <PageShell
       title="Wealth Risk"
-      subtitle="Concentration signals and geographic exposure for the current snapshot."
+      subtitle={`Concentration signals and geographic exposure${basisLabel ? ` · ${basisLabel}` : ""}.`}
       headerActions={(
         <>
           <MonthControl month={month} onMonthChange={setMonth} />
@@ -77,7 +88,7 @@ export default function WealthRisk() {
             <div className="card">
               <h2>Cash buffer</h2>
               <div className="big small">{fmt.formatPercent(cashPct, { scale: "points" })}</div>
-              <div className="muted">{formatMoney(summary?.net_worth.cash)} of {formatMoney(netWorthTotal)} net worth</div>
+              <div className="muted">{formatMoney(netWorth?.cash)} of {formatMoney(netWorthTotal)} net worth</div>
             </div>
 
             <div className="card">

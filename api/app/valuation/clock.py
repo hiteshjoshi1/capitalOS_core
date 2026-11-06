@@ -262,6 +262,25 @@ def _month_view_compare_month_start(month_start: datetime) -> datetime:
     return _add_months(_completed_snapshot_month_start(month_start), -1)
 
 
+def _trend_point_anchor(month_start: datetime) -> tuple[Optional[datetime], bool]:
+    """Where a month-by-month trend reads one month's bar (#241, D-61), and
+    whether it's live: History's rule (#138).
+
+    - The open month: live "now" (month to date), the instant the page's live
+      headline is taken at.
+    - A month whose month-end anchor has passed: that month-end.
+    - Any other month (a future month; last month before SNAPSHOT_DAY): no
+      value, ``None``: its month-end hasn't happened yet.
+    """
+    today = _app_today()
+    if (month_start.year, month_start.month) == (today.year, today.month):
+        return _current_anchor_ts(), True
+    anchor = _anchor_ts(month_start)
+    if _anchor_passed(anchor, today):
+        return anchor, False
+    return None, False
+
+
 def _is_open_or_future_month(month_start: datetime) -> bool:
     """Whether ``month_start``'s month is today's month (app timezone) or later."""
     today = _app_today()

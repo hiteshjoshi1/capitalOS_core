@@ -713,9 +713,18 @@ def crypto_summary(
     # FX-date rule (#139): a balance converts at its own anchor date's rate, so
     # the current view uses the anchor's rate and the prior-month snapshot (and
     # each trend month) its own. A missing rate converts to 0 and is flagged.
+    # The trend (#241, D-61): a month-end for each completed month; the open
+    # month is the live headline (month to date, filled in below); a month whose
+    # month-end hasn't passed has no value.
     trend_points = []
+    open_month_key: str | None = None
     for candidate_month in _month_window(selected_month_start, months=6):
-        candidate_anchor = _anchor_date(candidate_month)
+        candidate_anchor, candidate_live = valuation_clock._trend_point_anchor(candidate_month)
+        if candidate_live:
+            open_month_key = candidate_month.strftime("%Y-%m")
+        if candidate_anchor is None or candidate_live:
+            trend_points.append((candidate_month, candidate_anchor, [], 0.0))
+            continue
         candidate_wallet_rows = _latest_wallet_rows(db, current_user.id, as_of_date=candidate_anchor)
         candidate_total_usd, _, _ = _crypto_total_and_freshness(candidate_wallet_rows)
         trend_points.append((candidate_month, candidate_anchor, candidate_wallet_rows, candidate_total_usd))
@@ -872,10 +881,19 @@ def crypto_summary(
 
     trend = []
     for candidate_month, candidate_anchor, candidate_wallet_rows, candidate_total_usd in trend_points:
+        month_key = candidate_month.strftime("%Y-%m")
+        if month_key == open_month_key:
+            # The open month is in the window only when the view is live (the
+            # open or a future month), so its bar is the live headline.
+            trend.append({"month": month_key, "value": total_base if wallet_rows else None, "is_live": True})
+            continue
         trend.append(
             {
-                "month": candidate_month.strftime("%Y-%m"),
-                "value": candidate_total_usd * _usd_rate(candidate_anchor) if candidate_wallet_rows else None,
+                "month": month_key,
+                "value": candidate_total_usd * _usd_rate(candidate_anchor)
+                if candidate_anchor is not None and candidate_wallet_rows
+                else None,
+                "is_live": False,
             }
         )
 
