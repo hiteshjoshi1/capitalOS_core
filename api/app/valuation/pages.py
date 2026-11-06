@@ -48,6 +48,7 @@ from app.valuation.history import (
     _snapshot_compare_months,
     _stored_timeline_points,
     _trailing_month_keys,
+    baseline_missing,
 )
 from app.valuation.holdings import (
     _quote_freshness_summary,
@@ -58,6 +59,7 @@ from app.valuation.holdings import (
     _top_holdings,
     _top_movers_from_holdings,
 )
+from app.valuation.prices import _quote_stale_days
 from app.valuation.state import _effective_as_of, _positions_coverage_as_of, _snapshot_freshness
 
 
@@ -369,7 +371,8 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
     compare_stock_exposure = _stock_exposure(db, compare_anchor, base_currency, current_user_id)
     geography_breakdown = _stock_geography_breakdown(stock_exposure, compare_stock_exposure)
     platform_breakdown = _stock_platform_breakdown(stock_exposure, compare_stock_exposure)
-    quote_freshness_summary = _quote_freshness_summary(top)
+    quote_freshness_summary = _quote_freshness_summary(top, is_live=is_live)
+    compare_holdings_as_of = _positions_coverage_as_of(db, compare_anchor, current_user_id)
     trend = _stock_trend(db, month_start, base_currency, current_user_id)
 
     geography_performance: list[dict[str, Any]] = []
@@ -408,6 +411,8 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "stock_snapshot_total": compare_stock_exposure["total"],
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
+        "stock_snapshot_missing": baseline_missing(compare_holdings_as_of, compare_stock_exposure["total"]),
+        "quote_stale_days": _quote_stale_days(),
         **fx_status(),
     }
 
@@ -438,6 +443,8 @@ def net_worth_since_update(db: Session, current_user_id: int, base_currency: str
             "current_as_of": current_as_of.isoformat() if current_as_of else None,
             "compare_as_of": compare_as_of.isoformat() if compare_as_of else None,
             "compare_month": compare_label,
+            "compare_value": previous_value,
+            "baseline_missing": baseline_missing(compare_as_of, previous_value),
         }
 
     snapshot_top = _top_holdings(
@@ -504,6 +511,7 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
     current_total = _sum_balances(current_balances)
     snapshot_total = _sum_balances(snapshot_balances)
     delta_abs = current_total - snapshot_total
+    snapshot_cash_as_of = _effective_as_of(db, compare_anchor, current_user_id)
     return {
         "total": payload["total"],
         "items": payload["items"],
@@ -513,13 +521,14 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
         "is_live": is_live,
         "compare_month": _add_months(month_start, -1).strftime("%Y-%m"),
         "current_cash_as_of": _iso_value(_effective_as_of(db, effective_anchor, current_user_id)),
-        "snapshot_cash_as_of": _iso_value(_effective_as_of(db, compare_anchor, current_user_id)),
+        "snapshot_cash_as_of": _iso_value(snapshot_cash_as_of),
         "current_total": current_total,
         "snapshot_total": snapshot_total,
         "delta_abs": delta_abs,
         "delta_pct": (delta_abs / snapshot_total) if snapshot_total > 0 else None,
         "trend": _cash_trend(db, month_start, base_currency, current_user_id),
         "currency_breakdown": _cash_currency_breakdown(current_balances, snapshot_balances),
+        "snapshot_missing": baseline_missing(snapshot_cash_as_of, snapshot_total),
     }
 
 

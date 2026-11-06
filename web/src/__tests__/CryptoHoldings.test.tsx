@@ -318,4 +318,65 @@ describe("CryptoHoldings races", () => {
     expect(screen.getByText("CRYPTO VALUE — 2026-01")).toBeInTheDocument();
     await waitFor(() => expect(feb.signal?.aborted).toBe(true));
   });
+
+  it("says there is no comparison when the compare month has no wallet data (#224)", async () => {
+    mockApi.cryptoSummary.mockResolvedValueOnce({
+      ...cryptoSummaryFixture,
+      snapshot_total_base: 0,
+      snapshot_total_usd: 0,
+      snapshot_delta_base: 11200,
+      snapshot_delta_pct: null,
+      snapshot_missing: true,
+      snapshot_missing_reason: "no_data",
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("no comparison: no data for Jan 2026")).toBeInTheDocument();
+  });
+
+  it("names a missing exchange rate as the reason (#224, D-30)", async () => {
+    mockApi.cryptoSummary.mockResolvedValueOnce({
+      ...cryptoSummaryFixture,
+      snapshot_total_base: 0,
+      snapshot_missing: true,
+      snapshot_missing_reason: "no_fx_rate",
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("no comparison: no exchange rate for Jan 2026")).toBeInTheDocument();
+  });
+
+  it("shows each holding's change with the % in the same (base) currency as the amount (#224)", async () => {
+    mockApi.cryptoSummary.mockResolvedValueOnce(cryptoSummaryFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    // SOL: S$ 533 now, -S$ 20 vs last month -> -3.6% of S$ 553, not the USD -4.0%.
+    const sol = (await screen.findByText("-S$ 20 (-3.6%)")).closest(".delta");
+    expect(sol).toHaveClass("delta--down");
+    expect(sol).toHaveTextContent("▼");
+    expect(screen.queryByText(/-4\.0%/)).not.toBeInTheDocument();
+    // The header chip: +S$ 800 on S$ 10,400.
+    expect(document.querySelector(".coHeroValueRow .deltaChip")).toHaveTextContent("▲+7.7%");
+  });
 });

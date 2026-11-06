@@ -152,11 +152,7 @@ export default function Dividends() {
           <HeroMetricCard
             eyebrow="REALIZED THIS MONTH"
             value={formatMoney(realizedMonth.payout_minus_tax)}
-            deltaChip={{
-              // No baseline is "—", not "+—" (#131).
-              text: fmt.formatPercent(momDeltaPct, { signed: true }),
-              positive: momDeltaAbs >= 0,
-            }}
+            delta={{ abs: momDeltaAbs, pct: momDeltaPct, currency: shownCurrency }}
             insightText={`Gross ${formatMoney(realizedMonth.gross)} · Withholding ${formatMoney(realizedMonth.withholding)}`}
             deltaRow={[
               { label: "QUARTER-TO-DATE", value: formatMoney(realizedQuarter.payout_minus_tax), positive: true },

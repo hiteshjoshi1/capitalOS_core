@@ -110,7 +110,8 @@ describe("StockHoldings", () => {
   });
 
   it("renders dashboard-style header nav and native-currency detail columns", async () => {
-    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    // The live month: freshness badges apply (#224).
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...summaryFixture, is_live: true });
 
     render(
       <ThemeProvider>
@@ -157,7 +158,7 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("+HKD 280.04")).toBeInTheDocument();
       expect(scoped.getByText("+21.6%")).toBeInTheDocument();
       expect(scoped.getByText("fresh")).toBeInTheDocument();
-      expect(scoped.getByText(/1 Mar 2026 · eodhd/)).toBeInTheDocument();
+      expect(scoped.getByText("price from 1 Mar 2026, EODHD")).toBeInTheDocument();
       expect(scoped.getByText("24.0%")).toBeInTheDocument();
     }
 
@@ -168,6 +169,7 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("20")).toBeInTheDocument();
       expect(scoped.getAllByText("—").length).toBeGreaterThanOrEqual(2);
       expect(scoped.getByText("stale")).toBeInTheDocument();
+      expect(scoped.getByText(/^stale \(price from 27 Feb 2026, /)).toBeInTheDocument();
     }
 
     expect(screen.getAllByText("HK").length).toBeGreaterThan(0);
@@ -176,7 +178,7 @@ describe("StockHoldings", () => {
 
   it("renders top holdings as succinct responsive summary rows on mobile", async () => {
     Object.defineProperty(window, "innerWidth", { value: 480, configurable: true, writable: true });
-    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...summaryFixture, is_live: true });
 
     render(
       <ThemeProvider>
@@ -203,7 +205,166 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("+21.6%")).toBeInTheDocument();
       expect(scoped.queryByText("Shares")).not.toBeInTheDocument();
       expect(scoped.queryByText("Purchase Price")).not.toBeInTheDocument();
+      expect(scoped.getByText("price from 1 Mar 2026, EODHD")).toBeInTheDocument();
     }
+  });
+
+  // ── #224: price age per holding, freshness only on the live month ──────────
+  const statementOnly = {
+    asset_id: 4,
+    symbol: "RELIANCE",
+    name: "Reliance Industries",
+    asset_class: "STOCK",
+    value: 40000,
+    percent_of_networth: 8,
+    quantity: 12,
+    avg_cost: 2500,
+    latest_price: 2880,
+    quote_currency: "INR",
+    geo: "IN",
+    platform: "SHAREKHAN",
+    exchange_code: "NSE",
+    latest_trade_date: "2026-01-15",
+    quote_freshness_status: "stale",
+    price_source: "canonical_snapshot",
+    price_provider: "canonical",
+    price_basis: "statement" as const,
+    price_fallback_reason: "no_quote",
+  };
+  const liveFixture: StockHoldingsSummary = {
+    ...summaryFixture,
+    as_of_month: "2026-03",
+    compare_month: "2026-02",
+    is_live: true,
+    quote_stale_days: 3,
+    quote_freshness_summary: { fresh: 1, stale: 2, missing: 0, no_live_price: 2 },
+    top_holdings: [
+      { ...summaryFixture.top_holdings[0], price_basis: "quote" },
+      { ...summaryFixture.top_holdings[1], price_basis: "quote" },
+      statementOnly,
+    ],
+  };
+
+  it.each([
+    ["desktop table", 1024],
+    ["375px cards", 375],
+  ])("marks a statement-only price older than the stale window as stale (%s)", async (_label, width) => {
+    Object.defineProperty(window, "innerWidth", { value: width, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    const stale = await screen.findByText("stale (price from 15 Jan 2026, SHAREKHAN statement)");
+    expect(stale).toHaveClass("priceAge--stale");
+    // A fresh quote is dated and sourced, but not marked.
+    const fresh = screen.getByText("price from 1 Mar 2026, EODHD");
+    expect(fresh).not.toHaveClass("priceAge--stale");
+  });
+
+  it("counts holdings without a live price in the header and links to Data Hub", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    const line = await screen.findByTestId("stock-price-freshness");
+    expect(line).toHaveTextContent("Prices: 1 fresh · 2 stale");
+    expect(line).toHaveTextContent("2 holdings without a live price");
+    expect(within(line).getByRole("link", { name: "Fix in Data Hub" })).toHaveAttribute("href", "/operations");
+  });
+
+  it("falls back to counting holdings when the API has no no_live_price yet", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...liveFixture,
+      quote_freshness_summary: { fresh: 1, stale: 2, missing: 0 },
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByTestId("stock-price-freshness")).toHaveTextContent("2 holdings without a live price");
+  });
+
+  it.each([
+    ["desktop table", 1024],
+    ["375px cards", 375],
+  ])("shows no freshness badges on a past month, only the price date (%s)", async (_label, width) => {
+    Object.defineProperty(window, "innerWidth", { value: width, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...liveFixture,
+      as_of_month: "2026-02",
+      compare_month: "2026-01",
+      is_live: false,
+      quote_freshness_summary: { fresh: 1, stale: 2, missing: 0, no_live_price: null },
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("price from 15 Jan 2026, SHAREKHAN statement")).not.toHaveClass("priceAge--stale");
+    expect(screen.queryByTestId("stock-price-freshness")).not.toBeInTheDocument();
+    expect(screen.queryByText(/without a live price/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^stale/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^fresh$/i)).not.toBeInTheDocument();
+  });
+
+  it("says there is no comparison when the compare month has no stock data", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...liveFixture,
+      stock_snapshot_total: 0,
+      stock_snapshot_missing: true,
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("no comparison: no data for Feb 2026")).toBeInTheDocument();
+    // Never a delta the size of the whole holding.
+    expect(screen.queryByText(/\+S\$ 210,000/)).not.toBeInTheDocument();
+  });
+
+  it("shows the header change with the % from the same currency, and ▲", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    // 210,000 vs 185,000: +25,000, +13.5%.
+    const chip = (await screen.findByText("+13.5%")).closest(".delta");
+    expect(chip).toHaveClass("deltaChip", "delta--up");
+    expect(chip).toHaveTextContent("▲");
+    expect(screen.getByText("+S$ 25,000 (+13.5%)")).toBeInTheDocument();
   });
 
   it.each([

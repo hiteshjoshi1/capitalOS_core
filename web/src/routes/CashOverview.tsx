@@ -11,6 +11,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import RefreshingRegion from "../components/RefreshingRegion";
 import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber, formatPercent, formatSignedMoney } from "../lib/format";
 import { chartColor, donutGradient } from "../lib/chartColors";
+import { noDataFor } from "../lib/delta";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
@@ -75,8 +76,8 @@ export default function CashOverview() {
     [cashDeposits, compactMoney],
   );
 
-  const deltaPositive = (cashDeposits?.delta_abs ?? 0) >= 0;
-  const deltaPct = cashDeposits?.delta_pct;
+  // #224: a compare month with no cash data says so; it isn't a zero baseline.
+  const missingReason = cashDeposits?.snapshot_missing ? noDataFor(cashDeposits.compare_month) : null;
 
   return (
     <PageShell
@@ -101,11 +102,12 @@ export default function CashOverview() {
           <HeroMetricCard
             eyebrow={cashDeposits?.is_live ? "CURRENT CASH" : `CASH — ${cashDeposits?.as_of_month ?? month}`}
             value={money(cashDeposits?.current_total)}
-            deltaChip={
-              deltaPct == null
-                ? null
-                : { text: formatPercent(deltaPct, { signed: true }), positive: deltaPositive }
-            }
+            delta={{
+              abs: cashDeposits?.delta_abs,
+              compareValue: cashDeposits?.snapshot_total,
+              currency: shownCurrency,
+              missingReason,
+            }}
             insightText={`As of ${formatDate(cashDeposits?.current_cash_as_of)} · vs ${cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month"} (${formatDate(cashDeposits?.snapshot_cash_as_of)})`}
           />
 

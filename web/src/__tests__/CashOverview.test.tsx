@@ -224,4 +224,41 @@ describe("CashOverview chart accessibility", () => {
     expect(donut).toHaveAccessibleDescription("Cash by account: DBS 62.5%, OCBC 37.5%");
     expect(screen.getByRole("img", { name: "Six-month cash trend" })).toHaveAccessibleDescription(/Jan '26 S\$ 35K/);
   });
+
+  it("says there is no comparison when the compare month has no cash data (#224)", async () => {
+    mockApi.cashDeposits.mockResolvedValueOnce({
+      ...cashDepositsFixture,
+      snapshot_total: 0,
+      delta_abs: 40000,
+      delta_pct: null,
+      snapshot_missing: true,
+    });
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    expect(await screen.findByText("no comparison: no data for Jan 2026")).toBeInTheDocument();
+    expect(screen.queryByText(/\+S\$ 40,000/)).not.toBeInTheDocument();
+  });
+
+  it("shows the header change as ▲ and its % from the same currency (#224)", async () => {
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+
+    await screen.findByText("CURRENT CASH");
+    // 40,000 vs 36,000: +11.1%.
+    const chip = document.querySelector(".coHeroValueRow .deltaChip");
+    expect(chip).toHaveClass("delta--up");
+    expect(chip).toHaveTextContent("▲+11.1%");
+  });
 });

@@ -596,4 +596,44 @@ describe("WealthOverview panel errors", () => {
     const donut = await screen.findByRole("img", { name: "Allocation donut chart" });
     await waitFor(() => expect(donut).toHaveAccessibleDescription(/IBKR 80.0%, DBS Vickers 20.0%/));
   });
+
+  it("says 'no data for <month>' when a comparison has no baseline (#224)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    const change = (abs: number, pct: number | null, compareMonth: string, baselineMissing: boolean) => ({
+      abs,
+      pct,
+      current_as_of: "2026-05-15T00:00:00+00:00",
+      compare_as_of: baselineMissing ? null : "2026-05-01T00:00:00+00:00",
+      compare_month: compareMonth,
+      compare_value: baselineMissing ? 0 : 100 - abs,
+      baseline_missing: baselineMissing,
+    });
+    mockApi.dashboardSummary.mockResolvedValue({
+      ...makeSummary(100),
+      current_net_worth_change: {
+        vs_prev_month: change(-4, -0.04, "2026-04", false),
+        // A year back has no data at all: the whole figure, not a change.
+        vs_prev_year: change(100, null, "2025-04", true),
+      },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    const yearRow = (await screen.findByText("VS LAST YEAR")).parentElement as HTMLElement;
+    expect(yearRow).toHaveTextContent("no comparison: no data for Apr 2025");
+    expect(yearRow).not.toHaveTextContent("S$ 100");
+    // Last month is real: ▼, the down colour, amount and % together.
+    const monthDelta = (screen.getByText("VS LAST MONTH").parentElement as HTMLElement).querySelector(".delta");
+    expect(monthDelta).toHaveClass("delta--down");
+    expect(monthDelta).toHaveTextContent("▼-S$ 4 (-4.0%)");
+    // The hero chip is the same <Delta>, in the same colour.
+    const chip = document.querySelector(".coHeroValueRow .deltaChip");
+    expect(chip).toHaveClass("delta--down");
+    expect(chip).toHaveTextContent("▼-4.0%");
+  });
 });
