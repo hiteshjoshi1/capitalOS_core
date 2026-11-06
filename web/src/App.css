@@ -184,6 +184,16 @@ a {
   gap: 12px;
 }
 
+/* The page's own controls (month pill, currency, CSV) under its title: on a phone
+   (#239, D-64) and when a page is rendered outside the shell. */
+.dashboardHeaderActions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
 .pageHeaderActions {
   display: flex;
   align-items: center;
@@ -2883,6 +2893,10 @@ a.btn {
 
 .wealthOverviewLayout {
   display: grid;
+  /* One column no wider than the page (#239). The implicit column was sized to its
+     widest child's min-content, so a sideways scroller (Liabilities card filters) or a
+     long KPI row made the whole page wider than a phone. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 18px;
 }
 
@@ -3923,6 +3937,17 @@ a.btn {
   }
 }
 
+/* #239: six bars on a phone leave each label about 50px, so a value like "S$ 60,196"
+   overlapped its neighbour. It wraps at the space instead (currency over amount). */
+@media (max-width: 520px) {
+  .trendBarValue {
+    white-space: normal;
+    text-align: center;
+    line-height: 1.2;
+    max-width: 100%;
+  }
+}
+
 @media (max-width: 980px) {
   .wealthSignalGrid,
   .cashFlowDonutLayout,
@@ -4614,6 +4639,19 @@ a.btn {
   transform: translateY(0);
 }
 
+/* #239: a closed tooltip still takes up layout room, and next to a chip near the right
+   edge of a phone it made the page scroll sideways. On a phone it is taken out of the
+   layout while closed, and when open it is kept inside the screen. */
+@media (max-width: 980px) {
+  .coFreshnessChip:not(:hover):not(:focus-visible) .coFreshnessTooltip {
+    display: none;
+  }
+
+  .coFreshnessTooltip {
+    max-width: calc(100vw - 36px);
+  }
+}
+
 .coFreshnessTooltipRow {
   display: flex;
   justify-content: space-between;
@@ -5071,6 +5109,11 @@ html, body {
     display: none;
   }
 
+  /* A section with no tabs (Liabilities) drew an empty bordered strip (#239). */
+  .appShellTabs:empty {
+    display: none;
+  }
+
   /* Tab spacer not needed on mobile */
   .appShellTabsSpacer {
     display: none;
@@ -5085,24 +5128,11 @@ html, body {
     padding-bottom: 0;
   }
 
-  /* Signals: horizontal scroll on mobile (matches reference) */
+  /* Signals stack on mobile (#239). They were a sideways scroller whose first card grew
+     to its longest line, which pushed the Liabilities card out of sight. */
   .coSignalsGrid {
-    display: flex;
-    flex-direction: row;
-    overflow-x: auto;
+    grid-template-columns: minmax(0, 1fr);
     gap: 12px;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-    padding-bottom: 4px;
-  }
-
-  .coSignalsGrid::-webkit-scrollbar {
-    display: none;
-  }
-
-  .coSignalCard {
-    flex: 0 0 auto;
-    min-width: 180px;
   }
 
   /* Allocation card: stack donut above legend */
@@ -5169,6 +5199,29 @@ html, body {
     flex-wrap: wrap;
     gap: 8px;
   }
+
+  /* #239: the account pill is just the avatar on a phone. The name stays readable to
+     screen readers (visually hidden, not display: none), so the menu keeps its name. */
+  .appShellUserPill {
+    padding: 4px;
+  }
+
+  .appShellUserLabel {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .appShellUserAvatarFrame {
+    width: 36px;
+    height: 36px;
+  }
 }
 
 @media (max-width: 680px) {
@@ -5184,6 +5237,7 @@ html, body {
   .coHeroDeltaRow {
     flex-direction: column;
     gap: 12px;
+    align-items: flex-start; /* #239: stacked deltas line up with the value, not centred */
   }
 
   /* Donut: match reference 170×170 / inner 108×108 */
@@ -6508,15 +6562,16 @@ html, body {
   .ccHeroGrid > :first-child {
     grid-column: 1 / -1;
   }
+  /* minmax(0, …), not 1fr (#239): a plain 1fr column grows to its chart's min-content. */
   .ccGridMain,
   .ccChargesAndLedger {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 720px) {
   .ccHeroGrid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
   .ccChargeAlert {
     align-items: flex-start;
