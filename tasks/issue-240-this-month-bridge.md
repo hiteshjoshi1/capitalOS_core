@@ -40,6 +40,13 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/240
 - Provider/Model: `anthropic/claude-opus-5.5`
 - Last Updated: `2026-11-06`
 
+- Test-instance follow-up (copy of the real data): a holding priced on one side only (a crypto
+  token with no quote at the month-end) put its whole change in Unexplained, and dust tokens that
+  lost their quote made the Markets note read "23 holdings without a price". Now the change in
+  quantity is split at the priced side's price and rate, only the unpriced side's value stays
+  unsplit, and the note counts holdings whose unsplit change is at least 1 in the base currency
+  (`UNSPLIT_COUNT_MIN`). Sums unchanged (start + lines + unexplained = end).
+
 ## Deterministic Gate Results (Codex Mutable)
 - `lint`: `pass` — `make verify`
 - `typecheck`: `pass` — `make verify`
