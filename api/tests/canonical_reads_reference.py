@@ -12,6 +12,19 @@ return.
 Do not "fix" anything here. When a reader's rule changes on purpose, change this
 copy in the same PR and list the change (before/after) in the PR and the
 decision log, so the parity test keeps pinning everything else.
+
+Intended changes so far, each an opt-in argument whose default is the old rule,
+so the old behaviour stays pinned too (the parity test shows on which inputs
+the two differ):
+
+- #242 (D-62): ``ref_positions(owner_key="broker_account")``: the newest
+  snapshot per broker account, not per legacy account (``latest_canonical``
+  groups and joins by ``ba.id``).
+- #242 (D-62): ``ref_coverage(flex_routed=True)``: positions and broker cash of
+  a Flex-owned legacy account only from its Flex broker account, and its
+  uploaded balances left out (the value readers' Flex routing).
+- #242 (D-62): held positions' "today" is the app clock's date; the SQL here
+  takes ``today`` as an argument, so nothing changes in this copy.
 """
 
 from __future__ import annotations
@@ -90,10 +103,14 @@ def ref_positions(
     current_user_id: int,
     anchor_date: date,
     include_nav_accounts: bool = False,
+    owner_key: str = "legacy_account",
 ) -> list[dict[str, Any]]:
     """
     Return position-like dicts from portfolio_position_snapshots for accounts
     that have canonical position data.
+
+    ``owner_key="broker_account"`` (#242, D-62): the newest snapshot per broker
+    account instead of per legacy account.
 
     IBKR Flex accounts have NAV snapshots (handled by
     latest_authoritative_nav_by_legacy_account) and are excluded by default to
@@ -104,6 +121,8 @@ def ref_positions(
     Returned dicts use the dashboard's canonical position shape so callers do
     not need to hand-write SQL against portfolio_position_snapshots.
     """
+    assert owner_key in ("legacy_account", "broker_account")
+    owner = "ba.legacy_account_id" if owner_key == "legacy_account" else "ba.id"
     q = text(
         """
         WITH flex_authority_accounts AS (""" + _flex_authority_accounts_cte() + """),
@@ -120,7 +139,7 @@ def ref_positions(
         + """)
         ),
         latest_canonical AS (
-          SELECT ba.legacy_account_id AS account_id, MAX(ps.report_date) AS report_date
+          SELECT """ + owner + """ AS account_id, MAX(ps.report_date) AS report_date
           FROM portfolio_position_snapshots ps
           JOIN broker_accounts ba ON ba.id = ps.broker_account_id
           JOIN accounts acc ON acc.id = ba.legacy_account_id
@@ -161,7 +180,7 @@ def ref_positions(
         + account_scope_sql("acc")
         + """)
             AND """ + account_open_sql("acc") + """
-          GROUP BY ba.legacy_account_id
+          GROUP BY """ + owner + """
         ),
         sym_asset AS (
           SELECT LOWER(symbol) AS sym, MIN(id) AS asset_id
@@ -234,7 +253,7 @@ def ref_positions(
         JOIN latest_canonical lc
           ON lc.report_date = ps.report_date
         JOIN broker_accounts ba ON ba.id = ps.broker_account_id
-         AND ba.legacy_account_id = lc.account_id
+         AND """ + owner + """ = lc.account_id
         JOIN accounts acc ON acc.id = ba.legacy_account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
@@ -479,9 +498,14 @@ def ref_coverage(
     include_positions: bool = True,
     include_nav: bool = True,
     include_cash: bool = True,
+    flex_routed: bool = False,
 ) -> date | None:
     """
     Return the effective canonical snapshot date at/before ``anchor_date``.
+
+    ``flex_routed=True`` (#242, D-62): Flex routing as the value readers apply
+    it (positions and broker cash only from a Flex-owned account's Flex broker
+    account; its uploaded balances left out).
 
     This mirrors the old dashboard snapshot semantics from legacy
     ``positions``: if the dashboard can compute a boundary view from latest
@@ -490,6 +514,16 @@ def ref_coverage(
     staleness is exposed separately as freshness metadata; it should not make
     the whole net-worth snapshot disappear.
     """
+    routed_ba = """
+              AND (
+                NOT EXISTS (SELECT 1 FROM flex_authority_accounts faa WHERE faa.account_id = ba.legacy_account_id)
+                OR EXISTS (
+                  SELECT 1 FROM flex_authority_accounts faa
+                  WHERE faa.account_id = ba.legacy_account_id AND faa.broker_account_id = ba.id
+                )
+              )""" if flex_routed else ""
+    not_flex_owned = """
+              AND NOT EXISTS (SELECT 1 FROM flex_authority_accounts faa WHERE faa.account_id = abs.account_id)""" if flex_routed else ""
     selected: list[str] = []
     if include_positions:
         selected.append(
@@ -521,7 +555,7 @@ def ref_coverage(
               AND ("""
             + account_scope_sql("acc")
             + """)
-              AND """ + account_open_sql("acc") + """
+              AND """ + account_open_sql("acc") + routed_ba + """
             GROUP BY ba.legacy_account_id
             """
         )
@@ -555,7 +589,7 @@ def ref_coverage(
               AND ("""
             + account_scope_sql("acc")
             + """)
-              AND """ + account_open_sql("acc") + """
+              AND """ + account_open_sql("acc") + not_flex_owned + """
             GROUP BY abs.account_id
             """
         )
@@ -571,15 +605,16 @@ def ref_coverage(
               AND ("""
             + account_scope_sql("acc")
             + """)
-              AND """ + account_open_sql("acc") + """
+              AND """ + account_open_sql("acc") + routed_ba + """
             GROUP BY ba.legacy_account_id
             """
         )
     if not selected:
         return None
+    flex_cte = ("flex_authority_accounts AS (" + _flex_authority_accounts_cte() + "),") if flex_routed else ""
     q = text(
         """
-        WITH latest AS (
+        WITH """ + flex_cte + """ latest AS (
         """
         + "\nUNION ALL\n".join(selected)
         + """
