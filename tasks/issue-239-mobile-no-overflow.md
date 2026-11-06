@@ -50,6 +50,11 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/239
 - Provider/Model: `claude-code/claude-opus-5-5`
 - Last Updated: `2026-11-06`
 
+- Batch CI follow-up: on CI (Linux fonts) /crypto was 388px wide: the mobile `.coExposureGrid` used
+  a bare `1fr` column, as wide as the longest wallet address in "Connected wallets". Now
+  `minmax(0, 1fr)`, and `.listRowMeta` wraps long values (`overflow-wrap: anywhere`). Every route in
+  the guard now fits at 375, 360 and 340px locally, which leaves room for wider CI fonts.
+
 ## Deterministic Gate Results (Codex Mutable)
 - See the PR description for command output and counts.
 
