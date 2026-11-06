@@ -7,8 +7,7 @@ from typing import Any, Dict, List
 
 from sqlalchemy.orm import Session
 
-from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account, latest_authoritative_nav_by_legacy_account
 from app.valuation import fx
 from app.valuation.holdings import _stock_exposure
 from app.valuation.prices import (

@@ -11,56 +11,30 @@ before the anchor) reads nothing.
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from typing import Any, Dict
 
-from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.auth_context import account_scope_sql
-from app.portfolio.account_open import account_open_sql
-from app.portfolio.authority import authoritative_sql
-from app.portfolio.canonical_reads import canonical_account_balance_rows, canonical_position_rows_by_legacy_account
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.canonical_reads import (
+    canonical_account_balance_rows,
+    canonical_card_statement_rows,
+    canonical_position_rows_by_legacy_account,
+    latest_authoritative_nav_by_legacy_account,
+)
 from app.valuation.clock import _date_only
-from app.valuation.facts import CARD_STATEMENT_MAX_AGE_DAYS
 from app.valuation.state import _credit_card_account_ids
 
 
 def _card_statement_dates(db: Session, anchor_date: date, current_user_id: int) -> Dict[int, date]:
-    rows = db.execute(
-        text(
-            """
-            SELECT abs.account_id, MAX(abs.as_of_date) AS as_of_date
-            FROM account_balance_snapshots abs
-            JOIN accounts a ON a.id = abs.account_id
-            WHERE a.account_type = 'CREDIT_CARD'
-              AND abs.balance_type = 'credit_balance'
-              AND """
-            + authoritative_sql("abs")
-            + """
-              AND abs.as_of_date <= :anchor_date
-              AND abs.as_of_date >= :oldest
-              AND """
-            + account_open_sql("a")
-            + """
-              AND """
-            + account_scope_sql("a")
-            + """
-            GROUP BY abs.account_id
-            """
-        ),
-        {
-            "anchor_date": anchor_date,
-            "oldest": anchor_date - timedelta(days=CARD_STATEMENT_MAX_AGE_DAYS),
-            "current_user_id": current_user_id,
-        },
-    ).mappings().all()
+    """Each card's statement date at the anchor (newest within the age limit)."""
     out: Dict[int, date] = {}
-    for row in rows:
+    for row in canonical_card_statement_rows(db, current_user_id=current_user_id, anchor_date=anchor_date):
         as_of = _date_only(row["as_of_date"])
         if as_of is not None:
-            out[int(row["account_id"])] = as_of
+            account_id = int(row["account_id"])
+            if account_id not in out or as_of > out[account_id]:
+                out[account_id] = as_of
     return out
 
 

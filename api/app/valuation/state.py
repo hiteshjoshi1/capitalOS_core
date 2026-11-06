@@ -10,8 +10,11 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 from app.crypto.valuation import latest_wallet_valuation
-from app.portfolio.canonical_reads import canonical_account_balance_rows, canonical_snapshot_coverage_as_of
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
+from app.portfolio.canonical_reads import (
+    canonical_account_balance_rows,
+    canonical_snapshot_coverage_as_of,
+    latest_authoritative_nav_by_legacy_account,
+)
 from app.valuation import clock, fx
 from app.valuation.clock import _date_only, _iso_value, _normalize_ts
 from app.valuation.prices import _canonical_base_currency

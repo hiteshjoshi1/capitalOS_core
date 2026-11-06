@@ -1,27 +1,22 @@
 """
-Canonical portfolio read services for Phase 3/4 dashboard migration.
+Canonical portfolio read services: the readers every page values accounts with.
 
-Provides read-path functions that source facts from the canonical portfolio
-tables (portfolio_position_snapshots, portfolio_cash_balance_snapshots,
-portfolio_data_completeness, account_balance_snapshots) instead of the legacy
-positions / transactions tables.
+Each reader is a thin select over ``app.portfolio.effective_facts`` (#231, #130
+10.2), which defines once which fact rows count at an anchor: authority, owner
+and open account, latest per account, carry-forward, Flex routing and NAV
+coverage. A reader adds only its own columns and joins (platforms, assets).
 
-Design rules:
-- IBKR Flex accounts are covered by NAV snapshots (latest_authoritative_nav_by_legacy_account).
-  Position and cash reads here EXCLUDE those accounts to avoid double-counting.
+- IBKR Flex accounts are valued by their NAV (``latest_authoritative_nav_by_legacy_account``);
+  position reads exclude them unless a detail view opts in (``include_nav_accounts``).
 - Sharekhan / DBS Vickers accounts have canonical position snapshots written by
-  the upload adapter (Phase 2).  These are the primary targets for Phase 3.
+  the upload adapter.
 - If broker_instruments.asset_id is set, asset metadata is pulled from assets.
   Otherwise a symbol-based fallback lookup is attempted so that geography and
   platform allocation remain equivalent to legacy reads.
-
-Phase 4 additions:
-- account_balance_snapshots is the new canonical table for non-security cash
-  balances (bank cash, broker cash, stablecoin cash, etc.).
-- canonical_account_balance_rows() returns one normalized shape that surfaces
-  both account_balance_snapshots rows and any portfolio_cash_balance_snapshots
-  rows that have NOT yet been promoted, so dashboard/net-worth callers can read
-  from a single abstraction without knowing the source.
+- account_balance_snapshots is the canonical table for non-security cash
+  balances (bank cash, broker cash, stablecoin cash, card statement balances).
+  canonical_account_balance_rows() returns one normalized shape over it and any
+  portfolio_cash_balance_snapshots rows not covered by it.
 - Future adapters writing cash facts MUST write to account_balance_snapshots,
   not to positions(asset_class='CASH').
 """
@@ -34,102 +29,9 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.auth_context import account_scope_sql
-from app.portfolio.account_open import account_open_sql
-from app.portfolio.authority import FLEX_FACT_SCOPE, FLEX_SOURCE_KIND, authoritative_sql, window_covers_sql
+from app.portfolio import effective_facts as ef
 from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account  # noqa: F401  (one read layer)
 from app.valuation_cache import valuation_cached
-
-_IBKR_FLEX_SOURCE_KIND = FLEX_SOURCE_KIND
-_IBKR_FLEX_FACT_SCOPE = FLEX_FACT_SCOPE
-
-
-def _flex_authority_accounts_cte() -> str:
-    """Body of the ``flex_authority_accounts`` CTE: (legacy account, broker account)
-    pairs where IBKR Flex is the authority at :anchor_date (its window covers the
-    anchor) and has written a fact that counts at or before it (#140).
-
-    The window only routes the legacy account to its Flex broker account; whether
-    a row counts is its authority_status (``authoritative_sql``)."""
-    return (
-        """
-          SELECT ba.legacy_account_id AS account_id, ba.id AS broker_account_id
-          FROM portfolio_source_authority_windows aw
-          JOIN broker_accounts ba ON ba.id = aw.broker_account_id
-          JOIN broker_connections bc ON bc.id = ba.connection_id
-          JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE aw.source_kind = :ibkr_flex_source_kind
-            AND aw.fact_scope = :ibkr_flex_fact_scope
-            AND """
-        + window_covers_sql("aw", ":anchor_date")
-        + """
-            AND ba.legacy_account_id IS NOT NULL
-            AND bc.platform_code = 'IBKR'
-            AND (
-              EXISTS (
-                SELECT 1 FROM portfolio_nav_snapshots ns
-                WHERE ns.broker_account_id = ba.id
-                  AND ns.report_date <= :anchor_date
-                  AND """
-        + authoritative_sql("ns")
-        + """
-              )
-              OR EXISTS (
-                SELECT 1 FROM portfolio_position_snapshots ps
-                WHERE ps.broker_account_id = ba.id
-                  AND ps.report_date <= :anchor_date
-                  AND """
-        + authoritative_sql("ps")
-        + """
-              )
-              OR EXISTS (
-                SELECT 1 FROM portfolio_cash_balance_snapshots cs
-                WHERE cs.broker_account_id = ba.id
-                  AND cs.report_date <= :anchor_date
-                  AND """
-        + authoritative_sql("cs")
-        + """
-              )
-            )
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-        """
-    )
-
-# SQL fragment that tests whether a legacy account has any authoritative
-# canonical position snapshots at/before a given anchor date.
-# Bind params required: :anchor_date, :current_user_id  (plus p.account_id in context)
-_CANONICAL_POSITION_EXISTS_SQL = """
-    EXISTS (
-        SELECT 1
-        FROM broker_accounts _cba
-        JOIN portfolio_position_snapshots _cps ON _cps.broker_account_id = _cba.id
-        WHERE _cba.legacy_account_id = {account_id_col}
-          AND _cps.report_date <= :anchor_date
-          AND """ + authoritative_sql("_cps") + """
-    )
-"""
-
-# SQL fragment that tests whether a legacy account has any authoritative
-# canonical NAV snapshots at/before a given anchor date.
-# Used to exclude IBKR Flex accounts from the canonical position read.
-_CANONICAL_NAV_EXISTS_SQL = """
-    EXISTS (
-        SELECT 1
-        FROM broker_accounts _nba
-        JOIN portfolio_nav_snapshots _nns ON _nns.broker_account_id = _nba.id
-        WHERE _nba.legacy_account_id = {account_id_col}
-          AND _nns.report_date <= :anchor_date
-          AND """ + authoritative_sql("_nns") + """
-    )
-"""
-
-
-def has_canonical_position_snapshot_sql(account_id_col: str = "p.account_id") -> str:
-    """Return an EXISTS sub-expression testing for canonical position facts."""
-    return _CANONICAL_POSITION_EXISTS_SQL.format(account_id_col=account_id_col)
 
 
 @valuation_cached(shared=True)
@@ -155,63 +57,8 @@ def canonical_position_rows_by_legacy_account(
     """
     q = text(
         """
-        WITH flex_authority_accounts AS (""" + _flex_authority_accounts_cte() + """),
-        nav_covered_accounts AS (
-          SELECT DISTINCT ba.legacy_account_id AS account_id
-          FROM portfolio_nav_snapshots ns
-          JOIN broker_accounts ba ON ba.id = ns.broker_account_id
-          JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE ns.report_date <= :anchor_date
-            AND """ + authoritative_sql("ns") + """
-            AND ba.legacy_account_id IS NOT NULL
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-        ),
-        latest_canonical AS (
-          SELECT ba.legacy_account_id AS account_id, MAX(ps.report_date) AS report_date
-          FROM portfolio_position_snapshots ps
-          JOIN broker_accounts ba ON ba.id = ps.broker_account_id
-          JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE ps.report_date <= :anchor_date
-            AND """ + authoritative_sql("ps") + """
-            AND ba.legacy_account_id IS NOT NULL
-            AND (
-              NOT EXISTS (
-                SELECT 1
-                FROM flex_authority_accounts faa
-                WHERE faa.account_id = ba.legacy_account_id
-              )
-              OR EXISTS (
-                SELECT 1
-                FROM flex_authority_accounts faa
-                WHERE faa.account_id = ba.legacy_account_id
-                  AND faa.broker_account_id = ba.id
-              )
-            )
-            AND (
-              NOT EXISTS (
-                SELECT 1
-                FROM nav_covered_accounts nca
-                WHERE nca.account_id = ba.legacy_account_id
-              )
-              OR (
-                :include_nav_accounts
-                AND EXISTS (
-                  SELECT 1
-                  FROM portfolio_nav_snapshots ns
-                  WHERE ns.broker_account_id = ba.id
-                    AND ns.report_date <= :anchor_date
-                    AND """ + authoritative_sql("ns") + """
-                )
-              )
-            )
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-            AND """ + account_open_sql("acc") + """
-          GROUP BY ba.legacy_account_id
-        ),
+        WITH flex_authority_accounts AS (""" + ef.flex_authority_accounts_cte() + """),
+        effective_positions AS (""" + ef.effective_positions_sql() + """),
         sym_asset AS (
           SELECT LOWER(symbol) AS sym, MIN(id) AS asset_id
           FROM assets
@@ -251,13 +98,7 @@ def canonical_position_rows_by_legacy_account(
           COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
           COALESCE(pl_by_code.platform_type, pl.platform_type) AS platform_type,
           COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
-          EXISTS (
-            SELECT 1
-            FROM portfolio_nav_snapshots ns
-            WHERE ns.broker_account_id = ba.id
-              AND ns.report_date <= :anchor_date
-              AND """ + authoritative_sql("ns") + """
-          ) AS has_nav_snapshot,
+          """ + ef.has_nav_sql("ba") + """ AS has_nav_snapshot,
           ps.report_date AS report_date,
           CAST(ps.quantity AS DOUBLE PRECISION) AS quantity,
           CASE
@@ -279,11 +120,8 @@ def canonical_position_rows_by_legacy_account(
           CAST(ps.market_value_base AS DOUBLE PRECISION) AS snapshot_market_value_base,
           CAST(ps.cost_basis_local AS DOUBLE PRECISION) AS snapshot_cost_basis_local,
           CAST(ps.cost_basis_base AS DOUBLE PRECISION) AS snapshot_cost_basis_base
-        FROM portfolio_position_snapshots ps
-        JOIN latest_canonical lc
-          ON lc.report_date = ps.report_date
+        FROM effective_positions ps
         JOIN broker_accounts ba ON ba.id = ps.broker_account_id
-         AND ba.legacy_account_id = lc.account_id
         JOIN accounts acc ON acc.id = ba.legacy_account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
         LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
@@ -296,37 +134,6 @@ def canonical_position_rows_by_legacy_account(
         LEFT JOIN map_exchange mx ON mx.asset_id = a.id
         LEFT JOIN map_exchange mx_sym ON mx_sym.asset_id = a_sym.id AND bi.asset_id IS NULL
         LEFT JOIN map_exchange mx_norm ON mx_norm.asset_id = a_norm.id AND bi.asset_id IS NULL AND a_sym.id IS NULL
-        WHERE """ + authoritative_sql("ps") + """
-          AND (
-            NOT EXISTS (
-              SELECT 1
-              FROM flex_authority_accounts faa
-              WHERE faa.account_id = ba.legacy_account_id
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM flex_authority_accounts faa
-              WHERE faa.account_id = ba.legacy_account_id
-                AND faa.broker_account_id = ba.id
-            )
-          )
-          AND (
-            NOT EXISTS (
-              SELECT 1
-              FROM nav_covered_accounts nca
-              WHERE nca.account_id = ba.legacy_account_id
-            )
-            OR (
-              :include_nav_accounts
-              AND EXISTS (
-                SELECT 1
-                FROM portfolio_nav_snapshots ns
-                  WHERE ns.broker_account_id = ba.id
-                    AND ns.report_date <= :anchor_date
-                    AND """ + authoritative_sql("ns") + """
-              )
-            )
-          )
         """
     )
     rows = db.execute(
@@ -335,8 +142,7 @@ def canonical_position_rows_by_legacy_account(
             "anchor_date": anchor_date,
             "current_user_id": current_user_id,
             "include_nav_accounts": include_nav_accounts,
-            "ibkr_flex_source_kind": _IBKR_FLEX_SOURCE_KIND,
-            "ibkr_flex_fact_scope": _IBKR_FLEX_FACT_SCOPE,
+            **ef.flex_binds(),
         },
     ).mappings().all()
     out: list[dict[str, Any]] = []
@@ -347,57 +153,41 @@ def canonical_position_rows_by_legacy_account(
     return out
 
 
-def canonical_cash_rows_by_legacy_account(
+@valuation_cached(shared=True)
+def latest_authoritative_nav_by_legacy_account(
     db: Session,
     *,
     current_user_id: int,
     anchor_date: date,
 ) -> list[dict[str, Any]]:
-    """
-    Return cash-like dicts from portfolio_cash_balance_snapshots.
-
-    Unlike position snapshots, cash snapshots are written by IBKR Flex (Phase 1)
-    as well as any future broker that provides currency-level cash detail.
-    Upload adapters (Sharekhan, DBS Vickers) do NOT write cash snapshots.
-
-    Returned dicts have keys: account_id, currency, value (in base currency).
-    Callers must still FX-convert 'value' when base_currency is not the report base.
-
-    Note: cash_balance_base is already in the broker account's base currency so
-    it can be used directly after the caller's FX lookup.
-    """
-    q = text(
-        """
-        WITH latest AS (
-          SELECT cs.broker_account_id, MAX(cs.report_date) AS report_date
-          FROM portfolio_cash_balance_snapshots cs
-          JOIN broker_accounts ba ON ba.id = cs.broker_account_id
-          JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE cs.report_date <= :anchor_date
-            AND """ + authoritative_sql("cs") + """
-            AND ba.legacy_account_id IS NOT NULL
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-            AND """ + account_open_sql("acc") + """
-          GROUP BY cs.broker_account_id
-        )
-        SELECT
-          ba.legacy_account_id AS account_id,
-          cs.currency,
-          CAST(cs.cash_balance AS DOUBLE PRECISION) AS balance_local,
-          CAST(cs.cash_balance_base AS DOUBLE PRECISION) AS balance_base,
-          CAST(cs.fx_rate_to_base AS DOUBLE PRECISION) AS fx_rate
-        FROM portfolio_cash_balance_snapshots cs
-        JOIN latest l
-          ON l.broker_account_id = cs.broker_account_id
-         AND l.report_date = cs.report_date
-        JOIN broker_accounts ba ON ba.id = cs.broker_account_id
-        WHERE """ + authoritative_sql("cs") + """
-        """
-    )
-    rows = db.execute(q, {"anchor_date": anchor_date, "current_user_id": current_user_id}).mappings().all()
-    return [dict(r) for r in rows]
+    """Each broker account's NAV at the anchor (``effective_nav_sql``), with its
+    legacy account and platform. (Also importable from ``app.portfolio.ibkr_flex``,
+    where it used to live.)"""
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              ba.legacy_account_id,
+              ns.broker_account_id,
+              ns.report_date,
+              ns.base_currency,
+              ns.cash_base,
+              ns.stock_base,
+              ns.total_nav_base,
+              COALESCE(pl.code, acc.platform) AS platform,
+              pl.platform_type AS platform_type,
+              COALESCE(pl.country, acc.country) AS country
+            FROM ("""
+            + ef.effective_nav_sql()
+            + """) ns
+            JOIN broker_accounts ba ON ba.id = ns.broker_account_id
+            JOIN accounts acc ON acc.id = ba.legacy_account_id
+            LEFT JOIN platforms pl ON pl.id = acc.platform_id
+            """
+        ),
+        {"anchor_date": anchor_date, "current_user_id": current_user_id},
+    ).mappings().all()
+    return [dict(row) for row in rows]
 
 
 @valuation_cached(shared=True)
@@ -410,18 +200,15 @@ def canonical_account_balance_rows(
     """
     Return normalized cash/balance dicts for all accounts visible to this user.
 
-    **Phase 4 canonical cash read abstraction.**
-
     Merges two source tables into one uniform shape so that dashboard and
     net-worth callers do not need to know where a balance originated:
 
-    1. ``account_balance_snapshots`` — new canonical table; preferred source for
-       any account that has rows here.
-    2. ``portfolio_cash_balance_snapshots`` — broker-specific detail written by
-       IBKR Flex (Phase 1).  Rows from this table are surfaced for accounts
-       that do NOT already have a matching authoritative row in
-       ``account_balance_snapshots`` for the same (account, date), preventing
-       double-counting.
+    1. ``account_balance_snapshots``: each account's newest balances at the
+       anchor (``effective_uploaded_balances_sql``), unless IBKR Flex owns the
+       account at the anchor.
+    2. ``portfolio_cash_balance_snapshots``: broker cash written by IBKR Flex,
+       each broker account's newest at the anchor (``effective_broker_cash_sql``),
+       for accounts with no rows from (1), preventing double-counting.
 
     Each returned dict has the keys:
     - ``account_id``     — legacy accounts.id
@@ -444,28 +231,9 @@ def canonical_account_balance_rows(
     q = text(
         """
         WITH
-        flex_authority_accounts AS (""" + _flex_authority_accounts_cte() + """),
+        flex_authority_accounts AS (""" + ef.flex_authority_accounts_cte() + """),
 
-        -- 1. Latest authoritative rows from the new canonical table.
-        abs_latest AS (
-          SELECT
-            abs.account_id,
-            MAX(abs.as_of_date) AS as_of_date
-          FROM account_balance_snapshots abs
-          JOIN accounts acc ON acc.id = abs.account_id
-          WHERE abs.as_of_date <= :anchor_date
-            AND """ + authoritative_sql("abs") + """
-            AND NOT EXISTS (
-              SELECT 1
-              FROM flex_authority_accounts faa
-              WHERE faa.account_id = abs.account_id
-            )
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-            AND """ + account_open_sql("acc") + """
-          GROUP BY abs.account_id
-        ),
+        -- 1. The newest balances per account, unless Flex owns the account.
         abs_rows AS (
           SELECT
             abs.account_id,
@@ -482,53 +250,18 @@ def canonical_account_balance_rows(
             CAST(abs.fx_rate_to_base AS DOUBLE PRECISION) AS fx_rate,
             'account_balance_snapshots' AS source,
             CAST(abs.as_of_date AS TEXT) AS as_of_date
-          FROM account_balance_snapshots abs
+          FROM (""" + ef.effective_uploaded_balances_sql() + """) abs
           JOIN accounts acc ON acc.id = abs.account_id
           LEFT JOIN platforms pl ON pl.id = acc.platform_id
           LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
-          JOIN abs_latest al
-            ON al.account_id = abs.account_id
-           AND al.as_of_date = abs.as_of_date
-          WHERE """ + authoritative_sql("abs") + """
         ),
 
-        -- 2. Accounts already covered by the new canonical table.
+        -- 2. Accounts already covered by (1).
         abs_covered_accounts AS (
           SELECT DISTINCT account_id FROM abs_rows
         ),
 
-        -- 3. Latest authoritative portfolio_cash_balance_snapshots for accounts
-        --    NOT yet covered by account_balance_snapshots.
-        pcbs_latest AS (
-          SELECT
-            cs.broker_account_id,
-            MAX(cs.report_date) AS report_date
-          FROM portfolio_cash_balance_snapshots cs
-          JOIN broker_accounts ba ON ba.id = cs.broker_account_id
-          JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE cs.report_date <= :anchor_date
-            AND """ + authoritative_sql("cs") + """
-            AND ba.legacy_account_id IS NOT NULL
-            AND ba.legacy_account_id NOT IN (SELECT account_id FROM abs_covered_accounts)
-            AND (
-              NOT EXISTS (
-                SELECT 1
-                FROM flex_authority_accounts faa
-                WHERE faa.account_id = ba.legacy_account_id
-              )
-              OR EXISTS (
-                SELECT 1
-                FROM flex_authority_accounts faa
-                WHERE faa.account_id = ba.legacy_account_id
-                  AND faa.broker_account_id = ba.id
-              )
-            )
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-            AND """ + account_open_sql("acc") + """
-          GROUP BY cs.broker_account_id
-        ),
+        -- 3. The newest broker cash per broker account, for accounts not in (2).
         pcbs_rows AS (
           SELECT
             ba.legacy_account_id AS account_id,
@@ -545,15 +278,13 @@ def canonical_account_balance_rows(
             CAST(cs.fx_rate_to_base   AS DOUBLE PRECISION) AS fx_rate,
             'portfolio_cash_balance_snapshots' AS source,
             CAST(cs.report_date AS TEXT) AS as_of_date
-          FROM portfolio_cash_balance_snapshots cs
-          JOIN pcbs_latest pcl
-            ON pcl.broker_account_id = cs.broker_account_id
-           AND pcl.report_date = cs.report_date
+          FROM (""" + ef.effective_broker_cash_sql(
+            extra_where=["ba.legacy_account_id NOT IN (SELECT account_id FROM abs_covered_accounts)"]
+        ) + """) cs
           JOIN broker_accounts ba ON ba.id = cs.broker_account_id
           JOIN accounts acc ON acc.id = ba.legacy_account_id
           LEFT JOIN platforms pl ON pl.id = acc.platform_id
           LEFT JOIN platforms pl_by_code ON pl_by_code.code = acc.platform
-          WHERE """ + authoritative_sql("cs") + """
         )
 
         SELECT * FROM abs_rows
@@ -564,12 +295,7 @@ def canonical_account_balance_rows(
     )
     rows = db.execute(
         q,
-        {
-            "anchor_date": anchor_date,
-            "current_user_id": current_user_id,
-            "ibkr_flex_source_kind": _IBKR_FLEX_SOURCE_KIND,
-            "ibkr_flex_fact_scope": _IBKR_FLEX_FACT_SCOPE,
-        },
+        {"anchor_date": anchor_date, "current_user_id": current_user_id, **ef.flex_binds()},
     ).mappings().all()
     return [dict(r) for r in rows]
 
@@ -585,7 +311,10 @@ def canonical_snapshot_coverage_as_of(
     include_cash: bool = True,
 ) -> date | None:
     """
-    Return the effective canonical snapshot date at/before ``anchor_date``.
+    Return the effective canonical snapshot date at/before ``anchor_date``: the
+    newest of the accounts' latest fact dates (positions of accounts not valued
+    by a NAV, plus a NAV account's own positions; NAV; balances except card
+    statements, which are liabilities, not cash coverage (#207); broker cash).
 
     This mirrors the old dashboard snapshot semantics from legacy
     ``positions``: if the dashboard can compute a boundary view from latest
@@ -593,114 +322,35 @@ def canonical_snapshot_coverage_as_of(
     fact date available at or before the boundary. Individual component
     staleness is exposed separately as freshness metadata; it should not make
     the whole net-worth snapshot disappear.
+
+    Unlike the value readers it doesn't apply Flex routing (rule 5), as before
+    #231: an uploaded fact of an account Flex owns can still set the date (see
+    tasks/issue-231-canonical-read-layer.md, "kept differences").
     """
     selected: list[str] = []
     if include_positions:
         selected.append(
-            """
-            SELECT ba.legacy_account_id AS account_id, MAX(ps.report_date) AS as_of_date
-            FROM portfolio_position_snapshots ps
-            JOIN broker_accounts ba ON ba.id = ps.broker_account_id
-            JOIN accounts acc ON acc.id = ba.legacy_account_id
-            WHERE ps.report_date <= :anchor_date
-              AND """ + authoritative_sql("ps") + """
-              AND ba.legacy_account_id IS NOT NULL
-              AND (
-                NOT EXISTS (
-                  SELECT 1
-                  FROM portfolio_nav_snapshots ns_account
-                  JOIN broker_accounts ba_account ON ba_account.id = ns_account.broker_account_id
-                  WHERE ba_account.legacy_account_id = ba.legacy_account_id
-                    AND ns_account.report_date <= :anchor_date
-                    AND """ + authoritative_sql("ns_account") + """
-                )
-                OR EXISTS (
-                  SELECT 1
-                  FROM portfolio_nav_snapshots ns_same_broker
-                  WHERE ns_same_broker.broker_account_id = ba.id
-                    AND ns_same_broker.report_date <= :anchor_date
-                    AND """ + authoritative_sql("ns_same_broker") + """
-                )
-              )
-              AND ("""
-            + account_scope_sql("acc")
-            + """)
-              AND """ + account_open_sql("acc") + """
-            GROUP BY ba.legacy_account_id
-            """
+            ef.latest_per_account_sql(
+                ef.POSITIONS,
+                ef.POSITIONS_OWNER,
+                where=[ef.nav_rule_sql("ba", include_nav_accounts="TRUE")],
+            )
         )
     if include_nav:
-        selected.append(
-            """
-            SELECT ba.legacy_account_id AS account_id, MAX(ns.report_date) AS as_of_date
-            FROM portfolio_nav_snapshots ns
-            JOIN broker_accounts ba ON ba.id = ns.broker_account_id
-            JOIN accounts acc ON acc.id = ba.legacy_account_id
-            WHERE ns.report_date <= :anchor_date
-              AND """ + authoritative_sql("ns") + """
-              AND ba.legacy_account_id IS NOT NULL
-              AND ("""
-            + account_scope_sql("acc")
-            + """)
-              AND """ + account_open_sql("acc") + """
-            GROUP BY ba.legacy_account_id
-            """
-        )
+        selected.append(ef.latest_per_account_sql(ef.NAV, ef.BROKER_ACCOUNT_OWNER))
     if include_cash:
         selected.append(
-            """
-            SELECT abs.account_id AS account_id, MAX(abs.as_of_date) AS as_of_date
-            FROM account_balance_snapshots abs
-            JOIN accounts acc ON acc.id = abs.account_id
-            WHERE abs.as_of_date <= :anchor_date
-              AND """ + authoritative_sql("abs") + """
-              -- A card statement balance is a liability, not cash coverage (#207).
-              AND abs.balance_type <> 'credit_balance'
-              AND ("""
-            + account_scope_sql("acc")
-            + """)
-              AND """ + account_open_sql("acc") + """
-            GROUP BY abs.account_id
-            """
+            ef.latest_per_account_sql(ef.BALANCES, ef.BALANCE_OWNER, where=["abs.balance_type <> 'credit_balance'"])
         )
-        selected.append(
-            """
-            SELECT ba.legacy_account_id AS account_id, MAX(cs.report_date) AS as_of_date
-            FROM portfolio_cash_balance_snapshots cs
-            JOIN broker_accounts ba ON ba.id = cs.broker_account_id
-            JOIN accounts acc ON acc.id = ba.legacy_account_id
-            WHERE cs.report_date <= :anchor_date
-              AND """ + authoritative_sql("cs") + """
-              AND ba.legacy_account_id IS NOT NULL
-              AND ("""
-            + account_scope_sql("acc")
-            + """)
-              AND """ + account_open_sql("acc") + """
-            GROUP BY ba.legacy_account_id
-            """
-        )
+        selected.append(ef.latest_per_account_sql(ef.BROKER_CASH, ef.BROKER_ACCOUNT_OWNER))
     if not selected:
         return None
     q = text(
-        """
-        WITH latest AS (
-        """
-        + "\nUNION ALL\n".join(selected)
-        + """
-        )
-        SELECT MAX(as_of_date) AS as_of_date
-        FROM latest
-        """
+        "WITH latest AS (\n"
+        + "\nUNION ALL\n".join(f"SELECT as_of_date FROM ({sql}) _component_{i}" for i, sql in enumerate(selected))
+        + "\n)\nSELECT MAX(as_of_date) AS as_of_date FROM latest"
     )
-    row = db.execute(
-        q,
-        {
-            "anchor_date": anchor_date,
-            "current_user_id": current_user_id,
-            "ibkr_flex_source_kind": _IBKR_FLEX_SOURCE_KIND,
-            "ibkr_flex_fact_scope": _IBKR_FLEX_FACT_SCOPE,
-        },
-    ).mappings().one()
+    row = db.execute(q, {"anchor_date": anchor_date, "current_user_id": current_user_id}).mappings().one()
     return row["as_of_date"]
 
 
@@ -710,28 +360,16 @@ def get_data_completeness_status(
     *,
     current_user_id: int,
     anchor_date: date,
-  ) -> list[dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Return the latest completeness record per (broker_account, fact_scope)
-    for all canonical accounts visible to this user.
+    for all canonical accounts visible to this user, where it isn't complete.
 
     Incomplete scopes should be surfaced in dashboard responses as
     data-quality / completeness indicators rather than silently omitted.
     """
     q = text(
         """
-        WITH latest AS (
-          SELECT dc.broker_account_id, dc.fact_scope, MAX(dc.report_date) AS report_date
-          FROM portfolio_data_completeness dc
-          JOIN broker_accounts ba ON ba.id = dc.broker_account_id
-          JOIN accounts acc ON acc.id = ba.legacy_account_id
-          WHERE dc.report_date <= :anchor_date
-            AND ("""
-        + account_scope_sql("acc")
-        + """)
-            AND """ + account_open_sql("acc") + """
-          GROUP BY dc.broker_account_id, dc.fact_scope
-        )
         SELECT
           ba.legacy_account_id AS account_id,
           COALESCE(NULLIF(acc.platform, ''), pl.code) AS platform,
@@ -739,11 +377,7 @@ def get_data_completeness_status(
           dc.completeness_status,
           dc.missing_reason,
           dc.report_date
-        FROM portfolio_data_completeness dc
-        JOIN latest l
-          ON l.broker_account_id = dc.broker_account_id
-         AND l.fact_scope = dc.fact_scope
-         AND l.report_date = dc.report_date
+        FROM (""" + ef.effective_completeness_sql() + """) dc
         JOIN broker_accounts ba ON ba.id = dc.broker_account_id
         JOIN accounts acc ON acc.id = ba.legacy_account_id
         LEFT JOIN platforms pl ON pl.id = acc.platform_id
@@ -762,26 +396,16 @@ def canonical_card_statement_rows(
     current_user_id: int,
     anchor_date: date,
 ) -> list[dict[str, Any]]:
-    """Card statement balances (``credit_balance`` snapshots, #207) within
-    CARD_STATEMENT_MAX_AGE_DAYS on or before the anchor."""
+    """Each card's statement balance at the anchor (``effective_card_statements_sql``):
+    its newest ``credit_balance`` snapshots (#207), at most CARD_STATEMENT_MAX_AGE_DAYS
+    old (D-52), one row per currency."""
     rows = db.execute(
         text(
             """
             SELECT abs.account_id, abs.as_of_date, abs.currency, abs.balance_local
-            FROM account_balance_snapshots abs
-            JOIN accounts a ON a.id = abs.account_id
-            WHERE a.account_type = 'CREDIT_CARD'
-              AND abs.balance_type = 'credit_balance'
-              AND """
-            + authoritative_sql("abs")
-            + """
-              AND abs.as_of_date <= :anchor_date
-              AND abs.as_of_date >= :oldest
-              AND """
-            + account_open_sql("a")
-            + """
-              AND """
-            + account_scope_sql("a")
+            FROM (""" + ef.effective_card_statements_sql() + """) abs
+            ORDER BY abs.account_id, abs.currency
+            """
         ),
         {
             "anchor_date": anchor_date,

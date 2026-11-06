@@ -11,11 +11,12 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
 from app.crypto.valuation import latest_wallet_valuation
-from app.portfolio.account_open import account_open_sql
-from app.portfolio.authority import authoritative_sql
-from app.portfolio.canonical_reads import canonical_card_statement_rows, canonical_position_rows_by_legacy_account
+from app.portfolio.canonical_reads import (
+    canonical_card_statement_rows,
+    canonical_position_rows_by_legacy_account,
+    latest_authoritative_nav_by_legacy_account,
+)
 from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
-from app.portfolio.ibkr_flex import latest_authoritative_nav_by_legacy_account
 from app.valuation import clock, fx
 from app.valuation.clock import (
     _add_months,
