@@ -26,6 +26,7 @@ import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
+import { cashFlowNarrative, cashFlowPeriodView, periodEyebrow } from "../lib/cashFlowPeriod";
 
 type MerchantsView = "all" | "dining";
 type CashFlowWorkspaceTab = "overview" | "income" | "expenses";
@@ -36,6 +37,13 @@ type CategoryGroup = {
 };
 
 type FormatMoney = (value?: number | null, decimals?: number) => string;
+
+/** The comparison line under a KPI ("1–6 Oct: S$ 6,100", #243). */
+const KPI_PRIOR_STYLE = { margin: 0, fontSize: 12 } as const;
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
 
 
 const DINING_CATEGORY_KEYWORDS = [
@@ -101,10 +109,6 @@ function defaultSelectionValue(transaction: CashFlowTransaction) {
 
 function formatPercent(value?: number | null) {
   return fmt.formatPercent(value);
-}
-
-function formatMonthName(month: string): string {
-  return fmt.formatMonth(month).replace(/ \d{4}$/, "");
 }
 
 function formatMonthYear(month: string): string {
@@ -530,7 +534,9 @@ function OverviewTab({
   detail: CashFlowDetail;
   formatMoney: FormatMoney;
 }) {
-  const delta = detail.analytics.free_cash_flow_change_vs_prior_month;
+  // #243: the open month is month to date, compared with the same days last month.
+  const period = cashFlowPeriodView(detail);
+  const delta = period.netChange;
   const heroDelta =
     delta == null
       ? null
@@ -538,35 +544,41 @@ function OverviewTab({
           abs: delta,
           currency: detail.base_currency,
           show: "abs" as const,
-          baseline: detail.analytics.prior_month ? `vs ${formatMonthName(detail.analytics.prior_month)}` : null,
+          baseline: period.priorLabel ? `vs ${period.priorLabel}` : null,
         };
+  const toDate = period.monthToDate ? " to date" : "";
 
   return (
     <>
       <HeroMetricCard
-        eyebrow="Net cash flow this month"
+        eyebrow={periodEyebrow("Net cash flow", period)}
         value={fmt.formatSignedMoney(detail.net, detail.base_currency)}
         delta={heroDelta}
-        insightText={`Saved ${formatPercent(detail.savings_rate)} of income · Burn rate ${formatPercent(detail.analytics.burn_rate)}`}
+        insightText={`Saved ${formatPercent(detail.savings_rate)} of income`}
       />
 
       <section>
         <div className="cashFlowKpiGrid">
           <article className="card cashFlowKpiCard">
-            <p className="wealthEyebrow">Total inflows</p>
+            <p className="wealthEyebrow">Total inflows{toDate}</p>
             <p className="cashFlowKpiValue">{formatMoney(detail.income_total)}</p>
+            {period.priorInflows != null && period.priorLabel ? (
+              <p className="muted" style={KPI_PRIOR_STYLE}>{capitalize(period.priorLabel)}: {formatMoney(period.priorInflows)}</p>
+            ) : null}
           </article>
           <article className="card cashFlowKpiCard">
-            <p className="wealthEyebrow">Total outflows</p>
+            <p className="wealthEyebrow">Total outflows{toDate}</p>
             <p className="cashFlowKpiValue">{formatMoney(detail.expense_total)}</p>
+            {period.priorOutflows != null && period.priorLabel ? (
+              <p className="muted" style={KPI_PRIOR_STYLE}>{capitalize(period.priorLabel)}: {formatMoney(period.priorOutflows)}</p>
+            ) : null}
           </article>
           <article className="card cashFlowKpiCard">
-            <p className="wealthEyebrow">Savings rate</p>
+            <p className="wealthEyebrow">Savings rate{toDate}</p>
             <p className="cashFlowKpiValue">{formatPercent(detail.savings_rate)}</p>
-          </article>
-          <article className="card cashFlowKpiCard">
-            <p className="wealthEyebrow">Burn rate</p>
-            <p className="cashFlowKpiValue">{formatPercent(detail.analytics.burn_rate)}</p>
+            {period.priorSavingsRate != null && period.priorLabel ? (
+              <p className="muted" style={KPI_PRIOR_STYLE}>{capitalize(period.priorLabel)}: {formatPercent(period.priorSavingsRate)}</p>
+            ) : null}
           </article>
         </div>
       </section>
@@ -605,8 +617,8 @@ function OverviewTab({
           <h2 className="cashFlowSectionTitle">Vs. last month</h2>
         </div>
         <div className="card">
-          <p className="cashFlowNarrative">{findAnswer(detail.analytics.answers, "What changed versus last month?")}</p>
-          <DriverRows items={detail.analytics.deterioration_drivers} formatMoney={formatMoney} />
+          <p className="cashFlowNarrative">{cashFlowNarrative(period, detail.month, detail.base_currency)}</p>
+          <DriverRows items={period.deteriorationDrivers} formatMoney={formatMoney} />
         </div>
       </section>
 
@@ -637,7 +649,7 @@ function IncomeTab({
   return (
     <>
       <HeroMetricCard
-        eyebrow="Total inflows this month"
+        eyebrow={periodEyebrow("Total inflows", cashFlowPeriodView(detail))}
         value={formatMoney(detail.income_total)}
         insightText={findAnswer(detail.analytics.answers, "What percentage of inflows came from salary, dividends, and transfers?")}
       />
@@ -697,6 +709,7 @@ function ExpensesTab({
 }) {
   const [merchantsView, setMerchantsView] = useState<MerchantsView>("all");
   const diningMerchants = topDiningMerchantItems(detail.expenses.transactions);
+  const period = cashFlowPeriodView(detail);
   const activeMerchantItems: CashFlowBreakdownItem[] =
     merchantsView === "dining"
       ? diningMerchants
@@ -705,7 +718,7 @@ function ExpensesTab({
   return (
     <>
       <HeroMetricCard
-        eyebrow="Total outflows this month"
+        eyebrow={periodEyebrow("Total outflows", period)}
         value={formatMoney(detail.expense_total)}
         insightText={findAnswer(detail.analytics.answers, "Where did my money go this month?")}
       />
@@ -767,9 +780,10 @@ function ExpensesTab({
         <div className="cashFlowSectionHeading">
           <p className="wealthEyebrow">Getting worse</p>
           <h2 className="cashFlowSectionTitle">Categories trending up</h2>
+          {period.priorLabel ? <p className="muted">Compared with {period.priorLabel}.</p> : null}
         </div>
         <div className="card">
-          <DriverRows items={detail.analytics.outflow_category_deltas} formatMoney={formatMoney} />
+          <DriverRows items={period.outflowCategoryDeltas} formatMoney={formatMoney} />
         </div>
       </section>
 

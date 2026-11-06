@@ -3794,6 +3794,64 @@
           }
         ],
         "burn_rate": 0.3671,
+        "comparison": {
+          "basis": "full_month",
+          "deterioration_drivers": [
+            {
+              "current_amount": -1210.4,
+              "delta_amount": -1210.4,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Shopping",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": -0.719,
+              "delta_amount": -0.719,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Withholding tax",
+              "prior_amount": 0.0
+            }
+          ],
+          "inflows": 10367.5539,
+          "inflows_change": 2367.5539,
+          "month": "2026-02",
+          "month_days": 28,
+          "net": 6561.4348,
+          "net_change": 2033.4348,
+          "outflow_category_deltas": [
+            {
+              "current_amount": 1210.4,
+              "delta_amount": 1210.4,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Shopping",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 0.719,
+              "delta_amount": 0.719,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Withholding tax",
+              "prior_amount": 0.0
+            }
+          ],
+          "outflows": 3806.119,
+          "outflows_change": 334.119,
+          "prior_end": "2026-01-31",
+          "prior_inflows": 8000.0,
+          "prior_month": "2026-01",
+          "prior_month_days": 31,
+          "prior_net": 4528.0,
+          "prior_outflows": 3472.0,
+          "prior_savings_rate": 0.566,
+          "prior_start": "2026-01-01",
+          "prior_through_day": 31,
+          "savings_rate": 0.6329,
+          "through_day": 28
+        },
         "deterioration_drivers": [
           {
             "current_amount": -1210.4,
@@ -4230,6 +4288,88 @@
           }
         ],
         "burn_rate": 8.5101,
+        "comparison": {
+          "basis": "month_to_date",
+          "deterioration_drivers": [
+            {
+              "current_amount": 0.0,
+              "delta_amount": -2200.0,
+              "delta_percent": -1.0,
+              "direction": "deteriorated",
+              "label": "Salary",
+              "prior_amount": 2200.0
+            },
+            {
+              "current_amount": -712.8541,
+              "delta_amount": -712.8541,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Travel",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": -660.0,
+              "delta_amount": -660.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Groceries",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 0.0,
+              "delta_amount": -160.3636,
+              "delta_percent": -1.0,
+              "direction": "deteriorated",
+              "label": "Interest",
+              "prior_amount": 160.3636
+            },
+            {
+              "current_amount": 5.0885,
+              "delta_amount": -2.1017,
+              "delta_percent": -0.2923,
+              "direction": "deteriorated",
+              "label": "Dividend",
+              "prior_amount": 7.1902
+            }
+          ],
+          "inflows": 455.0885,
+          "inflows_change": -1912.4653,
+          "month": "2026-03",
+          "month_days": 31,
+          "net": -3417.7656,
+          "net_change": -1979.2005,
+          "outflow_category_deltas": [
+            {
+              "current_amount": 712.8541,
+              "delta_amount": 712.8541,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Travel",
+              "prior_amount": 0.0
+            },
+            {
+              "current_amount": 660.0,
+              "delta_amount": 660.0,
+              "delta_percent": null,
+              "direction": "deteriorated",
+              "label": "Groceries",
+              "prior_amount": 0.0
+            }
+          ],
+          "outflows": 3872.8541,
+          "outflows_change": 66.7351,
+          "prior_end": "2026-02-18",
+          "prior_inflows": 2367.5539,
+          "prior_month": "2026-02",
+          "prior_month_days": 28,
+          "prior_net": -1438.5652,
+          "prior_outflows": 3806.119,
+          "prior_savings_rate": -0.6076,
+          "prior_start": "2026-02-01",
+          "prior_through_day": 18,
+          "savings_rate": -7.5101,
+          "through_day": 18
+        },
         "deterioration_drivers": [
           {
             "current_amount": 0.0,

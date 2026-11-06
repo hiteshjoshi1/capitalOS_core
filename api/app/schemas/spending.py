@@ -96,6 +96,40 @@ class CashFlowDiagnosticAnswer(BaseModel):
     answer: str
 
 
+class CashFlowComparisonOut(BaseModel):
+    """The month vs the month before, like for like (#243, D-63).
+
+    The open month is month to date: its days 1..``through_day`` (today, in the
+    user's timezone) against the previous month's days 1..``prior_through_day``
+    (the same day, clamped to that month's length). A past (or future) month is
+    the whole month against the whole previous month, the same figures as the
+    analytics' ``prior_month_net`` / ``free_cash_flow_change_vs_prior_month``.
+    """
+
+    basis: str  # "month_to_date" | "full_month"
+    month: str
+    month_days: int
+    through_day: int
+    prior_month: str
+    prior_month_days: int
+    prior_through_day: int
+    prior_start: str  # ISO date, first day counted
+    prior_end: str  # ISO date, last day counted (inclusive)
+    inflows: float
+    outflows: float
+    net: float
+    savings_rate: float | None
+    prior_inflows: float
+    prior_outflows: float
+    prior_net: float
+    prior_savings_rate: float | None
+    inflows_change: float
+    outflows_change: float
+    net_change: float
+    outflow_category_deltas: list[CashFlowCategoryDeltaItem]
+    deterioration_drivers: list[CashFlowCategoryDeltaItem]
+
+
 class CashFlowAnalyticsOut(BaseModel):
     burn_rate: float | None
     prior_month: str | None
@@ -114,6 +148,7 @@ class CashFlowAnalyticsOut(BaseModel):
     trend: list[CashFlowTrendPoint]
     waterfall: CashFlowWaterfallOut
     answers: list[CashFlowDiagnosticAnswer]
+    comparison: CashFlowComparisonOut | None = None
 
 
 class CashFlowDetailOut(FxStatusFields):
