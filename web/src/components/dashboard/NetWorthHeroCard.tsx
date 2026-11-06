@@ -2,6 +2,7 @@ import type { DashboardSummary } from "../../lib/api";
 import { Link } from "react-router-dom";
 import Delta from "../Delta";
 import { missingBaselineReason } from "../../lib/delta";
+import { formatPercent } from "../../lib/format";
 
 type NetWorthHeroCardProps = {
   summary: DashboardSummary | null;
@@ -93,13 +94,13 @@ export default function NetWorthHeroCard({
 
       <div className="legend">
         <span className="dot">
-          <i style={{ background: "var(--alloc-cash)" }}></i>Cash {cashPct.toFixed(1)}%
+          <i style={{ background: "var(--alloc-cash)" }}></i>Cash {formatPercent(cashPct, { scale: "points" })}
         </span>
         <span className="dot">
-          <i style={{ background: "var(--alloc-stocks)" }}></i>Stocks {stocksPct.toFixed(1)}%
+          <i style={{ background: "var(--alloc-stocks)" }}></i>Stocks {formatPercent(stocksPct, { scale: "points" })}
         </span>
         <span className="dot">
-          <i style={{ background: "var(--alloc-crypto)" }}></i>Crypto {cryptoPct.toFixed(1)}%
+          <i style={{ background: "var(--alloc-crypto)" }}></i>Crypto {formatPercent(cryptoPct, { scale: "points" })}
         </span>
       </div>
     </div>

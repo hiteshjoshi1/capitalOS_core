@@ -371,8 +371,8 @@ describe("CryptoHoldings races", () => {
       </ThemeProvider>,
     );
 
-    // SOL: S$ 533 now, -S$ 20 vs last month -> -3.6% of S$ 553, not the USD -4.0%.
-    const sol = (await screen.findByText("-S$ 20 (-3.6%)")).closest(".delta");
+    // SOL: S$ 533 now, -S$ 20.00 vs last month -> -3.6% of S$ 553, not the USD -4.0%.
+    const sol = (await screen.findByText("-S$ 20.00 (-3.6%)")).closest(".delta");
     expect(sol).toHaveClass("delta--down");
     expect(sol).toHaveTextContent("▼");
     expect(screen.queryByText(/-4\.0%/)).not.toBeInTheDocument();

@@ -49,7 +49,7 @@ function formatChipAsOf(iso?: string | null): string {
   if (days == null) return "no data";
   if (days === 0) return "today";
   if (days === 1) return "yesterday";
-  const label = fmt.formatDate(iso).replace(/ \d{4}$/, "");
+  const label = fmt.formatDayMonth(iso);
   return `${label} · ${days}d`;
 }
 
@@ -604,7 +604,7 @@ export default function WealthOverview() {
                           </strong>
                           <span className="coHoldingPct">
                             {row.delta_pct == null
-                              ? `vs ${row.compare_month}`
+                              ? `vs ${fmt.formatMonth(row.compare_month, "medium")}`
                               : fmt.formatPercent(row.delta_pct, { signed: true })}
                           </span>
                         </div>

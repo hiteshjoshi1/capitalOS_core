@@ -138,7 +138,7 @@ export default function StockHoldings() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = summary?.base_currency || baseCurrency;
-  const formatMoney = (value?: number | null, decimals = 0) => fmt.formatMoney(value, shownCurrency, { decimals });
+  const formatMoney = (value?: number | null, decimals?: number) => fmt.formatMoney(value, shownCurrency, { decimals });
   const formatCompactMoney = (value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency);
   const formatQuantity = (value?: number | null) => fmt.formatNumber(value, 4);
   /** Prices and native P&L: 2 decimals, in the quote currency. */
@@ -234,8 +234,8 @@ export default function StockHoldings() {
           h.avg_cost ?? "",
           h.latest_price ?? "",
           h.quote_currency ?? "",
-          pnl != null ? pnl.toFixed(2) : "",
-          pnlPct != null ? pnlPct.toFixed(2) : "",
+          fmt.formatCsvNumber(pnl),
+          fmt.formatCsvNumber(pnlPct),
         ]
           .map(escapeCsvValue)
           .join(","),

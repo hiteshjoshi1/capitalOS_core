@@ -8,10 +8,6 @@ type MonthControlProps = {
   onMonthChange: (month: string) => void;
 };
 
-function formatMonthLabel(month: string): string {
-  return formatMonth(month);
-}
-
 export default function MonthControl({ month, onMonthChange }: MonthControlProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const openMonthPicker = (): boolean => {
@@ -48,7 +44,7 @@ export default function MonthControl({ month, onMonthChange }: MonthControlProps
           }
         }}
       >
-        <span aria-hidden="true">{formatMonthLabel(month)}</span>
+        <span aria-hidden="true">{formatMonth(month)}</span>
         <input
           ref={inputRef}
           className="coPillBtnInput"

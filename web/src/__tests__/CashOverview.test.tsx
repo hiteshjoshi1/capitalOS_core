@@ -310,6 +310,6 @@ describe("CashOverview stablecoins", () => {
     expect(screen.getByText("ETHEREUM")).toBeInTheDocument();
     expect(screen.getByText("SOLANA")).toBeInTheDocument();
     expect(screen.getByText("S$ 1,000")).toBeInTheDocument();
-    expect(screen.getByText("S$ 500")).toBeInTheDocument();
+    expect(screen.getByText("S$ 500.00")).toBeInTheDocument();
   });
 });

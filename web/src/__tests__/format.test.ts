@@ -5,8 +5,10 @@ import {
   currencyPrefix,
   currentMonth,
   directionClass,
+  formatCsvNumber,
   formatDate,
   formatDateTime,
+  formatDayMonth,
   formatDelta,
   formatMoney,
   formatMoneyCompact,
@@ -15,6 +17,7 @@ import {
   formatPercent,
   formatSignedMoney,
   isBaseCurrency,
+  moneyDecimals,
 } from "../lib/format";
 
 describe("formatMoney", () => {
@@ -25,7 +28,7 @@ describe("formatMoney", () => {
     expect(formatMoney(1234, "INR")).toBe("INR 1,234");
     expect(formatMoney(1234, "usd")).toBe("USD 1,234");
     for (const ccy of CURRENCY_OPTIONS) {
-      expect(formatMoney(1, ccy)).toMatch(/^\S+ 1$/);
+      expect(formatMoney(1000, ccy)).toMatch(/^\S+ 1,000$/);
     }
   });
 
@@ -36,7 +39,8 @@ describe("formatMoney", () => {
 
   it("shows zero without a sign, including values that round to zero", () => {
     expect(formatMoney(0, "SGD")).toBe("S$ 0");
-    expect(formatMoney(-0.4, "SGD")).toBe("S$ 0");
+    expect(formatMoney(-0.004, "SGD")).toBe("S$ 0");
+    expect(formatMoney(-0.4, "SGD", { decimals: 0 })).toBe("S$ 0");
     expect(formatSignedMoney(0, "SGD")).toBe("S$ 0");
   });
 
@@ -46,8 +50,16 @@ describe("formatMoney", () => {
     expect(formatMoney(Number.NaN, "SGD")).toBe("—");
   });
 
-  it("rounds to whole units by default and fixes decimals when asked", () => {
+  it("whole units from 1,000 up, 2 decimals below (#254), fixed decimals when asked", () => {
     expect(formatMoney(1234.56, "SGD")).toBe("S$ 1,235");
+    expect(formatMoney(53512.9, "SGD")).toBe("S$ 53,513");
+    expect(formatMoney(999.99, "SGD")).toBe("S$ 999.99");
+    expect(formatMoney(999.996, "SGD")).toBe("S$ 1,000");
+    expect(formatMoney(12.4, "SGD")).toBe("S$ 12.40");
+    expect(formatMoney(-85, "SGD")).toBe("-S$ 85.00");
+    expect(formatSignedMoney(0.5, "USD")).toBe("+USD 0.50");
+    expect(formatMoney(12.4, "SGD", { decimals: 0 })).toBe("S$ 12");
+    expect(formatMoney(1234.5, "SGD", { decimals: 2 })).toBe("S$ 1,234.50");
     expect(formatMoney(53512.9, "SGD", { decimals: 2 })).toBe("S$ 53,512.90");
     expect(formatMoney(11163859.85, "SGD", { decimals: 2 })).toBe("S$ 11,163,859.85");
   });
@@ -63,8 +75,30 @@ describe("formatMoney", () => {
   });
 
   it("works without a currency", () => {
-    expect(formatMoney(12, null)).toBe("12");
+    expect(formatMoney(12, null)).toBe("12.00");
+    expect(formatMoney(1200, null)).toBe("1,200");
     expect(currencyPrefix(undefined)).toBe("");
+  });
+});
+
+describe("moneyDecimals", () => {
+  it("picks decimals by size unless fixed", () => {
+    expect(moneyDecimals(0)).toBe(0);
+    expect(moneyDecimals(0.004)).toBe(0);
+    expect(moneyDecimals(0.01)).toBe(2);
+    expect(moneyDecimals(-999.99)).toBe(2);
+    expect(moneyDecimals(-1000)).toBe(0);
+    expect(moneyDecimals(5, 0)).toBe(0);
+    expect(moneyDecimals(5000, 2)).toBe(2);
+  });
+});
+
+describe("formatCsvNumber", () => {
+  it("prints plain numbers for CSV cells", () => {
+    expect(formatCsvNumber(1234.5)).toBe("1234.50");
+    expect(formatCsvNumber(-3.456, 1)).toBe("-3.5");
+    expect(formatCsvNumber(null)).toBe("");
+    expect(formatCsvNumber(Number.NaN)).toBe("");
   });
 });
 
@@ -74,6 +108,9 @@ describe("formatMoneyCompact", () => {
     expect(formatMoneyCompact(1234567, "SGD")).toBe("S$ 1.2M");
     expect(formatMoneyCompact(11170000, "USD")).toBe("USD 11.2M");
     expect(formatMoneyCompact(950, "HKD")).toBe("HKD 950");
+    // Below 1,000: whole units, never "S$ 537.4".
+    expect(formatMoneyCompact(-537.4, "SGD")).toBe("-S$ 537");
+    expect(formatMoneyCompact(999.6, "SGD")).toBe("S$ 1K");
   });
   it("negative, zero, signed and missing", () => {
     expect(formatMoneyCompact(-35000, "SGD")).toBe("-S$ 35K");
@@ -144,9 +181,18 @@ describe("months and dates", () => {
     expect(formatDate(null)).toBe("—");
   });
 
+  it("formats day and month without a year", () => {
+    expect(formatDayMonth("2026-07-22")).toBe("22 Jul");
+    expect(formatDayMonth(null)).toBe("—");
+  });
+
   it("formats date-times with a 24-hour local time", () => {
     const local = new Date(2026, 9, 29, 11, 50, 12).toISOString();
-    expect(formatDateTime(local)).toBe("29 Oct 2026, 11:50");
+    // The year only when it isn't this year (#254: "4 Nov, 14:05").
+    expect(formatDateTime(local, new Date(2026, 10, 6))).toBe("29 Oct, 11:50");
+    expect(formatDateTime(local, new Date(2027, 0, 2))).toBe("29 Oct 2026, 11:50");
+    expect(formatDateTime("2026-10-29", new Date(2026, 10, 6))).toBe("29 Oct 2026");
+    expect(formatDateTime("garbage")).toBe("—");
     expect(formatDateTime(undefined)).toBe("—");
   });
 

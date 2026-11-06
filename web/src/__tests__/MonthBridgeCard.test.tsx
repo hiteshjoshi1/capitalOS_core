@@ -136,11 +136,11 @@ describe("<MonthBridgeCard>", () => {
     expect(within(screen.getByTestId("bridge-line-markets")).getByText("+S$ 19,400")).toBeInTheDocument();
     expect(within(screen.getByTestId("bridge-line-fx")).getByText("-S$ 2,800")).toBeInTheDocument();
     // The residual is a row like the others, never hidden.
-    expect(within(screen.getByTestId("bridge-line-unexplained")).getByText("-S$ 800")).toBeInTheDocument();
+    expect(within(screen.getByTestId("bridge-line-unexplained")).getByText("-S$ 800.00")).toBeInTheDocument();
     // Markets says how it splits between stocks and crypto.
-    expect(within(screen.getByTestId("bridge-line-markets")).getByText(/stocks & funds \+S\$ 15\.1K · crypto \+S\$ 4\.3K/)).toBeInTheDocument();
+    expect(within(screen.getByTestId("bridge-line-markets")).getByText(/stocks & funds \+S\$ 15,100 · crypto \+S\$ 4,300/)).toBeInTheDocument();
     expect(screen.getByText(/Month to date: flows from 1 Nov 2026/)).toBeInTheDocument();
-    expect(screen.getByText(/Cards owe S\$ 350 more than at the start; card spending is in Cash kept/)).toBeInTheDocument();
+    expect(screen.getByText(/Cards owe S\$ 350.00 more than at the start; card spending is in Cash kept/)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "What moved net worth since the Oct 2026 close" })).toBeInTheDocument();
   });
 
@@ -182,7 +182,7 @@ describe("<MonthBridgeCard>", () => {
     const nvda = await screen.findByTestId("bridge-mover-NVDA");
     expect(nvda).toHaveTextContent("NVDA ▲+S$ 4,100 (price)");
     // A holding sold this month shows its market move, not the sale.
-    expect(screen.getByTestId("bridge-mover-ABT")).toHaveTextContent("ABT ▲+S$ 600 (price)");
+    expect(screen.getByTestId("bridge-mover-ABT")).toHaveTextContent("ABT ▲+S$ 600.00 (price)");
   });
 
   it("lists purchases and sales apart, not as gains or losses", async () => {

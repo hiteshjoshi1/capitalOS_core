@@ -409,7 +409,7 @@ describe("StockHoldings", () => {
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
     fireEvent.click(info);
     expect(screen.getByRole("note")).toHaveTextContent(
-      "Stale price for 700: taken from IBKR's statement of 2026-10-30, because the price job couldn't fetch a quote for it.",
+      "Stale price for 700: taken from IBKR's statement of 30 Oct 2026, because the price job couldn't fetch a quote for it.",
     );
     // Only the fallback holding gets one.
     expect(screen.getAllByRole("button", { name: /price stale\?/ })).toHaveLength(1);

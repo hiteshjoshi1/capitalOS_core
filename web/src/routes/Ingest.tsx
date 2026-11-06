@@ -14,13 +14,6 @@ import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
-function formatPreviewDate(ts?: string | null): string {
-  if (!ts) return "—";
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return "—";
-  return fmt.formatDate(ts);
-}
-
 function jobStatusMeta(status?: string | null): { tone: "good" | "warn" | "neutral"; label: string } {
   if (status === "IMPORTED") return { tone: "good", label: "Completed" };
   if (status === "NEEDS_MAPPING") return { tone: "warn", label: "Needs mapping" };
@@ -404,7 +397,7 @@ export default function Ingest() {
                     ) : (
                       previewRows.map((t, idx) => (
                         <div className="listRow" key={`tx-${idx}`}>
-                          <span className="ingestPreviewDate">{formatPreviewDate(t.ts as string | null)}</span>
+                          <span className="ingestPreviewDate">{fmt.formatDate(t.ts as string | null)}</span>
                           <strong className="ingestPreviewMerchant">{String(t.merchant_counterparty ?? "—")}</strong>
                           <span className="tag">{String(t.category ?? "—")}</span>
                           <strong className="ingestPreviewAmount">{formatPreviewAmount(t.amount, t.currency)}</strong>
@@ -442,7 +435,7 @@ export default function Ingest() {
                     <div className="listRowMain">
                       <div className="listRowTitle">{j.original_filename}</div>
                       <div className="listRowMeta">
-                        {formatPlatformLabel(j.platform)} · Account {j.account_id} · {formatPreviewDate(j.created_at)}
+                        {formatPlatformLabel(j.platform)} · Account {j.account_id} · {fmt.formatDate(j.created_at)}
                       </div>
                     </div>
                     <StatusPill

@@ -19,12 +19,12 @@ const CAUSE_LABEL: Record<string, string> = {
   unknown: "statement value",
 };
 
-/** "+S$ 15.1K stocks, +S$ 4.3K crypto": the line's non-zero parts, compact. */
+/** "stocks +S$ 15,100 · crypto +S$ 4,300": the line's non-zero parts (#254: compact is for chart labels only). */
 function partsSummary(line: BridgeLine, currency: string): string | null {
   const shown = line.parts.filter((part) => Math.abs(part.amount) >= 0.5);
   if (shown.length < 2) return null;
   return shown
-    .map((part) => `${part.label.toLowerCase()} ${fmt.formatMoneyCompact(part.amount, currency, { signed: true })}`)
+    .map((part) => `${part.label.toLowerCase()} ${fmt.formatSignedMoney(part.amount, currency)}`)
     .join(" · ");
 }
 

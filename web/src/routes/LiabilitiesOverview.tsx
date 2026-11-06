@@ -58,7 +58,7 @@ function transactionsToCsv(rows: CreditCardTransaction[]): string {
       t.card_name,
       t.resolved_category || t.category || "Uncategorized",
       t.type,
-      Math.abs(t.amount).toFixed(2),
+      fmt.formatCsvNumber(Math.abs(t.amount)),
     ]
       .map((cell) => csvEscape(String(cell)))
       .join(","),
@@ -96,7 +96,7 @@ export default function LiabilitiesOverview() {
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = data?.base_currency || baseCurrency;
   const formatMoney = useCallback(
-    (value?: number | null, decimals = 0) => fmt.formatMoney(value, shownCurrency, { decimals }),
+    (value?: number | null, decimals?: number) => fmt.formatMoney(value, shownCurrency, { decimals }),
     [shownCurrency],
   );
   const formatMoneyShort = useCallback((value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency), [shownCurrency]);
@@ -290,7 +290,7 @@ export default function LiabilitiesOverview() {
                       {card.available_limit != null && card.available_limit_as_of != null ? (
                         <>
                           <strong>{formatMoney(card.available_limit)}</strong>
-                          <span>as of {card.available_limit_as_of.slice(0, 10)}</span>
+                          <span>as of {fmt.formatDate(card.available_limit_as_of.slice(0, 10))}</span>
                         </>
                       ) : (
                         <strong>Not provided by issuer</strong>
@@ -423,7 +423,7 @@ export default function LiabilitiesOverview() {
                   <p className="wealthEyebrow">Worth a look</p>
                   <h2 className="cashFlowSectionTitle">Notable charges</h2>
                 </div>
-                <span className="muted">Single charges over {formatMoney(NOTABLE_THRESHOLD)}</span>
+                <span className="muted">Single charges over {formatMoney(NOTABLE_THRESHOLD, 0)}</span>
               </div>
               <div className="card">
                 <div className="listRows">
@@ -432,7 +432,7 @@ export default function LiabilitiesOverview() {
                       <div className="listRowMain">
                         <span className="listRowTitle">{tx.merchant_counterparty || tx.description}</span>
                         <span className="listRowMeta">
-                          {tx.ts.slice(0, 10)} · {tx.card_name}
+                          {fmt.formatDate(tx.ts.slice(0, 10))} · {tx.card_name}
                         </span>
                       </div>
                       <span className="tag">{tx.resolved_category?.trim() || "Uncategorized"}</span>
@@ -463,7 +463,7 @@ export default function LiabilitiesOverview() {
                           <div className="listRowTitle">{charge.description}</div>
                           <div className="listRowMeta">
                             <span className="tag">{charge.type}</span>
-                            {charge.card_name} · {charge.ts.slice(0, 10)}
+                            {charge.card_name} · {fmt.formatDate(charge.ts.slice(0, 10))}
                           </div>
                         </div>
                         <div className="listRowValue bad">{formatMoney(Math.abs(charge.amount), 2)}</div>
@@ -534,7 +534,7 @@ export default function LiabilitiesOverview() {
                     <tbody>
                       {data.transactions.map((tx, index) => (
                         <tr key={`${tx.account_id}-${tx.ts}-${index}`}>
-                          <td>{tx.ts.slice(0, 10)}</td>
+                          <td>{fmt.formatDate(tx.ts.slice(0, 10))}</td>
                           <td>{tx.description}</td>
                           <td>{tx.card_name}</td>
                           <td>

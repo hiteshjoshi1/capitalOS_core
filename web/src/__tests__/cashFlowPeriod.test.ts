@@ -4,7 +4,9 @@ import type { CashFlowComparison, CashFlowDetail } from "../lib/api";
 import {
   cashFlowNarrative,
   cashFlowPeriodView,
+  inflowsHeadline,
   monthToDateLabel,
+  outflowsHeadline,
   periodEyebrow,
   priorRangeLabel,
 } from "../lib/cashFlowPeriod";
@@ -158,5 +160,29 @@ describe("cash flow narrative (#243)", () => {
     const noIncome: CashFlowComparison = { ...comparison, prior_inflows: 0, prior_savings_rate: null };
     const text = cashFlowNarrative(cashFlowPeriodView(detailWith(noIncome)), "2026-11", "SGD");
     expect(text).toMatch(/Savings rate can't be compared: one of the periods has no recorded inflows\.$/);
+  });
+});
+
+describe("Cash Flow headlines (#254)", () => {
+  it("names the top three outflow categories with formatted money and shares", () => {
+    const categories = [
+      { label: "Rent", amount: 2500, percent: 0.646 },
+      { label: "Dining", amount: 800.5, percent: 0.207 },
+      { label: "Transport", amount: 570, percent: 0.147 },
+      { label: "Other", amount: 1, percent: 0.0003 },
+    ];
+    expect(outflowsHeadline(categories, "SGD")).toBe(
+      "Most outflows went to Rent S$ 2,500 (64.6%), Dining S$ 800.50 (20.7%) and Transport S$ 570.00 (14.7%).",
+    );
+    expect(outflowsHeadline([], "SGD")).toBe("No outflows recorded yet.");
+  });
+
+  it("names the inflow sources that have money, never a raw number", () => {
+    const sources = [
+      { label: "Salary", amount: 12000, percent: 0.962 },
+      { label: "Transfers", amount: 0, percent: 0 },
+    ];
+    expect(inflowsHeadline(sources, "USD")).toBe("Inflows came from Salary USD 12,000 (96.2%).");
+    expect(inflowsHeadline([{ label: "Transfers", amount: 0, percent: 0 }], "SGD")).toBe("No inflows recorded yet.");
   });
 });
