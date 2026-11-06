@@ -1350,6 +1350,31 @@ export type WealthTopMovers = {
 
 export type NetWorthSinceUpdateChange = NetWorthChange;
 
+/** #249 (D-65): a since-update mover, with what its compare value was priced at. */
+export type SinceUpdateTopMover = WealthTopMover & {
+  /** "quote" (last quote on or before the compare date) | "statement" (its own statement price); null for crypto or an asset not held then. */
+  compare_price_basis?: "quote" | "statement" | null;
+  /** The date of that quote or statement (YYYY-MM-DD). */
+  compare_price_as_of?: string | null;
+  /** Compared with a statement older than the compare date (no usable quote by then) while quote-priced now. */
+  compare_price_fallback?: boolean;
+};
+
+export type SinceUpdateTopMovers = {
+  compare_month: string;
+  gainers: SinceUpdateTopMover[];
+  detractors: SinceUpdateTopMover[];
+};
+
+/** #249 (D-65): how the compare side's stocks and funds were priced, per asset. */
+export type SinceUpdateCompareBasis = {
+  price_date: string | null;
+  holdings: number;
+  quoted: number;
+  statement_priced: number;
+  older_statement_priced: number;
+};
+
 export type NetWorthSinceUpdate = {
   base_currency: string;
   current_as_of: string | null;
@@ -1360,7 +1385,10 @@ export type NetWorthSinceUpdate = {
     stocks_funds?: NetWorthSinceUpdateChange;
     crypto?: NetWorthSinceUpdateChange;
   };
-  top_movers: WealthTopMovers | null;
+  top_movers: SinceUpdateTopMovers | null;
+  /** #249 (D-65): "quoted_at_compare_date": every holding vs its last quote on or before compare_as_of. */
+  basis?: string | null;
+  compare_basis?: SinceUpdateCompareBasis | null;
 };
 
 export type Currency = {

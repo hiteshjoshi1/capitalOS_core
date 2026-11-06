@@ -547,6 +547,64 @@ describe("WealthOverview", () => {
     expect(await screen.findByText("AAPL")).toBeInTheDocument();
     expect(screen.getByText("+S$ 10.00")).toBeInTheDocument();
   });
+
+  it("states what Today compares with and marks a holding compared with an older statement (#249)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    const mover = {
+      asset_class: "STOCK",
+      current_value: 110,
+      previous_value: 100,
+      delta_abs: 10,
+      delta_pct: 0.1,
+      compare_month: "2026-05-14T00:00:00+00:00",
+    };
+    mockApi.netWorthSinceUpdate.mockResolvedValue({
+      base_currency: "SGD",
+      current_as_of: "2026-05-14T00:00:00+00:00",
+      compare_as_of: "2026-05-14T00:00:00+00:00",
+      net_worth_change: {
+        abs: 15,
+        pct: 0.05,
+        current_as_of: "2026-05-14T00:00:00+00:00",
+        compare_as_of: "2026-05-14T00:00:00+00:00",
+        compare_month: "2026-05-14T00:00:00+00:00",
+      },
+      component_change: {},
+      top_movers: {
+        compare_month: "2026-05-14T00:00:00+00:00",
+        gainers: [
+          { ...mover, asset_id: 1, symbol: "AAPL", compare_price_basis: "quote", compare_price_as_of: "2026-05-14", compare_price_fallback: false },
+          { ...mover, asset_id: 3, symbol: "RELIANCE", delta_abs: 5, delta_pct: 0.05, compare_price_basis: "statement", compare_price_as_of: "2026-03-29", compare_price_fallback: true },
+        ],
+        detractors: [],
+      },
+      basis: "quoted_at_compare_date",
+      compare_basis: { price_date: "2026-05-14", holdings: 2, quoted: 1, statement_priced: 1, older_statement_priced: 1 },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Today" }));
+    expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.getByText("+5.0% *")).toHaveAttribute("title", "Compared with its statement price of 29 Mar 2026");
+    expect(screen.getByText("+10.0%")).not.toHaveAttribute("title");
+    expect(
+      screen.getByText(
+        "Moves since 14 May 2026, each holding at its last quote on or before that date. * No quote on or before 14 May 2026: compared with its own, older statement price.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 holding vs an older statement price")).toBeInTheDocument();
+    expect(screen.getByText(/SINCE LAST UPDATE/)).toHaveAttribute(
+      "title",
+      "Moves since 14 May 2026, each holding at its last quote on or before that date.",
+    );
+  });
 });
 
 // #148: currency switches with out-of-order replies.

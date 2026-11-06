@@ -692,7 +692,15 @@
     },
     "/dashboard/net-worth-since-update?base_currency=SGD": {
       "base_currency": "SGD",
+      "basis": "quoted_at_compare_date",
       "compare_as_of": "2026-03-31T00:00:00+00:00",
+      "compare_basis": {
+        "holdings": 4,
+        "older_statement_priced": 0,
+        "price_date": "2026-03-31",
+        "quoted": 4,
+        "statement_priced": 0
+      },
       "component_change": {
         "cash": {
           "abs": 0.0,
