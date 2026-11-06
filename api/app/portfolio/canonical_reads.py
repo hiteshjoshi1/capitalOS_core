@@ -323,34 +323,43 @@ def canonical_snapshot_coverage_as_of(
     staleness is exposed separately as freshness metadata; it should not make
     the whole net-worth snapshot disappear.
 
-    Unlike the value readers it doesn't apply Flex routing (rule 5), as before
-    #231: an uploaded fact of an account Flex owns can still set the date (see
-    tasks/issue-231-canonical-read-layer.md, "kept differences").
+    Flex-routed like the value readers (rule 5, D-62): only the facts a value
+    reader counts can set the date. Positions and broker cash of a legacy account
+    Flex owns come from its Flex broker account, and that account's uploaded
+    balances don't count.
     """
     selected: list[str] = []
     if include_positions:
         selected.append(
             ef.latest_per_account_sql(
                 ef.POSITIONS,
-                ef.POSITIONS_OWNER,
-                where=[ef.nav_rule_sql("ba", include_nav_accounts="TRUE")],
+                ef.BROKER_ACCOUNT_OWNER,
+                where=[ef.flex_routed_sql("ba"), ef.nav_rule_sql("ba", include_nav_accounts="TRUE")],
             )
         )
     if include_nav:
         selected.append(ef.latest_per_account_sql(ef.NAV, ef.BROKER_ACCOUNT_OWNER))
     if include_cash:
         selected.append(
-            ef.latest_per_account_sql(ef.BALANCES, ef.BALANCE_OWNER, where=["abs.balance_type <> 'credit_balance'"])
+            ef.latest_per_account_sql(
+                ef.BALANCES,
+                ef.BALANCE_OWNER,
+                where=["abs.balance_type <> 'credit_balance'", ef.not_flex_owned_sql("acc.id")],
+            )
         )
-        selected.append(ef.latest_per_account_sql(ef.BROKER_CASH, ef.BROKER_ACCOUNT_OWNER))
+        selected.append(ef.latest_per_account_sql(ef.BROKER_CASH, ef.BROKER_ACCOUNT_OWNER, where=[ef.flex_routed_sql("ba")]))
     if not selected:
         return None
     q = text(
-        "WITH latest AS (\n"
+        "WITH flex_authority_accounts AS ("
+        + ef.flex_authority_accounts_cte()
+        + "),\nlatest AS (\n"
         + "\nUNION ALL\n".join(f"SELECT as_of_date FROM ({sql}) _component_{i}" for i, sql in enumerate(selected))
         + "\n)\nSELECT MAX(as_of_date) AS as_of_date FROM latest"
     )
-    row = db.execute(q, {"anchor_date": anchor_date, "current_user_id": current_user_id}).mappings().one()
+    row = db.execute(
+        q, {"anchor_date": anchor_date, "current_user_id": current_user_id, **ef.flex_binds()}
+    ).mappings().one()
     return row["as_of_date"]
 
 

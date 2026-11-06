@@ -18,6 +18,7 @@ import MonthControl from "../components/MonthControl";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 import Delta from "../components/Delta";
+import MonthBridgeCard from "../components/MonthBridgeCard";
 import { missingBaselineReason } from "../lib/delta";
 
 const PORTFOLIO_REFRESH_TOPIC = "portfolio-refresh";
@@ -398,6 +399,9 @@ export default function WealthOverview() {
               </Link>
             </div>
           </article>
+
+          {/* ── This month's bridge (#240): what moved the headline since the last close ── */}
+          <MonthBridgeCard month={month} baseCurrency={selectedBaseCurrency} />
 
           {/* ── Allocation section ─────────────────────────────────────── */}
           <section aria-labelledby="wealth-alloc-heading">

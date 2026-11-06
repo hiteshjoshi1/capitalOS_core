@@ -247,26 +247,32 @@
       "total_crypto_usd": 15775.0,
       "trend": [
         {
+          "is_live": false,
           "month": "2025-11",
           "value": 0.0
         },
         {
+          "is_live": false,
           "month": "2025-12",
           "value": 0.0
         },
         {
+          "is_live": false,
           "month": "2026-01",
           "value": 10022.7273
         },
         {
+          "is_live": false,
           "month": "2026-02",
           "value": 18237.788
         },
         {
+          "is_live": false,
           "month": "2026-03",
           "value": 21154.4931
         },
         {
+          "is_live": true,
           "month": "2026-04",
           "value": 21154.4931
         }
@@ -470,26 +476,32 @@
       "total": 62218.2027,
       "trend": [
         {
+          "is_live": false,
           "month": "2025-10",
           "value": null
         },
         {
+          "is_live": false,
           "month": "2025-11",
           "value": null
         },
         {
+          "is_live": false,
           "month": "2025-12",
           "value": 44032.1101
         },
         {
+          "is_live": false,
           "month": "2026-01",
           "value": 58711.5095
         },
         {
+          "is_live": false,
           "month": "2026-02",
           "value": 63682.8865
         },
         {
+          "is_live": false,
           "month": "2026-03",
           "value": 62218.2027
         }
@@ -578,26 +590,32 @@
       "total": 62218.2027,
       "trend": [
         {
+          "is_live": false,
           "month": "2025-11",
           "value": null
         },
         {
+          "is_live": false,
           "month": "2025-12",
           "value": 44032.1101
         },
         {
+          "is_live": false,
           "month": "2026-01",
           "value": 58711.5095
         },
         {
+          "is_live": false,
           "month": "2026-02",
           "value": 63682.8865
         },
         {
+          "is_live": false,
           "month": "2026-03",
           "value": 62218.2027
         },
         {
+          "is_live": true,
           "month": "2026-04",
           "value": 62218.2027
         }
@@ -606,12 +624,13 @@
     "/dashboard/geography-exposure?month=2026-04&base_currency=SGD": {
       "as_of": "2026-03-31T00:00:00+00:00",
       "base_currency": "SGD",
+      "is_live": true,
       "items": [
         {
           "cash": 46100.0,
           "country": "SG",
           "crypto": 0.0,
-          "percent": 48.68,
+          "percent": 48.67,
           "stocks_funds": 0.0,
           "total": 46100.0
         },
@@ -619,28 +638,28 @@
           "cash": 5255.9908,
           "country": "US",
           "crypto": 19344.1244,
-          "percent": 33.2,
-          "stocks_funds": 6839.1705,
-          "total": 31439.2857
+          "percent": 33.26,
+          "stocks_funds": 6906.2212,
+          "total": 31506.3364
         },
         {
           "cash": 10862.212,
           "country": "HK",
           "crypto": 0.0,
-          "percent": 17.0,
-          "stocks_funds": 5239.3743,
-          "total": 16101.5863
+          "percent": 16.93,
+          "stocks_funds": 5170.6612,
+          "total": 16032.8731
         },
         {
           "cash": 0.0,
           "country": "IN",
           "crypto": 0.0,
-          "percent": 1.12,
-          "stocks_funds": 1064.7738,
-          "total": 1064.7738
+          "percent": 1.14,
+          "stocks_funds": 1084.4918,
+          "total": 1084.4918
         }
       ],
-      "total": 94705.6457
+      "total": 94723.7013
     },
     "/dashboard/net-worth-change?month=2026-04&base_currency=SGD": {
       "as_of_month": "2026-04",
@@ -1119,28 +1138,34 @@
       ],
       "trend": [
         {
+          "is_live": false,
           "month": "2025-11",
           "value": null
         },
         {
+          "is_live": false,
           "month": "2025-12",
           "value": null
         },
         {
+          "is_live": false,
           "month": "2026-01",
           "value": 10967.8161
         },
         {
+          "is_live": false,
           "month": "2026-02",
           "value": 11516.3878
         },
         {
+          "is_live": false,
           "month": "2026-03",
           "value": 13143.3186
         },
         {
+          "is_live": true,
           "month": "2026-04",
-          "value": 13143.3186
+          "value": 13161.3742
         }
       ]
     },

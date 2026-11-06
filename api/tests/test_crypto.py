@@ -413,7 +413,7 @@ def test_crypto_summary_exposes_snapshot_delta_and_refresh_movements(client: Tes
     assert body["total_crypto_base"] == 3600.0
     assert body["snapshot_total_base"] == 3000.0
     assert body["snapshot_delta_base"] == 600.0
-    assert body["trend"][-1] == {"month": "2026-05", "value": 3600.0}
+    assert body["trend"][-1] == {"month": "2026-05", "value": 3600.0, "is_live": False}
     assert body["chain_exposure"][0]["chain"] == "ethereum"
     holding = body["top_holdings"][0]
     assert holding["price_change_usd"] == 300.0

@@ -99,6 +99,11 @@ def test_risk_summary_equals_dashboard_summary_fields(household):
         full = _get(client, f"/dashboard/summary?month={month}&base_currency={ccy}&compare=prev_month,prev_year")
         for key in ("as_of_month", "base_currency", "snapshot_day", "is_live", "net_worth", *FX_FIELDS):
             assert lean[key] == full[key], (scenario, month, ccy, key)
+        # #241: the net worth the shares divide by is the one at the positions'
+        # anchor: /summary's live current_net_worth, or a past month's net_worth.
+        expected_view = full["current_net_worth"] if full["is_live"] else full["net_worth"]
+        assert lean["view_net_worth"] == pytest.approx(expected_view), (scenario, month, ccy)
+        assert lean["basis"] == ("live" if full["is_live"] else "month_end"), (scenario, month, ccy)
         fields = list(RiskHolding.model_fields)
         assert lean["top_holdings"] == [{field: row[field] for field in fields} for row in full["top_holdings"]], (
             scenario,

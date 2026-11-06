@@ -158,8 +158,17 @@ class RiskSummaryResponse(FxStatusFields):
     # As /summary: top_holdings are live for the open (or a future) month, the
     # month-end snapshot for a past month (#223). Same rows, same order.
     is_live: Optional[bool] = None
+    # /summary's month-end net worth (for the open month, the last completed one).
     net_worth: NetWorth
     top_holdings: List[RiskHolding]
+    # #241: one point in time per month. The basis of every Risk figure: "live"
+    # for the open (or a future) month, "month_end" for a past month; the net
+    # worth the shares divide by at that point (live: the Overview headline,
+    # /summary's current_net_worth; a past month: its month-end net_worth);
+    # and the anchor they're taken at (the live instant, or the month-end boundary).
+    basis: Optional[str] = None
+    view_net_worth: Optional[NetWorth] = None
+    net_worth_boundary_at: Optional[str] = None
 
 
 class NetWorthSinceUpdateResponse(BaseModel):
@@ -306,6 +315,9 @@ class GeographyExposureOut(BaseModel):
     base_currency: str
     total: float
     items: list[GeographyExposureItem]
+    # #241: live (quote-priced) for the open month, like the Overview headline; a
+    # past month is its month-end snapshot (D-55's rule).
+    is_live: Optional[bool] = None
 
 
 class QuoteFreshnessSummary(BaseModel):
@@ -328,6 +340,10 @@ class StockGeographyBreakdownItem(BaseModel):
 class MiniTrendPoint(BaseModel):
     month: str
     value: Optional[float] = None
+    # #241 (D-61): the open month's bar is live, month to date (the page's live
+    # headline); every other bar is a completed month-end, or None when that
+    # month-end hasn't passed.
+    is_live: bool = False
 
 
 class CashCurrencyBreakdownItem(BaseModel):
@@ -479,3 +495,107 @@ class WealthTimelineResponse(BaseModel):
 class WealthTimelineBackfillResponse(BaseModel):
     months_written: int
     base_currency: str
+
+
+# ─── This month's bridge (#240, D-60) ────────────────────────────────────────
+
+
+class BridgePart(BaseModel):
+    """One part of a bridge line; a line's parts add up to its amount."""
+
+    key: str
+    label: str
+    amount: float
+
+
+class BridgeNote(BaseModel):
+    """Context for a line that is not part of its amount (e.g. transfers between
+    your own accounts, sources with no data in the period)."""
+
+    key: str
+    label: str
+    amount: Optional[float] = None
+
+
+class BridgeLine(BaseModel):
+    """One cause of the change. ``status`` is ok | partial | unavailable; when it
+    isn't ok, ``reason`` says why and what couldn't be computed is in ``unexplained``."""
+
+    key: str
+    label: str
+    amount: float
+    status: str = "ok"
+    reason: Optional[str] = None
+    parts: List[BridgePart] = Field(default_factory=list)
+    notes: List[BridgeNote] = Field(default_factory=list)
+
+
+class BridgeEndpoint(BaseModel):
+    """The bridge's start (the month-end close Overview compares with) or end
+    (Overview's headline: live now, or that month's month-end)."""
+
+    month: str
+    # The anchor the value is taken at: a month-end anchor (00:00Z of its date) or
+    # the live instant; ``as_of`` is the newest data at or before it.
+    boundary_at: str
+    as_of: Optional[str] = None
+    value: float
+    net_worth: NetWorth
+    # No data at all at or before the start's anchor (#224).
+    baseline_missing: bool = False
+
+
+class BridgeMover(BaseModel):
+    asset_id: Optional[int] = None
+    symbol: str
+    name: Optional[str] = None
+    asset_class: str
+    start_value: float
+    end_value: float
+    change: float
+    price_effect: float
+    quantity_effect: float
+    fx_effect: float
+    # What the market did to the holding: price_effect + fx_effect. Movers are ranked
+    # by it; a change in quantity (buying, selling) is listed under ``trades``.
+    market_effect: float = 0.0
+    # The larger of the price and FX effects: price | fx; unknown when the part that
+    # can't be split (no price or quantity on one side) is larger than the market effect.
+    cause: str
+
+
+class BridgeTrade(BaseModel):
+    """A holding bought, sold or (crypto) moved in or out this month: its quantity
+    effect. Not a gain or loss: where the account's cash is recorded the money moved
+    to or from that cash."""
+
+    asset_id: Optional[int] = None
+    symbol: str
+    name: Optional[str] = None
+    asset_class: str
+    amount: float
+    side: str  # bought | sold | moved_in | moved_out
+    cash_recorded: bool = False
+
+
+class MonthBridgeResponse(FxStatusFields):
+    """GET /dashboard/month-bridge (#240): start + sum(lines) + unexplained = end."""
+
+    as_of_month: str
+    base_currency: str
+    snapshot_day: int
+    is_live: bool
+    # Flows count from this date (the start's anchor date) up to period_end (the
+    # end's boundary: a month-end anchor, or now).
+    period_start: str
+    period_end: str
+    start: BridgeEndpoint
+    end: BridgeEndpoint
+    change: float
+    lines: List[BridgeLine]
+    unexplained: BridgeLine
+    # What the cards owe at the end minus at the start (context: card spending is
+    # in "cash kept", so this is not a line of its own).
+    liabilities_change: float
+    movers: List[BridgeMover]
+    trades: List[BridgeTrade] = []

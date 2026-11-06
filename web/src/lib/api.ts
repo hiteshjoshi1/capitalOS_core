@@ -461,7 +461,100 @@ export type RiskSummary = FxStatus &
   Pick<DashboardSummary, "as_of_month" | "base_currency" | "is_live" | "net_worth"> & {
     snapshot_day?: number | null;
     top_holdings: RiskHolding[];
+    /** #241: one point in time per month. "live" for the open (or a future) month,
+     * "month_end" for a past month. */
+    basis?: "live" | "month_end" | null;
+    /** The net worth Risk's shares divide by, at the positions' point in time: live, the
+     * Overview headline (`current_net_worth`); a past month, its month-end `net_worth`. */
+    view_net_worth?: DashboardSummary["net_worth"] | null;
+    /** The anchor the figures are taken at: the live instant, or the month-end boundary. */
+    net_worth_boundary_at?: string | null;
   };
+
+/** One part of a bridge line; a line's parts add up to its amount (#240). */
+export type BridgePart = { key: string; label: string; amount: number };
+
+/** Context for a bridge line that is not part of its amount. */
+export type BridgeNote = { key: string; label: string; amount: number | null };
+
+export type BridgeLineStatus = "ok" | "partial" | "unavailable";
+
+/** One cause of the month's change; when `status` isn't ok, `reason` says why and the
+ * part that couldn't be computed is in the bridge's `unexplained`. */
+export type BridgeLine = {
+  key: string;
+  label: string;
+  amount: number;
+  status: BridgeLineStatus | string;
+  reason: string | null;
+  parts: BridgePart[];
+  notes: BridgeNote[];
+};
+
+export type BridgeEndpoint = {
+  month: string;
+  boundary_at: string;
+  as_of: string | null;
+  value: number;
+  net_worth: NetWorthBreakdown;
+  baseline_missing: boolean;
+};
+
+export type BridgeMover = {
+  asset_id: number | null;
+  symbol: string;
+  name: string | null;
+  asset_class: string;
+  start_value: number;
+  end_value: number;
+  change: number;
+  price_effect: number;
+  quantity_effect: number;
+  fx_effect: number;
+  /** price_effect + fx_effect: what the market did. Movers are ranked by it. */
+  market_effect?: number;
+  cause: "price" | "quantity" | "fx" | "unknown" | string;
+};
+
+/** A holding bought, sold or (crypto) moved in or out this month: its quantity effect,
+ * not a gain or loss. `cash_recorded`: the account's cash is recorded, so a sale's money
+ * is in that cash (#240). */
+export type BridgeTrade = {
+  asset_id: number | null;
+  symbol: string;
+  name: string | null;
+  asset_class: string;
+  amount: number;
+  side: "bought" | "sold" | "moved_in" | "moved_out" | string;
+  cash_recorded: boolean;
+};
+
+/** GET /dashboard/month-bridge (#240, D-60): start + sum(lines) + unexplained = end. */
+export type MonthBridge = FxStatus & {
+  as_of_month: string;
+  base_currency: string;
+  snapshot_day: number;
+  is_live: boolean;
+  period_start: string;
+  period_end: string;
+  start: BridgeEndpoint;
+  end: BridgeEndpoint;
+  change: number;
+  lines: BridgeLine[];
+  unexplained: BridgeLine;
+  liabilities_change: number;
+  movers: BridgeMover[];
+  trades?: BridgeTrade[];
+};
+
+/** One bar of a page's six-month trend (Stocks, Crypto, Cash). #241 (D-61): the open
+ * month's bar is live, month to date (the page's live headline); every other bar is a
+ * completed month-end, or has no value when that month-end hasn't passed yet. */
+export type MiniTrendPoint = {
+  month: string;
+  value?: number | null;
+  is_live?: boolean;
+};
 
 export type DashboardNetWorthChange = {
   as_of_month: string;
@@ -521,10 +614,7 @@ export type StockHoldingsSummary = FxStatus & {
     /** Live view only (null on a past month): holdings without a fresh quote, statement-only ones included (#224). */
     no_live_price?: number | null;
   } | null;
-  trend?: Array<{
-    month: string;
-    value?: number | null;
-  }>;
+  trend?: MiniTrendPoint[];
   /** No stock data at all for compare_month (not a real zero), #224. */
   stock_snapshot_missing?: boolean;
   /** QUOTE_STALE_DAYS: a price older than this is stale (#224). */
@@ -619,7 +709,38 @@ export type CashFlowDiagnosticAnswer = {
   answer: string;
 };
 
+/** The month vs the month before, like for like (#243, D-63): the open month is month to
+ * date (days 1..through_day) against the previous month's days 1..prior_through_day (the
+ * same day, clamped to that month's length); any other month is whole vs whole. */
+export type CashFlowComparison = {
+  basis: "month_to_date" | "full_month" | string;
+  month: string;
+  month_days: number;
+  through_day: number;
+  prior_month: string;
+  prior_month_days: number;
+  prior_through_day: number;
+  /** ISO date, first day counted. */
+  prior_start: string;
+  /** ISO date, last day counted (inclusive). */
+  prior_end: string;
+  inflows: number;
+  outflows: number;
+  net: number;
+  savings_rate: number | null;
+  prior_inflows: number;
+  prior_outflows: number;
+  prior_net: number;
+  prior_savings_rate: number | null;
+  inflows_change: number;
+  outflows_change: number;
+  net_change: number;
+  outflow_category_deltas: CashFlowCategoryDeltaItem[];
+  deterioration_drivers: CashFlowCategoryDeltaItem[];
+};
+
 export type CashFlowAnalytics = {
+  /** Still returned (fields are only added); the page no longer shows it (#243). */
   burn_rate: number | null;
   prior_month: string | null;
   prior_month_net: number | null;
@@ -637,6 +758,8 @@ export type CashFlowAnalytics = {
   trend: CashFlowTrendPoint[];
   waterfall: CashFlowWaterfall;
   answers: CashFlowDiagnosticAnswer[];
+  /** #243: always sent by the API; optional here like its Python default. */
+  comparison?: CashFlowComparison | null;
 };
 
 export type CashFlowDetail = FxStatus & {
@@ -864,6 +987,8 @@ export type PlatformAllocation = {
 export type GeographyExposure = {
   as_of: string | null;
   base_currency: string;
+  /** #241: live (quote-priced) for the open month, else the month-end snapshot. */
+  is_live?: boolean | null;
   total: number;
   items: Array<{
     country: string;
@@ -899,10 +1024,7 @@ export type CashDeposits = {
   snapshot_stablecoin_total?: number | null;
   delta_abs?: number | null;
   delta_pct?: number | null;
-  trend?: Array<{
-    month: string;
-    value?: number | null;
-  }>;
+  trend?: MiniTrendPoint[];
   currency_breakdown?: Array<{
     currency: string;
     current_value: number;
@@ -960,10 +1082,7 @@ export type CryptoSummary = FxStatus & {
   token_exposure_base?: number;
   token_count?: number;
   priced_token_count?: number;
-  trend?: Array<{
-    month: string;
-    value?: number | null;
-  }>;
+  trend?: MiniTrendPoint[];
   eth: { balance: number; value_usd: number; value_base: number };
   sol: { balance: number; value_usd: number; value_base: number };
   top5_holdings: Array<{
@@ -1642,6 +1761,8 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   riskSummary: (month: string, baseCurrency = "SGD") =>
     req<RiskSummary>(`/dashboard/risk-summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  monthBridge: (month: string, baseCurrency = "SGD") =>
+    req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   netWorthSinceUpdate: (baseCurrency = "SGD") =>

@@ -4,6 +4,8 @@ import { describeSeries } from "../lib/chartA11y";
 type ValueTrendPoint = {
   month: string;
   value?: number | null;
+  /** #241 (D-61): the open month's bar, live and month to date: labelled "MTD", hatched. */
+  is_live?: boolean;
 };
 
 type ValueTrendChartProps = {
@@ -14,6 +16,11 @@ type ValueTrendChartProps = {
 };
 
 const formatTrendMonth = (month: string) => fmt.formatMonth(month, "short");
+/** The bar's name for screen readers and its tooltip. */
+const describeTrendMonth = (point: { month: string; isLive: boolean }) =>
+  point.isLive ? `${formatTrendMonth(point.month)} (month to date, live)` : formatTrendMonth(point.month);
+/** The visible label under a bar and in the data strip. */
+const trendMonthLabel = (point: { month: string; isLive: boolean }) => (point.isLive ? "MTD" : formatTrendMonth(point.month));
 
 export default function ValueTrendChart({
   points,
@@ -22,13 +29,16 @@ export default function ValueTrendChart({
   formatCompactMoney,
 }: ValueTrendChartProps) {
   const descId = useId();
-  const numericPoints = points.reduce<Array<{ month: string; value: number; index: number }>>((acc, point) => {
-    const value = point.value == null ? null : Number(point.value);
-    if (value != null && Number.isFinite(value)) {
-      acc.push({ month: point.month, value, index: acc.length });
-    }
-    return acc;
-  }, []);
+  const numericPoints = points.reduce<Array<{ month: string; value: number; index: number; isLive: boolean }>>(
+    (acc, point) => {
+      const value = point.value == null ? null : Number(point.value);
+      if (value != null && Number.isFinite(value)) {
+        acc.push({ month: point.month, value, index: acc.length, isLive: point.is_live === true });
+      }
+      return acc;
+    },
+    [],
+  );
 
   if (numericPoints.length === 0) {
     return <div className="muted valueTrendEmpty">Not enough history yet.</div>;
@@ -48,7 +58,7 @@ export default function ValueTrendChart({
       <span id={descId} className="srOnly">
         {describeSeries(
           ariaLabel,
-          numericPoints.map((p) => ({ label: formatTrendMonth(p.month), value: formatMoney(p.value) })),
+          numericPoints.map((p) => ({ label: describeTrendMonth(p), value: formatMoney(p.value) })),
         )}
       </span>
       <div
@@ -63,12 +73,12 @@ export default function ValueTrendChart({
               <span className="valueTrendBarValue">{formatCompactMoney(point.value)}</span>
               <div className="valueTrendBarTrack">
                 <div
-                  className="valueTrendBar"
+                  className={`valueTrendBar${point.isLive ? " live" : ""}`}
                   style={{ height: `${barHeightFor(point.value)}%` }}
-                  title={`${formatTrendMonth(point.month)}: ${formatMoney(point.value)}`}
+                  title={`${describeTrendMonth(point)}: ${formatMoney(point.value)}`}
                 />
               </div>
-              <span className="valueTrendBarMonth">{formatTrendMonth(point.month)}</span>
+              <span className="valueTrendBarMonth">{trendMonthLabel(point)}</span>
             </div>
           );
         })}
@@ -76,7 +86,7 @@ export default function ValueTrendChart({
       <div className="valueTrendDataStrip">
         {numericPoints.map((point) => (
           <div className="valueTrendDataPoint" key={point.month}>
-            <span>{formatTrendMonth(point.month)}</span>
+            <span>{trendMonthLabel(point)}</span>
             <strong>{formatMoney(point.value)}</strong>
           </div>
         ))}

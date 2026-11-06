@@ -448,6 +448,7 @@ export default function StockHoldings() {
               </div>
               <span className="muted" style={{ fontSize: "13px" }}>
                 Ending {summary?.as_of_month ?? month}
+                {summary?.trend?.some((point) => point.is_live) ? " · MTD: this month to date, live" : ""}
               </span>
             </div>
             <div className="card valueTrendCard">

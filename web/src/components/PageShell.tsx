@@ -30,7 +30,7 @@ export default function PageShell({
   fillHeight = false,
   children,
 }: PageShellProps) {
-  const { hasProvider, setHeaderActions } = useShellHeader();
+  const { hasProvider, actionsInPage, setHeaderActions } = useShellHeader();
 
   useEffect(() => {
     if (!hasProvider) {
@@ -50,7 +50,7 @@ export default function PageShell({
             <h1 className="title">{title}</h1>
             {subtitle ? <div className="subtitle">{subtitle}</div> : null}
           </div>
-          {!hasProvider && headerActions ? <div className="dashboardHeaderActions">{headerActions}</div> : null}
+          {(!hasProvider || actionsInPage) && headerActions ? <div className="dashboardHeaderActions">{headerActions}</div> : null}
         </header>
       ) : null}
 

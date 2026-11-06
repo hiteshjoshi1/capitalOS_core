@@ -48,6 +48,7 @@ describe("api client coverage", () => {
     await api.dashboardNetWorthChange("2026-03", "USD", "prev_month");
     await api.dashboardSummary("2026-03", "prev_month,prev_year", "USD", true);
     await api.riskSummary("2026-03", "SGD");
+    await api.monthBridge("2026-03", "USD");
     await api.stockHoldingsSummary("2026-03", "USD");
     await api.cashDeposits("2026-03", "USD");
     await api.platformAllocation("2026-03", "USD");
@@ -137,6 +138,7 @@ describe("api client coverage", () => {
     expect(urls.some((url) => url.includes("/crypto/stablecoins?base_currency=SGD&month=2026-03"))).toBe(true);
     expect(urls.some((url) => url.includes("/alerts/notifications/count"))).toBe(true);
     expect(urls.some((url) => url.includes("/dashboard/risk-summary?month=2026-03&base_currency=SGD"))).toBe(true);
+    expect(urls.some((url) => url.includes("/dashboard/month-bridge?month=2026-03&base_currency=USD"))).toBe(true);
   });
 
   it("retries once after refresh on 401 and updates bearer token", async () => {

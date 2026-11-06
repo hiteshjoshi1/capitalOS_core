@@ -71,6 +71,8 @@ export default function CashOverview() {
           value: point.value as number,
           displayValue: compactMoney(point.value),
           tone: "neutral" as const,
+          // #241 (D-61): the open month is live, month to date.
+          isLive: point.is_live === true,
         })),
     [cashDeposits, compactMoney],
   );
@@ -203,7 +205,9 @@ export default function CashOverview() {
           <div className="card">
             <div className="stockHoldingsHeader">
               <h2>Six-month cash trend</h2>
-              <div className="muted stockHoldingsMeta">Snapshot-based month history</div>
+              <div className="muted stockHoldingsMeta">
+                Month-end snapshots{trendPoints.some((point) => point.isLive) ? " · MTD: this month to date, live" : ""}
+              </div>
             </div>
             <TrendBarChart points={trendPoints} ariaLabel="Six-month cash trend" />
           </div>

@@ -20,7 +20,6 @@ from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
 from app.valuation import clock, fx
 from app.valuation.clock import (
     _add_months,
-    _anchor_ts,
     _card_transaction_in_window,
     _configured_snapshot_day,
     _date_only,
@@ -609,21 +608,30 @@ def _cash_trend(
     base_currency: str,
     current_user_id: int,
 ) -> list[dict[str, Any]]:
+    """The Cash page's cash (net-worth cash plus stablecoins) per month (#241,
+    D-61): a month-end for each completed month, the open month live (month to
+    date, the Cash headline), and no value for a month whose month-end hasn't
+    passed."""
     months = _month_window(month_start, months=6)
-    anchors = [_anchor_ts(candidate_month) for candidate_month in months]
-    stablecoin_usd = _stablecoin_usd_by_date(db, [anchor.date() for anchor in anchors], current_user_id)
+    anchors = [clock._trend_point_anchor(candidate_month) for candidate_month in months]
+    month_end_dates = [anchor.date() for anchor, is_live in anchors if anchor is not None and not is_live]
+    stablecoin_usd = _stablecoin_usd_by_date(db, month_end_dates, current_user_id)
     points: list[dict[str, Any]] = []
-    for candidate_month, anchor in zip(months, anchors):
-        as_of = _effective_as_of(db, anchor, current_user_id)
+    for candidate_month, (anchor, is_live) in zip(months, anchors):
+        as_of = _effective_as_of(db, anchor, current_user_id) if anchor is not None else None
         value = None
-        if as_of is not None:
+        if anchor is not None and as_of is not None:
             stablecoin: list[dict[str, Any]] = []
-            total_usd = stablecoin_usd.get(anchor.date(), 0.0)
-            if total_usd > 0:
-                usd_rate = fx.get_rates(anchor, base_currency, {"USD"}).get("USD", 0.0)
-                stablecoin = [{"currency": "USD", "value": total_usd * usd_rate}]
+            if is_live:
+                # The same figures as the live headline (pages.cash_deposits).
+                stablecoin = _stablecoin_cash_balances(db, anchor, base_currency, current_user_id)
+            else:
+                total_usd = stablecoin_usd.get(anchor.date(), 0.0)
+                if total_usd > 0:
+                    usd_rate = fx.get_rates(anchor, base_currency, {"USD"}).get("USD", 0.0)
+                    stablecoin = [{"currency": "USD", "value": total_usd * usd_rate}]
             value = _sum_balances(_cash_balances(db, anchor, base_currency, current_user_id) + stablecoin)
-        points.append({"month": candidate_month.strftime("%Y-%m"), "value": value})
+        points.append({"month": candidate_month.strftime("%Y-%m"), "value": value, "is_live": is_live})
     return points
 
 

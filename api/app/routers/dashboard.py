@@ -14,6 +14,7 @@ from app.schemas.dashboard import (
     DashboardSummaryResponse,
     DataHubSummaryResponse,
     GeographyExposureOut,
+    MonthBridgeResponse,
     NetWorthChangeResponse,
     NetWorthSinceUpdateResponse,
     PlatformAllocationOut,
@@ -25,7 +26,7 @@ from app.schemas.dashboard import (
     WealthTimelineResponse,
 )
 from app.services import data_hub
-from app.valuation import pages
+from app.valuation import bridge, pages
 from app.valuation.clock import _parse_month
 from app.valuation.history import _backfill_wealth_rollups
 
@@ -136,6 +137,21 @@ def dashboard_risk_summary(
     """Lean twin of /summary for the Risk page (#149): net_worth, and top_holdings cut to
     symbol / class / value, the same values as /summary for the same month and currency."""
     return pages.risk_summary(db, current_user.id, month, _parse_month(month), base_currency)
+
+
+@router.get("/month-bridge", response_model=MonthBridgeResponse)
+def dashboard_month_bridge(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    limit: int = Query(3, ge=1, le=20, description="How many movers"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Overview's "This month" bridge (#240, D-60): the last month-end close, what
+    moved it (new money, markets, FX, dividends and interest, cash kept) and the
+    unexplained rest, to the headline. Live for the open month, that month-end for
+    a past month (D-55). The lines always add up to end - start."""
+    return bridge.month_bridge(db, current_user.id, month, _parse_month(month), base_currency, movers_limit=limit)
 
 
 @router.get("/stock-holdings", response_model=StockHoldingsResponse)

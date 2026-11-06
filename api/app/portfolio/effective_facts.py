@@ -15,9 +15,11 @@ At an anchor date d:
    ``closed_on``, or one on or after d). A closed account contributes nothing.
 3. **Latest per account**: of the counting rows dated on or before d, a reader
    sees the ones on their account's newest date (``latest_per_account_sql``,
-   ``effective_rows_sql``). "Account" is the fact's owner key, one per fact:
-   - positions: the legacy account (``POSITIONS_OWNER``);
-   - NAV and broker cash: the broker account (``BROKER_ACCOUNT_OWNER``);
+   ``effective_rows_sql``). "Account" is the fact's owner key:
+   - broker facts (positions, NAV, broker cash): the broker account
+     (``BROKER_ACCOUNT_OWNER``), one rule for all three (D-62, #242). A legacy
+     account with two broker accounts that Flex routing doesn't separate shows
+     each one's newest facts;
    - uploaded balances and card statements: the account (``BALANCE_OWNER``);
    - completeness: the broker account and scope.
 4. **Carry-forward**: the newest row is carried forward however old it is
@@ -89,8 +91,7 @@ COMPLETENESS = FactTable(
     "portfolio_data_completeness", "dc", "report_date", via_broker_account=True, has_authority=False
 )
 
-# Owner keys (rule 3).
-POSITIONS_OWNER = ("ba.legacy_account_id",)
+# Owner keys (rule 3). Positions, NAV and broker cash share one (D-62).
 BROKER_ACCOUNT_OWNER = ("ba.id",)
 BALANCE_OWNER = ("acc.id",)
 COMPLETENESS_OWNER = ("ba.id", "dc.fact_scope")
@@ -281,12 +282,12 @@ def nav_rule_sql(ba: str = "ba", *, include_nav_accounts: str) -> str:
 
 
 def effective_positions_sql(*, include_nav_accounts: str = ":include_nav_accounts") -> str:
-    """Position snapshots at the anchor, newest per legacy account, routed (needs
-    the ``flex_authority_accounts`` CTE) and without NAV accounts' positions unless
-    ``include_nav_accounts`` (a SQL boolean)."""
+    """Position snapshots at the anchor, newest per broker account (D-62), routed
+    (needs the ``flex_authority_accounts`` CTE) and without NAV accounts' positions
+    unless ``include_nav_accounts`` (a SQL boolean)."""
     return effective_rows_sql(
         POSITIONS,
-        POSITIONS_OWNER,
+        BROKER_ACCOUNT_OWNER,
         where=[flex_routed_sql("ba"), nav_rule_sql("ba", include_nav_accounts=include_nav_accounts)],
     )
 
