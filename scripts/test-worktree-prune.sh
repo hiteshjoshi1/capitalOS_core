@@ -26,6 +26,8 @@ exit 0
 EOF
 chmod +x "$TMP/docker"
 export DOCKER="$TMP/docker" DOCKER_LOG="$TMP/docker.log" NO_FETCH=1
+# The throwaway repo's commits and merges need an identity; CI runners have none configured.
+export GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t
 
 R="$TMP/repo" W="$TMP/capitalOS-worktrees"
 git init -q -b main "$R"
