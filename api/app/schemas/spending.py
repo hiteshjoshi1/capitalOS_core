@@ -220,6 +220,9 @@ class CreditCardRecurringPaymentItem(BaseModel):
     merchant_counterparty: str
     months_present: int
     current_month_amount: float
+    # #266: how it repeats ("monthly"), and its usual amount (median charge, base currency).
+    cadence: str = "monthly"
+    typical_amount: float | None = None
 
 
 class CreditCardDetailOut(FxStatusFields):

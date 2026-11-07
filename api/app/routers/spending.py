@@ -366,13 +366,46 @@ def _inflow_source_label(row) -> str:
     return "Other"
 
 
-def _is_stable_recurring_charge(monthly_amounts: dict[str, float]) -> bool:
-    amounts = sorted(round(abs(amount), 2) for amount in monthly_amounts.values() if amount > 0)
-    if len(amounts) < 3:
-        return False
+# A card charge is a real repeat (#266): the trailing window it's judged over, in months
+# (the selected month included).
+RECURRING_LOOKBACK_MONTHS = 6
+
+
+def _month_index(month: str) -> int:
+    year, mon = month.split("-")
+    return int(year) * 12 + int(mon) - 1
+
+
+def detect_recurring_cadence(charges_by_month: dict[str, list[float]], month: str) -> str | None:
+    """Whether one merchant's card charges are a real repeat (#266), and its cadence.
+
+    ``charges_by_month``: ``YYYY-MM`` -> the positive charge amounts in that month, over the
+    trailing window. A real repeat is billed like a subscription:
+      - charged in the selected ``month``;
+      - in at least 3 distinct months;
+      - once a month at most (several charges in a month is shopping, not a subscription);
+      - every month: consecutive months, with at most one missed month in between
+        (a statement that landed late or a skipped cycle);
+      - a stable amount: every charge within max(2, 10%) of their median.
+    Returns ``"monthly"`` or ``None``. Quarterly or yearly charges can't show 3 times in
+    the window, so they are never called recurring.
+    """
+    present = {m: [a for a in amounts if a > 0] for m, amounts in charges_by_month.items()}
+    present = {m: a for m, a in present.items() if a}
+    if month not in present or len(present) < 3:
+        return None
+    if any(len(amounts) > 1 for amounts in present.values()):
+        return None
+    indexes = sorted(_month_index(m) for m in present)
+    gaps = [b - a for a, b in zip(indexes, indexes[1:])]
+    if any(gap > 2 for gap in gaps) or sum(1 for gap in gaps if gap == 2) > 1:
+        return None
+    amounts = sorted(round(a[0], 2) for a in present.values())
     median = amounts[len(amounts) // 2]
     tolerance = max(2.0, median * 0.10)
-    return all(abs(amount - median) <= tolerance for amount in amounts)
+    if not all(abs(amount - median) <= tolerance for amount in amounts):
+        return None
+    return "monthly"
 
 
 def _sorted_breakdown_items(items: dict[str, float], total: float, limit: int | None = None) -> list[CashFlowBreakdownItem]:
@@ -1057,8 +1090,8 @@ def _credit_card_recurring_payments(
     end: datetime,
     account_id: int | None = None,
 ) -> list[CreditCardRecurringPaymentItem]:
-    """Merchants charged in the selected month whose amount has stayed stable across
-    at least 3 of the trailing months — used as a recurring/subscription signal.
+    """Merchants charged in the selected month that are a real repeat
+    (``detect_recurring_cadence``, #266) over the trailing window from ``lookback_start``.
     Optionally scoped to a single owned CREDIT_CARD account."""
     recurring_q = text("""
         SELECT
@@ -1105,6 +1138,7 @@ def _credit_card_recurring_payments(
                 "merchant_counterparty": merchant,
                 "months": set(),
                 "monthly_amounts": defaultdict(float),
+                "charges_by_month": defaultdict(list),
                 "current_month_amount": 0.0,
             },
         )
@@ -1112,6 +1146,7 @@ def _credit_card_recurring_payments(
         amount = -converted
         record["months"].add(month_key)
         record["monthly_amounts"][month_key] += amount
+        record["charges_by_month"][month_key].append(amount)
         if month_key == month:
             record["current_month_amount"] += amount
 
@@ -1119,8 +1154,10 @@ def _credit_card_recurring_payments(
     for record in recurring_index.values():
         months_present = len(record["months"])
         current_month_amount = float(record["current_month_amount"])
-        if current_month_amount <= 0 or not _is_stable_recurring_charge(record["monthly_amounts"]):
+        cadence = detect_recurring_cadence(record["charges_by_month"], month)
+        if current_month_amount <= 0 or cadence is None:
             continue
+        amounts = sorted(a for charges in record["charges_by_month"].values() for a in charges if a > 0)
         recurring_payments.append(
             CreditCardRecurringPaymentItem(
                 account_id=record["account_id"],
@@ -1130,6 +1167,8 @@ def _credit_card_recurring_payments(
                 merchant_counterparty=record["merchant_counterparty"],
                 months_present=months_present,
                 current_month_amount=current_month_amount,
+                cadence=cadence,
+                typical_amount=float(amounts[len(amounts) // 2]),
             )
         )
 
@@ -1384,7 +1423,6 @@ def credit_card_transactions(
 ):
     start = _parse_month(month)
     end = _month_end(start)
-    lookback_start = _add_months(start, -2)
 
     cards = _credit_cards(db, current_user.id)
     spend = _spend_by_account(db, start, end, base_currency, current_user.id)
@@ -1454,7 +1492,9 @@ def credit_card_transactions(
         reverse=True,
     )[:5]
 
-    recurring_payments = _credit_card_recurring_payments(db, current_user.id, month, base_currency, lookback_start, end)
+    recurring_payments = _credit_card_recurring_payments(
+        db, current_user.id, month, base_currency, _add_months(start, -(RECURRING_LOOKBACK_MONTHS - 1)), end
+    )
 
     total_spend = sum(item.current_due for item in card_items)
     return CreditCardDetailOut(
@@ -1484,7 +1524,7 @@ def credit_card_analytics(
     prior_month = _month_key(prior_start)
     trend_start = _add_months(start, -(months - 1))
     fetch_start = min(trend_start, prior_start)
-    recurring_lookback_start = _add_months(start, -2)
+    recurring_lookback_start = _add_months(start, -(RECURRING_LOOKBACK_MONTHS - 1))
 
     cards_raw = _credit_cards(db, current_user.id)
     owned_account_ids = {int(c["account_id"]) for c in cards_raw}

@@ -18,6 +18,15 @@ import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
+import {
+  NOTABLE_THRESHOLD,
+  TRANSACTION_FILTERS,
+  filterCounts,
+  filterTransactions,
+  recurringFor,
+  recurringIndex,
+  type TransactionFilter,
+} from "../lib/liabilities";
 
 type UpcomingRow = {
   key: string;
@@ -27,8 +36,6 @@ type UpcomingRow = {
   dueDateLabel: string | null;
   sortValue: number;
 };
-
-const NOTABLE_THRESHOLD = 50;
 
 function cardColor(index: number): string {
   return chartColor(index);
@@ -81,6 +88,7 @@ export default function LiabilitiesOverview() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency] = useBaseCurrency();
   const [selectedAccountId, setSelectedAccountId] = useState<number | null>(null);
+  const [txFilter, setTxFilter] = useState<TransactionFilter>("all");
 
   // #148: the account list doesn't depend on month, currency or card filter, so it has
   // its own resource and is no longer refetched on every filter change.
@@ -94,8 +102,9 @@ export default function LiabilitiesOverview() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = data?.base_currency || baseCurrency;
+  // #266: totals and summaries in whole units; a single charge with its cents.
   const formatMoney = useCallback(
-    (value?: number | null, decimals?: number) => fmt.formatMoney(value, shownCurrency, { decimals }),
+    (value?: number | null, decimals: number = 0) => fmt.formatMoney(value, shownCurrency, { decimals }),
     [shownCurrency],
   );
   const formatMoneyShort = useCallback((value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency), [shownCurrency]);
@@ -138,12 +147,13 @@ export default function LiabilitiesOverview() {
     return [...cardRows, ...loanRows].sort((a, b) => a.sortValue - b.sortValue);
   }, [data, hasLoans, loanAccounts]);
 
-  const notableRows = useMemo(
-    () =>
-      (data?.transactions ?? [])
-        .filter((t) => t.type === "EXPENSE" && Math.abs(t.amount) > NOTABLE_THRESHOLD)
-        .sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount)),
-    [data],
+  // #266: one transaction list with filters (All / Notable / Recurring / Fees & charges)
+  // replaces the Notable, Recurring, Fees and Transactions sections.
+  const recurring = useMemo(() => recurringIndex(data?.recurring_payments ?? []), [data]);
+  const counts = useMemo(() => filterCounts(data?.transactions ?? [], recurring), [data, recurring]);
+  const shownTransactions = useMemo(
+    () => filterTransactions(data?.transactions ?? [], txFilter, recurring),
+    [data, txFilter, recurring],
   );
 
   const delta = data ? data.total_spend - data.prior_month_spend : null;
@@ -256,7 +266,12 @@ export default function LiabilitiesOverview() {
                   </div>
                   <div className="ccChargeAlertMeta">Annual fees, finance charges and tax included in this month's spend.</div>
                 </div>
-                <div className="ccChargeAlertAmount">{formatMoney(data.charge_total)}</div>
+                <div className="ccChargeAlertSide">
+                  <div className="ccChargeAlertAmount">{formatMoney(data.charge_total)}</div>
+                  <button type="button" className="btn" onClick={() => setTxFilter("charges")}>
+                    Show charges
+                  </button>
+                </div>
               </section>
             ) : (
               <section className="card">
@@ -279,17 +294,14 @@ export default function LiabilitiesOverview() {
                       <div className="ccCardTileSpend">{formatMoney(card.spend)}</div>
                       <div className="ccCardTileSub">spent this month</div>
                     </div>
-                    <div className="ccCardTileAvailable">
-                      Available credit
-                      {card.available_limit != null && card.available_limit_as_of != null ? (
-                        <>
-                          <strong>{formatMoney(card.available_limit)}</strong>
-                          <span>as of {fmt.formatDate(card.available_limit_as_of.slice(0, 10))}</span>
-                        </>
-                      ) : (
-                        <strong>Not provided by issuer</strong>
-                      )}
-                    </div>
+                    {/* #266: shown only when the issuer gives it; no "not provided" filler. */}
+                    {card.available_limit != null && card.available_limit_as_of != null ? (
+                      <div className="ccCardTileAvailable">
+                        Available credit
+                        <strong>{formatMoney(card.available_limit)}</strong>
+                        <span>as of {fmt.formatDate(card.available_limit_as_of.slice(0, 10))}</span>
+                      </div>
+                    ) : null}
                   </div>
                 </article>
               ))}
@@ -408,136 +420,99 @@ export default function LiabilitiesOverview() {
               </article>
             </section>
 
-            <section>
-              <div
-                className="cashFlowSectionHeading"
-                style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}
-              >
-                <div>
-                  <p className="wealthEyebrow">Worth a look</p>
-                  <h2 className="cashFlowSectionTitle">Notable charges</h2>
-                </div>
-                <span className="muted">Single charges over {formatMoney(NOTABLE_THRESHOLD, 0)}</span>
-              </div>
-              <div className="card">
-                <div className="listRows">
-                  {notableRows.map((tx, idx) => (
-                    <div className="listRow liabDueRow" key={`notable-${idx}`}>
-                      <div className="listRowMain">
-                        <span className="listRowTitle">{tx.merchant_counterparty || tx.description}</span>
-                        <span className="listRowMeta">
-                          {fmt.formatDate(tx.ts.slice(0, 10))} · {tx.card_name}
-                        </span>
-                      </div>
-                      <span className="tag">{tx.resolved_category?.trim() || "Uncategorized"}</span>
-                      <span className="listRowValue">{formatMoney(Math.abs(tx.amount), 2)}</span>
-                    </div>
-                  ))}
-                  {notableRows.length === 0 && <p className="muted">No notable charges this month.</p>}
-                </div>
-              </div>
-            </section>
-
-            <section className="ccChargesAndLedger">
-              <article className="whCard">
-                <div className="whCardHead">
-                  <div>
-                    <div className="whCardTitle">Fees &amp; finance charges</div>
-                    <div className="whCardMeta">Always visible when present</div>
-                  </div>
-                  {data.charges.length > 0 ? <span className="tag bad">{data.charges.length} items</span> : null}
-                </div>
-                {data.charges.length === 0 ? (
-                  <p className="muted">No card charges this month.</p>
-                ) : (
-                  <div className="listRows">
-                    {data.charges.map((charge, index) => (
-                      <div className="listRow" key={`${charge.account_id}-${charge.ts}-${index}`}>
-                        <div className="listRowMain">
-                          <div className="listRowTitle">{charge.description}</div>
-                          <div className="listRowMeta">
-                            <span className="tag">{charge.type}</span>
-                            {charge.card_name} · {fmt.formatDate(charge.ts.slice(0, 10))}
-                          </div>
-                        </div>
-                        <div className="listRowValue bad">{formatMoney(Math.abs(charge.amount), 2)}</div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-
-              <article className="whCard">
-                <div className="whCardHead">
-                  <div>
-                    <div className="whCardTitle">Recurring charges</div>
-                    <div className="whCardMeta">Subscriptions detected from 3 stable months</div>
-                  </div>
-                </div>
-                {data.recurring_payments.length === 0 ? (
-                  <p className="muted">No recurring payments detected in the last 3 months.</p>
-                ) : (
-                  <div className="listRows">
-                    {data.recurring_payments.map((payment) => (
-                      <div className="listRow" key={`${payment.account_id}-${payment.merchant_counterparty}`}>
-                        <span className="listRowTitle">{payment.merchant_counterparty}</span>
-                        <span className="listRowMeta">
-                          {payment.card_name} · {payment.months_present} months
-                        </span>
-                        <span className="listRowValue">{formatMoney(payment.current_month_amount, 2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </article>
-            </section>
-
             <section className="whCard">
               <div className="whCardHead">
                 <div>
                   <div className="whCardTitle">Transactions</div>
                   <div className="whCardMeta">
-                    {monthLabel(data.month)} · {selectedCard ? selectedCard.card_name : "All cards"} · {data.transactions.length}{" "}
-                    entries
+                    {monthLabel(data.month)} · {selectedCard ? selectedCard.card_name : "All cards"} ·{" "}
+                    {shownTransactions.length} of {data.transactions.length} entries
                   </div>
                 </div>
                 <button
                   type="button"
                   className="btn"
-                  disabled={data.transactions.length === 0}
-                  onClick={() => downloadCsv(`credit-card-transactions-${data.month}.csv`, transactionsToCsv(data.transactions))}
+                  disabled={shownTransactions.length === 0}
+                  onClick={() =>
+                    downloadCsv(
+                      `credit-card-transactions-${data.month}${txFilter === "all" ? "" : `-${txFilter}`}.csv`,
+                      transactionsToCsv(shownTransactions),
+                    )
+                  }
                 >
                   Export CSV
                 </button>
               </div>
-              {data.transactions.length === 0 ? (
-                <p className="muted">No transactions for this scope.</p>
+              <div className="ccFilterRail liabTxFilters" role="group" aria-label="Filter transactions">
+                {TRANSACTION_FILTERS.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="ccFilterPill"
+                    aria-pressed={txFilter === key}
+                    onClick={() => setTxFilter(key)}
+                  >
+                    {label} <span className="liabTxFilterCount">{counts[key]}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="muted liabTxFilterHint">
+                {txFilter === "notable"
+                  ? `Single purchases over ${formatMoney(NOTABLE_THRESHOLD)}, biggest first.`
+                  : txFilter === "recurring"
+                    ? "Charged once a month for at least 3 months, at a steady amount (within 10%)."
+                    : txFilter === "charges"
+                      ? "Annual fees, interest and tax."
+                      : "Every entry, newest first."}
+              </p>
+              {shownTransactions.length === 0 ? (
+                <p className="muted">
+                  {data.transactions.length === 0
+                    ? "No transactions for this scope."
+                    : txFilter === "notable"
+                      ? "No notable charges this month."
+                      : txFilter === "recurring"
+                        ? "No recurring payments detected."
+                        : "No card charges this month."}
+                </p>
               ) : (
                 <div className="tableWrap">
-                  <table className="table">
+                  <table className="table liabTxTable">
                     <thead>
                       <tr>
                         <th>Date</th>
                         <th>Merchant</th>
                         <th>Card</th>
                         <th>Category</th>
-                        <th>Type</th>
                         <th className="right">Amount</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {data.transactions.map((tx, index) => (
-                        <tr key={`${tx.account_id}-${tx.ts}-${index}`}>
-                          <td>{fmt.formatDate(tx.ts.slice(0, 10))}</td>
-                          <td>{tx.description}</td>
-                          <td>{tx.card_name}</td>
-                          <td>
-                            <span className="tag">{tx.resolved_category || tx.category || "Uncategorized"}</span>
-                          </td>
-                          <td>{fmt.formatEnumLabel(tx.type)}</td>
-                          <td className={`right${tx.type !== "EXPENSE" ? " bad" : ""}`}>{formatMoney(Math.abs(tx.amount), 2)}</td>
-                        </tr>
-                      ))}
+                      {shownTransactions.map((tx, index) => {
+                        const repeat = recurringFor(tx, recurring);
+                        return (
+                          <tr key={`${tx.account_id}-${tx.ts}-${index}`}>
+                            <td>{fmt.formatDate(tx.ts.slice(0, 10))}</td>
+                            <td>
+                              <span className="liabTxMerchant">
+                                {/* A purchase by its merchant; a fee or interest line by its own text. */}
+                                {tx.type === "EXPENSE" ? tx.merchant_counterparty?.trim() || tx.description : tx.description}
+                              </span>
+                              {repeat ? (
+                                <span className="tag liabTxRepeat">
+                                  {fmt.formatEnumLabel(repeat.cadence ?? "monthly")} · {repeat.months_present} months
+                                </span>
+                              ) : null}
+                              {tx.type !== "EXPENSE" ? <span className="tag bad">{fmt.formatEnumLabel(tx.type)}</span> : null}
+                            </td>
+                            <td>{tx.card_name}</td>
+                            <td>
+                              <span className="tag">{tx.resolved_category || tx.category || "Uncategorized"}</span>
+                            </td>
+                            <td className={`right${tx.type !== "EXPENSE" ? " bad" : ""}`}>{formatMoney(Math.abs(tx.amount), 2)}</td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

@@ -908,6 +908,9 @@ export type CreditCardRecurringPayment = {
   merchant_counterparty: string;
   months_present: number;
   current_month_amount: number;
+  /** #266: how it repeats ("monthly") and its usual amount (median charge). Older APIs omit them. */
+  cadence?: string;
+  typical_amount?: number | null;
 };
 
 export type CreditCardDetail = FxStatus & {
