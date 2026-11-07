@@ -17,7 +17,7 @@ from app.ingestion.parsers import ParseResult
 from app.ingestion.parsers.citi_credit_card_csv_v1 import parse_citi_credit_card_csv
 from app.ingestion.parsers.dbs_credit_card_csv_v1 import parse_dbs_credit_card_csv
 from app.ingestion.signature import compute_format_signature
-from app.ingestion.masking import mask_parser_meta, mask_signature_debug
+from app.ingestion.masking import mask_parser_meta, mask_signature_debug, mask_transaction_notes
 from app.ingestion.registry import lookup_parser_key
 from app.ingestion.validators import validate_transactions
 from app.ingestion.report import write_report
@@ -548,7 +548,8 @@ def _run_ingestion_with_context(
             job.error_message = f"Unsupported parser kind for {parser_key}: {kind}"
             return write_and_return(_report(job, status="FAILED", error=job.error_message))
 
-        parsed = result.transactions
+        # Card/account numbers in the parsers' notes are masked to the last 4 (#301).
+        parsed = mask_transaction_notes(result.transactions)
         positions = result.positions
         section_counts = result.section_counts
         parser_meta = result.parser_meta

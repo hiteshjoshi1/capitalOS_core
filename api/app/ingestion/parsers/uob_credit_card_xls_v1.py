@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.ingestion.masking import mask_account_numbers
 from app.ingestion.parsers import ParseResult
 from app.ingestion.parsers.uob_account_xls_v1 import (
     _clean_text,
@@ -212,7 +213,8 @@ def _build_notes(row: ParsedRow, metadata: dict[str, Any]) -> str | None:
     _, description_notes = _transaction_fields(row.description)
     notes_parts: list[str] = []
     if metadata["account_number"]:
-        notes_parts.append(f"card_number={metadata['account_number']}")
+        # The last 4 only (#301); the full number stays in parser_meta for the statement check (#180).
+        notes_parts.append(f"card_number={mask_account_numbers(str(metadata['account_number']))}")
     if row.posting_date is not None:
         notes_parts.append(f"posting_date={row.posting_date.date().isoformat()}")
     reference_match = _REFERENCE_RE.search(row.description)

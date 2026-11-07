@@ -105,7 +105,7 @@ def test_parse_uob_credit_card_xls_fixture():
 
     first_tx = result.transactions[0]
     assert first_tx["merchant_counterparty"] == "TEST CAFE SINGAPORE SG"
-    assert "card_number=4111111111111111" in (first_tx["notes"] or "")
+    assert "card_number=************1111" in (first_tx["notes"] or "")  # last 4 only (#301)
     assert "posting_date=2026-02-09" in (first_tx["notes"] or "")
     assert "reference=TEST000001" in (first_tx["notes"] or "")
 
@@ -216,5 +216,5 @@ def test_uob_cc_ingest_upload_and_idempotent(client: TestClient, db_engine):
 
     assert tx_count == 11
     assert isinstance(notes, str)
-    assert "card_number=4111111111111111" in notes
+    assert "card_number=************1111" in notes  # last 4 only (#301)
     assert "reference=TEST000001" in notes
