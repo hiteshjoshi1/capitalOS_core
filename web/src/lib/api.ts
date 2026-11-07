@@ -331,6 +331,24 @@ export type FxStatus = {
   fx_stale_currencies?: string[];
 };
 
+/** FX back-fill (#290): `GET /fx/backfill-plan` and `POST /fx/backfill` (admin). */
+export type FxBackfillPlan = {
+  span_start: string | null;
+  span_end: string | null;
+  currencies: string[];
+  unsupported_currencies: string[];
+  uncovered_days: number;
+  planned_requests: Array<{ start: string; end: string }>;
+  remaining_requests: number;
+};
+
+export type FxBackfillResult = FxBackfillPlan & {
+  status: "completed" | "partial" | "failed" | "up_to_date" | "remote_disabled";
+  fetched_requests: number;
+  failed_requests: number;
+  rows_stored: number;
+};
+
 /** One comparison of a value with a baseline (net worth or a component). */
 export type NetWorthChange = {
   abs: number;
@@ -2100,6 +2118,10 @@ export const api = {
   marketDataStatus: () => req<{ status: MarketDataExchangeStatus[] }>("/market-data/status"),
   marketDataRuns: (limit = 50) =>
     req<{ runs: MarketDataRun[] }>(`/market-data/runs?limit=${encodeURIComponent(String(limit))}`),
+  fxBackfillPlan: (baseCurrency: string) =>
+    req<FxBackfillPlan>(`/fx/backfill-plan?base_currency=${encodeURIComponent(baseCurrency)}`),
+  fxBackfill: (baseCurrency: string) =>
+    req<FxBackfillResult>(`/fx/backfill?base_currency=${encodeURIComponent(baseCurrency)}`, { method: "POST" }),
   marketDataRefreshNow: (adminKey?: string) =>
     req<{ status: string; exchanges: Array<Record<string, unknown>> }>("/market-data/refresh-now", {
       method: "POST",

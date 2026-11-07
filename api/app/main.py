@@ -20,6 +20,7 @@ from app.routers.portfolio import router as portfolio_router
 from app.routers.alerts import router as alerts_router
 from app.routers.dividends import router as dividends_router
 from app.routers.income import router as income_router
+from app.routers.fx import router as fx_router
 from app.routers.realtime import router as realtime_router
 from app.core.logging import RequestIdMiddleware, configure_logging
 from app.valuation_cache import ValuationCacheMiddleware
@@ -116,4 +117,5 @@ app.include_router(portfolio_router)
 app.include_router(alerts_router)
 app.include_router(dividends_router)
 app.include_router(income_router)
+app.include_router(fx_router)
 app.include_router(realtime_router)

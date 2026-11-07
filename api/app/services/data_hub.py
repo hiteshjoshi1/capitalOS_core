@@ -9,7 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, account_scope_sql, allow_legacy_null_ownership
-from app.core.job_runs import JOB_CRYPTO, JOB_FX, JOB_IBKR_FLEX, JOB_MARKET_DATA, job_status
+from app.core.job_runs import JOB_CRYPTO, JOB_FX, JOB_FX_BACKFILL, JOB_IBKR_FLEX, JOB_MARKET_DATA, job_status
 from app.market_data.service import (
     EMPTY_EXCHANGE_PROVIDER,
     configured_exchanges,
@@ -64,12 +64,16 @@ def _data_hub_job_status(db: Session, current_user: CurrentUser) -> list[DataHub
     ).fetchall()
     wallet_labels = {f"wallet:{row[0]}": str(row[1] or row[2]) for row in wallet_rows}
     exchange_labels = {f"exchange:{code}": code for code in configured_exchanges()}
-    plan = (
+    plan: list[tuple[str, dict[str, str]]] = [
         (JOB_IBKR_FLEX, ibkr_labels),
         (JOB_MARKET_DATA, exchange_labels),
         (JOB_CRYPTO, wallet_labels),
         (JOB_FX, {"all": "Daily fill"}),
-    )
+    ]
+    # The FX back-fill (#290) shows once it has run: a card that never ran would only
+    # say "never run" for something that runs by itself after an import.
+    if db.execute(text("SELECT 1 FROM job_runs WHERE job = :job LIMIT 1"), {"job": JOB_FX_BACKFILL}).first():
+        plan.append((JOB_FX_BACKFILL, {"all": "Past rates"}))
     return [
         DataHubJobStatus(**job_status(db, job, user_id=current_user.id, scopes=labels.keys(), scope_labels=labels))
         for job, labels in plan

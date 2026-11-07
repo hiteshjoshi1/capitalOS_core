@@ -1,5 +1,6 @@
 import { useEffect, type ReactNode } from "react";
 import { useShellHeader } from "../context/ShellHeaderContext";
+import { FxNoteScope, PageFxNote } from "./FxNote";
 
 type PageShellProps = {
   title: string;
@@ -57,9 +58,12 @@ export default function PageShell({
         </header>
       ) : null}
 
-      {monthBar}
-
-      {children}
+      {/* One FX note per page (#290): every <FxNote> below reports into this scope. */}
+      <FxNoteScope>
+        {monthBar}
+        <PageFxNote />
+        {children}
+      </FxNoteScope>
     </div>
   );
 }

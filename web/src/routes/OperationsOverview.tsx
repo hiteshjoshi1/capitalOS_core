@@ -11,6 +11,7 @@ import type { StatusPillTone } from "../components/StatusPill";
 import * as fmt from "../lib/format";
 import LoadError from "../components/LoadError";
 import SourceFreshnessTable from "../components/SourceFreshnessTable";
+import { useBaseCurrency } from "../context/CurrencyContext";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type RefreshStatus = "idle" | "running" | "done" | "error";
@@ -86,6 +87,8 @@ export default function OperationsOverview() {
   const [selectedIbkrAccountId, setSelectedIbkrAccountId] = useState<number | null>(null);
 
   const [priceRefresh, setPriceRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
+  const [fxBackfill, setFxBackfill] = useState<RefreshRowState>(REFRESH_IDLE);
+  const [baseCurrency] = useBaseCurrency();
   const [ibkrRefresh, setIbkrRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
   const [cryptoRefresh, setCryptoRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
 
@@ -125,6 +128,26 @@ export default function OperationsOverview() {
       await reloadSummary();
     } catch (e: unknown) {
       setPriceRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  // #290: past exchange rates for the span of your data (admin: shared table).
+  const runFxBackfill = async () => {
+    setFxBackfill({ status: "running", message: "" });
+    try {
+      const result = await api.fxBackfill(baseCurrency);
+      const message =
+        result.status === "up_to_date"
+          ? "Already up to date."
+          : result.status === "failed"
+            ? "The rate provider didn't answer."
+            : result.status === "remote_disabled"
+              ? "Fetching rates is off on this install."
+              : `Fetched ${result.fetched_requests} range${result.fetched_requests === 1 ? "" : "s"}${result.remaining_requests > 0 ? `, ${result.remaining_requests} to go` : ""}.`;
+      setFxBackfill({ status: result.status === "failed" ? "error" : "done", message });
+      await reloadSummary();
+    } catch (e: unknown) {
+      setFxBackfill({ status: "error", message: e instanceof Error ? e.message : String(e) });
     }
   };
 
@@ -307,6 +330,18 @@ export default function OperationsOverview() {
                 {priceRefresh.status === "done" && <StatusPill tone="good" label={priceRefresh.message} />}
                 {priceRefresh.status === "error" && (
                   <p className="dataHubRefreshError" role="alert">{priceRefresh.message}</p>
+                )}
+              </article>
+
+              <article className="card dataHubStatCard">
+                <p className="dataHubStatLabel">Past exchange rates</p>
+                <p className="muted">Fetch the daily rates missing for the span of your data, so past months include foreign holdings.</p>
+                <button className="btn" type="button" onClick={runFxBackfill} disabled={fxBackfill.status === "running"}>
+                  {fxBackfill.status === "running" ? "Fetching…" : "Fetch past rates"}
+                </button>
+                {fxBackfill.status === "done" && <StatusPill tone="good" label={fxBackfill.message} />}
+                {fxBackfill.status === "error" && (
+                  <p className="dataHubRefreshError" role="alert">{fxBackfill.message}</p>
                 )}
               </article>
 
