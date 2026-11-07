@@ -324,9 +324,14 @@ _HOLDINGS_HTML = """<html><body>
 </body></html>"""
 
 
-def _count(engine, sql: str) -> int:
+def _count(engine, sql: str, params: dict | None = None) -> int:
     with engine.connect() as conn:
-        return int(conn.execute(text(sql)).scalar_one())
+        return int(conn.execute(text(sql), params or {}).scalar_one())
+
+
+def _rows(engine, sql: str) -> list:
+    with engine.connect() as conn:
+        return [tuple(row) for row in conn.execute(text(sql))]
 
 
 @pytest.mark.postgres
@@ -410,12 +415,49 @@ def test_the_dummy_seed_reruns_and_clears_under_restrict(pg_engine):  # noqa: F8
         for script in (seed, seed):
             cursor.execute(script)
         assert _count(pg_engine, "SELECT COUNT(*) FROM broker_import_runs WHERE source_type = 'DUMMY'") > 0
+        _assert_seed_shape(pg_engine)
         cursor.execute(cleanup)
     finally:
         raw.close()
+    assert _count(pg_engine, "SELECT COUNT(*) FROM fx_rates WHERE source = 'DUMMY'") == 0
     assert _count(pg_engine, "SELECT COUNT(*) FROM accounts WHERE name LIKE 'DUMMY - %'") == 0
     assert _count(pg_engine, "SELECT COUNT(*) FROM broker_import_runs WHERE source_type = 'DUMMY'") == 0
     assert _count(pg_engine, "SELECT COUNT(*) FROM portfolio_position_snapshots") == 0
+
+
+def _assert_seed_shape(pg_engine) -> None:
+    """#291: what the demo seed must look like for History and past months to be honest."""
+    # Snapshots on the anchor day (the 1st, SNAPSHOT_DAY=1) of every month, plus today.
+    days = [
+        row[0]
+        for row in _rows(pg_engine, "SELECT DISTINCT report_date FROM portfolio_position_snapshots ORDER BY 1")
+    ]
+    firsts = [d for d in days if d.day == 1]
+    assert len(firsts) == 12, days
+    assert all(d.day == 1 for d in days[:-1]), days
+    # Exchange rates for every day the snapshots span (USD-based, SGD and HKD).
+    for quote in ("SGD", "HKD"):
+        missing = _count(
+            pg_engine,
+            "SELECT COUNT(*) FROM generate_series(0, CURRENT_DATE - :lo) AS n "
+            "WHERE NOT EXISTS (SELECT 1 FROM fx_rates f WHERE f.base = 'USD' AND f.quote = :q "
+            "AND f.rate_date = :lo + n)",
+            {"lo": firsts[0], "q": quote},
+        )
+        assert missing == 0, quote
+    # *_base is in the account's currency: IBKR's HKD holdings are converted to its USD base.
+    hkd = _rows(
+        pg_engine,
+        "SELECT ps.market_value_local, ps.market_value_base, ps.fx_rate_to_base FROM portfolio_position_snapshots ps "
+        "WHERE ps.currency = 'HKD' LIMIT 1",
+    )[0]
+    assert float(hkd[2]) < 0.2 and abs(float(hkd[0]) * float(hkd[2]) - float(hkd[1])) < 1
+    # No empty, non-DUMMY card left for the demo user (migration 059's placeholder).
+    assert _count(
+        pg_engine,
+        "SELECT COUNT(*) FROM accounts a JOIN users u ON u.id = a.user_id "
+        "WHERE LOWER(u.username) = 'demo' AND a.name NOT LIKE 'DUMMY - %'",
+    ) == 0
 
 
 @pytest.mark.postgres
@@ -437,8 +479,11 @@ def test_the_dummy_cleanup_marks_history_dirty_from_the_earliest_dummy_price(pg_
         raw.autocommit = True
         cursor = raw.cursor()
         cursor.execute(seed)
+        # The earliest DUMMY price or DUMMY exchange rate (#291): both are shared tables.
         cursor.execute(
-            "SELECT MIN(LEAST(trade_date, (ts AT TIME ZONE 'UTC')::date)) FROM prices WHERE source = 'DUMMY'"
+            "SELECT LEAST("
+            "(SELECT MIN(LEAST(trade_date, (ts AT TIME ZONE 'UTC')::date)) FROM prices WHERE source = 'DUMMY'), "
+            "(SELECT MIN(rate_date) FROM fx_rates WHERE source = 'DUMMY'))"
         )
         earliest = cursor.fetchone()[0]
         assert earliest is not None
