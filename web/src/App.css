@@ -6852,3 +6852,96 @@ html, body {
     min-height: 44px;
   }
 }
+
+/* ─── Liabilities: one transaction list with filters (#266) ─────────── */
+.ccChargeAlertSide {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.liabTxFilters {
+  margin: 12px 0 4px;
+}
+
+.liabTxFilterCount {
+  margin-left: 6px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
+.liabTxFilterHint {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.liabTxTable td:nth-child(2) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.liabTxMerchant {
+  overflow-wrap: anywhere;
+}
+
+/* Phone: the table becomes stacked rows, so nothing scrolls sideways (#266). */
+@media (max-width: 640px) {
+  .liabTxTable thead {
+    display: none;
+  }
+
+  .liabTxTable,
+  .liabTxTable tbody,
+  .liabTxTable tr,
+  .liabTxTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .liabTxTable tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .liabTxTable td {
+    padding: 0;
+    border: none;
+  }
+
+  .liabTxTable td:nth-child(1) {
+    grid-column: 1;
+    grid-row: 2;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .liabTxTable td:nth-child(2) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .liabTxTable td:nth-child(3) {
+    grid-column: 1;
+    grid-row: 3;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .liabTxTable td:nth-child(4) {
+    grid-column: 2;
+    grid-row: 2 / span 2;
+    justify-self: end;
+  }
+
+  .liabTxTable td:nth-child(5) {
+    grid-column: 2;
+    grid-row: 1;
+    text-align: right;
+  }
+}
