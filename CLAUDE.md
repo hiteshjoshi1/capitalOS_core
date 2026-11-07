@@ -17,7 +17,9 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   last `make deploy`, without `--reload` (#155), while worktree and test-instance APIs mount the code and reload). Stack-changing targets refuse there on any other branch (#44). Do feature work in a
   worktree: `make worktree ISSUE=<n> SLUG=<slug>` → `../capitalOS-worktrees/issue-<n>-<slug>`,
   where `make up` / `web-up` / `db-migrate` run an **isolated** stack (own project, containers,
-  ports and DB; `make where` prints them) and `make instance-drop` removes it.
+  ports and DB; `make where` prints them) and `make instance-drop` removes it. After a merge,
+  `make worktree-prune` lists merged, clean worktrees and `APPLY=1` removes each with its containers,
+  volumes, networks and images (#269; unmerged/dirty ones, main and the test instance are kept).
 - Web (#263): in the main checkout the real app's UI is a **production build in the `web` container** (nginx,
   `127.0.0.1:5173`, proxies `/api/*` to the API). `make up` starts it in the background, Docker restarts it
   (`restart: unless-stopped`, main checkout only), `make deploy` rebuilds it; `make web-logs`. Worktrees and the
