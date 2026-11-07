@@ -82,8 +82,9 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 ## Test instance (#45): a batch of PRs, tested before main
 From the main checkout:
 - `make test-instance PRS="54 61"`: merges `main` + the PRs into `test/<date>` (worktree
-  `../capitalOS-worktrees/test-instance`), runs `make verify`, restores the newest verified
-  backup there (counts checked), applies the batch's migrations, and serves it with a red TEST
+  `../capitalOS-worktrees/test-instance`), runs `make verify`, takes a **fresh verified backup** of the
+  real app and restores it there (counts checked; #287, `SKIP_BACKUP=1` reuses the newest; the banner
+  and `make test-instance-status` show the copy's time and any newer real imports), applies the batch's migrations, and serves it with a red TEST
   banner: web **:5174** (also via Tailscale), API :8021, Postgres :5434. Schedulers are off.
   It links the main checkout's `.env` (API keys, IBKR Flex) so refreshes work; a `DATABASE_URL` there is refused (#120).
 - A conflict stops and is named: resolve and commit in that worktree, then `make test-instance-start`.

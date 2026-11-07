@@ -4,8 +4,9 @@
 #
 #   test-instance.sh up <pr> [<pr>...]  main + the PRs merged in order into test/<date> (a
 #                                       worktree); a conflict stops, named, for a person.
-#                                       Then `make verify`, then the stack restored from the
-#                                       newest VERIFIED backup (counts checked), the batch's
+#                                       Then `make verify`, then a FRESH verified backup of the
+#                                       real app (#287; SKIP_BACKUP=1 reuses the newest one), the
+#                                       stack restored from it (counts checked), the batch's
 #                                       migrations applied to that copy, the demo login enabled
 #                                       on it, and the app served
 #                                       with a TEST banner on its own ports.
@@ -33,6 +34,10 @@ export ISO_NAME=capitalos-test
 export ISO_API_PORT=${TEST_API_PORT:-8021} ISO_PG_PORT=${TEST_PG_PORT:-5434} ISO_WEB_PORT=${TEST_WEB_PORT:-5174}
 export ISO_GRAFANA_PORT=${TEST_GRAFANA_PORT:-3001} ISO_LOKI_PORT=${TEST_LOKI_PORT:-3101}
 DB_USER=capitalos DB_NAME=capitalos
+# The real-data stack's database (read-only queries: the newest import, for "has it changed since
+# the copy"), and how a fresh backup is taken (#287). Both can be overridden, e.g. by the test.
+REAL_DB_CONTAINER=${REAL_DB_CONTAINER:-capitalos-oss-postgres}
+BACKUP_CMD=${BACKUP_CMD:-make -C "$REPO" -s db-backup}
 compose() { (cd "$TW" && COMPOSE_PROJECT_NAME="" COMPOSE_FILE="" docker compose -p "$ISO_NAME" -f docker-compose.yml -f docker-compose.isolated.yml "$@"); }
 tmake() { make -C "$TW" -s "$@"; }   # ISO_* are exported, so the worktree's make uses them
 # The main checkout's .env (API keys, IBKR Flex) so a batch's refreshes can be tested (#120).
@@ -79,6 +84,42 @@ newest_verified_backup() {
   ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 | sed 's/\.verified$//'
 }
 
+# The dump to serve (#287): a fresh verified backup of the real app, so the copy has everything
+# uploaded up to now; with SKIP_BACKUP=1 the newest verified one already there. Prints its path.
+fresh_dump() {
+  if [ "${SKIP_BACKUP:-0}" != 1 ]; then
+    echo "Data: taking a fresh verified backup of the real app (SKIP_BACKUP=1 reuses the newest)" >&2
+    $BACKUP_CMD >&2 || die "the fresh backup failed, so nothing was served (SKIP_BACKUP=1 to use the newest verified one)"
+  fi
+  newest_verified_backup
+}
+
+# "15:10 today", "14:02 on 6 Nov": when a backup was taken, from its name (capitalos_YYYYMMDD_HHMMSS.dump).
+backup_time_label() {
+  local name ymd hm today=${2:-$(date +%Y%m%d)}
+  name=$(basename "$1")
+  [[ $name =~ capitalos_([0-9]{8})_([0-9]{2})([0-9]{2})[0-9]{2}\.dump ]] || { echo "unknown time"; return 0; }
+  ymd=${BASH_REMATCH[1]} hm="${BASH_REMATCH[2]}:${BASH_REMATCH[3]}"
+  if [ "$ymd" = "$today" ]; then echo "$hm today"; return 0; fi
+  local months=(Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec)
+  echo "$hm on $((10#${ymd:6:2})) ${months[$((10#${ymd:4:2} - 1))]}"
+}
+
+# This machine's time zone (e.g. Asia/Singapore), so import times read like the banner's.
+HOST_TZ=${HOST_TZ:-$(readlink /etc/localtime 2>/dev/null | sed -n 's#.*/zoneinfo/##p')}
+newest_import() {  # newest_import <db container>: the newest import job's time (HOST_TZ), or nothing
+  docker exec "$1" psql -X -q -At -U "$DB_USER" -d "$DB_NAME" \
+    -c "SELECT to_char(max(created_at) AT TIME ZONE '${HOST_TZ:-UTC}', 'YYYY-MM-DD HH24:MI') FROM import_jobs" 2>/dev/null | grep -v -i collation | head -1 || true
+}
+
+# One line when the real app has imports the copy lacks (#287), else nothing.
+data_drift() {  # data_drift <real newest> <copy newest>
+  [ -n "$1" ] || return 0
+  if [ -z "$2" ] || [[ "$1" > "$2" ]]; then
+    echo "  Data drift:  the real app has newer imports (newest $1) than the copy (${2:-none}): rebuild to test them"
+  fi
+}
+
 serve() {
   say "Checks on the batch: make verify (lint, typecheck, backend + frontend tests)"
   if ! tmake verify; then
@@ -89,9 +130,11 @@ serve() {
   fi
 
   local dump
-  dump=$(newest_verified_backup)
+  say "Data"
+  dump=$(fresh_dump)
   [ -n "$dump" ] || die "no verified backup in $BACKUP_DIR (make db-backup)"
-  say "Data: a copy of $dump"
+  state_set data_from "$dump"
+  say "Data: a copy of $dump ($(backup_time_label "$dump"))"
   link_env
   compose down -v --remove-orphans >/dev/null 2>&1 || true
   compose up -d postgres
@@ -133,7 +176,7 @@ serve() {
   say "Web"
   stop_web
   local label repo_url
-  label="TEST $(git -C "$TW" branch --show-current) · Issues$(for n in $(banner_refs); do printf ' #%s' "$n"; done)"
+  label="TEST $(git -C "$TW" branch --show-current) · data $(backup_time_label "$(state_get data_from)") · Issues$(for n in $(banner_refs); do printf ' #%s' "$n"; done)"
   # The banner lists the batch's issues and links each #N to it (#200, #219: the issues a PR
   # closes, else the one it's "Part of"; GitHub sends /issues/N on to the PR when N is a PR,
   # used for a PR that names no issue at all).
@@ -217,6 +260,10 @@ status() {
   [ -n "$(state_get pending)" ] && echo "  PRs pending: $(state_get pending)"
   [ -n "$(state_get conflict)" ] && echo "  CONFLICT on #$(state_get conflict): resolve in $TW, then make test-instance-start"
   echo "  Served:      $(state_get served)"
+  if [ -n "$(state_get data_from)" ]; then
+    echo "  Data:        copy of $(basename "$(state_get data_from)") ($(backup_time_label "$(state_get data_from)"))"
+    data_drift "$(newest_import "$REAL_DB_CONTAINER")" "$(newest_import "$ISO_NAME-postgres")"
+  fi
   echo "  Web:         http://localhost:$ISO_WEB_PORT${ts:+   (phone: http://$ts:$ISO_WEB_PORT)}"
   echo "  API:         http://127.0.0.1:$ISO_API_PORT   Postgres: 127.0.0.1:$ISO_PG_PORT"
   echo "  After testing: make test-instance-pr (one PR to main), then make test-instance-drop"

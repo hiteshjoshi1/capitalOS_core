@@ -77,5 +77,29 @@ if out=$(batch_issues 2>&1); then bad "test PR: a PR gh can't read must stop it 
 elif printf '%s' "$out" | grep -q '#999'; then ok "test PR: a PR gh can't read stops it, named"
 else bad "test PR: failed without naming the PR ($out)"; fi
 
+# --- Fresh data (#287) ------------------------------------------------------------------------
+BACKUP_DIR="$tmp/backups"; mkdir -p "$BACKUP_DIR"
+touch "$BACKUP_DIR/capitalos_20261107_092826.dump" "$BACKUP_DIR/capitalos_20261107_092826.dump.verified"
+fake_backup() { sleep 1; touch "$BACKUP_DIR/capitalos_20261107_151014.dump" "$BACKUP_DIR/capitalos_20261107_151014.dump.verified"; echo backed-up >>"$tmp/backup.log"; }
+BACKUP_CMD=fake_backup
+expect "SKIP_BACKUP=1 serves the newest verified backup, without taking one" \
+  "$BACKUP_DIR/capitalos_20261107_092826.dump|0" \
+  "$(SKIP_BACKUP=1 fresh_dump 2>/dev/null)|$(grep -c backed-up "$tmp/backup.log" 2>/dev/null || echo 0)"
+expect "by default a fresh verified backup is taken and served" \
+  "$BACKUP_DIR/capitalos_20261107_151014.dump|1" \
+  "$(fresh_dump 2>/dev/null)|$(grep -c backed-up "$tmp/backup.log")"
+failing_backup() { return 1; }
+if out=$(BACKUP_CMD=failing_backup fresh_dump 2>&1); then bad "a failed backup stops the serve"
+elif printf '%s' "$out" | grep -q "fresh backup failed"; then ok "a failed backup stops the serve, named"
+else bad "a failed backup stopped without saying so ($out)"; fi
+expect "the copy's time, today" "15:10 today" "$(backup_time_label "$BACKUP_DIR/capitalos_20261107_151014.dump" 20261107)"
+expect "the copy's time, another day" "09:28 on 6 Nov" "$(backup_time_label x/capitalos_20261106_092826.dump 20261107)"
+expect "a name without a time" "unknown time" "$(backup_time_label x/other.dump 20261107)"
+expect "drift: the real app has a newer import" \
+  "  Data drift:  the real app has newer imports (newest 2026-11-07 13:42) than the copy (2026-11-07 09:38): rebuild to test them" \
+  "$(data_drift '2026-11-07 13:42' '2026-11-07 09:38')"
+expect "no drift when the copy is current" "" "$(data_drift '2026-11-07 13:42:00' '2026-11-07 13:42:00')"
+expect "no drift line when the real app can't be read" "" "$(data_drift '' '2026-11-07 13:42:00')"
+
 echo "test-instance issue refs: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
