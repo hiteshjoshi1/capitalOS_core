@@ -1,3 +1,5 @@
+from datetime import date
+
 from pydantic import BaseModel
 
 from app.schemas.fx import FxStatusFields
@@ -202,6 +204,66 @@ class CreditCardSummaryOut(FxStatusFields):
     base_currency: str
     total_spend: float
     cards: list[CreditCardItem]
+
+
+class CreditCardBalancePeriod(BaseModel):
+    """The card between two dated balances (#300); amounts in the card's currency.
+    ``to_date`` None: the newest balance, carried to today. ``printed`` is the next
+    balance the bank stated; ``difference`` = printed - expected, flagged above S$ 1."""
+    from_date: str
+    to_date: str | None = None
+    opening: float
+    charges: float
+    fees: float
+    interest: float
+    payments: float
+    credits: float
+    transaction_count: int
+    expected: float
+    printed: float | None = None
+    difference: float | None = None
+    flagged: bool = False
+    paid_in_full: bool | None = None
+
+
+class CreditCardBalanceItem(BaseModel):
+    """One card's running balance and statement check (#300, D-76)."""
+    account_id: int
+    account_name: str
+    card_name: str
+    issuer: str
+    currency: str
+    # running (a dated balance carried by the card's transactions) | transactions
+    # (no dated balance yet: this month's net transactions, an estimate).
+    method: str
+    owed_now: float  # card currency; negative = a credit (overpaid)
+    owed_now_base: float
+    last_balance_date: str | None = None
+    last_balance: float | None = None
+    last_balance_source: str | None = None
+    paid_since: float = 0.0
+    charges_since: float = 0.0
+    paid_in_full: bool | None = None
+    due_date: str | None = None
+    fees_interest_ytd: float = 0.0
+    last_transaction_date: str | None = None
+    flagged_count: int = 0
+    periods: list[CreditCardBalancePeriod] = []  # newest first
+
+
+class CreditCardBalanceIn(BaseModel):
+    """A card balance typed in from a statement (#300): what was owed on that date
+    (negative: a credit). For a card whose files state none (Citi)."""
+    as_of_date: date
+    owed: float
+
+
+class CreditCardBalancesOut(FxStatusFields):
+    base_currency: str
+    as_of: str
+    total_owed_base: float
+    flagged_count: int
+    cards: list[CreditCardBalanceItem]
 
 
 class CreditCardTransactionItem(BaseModel):

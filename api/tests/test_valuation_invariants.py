@@ -330,10 +330,11 @@ def test_user_b_sees_only_their_own_money(household, monkeypatch, db_engine):
     as_user(household, USER_B)
     nw = _summary(household, "2026-03")["current_net_worth"]
     usd = fx(MID.date(), "USD")
-    # B: OCBC 17,000 SGD; wallet 1 ETH @ 3,000 + 700 USDT; card limit 5,000 - 4,200 available.
+    # B: OCBC 17,000 SGD; wallet 1 ETH @ 3,000 + 700 USDT; card limit 5,000 - 4,200 available
+    # on 20 Feb (owes 800), plus the 11 Mar purchase of 400 since (#300's running balance).
     assert nw["cash"] == pytest.approx(17000.0, abs=TOL)
     assert nw["crypto"] == pytest.approx((3000.0 + 700.0) * usd, abs=TOL)
-    assert nw["liabilities"] == pytest.approx(800.0, abs=TOL)
+    assert nw["liabilities"] == pytest.approx(1200.0, abs=TOL)
     assert nw["stocks_funds"] == 0.0
     cash_page = _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
     assert {i["source"] for i in cash_page["items"]} == {"OCBC", "Base"}

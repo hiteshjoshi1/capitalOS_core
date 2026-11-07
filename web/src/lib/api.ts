@@ -995,6 +995,59 @@ export type CreditCardAnalyticsCategory = {
   percent: number;
 };
 
+/** One card between two dated balances (#300); amounts in the card's currency.
+ *  `to_date` null: the newest balance carried to today. `difference` = printed - expected. */
+export type CreditCardBalancePeriod = {
+  from_date: string;
+  to_date: string | null;
+  opening: number;
+  charges: number;
+  fees: number;
+  interest: number;
+  payments: number;
+  credits: number;
+  transaction_count: number;
+  expected: number;
+  printed: number | null;
+  difference: number | null;
+  flagged: boolean;
+  paid_in_full: boolean | null;
+};
+
+/** A card's running balance and statement check (#300, D-76). */
+export type CreditCardBalanceItem = {
+  account_id: number;
+  account_name: string;
+  card_name: string;
+  issuer: string;
+  currency: string;
+  /** "running" (a dated balance carried by the card's transactions) | "transactions" (none yet: an estimate). */
+  method: "running" | "transactions" | string;
+  /** Negative: a credit (overpaid). */
+  owed_now: number;
+  owed_now_base: number;
+  last_balance_date: string | null;
+  last_balance: number | null;
+  last_balance_source: string | null;
+  paid_since: number;
+  charges_since: number;
+  paid_in_full: boolean | null;
+  due_date: string | null;
+  fees_interest_ytd: number;
+  last_transaction_date: string | null;
+  flagged_count: number;
+  /** Newest first. */
+  periods: CreditCardBalancePeriod[];
+};
+
+export type CreditCardBalances = FxStatus & {
+  base_currency: string;
+  as_of: string;
+  total_owed_base: number;
+  flagged_count: number;
+  cards: CreditCardBalanceItem[];
+};
+
 export type CreditCardAnalytics = FxStatus & {
   month: string;
   base_currency: string;
@@ -2029,6 +2082,14 @@ export const api = {
     req<CreditCardSummary>(`/spending/credit-cards?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   creditCardTransactions: (month: string, baseCurrency = "SGD") =>
     req<CreditCardDetail>(`/spending/credit-card-transactions?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  creditCardBalances: (baseCurrency = "SGD") =>
+    req<CreditCardBalances>(`/spending/credit-card-balances?base_currency=${encodeURIComponent(baseCurrency)}`),
+  // A statement balance typed in by hand (#300), for a card whose files state none.
+  setCreditCardBalance: (accountId: number, payload: { as_of_date: string; owed: number }, baseCurrency = "SGD") =>
+    req<CreditCardBalances>(
+      `/spending/credit-card-balances/${encodeURIComponent(String(accountId))}?base_currency=${encodeURIComponent(baseCurrency)}`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
   creditCardAnalytics: (month: string, baseCurrency = "SGD", months = 12, accountId?: number | null) =>
     req<CreditCardAnalytics>(
       `/spending/credit-card-analytics?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}&months=${encodeURIComponent(String(months))}${

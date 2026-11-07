@@ -32,7 +32,7 @@ def _pb(amount):
 
 def _parse(rows):
     df = _frame(rows)
-    return [r for r in _collapse_rows(df, _normalize_columns(COLUMNS)) if not r.is_balance_marker]
+    return _collapse_rows(df, _normalize_columns(COLUMNS)).rows
 
 
 PERIOD_1 = [

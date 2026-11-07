@@ -1,0 +1,124 @@
+/* Card balances (#300): owed now, paid, and each statement's check. Wraps at 375px. */
+.cardBalancesList {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.cardBalancesAlert {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--warn);
+  border-radius: 10px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--warn) 12%, transparent);
+}
+
+.cardBalanceCard {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cardBalanceHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 16px;
+}
+
+.cardBalanceName {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: baseline;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.cardBalanceOwed {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.cardBalanceCredit {
+  color: var(--good);
+}
+
+.cardBalanceFacts {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.cardBalanceFees {
+  margin: 0;
+  font-size: 13px;
+}
+
+.cardBalanceGood {
+  color: var(--good);
+}
+
+.cardBalanceWarn {
+  color: var(--warn);
+}
+
+.cardBalanceChecks summary {
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.cardBalancePeriods {
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.cardBalancePeriods li {
+  display: grid;
+  gap: 2px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.cardBalancePeriodDates {
+  font-weight: 600;
+}
+
+.cardBalancePeriodMath {
+  font-variant-numeric: tabular-nums;
+}
+
+.cardBalancePeriodFlagged .cardBalancePeriodDates {
+  color: var(--warn);
+}
+
+.cardBalanceForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px 12px;
+}
+
+.cardBalanceForm label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.cardBalanceForm input {
+  min-height: 36px;
+  max-width: 100%;
+}

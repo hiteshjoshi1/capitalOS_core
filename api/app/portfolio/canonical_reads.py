@@ -404,10 +404,12 @@ def canonical_card_statement_rows(
     *,
     current_user_id: int,
     anchor_date: date,
+    max_age_days: int | None = CARD_STATEMENT_MAX_AGE_DAYS,
 ) -> list[dict[str, Any]]:
     """Each card's statement balance at the anchor (``effective_card_statements_sql``):
     its newest ``credit_balance`` snapshots (#207), at most CARD_STATEMENT_MAX_AGE_DAYS
-    old (D-52), one row per currency."""
+    old (D-52), one row per currency. ``max_age_days=None``: however old (the running
+    balance's anchor, #300, which carries it forward with the card's transactions)."""
     rows = db.execute(
         text(
             """
@@ -418,7 +420,7 @@ def canonical_card_statement_rows(
         ),
         {
             "anchor_date": anchor_date,
-            "oldest": anchor_date - timedelta(days=CARD_STATEMENT_MAX_AGE_DAYS),
+            "oldest": anchor_date - timedelta(days=max_age_days) if max_age_days is not None else date(1900, 1, 1),
             "current_user_id": current_user_id,
         },
     ).mappings().all()

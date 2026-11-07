@@ -123,6 +123,9 @@ def test_parse_uob_credit_card_xls_fixture():
         "currency": "SGD",
         "statement_date": "2026-02-12T00:00:00+00:00",
         "statement_balance": 321.84,
+        # #300: every dated balance the file prints; a one-date statement's header
+        # balance is what's owed on that date.
+        "statement_balances": [{"as_of_date": "2026-02-12", "owed": 321.84, "source": "statement_balance"}],
     }
 
 

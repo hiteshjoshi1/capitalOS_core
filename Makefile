@@ -629,6 +629,8 @@ ibkr-rebuild-snapshots:
 # older statements from their files under data/. Dry run unless APPLY=1; idempotent (newest import
 # wins per date; a second run changes nothing); marks History dirty from the earliest changed date.
 # Prints job ids, actions and dates, never amounts. Runs in the running api container.
+# #300: a UOB history export states one balance per statement period (its "Previous Balance"
+# lines): each is written, so the card's running balance and statement checks have them.
 card-balance-backfill:
 	$(COMPOSE) exec api python -m app.scripts.backfill_card_balances $(if $(filter 1,$(APPLY)),--apply,)
 

@@ -28,7 +28,7 @@ from app.ingestion.card_balances import (
     CARD_BALANCE_PARSERS,
     CARD_BALANCE_TYPE,
     CardStatementBalance,
-    card_statement_balance,
+    card_statement_balances,
     write_card_statement_balance,
 )
 from app.wealth_rollup_dirty import mark_rollups_dirty
@@ -93,38 +93,46 @@ def backfill_card_balances(db: Session, *, apply: bool = False) -> BackfillResul
         )
     ).mappings().all()
     result = BackfillResult(applied=apply)
-    # (account, date, currency) -> (job id, statement, parser_meta): the newest import wins.
-    winners: dict[tuple[int, date, str], tuple[int, CardStatementBalance, dict[str, Any]]] = {}
-    outcomes: dict[int, JobOutcome] = {}
+    # (account, date, currency) -> (job id, statement): the newest import wins.
+    winners: dict[tuple[int, date, str], tuple[int, CardStatementBalance, dict[str, Any] | None]] = {}
+    # One outcome per (job, balance date); a job without a balance has one with no date.
+    # A UOB history export states several dated balances (#300), each its own outcome.
+    outcomes: dict[tuple[int, date | None], JobOutcome] = {}
     for job in jobs:
         parser_key = str(job["parser_key"] or "")
         if parser_key not in CARD_BALANCE_PARSERS:
             continue
         job_id, account_id = int(job["id"]), int(job["account_id"])
-        outcome = JobOutcome(job_id=job_id, account_id=account_id, parser_key=parser_key, action="no_balance")
-        outcomes[job_id] = outcome
+
+        def _job_outcome(action: str) -> None:
+            outcomes[(job_id, None)] = JobOutcome(job_id=job_id, account_id=account_id, parser_key=parser_key, action=action)
+
         path = str(job["stored_path"] or "")
         if not path or not os.path.isfile(path):
-            outcome.action = "missing_file"
+            _job_outcome("missing_file")
             continue
         try:
             meta = _parse(parser_key, path)
         except Exception:  # a file that no longer parses is reported, not fatal
-            outcome.action = "parse_error"
+            _job_outcome("parse_error")
             continue
-        statement = card_statement_balance(parser_key, meta)
-        if statement is None:
+        statements = card_statement_balances(parser_key, meta)
+        if not statements:
+            _job_outcome("no_balance")
             continue
-        outcome.as_of_date = statement.as_of_date
-        key = (account_id, statement.as_of_date, str(job["currency"] or "SGD"))
-        previous = winners.get(key)
-        if previous is not None:
-            outcomes[previous[0]].action = "superseded"
-        winners[key] = (job_id, statement, meta)
-        outcome.action = "pending"
+        for statement in statements:
+            key = (account_id, statement.as_of_date, str(job["currency"] or "SGD"))
+            previous = winners.get(key)
+            if previous is not None:
+                outcomes[(previous[0], statement.as_of_date)].action = "superseded"
+            # A file stating one balance keeps its own parser_meta (e.g. DBS's limits).
+            winners[key] = (job_id, statement, meta if len(statements) == 1 else None)
+            outcomes[(job_id, statement.as_of_date)] = JobOutcome(
+                job_id=job_id, account_id=account_id, parser_key=parser_key, action="pending", as_of_date=statement.as_of_date
+            )
 
-    for (account_id, as_of, currency), (job_id, statement, meta) in winners.items():
-        outcome = outcomes[job_id]
+    for (account_id, as_of, currency), (job_id, statement, own_meta) in winners.items():
+        outcome = outcomes[(job_id, as_of)]
         existing = _existing(db, account_id, as_of, currency)
         if existing is None:
             outcome.action = "insert"
@@ -144,10 +152,10 @@ def backfill_card_balances(db: Session, *, apply: bool = False) -> BackfillResul
                 account_id=account_id,
                 import_job_id=job_id,
                 parser_key=outcome.parser_key,
-                parser_meta=meta,
+                parser_meta=own_meta if own_meta is not None else _one_balance_meta(statement),
                 mark_dirty=False,
             )
-    result.jobs = sorted(outcomes.values(), key=lambda o: o.job_id)
+    result.jobs = sorted(outcomes.values(), key=lambda o: (o.job_id, o.as_of_date or date.min))
     if apply:
         for account_id, from_date in result.dirty_from.items():
             mark_rollups_dirty(db, from_date, account_id=account_id, reason="card_balance_backfill")
@@ -155,6 +163,16 @@ def backfill_card_balances(db: Session, *, apply: bool = False) -> BackfillResul
     else:
         db.rollback()
     return result
+
+
+def _one_balance_meta(statement: CardStatementBalance) -> dict[str, Any]:
+    """parser_meta stating just this one dated balance, so the writer writes only it."""
+    return {
+        "statement_balances": [
+            {"as_of_date": statement.as_of_date.isoformat(), "owed": -statement.balance,
+             "source": statement.metadata.get("source")}
+        ]
+    }
 
 
 def summary_lines(result: BackfillResult) -> list[str]:

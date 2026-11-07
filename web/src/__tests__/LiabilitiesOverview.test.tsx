@@ -10,6 +10,7 @@ import type { Account, CreditCardAnalytics, CreditCardTransaction } from "../lib
 vi.mock("../lib/api", () => ({
   api: {
     creditCardAnalytics: vi.fn(),
+    creditCardBalances: vi.fn(),
     accounts: vi.fn(),
   },
 }));
@@ -119,6 +120,11 @@ describe("LiabilitiesOverview route", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.accounts.mockResolvedValue(noLoans);
+    // #300's card balances section has its own request; empty here.
+    mockApi.creditCardBalances.mockResolvedValue({
+      base_currency: "SGD", as_of: "2026-07-20", total_owed_base: 0, flagged_count: 0, cards: [],
+      fx_incomplete: false, fx_missing_currencies: [],
+    } as never);
   });
 
   it("renders the hero spend, charge total, and largest category once loaded", async () => {

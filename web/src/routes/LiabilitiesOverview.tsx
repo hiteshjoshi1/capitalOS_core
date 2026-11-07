@@ -3,6 +3,7 @@ import { api } from "../lib/api";
 import type { CreditCardTransaction } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
+import CardBalances from "../components/CardBalances";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import { chartColor } from "../lib/chartColors";
@@ -306,6 +307,8 @@ export default function LiabilitiesOverview() {
                 </article>
               ))}
             </section>
+
+            <CardBalances baseCurrency={baseCurrency} />
 
             <section>
               <div className="cashFlowSectionHeading">
