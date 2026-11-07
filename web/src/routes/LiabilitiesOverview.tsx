@@ -9,7 +9,7 @@ import { chartColor } from "../lib/chartColors";
 import { computeDueStatus, dueSortValue, formatShortDate } from "../lib/dueStatus";
 import type { DueStatus } from "../lib/dueStatus";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
 import FxNote from "../components/FxNote";
@@ -17,7 +17,6 @@ import DueStatusPill from "../components/DueStatusPill";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
 type UpcomingRow = {
@@ -159,12 +158,7 @@ export default function LiabilitiesOverview() {
     <PageShell
       title="Liabilities"
       subtitle={pageSubtitle}
-      headerActions={
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      }
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {analytics.isLoading ? <div className="card" role="status">Loading…</div> : null}
 

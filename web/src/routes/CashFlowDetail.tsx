@@ -15,14 +15,13 @@ import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
 import FxNote from "../components/FxNote";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 import { cashFlowNarrative, cashFlowPeriodView, inflowsHeadline, outflowsHeadline, periodEyebrow } from "../lib/cashFlowPeriod";
@@ -881,12 +880,7 @@ export default function CashFlowDetailRoute() {
     <PageShell
       title={shellTitle}
       subtitle={shellSubtitle}
-      headerActions={(
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      )}
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {!loadError && (detailRes.isLoading || categoriesRes.isLoading) && <div className="card" role="status">Loading…</div>}
 

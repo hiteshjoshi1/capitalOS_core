@@ -7,7 +7,7 @@ import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber,
 import { noDataFor, noRateFor } from "../lib/delta";
 import { chartColor } from "../lib/chartColors";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
@@ -15,7 +15,6 @@ import Delta from "../components/Delta";
 import TrendBarChart from "../components/TrendBarChart";
 import StackedBar from "../components/StackedBar";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
 
@@ -75,12 +74,7 @@ export default function CryptoHoldings() {
       subtitle="Wallet, token, and chain-level exposure as of any month."
       activeRoute="/crypto/holdings"
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
-      headerActions={(
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      )}
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {resource.isLoading && <div className="card" role="status">Loading…</div>}
       {resource.error && (

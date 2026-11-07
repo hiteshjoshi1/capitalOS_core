@@ -6,14 +6,13 @@ import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import HeroMetricCard from "../components/HeroMetricCard";
 import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
 type CompanyTab = "realized" | "expected";
@@ -132,12 +131,7 @@ export default function Dividends() {
       title="Dividends"
       subtitle="Cash dividends received, and what your holdings are projected to pay next."
       activeRoute="/dividends"
-      headerActions={(
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      )}
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {monthRes.isLoading && <div className="card" role="status">Loading…</div>}
       {monthRes.error && (

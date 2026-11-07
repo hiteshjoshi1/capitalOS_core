@@ -1,5 +1,5 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
-import { Suspense, useState, type ReactNode } from "react";
+import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Sidebar from "./Sidebar";
 import RouteFallback from "./RouteFallback";
 import RouteErrorBoundary from "./RouteErrorBoundary";
@@ -19,6 +19,13 @@ export default function AppShell() {
   // page's own controls (month pill, currency, CSV) go in a row under its title
   // (PageShell), and the theme switch moves into the account menu.
   const narrow = useMediaQuery(NARROW_SHELL_QUERY);
+  // #264: the section tabs are one row that scrolls sideways when it doesn't fit (Wealth has 7);
+  // the active tab is scrolled into view on every route change.
+  const tabsRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const active = tabsRef.current?.querySelector<HTMLElement>(".appShellTabActive");
+    active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [location.pathname]);
 
   return (
     <div className="appShell">
@@ -38,13 +45,14 @@ export default function AppShell() {
 
             {/* Tabs: only when there's a matching section */}
             {activeSection ? (
-              <nav className="appShellTabs" aria-label={`${activeSection.label} tabs`}>
+              <nav ref={tabsRef} className="appShellTabs" aria-label={`${activeSection.label} tabs`}>
                 {activeSection.tabs
                   .filter((tab) => !tab.hidden)
                   .map((tab) => (
                     <Link
                       key={tab.to}
                       className={`appShellTab${isNavItemActive(tab, location.pathname) ? " appShellTabActive" : ""}`}
+                      aria-current={isNavItemActive(tab, location.pathname) ? "page" : undefined}
                       to={tab.to}
                     >
                       {tab.label}
