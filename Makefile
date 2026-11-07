@@ -31,6 +31,11 @@ API_PORT=8000
 DB_CONTAINER=capitalos-postgres
 API_CONTAINER=capitalos-api
 endif
+# The real app's web UI is a container here (#263): built by make deploy, started by make up,
+# brought back by Docker after a restart. Worktrees run the Vite dev server instead.
+WEB_SERVICE=web
+WEB_URL=http://127.0.0.1:5173
+export CAPITALOS_RESTART=unless-stopped
 else
 CHECKOUT=worktree
 # Name and ports come from the worktree's directory, so they're stable per worktree and
@@ -56,7 +61,7 @@ endif
 #   that branch live on the real data. Work in a worktree instead (make worktree ISSUE=<n>
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
-GUARDED_TARGETS=up down build api-up api-build api-rebuild deploy db-migrate db-reset db-restore db-adopt-migrations \
+GUARDED_TARGETS=up down build api-up api-build api-rebuild web-build web-rebuild tailnet-serve tailnet-serve-off deploy db-migrate db-reset db-restore db-adopt-migrations \
 	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
@@ -80,7 +85,7 @@ $(error Refusing: a worktree must not use the main stack's ports ($(ISO_API_PORT
 endif
 endif
 endif
-CORE_SERVICES=postgres api
+CORE_SERVICES=postgres api $(WEB_SERVICE)
 DB_USER?=capitalos
 DB_NAME?=capitalos
 # The smoke targets sign in as demo: on a dev/test stack run `make demo-enable` first (#152),
@@ -172,7 +177,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke logs-purge-secrets grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build deploy deploy-plan deploy-status observability-running
+.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke logs-purge-secrets grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build web-build web-logs tailnet-serve tailnet-serve-status tailnet-serve-off deploy deploy-plan deploy-status observability-running
 
 build:
 	$(COMPOSE) build
@@ -198,8 +203,32 @@ ifeq ($(CHECKOUT),worktree)
 web-up: web-deps
 	cd $(WEB_DIR) && VITE_API_BASE=/api VITE_API_PORT=$(API_PORT) VITE_INSTANCE_LABEL="$(or $(INSTANCE_LABEL),DEV $(CURRENT_BRANCH))" VITE_INSTANCE_REPO_URL="$(INSTANCE_REPO_URL)" npm run dev -- --port $(ISO_WEB_PORT) --strictPort
 else
-web-up: web-deps
-	cd $(WEB_DIR) && npm run dev
+# The main checkout serves the production build from the web container (#263), on
+# 127.0.0.1:5173 only; `make tailnet-serve` puts it on the tailnet. For hot reload, use a worktree.
+web-up:
+	$(COMPOSE) up -d $(WEB_SERVICE)
+	@echo "Web: $(WEB_URL)"
+
+web-logs:
+	docker logs -f capitalos-web
+
+# Only your tailnet's devices reach the real app (#263): `tailscale serve` (never funnel) proxies
+# tailnet HTTPS on port $(TAILNET_PORT) to the web container on 127.0.0.1:5173. Tailscale keeps
+# the setting across restarts. InvestOS keeps the default HTTPS port (443) of the same name.
+TAILSCALE?=$(shell command -v tailscale 2>/dev/null || ls /Applications/Tailscale.app/Contents/MacOS/Tailscale 2>/dev/null)
+TAILNET_PORT?=8443
+tailnet-serve:
+	@test -n "$(TAILSCALE)" || { echo "tailscale CLI not found (install Tailscale, or pass TAILSCALE=<path>)" >&2; exit 1; }
+	"$(TAILSCALE)" serve --bg --https=$(TAILNET_PORT) $(WEB_URL)
+	@"$(TAILSCALE)" serve status
+
+tailnet-serve-status:
+	@test -n "$(TAILSCALE)" || { echo "tailscale CLI not found" >&2; exit 1; }
+	@"$(TAILSCALE)" serve status
+
+tailnet-serve-off:
+	@test -n "$(TAILSCALE)" || { echo "tailscale CLI not found" >&2; exit 1; }
+	"$(TAILSCALE)" serve --https=$(TAILNET_PORT) off
 endif
 
 api-logs:
@@ -871,17 +900,20 @@ orch-clean:
 TRIVY_IMAGE?=$(shell scripts/tool-image.sh trivy)
 TRIVY=docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v capitalos-trivy-cache:/root/.cache $(TRIVY_IMAGE) image --quiet --skip-version-check --table-mode detailed --scanners vuln --ignore-unfixed --severity HIGH,CRITICAL
 SCAN_API_IMAGE=capitalos-api:security-scan
+SCAN_WEB_IMAGE=capitalos-web:security-scan
 .PHONY: security-scan
 security-scan:
 	docker build --pull --target runtime -t $(SCAN_API_IMAGE) api
 	$(TRIVY) --exit-code 1 $(SCAN_API_IMAGE)
-	@for img in $$(docker compose -f docker-compose.yml --profile observability config --images | grep -v -- '-api') $$(scripts/tool-image.sh mcp-toolbox); do \
+	docker build --pull --target runtime -t $(SCAN_WEB_IMAGE) web
+	$(TRIVY) --exit-code 1 $(SCAN_WEB_IMAGE)
+	@for img in $$(docker compose -f docker-compose.yml --profile observability config --images | grep '@sha256:') $$(scripts/tool-image.sh mcp-toolbox); do \
 		echo "== $$img (report only)"; $(TRIVY) $$img | grep -E '^(Total:|[a-z].*\()' || true; \
 	done
 
 # ---- SBOMs, provenance, pruning (issue 214) ----
 # Every pinned third-party image plus the tool images.
-PINNED_IMAGES=$$(docker compose -f docker-compose.yml --profile observability config --images | grep -v -- '-api'; sed -n 's/^FROM \([^ ]*@sha256:[^ ]*\) AS .*/\1/p' tools/Dockerfile api/Dockerfile)
+PINNED_IMAGES=$$(docker compose -f docker-compose.yml --profile observability config --images | grep '@sha256:'; sed -n 's/^FROM \([^ ]*@sha256:[^ ]*\) AS .*/\1/p' tools/Dockerfile api/Dockerfile web/Dockerfile)
 .PHONY: sbom sbom-find verify-image verify-images docker-prune
 sbom:
 	docker build --target runtime -t $(SCAN_API_IMAGE) api
@@ -917,6 +949,14 @@ docker-prune:
 api-build:
 	$(COMPOSE) build --pull api api-dev
 
+# The web image (#263), on freshly pulled bases (OS fixes land on every deploy). Main checkout only.
+web-build:
+ifeq ($(CHECKOUT),worktree)
+	@echo "web-build: worktrees run the Vite dev server (make web-up); the web image is the main checkout's" >&2; exit 1
+else
+	$(COMPOSE) build --pull web
+endif
+
 # Install merged main into the real-data stack (#46): backup if migrating, migrate, rebuild,
 # health check. Main checkout on main only. See scripts/deploy.sh.
 deploy:
@@ -937,8 +977,13 @@ api-rebuild:
 	$(COMPOSE) build --pull api api-dev
 	$(COMPOSE) up -d api
 
+ifeq ($(CHECKOUT),worktree)
 web-rebuild:
 	cd $(WEB_DIR) && npm run build
+else
+web-rebuild: web-build
+	$(COMPOSE) up -d $(WEB_SERVICE)
+endif
 
 api-shell:
 	$(COMPOSE) exec -T api python -c "import urllib.request; print(urllib.request.urlopen('http://localhost:8000/health').read().decode())"

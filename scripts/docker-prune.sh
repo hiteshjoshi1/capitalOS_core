@@ -11,8 +11,8 @@ set -eu
 cd "$(dirname "$0")/.."
 project=${COMPOSE_PROJECT:-capitalos}
 
-pinned=$( { docker compose -f docker-compose.yml --profile observability config --images 2>/dev/null | grep -v -- '-api' || true
-            sed -n 's/^FROM \([^ ]*\) AS .*/\1/p' tools/Dockerfile api/Dockerfile | grep '@sha256:' ; } | sort -u )
+pinned=$( { docker compose -f docker-compose.yml --profile observability config --images 2>/dev/null | grep '@sha256:' || true
+            sed -n 's/^FROM \([^ ]*\) AS .*/\1/p' tools/Dockerfile api/Dockerfile web/Dockerfile | grep '@sha256:' ; } | sort -u )
 repos=$(printf '%s\n' "$pinned" | sed 's/@.*//; s/:[^:/]*$//' | sort -u)
 keep_ids=$(for r in $pinned; do docker image inspect -f '{{.Id}}' "$r" 2>/dev/null || true; done)
 used_ids=$(docker ps -aq | xargs -r docker inspect -f '{{.Image}}' 2>/dev/null || true)

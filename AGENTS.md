@@ -207,10 +207,13 @@ After ANY backend change:
 (`make api-url` prints the API base for this checkout: `http://127.0.0.1:8011` when the
 local `docker-compose.oss-test.yml` override is present, otherwise `http://127.0.0.1:8000`.)
 
-After ANY frontend change:
+After ANY frontend change (in a worktree):
 
-1. make web-rebuild
-2. open http://localhost:5173
+1. make web-up (Vite, hot reload)
+2. open the URL `make where` prints
+
+The real app's UI (main checkout) is the `web` container's production build (#263): it changes only
+with `make deploy`.
 
 ---
 

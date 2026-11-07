@@ -8,9 +8,9 @@ and the `docs/PRD/` docs.
 Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 
 ## Run
-- `make up` — starts postgres + api. With the local, git-ignored `docker-compose.oss-test.yml`
-  present (this checkout) that is the **OSS stack** (postgres :5433 + api :8011, compose project
-  `capitalos-oss-test`). The default-project stack (`capitalos`, API :8000) is not used in
+- `make up` — starts postgres + api (+ the **web container** in the main checkout, #263). With the local,
+  git-ignored `docker-compose.oss-test.yml` present (this checkout) that is the **OSS stack** (postgres :5433 +
+  api :8011, compose project `capitalos-oss-test`). The default-project stack (`capitalos`, API :8000) is not used in
   this checkout — don't start it. Without that file (fresh
   clone) it's the base stack on :5432 / :8000.
 - **The main checkout stays on `main`** (it runs the real data; its API runs the code baked into the image at the
@@ -18,7 +18,13 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   worktree: `make worktree ISSUE=<n> SLUG=<slug>` → `../capitalOS-worktrees/issue-<n>-<slug>`,
   where `make up` / `web-up` / `db-migrate` run an **isolated** stack (own project, containers,
   ports and DB; `make where` prints them) and `make instance-drop` removes it.
-- Web: `cd web && npm run dev` → `http://localhost:5173`.
+- Web (#263): in the main checkout the real app's UI is a **production build in the `web` container** (nginx,
+  `127.0.0.1:5173`, proxies `/api/*` to the API). `make up` starts it in the background, Docker restarts it
+  (`restart: unless-stopped`, main checkout only), `make deploy` rebuilds it; `make web-logs`. Worktrees and the
+  test instance run the Vite dev server (`make web-up`, hot reload).
+- Tailnet (#263): `make tailnet-serve` (once; Tailscale keeps it) serves the real app at
+  `https://<mac>.<tailnet>.ts.net:8443` to your tailnet only (`tailscale serve`, never `funnel`).
+  `make tailnet-serve-status` / `tailnet-serve-off`. InvestOS has port 443 of the same name.
 - API: `http://localhost:8011` (health: `curl http://127.0.0.1:8011/health`). `web/.env.local` sets
   `VITE_API_BASE=/api` + `VITE_API_PORT=8011`: the browser talks only to the Vite server, which
   proxies `/api/*` to the API (works from other devices, where `localhost` would be that device).
@@ -29,7 +35,10 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   scratch). All are non-root except `docker-socket-proxy`, the only container with the Docker socket:
   it exposes read-only container/event endpoints to Alloy on an internal network (`docker-api`).
   Loki/Grafana/Alloy sit on an `observability` network that can't reach Postgres.
-- Vite listens on all interfaces (`host: true`) but `web/vite.network.ts` drops any connection
+- The web container publishes on `127.0.0.1` only: Docker Desktop hides client addresses from containers, so the
+  tailnet reaches it through `tailscale serve`, never the LAN; nginx answers 421 to any Host but localhost or
+  `*.ts.net` (DNS rebinding).
+- Vite (worktrees/test instance) listens on all interfaces (`host: true`) but `web/vite.network.ts` drops any connection
   that isn't from localhost or Tailscale (100.64.0.0/10, fd7a:115c:a1e0::/48). `VITE_ALLOW_LAN=1`
   opens it to the local network. `*.ts.net` Host headers are allowed (`allowedHosts`).
 - Demo login `demo` / `Test@1234`: **dev worktree stacks and test instances only** (#152). Migration
@@ -63,10 +72,10 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 ## Deploy (#46): installing merged main into the real app
 - `make deploy` in the main checkout (on `main`, clean tree), **never a bare `git pull`**. It runs:
   a verified backup if new migrations come in, fast-forward, `make api-build`, `make db-migrate`,
-  `make up` (+ observability if it's running), then health checks. A failed migration is rolled
+  `make up` (+ observability if it's running), then health checks (API, and the web container's page + `/api` proxy). A failed migration is rolled
   back, the code reset to the previous commit, and the backup named.
 - `make deploy-plan` (what would happen), `make deploy-status` (deployed commit, how far behind,
-  last deploys from `deployments.log`). Restart `make web-up` when it says web deps changed.
+  last deploys from `deployments.log`). The web UI is rebuilt by the deploy (#263); nothing to restart.
 
 ## Test instance (#45): a batch of PRs, tested before main
 From the main checkout:

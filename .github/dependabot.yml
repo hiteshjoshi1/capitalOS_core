@@ -68,6 +68,19 @@ updates:
       - dependency-name: python
         update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
+  # Web image bases (#263): node (build stage) and nginx-unprivileged (runtime).
+  - package-ecosystem: docker
+    directory: /web
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 14
+    ignore:
+      # A Node major is a deliberate runtime change (it follows .nvmrc).
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
   # Postgres, Loki, Grafana, Alloy pins in docker-compose.yml.
   - package-ecosystem: docker-compose
     directory: /

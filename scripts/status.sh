@@ -19,10 +19,12 @@ make -s where 2>/dev/null | sed 's/^/  /'
 
 # The real-data stack: health of what runs, and how far main's checkout is from origin/main.
 if docker info >/dev/null 2>&1; then
-  running=$(docker ps --filter name=capitalos-oss --filter name=capitalos-loki --filter name=capitalos-grafana \
-    --filter name=capitalos-alloy --filter name=capitalos-docker-socket-proxy --format '{{.Names}}' | wc -l | tr -d ' ')
+  running=$(docker ps --filter name=capitalos-oss --filter name=capitalos-web --filter name=capitalos-loki \
+    --filter name=capitalos-grafana --filter name=capitalos-alloy --filter name=capitalos-docker-socket-proxy \
+    --format '{{.Names}}' | wc -l | tr -d ' ')
   api=$(curl -s -m 2 http://127.0.0.1:8011/health 2>/dev/null | grep -q '"ok"' && echo ok || echo DOWN)
-  echo "Real stack: API $api, $running/6 containers up"
+  web=$(curl -s -m 2 -o /dev/null -w '%{http_code}' http://127.0.0.1:5173/ 2>/dev/null | grep -q 200 && echo ok || echo DOWN)
+  echo "Real stack: API $api, web $web, $running/7 containers up"
 else
   echo "Real stack: Docker not running"
 fi
