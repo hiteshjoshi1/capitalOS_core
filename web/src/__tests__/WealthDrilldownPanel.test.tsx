@@ -13,6 +13,7 @@ vi.mock("../lib/api", () => ({
     netWorthTimelineMovers: vi.fn(),
     dividendsSummary: vi.fn(),
     spendingSummary: vi.fn(),
+    monthBridge: vi.fn(),
   },
 }));
 
@@ -69,6 +70,10 @@ describe("WealthDrilldownPanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-05", gainers: [], detractors: [] });
+    mockApi.monthBridge.mockResolvedValue({
+      base_currency: "SGD",
+      move_causes: { change: 100, change_pct: 11, is_big_move: true, causes: [], none_reason: null },
+    } as never);
     mockApi.dividendsSummary.mockResolvedValue({
       from_month: "2026-06",
       to_month: "2026-06",
@@ -208,5 +213,37 @@ describe("WealthDrilldownPanel focus", () => {
     expect(opener).toHaveFocus();
     opener.remove();
     await waitFor(() => undefined);
+  });
+  it("explains a flagged month with its causes, and never fetches them for a normal month (#289)", async () => {
+    mockApi.monthBridge.mockResolvedValue({
+      base_currency: "SGD",
+      move_causes: {
+        change: 60000,
+        change_pct: 60,
+        is_big_move: true,
+        causes: [{ key: "first_statement", label: "First data for Synthetic Bank", amount: 60000, significant: true, detail: "x" }],
+        none_reason: null,
+      },
+    } as never);
+    renderPanel({ flags: { ...baseFlags, isOutlier: true } });
+    const note = await screen.findByRole("note", { name: "Why it moved" });
+    expect(note).toHaveTextContent("First data for Synthetic Bank");
+    expect(note).toHaveTextContent("S$ 60,000");
+    expect(mockApi.monthBridge).toHaveBeenCalledWith("2026-06", "SGD");
+  });
+
+  it("says no data cause for a flagged month whose bridge found none (#289)", async () => {
+    mockApi.monthBridge.mockResolvedValue({
+      base_currency: "SGD",
+      move_causes: { change: 100, change_pct: 2, is_big_move: false, causes: [], none_reason: null },
+    } as never);
+    renderPanel({ month: "2026-07", flags: { ...baseFlags, isCatchUp: true } });
+    expect(await screen.findByText("No data cause found: a market move")).toBeInTheDocument();
+  });
+
+  it("doesn't fetch causes for an unflagged month (#289)", () => {
+    mockApi.monthBridge.mockClear();
+    renderPanel({ month: "2026-08" });
+    expect(mockApi.monthBridge).not.toHaveBeenCalled();
   });
 });
