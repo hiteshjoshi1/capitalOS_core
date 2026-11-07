@@ -48,7 +48,12 @@ describe("api client coverage", () => {
     await api.dashboardNetWorthChange("2026-03", "USD", "prev_month");
     await api.dashboardSummary("2026-03", "prev_month,prev_year", "USD", true);
     await api.riskSummary("2026-03", "SGD");
+    await api.riskThresholds();
+    await api.saveRiskThresholds({ largest_position_warn_pct: 20, top_n_warn_pct: null, platform_warn_pct: null });
     await api.monthBridge("2026-03", "USD");
+    await api.sourceFreshness();
+    await api.setSourceFreshnessCadence("account:1", { cadence: "weekly", grace_days: 2 });
+    await api.resetSourceFreshnessCadence("wallet:abc");
     await api.stockHoldingsSummary("2026-03", "USD");
     await api.cashDeposits("2026-03", "USD");
     await api.platformAllocation("2026-03", "USD");

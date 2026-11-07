@@ -76,10 +76,10 @@ describe("Statement date helpers (#141)", () => {
   });
 
   it("describes where the snapshot date came from", () => {
-    expect(describeAsOf("2026-10-01", "file")).toBe("Dated 2026-10-01 (from the file)");
+    expect(describeAsOf("2026-10-01", "file")).toBe("Dated 1 Oct 2026 (from the file)");
     expect(describeAsOf("2026-10-01", "user")).toMatch(/date you chose/);
     expect(describeAsOf("2026-10-01", "fallback")).toMatch(/upload day/);
-    expect(describeAsOf("2026-10-01", undefined)).toBe("Dated 2026-10-01");
+    expect(describeAsOf("2026-10-01", undefined)).toBe("Dated 1 Oct 2026");
     expect(describeAsOf(undefined, "file")).toBeNull();
   });
 
@@ -138,7 +138,7 @@ describe("Ingest", () => {
     await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));
 
     expect(mockApi.ingestUpload).toHaveBeenCalledWith(2, file, "2025-06-30");
-    expect(await screen.findByText("Dated 2025-06-30 (the date you chose; the file states none)")).toBeInTheDocument();
+    expect(await screen.findByText("Dated 30 Jun 2025 (the date you chose; the file states none)")).toBeInTheDocument();
   });
 
   it("pre-fills the statement date from a dated file name", async () => {

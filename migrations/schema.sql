@@ -2098,6 +2098,21 @@ CREATE TABLE public.schema_migrations (
 
 
 --
+-- Name: source_freshness_overrides; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.source_freshness_overrides (
+    user_id bigint NOT NULL,
+    source_key text NOT NULL,
+    cadence text NOT NULL,
+    grace_days integer NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT source_freshness_overrides_cadence_check CHECK ((cadence = ANY (ARRAY['daily'::text, 'weekdays'::text, 'weekly'::text, 'monthly'::text, 'quarterly'::text, 'off'::text]))),
+    CONSTRAINT source_freshness_overrides_grace_days_check CHECK (((grace_days >= 0) AND (grace_days <= 90)))
+);
+
+
+--
 -- Name: transactions; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2195,7 +2210,11 @@ CREATE TABLE public.user_preferences (
     timezone text,
     timezone_from_app boolean DEFAULT false NOT NULL,
     base_currency text,
-    CONSTRAINT user_preferences_base_currency_format CHECK (((base_currency IS NULL) OR (base_currency ~ '^[A-Z]{3}$'::text)))
+    risk_largest_position_warn_pct numeric(5,2),
+    risk_top_n_warn_pct numeric(5,2),
+    risk_platform_warn_pct numeric(5,2),
+    CONSTRAINT user_preferences_base_currency_format CHECK (((base_currency IS NULL) OR (base_currency ~ '^[A-Z]{3}$'::text))),
+    CONSTRAINT user_preferences_risk_thresholds_range CHECK ((((risk_largest_position_warn_pct IS NULL) OR ((risk_largest_position_warn_pct > (0)::numeric) AND (risk_largest_position_warn_pct <= (100)::numeric))) AND ((risk_top_n_warn_pct IS NULL) OR ((risk_top_n_warn_pct > (0)::numeric) AND (risk_top_n_warn_pct <= (100)::numeric))) AND ((risk_platform_warn_pct IS NULL) OR ((risk_platform_warn_pct > (0)::numeric) AND (risk_platform_warn_pct <= (100)::numeric)))))
 );
 
 
@@ -3294,6 +3313,14 @@ ALTER TABLE ONLY public.raw_files
 
 ALTER TABLE ONLY public.schema_migrations
     ADD CONSTRAINT schema_migrations_pkey PRIMARY KEY (filename);
+
+
+--
+-- Name: source_freshness_overrides source_freshness_overrides_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_freshness_overrides
+    ADD CONSTRAINT source_freshness_overrides_pkey PRIMARY KEY (user_id, source_key);
 
 
 --
@@ -4564,6 +4591,14 @@ ALTER TABLE ONLY public.raw_broker_documents
 
 ALTER TABLE ONLY public.raw_files
     ADD CONSTRAINT raw_files_ingestion_job_id_fkey FOREIGN KEY (ingestion_job_id) REFERENCES public.ingestion_jobs(id) ON DELETE SET NULL;
+
+
+--
+-- Name: source_freshness_overrides source_freshness_overrides_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.source_freshness_overrides
+    ADD CONSTRAINT source_freshness_overrides_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --

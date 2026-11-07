@@ -470,7 +470,7 @@ describe("CashFlowDetail route", () => {
 
     const hero = (await screen.findByText("Total inflows this month")).closest("article") as HTMLElement;
     expect(within(hero).getByText("S$ 12,480")).toBeInTheDocument();
-    expect(screen.getByText("Salary 96.2%, dividends 3.8%, transfers 0.0%.")).toBeInTheDocument();
+    expect(screen.getByText("Inflows came from Salary S$ 12,000 (96.2%) and Dividends S$ 480.00 (3.8%).")).toBeInTheDocument();
 
     expect(screen.getByLabelText("Income source donut chart")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Recurring vs. one-off" })).toBeInTheDocument();
@@ -588,7 +588,7 @@ describe("CashFlowDetail route", () => {
       expect(mockApi.cashFlowDetail.mock.calls.length).toBeGreaterThanOrEqual(2);
     });
     expect(await screen.findByText("Income transactions (0)")).toBeInTheDocument();
-    expect(screen.getByText("No income transactions for 2026-02.")).toBeInTheDocument();
+    expect(screen.getByText("No income transactions for February 2026.")).toBeInTheDocument();
 
     // The editor closes itself once the save succeeds.
     expect(screen.queryByLabelText("Select category for transaction 2")).not.toBeInTheDocument();

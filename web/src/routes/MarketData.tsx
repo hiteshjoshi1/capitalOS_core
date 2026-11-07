@@ -14,13 +14,6 @@ const REASON_LABELS = {
   INVALID_PRICE: "Invalid price",
 } as const;
 
-function formatRunStarted(ts?: string | null): string {
-  if (!ts) return "—";
-  const date = new Date(ts);
-  if (Number.isNaN(date.getTime())) return "—";
-  return fmt.formatDateTime(ts);
-}
-
 export default function MarketData() {
   const [status, setStatus] = useState<MarketDataExchangeStatus[]>([]);
   const [runs, setRuns] = useState<MarketDataRun[]>([]);
@@ -152,7 +145,7 @@ export default function MarketData() {
                                 label={item.freshness_status === "fresh" ? "Fresh" : "Stale"}
                               />
                               <span className="muted marketDataSymbolMeta">
-                                {item.latest_trade_date?.slice(0, 10) ?? "—"} · {item.provider ?? item.source ?? "—"}
+                                {fmt.formatDate(item.latest_trade_date?.slice(0, 10))} · {item.provider ?? item.source ?? "—"}
                               </span>
                               <span className="muted">
                                 {item.reason_code ? REASON_LABELS[item.reason_code] : item.failure_reason ?? "Reason unavailable"}
@@ -193,7 +186,7 @@ export default function MarketData() {
                     <tbody>
                       {runs.map((r) => (
                         <tr key={r.id}>
-                          <td className="muted marketDataRunStarted">{formatRunStarted(r.started_at)}</td>
+                          <td className="muted marketDataRunStarted">{fmt.formatDateTime(r.started_at)}</td>
                           <td>
                             <strong>{r.exchange_code}</strong>
                           </td>

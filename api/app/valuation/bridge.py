@@ -95,6 +95,7 @@ class _Holding:
     price: Optional[float]  # in the currency it is quoted in
     value: float
     fx_rate: Optional[float] = None  # base currency per unit of the price's currency, at the anchor
+    price_currency: Optional[str] = None  # the currency ``price`` is in
 
     def rate(self) -> Optional[float]:
         """Base currency per unit of the price's currency: the rate the value itself
@@ -168,6 +169,123 @@ def _split(start: Optional[_Holding], end: Optional[_Holding]) -> _Split:
     return _Split(price=q0 * (p1 - p0) * r1, fx=q0 * p0 * (r1 - r0), quantity=(q1 - q0) * p1 * r1, gap=gap)
 
 
+@dataclass
+class HoldingChange:
+    """One holding (per account) from the start anchor to the end, and its split."""
+
+    key: tuple
+    start: Optional[_Holding]
+    end: Optional[_Holding]
+    split: _Split
+
+    @property
+    def held(self) -> _Holding:
+        held = self.end or self.start
+        assert held is not None
+        return held
+
+
+def holding_changes(start: Mapping[tuple, _Holding], end: Mapping[tuple, _Holding]) -> list[HoldingChange]:
+    """Every holding at either anchor, with its change split (``_split``)."""
+    return [
+        HoldingChange(key, start.get(key), end.get(key), _split(start.get(key), end.get(key)))
+        for key in sorted(set(start) | set(end), key=repr)
+    ]
+
+
+@dataclass
+class AssetChange:
+    """One asset's change across its accounts: what the bridge's movers and trades,
+    and the Stocks page's change per holding (#251), are read from. ``unsplit``
+    includes the gap (a value that isn't its own quantity x price x rate), so
+    end_value - start_value = price + FX + quantity + unsplit."""
+
+    mover_key: tuple
+    asset_id: Optional[int]
+    symbol: str
+    name: Optional[str]
+    asset_class: str
+    platform: Optional[str]
+    start_value: float = 0.0
+    end_value: float = 0.0
+    price_effect: float = 0.0
+    quantity_effect: float = 0.0
+    fx_effect: float = 0.0
+    unsplit: float = 0.0
+    cash_recorded: bool = False
+    held_at_start: bool = False
+    held_at_end: bool = False
+    start_quantity: Optional[float] = None
+    end_quantity: Optional[float] = None
+    start_price: Optional[float] = None
+    end_price: Optional[float] = None
+    price_currency: Optional[str] = None
+    start_rate: Optional[float] = None
+    end_rate: Optional[float] = None
+
+    @property
+    def change(self) -> float:
+        return self.end_value - self.start_value
+
+    @property
+    def market_effect(self) -> float:
+        return self.price_effect + self.fx_effect
+
+    @property
+    def side(self) -> str:
+        """held | new (not held at the start) | sold (held at the start, not at the end)."""
+        if self.held_at_start and not self.held_at_end:
+            return "sold"
+        if self.held_at_end and not self.held_at_start:
+            return "new"
+        return "held"
+
+
+def _add_quantity(total: Optional[float], quantity: Optional[float]) -> Optional[float]:
+    if quantity is None:
+        return total
+    return quantity if total is None else total + quantity
+
+
+def asset_changes(changes: Iterable[HoldingChange], cash_accounts: Iterable[int] = ()) -> Dict[tuple, AssetChange]:
+    """The holdings' changes added up per asset (``mover_key``), across accounts."""
+    recorded = set(cash_accounts)
+    out: Dict[tuple, AssetChange] = {}
+    for change in changes:
+        h0, h1, split, held = change.start, change.end, change.split, change.held
+        asset = out.setdefault(held.mover_key, AssetChange(
+            mover_key=held.mover_key,
+            asset_id=held.asset_id,
+            symbol=held.symbol,
+            name=held.name,
+            asset_class=held.asset_class,
+            platform=held.platform,
+        ))
+        asset.start_value += h0.value if h0 else 0.0
+        asset.end_value += h1.value if h1 else 0.0
+        asset.price_effect += split.price
+        asset.quantity_effect += split.quantity
+        asset.fx_effect += split.fx
+        asset.unsplit += split.unsplit + split.gap
+        if held.account_id is not None and held.account_id in recorded:
+            asset.cash_recorded = True
+        if h0 is not None and not h0.is_empty():
+            asset.held_at_start = True
+            asset.start_quantity = _add_quantity(asset.start_quantity, h0.quantity)
+            if asset.start_price is None:
+                asset.start_price, asset.start_rate = h0.price, h0.rate()
+        if h1 is not None and not h1.is_empty():
+            asset.held_at_end = True
+            asset.end_quantity = _add_quantity(asset.end_quantity, h1.quantity)
+            if asset.end_price is None:
+                asset.end_price, asset.end_rate = h1.price, h1.rate()
+        if asset.price_currency is None:
+            asset.price_currency = (h1.price_currency if h1 else None) or (h0.price_currency if h0 else None)
+        if not asset.name and held.name:
+            asset.name = held.name
+    return out
+
+
 # ─── Holdings at an anchor ───────────────────────────────────────────────────
 
 
@@ -216,11 +334,28 @@ def _stock_holdings(
                 price=float(price) if price is not None else None,
                 value=priced.value,
                 fx_rate=fx_rate,
+                price_currency=str(price_currency).upper() if price_currency else None,
             )
         else:  # two rows for one holding: add them up (the price stays, the rate follows)
             held.value += priced.value
             held.quantity = None if held.quantity is None or quantity is None else held.quantity + quantity
     return out
+
+
+def stock_asset_changes(
+    db: Session, current_user_id: int, base_currency: str, start_anchor: datetime, end_anchor: datetime, *, live: bool
+) -> Dict[tuple, AssetChange]:
+    """Each stock/fund's change from the start anchor (statement prices) to the end
+    (quotes when ``live``), split as the bridge splits it: what the Stocks page's
+    change per holding reads (#251), so its rows add up to the bridge's stocks parts."""
+    stocks0 = _stock_holdings(db, start_anchor, base_currency, current_user_id, live=False)
+    stocks1 = _stock_holdings(db, end_anchor, base_currency, current_user_id, live=live)
+    return asset_changes(holding_changes(stocks0, stocks1))
+
+
+def stock_mover_key(asset_id: Any, symbol: Any) -> tuple:
+    """The ``mover_key`` of a stock/fund holding row (``_stock_holdings``)."""
+    return ("STOCK", int(asset_id) if asset_id is not None else str(symbol or "UNKNOWN").upper())
 
 
 def _crypto_holdings(
@@ -252,6 +387,7 @@ def _crypto_holdings(
             price=(value_usd / quantity) if abs(quantity) > _EPS else None,
             value=value_usd * usd,
             fx_rate=usd or None,
+            price_currency="USD",
         )
     return out, float(valuation.get("total_usd") or 0.0) * usd
 
@@ -578,28 +714,10 @@ def month_bridge(
     unsplit = 0.0
     unsplit_count = 0
     valuation_gap = 0.0
-    movers: Dict[tuple, Dict[str, Any]] = {}
 
-    def _mover(held: _Holding) -> Dict[str, Any]:
-        return movers.setdefault(held.mover_key, {
-            "asset_id": held.asset_id,
-            "symbol": held.symbol,
-            "name": held.name,
-            "asset_class": held.asset_class,
-            "start_value": 0.0,
-            "end_value": 0.0,
-            "price_effect": 0.0,
-            "quantity_effect": 0.0,
-            "fx_effect": 0.0,
-            "unsplit": 0.0,
-            "cash_recorded": False,
-        })
-
-    for key in set(stocks0) | set(stocks1):
-        h0, h1 = stocks0.get(key), stocks1.get(key)
-        held = h1 or h0
-        assert held is not None
-        split = _split(h0, h1)
+    stock_changes = holding_changes(stocks0, stocks1)
+    for holding in stock_changes:
+        split, held = holding.split, holding.held
         stock_price += split.price
         stock_fx += split.fx
         valuation_gap += split.gap
@@ -609,22 +727,11 @@ def month_bridge(
         if split.quantity and (held.account_id is None or held.account_id not in cash_accounts):
             untracked_trades += split.quantity
             untracked_platforms.add(held.platform)
-        mover = _mover(held)
-        mover["start_value"] += h0.value if h0 else 0.0
-        mover["end_value"] += h1.value if h1 else 0.0
-        mover["price_effect"] += split.price
-        mover["quantity_effect"] += split.quantity
-        mover["fx_effect"] += split.fx
-        mover["unsplit"] += split.unsplit + split.gap
-        if held.account_id is not None and held.account_id in cash_accounts:
-            mover["cash_recorded"] = True
 
     crypto_price = crypto_fx = crypto_moved = 0.0
-    for key in set(crypto0) | set(crypto1):
-        h0, h1 = crypto0.get(key), crypto1.get(key)
-        held = h1 or h0
-        assert held is not None
-        split = _split(h0, h1)
+    crypto_changes = holding_changes(crypto0, crypto1)
+    for holding in crypto_changes:
+        split = holding.split
         crypto_price += split.price
         crypto_fx += split.fx
         crypto_moved += split.quantity
@@ -632,13 +739,6 @@ def month_bridge(
         if split.unsplit:
             unsplit += split.unsplit
             unsplit_count += int(abs(split.unsplit) >= UNSPLIT_COUNT_MIN)
-        mover = _mover(held)
-        mover["start_value"] += h0.value if h0 else 0.0
-        mover["end_value"] += h1.value if h1 else 0.0
-        mover["price_effect"] += split.price
-        mover["quantity_effect"] += split.quantity
-        mover["fx_effect"] += split.fx
-        mover["unsplit"] += split.unsplit + split.gap
 
     # What the statement totals hold beyond the holdings split above (e.g. an IBKR
     # NAV's other asset types), at either end.
@@ -768,32 +868,41 @@ def month_bridge(
     # Movers rank what the market did to each holding (price + FX). Buying or selling
     # isn't a gain or a loss (a sale where the cash is recorded moves the money to cash),
     # so a change in quantity is listed apart, under trades.
-    mover_rows = []
-    trade_rows = []
-    for mover in movers.values():
-        mover["change"] = mover["end_value"] - mover["start_value"]
-        unsplit_part = mover.pop("unsplit")
-        cash_recorded = mover.pop("cash_recorded")
-        quantity = mover["quantity_effect"]
+    mover_rows: list[Dict[str, Any]] = []
+    trade_rows: list[Dict[str, Any]] = []
+    for asset in asset_changes([*stock_changes, *crypto_changes], cash_accounts).values():
+        mover: Dict[str, Any] = {
+            "asset_id": asset.asset_id,
+            "symbol": asset.symbol,
+            "name": asset.name,
+            "asset_class": asset.asset_class,
+            "start_value": asset.start_value,
+            "end_value": asset.end_value,
+            "price_effect": asset.price_effect,
+            "quantity_effect": asset.quantity_effect,
+            "fx_effect": asset.fx_effect,
+            "change": asset.change,
+        }
+        quantity = asset.quantity_effect
         if abs(quantity) >= TRADE_MIN:
-            crypto = mover["asset_class"] == "CRYPTO"
+            crypto = asset.asset_class == "CRYPTO"
             trade_rows.append({
-                "asset_id": mover["asset_id"],
-                "symbol": mover["symbol"],
-                "name": mover["name"],
-                "asset_class": mover["asset_class"],
+                "asset_id": asset.asset_id,
+                "symbol": asset.symbol,
+                "name": asset.name,
+                "asset_class": asset.asset_class,
                 "amount": quantity,
                 "side": ("moved_in" if quantity > 0 else "moved_out") if crypto else ("bought" if quantity > 0 else "sold"),
-                "cash_recorded": cash_recorded,
+                "cash_recorded": asset.cash_recorded,
             })
-        market = mover["price_effect"] + mover["fx_effect"]
+        market = asset.market_effect
         mover["market_effect"] = market
-        if abs(market) < 0.005 and abs(unsplit_part) < 0.005:
+        if abs(market) < 0.005 and abs(asset.unsplit) < 0.005:
             continue
-        effects = {"price": mover["price_effect"], "fx": mover["fx_effect"]}
+        effects = {"price": asset.price_effect, "fx": asset.fx_effect}
         dominant = max(effects, key=lambda name: abs(effects[name]))
-        mover["cause"] = "unknown" if abs(unsplit_part) > abs(market) else dominant
-        mover["_rank"] = max(abs(market), abs(unsplit_part))
+        mover["cause"] = "unknown" if abs(asset.unsplit) > abs(market) else dominant
+        mover["_rank"] = max(abs(market), abs(asset.unsplit))
         mover_rows.append(mover)
     mover_rows.sort(key=lambda m: (-m["_rank"], str(m["symbol"]).lower()))
     for mover in mover_rows:

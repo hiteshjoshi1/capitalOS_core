@@ -469,7 +469,36 @@ export type RiskSummary = FxStatus &
     view_net_worth?: DashboardSummary["net_worth"] | null;
     /** The anchor the figures are taken at: the live instant, or the month-end boundary. */
     net_worth_boundary_at?: string | null;
+    /** #253, at the same point in time: net worth by currency (its total is
+     * `view_net_worth.total`; USD stablecoins count as USD). */
+    currency_exposure?: CurrencyExposure | null;
+    /** #253: gross assets by platform, the Overview platform donut's split. */
+    platform_concentration?: Pick<PlatformAllocation, "total" | "items"> | null;
   };
+
+/** One currency's part of net worth (#253). `currency` is an ISO code, or "CRYPTO" for
+ * crypto other than USD stablecoins (not a currency). `value` = cash + stocks_funds +
+ * stablecoins + crypto - liabilities; `percent` is its share of net worth. */
+export type CurrencyExposureItem = {
+  currency: string;
+  cash: number;
+  stocks_funds: number;
+  stablecoins: number;
+  crypto: number;
+  liabilities: number;
+  value: number;
+  percent: number;
+};
+
+export type CurrencyExposure = { total: number; items: CurrencyExposureItem[] };
+
+/** GET/PUT /dashboard/risk-thresholds (#253): the percent above which Risk calls a
+ * figure concentrated; null = the app's default (lib/risk.ts). */
+export type RiskThresholdsSetting = {
+  largest_position_warn_pct: number | null;
+  top_n_warn_pct: number | null;
+  platform_warn_pct: number | null;
+};
 
 /** One part of a bridge line; a line's parts add up to its amount (#240). */
 export type BridgePart = { key: string; label: string; amount: number };
@@ -567,6 +596,40 @@ export type DashboardNetWorthChange = {
   net_worth_change: DashboardSummary["net_worth_change"];
 };
 
+/** A holding's change vs the compare month-end (#251), split as Overview's bridge splits
+ * it (D-60), in the base currency: abs = price_effect + quantity_effect + fx_effect + unsplit.
+ * Buying or selling is the quantity effect, not a gain or a loss. */
+export type StockMonthChange = {
+  abs: number;
+  /** abs / compare_value; null without a start value (a new holding). */
+  pct?: number | null;
+  price_effect: number;
+  quantity_effect: number;
+  fx_effect: number;
+  /** What can't be split: no price or quantity on one side, or a value that isn't quantity x price x rate. */
+  unsplit: number;
+  compare_value: number;
+  end_value: number;
+  compare_month?: string | null;
+  /** No stock data at all for compare_month (the page's stock_snapshot_missing). */
+  baseline_missing: boolean;
+  /** held | new (not held at the compare month-end) | sold (held then, not now). */
+  side: "held" | "new" | "sold";
+  start_quantity?: number | null;
+  end_quantity?: number | null;
+  /** Prices in price_currency; rates in base currency per unit of it. */
+  start_price?: number | null;
+  end_price?: number | null;
+  price_currency?: string | null;
+  start_rate?: number | null;
+  end_rate?: number | null;
+};
+
+/** A Stocks page row: a /summary top holding plus its change this month (#251). */
+export type StockHolding = DashboardSummary["top_holdings"][number] & {
+  month_change?: StockMonthChange | null;
+};
+
 export type StockHoldingsSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
@@ -579,7 +642,7 @@ export type StockHoldingsSummary = FxStatus & {
   net_worth_boundary_at?: string | null;
   net_worth_boundary_exact?: boolean | null;
   net_worth_freshness_status?: string | null;
-  top_holdings: DashboardSummary["top_holdings"];
+  top_holdings: StockHolding[];
   geography_breakdown?: Array<{
     geography: string;
     current_value: number;
@@ -619,6 +682,23 @@ export type StockHoldingsSummary = FxStatus & {
   stock_snapshot_missing?: boolean;
   /** QUOTE_STALE_DAYS: a price older than this is stale (#224). */
   quote_stale_days?: number | null;
+  /** #251: the compare month-end's anchor ("vs 31 Oct close"). */
+  compare_boundary_at?: string | null;
+  /** #251: held at the compare month-end, sold since (value 0, month_change.side "sold"). */
+  sold_holdings?: StockHolding[];
+  /** #251: the headline's change as the rows add up:
+   * abs = price_effect + quantity_effect + fx_effect + unsplit + not_in_holdings. */
+  month_change_total?: {
+    abs: number;
+    price_effect: number;
+    quantity_effect: number;
+    fx_effect: number;
+    unsplit: number;
+    not_in_holdings: number;
+    compare_value: number;
+    compare_month?: string | null;
+    baseline_missing: boolean;
+  } | null;
 };
 
 export type SpendingSummary = FxStatus & {
@@ -1350,6 +1430,31 @@ export type WealthTopMovers = {
 
 export type NetWorthSinceUpdateChange = NetWorthChange;
 
+/** #249 (D-65): a since-update mover, with what its compare value was priced at. */
+export type SinceUpdateTopMover = WealthTopMover & {
+  /** "quote" (last quote on or before the compare date) | "statement" (its own statement price); null for crypto or an asset not held then. */
+  compare_price_basis?: "quote" | "statement" | null;
+  /** The date of that quote or statement (YYYY-MM-DD). */
+  compare_price_as_of?: string | null;
+  /** Compared with a statement older than the compare date (no usable quote by then) while quote-priced now. */
+  compare_price_fallback?: boolean;
+};
+
+export type SinceUpdateTopMovers = {
+  compare_month: string;
+  gainers: SinceUpdateTopMover[];
+  detractors: SinceUpdateTopMover[];
+};
+
+/** #249 (D-65): how the compare side's stocks and funds were priced, per asset. */
+export type SinceUpdateCompareBasis = {
+  price_date: string | null;
+  holdings: number;
+  quoted: number;
+  statement_priced: number;
+  older_statement_priced: number;
+};
+
 export type NetWorthSinceUpdate = {
   base_currency: string;
   current_as_of: string | null;
@@ -1360,7 +1465,10 @@ export type NetWorthSinceUpdate = {
     stocks_funds?: NetWorthSinceUpdateChange;
     crypto?: NetWorthSinceUpdateChange;
   };
-  top_movers: WealthTopMovers | null;
+  top_movers: SinceUpdateTopMovers | null;
+  /** #249 (D-65): "quoted_at_compare_date": every holding vs its last quote on or before compare_as_of. */
+  basis?: string | null;
+  compare_basis?: SinceUpdateCompareBasis | null;
 };
 
 export type Currency = {
@@ -1513,6 +1621,49 @@ export type DataHubUnpricedHolding = {
   exchange_code?: string | null;
   platform?: string | null;
   reason: "no_asset" | "no_symbol" | "no_quote" | string;
+};
+
+// Source freshness (#252, D-67): one row per data source (/dashboard/source-freshness).
+export type SourceFreshnessKind =
+  | "ibkr_flex"
+  | "broker_statement"
+  | "bank_statement"
+  | "card_statement"
+  | "account_statement"
+  | "crypto_wallet"
+  | "market_data"
+  | "fx";
+
+export type SourceFreshnessCadence = "daily" | "weekdays" | "weekly" | "monthly" | "quarterly" | "off";
+
+export type SourceFreshnessStatus = "on_time" | "overdue" | "never_loaded" | "no_schedule";
+
+export type SourceFreshnessRow = {
+  source_key: string;
+  kind: SourceFreshnessKind | string;
+  label: string;
+  platform?: string | null;
+  /** ISO date of the newest data, or null when the source has never loaded. */
+  last_data_date?: string | null;
+  cadence: SourceFreshnessCadence | string;
+  /** Business days for "weekdays", calendar days otherwise. */
+  grace_days: number;
+  default_cadence: SourceFreshnessCadence | string;
+  default_grace_days: number;
+  overridden: boolean;
+  /** The last day the newest data is on time. */
+  due_date?: string | null;
+  status: SourceFreshnessStatus | string;
+  /** True for overdue and never-loaded sources. */
+  overdue: boolean;
+  days_overdue?: number | null;
+};
+
+export type SourceFreshness = {
+  as_of: string;
+  overdue_count: number;
+  cadences: string[];
+  sources: SourceFreshnessRow[];
 };
 
 export type DataHubSummary = {
@@ -1761,6 +1912,9 @@ export const api = {
   req<DashboardSummary>(`/dashboard/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}${compare ? `&compare=${encodeURIComponent(compare)}` : ""}${skipNetworth ? "&skip_networth=true" : ""}`),
   riskSummary: (month: string, baseCurrency = "SGD") =>
     req<RiskSummary>(`/dashboard/risk-summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  riskThresholds: () => req<RiskThresholdsSetting>("/dashboard/risk-thresholds"),
+  saveRiskThresholds: (payload: RiskThresholdsSetting) =>
+    req<RiskThresholdsSetting>("/dashboard/risk-thresholds", { method: "PUT", body: JSON.stringify(payload) }),
   monthBridge: (month: string, baseCurrency = "SGD") =>
     req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
@@ -1768,6 +1922,14 @@ export const api = {
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
     req<NetWorthSinceUpdate>(`/dashboard/net-worth-since-update?base_currency=${encodeURIComponent(baseCurrency)}`),
   dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
+  sourceFreshness: () => req<SourceFreshness>("/dashboard/source-freshness"),
+  setSourceFreshnessCadence: (sourceKey: string, body: { cadence: string; grace_days: number }) =>
+    req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  resetSourceFreshnessCadence: (sourceKey: string) =>
+    req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, { method: "DELETE" }),
   cashDeposits: (month: string, baseCurrency = "SGD") =>
     req<CashDeposits>(`/dashboard/cash-deposits?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   platformAllocation: (month: string, baseCurrency = "SGD") =>

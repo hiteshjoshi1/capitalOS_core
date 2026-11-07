@@ -162,7 +162,7 @@ export default function WealthHistory() {
   }, [range, baseCurrency]);
 
   const formatMoney = useCallback(
-    (value?: number | null, decimals = 0) => fmt.formatMoney(value, baseCurrency, { decimals }),
+    (value?: number | null, decimals?: number) => fmt.formatMoney(value, baseCurrency, { decimals }),
     [baseCurrency],
   );
   const formatMoneyShort = useCallback((value?: number | null) => fmt.formatMoneyCompact(value, baseCurrency), [baseCurrency]);

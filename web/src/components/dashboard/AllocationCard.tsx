@@ -1,3 +1,5 @@
+import { formatPercent } from "../../lib/format";
+
 type AllocationRow = {
   key: string;
   value: number;
@@ -37,7 +39,7 @@ export default function AllocationCard({
                 <tr key={row.key}>
                   <td>{row.key}</td>
                   <td className="right">{formatMoney(row.value)}</td>
-                  <td className="right">{row.percent.toFixed(1)}%</td>
+                  <td className="right">{formatPercent(row.percent, { scale: "points" })}</td>
                 </tr>
               ))
             ) : (

@@ -570,6 +570,9 @@ def setup_db():
               timezone TEXT,
               timezone_from_app BOOLEAN NOT NULL DEFAULT 0,
               base_currency TEXT,
+              risk_largest_position_warn_pct REAL,
+              risk_top_n_warn_pct REAL,
+              risk_platform_warn_pct REAL,
               updated_at TIMESTAMP
             )
             """
@@ -1059,6 +1062,7 @@ def clear_db():
             "wealth_monthly_rollups",
             "wealth_rollup_dirty",
             "user_preferences",  # a home timezone (#202) must not leak into the next test
+            "source_freshness_overrides",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",

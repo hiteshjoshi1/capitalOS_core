@@ -6,7 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import StockHoldings from "../routes/StockHoldings";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { StockHoldingsSummary } from "../lib/api";
+import type { StockHoldingsSummary, StockMonthChange } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
@@ -109,7 +109,7 @@ describe("StockHoldings", () => {
     Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
   });
 
-  it("renders dashboard-style header nav and native-currency detail columns", async () => {
+  it("renders dashboard-style header nav and native-currency price columns", async () => {
     // The live month: freshness badges apply (#224).
     mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...summaryFixture, is_live: true });
 
@@ -155,7 +155,8 @@ describe("StockHoldings", () => {
       expect(scoped.getByText("10.5")).toBeInTheDocument();
       expect(scoped.getByText("HKD 123.45")).toBeInTheDocument();
       expect(scoped.getByText("HKD 150.12")).toBeInTheDocument();
-      expect(scoped.getByText("+HKD 280.04")).toBeInTheDocument();
+      // P&L in the base currency, the local currency in the tooltip (#251).
+      expect(scoped.getByText("+S$ 21,319").closest("td")).toHaveAttribute("title", "In HKD: +HKD 280.04");
       expect(scoped.getByText("+21.6%")).toBeInTheDocument();
       expect(scoped.getByText("fresh")).toBeInTheDocument();
       expect(scoped.getByText("price from 1 Mar 2026, EODHD")).toBeInTheDocument();
@@ -409,10 +410,154 @@ describe("StockHoldings", () => {
     expect(screen.queryByRole("note")).not.toBeInTheDocument();
     fireEvent.click(info);
     expect(screen.getByRole("note")).toHaveTextContent(
-      "Stale price for 700: taken from IBKR's statement of 2026-10-30, because the price job couldn't fetch a quote for it.",
+      "Stale price for 700: taken from IBKR's statement of 30 Oct 2026, because the price job couldn't fetch a quote for it.",
     );
     // Only the fallback holding gets one.
     expect(screen.getAllByRole("button", { name: /price stale\?/ })).toHaveLength(1);
+  });
+
+  // ── #251: change per holding vs the compare month-end, split; sales read as sales ──
+  const change = (over: Partial<StockMonthChange>): StockMonthChange => ({
+    abs: 0,
+    pct: null,
+    price_effect: 0,
+    quantity_effect: 0,
+    fx_effect: 0,
+    unsplit: 0,
+    compare_value: 0,
+    end_value: 0,
+    compare_month: "2026-02",
+    baseline_missing: false,
+    side: "held",
+    ...over,
+  });
+  const changeFixture: StockHoldingsSummary = {
+    ...liveFixture,
+    compare_boundary_at: "2026-03-01T00:00:00+00:00",
+    top_holdings: [
+      {
+        ...summaryFixture.top_holdings[0],
+        month_change: change({
+          abs: 3000, pct: 0.025641, price_effect: 3400, fx_effect: -400, compare_value: 117000, end_value: 120000,
+          start_quantity: 10.5, end_quantity: 10.5, start_price: 140, end_price: 150.12, price_currency: "HKD",
+          start_rate: 0.172, end_rate: 0.1717,
+        }),
+      },
+      {
+        ...summaryFixture.top_holdings[1],
+        // Bought 5 more: most of the change is a purchase, not a gain.
+        month_change: change({
+          abs: 21000, pct: 0.3, price_effect: 1000, quantity_effect: 20000, compare_value: 70000, end_value: 90000,
+          start_quantity: 15, end_quantity: 20, start_price: 1500, end_price: 1600, price_currency: "INR",
+          start_rate: 0.016, end_rate: 0.016,
+        }),
+      },
+    ],
+    sold_holdings: [
+      {
+        asset_id: 9,
+        symbol: "AAPL",
+        name: "Apple",
+        asset_class: "STOCK",
+        value: 0,
+        percent_of_networth: 0,
+        quantity: 0,
+        quote_currency: "USD",
+        platform: "IBKR",
+        month_change: change({
+          abs: -5000, pct: -1, quantity_effect: -5000, compare_value: 5000, end_value: 0, side: "sold",
+          start_quantity: 20, start_price: 190, price_currency: "USD", start_rate: 1.3157,
+        }),
+      },
+    ],
+  };
+
+  const renderChange = async (width: number) => {
+    Object.defineProperty(window, "innerWidth", { value: width, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(changeFixture);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    expect(await screen.findByText("Top Holdings")).toBeInTheDocument();
+  };
+
+  it("shows each holding's change vs the month-end close, with its split on tap (#251)", async () => {
+    await renderChange(1024);
+    expect(screen.getByRole("columnheader", { name: "Δ vs 28 Feb 2026" })).toBeInTheDocument();
+    const hkRow = within(screen.getByText("700").closest("tr") as HTMLElement);
+    const delta = hkRow.getByText("+S$ 3,000 (+2.6%)").closest(".delta");
+    expect(delta).toHaveClass("delta--up");
+    const toggle = hkRow.getByRole("button", { name: /^700 since 28 Feb 2026: \+S\$ 3,000/ });
+    expect(toggle).toHaveAttribute("title", expect.stringContaining("Price +S$ 3,400 (HKD 140.00 → HKD 150.12 (+HKD 106.26))"));
+    expect(hkRow.queryByRole("note")).not.toBeInTheDocument();
+    fireEvent.click(toggle);
+    const note = hkRow.getByRole("note");
+    expect(note).toHaveTextContent("Price+S$ 3,400HKD 140.00 → HKD 150.12 (+HKD 106.26)");
+    expect(note).toHaveTextContent("Quantity");
+    expect(note).toHaveTextContent("no shares added or sold");
+    expect(note).toHaveTextContent("FX-S$ 400.00HKD -0.17% vs SGD");
+    expect(note).toHaveTextContent("vs S$ 117,000 at 28 Feb 2026 close");
+  });
+
+  it("doesn't colour a purchase as a gain, and lists a sale as Sold, never a loss (#251)", async () => {
+    await renderChange(1024);
+    const boughtRow = screen.getByText("INFY").closest("tr") as HTMLElement;
+    const bought = within(boughtRow);
+    expect(bought.getByText("+S$ 21,000")).toHaveClass("stockMonthChangeNeutral");
+    expect(bought.getByText("bought S$ 20,000 · market +S$ 1,000")).toBeInTheDocument();
+    expect(boughtRow.querySelector(".delta--up, .delta--down")).toBeNull();
+
+    const soldRow = screen.getByText("AAPL").closest("tr") as HTMLElement;
+    const sold = within(soldRow);
+    expect(soldRow).toHaveClass("stockHoldingsSoldRow");
+    expect(sold.getByText("Sold")).toBeInTheDocument();
+    expect(sold.getByText("was S$ 5,000")).toBeInTheDocument();
+    expect(soldRow.querySelector(".delta--down, .bad")).toBeNull();
+    expect(sold.queryByText(/-S\$ 5,000/)).not.toBeInTheDocument();
+    fireEvent.click(sold.getByRole("button", { name: /^AAPL since 28 Feb 2026: -S\$ 5,000, sold/ }));
+    expect(sold.getByRole("note")).toHaveTextContent("Quantity-S$ 5,000sold 20 shares");
+    expect(sold.getByRole("note")).not.toHaveTextContent("Price");
+    expect(screen.getByText("2 of 2 positions · 1 sold since 28 Feb 2026")).toBeInTheDocument();
+  });
+
+  it("shows the change and its price / quantity / FX split on the mobile card (#251)", async () => {
+    await renderChange(375);
+    const hkCard = within(screen.getByText("Tencent Holdings").closest(".stockHoldingsMobileCard") as HTMLElement);
+    expect(hkCard.getByText("Since 28 Feb 2026")).toBeInTheDocument();
+    expect(hkCard.getByText("+S$ 3,000 (+2.6%)")).toBeInTheDocument();
+    expect(hkCard.getByText("Price +S$ 3,400")).toBeInTheDocument();
+    expect(hkCard.getByText("Quantity S$ 0")).toBeInTheDocument();
+    expect(hkCard.getByText("FX -S$ 400.00")).toBeInTheDocument();
+
+    const soldCard = within(screen.getByText("Apple").closest(".stockHoldingsMobileCard") as HTMLElement);
+    expect(soldCard.getByText("Sold")).toBeInTheDocument();
+    expect(soldCard.getByText("Quantity -S$ 5,000")).toBeInTheDocument();
+    expect(soldCard.queryByText(/NW$/)).not.toBeInTheDocument();
+  });
+
+  it("says there's no comparison per holding when the compare month has no data (#251)", async () => {
+    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...changeFixture,
+      stock_snapshot_missing: true,
+      sold_holdings: [],
+      top_holdings: [{ ...summaryFixture.top_holdings[0], month_change: change({ abs: 120000, quantity_effect: 120000, side: "new", baseline_missing: true }) }],
+    });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <StockHoldings />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    const row = within((await screen.findByText("700")).closest("tr") as HTMLElement);
+    expect(row.getByTitle("no comparison: no data for Feb 2026")).toHaveTextContent("—");
+    // Never a change the size of the whole holding.
+    expect(row.queryByText(/\+S\$ 120,000/)).not.toBeInTheDocument();
   });
 
   it("stores stock table column visibility in browser storage", async () => {

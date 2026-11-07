@@ -147,6 +147,44 @@ class RiskHolding(BaseModel):
     percent_of_networth: float
 
 
+class CurrencyExposureItem(BaseModel):
+    """Net worth held in one currency (#253). ``currency`` is an ISO code, or
+    ``CRYPTO`` for crypto other than USD stablecoins (which count as USD)."""
+
+    currency: str
+    cash: float
+    stocks_funds: float
+    stablecoins: float
+    crypto: float
+    liabilities: float
+    # cash + stocks_funds + stablecoins + crypto - liabilities, and its share of net worth.
+    value: float
+    percent: float
+
+
+class CurrencyExposure(BaseModel):
+    # The sum of the items' values: the net worth the shares divide by.
+    total: float
+    items: List[CurrencyExposureItem]
+
+
+class PlatformConcentration(BaseModel):
+    """Gross assets by platform (#253): /dashboard/platform-allocation's split."""
+
+    total: float
+    items: List["PlatformAllocationItem"]
+
+
+class RiskThresholds(BaseModel):
+    """The Risk page's concentration thresholds (#253, D-68): the percent above
+    which a figure is "concentrated". None: the app's default (web/src/lib/risk.ts).
+    Largest position and top N are shares of net worth; platform, of gross assets."""
+
+    largest_position_warn_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    top_n_warn_pct: Optional[float] = Field(default=None, gt=0, le=100)
+    platform_warn_pct: Optional[float] = Field(default=None, gt=0, le=100)
+
+
 class RiskSummaryResponse(FxStatusFields):
     """GET /dashboard/risk-summary (#149): what the Risk page reads from
     /dashboard/summary (net_worth, and per position its symbol, class and value),
@@ -169,6 +207,38 @@ class RiskSummaryResponse(FxStatusFields):
     basis: Optional[str] = None
     view_net_worth: Optional[NetWorth] = None
     net_worth_boundary_at: Optional[str] = None
+    # #253, at the same point in time: net worth by currency (USD stablecoins as
+    # USD; its total is view_net_worth's) and gross assets by platform (the
+    # Overview platform donut's split).
+    currency_exposure: Optional[CurrencyExposure] = None
+    platform_concentration: Optional[PlatformConcentration] = None
+
+
+class SinceUpdateTopMover(TopMover):
+    # #249 (D-65): what the compare value was priced at: "quote" (the last quote
+    # on or before the compare date) or "statement" (the holding's own statement
+    # price, D-21's fallback); None for crypto or an asset not held then. The date
+    # of that price, and whether it is a statement older than the compare date
+    # while the holding is quote-priced now (its move then starts at that statement).
+    compare_price_basis: Optional[str] = None
+    compare_price_as_of: Optional[str] = None
+    compare_price_fallback: bool = False
+
+
+class SinceUpdateTopMovers(TopMovers):
+    gainers: List[SinceUpdateTopMover]
+    detractors: List[SinceUpdateTopMover]
+
+
+class SinceUpdateCompareBasis(BaseModel):
+    # #249 (D-65): the compare side's stocks and funds (per asset), priced on or
+    # before price_date: at a quote, or at their own statement price; and how many
+    # of those are statements older than price_date while quote-priced now.
+    price_date: Optional[str] = None
+    holdings: int = 0
+    quoted: int = 0
+    statement_priced: int = 0
+    older_statement_priced: int = 0
 
 
 class NetWorthSinceUpdateResponse(BaseModel):
@@ -177,7 +247,11 @@ class NetWorthSinceUpdateResponse(BaseModel):
     compare_as_of: Optional[str] = None
     net_worth_change: NetWorthChange
     component_change: Dict[str, NetWorthChange]
-    top_movers: Optional[TopMovers] = None
+    top_movers: Optional[SinceUpdateTopMovers] = None
+    # #249 (D-65): "quoted_at_compare_date": the compare side is valued at the
+    # compare date (compare_as_of), each holding at its last quote on or before it.
+    basis: Optional[str] = None
+    compare_basis: Optional[SinceUpdateCompareBasis] = None
 
     class Config:
         populate_by_name = True
@@ -206,6 +280,59 @@ class StockBreakdownItem(BaseModel):
     percent: float
 
 
+class StockMonthChange(BaseModel):
+    """A holding's change vs the compare month-end (#251), split as Overview's
+    bridge splits it (D-60): abs = price_effect + quantity_effect + fx_effect + unsplit,
+    in the base currency. Buying or selling is the quantity effect, not a gain or loss."""
+
+    abs: float
+    # abs / compare_value; None without a start value (a new holding).
+    pct: Optional[float] = None
+    price_effect: float = 0.0
+    quantity_effect: float = 0.0
+    fx_effect: float = 0.0
+    # What can't be split: no price or quantity on one side, or a value that isn't
+    # its own quantity x price x rate.
+    unsplit: float = 0.0
+    compare_value: float = 0.0
+    end_value: float = 0.0
+    compare_month: Optional[str] = None
+    # No stock data at all for compare_month (the page's stock_snapshot_missing).
+    baseline_missing: bool = False
+    # held | new (not held at the compare month-end) | sold (held then, not now).
+    side: str = "held"
+    start_quantity: Optional[float] = None
+    end_quantity: Optional[float] = None
+    # Prices in price_currency, rates in base currency per unit of it.
+    start_price: Optional[float] = None
+    end_price: Optional[float] = None
+    price_currency: Optional[str] = None
+    start_rate: Optional[float] = None
+    end_rate: Optional[float] = None
+
+
+class StockHolding(TopHolding):
+    """A Stocks page row: a /summary top holding plus its change this month (#251)."""
+
+    month_change: Optional[StockMonthChange] = None
+
+
+class StockMonthChangeTotal(BaseModel):
+    """The Stocks headline's change vs the compare month-end, as the rows add up (#251):
+    abs = price_effect + quantity_effect + fx_effect + unsplit + not_in_holdings."""
+
+    abs: float
+    price_effect: float = 0.0
+    quantity_effect: float = 0.0
+    fx_effect: float = 0.0
+    unsplit: float = 0.0
+    # The statement totals beyond the holdings listed (e.g. an IBKR NAV's other asset types).
+    not_in_holdings: float = 0.0
+    compare_value: float = 0.0
+    compare_month: Optional[str] = None
+    baseline_missing: bool = False
+
+
 class StockHoldingsResponse(FxStatusFields):
     as_of_month: str
     base_currency: str
@@ -218,7 +345,7 @@ class StockHoldingsResponse(FxStatusFields):
     net_worth_boundary_at: Optional[str] = None
     net_worth_boundary_exact: Optional[bool] = None
     net_worth_freshness_status: Optional[str] = None
-    top_holdings: List[TopHolding]
+    top_holdings: List[StockHolding]
     geography_breakdown: list["StockGeographyBreakdownItem"] = []
     geography_performance: list["StockGeographyBreakdownItem"] = []
     geography_performance_as_of: Optional[str] = None
@@ -233,6 +360,11 @@ class StockHoldingsResponse(FxStatusFields):
     stock_snapshot_missing: bool = False
     # QUOTE_STALE_DAYS: a price older than this many days is stale (#224).
     quote_stale_days: Optional[int] = None
+    # #251: the compare month-end's anchor; the holdings held then and sold since
+    # (value 0, month_change.side "sold"); and the headline's change as the rows add up.
+    compare_boundary_at: Optional[str] = None
+    sold_holdings: List[StockHolding] = []
+    month_change_total: Optional[StockMonthChangeTotal] = None
 
 
 class PlatformAllocationItem(BaseModel):
@@ -599,3 +731,8 @@ class MonthBridgeResponse(FxStatusFields):
     liabilities_change: float
     movers: List[BridgeMover]
     trades: List[BridgeTrade] = []
+
+
+# #253: PlatformConcentration names PlatformAllocationItem, defined after it.
+PlatformConcentration.model_rebuild()
+RiskSummaryResponse.model_rebuild()

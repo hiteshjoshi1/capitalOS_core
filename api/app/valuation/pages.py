@@ -14,9 +14,11 @@ from sqlalchemy.orm import Session
 
 from app.portfolio.canonical_reads import get_data_completeness_status
 from app.valuation import clock
+from app.valuation.bridge import AssetChange, stock_asset_changes, stock_mover_key
 from app.valuation.clock import (
     _add_months,
     _anchor_ts,
+    _compare_date_anchor_ts,
     _completed_snapshot_anchor_ts,
     _completed_snapshot_month_start,
     _configured_snapshot_day,
@@ -25,7 +27,7 @@ from app.valuation.clock import (
     _month_view_compare_month_start,
     _previous_update_anchor_ts,
 )
-from app.valuation.exposure import _geography, _geography_exposure, _platform_allocation
+from app.valuation.exposure import _currency_exposure, _geography, _geography_exposure, _platform_allocation
 from app.valuation.facts import (
     _cash_balances,
     _cash_currency_breakdown,
@@ -350,7 +352,8 @@ def risk_summary(
     One point in time per month (#241): ``view_net_worth`` is the net worth at
     the positions' anchor, live for the open month (the Overview headline) and
     the month-end for a past month, so every share the page shows has its
-    numerator and denominator at one instant."""
+    numerator and denominator at one instant. Currency exposure and platform
+    concentration (#253) are taken at that instant too."""
     anchor = _anchor_ts(_completed_snapshot_month_start(month_start))
     nw = _networth_components(db, anchor, base_currency, current_user_id)
     view_anchor, is_live = _month_view_anchor(month_start)
@@ -371,6 +374,11 @@ def risk_summary(
         limit=_summary_top_holdings_limit(),
         price_overlay=is_live,
     )
+    # #253: currency exposure (shares of view_net_worth) and platform concentration
+    # (Overview's platform donut: shares of gross assets), at the same anchor and
+    # price mode as the positions.
+    currency = _currency_exposure(db, view_anchor, base_currency, current_user_id, price_overlay=is_live)
+    platforms = _platform_allocation(db, view_anchor, base_currency, current_user_id, price_overlay=is_live)
     return {
         "as_of_month": month,
         "base_currency": base_currency,
@@ -381,7 +389,51 @@ def risk_summary(
         "basis": "live" if is_live else "month_end",
         "view_net_worth": _serialize_net_worth(view_nw),
         "net_worth_boundary_at": view_anchor.isoformat(),
+        "currency_exposure": {"total": currency["total"], "items": currency["items"]},
+        "platform_concentration": {"total": platforms["total"], "items": platforms["items"]},
         **fx_status(),
+    }
+
+
+def _stock_month_change(asset: AssetChange, *, compare_month: str, baseline_missing_flag: bool) -> Dict[str, Any]:
+    """One holding's change vs the compare month-end, split as the bridge splits it (#251)."""
+    compare_value = asset.start_value
+    return {
+        "abs": asset.change,
+        "pct": (asset.change / compare_value) if compare_value > 0 else None,
+        "price_effect": asset.price_effect,
+        "quantity_effect": asset.quantity_effect,
+        "fx_effect": asset.fx_effect,
+        "unsplit": asset.unsplit,
+        "compare_value": compare_value,
+        "end_value": asset.end_value,
+        "compare_month": compare_month,
+        "baseline_missing": baseline_missing_flag,
+        "side": asset.side,
+        "start_quantity": asset.start_quantity,
+        "end_quantity": asset.end_quantity,
+        "start_price": asset.start_price,
+        "end_price": asset.end_price,
+        "price_currency": asset.price_currency,
+        "start_rate": asset.start_rate,
+        "end_rate": asset.end_rate,
+    }
+
+
+def _sold_holding(asset: AssetChange, month_change: Dict[str, Any]) -> Dict[str, Any]:
+    """A holding held at the compare month-end and not now: listed at 0 so the rows'
+    changes add up, and read as a sale, not a loss (#251)."""
+    return {
+        "asset_id": asset.asset_id,
+        "symbol": asset.symbol,
+        "name": asset.name,
+        "asset_class": asset.asset_class,
+        "value": 0.0,
+        "percent_of_networth": 0.0,
+        "quantity": 0.0,
+        "quote_currency": asset.price_currency,
+        "platform": asset.platform,
+        "month_change": month_change,
     }
 
 
@@ -421,6 +473,43 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
     quote_freshness_summary = _quote_freshness_summary(top, is_live=is_live)
     compare_holdings_as_of = _positions_coverage_as_of(db, compare_anchor, current_user_id)
     trend = _stock_trend(db, month_start, base_currency, current_user_id)
+    stock_snapshot_missing = baseline_missing(compare_holdings_as_of, compare_stock_exposure["total"])
+
+    # Each holding's change vs the compare month-end, split into price, quantity and
+    # FX by the Overview bridge's own split (#251, D-60); holdings sold since are
+    # listed at 0, so the rows add up to the bridge's stocks parts.
+    compare_month = compare_month_start.strftime("%Y-%m")
+    changes = stock_asset_changes(db, current_user_id, base_currency, compare_anchor, effective_anchor, live=is_live)
+    listed: set[tuple] = set()
+    for row in top:
+        key = stock_mover_key(row.get("asset_id"), row.get("symbol"))
+        asset = changes.get(key)
+        if asset is not None:
+            listed.add(key)
+            row["month_change"] = _stock_month_change(
+                asset, compare_month=compare_month, baseline_missing_flag=stock_snapshot_missing
+            )
+    sold = [
+        _sold_holding(asset, _stock_month_change(asset, compare_month=compare_month, baseline_missing_flag=stock_snapshot_missing))
+        for key, asset in changes.items()
+        if key not in listed and asset.side == "sold"
+    ]
+    sold.sort(key=lambda row: (row["month_change"]["abs"], str(row["symbol"]).lower()))
+    stock_change = stock_exposure["total"] - compare_stock_exposure["total"]
+    holdings_change = sum(asset.change for asset in changes.values())
+    month_change_total = {
+        "abs": stock_change,
+        "price_effect": sum(asset.price_effect for asset in changes.values()),
+        "quantity_effect": sum(asset.quantity_effect for asset in changes.values()),
+        "fx_effect": sum(asset.fx_effect for asset in changes.values()),
+        "unsplit": sum(asset.unsplit for asset in changes.values()),
+        # The statement totals beyond the holdings listed (e.g. an IBKR NAV's other
+        # asset types): the headline's change minus the holdings' changes.
+        "not_in_holdings": stock_change - holdings_change,
+        "compare_value": compare_stock_exposure["total"],
+        "compare_month": compare_month,
+        "baseline_missing": stock_snapshot_missing,
+    }
 
     geography_performance: list[dict[str, Any]] = []
     geography_performance_as_of: Optional[str] = None
@@ -460,23 +549,109 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "stock_snapshot_as_of": compare_holdings_as_of.isoformat() if compare_holdings_as_of else None,
         "quote_freshness_summary": quote_freshness_summary,
         "trend": trend,
-        "stock_snapshot_missing": baseline_missing(compare_holdings_as_of, compare_stock_exposure["total"]),
+        "stock_snapshot_missing": stock_snapshot_missing,
+        # The compare month-end's anchor (D-55): "vs 31 Oct close" (#251).
+        "compare_boundary_at": compare_anchor.isoformat(),
+        "sold_holdings": sold,
+        "month_change_total": month_change_total,
         "quote_stale_days": _quote_stale_days(),
         **fx_status(),
     }
+
+
+SINCE_UPDATE_BASIS = "quoted_at_compare_date"  # D-65
+
+
+def _holding_key(row: Dict[str, Any]) -> tuple:
+    return (row.get("asset_id"), row["symbol"], row["asset_class"])
+
+
+def _compared_with_older_statement(
+    prior: Optional[Dict[str, Any]], current: Optional[Dict[str, Any]], price_date: Optional[str]
+) -> bool:
+    """A holding compared with its own statement from before the compare date
+    while it is quote-priced now (#249): its move then includes the market moves
+    between that statement and the compare date. (Statement-priced on both
+    sides, it doesn't move unless a new statement arrives.)"""
+    if not prior or not price_date or prior.get("price_basis") != "statement":
+        return False
+    price_as_of = str(prior.get("latest_trade_date") or "")[:10]
+    return bool(price_as_of and price_as_of < price_date and current and current.get("price_basis") == "quote")
+
+
+def _since_update_basis_counts(
+    current_holdings: list[Dict[str, Any]], compare_holdings: list[Dict[str, Any]], price_date: Optional[str]
+) -> Dict[str, Any]:
+    """How the compare side's stocks and funds were priced (#249, D-65), per asset:
+    at a quote on or before the compare date, or at their own statement price
+    (D-21: no quote by then, the newest one older than the statement, or one over
+    2x off), and how many of those are compared with an older statement while
+    quote-priced now (``_compared_with_older_statement``)."""
+    current_by_key = {_holding_key(row): row for row in current_holdings}
+    quoted = statement_priced = older = 0
+    for row in compare_holdings:
+        if str(row.get("asset_class") or "").upper() not in {"STOCK", "FUND"}:
+            continue
+        if row.get("price_basis") == "quote":
+            quoted += 1
+            continue
+        statement_priced += 1
+        if _compared_with_older_statement(row, current_by_key.get(_holding_key(row)), price_date):
+            older += 1
+    return {
+        "price_date": price_date,
+        "holdings": quoted + statement_priced,
+        "quoted": quoted,
+        "statement_priced": statement_priced,
+        "older_statement_priced": older,
+    }
+
+
+def _since_update_movers(
+    current_holdings: list[Dict[str, Any]],
+    compare_holdings: list[Dict[str, Any]],
+    compare_label: str,
+    price_date: Optional[str],
+) -> Dict[str, Any]:
+    """Top movers, each saying what its compare value was priced at (#249): a
+    quote or its statement, the date of that price, and whether it is compared
+    with an older statement (``compare_price_fallback``)."""
+    movers = _top_movers_from_holdings(current_holdings, compare_holdings, compare_label, limit=5)
+    prior_by_key = {_holding_key(row): row for row in compare_holdings}
+    current_by_key = {_holding_key(row): row for row in current_holdings}
+    for row in [*movers["gainers"], *movers["detractors"]]:
+        prior = prior_by_key.get(_holding_key(row))
+        basis = prior.get("price_basis") if prior else None  # None: crypto, or not held then
+        price_as_of = (str(prior.get("latest_trade_date") or "")[:10] or None) if prior and basis else None
+        row["compare_price_basis"] = basis
+        row["compare_price_as_of"] = price_as_of
+        row["compare_price_fallback"] = _compared_with_older_statement(
+            prior, current_by_key.get(_holding_key(row)), price_date
+        )
+    return movers
 
 
 def net_worth_since_update(db: Session, current_user_id: int, base_currency: str) -> Dict[str, Any]:
     """Since-last-update net-worth delta: current live state vs. the last
     available prior data point (not a fixed calendar day — if prices haven't
     refreshed in days, both anchors resolve to the same data and the delta is 0).
+
+    The compare point is the newest statement date at or before yesterday
+    (``compare_as_of``, the label), and the compare side is valued at that date
+    (#249, D-65): its holdings, each priced at its last quote on or before that
+    date (D-21's rule, as the live headline is), its wallets and card balances as
+    of that date. So the change is market movement since that date for every
+    holding, whichever broker's statement is older; a holding with no usable quote
+    by then is at its statement price and counted in ``compare_basis``.
     """
     top_holdings_limit = _summary_top_holdings_limit()
     current_anchor = clock._current_anchor_ts()
-    compare_anchor = _previous_update_anchor_ts(current_anchor)
+    previous_anchor = _previous_update_anchor_ts(current_anchor)
     current_as_of = _effective_as_of(db, current_anchor, current_user_id)
-    compare_as_of = _effective_as_of(db, compare_anchor, current_user_id)
+    compare_as_of = _effective_as_of(db, previous_anchor, current_user_id)
     compare_label = compare_as_of.isoformat() if compare_as_of else "unknown"
+    compare_anchor = _compare_date_anchor_ts(previous_anchor, compare_as_of)
+    price_date = compare_anchor.date().isoformat() if compare_as_of else None
 
     # price_overlay=True on both sides (unlike the monthly comparisons elsewhere)
     # so the delta reflects the anchor-scoped `prices` table rather than a frozen
@@ -520,7 +695,9 @@ def net_worth_since_update(db: Session, current_user_id: int, base_currency: str
         "compare_as_of": compare_as_of.isoformat() if compare_as_of else None,
         "net_worth_change": _change(current_nw["total"], compare_nw["total"]),
         "component_change": {key: _change(current_nw[key], compare_nw[key]) for key in ("cash", "stocks_funds", "crypto")},
-        "top_movers": _top_movers_from_holdings(snapshot_top, prev_top, compare_label, limit=5),
+        "top_movers": _since_update_movers(snapshot_top, prev_top, compare_label, price_date),
+        "basis": SINCE_UPDATE_BASIS,
+        "compare_basis": _since_update_basis_counts(snapshot_top, prev_top, price_date),
     }
 
 

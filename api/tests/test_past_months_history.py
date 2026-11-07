@@ -230,8 +230,8 @@ def test_a_statement_too_old_is_not_carried_forward(db_engine, sgd_only):
         mar = _credit_card_liability_details(db, _anchor_ts(MAR), "SGD", 1)  # 1 Apr: 71 days later
     finally:
         db.close()
-    assert feb == [{"account_id": CARD, "method": "statement", "as_of_date": date(2026, 1, 20), "value": pytest.approx(700.0)}]
-    assert mar == [{"account_id": CARD, "method": "transactions", "as_of_date": None, "value": pytest.approx(250.0)}]
+    assert feb == [{"account_id": CARD, "currency": "SGD", "method": "statement", "as_of_date": date(2026, 1, 20), "value": pytest.approx(700.0)}]
+    assert mar == [{"account_id": CARD, "currency": "SGD", "method": "transactions", "as_of_date": None, "value": pytest.approx(250.0)}]
 
 
 def test_an_overpaid_card_owes_nothing(db_engine, sgd_only):

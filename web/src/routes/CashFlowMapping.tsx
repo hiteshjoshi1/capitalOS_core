@@ -23,7 +23,7 @@ type MerchantGroup = {
 };
 
 function asDate(ts: string) {
-  return ts.slice(0, 10);
+  return fmt.formatDate(ts.slice(0, 10));
 }
 
 function groupCategories(categories: CategoryTaxonomy[]) {
@@ -204,7 +204,7 @@ export default function CashFlowMapping() {
       {ready && transactions.length === 0 && (
         <div className="card">
           <div className="cardTitle">Unmapped queue</div>
-          <div>All transactions mapped for {month}.</div>
+          <div>All transactions mapped for {fmt.formatMonth(month)}.</div>
         </div>
       )}
 

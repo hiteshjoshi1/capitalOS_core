@@ -122,7 +122,7 @@ describe("CashFlowMapping route", () => {
 
     renderRoute();
 
-    expect(await screen.findByText("All transactions mapped for 2026-02.")).toBeInTheDocument();
+    expect(await screen.findByText("All transactions mapped for February 2026.")).toBeInTheDocument();
   });
 
   it("expands a merchant group to review individual transactions", async () => {
@@ -196,7 +196,7 @@ describe("CashFlowMapping races", () => {
     fireEvent.change(screen.getByLabelText("Month"), { target: { value: "2025-12" } });
     const jan = queue.find((a) => a[0] === "2026-01");
     await act(async () => queue.find((a) => a[0] === "2025-12").resolve([]));
-    expect(await screen.findByText("All transactions mapped for 2025-12.")).toBeInTheDocument();
+    expect(await screen.findByText("All transactions mapped for December 2025.")).toBeInTheDocument();
     await act(async () => jan.resolve(unmappedFixture));
     expect(screen.queryByText("Grab")).not.toBeInTheDocument();
     await waitFor(() => expect(jan.signal?.aborted).toBe(true));

@@ -41,7 +41,7 @@ describe("<Delta>", () => {
 
     const down = render(<Delta abs={-50} pct={-0.004} currency="USD" />);
     expect(deltaEl(down.container)).toHaveClass("delta--down");
-    expect(deltaEl(down.container)).toHaveTextContent("▼-USD 50 (-0.4%)");
+    expect(deltaEl(down.container)).toHaveTextContent("▼-USD 50.00 (-0.4%)");
   });
 
   it("shows no arrow and a neutral colour for no change", () => {
@@ -59,7 +59,7 @@ describe("<Delta>", () => {
   it("inverse tone keeps the arrow and flips the colour (spending: up is bad)", () => {
     const { container } = render(<Delta abs={120} currency="SGD" show="abs" tone="inverse" baseline="vs Oct" />);
     expect(deltaEl(container)).toHaveClass("delta--down");
-    expect(deltaEl(container)).toHaveTextContent("▲+S$ 120vs Oct");
+    expect(deltaEl(container)).toHaveTextContent("▲+S$ 120.00vs Oct");
   });
 
   it("pct mode falls back to the amount when there is no %", () => {

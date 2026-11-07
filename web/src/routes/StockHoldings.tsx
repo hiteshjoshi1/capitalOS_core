@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { StockHoldingsSummary } from "../lib/api";
+import type { StockHolding } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
-import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
+import { monthEndCloseDate, snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
@@ -14,13 +14,14 @@ import Delta from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthControl from "../components/MonthControl";
 import PriceFallbackInfo from "../components/PriceFallbackInfo";
+import StockMonthChange from "../components/StockMonthChange";
 import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
-type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "pnl" | "percentNetWorth" | "quoteFreshness";
+type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "monthChange" | "pnl" | "percentNetWorth" | "quoteFreshness";
 
 const PAGE_SIZE = 20;
 const MOBILE_BREAKPOINT_PX = 900;
@@ -29,6 +30,7 @@ const STOCK_COLUMN_OPTIONS: Array<{ key: StockColumnKey; label: string; align?: 
   { key: "shares", label: "Shares", align: "right" },
   { key: "purchasePrice", label: "Purchase Price", align: "right" },
   { key: "currentPrice", label: "Current Price", align: "right" },
+  { key: "monthChange", label: "Change vs month-end", align: "right" },
   { key: "pnl", label: "Profit & Loss", align: "right" },
   { key: "percentNetWorth", label: "% NW", align: "right" },
   { key: "quoteFreshness", label: "Quote freshness" },
@@ -37,6 +39,7 @@ const DEFAULT_VISIBLE_STOCK_COLUMNS: Record<StockColumnKey, boolean> = {
   shares: true,
   purchasePrice: true,
   currentPrice: true,
+  monthChange: true,
   pnl: true,
   percentNetWorth: true,
   quoteFreshness: true,
@@ -138,48 +141,34 @@ export default function StockHoldings() {
 
   // The currency the shown numbers are in (the previous one while a switch loads).
   const shownCurrency = summary?.base_currency || baseCurrency;
-  const formatMoney = (value?: number | null, decimals = 0) => fmt.formatMoney(value, shownCurrency, { decimals });
+  const formatMoney = (value?: number | null, decimals?: number) => fmt.formatMoney(value, shownCurrency, { decimals });
   const formatCompactMoney = (value?: number | null) => fmt.formatMoneyCompact(value, shownCurrency);
   const formatQuantity = (value?: number | null) => fmt.formatNumber(value, 4);
   /** Prices and native P&L: 2 decimals, in the quote currency. */
   const formatNativeMoney = (value?: number | null, quoteCurrency?: string, decimals = 2) =>
     quoteCurrency ? fmt.formatMoney(value, quoteCurrency, { decimals }) : fmt.MISSING;
-  const formatPnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
+  /** P&L in the base currency (at the rate the holding's value implies), the local
+   * currency in the tooltip: the same on the table and the mobile card (#251). */
+  const formatPnl = (holding: StockHolding) => {
     if (
       holding.quantity == null
       || holding.avg_cost == null
       || holding.latest_price == null
       || !holding.quote_currency
     ) {
-      return { amount: "—", pct: null, positive: true };
+      return { amount: "—", native: null, pct: null, positive: true };
     }
-    const pnl = holding.quantity * (holding.latest_price - holding.avg_cost);
+    const nativePnl = holding.quantity * (holding.latest_price - holding.avg_cost);
+    const native = fmt.formatSignedMoney(nativePnl, holding.quote_currency, { decimals: 2 });
     const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
-    return {
-      amount: fmt.formatSignedMoney(pnl, holding.quote_currency, { decimals: 2 }),
-      pct: pnlPct,
-      positive: pnl >= 0,
-    };
-  };
-  const formatMobilePnl = (holding: StockHoldingsSummary["top_holdings"][number]) => {
-    if (
-      holding.quantity == null
-      || holding.avg_cost == null
-      || holding.latest_price == null
-      || holding.latest_price <= 0
-      || holding.value == null
-    ) {
-      return { amount: "—", pct: null, positive: true };
+    const nativeValue = holding.quantity * holding.latest_price;
+    if (nativeValue <= 0 || holding.value == null) {
+      return { amount: native, native: null, pct: pnlPct, positive: nativePnl >= 0 };
     }
-    const currentNativeValue = holding.quantity * holding.latest_price;
-    if (currentNativeValue <= 0) {
-      return { amount: "—", pct: null, positive: true };
-    }
-    const inferredFxToBase = holding.value / currentNativeValue;
-    const pnl = holding.quantity * (holding.latest_price - holding.avg_cost) * inferredFxToBase;
-    const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
+    const pnl = nativePnl * (holding.value / nativeValue);
     return {
       amount: fmt.formatSignedMoney(pnl, shownCurrency),
+      native: holding.quote_currency.toUpperCase() === shownCurrency.toUpperCase() ? null : `In ${holding.quote_currency}: ${native}`,
       pct: pnlPct,
       positive: pnl >= 0,
     };
@@ -194,7 +183,7 @@ export default function StockHoldings() {
     };
     return labels[normalized] ?? geo ?? "—";
   };
-  const formatExchangeLabel = (holding: StockHoldingsSummary["top_holdings"][number]) =>
+  const formatExchangeLabel = (holding: StockHolding) =>
     holding.exchange_code ?? holding.quote_currency ?? holding.asset_class;
   const formatFreshnessLabel = (status?: string | null) => {
     if (!status) {
@@ -203,6 +192,14 @@ export default function StockHoldings() {
     return `${status.slice(0, 1).toUpperCase()}${status.slice(1).toLowerCase()}`;
   };
   const holdings = useMemo(() => summary?.top_holdings ?? [], [summary]);
+  // #251: holdings held at the compare month-end and sold since, listed after the
+  // held ones (value 0, "Sold"), so the rows' changes add up to the headline's.
+  const soldHoldings = useMemo(() => summary?.sold_holdings ?? [], [summary]);
+  const rows = useMemo(() => [...holdings, ...soldHoldings], [holdings, soldHoldings]);
+  const compareCloseDate = monthEndCloseDate(summary?.compare_boundary_at);
+  const compareLabel = compareCloseDate
+    ? fmt.formatDate(compareCloseDate)
+    : fmt.formatMonth(summary?.compare_month, "medium");
   // #224: freshness only means something on the live month; a past month is valued
   // at its statements.
   const isLive = summary?.is_live === true;
@@ -234,8 +231,8 @@ export default function StockHoldings() {
           h.avg_cost ?? "",
           h.latest_price ?? "",
           h.quote_currency ?? "",
-          pnl != null ? pnl.toFixed(2) : "",
-          pnlPct != null ? pnlPct.toFixed(2) : "",
+          fmt.formatCsvNumber(pnl),
+          fmt.formatCsvNumber(pnlPct),
         ]
           .map(escapeCsvValue)
           .join(","),
@@ -252,9 +249,9 @@ export default function StockHoldings() {
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
-  const visibleHoldings = holdings.slice(0, visibleCount);
+  const visibleHoldings = rows.slice(0, visibleCount);
   const visibleColumnCount = 1 + STOCK_COLUMN_OPTIONS.filter((option) => visibleColumns[option.key]).length;
-  const hasMore = visibleCount < holdings.length;
+  const hasMore = visibleCount < rows.length;
   const hasPrevious = visibleCount > PAGE_SIZE;
   const stockCurrentTotal = summary?.stock_current_total ?? 0;
   const geographyPieItems = useMemo(
@@ -474,7 +471,8 @@ export default function StockHoldings() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: "13px" }}>
-                  {visibleHoldings.length} of {holdings.length} positions
+                  {Math.min(visibleHoldings.length, holdings.length)} of {holdings.length} positions
+                  {soldHoldings.length > 0 ? ` · ${soldHoldings.length} sold since ${compareLabel}` : ""}
                 </span>
                 <button
                   className="btn stockHoldingsRefreshBtn"
@@ -506,10 +504,11 @@ export default function StockHoldings() {
               {isMobile ? (
                 <div className="stockHoldingsMobileList">
                   {visibleHoldings.map((h, idx) => {
-                    const mobilePnl = formatMobilePnl(h);
+                    const sold = h.month_change?.side === "sold";
+                    const mobilePnl = sold ? null : formatPnl(h);
                     const priceAge = holdingPriceAge(h, isLive);
                     return (
-                      <article className="stockHoldingsMobileCard" key={h.asset_id ?? `${h.symbol}-${idx}`}>
+                      <article className="stockHoldingsMobileCard" key={`${sold ? "sold" : "held"}-${h.asset_id ?? `${h.symbol}-${idx}`}`}>
                         <div className="stockHoldingsMobileHeader">
                           <div>
                             <div className="stockHoldingsMobileTitleLine">
@@ -517,10 +516,11 @@ export default function StockHoldings() {
                               <span className="stockHoldingsExchangePill">{formatExchangeLabel(h)}</span>
                             </div>
                             <div className="stockHoldingsMobileMeta">
-                              {formatPlatformLabel(h.platform ?? "—")} · {formatGeoLabel(h.geo)}
+                              {formatPlatformLabel(h.platform ?? "—")}{sold ? null : ` · ${formatGeoLabel(h.geo)}`}
                             </div>
                           </div>
                         </div>
+                        {sold ? null : (
                         <div className="stockHoldingsMobileMetrics">
                           {isLive ? (
                             <span className={`stockHoldingsFreshnessTag stockHoldingsFreshnessTag${(h.quote_freshness_status ?? "").toLowerCase() === "fresh" ? "Fresh" : "Stale"}`}>
@@ -534,18 +534,35 @@ export default function StockHoldings() {
                             <strong>{formatMoney(h.value)}</strong>
                             <span>{fmt.formatPercent(h.percent_of_networth, { scale: "points" })} NW</span>
                           </div>
-                          <div className={`stockHoldingsMobilePnlBlock ${mobilePnl.positive ? "good" : "bad"}`}>
-                            <strong>{mobilePnl.amount}</strong>
-                            {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
-                          </div>
+                          {mobilePnl ? (
+                            <div className={`stockHoldingsMobilePnlBlock ${mobilePnl.positive ? "good" : "bad"}`} title={mobilePnl.native ?? undefined}>
+                              <strong>{mobilePnl.amount}</strong>
+                              {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
+                            </div>
+                          ) : null}
                         </div>
-                        <small className={`priceAge stockHoldingsMobilePriceAge${priceAge.stale ? " priceAge--stale" : ""}`}>
-                          {priceAge.text}
-                        </small>
+                        )}
+                        {visibleColumns.monthChange ? (
+                          <div className="stockHoldingsMobileChange">
+                            <span className="muted">Since {compareLabel}</span>
+                            <StockMonthChange
+                              change={h.month_change}
+                              currency={shownCurrency}
+                              compareLabel={compareLabel}
+                              symbol={h.symbol}
+                              layout="card"
+                            />
+                          </div>
+                        ) : null}
+                        {sold ? null : (
+                          <small className={`priceAge stockHoldingsMobilePriceAge${priceAge.stale ? " priceAge--stale" : ""}`}>
+                            {priceAge.text}
+                          </small>
+                        )}
                       </article>
                     );
                   })}
-                  {summary && holdings.length === 0 && (
+                  {summary && rows.length === 0 && (
                     <p className="muted">No holdings available.</p>
                   )}
                 </div>
@@ -558,6 +575,7 @@ export default function StockHoldings() {
                         {visibleColumns.shares && <th className="right">Shares</th>}
                         {visibleColumns.purchasePrice && <th className="right">Purchase Price</th>}
                         {visibleColumns.currentPrice && <th className="right">Current Price</th>}
+                        {visibleColumns.monthChange && <th className="right">Δ vs {compareLabel}</th>}
                         {visibleColumns.pnl && <th className="right">Profit &amp; Loss</th>}
                         {visibleColumns.percentNetWorth && <th className="right">% NW</th>}
                         {visibleColumns.quoteFreshness && <th>Quote freshness</th>}
@@ -565,8 +583,39 @@ export default function StockHoldings() {
                     </thead>
                     <tbody>
                       {visibleHoldings.map((h, idx) => {
+                        const sold = h.month_change?.side === "sold";
                         const pnl = formatPnl(h);
                         const priceAge = holdingPriceAge(h, isLive);
+                        if (sold) {
+                          // #251: sold since the compare month-end: no price, P&L or weight now.
+                          return (
+                            <tr key={`sold-${h.asset_id ?? `${h.symbol}-${idx}`}`} className="stockHoldingsSoldRow">
+                              <td>
+                                <div className="stockHoldingsAssetCell">
+                                  <div className="stockHoldingsSymbol">{h.symbol}</div>
+                                  <div className="stockHoldingsAssetMeta">
+                                    <span>{h.platform ? formatPlatformLabel(h.platform) : "—"}</span>
+                                  </div>
+                                </div>
+                              </td>
+                              {visibleColumns.shares && <td className="right stockHoldingsQuantityCell">{formatQuantity(0)}</td>}
+                              {visibleColumns.purchasePrice && <td className="right muted">—</td>}
+                              {visibleColumns.currentPrice && <td className="right muted">—</td>}
+                              {visibleColumns.monthChange && (
+                                <td className="right">
+                                  <StockMonthChange change={h.month_change} currency={shownCurrency} compareLabel={compareLabel} symbol={h.symbol} />
+                                </td>
+                              )}
+                              {visibleColumns.pnl && <td className="right muted">—</td>}
+                              {visibleColumns.percentNetWorth && (
+                                <td className="right stockHoldingsPercentCell">
+                                  <small>{formatMoney(0)}</small>
+                                </td>
+                              )}
+                              {visibleColumns.quoteFreshness && <td />}
+                            </tr>
+                          );
+                        }
                         return (
                           <tr key={h.asset_id ?? `${h.symbol}-${idx}`}>
                             <td>
@@ -592,8 +641,13 @@ export default function StockHoldings() {
                                 )}
                               </td>
                             )}
+                            {visibleColumns.monthChange && (
+                              <td className="right">
+                                <StockMonthChange change={h.month_change} currency={shownCurrency} compareLabel={compareLabel} symbol={h.symbol} />
+                              </td>
+                            )}
                             {visibleColumns.pnl && (
-                              <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`}>
+                              <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`} title={pnl.native ?? undefined}>
                                 <div>{pnl.amount}</div>
                                 {pnl.pct == null ? null : <small>{fmt.formatPercent(pnl.pct, { signed: true, scale: "points" })}</small>}
                               </td>
@@ -613,7 +667,7 @@ export default function StockHoldings() {
                           </tr>
                         );
                       })}
-                      {summary && holdings.length === 0 && (
+                      {summary && rows.length === 0 && (
                         <tr>
                           <td className="muted" colSpan={visibleColumnCount}>No holdings available.</td>
                         </tr>
@@ -622,7 +676,7 @@ export default function StockHoldings() {
                   </table>
                 </div>
               )}
-              {holdings.length > 0 ? (
+              {rows.length > 0 ? (
                 <div className="stockHoldingsControls">
                   <button
                     type="button"
@@ -635,7 +689,7 @@ export default function StockHoldings() {
                   <button
                     type="button"
                     className="btn"
-                    onClick={() => setVisibleCount((current) => Math.min(holdings.length, current + PAGE_SIZE))}
+                    onClick={() => setVisibleCount((current) => Math.min(rows.length, current + PAGE_SIZE))}
                     disabled={!hasMore}
                   >
                     Next

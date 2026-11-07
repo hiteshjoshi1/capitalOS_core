@@ -144,7 +144,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
 
       {showSnapshotClockCaveat ? (
         <div className="whDrillBanner">
-          Uses data through {point.anchor_date}; recent uploads apply next month.
+          Uses data through {fmt.formatDate(point.anchor_date)}; recent uploads apply next month.
         </div>
       ) : null}
 

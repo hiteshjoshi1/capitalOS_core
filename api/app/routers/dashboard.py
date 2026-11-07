@@ -19,6 +19,7 @@ from app.schemas.dashboard import (
     NetWorthSinceUpdateResponse,
     PlatformAllocationOut,
     RiskSummaryResponse,
+    RiskThresholds,
     StockExposureOut,
     StockHoldingsResponse,
     TopMovers,
@@ -26,6 +27,7 @@ from app.schemas.dashboard import (
     WealthTimelineResponse,
 )
 from app.services import data_hub
+from app.services.risk_thresholds import read_risk_thresholds, save_risk_thresholds
 from app.valuation import bridge, pages
 from app.valuation.clock import _parse_month
 from app.valuation.history import _backfill_wealth_rollups
@@ -137,6 +139,25 @@ def dashboard_risk_summary(
     """Lean twin of /summary for the Risk page (#149): net_worth, and top_holdings cut to
     symbol / class / value, the same values as /summary for the same month and currency."""
     return pages.risk_summary(db, current_user.id, month, _parse_month(month), base_currency)
+
+
+@router.get("/risk-thresholds", response_model=RiskThresholds)
+def dashboard_risk_thresholds(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """The Risk page's concentration thresholds (#253); null = the app's default."""
+    return read_risk_thresholds(db, current_user.id)
+
+
+@router.put("/risk-thresholds", response_model=RiskThresholds)
+def dashboard_put_risk_thresholds(
+    payload: RiskThresholds,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Replace the user's thresholds (Settings → Risk thresholds); null resets one to the default."""
+    return save_risk_thresholds(db, current_user.id, payload.model_dump())
 
 
 @router.get("/month-bridge", response_model=MonthBridgeResponse)

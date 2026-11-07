@@ -2,6 +2,7 @@ import "../App.css";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import HomeRegionCard from "../components/HomeRegionCard";
 import PageShell from "../components/PageShell";
+import RiskThresholdsCard from "../components/RiskThresholdsCard";
 import { useTheme } from "../context/ThemeContext";
 
 export default function Settings() {
@@ -18,6 +19,7 @@ export default function Settings() {
           </button>
         </div>
         <HomeRegionCard />
+        <RiskThresholdsCard />
         <ChangePasswordCard />
       </div>
     </PageShell>

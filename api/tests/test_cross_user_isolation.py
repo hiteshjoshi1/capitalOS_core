@@ -111,6 +111,7 @@ A_SEES_OWN_DATA = (
     "/dashboard/net-worth-timeline",
     "/dashboard/platform-allocation",
     "/dashboard/risk-summary",
+    "/dashboard/source-freshness",
     "/dashboard/stock-exposure",
     "/dashboard/stock-holdings",
     "/dashboard/summary",

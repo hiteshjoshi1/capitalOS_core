@@ -673,6 +673,7 @@ lint: web-deps
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
 	scripts/test-test-instance.sh
+	scripts/test-pretooluse-guard.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
 typecheck: web-deps

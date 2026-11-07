@@ -243,15 +243,15 @@ describe("WealthOverview", () => {
     );
 
     expect(await screen.findByText("NET WORTH · APR 2026 MONTH-END")).toBeInTheDocument();
-    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 80");
+    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 80.00");
     expect(screen.getByRole("note")).toHaveTextContent("Viewing Apr 2026 (month-end snapshot)");
     expect(screen.queryByText("CURRENT NET WORTH")).not.toBeInTheDocument();
     // Freshness chips and "since last update" are about live data.
     expect(screen.queryByLabelText("Data freshness by asset class")).not.toBeInTheDocument();
     expect(screen.queryByText(/SINCE LAST UPDATE/)).not.toBeInTheDocument();
     // Comparisons name their baseline.
-    expect((await screen.findByText("VS MAR 2026 MONTH-END")).parentElement).toHaveTextContent("+S$ 11");
-    expect(screen.getByText("VS APR 2025 MONTH-END").parentElement).toHaveTextContent("+S$ 22");
+    expect((await screen.findByText("VS MAR 2026 MONTH-END")).parentElement).toHaveTextContent("+S$ 11.00");
+    expect(screen.getByText("VS APR 2025 MONTH-END").parentElement).toHaveTextContent("+S$ 22.00");
     expect(screen.queryByText(/S\$ 777/)).not.toBeInTheDocument();
     expect(screen.queryByText(/S\$ 999/)).not.toBeInTheDocument();
     // Today's movers are live only.
@@ -325,7 +325,7 @@ describe("WealthOverview", () => {
     await screen.findByText("Loading holdings…");
     // Scoped to the hero specifically — the platform-allocation legend can
     // coincidentally show the same figure for an individual platform.
-    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 100");
+    expect(document.querySelector(".coHeroValue")).toHaveTextContent("S$ 100.00");
   });
 
   it("refetches bootstrap and summary when a portfolio refresh event arrives", async () => {
@@ -345,7 +345,7 @@ describe("WealthOverview", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findAllByText("S$ 125")).not.toHaveLength(0);
+    expect(await screen.findAllByText("S$ 125.00")).not.toHaveLength(0);
 
     await act(async () => {
       handlers?.onEvent?.({
@@ -359,7 +359,7 @@ describe("WealthOverview", () => {
     await waitFor(() => {
       expect(mockApi.dashboardBootstrap).toHaveBeenCalledTimes(2);
     }, { timeout: 2000 });
-    expect(await screen.findByText("S$ 225")).toBeInTheDocument();
+    expect(await screen.findByText("S$ 225.00")).toBeInTheDocument();
   });
 
   it("does not render upload reminders on the wealth overview", async () => {
@@ -394,7 +394,7 @@ describe("WealthOverview", () => {
     // Signals section shows LIABILITIES with the value
     expect(await screen.findByText("LIABILITIES")).toBeInTheDocument();
     expect(screen.getByText("What the cards owe, taken off the net worth above.")).toBeInTheDocument();
-    expect(screen.getByText("S$ 261")).toBeInTheDocument();
+    expect(screen.getByText("S$ 260.56")).toBeInTheDocument();
   });
 
   // #232: one number everywhere. The Liabilities card is the liability in the headline (live:
@@ -424,8 +424,8 @@ describe("WealthOverview", () => {
     );
 
     const card = (await screen.findByText("LIABILITIES")).closest("article") as HTMLElement;
-    expect(within(card).getByText("S$ 50")).toBeInTheDocument();
-    expect(within(card).queryByText("S$ 300")).not.toBeInTheDocument();
+    expect(within(card).getByText("S$ 50.00")).toBeInTheDocument();
+    expect(within(card).queryByText("S$ 300.00")).not.toBeInTheDocument();
 
     const totalOf = () => (screen.getByText("GROSS ASSETS").nextElementSibling as HTMLElement).textContent;
     await waitFor(() => expect(screen.getAllByText("IBKR")).not.toHaveLength(0));
@@ -433,7 +433,7 @@ describe("WealthOverview", () => {
     fireEvent.click(screen.getByRole("button", { name: "By asset class" }));
     expect(totalOf()).toBe(platformTotal);
     expect(screen.getByTestId("allocation-net-worth-line")).toHaveTextContent(
-      "Gross assets S$ 150 − liabilities S$ 50 = net worth S$ 100",
+      "Gross assets S$ 150.00 − liabilities S$ 50.00 = net worth S$ 100.00",
     );
     // Shares of gross assets add up to 100%.
     const donut = screen.getByRole("img", { name: "Allocation donut chart" });
@@ -466,7 +466,7 @@ describe("WealthOverview", () => {
     );
 
     expect(await screen.findByText(/SINCE LAST UPDATE/)).toBeInTheDocument();
-    expect(screen.getByText("+S$ 5 (+5.0%)")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 5.00 (+5.0%)")).toBeInTheDocument();
   });
 
   it("shows the live comparisons next to the live headline (#133)", async () => {
@@ -495,8 +495,8 @@ describe("WealthOverview", () => {
 
     // #232: the live comparisons name their baseline month-end too.
     const monthLabel = await screen.findByText("VS MAY 2026 MONTH-END");
-    expect(monthLabel.parentElement).toHaveTextContent("+S$ 7");
-    expect(screen.getByText("VS MAY 2025 MONTH-END").parentElement).toHaveTextContent("+S$ 9");
+    expect(monthLabel.parentElement).toHaveTextContent("+S$ 7.00");
+    expect(screen.getByText("VS MAY 2025 MONTH-END").parentElement).toHaveTextContent("+S$ 9.00");
     expect(screen.queryByText(/S\$ 111/)).not.toBeInTheDocument();
     expect(screen.queryByText(/S\$ 222/)).not.toBeInTheDocument();
   });
@@ -545,7 +545,65 @@ describe("WealthOverview", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Today" }));
 
     expect(await screen.findByText("AAPL")).toBeInTheDocument();
-    expect(screen.getByText("+S$ 10")).toBeInTheDocument();
+    expect(screen.getByText("+S$ 10.00")).toBeInTheDocument();
+  });
+
+  it("states what Today compares with and marks a holding compared with an older statement (#249)", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary.mockResolvedValue(makeSummary(100) as never);
+    const mover = {
+      asset_class: "STOCK",
+      current_value: 110,
+      previous_value: 100,
+      delta_abs: 10,
+      delta_pct: 0.1,
+      compare_month: "2026-05-14T00:00:00+00:00",
+    };
+    mockApi.netWorthSinceUpdate.mockResolvedValue({
+      base_currency: "SGD",
+      current_as_of: "2026-05-14T00:00:00+00:00",
+      compare_as_of: "2026-05-14T00:00:00+00:00",
+      net_worth_change: {
+        abs: 15,
+        pct: 0.05,
+        current_as_of: "2026-05-14T00:00:00+00:00",
+        compare_as_of: "2026-05-14T00:00:00+00:00",
+        compare_month: "2026-05-14T00:00:00+00:00",
+      },
+      component_change: {},
+      top_movers: {
+        compare_month: "2026-05-14T00:00:00+00:00",
+        gainers: [
+          { ...mover, asset_id: 1, symbol: "AAPL", compare_price_basis: "quote", compare_price_as_of: "2026-05-14", compare_price_fallback: false },
+          { ...mover, asset_id: 3, symbol: "RELIANCE", delta_abs: 5, delta_pct: 0.05, compare_price_basis: "statement", compare_price_as_of: "2026-03-29", compare_price_fallback: true },
+        ],
+        detractors: [],
+      },
+      basis: "quoted_at_compare_date",
+      compare_basis: { price_date: "2026-05-14", holdings: 2, quoted: 1, statement_priced: 1, older_statement_priced: 1 },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Today" }));
+    expect(await screen.findByText("RELIANCE")).toBeInTheDocument();
+    expect(screen.getByText("+5.0% *")).toHaveAttribute("title", "Compared with its statement price of 29 Mar 2026");
+    expect(screen.getByText("+10.0%")).not.toHaveAttribute("title");
+    expect(
+      screen.getByText(
+        "Moves since 14 May 2026, each holding at its last quote on or before that date. * No quote on or before 14 May 2026: compared with its own, older statement price.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1 holding vs an older statement price")).toBeInTheDocument();
+    expect(screen.getByText(/SINCE LAST UPDATE/)).toHaveAttribute(
+      "title",
+      "Moves since 14 May 2026, each holding at its last quote on or before that date.",
+    );
   });
 });
 
@@ -568,19 +626,19 @@ describe("WealthOverview currency races", () => {
       </MemoryRouter>,
     );
     await act(async () => boot.find((a) => a[1] === "SGD").resolve(makeBootstrap(100)));
-    expect(await screen.findByText("S$ 100")).toBeInTheDocument();
+    expect(await screen.findByText("S$ 100.00")).toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Base currency"), { target: { value: "USD" } });
     // Still the SGD figure, still labelled S$, marked busy.
-    expect(screen.getByText("S$ 100").closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByText("S$ 100.00").closest("[aria-busy]")).toHaveAttribute("aria-busy", "true");
     fireEvent.change(screen.getByLabelText("Base currency"), { target: { value: "HKD" } });
 
     const usd = boot.find((a) => a[1] === "USD");
     await act(async () => boot.find((a) => a[1] === "HKD").resolve({ ...makeBootstrap(500), base_currency: "HKD" }));
-    expect(await screen.findByText("HKD 500")).toBeInTheDocument();
+    expect(await screen.findByText("HKD 500.00")).toBeInTheDocument();
     await act(async () => usd.resolve({ ...makeBootstrap(300), base_currency: "USD" }));
-    expect(screen.queryByText("USD 300")).not.toBeInTheDocument();
-    expect(screen.getByText("HKD 500")).toBeInTheDocument();
+    expect(screen.queryByText("USD 300.00")).not.toBeInTheDocument();
+    expect(screen.getByText("HKD 500.00")).toBeInTheDocument();
     await waitFor(() => expect(usd.signal?.aborted).toBe(true));
   });
 });
@@ -670,11 +728,11 @@ describe("WealthOverview panel errors", () => {
 
     const yearRow = (await screen.findByText("VS APR 2025 MONTH-END")).parentElement as HTMLElement;
     expect(yearRow).toHaveTextContent("no comparison: no data for Apr 2025");
-    expect(yearRow).not.toHaveTextContent("S$ 100");
+    expect(yearRow).not.toHaveTextContent("S$ 100.00");
     // Last month is real: ▼, the down colour, amount and % together.
     const monthDelta = (screen.getByText("VS APR 2026 MONTH-END").parentElement as HTMLElement).querySelector(".delta");
     expect(monthDelta).toHaveClass("delta--down");
-    expect(monthDelta).toHaveTextContent("▼-S$ 4 (-4.0%)");
+    expect(monthDelta).toHaveTextContent("▼-S$ 4.00 (-4.0%)");
     // The hero chip is the same <Delta>, in the same colour.
     const chip = document.querySelector(".coHeroValueRow .deltaChip");
     expect(chip).toHaveClass("delta--down");

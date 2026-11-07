@@ -10,6 +10,7 @@ import StatusPill from "../components/StatusPill";
 import type { StatusPillTone } from "../components/StatusPill";
 import * as fmt from "../lib/format";
 import LoadError from "../components/LoadError";
+import SourceFreshnessTable from "../components/SourceFreshnessTable";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 type RefreshStatus = "idle" | "running" | "done" | "error";
@@ -211,6 +212,8 @@ export default function OperationsOverview() {
               ))}
             </div>
           </section>
+
+          <SourceFreshnessTable />
 
           {summary && (summary.market_data.unpriced_holdings ?? []).length > 0 && (
             <section aria-label="Unpriced holdings">
