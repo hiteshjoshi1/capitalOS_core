@@ -6,6 +6,8 @@ type PageShellProps = {
   subtitle?: string;
   hideHeader?: boolean;
   headerActions?: ReactNode;
+  /** The page's month + currency bar (#264, `<MonthBar>`), under the title on every width. */
+  monthBar?: ReactNode;
   className?: string;
   fillHeight?: boolean;
   /** @deprecated Navigation moved to Sidebar; kept for backward compatibility */
@@ -26,6 +28,7 @@ export default function PageShell({
   subtitle,
   hideHeader = false,
   headerActions,
+  monthBar,
   className,
   fillHeight = false,
   children,
@@ -53,6 +56,8 @@ export default function PageShell({
           {(!hasProvider || actionsInPage) && headerActions ? <div className="dashboardHeaderActions">{headerActions}</div> : null}
         </header>
       ) : null}
+
+      {monthBar}
 
       {children}
     </div>

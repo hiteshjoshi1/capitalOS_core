@@ -9,8 +9,7 @@ import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
 import { computeMonthFlags, isGapPoint } from "../lib/wealthHistoryAnalysis";
 import "../App.css";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import * as fmt from "../lib/format";
 import { shiftMonth, useSelectedMonth } from "../lib/selectedMonth";
 import LoadError from "../components/LoadError";
@@ -199,12 +198,7 @@ export default function WealthHistory() {
     <PageShell
       title="History"
       subtitle="How your wealth evolved — and why. Carried data is shown dashed; gaps stay gaps."
-      headerActions={
-        <>
-          <MonthControl month={selectedMonth} onMonthChange={setSelectedMonth} />
-          <BaseCurrencyPicker />
-        </>
-      }
+      monthBar={<MonthBar month={selectedMonth} onMonthChange={setSelectedMonth} />}
     >
       <div className="whFilters">
         <div className="coSegmentedControl" role="group" aria-label="Range">

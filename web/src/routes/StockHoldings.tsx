@@ -12,13 +12,12 @@ import { hasLivePrice, holdingPriceAge } from "../lib/priceAge";
 import "../App.css";
 import Delta from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PriceFallbackInfo from "../components/PriceFallbackInfo";
 import StockMonthChange from "../components/StockMonthChange";
 import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
 type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "monthChange" | "pnl" | "percentNetWorth" | "quoteFreshness";
@@ -302,10 +301,9 @@ export default function StockHoldings() {
           >
             Download CSV
           </button>
-          <MonthControl month={month} onMonthChange={handleMonthChange} />
-          <BaseCurrencyPicker />
         </>
       }
+      monthBar={<MonthBar month={month} onMonthChange={handleMonthChange} />}
     >
       {resource.isLoading && <div className="card" role="status">Loading…</div>}
       {(resource.error || refreshErr) && (

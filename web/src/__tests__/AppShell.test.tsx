@@ -423,9 +423,11 @@ describe("AppShell on a phone-width screen (#239)", () => {
     expect(screen.getAllByLabelText("Month")).toHaveLength(1);
     const topbar = container.querySelector(".appShellTopbar") as HTMLElement;
     expect(topbar).not.toContainElement(month);
-    const pageHeader = container.querySelector(".pageShellWrap .dashboardHeader") as HTMLElement;
-    expect(pageHeader).toContainElement(month);
-    expect(pageHeader).toContainElement(screen.getByLabelText("Base currency"));
+    // #264: in the page's month bar, under its title.
+    const monthBar = screen.getByRole("group", { name: "Month and currency" });
+    expect(container.querySelector(".pageShellWrap")).toContainElement(monthBar);
+    expect(monthBar).toContainElement(month);
+    expect(monthBar).toContainElement(screen.getByLabelText("Base currency"));
   });
 
   it("moves the theme switch into the account menu", async () => {

@@ -23,11 +23,10 @@ import {
 } from "../lib/risk";
 import "../App.css";
 import GeographyPieCard from "../components/dashboard/GeographyPieCard";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
 /** Bar width as a share of the widest bar in its list (negative values draw none). */
@@ -94,12 +93,7 @@ export default function WealthRisk() {
     <PageShell
       title="Wealth Risk"
       subtitle={`Concentration signals and exposure${basisLabel ? ` · ${basisLabel}` : ""}.`}
-      headerActions={(
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      )}
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {summaryRes.isLoading && !loadError ? <div className="card" role="status">Loading…</div> : null}
       {loadError ? (
