@@ -18,6 +18,7 @@ import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 import Delta from "../components/Delta";
 import MonthBridgeCard from "../components/MonthBridgeCard";
+import MoveCauses from "../components/MoveCauses";
 import SourceFreshnessStrip from "../components/SourceFreshnessStrip";
 import { missingBaselineReason } from "../lib/delta";
 
@@ -410,6 +411,8 @@ export default function WealthOverview() {
                 View history →
               </Link>
             </div>
+            {/* #289: the data causes behind a big move, next to the deltas. */}
+            <MoveCauses month={month} baseCurrency={selectedBaseCurrency} />
           </article>
 
           {/* ── This month's bridge (#240): what moved the headline since the last close ── */}

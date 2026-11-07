@@ -40,7 +40,7 @@ from app.portfolio.ledger_dividends import LEDGER_CODES, ledger_covered_since
 from app.portfolio.position_pricing import price_position
 from app.routers.dividends import _covered_by_ledger
 from app.routers.spending import _build_row_rate_map, _cash_flow_bucket, _cash_flow_rows, _row_base_amount
-from app.valuation import clock, fx
+from app.valuation import clock, fx, move_causes
 from app.valuation.clock import (
     _anchor_ts,
     _completed_snapshot_month_start,
@@ -96,6 +96,8 @@ class _Holding:
     value: float
     fx_rate: Optional[float] = None  # base currency per unit of the price's currency, at the anchor
     price_currency: Optional[str] = None  # the currency ``price`` is in
+    as_of: Optional[date] = None  # the statement date the holding comes from (#289)
+    fallback_reason: Optional[str] = None  # D-21: why a live view used the statement price (#289)
 
     def rate(self) -> Optional[float]:
         """Base currency per unit of the price's currency: the rate the value itself
@@ -320,6 +322,7 @@ def _stock_holdings(
         account_id = int(row["account_id"]) if row.get("account_id") is not None else None
         key = (account_id, row.get("broker_account_id"), asset_key)
         quantity = float(row["quantity"]) if row.get("quantity") is not None else None
+        report_date = _date_only(row.get("report_date"))
         held = out.get(key)
         if held is None:
             out[key] = _Holding(
@@ -335,10 +338,14 @@ def _stock_holdings(
                 value=priced.value,
                 fx_rate=fx_rate,
                 price_currency=str(price_currency).upper() if price_currency else None,
+                as_of=report_date,
+                fallback_reason=priced.fallback_reason,
             )
         else:  # two rows for one holding: add them up (the price stays, the rate follows)
             held.value += priced.value
             held.quantity = None if held.quantity is None or quantity is None else held.quantity + quantity
+            if report_date is not None and (held.as_of is None or report_date > held.as_of):
+                held.as_of = report_date
     return out
 
 
@@ -910,6 +917,19 @@ def month_bridge(
     trade_rows.sort(key=lambda t: (-abs(t["amount"]), str(t["symbol"]).lower()))
 
     end_month = month_start if is_live else _completed_snapshot_month_start(month_start)
+    causes = move_causes.move_causes(
+        db,
+        current_user_id,
+        base_currency=base_currency,
+        start_anchor=start_anchor,
+        end_anchor=end_anchor,
+        start_total=start_nw["total"],
+        end_total=end_nw["total"],
+        start_holdings=[*stocks0.values(), *crypto0.values()],
+        end_holdings=[*stocks1.values(), *crypto1.values()],
+        fx_flags=fx.fx_status(),
+        baseline_missing=baseline_missing(start_as_of, start_nw["total"]),
+    )
     return {
         "as_of_month": month,
         "base_currency": base_currency,
@@ -939,5 +959,6 @@ def month_bridge(
         "liabilities_change": liabilities_change,
         "movers": mover_rows[:movers_limit],
         "trades": trade_rows[:movers_limit],
+        "move_causes": causes,
         **fx.fx_status(),
     }

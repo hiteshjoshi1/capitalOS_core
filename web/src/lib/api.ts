@@ -558,6 +558,28 @@ export type BridgeTrade = {
   cash_recorded: boolean;
 };
 
+/** One data cause behind a period's change (#289). `amount` is in the base currency;
+ * null when unknown (an FX gap leaves amounts out). */
+export type MoveCause = {
+  key: "first_statement" | "catch_up" | "statement" | "new_position" | "fx_gap" | "price_fallback" | string;
+  label: string;
+  detail?: string | null;
+  amount?: number | null;
+  significant: boolean;
+  account_id?: number | null;
+  as_of?: string | null;
+};
+
+/** Why the headline moved (#289): big = at least 5% of the start; `none_reason` when a
+ * big move has no significant data cause. */
+export type MoveCauses = {
+  change: number;
+  change_pct?: number | null;
+  is_big_move: boolean;
+  causes: MoveCause[];
+  none_reason?: string | null;
+};
+
 /** GET /dashboard/month-bridge (#240, D-60): start + sum(lines) + unexplained = end. */
 export type MonthBridge = FxStatus & {
   as_of_month: string;
@@ -574,6 +596,7 @@ export type MonthBridge = FxStatus & {
   liabilities_change: number;
   movers: BridgeMover[];
   trades?: BridgeTrade[];
+  move_causes?: MoveCauses | null;
 };
 
 /** One bar of a page's six-month trend (Stocks, Crypto, Cash). #241 (D-61): the open

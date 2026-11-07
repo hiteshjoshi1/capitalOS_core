@@ -7,6 +7,7 @@ import type { ComponentDeltas, MonthFlags } from "../lib/wealthHistoryAnalysis";
 import * as fmt from "../lib/format";
 import { deltaDirection } from "../lib/delta";
 import { DeltaArrow } from "./Delta";
+import { MonthMoveCauses } from "./MoveCauses";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -174,6 +175,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
               upload.
             </div>
           ) : null}
+          {flags.isOutlier || flags.isCatchUp ? <MonthMoveCauses month={month} baseCurrency={baseCurrency} /> : null}
           {flags.componentDeltas ? (
             <div className="whWaterfall">
               {(Object.keys(flags.componentDeltas) as (keyof ComponentDeltas)[]).map((key) => {
