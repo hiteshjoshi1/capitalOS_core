@@ -1,6 +1,9 @@
 # Runtime hardening applied to every long-running service: no privilege
 # escalation via setuid binaries, no Linux capabilities, and a process cap.
 x-hardening: &hardening
+  # The main checkout's `make up` sets CAPITALOS_RESTART=unless-stopped (#263), so the real app
+  # comes back by itself after a Docker or machine restart. Worktree and test stacks stay "no".
+  restart: ${CAPITALOS_RESTART:-no}
   security_opt:
     - no-new-privileges:true
   cap_drop:
@@ -72,6 +75,30 @@ services:
     # migrations, never at the `git merge`. Worktrees and the test instance mount the code and
     # reload (docker-compose.isolated.yml).
     command: uvicorn app.main:app --host=0.0.0.0 --port=8000
+
+  # The real app's web UI (#263): the production build served by nginx, which also proxies
+  # /api/* to the api service. Only the main checkout's `make up` starts it (worktrees and the
+  # test instance run the Vite dev server instead); `make deploy` rebuilds it. Published on
+  # 127.0.0.1 only: Docker Desktop hides client addresses from containers, so other devices
+  # reach it through `tailscale serve` (tailnet-only HTTPS, `make tailnet-serve`), never the LAN.
+  web:
+    <<: *hardening
+    build:
+      context: ./web
+      target: runtime
+    container_name: capitalos-web
+    read_only: true
+    tmpfs:
+      - /tmp
+    depends_on:
+      - api
+    ports:
+      - "127.0.0.1:5173:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
 
   # Test/lint/typecheck tooling (`make test-backend`, `make lint`, `make typecheck`).
   # Same config as `api`, built from the `dev` target; only started via `compose run`.

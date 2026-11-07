@@ -70,6 +70,10 @@ responses, anything where "restart from empty" (Path 1) isn't good enough.
    only on a dev/test stack after `make demo-enable`), API at
    `http://localhost:8000` (`curl http://localhost:8000/health`), web at
    `http://localhost:5173`.
+5. **The real app in the phone's browser** (#263): no terminal needed. Run
+   `make tailnet-serve` once in the main checkout, then open
+   `https://<mac>.<tailnet>.ts.net:8443` on any of your tailnet devices (tailnet
+   only, real HTTPS; the same URL on the laptop).
 
 **When to reach for this**: anything Path 1 can't do — real data, real
 containers, real ports.

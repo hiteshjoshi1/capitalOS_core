@@ -15,8 +15,8 @@
 #      to the previous commit and the image rebuilt from it, the old API is still running, the
 #      migrations of this deploy that did apply are named (D-13), and so is the backup.
 #   6. recreate the stack (make up): the new code goes live here, after build and migrations
-#   7. health checks: API (/health checks the database and the migration state), then
-#      Loki/Grafana if they run
+#   7. health checks: API (/health checks the database and the migration state), the web
+#      container (#263: the page, and /api/health through its proxy), then Loki/Grafana if they run
 # Each deploy appends a line to deployments.log (git-ignored).
 set -euo pipefail
 
@@ -38,9 +38,7 @@ plan() {  # plan FROM TO
   else echo "  backup:     no (no new migrations)"; fi
   [ -n "$(changed "$from" "$to" api/)" ] && echo "  api:        rebuild + restart"
   [ -n "$(changed "$from" "$to" docker-compose.yml)" ] && echo "  compose:    changed: services recreated as needed"
-  [ -n "$(changed "$from" "$to" web/package.json web/package-lock.json)" ] &&
-    echo "  web deps:   changed: npm ci, then RESTART your 'make web-up' (Vite)"
-  [ -n "$(changed "$from" "$to" web/src)" ] && echo "  web:        code changed (a running Vite picks it up)"
+  [ -n "$(changed "$from" "$to" web/)" ] && echo "  web:        rebuild + restart (the web container, #263)"
   return 0
 }
 
@@ -86,7 +84,7 @@ git merge -q --ff-only "$TO"
 
 # 4. Images (the running API keeps serving its own image meanwhile; nothing reloads, #155)
 say "Build"
-make -s api-build
+make -s api-build web-build
 
 # 5. Migrations
 if [ "$NEW_MIGRATIONS" -gt 0 ]; then
@@ -97,7 +95,7 @@ if [ "$NEW_MIGRATIONS" -gt 0 ]; then
     git reset -q --hard "$FROM"
     # The image tag now holds the new code; rebuild it from the old, so a later `make up` (or
     # restart) doesn't start code whose migrations didn't run.
-    make -s api-build || echo "deploy: WARNING: rebuilding the previous image failed; run make api-build before any make up" >&2
+    make -s api-build web-build || echo "deploy: WARNING: rebuilding the previous images failed; run make api-build web-build before any make up" >&2
     [ -n "$partial" ] && printf 'deploy: applied before the failure (they stay applied, D-13): %s\n' $partial >&2
     die "a migration failed (rolled back, see above). Code reset to $(git rev-parse --short "$FROM"); the old API is still running. Backup taken first: $BACKUP"
   fi
@@ -106,7 +104,6 @@ fi
 # 6. Stack
 say "Stack"
 make -s up
-if [ -n "$(changed "$FROM" "$TO" web/package.json web/package-lock.json)" ]; then make -s web-deps; fi
 if make -s observability-running; then make -s observability-up; fi
 
 # 7. Health
@@ -120,6 +117,11 @@ echo "API: $health"
 case "$health" in
   *'"current":false'*) echo "deploy: WARNING: the newest applied migration is not the newest file (see above; make db-migrate?)" >&2 ;;
 esac
+web=http://127.0.0.1:5173
+for _ in $(seq 1 30); do curl -sf "$web/" >/dev/null && break; sleep 1; done
+curl -sf "$web/" >/dev/null || die "the web app is not serving at $web (make web-logs). Previous commit: $(git rev-parse --short "$FROM")"
+curl -sf "$web/api/health" >/dev/null || die "the web app's /api proxy does not reach the API (make web-logs). Previous commit: $(git rev-parse --short "$FROM")"
+echo "Web: ok ($web, /api proxy ok)"
 if make -s observability-running; then
   curl -sf http://127.0.0.1:3100/ready >/dev/null && echo "Loki: ready" || echo "Loki: NOT ready"
   curl -sf http://127.0.0.1:3000/api/health >/dev/null && echo "Grafana: ok" || echo "Grafana: NOT ok"
@@ -128,5 +130,4 @@ trap - EXIT
 record ok
 echo
 echo "Deployed $(git rev-parse --short "$TO")."
-[ -n "$(changed "$FROM" "$TO" web/package.json web/package-lock.json)" ] && echo "Web dependencies changed: restart 'make web-up'."
 exit 0

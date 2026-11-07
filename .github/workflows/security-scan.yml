@@ -1,8 +1,8 @@
 name: Security Scan
 
 # Image vulnerability scanning with Trivy (local twin: `make security-scan`).
-# - api-image: builds the runtime API image on a freshly pulled base and FAILS
-#   on fixable HIGH/CRITICAL findings.
+# - api-image / web-image: build the runtime API and web (#263) images on freshly
+#   pulled bases and FAIL on fixable HIGH/CRITICAL findings.
 # - compose-images: third-party images pinned in docker-compose.yml plus tool
 #   images from tools/Dockerfile (e.g. the MCP server); report only.
 # Results are uploaded to the repository's Security tab (code scanning is free
@@ -65,6 +65,50 @@ jobs:
           docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
             -v "${{ runner.temp }}/trivy-cache:/root/.cache" \
             "$TRIVY_IMAGE" image $TRIVY_FLAGS --table-mode detailed --exit-code 1 capitalos-api:scan
+
+  web-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve Trivy image (tools/Dockerfile)
+        run: echo "TRIVY_IMAGE=$(scripts/tool-image.sh trivy)" >> "$GITHUB_ENV"
+
+      - name: Cache Trivy DB
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/trivy-cache
+          key: trivy-db-${{ github.run_id }}
+          restore-keys: trivy-db-
+
+      - name: Build runtime web image (fresh bases)
+        run: docker build --pull --target runtime -t capitalos-web:scan web
+
+      - name: Scan (SARIF for the Security tab)
+        run: |
+          # shellcheck disable=SC2086 # TRIVY_FLAGS is intentionally word-split
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ runner.temp }}/trivy-cache:/root/.cache" -v "$PWD:/out" \
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --format sarif --output /out/web-image.sarif capitalos-web:scan
+
+      - name: Upload SARIF
+        if: always() && env.CAN_UPLOAD == 'true' && hashFiles('web-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee # v4.39.0
+        with:
+          sarif_file: web-image.sarif
+          category: trivy-web-image
+
+      - name: Fail on fixable HIGH/CRITICAL
+        run: |
+          # shellcheck disable=SC2086 # TRIVY_FLAGS is intentionally word-split
+          docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${{ runner.temp }}/trivy-cache:/root/.cache" \
+            "$TRIVY_IMAGE" image $TRIVY_FLAGS --table-mode detailed --exit-code 1 capitalos-web:scan
 
   list-compose-images:
     runs-on: ubuntu-latest
