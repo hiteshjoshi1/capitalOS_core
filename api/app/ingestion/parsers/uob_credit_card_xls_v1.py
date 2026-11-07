@@ -68,10 +68,6 @@ class ParsedRow:
 _MIN_REPEATED_RUN = 3
 
 
-def _is_previous_balance(description: str) -> bool:
-    return description.strip().upper().startswith("PREVIOUS BALANCE")
-
-
 def _row_signature(row: ParsedRow) -> tuple[Any, ...]:
     return (
         row.is_balance_marker,
