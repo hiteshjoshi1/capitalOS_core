@@ -6,9 +6,11 @@ import { formatMonth } from "../lib/format";
 type MonthControlProps = {
   month: string;
   onMonthChange: (month: string) => void;
+  /** The month bar (#264) shows the off-month state itself, after its ▸ step. */
+  hideOffMonth?: boolean;
 };
 
-export default function MonthControl({ month, onMonthChange }: MonthControlProps) {
+export default function MonthControl({ month, onMonthChange, hideOffMonth = false }: MonthControlProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const openMonthPicker = (): boolean => {
     const input = inputRef.current;
@@ -60,7 +62,7 @@ export default function MonthControl({ month, onMonthChange }: MonthControlProps
           }}
         />
       </label>
-      {offMonthLabel && (
+      {offMonthLabel && !hideOffMonth && (
         <span className="monthControlOffMonth" role="status">
           {offMonthLabel}
         </span>

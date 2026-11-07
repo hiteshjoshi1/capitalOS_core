@@ -4,10 +4,9 @@ import type { CategoryTaxonomy, UnmappedTransaction } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import * as fmt from "../lib/format";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 
 type CategoryGroup = {
@@ -177,12 +176,7 @@ export default function CashFlowMapping() {
       activeRoute="/cash-flow/map-transactions"
       secondaryNavItem={{ label: "Map Transactions", to: "/cash-flow/map-transactions" }}
       unmappedCount={transactions.length}
-      headerActions={(
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      )}
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {!ready && !error && <div className="card" role="status">Loading…</div>}
 

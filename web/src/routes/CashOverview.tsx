@@ -3,7 +3,7 @@ import { api } from "../lib/api";
 import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import "../App.css";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import HeroMetricCard from "../components/HeroMetricCard";
 import StackedBar from "../components/StackedBar";
@@ -13,7 +13,6 @@ import { formatDate, formatMoney, formatMoneyCompact, formatMonth, formatNumber,
 import { chartColor, donutGradient } from "../lib/chartColors";
 import { noDataFor } from "../lib/delta";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 
@@ -94,12 +93,7 @@ export default function CashOverview() {
       subtitle="Bank cash, broker cash, and stablecoin balances as of any month."
       activeRoute="/cash"
       secondaryNavItem={{ label: "Import Statements", to: "/ingest" }}
-      headerActions={(
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      )}
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {deposits.isLoading && <div className="card" role="status">Loading…</div>}
       {deposits.error && (

@@ -6718,3 +6718,137 @@ html, body {
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+
+/* ─── Month bar (#264, #131 mock-up B) ────────────────────────────────
+   One row under the page title on every page that follows the month: ◂ month ▸, Live or
+   "Back to <current>", and the base currency on the right. It wraps rather than overflow. */
+.monthBar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin: 0 0 18px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.monthBarNav,
+.monthBarState,
+.monthBarCurrency {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.monthBarStep,
+.monthBarBack {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.monthBarStep:hover:not(:disabled),
+.monthBarBack:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.monthBarCurrency {
+  margin-left: auto;
+}
+
+/* No arrow: it sits after ▸, not next to the pill. */
+.monthBarOffMonth::before {
+  display: none;
+}
+
+.monthBarStep:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.monthBarLive {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.monthBarLiveDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--good);
+}
+
+/* Section tabs: always one row; scroll sideways when they don't fit (#264). */
+.appShellTabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  min-width: 0;
+}
+
+/* Tap targets (#264): at least 44px tall on a phone or any touch screen. */
+@media (max-width: 980px), (pointer: coarse) {
+  .appShellTab {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    padding-bottom: 0;
+  }
+
+  .coPillBtn,
+  .monthBarStep,
+  .monthBarBack,
+  .coThemeBtn,
+  .appShellUserPill {
+    min-height: 44px;
+  }
+
+  .monthBarStep {
+    min-width: 44px;
+  }
+
+  /* Phone: ◂ month ▸ and the currency on one row, the Live / past-month state under them. */
+  .monthBar {
+    justify-content: flex-start;
+  }
+
+  .monthBarNav {
+    flex-wrap: nowrap;
+    order: 1;
+  }
+
+  .monthBarCurrency {
+    order: 2;
+  }
+
+  .monthBarState {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .coMobileBottomNavItem {
+    min-height: 44px;
+  }
+}

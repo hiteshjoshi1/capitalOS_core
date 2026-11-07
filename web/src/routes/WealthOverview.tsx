@@ -13,8 +13,7 @@ import "../App.css";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import { useBaseCurrency } from "../context/CurrencyContext";
-import BaseCurrencyPicker from "../components/BaseCurrencyPicker";
-import MonthControl from "../components/MonthControl";
+import MonthBar from "../components/MonthBar";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
 import Delta from "../components/Delta";
@@ -282,12 +281,7 @@ export default function WealthOverview() {
     <PageShell
       title="Wealth Overview"
       subtitle="Portfolio composition and the most important balance-sheet signals."
-      headerActions={
-        <>
-          <MonthControl month={month} onMonthChange={setMonth} />
-          <BaseCurrencyPicker />
-        </>
-      }
+      monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       <SourceFreshnessStrip />
       {bootstrapRes.isLoading ? (
