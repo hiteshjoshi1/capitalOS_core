@@ -375,8 +375,13 @@ def test_cash_flow_detail_includes_deterministic_analytics(client: TestClient, d
         "snapshot_end_as_of": "2026-02-28T00:00:00+00:00",
         "snapshot_end_boundary_at": "2026-03-01T00:00:00+00:00",
         "boundary_exact": False,
-        "availability_message": "Cash reconciliation needs exact cash snapshots on 2026-02-01 and 2026-03-01. Available snapshots are 2026-01-31 and 2026-02-28.",
+        # #265: month-end statements (31 Jan, 28 Feb) are the nearest snapshots; the bridge draws.
+        "availability_message": None,
         "ending_cash": 15000.0,
+        "bridge_available": True,
+        "span_start": "2026-01-31",
+        "span_end": "2026-02-28",
+        "span_basis": "nearest",
     }
 
     outflow_categories = {item["label"]: item for item in analytics["outflow_categories"]}
