@@ -6852,3 +6852,10 @@ html, body {
     min-height: 44px;
   }
 }
+
+/* Income (#267): the last-12-months headline and its monthly bars, above the dividend detail. */
+.incomeHeadline {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
