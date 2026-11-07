@@ -64,7 +64,6 @@ export default function ValueTrendChart({
       <div
         className="valueTrendBars"
         style={{ gridTemplateColumns: `repeat(${numericPoints.length}, minmax(0, 1fr))` }}
-        role="img"
         aria-hidden="true"
       >
         {numericPoints.map((point) => {

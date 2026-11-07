@@ -32,7 +32,7 @@ export default function NetWorthHeroCard({
       <h2>Net Worth</h2>
       <div className="big">{formatMoney(summary?.net_worth.total)}</div>
       {prevMonthChange || prevYearChange ? (
-        <div className="netWorthDeltaRow" aria-label="Net worth changes">
+        <div className="netWorthDeltaRow" role="group" aria-label="Net worth changes">
           {prevMonthChange ? (
             <div className="netWorthDelta">
               <span className="label">vs {prevMonthChange.compare_month}</span>

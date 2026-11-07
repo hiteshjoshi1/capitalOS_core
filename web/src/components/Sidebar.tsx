@@ -43,7 +43,7 @@ export default function Sidebar() {
           >
             <span>{item.label}</span>
             {item.badgeKey === "alerts" && alertCount > 0 ? (
-              <span className="sidebarBadge alertBadge" aria-label={`${alertCount} alerts`}>
+              <span className="sidebarBadge alertBadge" role="img" aria-label={`${alertCount} alerts`}>
                 {alertCount}
               </span>
             ) : null}

@@ -7,10 +7,10 @@ import { monthEndCloseDate, snapshotMonthOf, useSelectedMonth } from "../lib/sel
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
-import { deltaPercent, noDataFor } from "../lib/delta";
+import { deltaDirection, deltaPercent, noDataFor } from "../lib/delta";
 import { hasLivePrice, holdingPriceAge } from "../lib/priceAge";
 import "../App.css";
-import Delta from "../components/Delta";
+import Delta, { DeltaArrow } from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthBar from "../components/MonthBar";
 import PriceFallbackInfo from "../components/PriceFallbackInfo";
@@ -19,6 +19,9 @@ import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
+
+/** P&L colour by direction (#268): zero is neutral, not green. */
+const PNL_CLASS = { up: "good", down: "bad", flat: "" } as const;
 
 type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "monthChange" | "pnl" | "percentNetWorth" | "quoteFreshness";
 
@@ -155,14 +158,14 @@ export default function StockHoldings() {
       || holding.latest_price == null
       || !holding.quote_currency
     ) {
-      return { amount: "—", native: null, pct: null, positive: true };
+      return { amount: "—", native: null, pct: null, positive: true, direction: "flat" as const };
     }
     const nativePnl = holding.quantity * (holding.latest_price - holding.avg_cost);
     const native = fmt.formatSignedMoney(nativePnl, holding.quote_currency, { decimals: 2 });
     const pnlPct = holding.avg_cost > 0 ? ((holding.latest_price - holding.avg_cost) / holding.avg_cost) * 100 : null;
     const nativeValue = holding.quantity * holding.latest_price;
     if (nativeValue <= 0 || holding.value == null) {
-      return { amount: native, native: null, pct: pnlPct, positive: nativePnl >= 0 };
+      return { amount: native, native: null, pct: pnlPct, positive: nativePnl >= 0, direction: deltaDirection(nativePnl) };
     }
     const pnl = nativePnl * (holding.value / nativeValue);
     return {
@@ -170,6 +173,7 @@ export default function StockHoldings() {
       native: holding.quote_currency.toUpperCase() === shownCurrency.toUpperCase() ? null : `In ${holding.quote_currency}: ${native}`,
       pct: pnlPct,
       positive: pnl >= 0,
+      direction: deltaDirection(pnl),
     };
   };
   const formatGeoLabel = (geo?: string | null) => {
@@ -483,7 +487,7 @@ export default function StockHoldings() {
                 </button>
                 <details className="stockColumnMenu" ref={columnMenuRef}>
                   <summary className="btn stockColumnSummary">Columns</summary>
-                  <div className="stockColumnPanel" aria-label="Visible stock columns">
+                  <div className="stockColumnPanel" role="group" aria-label="Visible stock columns">
                     {STOCK_COLUMN_OPTIONS.map((option) => (
                       <label className="stockColumnOption" key={option.key}>
                         <input
@@ -533,8 +537,8 @@ export default function StockHoldings() {
                             <span>{fmt.formatPercent(h.percent_of_networth, { scale: "points" })} NW</span>
                           </div>
                           {mobilePnl ? (
-                            <div className={`stockHoldingsMobilePnlBlock ${mobilePnl.positive ? "good" : "bad"}`} title={mobilePnl.native ?? undefined}>
-                              <strong>{mobilePnl.amount}</strong>
+                            <div className={`stockHoldingsMobilePnlBlock ${PNL_CLASS[mobilePnl.direction]}`} title={mobilePnl.native ?? undefined}>
+                              <strong><DeltaArrow direction={mobilePnl.direction} />{mobilePnl.amount}</strong>
                               {mobilePnl.pct == null ? null : <span>{fmt.formatPercent(mobilePnl.pct, { signed: true, scale: "points" })}</span>}
                             </div>
                           ) : null}
@@ -645,8 +649,8 @@ export default function StockHoldings() {
                               </td>
                             )}
                             {visibleColumns.pnl && (
-                              <td className={`right stockHoldingsPnlCell ${pnl.positive ? "good" : "bad"}`} title={pnl.native ?? undefined}>
-                                <div>{pnl.amount}</div>
+                              <td className={`right stockHoldingsPnlCell ${PNL_CLASS[pnl.direction]}`} title={pnl.native ?? undefined}>
+                                <div><DeltaArrow direction={pnl.direction} />{pnl.amount}</div>
                                 {pnl.pct == null ? null : <small>{fmt.formatPercent(pnl.pct, { signed: true, scale: "points" })}</small>}
                               </td>
                             )}
