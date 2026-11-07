@@ -235,18 +235,24 @@ export function sourceLinkLabel(row: SourceFreshnessRow): string {
 /**
  * The Upload page's line about what's due (#278):
  * "DBS Card: statement due for October 2026 (last data 30 Sep 2026)",
+ * "DBS Card: up to date (last data 31 Oct 2026). The next statement covers November 2026.",
  * "DBS Card: no data yet. Upload its newest statement."
+ * "Up to date" when the next period hasn't ended by `today`, so an on-time source never reads "due".
  */
 export function uploadExpectationLine(
   accountName: string,
   asOf: string | null,
   lastData: string | null,
   cadence: string | null,
+  today: string = localToday(),
 ): string | null {
   if (!isIsoDate(lastData)) return `${accountName}: no data yet. Upload its newest statement.`;
   if (!isIsoDate(asOf)) return null;
-  const period = cadence === "monthly" || cadence === "quarterly" || cadence == null
-    ? fmt.formatMonth(asOf.slice(0, 7))
-    : fmt.formatDate(asOf);
-  return `${accountName}: statement due for ${period} (last data ${fmt.formatDate(lastData)})`;
+  const periodOf = (date: string) =>
+    cadence === "monthly" || cadence === "quarterly" || cadence == null ? fmt.formatMonth(date.slice(0, 7)) : fmt.formatDate(date);
+  const next = expectedStatementDate(lastData, cadence ?? "monthly", "9999-12-31");
+  if (next && next > today) {
+    return `${accountName}: up to date (last data ${fmt.formatDate(lastData)}). The next statement covers ${periodOf(next)}.`;
+  }
+  return `${accountName}: statement due for ${periodOf(asOf)} (last data ${fmt.formatDate(lastData)})`;
 }

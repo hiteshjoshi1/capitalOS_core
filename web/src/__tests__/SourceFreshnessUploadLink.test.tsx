@@ -126,14 +126,25 @@ describe("sourceLink", () => {
 
 describe("uploadExpectationLine", () => {
   it("names the period that's due and the last data", () => {
-    expect(uploadExpectationLine("Synthetic Card", "2026-10-31", "2026-09-30", "monthly")).toBe(
+    expect(uploadExpectationLine("Synthetic Card", "2026-10-31", "2026-09-30", "monthly", "2026-11-07")).toBe(
       "Synthetic Card: statement due for October 2026 (last data 30 Sep 2026)",
     );
-    expect(uploadExpectationLine("Synthetic Card", "2026-11-06", "2026-11-05", "daily")).toBe(
+    expect(uploadExpectationLine("Synthetic Card", "2026-11-06", "2026-11-05", "daily", "2026-11-07")).toBe(
       "Synthetic Card: statement due for 6 Nov 2026 (last data 5 Nov 2026)",
     );
     expect(uploadExpectationLine("Synthetic Card", TODAY, null, "monthly")).toBe(
       "Synthetic Card: no data yet. Upload its newest statement.",
+    );
+  });
+
+  it("says up to date, never due, while the next period hasn't ended", () => {
+    // On time: October's statement is in, November's isn't due until 30 Nov.
+    expect(uploadExpectationLine("Synthetic Card", "2026-11-07", "2026-10-31", "monthly", "2026-11-07")).toBe(
+      "Synthetic Card: up to date (last data 31 Oct 2026). The next statement covers November 2026.",
+    );
+    // The period ends today: due.
+    expect(uploadExpectationLine("Synthetic Card", "2026-11-30", "2026-10-31", "monthly", "2026-11-30")).toBe(
+      "Synthetic Card: statement due for November 2026 (last data 31 Oct 2026)",
     );
   });
 });
