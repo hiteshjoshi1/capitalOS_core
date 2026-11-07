@@ -16,7 +16,6 @@ from app.portfolio.canonical_reads import (
     canonical_position_rows_by_legacy_account,
     latest_authoritative_nav_by_legacy_account,
 )
-from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
 from app.valuation import clock, fx
 from app.valuation.clock import (
     _add_months,
@@ -78,8 +77,9 @@ def _card_liability_transaction_start(anchor_ts: datetime) -> date:
     return date(local_day.year, local_day.month, 1)
 
 
-# CARD_STATEMENT_MAX_AGE_DAYS (D-52's 45 days) is defined by the read layer,
-# app.portfolio.effective_facts, and imported above.
+# A card's liability is its running balance (#300, D-76): no age limit on the dated
+# balance it starts from (D-52's CARD_STATEMENT_MAX_AGE_DAYS still bounds the read
+# layer's default, e.g. account_status's "statement in use" check).
 
 
 def _card_statements_by_account(
@@ -114,19 +114,23 @@ def _credit_card_liability_details(
 ) -> list[Dict[str, Any]]:
     """Each of the user's cards at ``anchor_ts``: what it owes, in ``base_currency``.
 
-    Per card (D-n, #207):
+    Per card (#207, D-76 #300):
     - closed before the anchor's date (``accounts.closed_on``): nothing;
-    - else its newest statement balance (``credit_balance`` snapshot) dated on
-      or before the anchor's date and at most CARD_STATEMENT_MAX_AGE_DAYS older:
-      that balance, as of its date (spend after it is not added);
+    - else, with a dated balance (``credit_balance`` snapshot: a statement, a
+      previous balance, a limit-derived balance) on or before the anchor's date,
+      however old: the **running balance**, that balance plus every card
+      transaction after its date up to the anchor (charges, fees and interest
+      add, payments and refunds subtract). Not clamped: an overpaid card owes
+      less than nothing (a credit, ``value`` < 0). A newer balance re-bases it.
     - else its net card transactions in the anchor's card window (the method
-      before #207).
+      before #207), clamped at 0: with no balance to start from, it's an estimate.
     A newer statement never changes an earlier anchor: only snapshots on or
-    before an anchor are read. A credit balance (overpaid card) owes nothing.
+    before an anchor are read.
 
-    Each entry: account_id, currency (the card's), method (statement |
-    transactions | closed), as_of_date (the statement's date, else None),
-    value (>= 0).
+    Each entry: account_id, currency (the card's), method (running |
+    transactions | closed), as_of_date (the anchoring balance's date, else
+    None), value, and for ``running``: anchor_value (the dated balance, owed
+    positive) and since_value (the transactions after it), both in base.
     """
     anchor_date = anchor_ts.date()
     cards = db.execute(
@@ -147,7 +151,7 @@ def _credit_card_liability_details(
         return []
 
     statements = _card_statements_by_account(
-        canonical_card_statement_rows(db, current_user_id=current_user_id, anchor_date=anchor_date),
+        canonical_card_statement_rows(db, current_user_id=current_user_id, anchor_date=anchor_date, max_age_days=None),
         base_currency,
     )
     newest_statement = {account_id: as_of for account_id, (as_of, _balances) in statements.items()}
@@ -156,7 +160,8 @@ def _credit_card_liability_details(
     # The month boundary is midnight in the user's timezone (#202); the query
     # takes a day of slack either side and _card_transaction_in_window decides.
     start_day = _card_liability_transaction_start(anchor_ts)
-    query_start = datetime.combine(start_day - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
+    earliest = min([start_day, *newest_statement.values()])
+    query_start = datetime.combine(earliest - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc)
     query_end = anchor_ts.astimezone(timezone.utc) + timedelta(days=1)
     transaction_rows = db.execute(
         text(
@@ -173,24 +178,26 @@ def _credit_card_liability_details(
         ),
         {"start": query_start, "anchor": query_end, "current_user_id": current_user_id},
     ).mappings().all()
-    transaction_rows = [
-        row for row in transaction_rows
-        if _card_transaction_in_window(_normalize_ts(row["ts"]) or row["ts"], start_day, anchor_ts)
-    ]
 
     currencies = {str(card["account_currency"] or base_currency).upper() for card in cards}
     currencies.update(str(row["currency"] or base_currency).upper() for row in transaction_rows)
     currencies.update(currency for balances in statement_balances.values() for currency, _ in balances)
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
 
-    transaction_outstanding: dict[int, float] = {}
-    for row in transaction_rows:
+    def _owed(row: Mapping[str, Any]) -> float:
         currency = str(row["currency"] or base_currency).upper()
+        return -float(row["amount"] or 0.0) * rates.get(currency, 0.0)
+
+    window_outstanding: dict[int, float] = {}
+    since_balance: dict[int, float] = {}
+    for row in transaction_rows:
         account_id = int(row["account_id"])
-        transaction_outstanding[account_id] = (
-            transaction_outstanding.get(account_id, 0.0)
-            + (-float(row["amount"] or 0.0) * rates.get(currency, 0.0))
-        )
+        ts = _normalize_ts(row["ts"]) or row["ts"]
+        if _card_transaction_in_window(ts, start_day, anchor_ts):
+            window_outstanding[account_id] = window_outstanding.get(account_id, 0.0) + _owed(row)
+        as_of = newest_statement.get(account_id)
+        if as_of is not None and _card_transaction_in_window(ts, as_of + timedelta(days=1), anchor_ts):
+            since_balance[account_id] = since_balance.get(account_id, 0.0) + _owed(row)
 
     out: list[Dict[str, Any]] = []
     for card in cards:
@@ -206,14 +213,17 @@ def _credit_card_liability_details(
         if account_id in statement_balances:
             # A card's balance is negative while money is owed (the holder's view,
             # like its transactions), so what it owes is minus the balance.
-            outstanding = sum(-amount * rates.get(currency, 0.0) for currency, amount in statement_balances[account_id])
+            anchor_value = sum(-amount * rates.get(currency, 0.0) for currency, amount in statement_balances[account_id])
+            since_value = since_balance.get(account_id, 0.0)
             out.append(
                 {
                     "account_id": account_id,
                     "currency": card_currency,
-                    "method": "statement",
+                    "method": "running",
                     "as_of_date": newest_statement[account_id],
-                    "value": max(outstanding, 0.0),
+                    "anchor_value": anchor_value,
+                    "since_value": since_value,
+                    "value": anchor_value + since_value,
                 }
             )
             continue
@@ -223,13 +233,12 @@ def _credit_card_liability_details(
                 "currency": card_currency,
                 "method": "transactions",
                 "as_of_date": None,
-                "value": max(transaction_outstanding.get(account_id, 0.0), 0.0),
+                "value": max(window_outstanding.get(account_id, 0.0), 0.0),
             }
         )
     return out
 
 
-@valuation_cached()
 def _credit_card_liability_component(
     db: Session,
     anchor_ts: datetime,

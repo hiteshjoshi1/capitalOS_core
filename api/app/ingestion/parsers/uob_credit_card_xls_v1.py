@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 import re
 from typing import Any
 
@@ -126,8 +126,22 @@ def _append_description(existing: str, extra: str) -> str:
     return f"{existing}\n{extra}"
 
 
-def _collapse_rows(df: pd.DataFrame, col_map: dict[str, str]) -> list[ParsedRow]:
+@dataclass
+class CollapsedRows:
+    rows: list[ParsedRow]
+    # (index into ``rows`` where the period starts, the "Previous Balance" it opens with):
+    # the rows from that index up to the next boundary are one statement period, newest
+    # first, and the amount is what the statement before that period printed (#300).
+    boundaries: list[tuple[int, float]] = field(default_factory=list)
+
+
+def _is_previous_balance(description: str) -> bool:
+    return _normalize_line(description).upper() == "PREVIOUS BALANCE"
+
+
+def _collapse_rows(df: pd.DataFrame, col_map: dict[str, str]) -> CollapsedRows:
     grouped: list[ParsedRow] = []
+    boundaries: list[tuple[int, float]] = []
     current: ParsedRow | None = None
 
     for row_index, row in df.iterrows():
@@ -138,6 +152,15 @@ def _collapse_rows(df: pd.DataFrame, col_map: dict[str, str]) -> list[ParsedRow]
         foreign_amount = _parse_amount(row.get(col_map["transaction amount(foreign)"]))
         local_currency = _clean_text(row.get(col_map["local currency type"])).upper() or None
         local_amount = _parse_amount(row.get(col_map["transaction amount(local)"]))
+
+        if tx_date is None and _is_previous_balance(description):
+            # A statement period boundary, not a continuation line: before #300 its
+            # amount overwrote the transaction above it (a S$ 36.90 charge read as the
+            # S$ 271.06 previous balance).
+            if local_amount is not None:
+                boundaries.append((len(grouped), local_amount))
+            current = None
+            continue
 
         if tx_date is None:
             if current is None:
@@ -168,7 +191,40 @@ def _collapse_rows(df: pd.DataFrame, col_map: dict[str, str]) -> list[ParsedRow]
         )
         grouped.append(current)
 
-    return grouped
+    return CollapsedRows(rows=grouped, boundaries=boundaries)
+
+
+def _statement_balances(
+    collapsed: CollapsedRows, statement_balance: float | None, statement_date: datetime | None
+) -> list[dict[str, Any]]:
+    """The dated balances the file prints (#300). Each "Previous Balance" opens the
+    rows after it (newest first) up to the next one: it is what the statement before
+    that period said was owed, dated the day before the period's first transaction
+    (that statement's own date isn't in the file). The header's "Statement Balance":
+    - a statement (one "Statement Date"): what's owed on that date, the closing balance;
+    - a history export (a date range, no single date): the newest statement, which
+      opens the newest (unbilled) period, the rows before the first "Previous Balance",
+      dated the day before them.
+    Owed is positive. One per date; the first seen wins (a repeated block repeats them)."""
+    rows = collapsed.rows
+    starts = [index for index, _amount in collapsed.boundaries]
+    periods: list[tuple[list[ParsedRow], float, str]] = []
+    out: dict[str, dict[str, Any]] = {}
+    if statement_balance is not None and statement_date is not None:
+        as_of = statement_date.date().isoformat()
+        out[as_of] = {"as_of_date": as_of, "owed": round(float(statement_balance), 2), "source": "statement_balance"}
+    elif statement_balance is not None and starts:
+        periods.append((rows[: starts[0]], statement_balance, "statement_balance"))
+    for position, (start, amount) in enumerate(collapsed.boundaries):
+        end = starts[position + 1] if position + 1 < len(starts) else len(rows)
+        periods.append((rows[start:end], amount, "previous_balance"))
+    for period_rows, owed, source in periods:
+        if not period_rows:
+            continue
+        first_day = min(row.ts for row in period_rows)
+        as_of = (first_day - timedelta(days=1)).date().isoformat()
+        out.setdefault(as_of, {"as_of_date": as_of, "owed": round(float(owed), 2), "source": source})
+    return [out[key] for key in sorted(out)]
 
 
 def _extract_foreign_currency(row: ParsedRow) -> tuple[str, str] | None:
@@ -239,6 +295,7 @@ def parse_uob_credit_card_xls(file_path: str) -> ParseResult:
             "currency": None,
             "statement_date": None,
             "statement_balance": None,
+            "statement_balances": [],
         },
     )
 
@@ -275,7 +332,8 @@ def parse_uob_credit_card_xls(file_path: str) -> ParseResult:
             parser_meta={**metadata, "sheet_name": sheet_name, "header_row_index": header_row},
         )
 
-    grouped_rows = _collapse_rows(df, col_map)
+    collapsed = _collapse_rows(df, col_map)
+    grouped_rows = collapsed.rows
     transactions: list[dict[str, Any]] = []
 
     for row in grouped_rows:
@@ -305,6 +363,7 @@ def parse_uob_credit_card_xls(file_path: str) -> ParseResult:
         "currency": metadata["currency"],
         "statement_date": metadata["statement_date"].isoformat() if metadata["statement_date"] else None,
         "statement_balance": metadata["statement_balance"],
+        "statement_balances": _statement_balances(collapsed, metadata["statement_balance"], metadata["statement_date"]),
     }
     return ParseResult(
         transactions=transactions,
