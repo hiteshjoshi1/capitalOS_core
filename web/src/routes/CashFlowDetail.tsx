@@ -13,6 +13,7 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
+import { cashBridgeSpanText } from "../lib/cashBridge";
 import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
 import MonthBar from "../components/MonthBar";
@@ -321,6 +322,7 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
   ];
 
   const maxMagnitude = steps.reduce((largest, step) => Math.max(largest, Math.abs(step.value ?? 0)), 0);
+  const spanText = cashBridgeSpanText(waterfall);
 
   return (
     <section>
@@ -333,19 +335,19 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
       </div>
 
       <div className="card" style={{ padding: "28px 24px 20px" }}>
-        {waterfall.snapshot_start_as_of && waterfall.snapshot_end_as_of ? (
+        {spanText ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            Reconciled across available cash snapshots from {fmt.formatDate(waterfall.snapshot_start_as_of)} to {fmt.formatDate(waterfall.snapshot_end_as_of)}.
+            {spanText}
           </p>
         ) : null}
 
-        {!waterfall.boundary_exact ? (
+        {!spanText ? (
           <div className="cashFlowUnavailableState" aria-label="Cash reconciliation unavailable">
             <p className="muted">
               {waterfall.availability_message ?? "Cash reconciliation is unavailable for the full month boundary."}
             </p>
             <p className="muted">
-              Upload statements or refresh balances to close the month cleanly before using this reconciliation view.
+              Upload a bank or broker statement to give the bridge a start and an end.
             </p>
           </div>
         ) : (

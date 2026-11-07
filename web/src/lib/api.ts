@@ -782,6 +782,12 @@ export type CashFlowWaterfall = {
   boundary_exact: boolean;
   availability_message: string | null;
   ending_cash: number | null;
+  /** #265 (D-72): drawn between the nearest cash snapshots at or before the month's start and
+   * end anchors (the open month: the newest so far). Optional for older API responses. */
+  bridge_available?: boolean;
+  span_start?: string | null;
+  span_end?: string | null;
+  span_basis?: "exact" | "nearest" | string | null;
 };
 
 export type CashFlowDiagnosticAnswer = {

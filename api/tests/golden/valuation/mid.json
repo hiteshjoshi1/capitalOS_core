@@ -4346,8 +4346,9 @@
           }
         ],
         "waterfall": {
-          "availability_message": "Cash reconciliation needs exact cash snapshots on 2026-02-01 and 2026-03-01. Available snapshots are 2026-01-31 and 2026-02-28.",
+          "availability_message": null,
           "boundary_exact": false,
+          "bridge_available": true,
           "ending_cash": 61000.8589,
           "inflows": 10367.5539,
           "investment_and_fx_effects": -3255.5401,
@@ -4357,6 +4358,9 @@
           "snapshot_end_boundary_at": "2026-03-01T00:00:00+00:00",
           "snapshot_start_as_of": "2026-01-31T00:00:00+00:00",
           "snapshot_start_boundary_at": "2026-02-01T00:00:00+00:00",
+          "span_basis": "nearest",
+          "span_end": "2026-02-27",
+          "span_start": "2026-01-30",
           "starting_cash": 56706.9641,
           "transfers_and_funding": 1000.0
         }
@@ -4873,8 +4877,9 @@
           }
         ],
         "waterfall": {
-          "availability_message": "Cash reconciliation needs exact cash snapshots on 2026-03-01 and 2026-04-01. Available snapshots are 2026-02-28 and 2026-03-16.",
+          "availability_message": null,
           "boundary_exact": false,
+          "bridge_available": true,
           "ending_cash": 61323.7327,
           "inflows": 455.0885,
           "investment_and_fx_effects": 3740.6394,
@@ -4884,6 +4889,9 @@
           "snapshot_end_boundary_at": "2026-04-01T00:00:00+00:00",
           "snapshot_start_as_of": "2026-02-28T00:00:00+00:00",
           "snapshot_start_boundary_at": "2026-03-01T00:00:00+00:00",
+          "span_basis": "nearest",
+          "span_end": "2026-03-16",
+          "span_start": "2026-02-27",
           "starting_cash": 61000.8589,
           "transfers_and_funding": 0.0
         }
