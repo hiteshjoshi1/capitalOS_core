@@ -22,7 +22,13 @@ from app.valuation.clock import (
 from app.valuation.facts import _networth_components
 from app.portfolio.canonical_reads import canonical_snapshot_coverage_as_of
 from app.valuation.state import _effective_as_of
+from app.ingestion.card_balances import write_card_statement_balance
+from app.valuation.card_ledger import card_ledgers
 from app.schemas.spending import (
+    CreditCardBalanceIn,
+    CreditCardBalanceItem,
+    CreditCardBalancePeriod,
+    CreditCardBalancesOut,
     CategoryAmount,
     CashFlowAnalyticsOut,
     CashFlowBreakdownItem,
@@ -1043,7 +1049,8 @@ def _credit_cards(db: Session, current_user_id: int):
           cc.available_limit,
           cc.available_limit_as_of,
           COALESCE(cc.statement_day, 1) AS statement_day,
-          COALESCE(cc.due_day, 1) AS due_day
+          COALESCE(cc.due_day, 1) AS due_day,
+          cc.due_day AS configured_due_day
         FROM accounts a
         LEFT JOIN credit_card_accounts cc ON cc.account_id = a.id
         WHERE a.account_type = 'CREDIT_CARD'
@@ -1479,6 +1486,116 @@ def credit_card_summary(
         cards=items,
         **fx_status(),
     )
+
+
+@router.get("/credit-card-balances", response_model=CreditCardBalancesOut)
+def credit_card_balances(
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Each card's running balance (#300, D-76): what it owes now, its newest dated
+    balance, what was paid since and whether that paid it in full, fees and interest
+    this year, and every statement period checked against the card's transactions."""
+    today = _app_today()
+    cards = {int(c["account_id"]): c for c in _credit_cards(db, current_user.id)}
+    ledgers = card_ledgers(db, current_user.id, today=today)
+    rates = get_rates(datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc), base_currency,
+                      {ledger.currency for ledger in ledgers})
+
+    def _iso(day: date | None) -> str | None:
+        return day.isoformat() if day else None
+
+    items: list[CreditCardBalanceItem] = []
+    for ledger in ledgers:
+        card = cards.get(ledger.account_id)
+        if card is None:
+            continue
+        due_date = None
+        if ledger.last_balance_date is not None and ledger.paid_in_full is False and card["configured_due_day"]:
+            # The configured due day after the newest statement (credit_card_accounts).
+            due = _clamp_day(datetime.combine(ledger.last_balance_date, datetime.min.time(), tzinfo=timezone.utc),
+                             int(card["due_day"]))
+            if due.date() <= ledger.last_balance_date:
+                due = _clamp_day(_add_months(due.replace(day=1), 1), int(card["due_day"]))
+            due_date = due.date().isoformat()
+        items.append(
+            CreditCardBalanceItem(
+                account_id=ledger.account_id,
+                account_name=card["account_name"],
+                card_name=card["card_name"],
+                issuer=card["issuer"],
+                currency=ledger.currency,
+                method=ledger.method,
+                owed_now=ledger.owed_now,
+                owed_now_base=round(ledger.owed_now * rates.get(ledger.currency, 0.0), 2),
+                last_balance_date=_iso(ledger.last_balance_date),
+                last_balance=ledger.last_balance,
+                last_balance_source=ledger.last_balance_source,
+                paid_since=ledger.paid_since,
+                charges_since=ledger.charges_since,
+                paid_in_full=ledger.paid_in_full,
+                due_date=due_date,
+                fees_interest_ytd=ledger.fees_interest_ytd,
+                last_transaction_date=_iso(ledger.last_transaction_date),
+                flagged_count=ledger.flagged_count,
+                periods=[
+                    CreditCardBalancePeriod(
+                        from_date=period.from_date.isoformat(),
+                        to_date=_iso(period.to_date),
+                        opening=round(period.opening, 2),
+                        charges=round(period.charges, 2),
+                        fees=round(period.fees, 2),
+                        interest=round(period.interest, 2),
+                        payments=round(period.payments, 2),
+                        credits=round(period.credits, 2),
+                        transaction_count=period.transaction_count,
+                        expected=period.expected,
+                        printed=period.printed,
+                        difference=period.difference,
+                        flagged=period.flagged,
+                        paid_in_full=period.paid_in_full,
+                    )
+                    for period in reversed(ledger.periods)
+                ],
+            )
+        )
+    return CreditCardBalancesOut(
+        base_currency=base_currency,
+        as_of=today.isoformat(),
+        total_owed_base=round(sum(item.owed_now_base for item in items), 2),
+        flagged_count=sum(item.flagged_count for item in items),
+        cards=items,
+        **fx_status(),
+    )
+
+
+@router.post("/credit-card-balances/{account_id}", response_model=CreditCardBalancesOut)
+def set_credit_card_balance(
+    account_id: int,
+    payload: CreditCardBalanceIn,
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Record a statement balance typed in by the card's owner (#300): it anchors the
+    running balance like an uploaded statement, and History recomputes from its date."""
+    card = next((c for c in _credit_cards(db, current_user.id) if int(c["account_id"]) == account_id), None)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Credit card not found")
+    if payload.as_of_date > _app_today():
+        raise HTTPException(status_code=422, detail="The statement date can't be in the future")
+    write_card_statement_balance(
+        db,
+        account_id=account_id,
+        import_job_id=None,
+        parser_key=None,
+        parser_meta={"statement_balances": [
+            {"as_of_date": payload.as_of_date.isoformat(), "owed": round(payload.owed, 2), "source": "manual"}
+        ]},
+    )
+    db.commit()
+    return credit_card_balances(base_currency=base_currency, db=db, current_user=current_user)
 
 
 @router.get("/credit-card-transactions", response_model=CreditCardDetailOut)

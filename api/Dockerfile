@@ -9,6 +9,12 @@ WORKDIR /app
 ENV PYTHONPATH=/app \
     PYTHONDONTWRITEBYTECODE=1
 
+# OS security fixes released since the pinned base was built (D-18; like the web image's
+# apk upgrade, D-71), e.g. a Debian zlib fix the base didn't have yet (2026-11-07).
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
+
 # Fixed uid/gid so bind-mounted ./data ownership is predictable; override per
 # host with CAPITALOS_UID / CAPITALOS_GID in .env (see docker-compose.yml).
 RUN groupadd --system --gid 10001 app \

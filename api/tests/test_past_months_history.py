@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from app.ingestion.card_balance_backfill import backfill_card_balances, summary_lines
 from app.ingestion.card_balances import card_statement_balance, write_card_statement_balance
 from app.valuation.clock import _anchor_ts
-from app.valuation.facts import CARD_STATEMENT_MAX_AGE_DAYS, _credit_card_liability_details, _networth_components
+from app.valuation.facts import _credit_card_liability_details, _networth_components
 from app.wealth_rollup_dirty import dirty_state
 from tests.auth_helpers import signed_in_client
 from tests.canonical_test_helpers import seed_canonical_account_balance_for_test
@@ -208,10 +208,9 @@ def test_uob_statement_balance_is_the_liability_from_its_date(db_engine, sgd_onl
     assert _liability(db_engine, _anchor_ts(FEB)) == pytest.approx(321.84)
 
 
-def test_a_statement_too_old_is_not_carried_forward(db_engine, sgd_only):
-    """A statement balance counts up to CARD_STATEMENT_MAX_AGE_DAYS after its
-    date; after that the card's transactions in the month are its liability."""
-    assert CARD_STATEMENT_MAX_AGE_DAYS == 45
+def test_an_old_statement_is_carried_forward_by_the_cards_transactions(db_engine, sgd_only):
+    """#300 (D-76): a dated balance however old is the running balance's start; every
+    card transaction after its date adds (D-52's 45-day cut-off no longer applies)."""
     _card_account(db_engine)
     seed_canonical_account_balance_for_test(
         db_engine, account_id=CARD, as_of="2026-01-20", currency="SGD", balance_base=-700.0, balance_type="credit_balance"
@@ -220,6 +219,7 @@ def test_a_statement_too_old_is_not_carried_forward(db_engine, sgd_only):
         conn.execute(
             text(
                 "INSERT INTO transactions (ts, account_id, type, amount, currency) VALUES "
+                "('2026-01-20 00:00:00+00:00', :a, 'EXPENSE', -999, 'SGD'), "  # on the balance's date: already in it
                 "('2026-03-10 00:00:00+00:00', :a, 'EXPENSE', -250, 'SGD')"
             ),
             {"a": CARD},
@@ -230,16 +230,21 @@ def test_a_statement_too_old_is_not_carried_forward(db_engine, sgd_only):
         mar = _credit_card_liability_details(db, _anchor_ts(MAR), "SGD", 1)  # 1 Apr: 71 days later
     finally:
         db.close()
-    assert feb == [{"account_id": CARD, "currency": "SGD", "method": "statement", "as_of_date": date(2026, 1, 20), "value": pytest.approx(700.0)}]
-    assert mar == [{"account_id": CARD, "currency": "SGD", "method": "transactions", "as_of_date": None, "value": pytest.approx(250.0)}]
+    assert feb == [{
+        "account_id": CARD, "currency": "SGD", "method": "running", "as_of_date": date(2026, 1, 20),
+        "anchor_value": pytest.approx(700.0), "since_value": pytest.approx(0.0), "value": pytest.approx(700.0),
+    }]
+    assert mar[0]["method"] == "running"
+    assert mar[0]["value"] == pytest.approx(950.0)
 
 
-def test_an_overpaid_card_owes_nothing(db_engine, sgd_only):
+def test_an_overpaid_card_is_a_credit_not_zero(db_engine, sgd_only):
+    """#300: an overpaid card owes less than nothing (a credit), it isn't clamped."""
     _card_account(db_engine)
     seed_canonical_account_balance_for_test(
         db_engine, account_id=CARD, as_of="2026-02-20", currency="SGD", balance_base=35.0, balance_type="credit_balance"
     )
-    assert _liability(db_engine, _anchor_ts(FEB)) == 0.0
+    assert _liability(db_engine, _anchor_ts(FEB)) == pytest.approx(-35.0)
 
 
 def test_a_card_statement_is_never_cash_or_cash_coverage(client, db_engine, sgd_only, tmp_path):

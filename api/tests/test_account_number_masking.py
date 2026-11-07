@@ -1,6 +1,7 @@
 """#190: account numbers in the app's own copies of statement headers (import
 reports, upload / register responses) are masked to the last 4 digits.
-Transaction descriptions are out of scope and stay as the bank wrote them.
+#301: so are the numbers parsers put in transaction notes (card_number=...), stored
+and in the preview. merchant_counterparty stays as the bank wrote it (D-35's key).
 
 Synthetic statements and fake numbers only.
 """
@@ -19,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import sessionmaker
 
 from app.ingestion.account_checks import identity_from_number, normalise_account_number
-from app.ingestion.masking import mask_account_numbers, mask_report
+from app.ingestion.masking import mask_account_numbers, mask_report, mask_transaction_notes
 from app.ingestion.registry import register_signature
 from app.ingestion.runner import PARSER_REGISTRY
 from app.ingestion.signature import compute_format_signature
@@ -271,6 +272,87 @@ def test_no_report_or_response_carries_the_full_number(parser_key, client, db_en
     assert resp.json()["parser_key"] == parser_key
     for copy in _all_copies(resp.json()):
         _assert_no_full_number(_outside_descriptions(copy), number)
+
+
+# 12+ digits in a row, not part of a longer word: a full card or account number (#301).
+_LONG_DIGITS = re.compile(r"(?<![0-9A-Za-z])[0-9]{12,}(?![0-9A-Za-z])")
+
+
+def _parser_part(notes: str | None) -> str:
+    """A stored note without the runner's " | fp:<hash>" suffix (the hash is hex, not a number)."""
+    return re.sub(r"(^| \| )fp:[0-9a-f]{64}$", "", notes or "")
+
+
+@pytest.mark.parametrize("parser_key", sorted(STATEMENTS))
+def test_no_transaction_note_carries_the_full_number(parser_key, client, db_engine, tmp_path):
+    """Stored notes and the report's preview notes hold the last 4 only, for every parser (#301)."""
+    platform, account_type, number, build = STATEMENTS[parser_key]
+    account_id = next(ACCOUNT_IDS)
+    _seed_account(db_engine, account_id, platform, account_type)
+    statement = build(tmp_path, number)
+    _register(db_engine, statement, platform, parser_key)
+
+    resp = _post(client, account_id, statement)
+
+    assert resp.status_code == 200, resp.text
+    with db_engine.connect() as conn:
+        stored = [r[0] for r in conn.execute(text("SELECT notes FROM transactions WHERE account_id = :a"), {"a": account_id})]
+    previews = [tx.get("notes") for copy in _all_copies(resp.json()) for tx in copy.get("preview_transactions") or []]
+    for note in stored + previews:
+        _assert_no_full_number(_parser_part(note), number)
+        assert not _LONG_DIGITS.search(_parser_part(note)), note
+
+
+def test_the_card_number_note_keeps_its_last_four():
+    parsed = [
+        {"notes": "card_number=4111111111111111; posting_date=2026-02-09"},
+        {"notes": "Inward DR - GIRO | 4111 111111111111 | COLL 123456789012 | TEST CARD CENTRE"},
+        {"notes": None},
+        {"notes": "reference=TEST000001; foreign_currency=USD 21.80"},
+    ]
+    mask_transaction_notes(parsed)
+    assert parsed[0]["notes"] == "card_number=************1111; posting_date=2026-02-09"
+    assert parsed[1]["notes"] == "Inward DR - GIRO | **** ********1111 | COLL ********9012 | TEST CARD CENTRE"
+    assert parsed[2]["notes"] is None
+    assert parsed[3]["notes"] == "reference=TEST000001; foreign_currency=USD 21.80"  # nothing to mask
+    assert mask_transaction_notes([dict(p) for p in parsed]) == parsed  # idempotent
+
+
+def test_reimporting_after_the_repair_adds_no_rows(client, db_engine, tmp_path):
+    """Rows stored before #301 (full number in notes) and masked by migration 082 still
+    count as the same transactions: notes are not part of the dedup key (D-35)."""
+    platform, account_type, number, build = STATEMENTS["uob_credit_card_xls_v1"]
+    account_id = next(ACCOUNT_IDS)
+    _seed_account(db_engine, account_id, platform, account_type)
+    statement = build(tmp_path, number)
+    _register(db_engine, statement, platform, "uob_credit_card_xls_v1")
+    first = _post(client, account_id, statement).json()
+    inserted = first["counts"]["transactions_inserted"]
+    assert inserted > 0
+    # As an import before #301 left them: the full number in the notes.
+    with db_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE transactions SET notes = REPLACE(notes, '************1111', :n) WHERE account_id = :a"),
+            {"n": number, "a": account_id},
+        )
+    before_repair = _post(client, account_id, statement).json()
+    assert before_repair["counts"]["transactions_inserted"] == 0
+    # Then the repair (migration 082's rule) masks them: still the same transactions.
+    with db_engine.begin() as conn:
+        rows = conn.execute(text("SELECT id, notes FROM transactions WHERE account_id = :a"), {"a": account_id}).all()
+        for row_id, note in rows:
+            head, sep, fp = note.rpartition(" | fp:")
+            conn.execute(
+                text("UPDATE transactions SET notes = :n WHERE id = :i"),
+                {"n": f"{mask_account_numbers(head)}{sep}{fp}" if sep else mask_account_numbers(note), "i": row_id},
+            )
+
+    again = _post(client, account_id, statement).json()
+
+    assert again["counts"]["transactions_inserted"] == 0
+    assert again["counts"]["duplicates_skipped"] == inserted
+    with db_engine.connect() as conn:
+        assert conn.execute(text("SELECT COUNT(*) FROM transactions WHERE account_id = :a"), {"a": account_id}).scalar() == inserted
 
 
 def test_an_unrecognised_card_statement_and_its_register_response_are_masked(client, db_engine, tmp_path):

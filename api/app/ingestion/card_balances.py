@@ -12,6 +12,10 @@ What each card parser gives:
   liability used before #207, from ``credit_card_accounts``).
 - ``uob_credit_card_xls_v1``: the statement balance on the statement date
   (positive = owed). A value the parser can't read (e.g. a "CR" suffix) gives none.
+  A transaction-history export (a date range, its periods separated by "Previous
+  Balance" lines) gives one balance per period instead (#300,
+  ``parser_meta["statement_balances"]``): each previous balance dated the day before
+  its period, and the header's statement balance the day before the newest period.
 - ``citi_credit_card_csv_v1``: no balance or date; the card keeps the
   transaction method.
 """
@@ -63,9 +67,36 @@ def _number(value: Any) -> float | None:
         return None
 
 
-def card_statement_balance(parser_key: str | None, parser_meta: dict[str, Any] | None) -> CardStatementBalance | None:
-    """The dated balance a card statement states, or None when it states none."""
+def card_statement_balances(parser_key: str | None, parser_meta: dict[str, Any] | None) -> list[CardStatementBalance]:
+    """Every dated balance a card file states, oldest first (#300): a UOB history
+    export's per-period balances, else the one balance ``card_statement_balance`` reads."""
     meta = parser_meta or {}
+    if meta.get("statement_balances"):
+        out: list[CardStatementBalance] = []
+        for entry in meta["statement_balances"]:
+            owed = _number(entry.get("owed"))
+            as_of = _as_date(entry.get("as_of_date"))
+            if owed is None or as_of is None:
+                continue
+            out.append(
+                CardStatementBalance(
+                    as_of_date=as_of,
+                    balance=round(-owed, 2),
+                    metadata={"source": str(entry.get("source") or "previous_balance"), "statement_balance": owed},
+                )
+            )
+        return sorted(out, key=lambda statement: statement.as_of_date)
+    single = card_statement_balance(parser_key, parser_meta)
+    return [single] if single is not None else []
+
+
+def card_statement_balance(parser_key: str | None, parser_meta: dict[str, Any] | None) -> CardStatementBalance | None:
+    """The dated balance a card statement states, or None when it states none (the newest,
+    for a file that states several: ``card_statement_balances``)."""
+    meta = parser_meta or {}
+    if meta.get("statement_balances"):
+        many = card_statement_balances(parser_key, parser_meta)
+        return many[-1] if many else None
     if parser_key == "dbs_credit_card_csv_v1":
         credit_limit = _number(meta.get("credit_limit"))
         available = _number(meta.get("available_limit"))
@@ -115,11 +146,28 @@ def write_card_statement_balance(
     In the account's currency (the liability's currency before #207). With
     ``undo``, the row it replaces is kept so removing the upload restores it.
     Marks History dirty from the statement's date (D-29): no earlier anchor
-    reads it. Doesn't commit. Returns what was written, or None.
+    reads it. Doesn't commit. Returns what was written (the newest), or None.
+    A file stating several dated balances (#300) writes each.
     """
-    statement = card_statement_balance(parser_key, parser_meta)
-    if statement is None:
-        return None
+    written: CardStatementBalance | None = None
+    for statement in card_statement_balances(parser_key, parser_meta):
+        _write_one(db, account_id=account_id, import_job_id=import_job_id, parser_key=parser_key,
+                   parser_meta=parser_meta, statement=statement, undo=undo, mark_dirty=mark_dirty)
+        written = statement
+    return written
+
+
+def _write_one(
+    db: Session,
+    *,
+    account_id: int,
+    import_job_id: int | None,
+    parser_key: str | None,
+    parser_meta: dict[str, Any] | None,
+    statement: CardStatementBalance,
+    undo: dict[str, Any] | None,
+    mark_dirty: bool,
+) -> None:
     currency = _account_currency(db, account_id) or str((parser_meta or {}).get("currency") or "SGD").upper()
     metadata = {**statement.metadata, "parser_key": parser_key}
     statement_currency = (parser_meta or {}).get("currency")
@@ -142,4 +190,3 @@ def write_card_statement_balance(
         undo.setdefault("affected_dates", []).append(statement.as_of_date.isoformat())
     if mark_dirty:
         mark_rollups_dirty(db, statement.as_of_date, account_id=account_id, reason="card_statement_balance")
-    return statement
