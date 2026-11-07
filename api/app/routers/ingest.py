@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from datetime import date, timedelta
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import app_today
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
+from app.fx_backfill import backfill_in_background
 from app.ingestion.runner import PARSER_REGISTRY, create_import_job, run_ingestion
 from app.ingestion.registry import register_signature
 from app.ingestion.account_checks import account_type_of, check_parser_account_type
@@ -17,6 +19,8 @@ from app.ingestion.undo import RemovalRefused, remove_import_job
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
 from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
+
+logger = logging.getLogger("capitalos.ingest")
 
 router = APIRouter(prefix="/ingest", tags=["ingest"], dependencies=[Depends(require_current_user)])
 
@@ -200,6 +204,8 @@ def ingest_ibkr(
             data_dir=data_dir,
         )
         report = run_ingestion(db=db, job_id=job.id, data_dir=data_dir)
+        if report.get("status") == "IMPORTED":
+            _backfill_fx_after_import(db, current_user.id)
         return _raise_if_refused(report)
     finally:
         try:
@@ -260,12 +266,25 @@ def ingest_upload(
         )
         if report.get("status") == "IMPORTED":
             _backfill_account_categories(db, account_id)
+            _backfill_fx_after_import(db, current_user.id)
         return _raise_if_refused(report)
     finally:
         try:
             os.remove(tmp_path)
         except OSError:
             pass
+
+
+def _backfill_fx_after_import(db: Session, user_id: int) -> None:
+    """Past FX rates for the new data's span (#290), in the background; never fails the upload."""
+    try:
+        row = db.execute(
+            text("SELECT base_currency FROM user_preferences WHERE user_id = :uid"), {"uid": user_id}
+        ).first()
+        base = str(row[0]) if row and row[0] else "SGD"
+        backfill_in_background(user_id, base)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("fx_backfill_start_failed", extra={"event": "fx_backfill_start_failed", "error_class": exc.__class__.__name__})
 
 
 def _backfill_account_categories(db: Session, account_id: int) -> None:

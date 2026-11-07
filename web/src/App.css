@@ -6963,3 +6963,40 @@ html, body {
   gap: 16px;
   min-width: 0;
 }
+
+/* ─── One FX note per page (#290) ───────────────────────────────────── */
+.fxPageNote {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  min-width: 0;
+}
+
+.fxPageNote .coHeroFreshness {
+  margin: 0;
+}
+
+.fxPageNoteActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 8px;
+}
+
+.fxPageNoteResult {
+  font-size: 12px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.linkButton {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

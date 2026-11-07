@@ -29,12 +29,14 @@ JOB_IBKR_FLEX = "ibkr_flex"
 JOB_MARKET_DATA = "market_data"
 JOB_CRYPTO = "crypto_refresh"
 JOB_FX = "fx_fill"
+JOB_FX_BACKFILL = "fx_backfill"  # #290: past rates for a user's data span
 
 JOB_LABELS = {
     JOB_IBKR_FLEX: "IBKR Flex import",
     JOB_MARKET_DATA: "Quote refresh",
     JOB_CRYPTO: "Crypto wallet refresh",
     JOB_FX: "FX rates",
+    JOB_FX_BACKFILL: "FX back-fill",
 }
 
 STATUS_SUCCESS = "success"
