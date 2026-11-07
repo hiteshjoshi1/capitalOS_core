@@ -57,6 +57,56 @@ class ParsedRow:
     foreign_amount: float | None
     local_currency: str | None
     local_amount: float | None
+    # A "Previous Balance" line (#299): a statement-period boundary, not a transaction.
+    is_balance_marker: bool = False
+
+
+# The shortest run of rows that counts as the export repeating itself (#299). Two identical
+# same-day purchases in a row are real; three or more identical rows (dates, posting dates,
+# descriptions and amounts) repeated back to back are the export printing a period twice.
+_MIN_REPEATED_RUN = 3
+
+
+def _is_previous_balance(description: str) -> bool:
+    return description.strip().upper().startswith("PREVIOUS BALANCE")
+
+
+def _row_signature(row: ParsedRow) -> tuple[Any, ...]:
+    return (
+        row.is_balance_marker,
+        row.ts,
+        row.posting_date,
+        row.description,
+        row.foreign_currency,
+        row.foreign_amount,
+        row.local_currency,
+        row.local_amount,
+    )
+
+
+def _drop_repeated_runs(rows: list[ParsedRow]) -> list[ParsedRow]:
+    """Remove a run of rows that repeats the run just before it (#299).
+
+    UOB's card history export can print the latest statement period twice, back to back.
+    The rows are identical, so the runner's per-occurrence fingerprint (two same-day coffees)
+    kept both copies. A run of at least _MIN_REPEATED_RUN rows followed immediately by an
+    identical copy keeps the first copy only; the longest repeat is removed first.
+    """
+    signatures = [_row_signature(row) for row in rows]
+    changed = True
+    while changed:
+        changed = False
+        n = len(signatures)
+        for length in range(n // 2, _MIN_REPEATED_RUN - 1, -1):
+            for start in range(0, n - 2 * length + 1):
+                if signatures[start:start + length] == signatures[start + length:start + 2 * length]:
+                    del rows[start + length:start + 2 * length]
+                    del signatures[start + length:start + 2 * length]
+                    changed = True
+                    break
+            if changed:
+                break
+    return rows
 
 
 def _find_header_row(df: pd.DataFrame) -> int | None:
@@ -139,6 +189,25 @@ def _collapse_rows(df: pd.DataFrame, col_map: dict[str, str]) -> list[ParsedRow]
         local_currency = _clean_text(row.get(col_map["local currency type"])).upper() or None
         local_amount = _parse_amount(row.get(col_map["transaction amount(local)"]))
 
+        if tx_date is None and _is_previous_balance(description):
+            # A period boundary (#299). It used to be merged into the transaction above it,
+            # replacing that row's amount with the previous balance.
+            grouped.append(
+                ParsedRow(
+                    row_index=int(row_index),
+                    ts=datetime.min,
+                    posting_date=None,
+                    description=description,
+                    foreign_currency=None,
+                    foreign_amount=None,
+                    local_currency=local_currency,
+                    local_amount=local_amount,
+                    is_balance_marker=True,
+                )
+            )
+            current = None
+            continue
+
         if tx_date is None:
             if current is None:
                 continue
@@ -168,7 +237,7 @@ def _collapse_rows(df: pd.DataFrame, col_map: dict[str, str]) -> list[ParsedRow]
         )
         grouped.append(current)
 
-    return grouped
+    return _drop_repeated_runs(grouped)
 
 
 def _extract_foreign_currency(row: ParsedRow) -> tuple[str, str] | None:
@@ -279,6 +348,8 @@ def parse_uob_credit_card_xls(file_path: str) -> ParseResult:
     transactions: list[dict[str, Any]] = []
 
     for row in grouped_rows:
+        if row.is_balance_marker:
+            continue
         merchant_counterparty, _ = _transaction_fields(row.description)
         local_amount = row.local_amount or 0.0
         if merchant_counterparty.upper() == "PREVIOUS BALANCE" or local_amount == 0.0:
