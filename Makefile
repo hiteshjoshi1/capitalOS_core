@@ -177,7 +177,7 @@ define run_llm_orch
 endef
 
 # ---- Primary lifecycle ----
-.PHONY: build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke logs-purge-secrets grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build web-build web-logs tailnet-serve tailnet-serve-status tailnet-serve-off deploy deploy-plan deploy-status observability-running
+.PHONY: worktree-prune build up down ps logs api-up web-up api-logs api-url openapi web-deps pr-open-if-ahead commit observability-up observability-down observability-logs observability-smoke logs-purge-secrets grafana-url worktree where status instance-drop test-instance test-instance-start test-instance-status test-instance-pr test-instance-drop api-build web-build web-logs tailnet-serve tailnet-serve-status tailnet-serve-off deploy deploy-plan deploy-status observability-running
 
 build:
 	$(COMPOSE) build
@@ -297,6 +297,12 @@ worktree:
 	git fetch -q $(GIT_REMOTE)
 	git worktree add -b feature/issue-$(ISSUE)-$(SLUG) "$(WORKTREES_DIR)/issue-$(ISSUE)-$(SLUG)" $(GIT_REMOTE)/$(BASE_BRANCH)
 	@echo "Worktree ready: cd $(WORKTREES_DIR)/issue-$(ISSUE)-$(SLUG) && make where && make up"
+
+# Remove merged worktrees and their stacks' containers, volumes, networks and images (#269).
+# Dry run by default; APPLY=1 removes. Unmerged or dirty worktrees, the main checkout and the test
+# instance are never touched. Docker runs out of network addresses when old stacks pile up.
+worktree-prune:
+	@APPLY=$(APPLY) scripts/worktree-prune.sh
 
 observability-up:
 	$(OBSERVABILITY_COMPOSE) up -d $(OBSERVABILITY_SERVICES)
@@ -702,6 +708,7 @@ lint: web-deps
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
 	scripts/test-test-instance.sh
+	scripts/test-worktree-prune.sh
 	scripts/test-pretooluse-guard.sh
 	$(COMPOSE) run --rm --build --no-deps api-dev ruff check app tests
 
