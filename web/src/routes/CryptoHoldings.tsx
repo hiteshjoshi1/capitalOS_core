@@ -109,7 +109,7 @@ export default function CryptoHoldings() {
               <h2 className="cashFlowSectionTitle">Breakdown by chain and wallet</h2>
             </div>
             <div className="grid g-mid">
-              <div className="card" aria-label="Crypto chain exposure chart">
+              <div className="card" role="group" aria-label="Crypto chain exposure chart">
                 <p className="cashFlowCardTitle">Chain mix</p>
                 {(summary?.chain_exposure ?? []).length === 0 ? (
                   <p className="muted">No exposure data yet.</p>
@@ -128,7 +128,7 @@ export default function CryptoHoldings() {
                 )}
               </div>
 
-              <div className="card" aria-label="Crypto wallet exposure chart">
+              <div className="card" role="group" aria-label="Crypto wallet exposure chart">
                 <p className="cashFlowCardTitle">Wallet mix</p>
                 {(summary?.wallet_exposure ?? []).length === 0 ? (
                   <p className="muted">No exposure data yet.</p>

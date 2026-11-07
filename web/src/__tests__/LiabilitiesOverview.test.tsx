@@ -165,8 +165,13 @@ describe("LiabilitiesOverview route", () => {
     mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
     renderPage();
     expect(await screen.findByText("1 card charge need attention")).toBeInTheDocument();
-    const chargePanel = screen.getByText("Fees & finance charges").closest("article")!;
-    expect(within(chargePanel).getByText("DBS Annual Membership Fee")).toBeInTheDocument();
+    // #266: "Show charges" filters the one transaction list to fees, interest and tax.
+    fireEvent.click(screen.getByRole("button", { name: "Show charges" }));
+    const filters = screen.getByRole("group", { name: "Filter transactions" });
+    expect(within(filters).getByRole("button", { name: /Fees & charges/ })).toHaveAttribute("aria-pressed", "true");
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("DBS Annual Membership Fee")).toBeInTheDocument();
+    expect(within(table).queryByText("SIA")).not.toBeInTheDocument();
 
     mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics({ charges: [], charge_total: 0 }));
     renderPage();
@@ -187,17 +192,38 @@ describe("LiabilitiesOverview route", () => {
     mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
     renderPage();
 
-    const notableSection = (await screen.findByText("Notable charges")).closest("section") as HTMLElement;
-    expect(within(notableSection).getByText("SIA")).toBeInTheDocument();
-    expect(within(notableSection).queryByText("DBS Annual Membership Fee")).not.toBeInTheDocument();
+    const filters = await screen.findByRole("group", { name: "Filter transactions" });
+    fireEvent.click(within(filters).getByRole("button", { name: /Notable/ }));
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("SIA")).toBeInTheDocument();
+    expect(within(table).queryByText("DBS Annual Membership Fee")).not.toBeInTheDocument();
+    // Purchases in cents, totals in whole units (#266).
+    expect(within(table).getByText("S$ 12,640.00")).toBeInTheDocument();
   });
 
   it("shows recurring charges from the API response", async () => {
-    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
+    mockApi.creditCardAnalytics.mockResolvedValue(
+      makeAnalytics({
+        transactions: [
+          tx(),
+          tx({ description: "NETFLIX.COM", merchant_counterparty: "Netflix", amount: -22, category: "Subscription", resolved_category: "Subscription" }),
+          // Same merchant on another card: not that card's repeat.
+          tx({ account_id: 2, card_name: "DBS Credit Card", description: "NETFLIX.COM", merchant_counterparty: "Netflix", amount: -22 }),
+        ],
+        recurring_payments: [
+          { account_id: 1, account_name: "Amex Platinum", card_name: "Amex Platinum", issuer: "Amex", merchant_counterparty: "Netflix", months_present: 5, current_month_amount: 22, cadence: "monthly", typical_amount: 22 },
+        ],
+      }),
+    );
     renderPage();
-    expect(await screen.findByText("Recurring charges")).toBeInTheDocument();
-    expect(screen.getByText("Netflix")).toBeInTheDocument();
-    expect(screen.getByText(/Amex Platinum · 3 months/)).toBeInTheDocument();
+    const filters = await screen.findByRole("group", { name: "Filter transactions" });
+    expect(within(filters).getByRole("button", { name: "Recurring 1" })).toBeInTheDocument();
+    fireEvent.click(within(filters).getByRole("button", { name: /Recurring/ }));
+    const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+    expect(rows).toHaveLength(1);
+    expect(within(rows[0]).getByText("Netflix")).toBeInTheDocument();
+    expect(within(rows[0]).getByText("Monthly · 5 months")).toBeInTheDocument();
+    expect(within(rows[0]).getByText("Amex Platinum")).toBeInTheDocument();
   });
 
   it("shows upcoming payments by due date only, with no dollar estimate", async () => {
@@ -241,7 +267,9 @@ describe("LiabilitiesOverview route", () => {
     await screen.findByText("S$ 53,192");
 
     expect(screen.getByText("S$ 59,739")).toBeInTheDocument();
-    expect(screen.getByText("Not provided by issuer")).toBeInTheDocument();
+    // #266: no filler when the issuer doesn't give it; one card has it, one doesn't.
+    expect(screen.queryByText("Not provided by issuer")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Available credit")).toHaveLength(1);
   });
 
   it("never renders utilization, credit-limit progress, or a fabricated total-liabilities balance", async () => {
@@ -302,10 +330,10 @@ describe("LiabilitiesOverview route", () => {
     );
     renderPage();
 
-    expect(await screen.findByText("No notable charges this month.")).toBeInTheDocument();
-    expect(screen.getByText("No recurring payments detected in the last 3 months.")).toBeInTheDocument();
-    expect(screen.getByText("No categorized spend this month.")).toBeInTheDocument();
+    expect(await screen.findByText("No categorized spend this month.")).toBeInTheDocument();
     expect(screen.getByText("No transactions for this scope.")).toBeInTheDocument();
+    const filters = screen.getByRole("group", { name: "Filter transactions" });
+    expect(within(filters).getByRole("button", { name: "Recurring 0" })).toBeInTheDocument();
   });
 
   it("keeps month fixed when base currency changes", async () => {
@@ -324,6 +352,28 @@ describe("LiabilitiesOverview route", () => {
 });
 
 // #148: month switches with out-of-order replies; the account list is fetched once.
+describe("LiabilitiesOverview: one filtered list (#266)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockApi.accounts.mockResolvedValue(noLoans);
+  });
+
+  it("replaces the Notable, Recurring and Fees sections with filters on one list", async () => {
+    mockApi.creditCardAnalytics.mockResolvedValue(makeAnalytics());
+    renderPage();
+    const filters = await screen.findByRole("group", { name: "Filter transactions" });
+    expect(screen.queryByText("Notable charges")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recurring charges")).not.toBeInTheDocument();
+    expect(screen.queryByText("Fees & finance charges")).not.toBeInTheDocument();
+    expect(within(filters).getByRole("button", { name: "All 2" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(filters).getByRole("button", { name: "Notable 1" })).toBeInTheDocument();
+    expect(within(filters).getByRole("button", { name: "Fees & charges 1" })).toBeInTheDocument();
+    expect(screen.getByText(/2 of 2 entries/)).toBeInTheDocument();
+    fireEvent.click(within(filters).getByRole("button", { name: /Notable/ }));
+    expect(screen.getByText(/1 of 2 entries/)).toBeInTheDocument();
+  });
+});
+
 describe("LiabilitiesOverview races", () => {
   it("a slow earlier month never renders under the later month, and accounts load once", async () => {
     vi.clearAllMocks();

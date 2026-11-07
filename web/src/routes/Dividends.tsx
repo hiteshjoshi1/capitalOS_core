@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { api } from "../lib/api";
-import type { DividendCompanyItem, DividendsSummary, ExpectedDividendCompany } from "../lib/api";
+import type { DividendCompanyItem, DividendsSummary, ExpectedDividendCompany, IncomeWindow } from "../lib/api";
 import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
@@ -45,6 +45,11 @@ export default function Dividends() {
   const expectedRes = useApiResource(resourceKey("expectedDividends", fromMonth, month, baseCurrency), () =>
     api.expectedDividendsOverview(fromMonth, month, baseCurrency),
   );
+  // #267: the headline — dividends + interest, last 12 months and year to date, each vs a year earlier.
+  const incomeRes = useApiResource(resourceKey("incomeSummary", month, baseCurrency), () =>
+    api.incomeSummary(month, baseCurrency),
+  );
+  const income = incomeRes.data ?? null;
   const monthSummary = monthRes.data ?? null;
   const companySummary = companyRes.data ?? null;
   const expectedOverview = expectedRes.data ?? null;
@@ -125,17 +130,35 @@ export default function Dividends() {
       })),
     [realizedBuckets, formatCompactMoney],
   );
+  const incomeCurrency = income?.base_currency || shownCurrency;
+  const incomePoints = useMemo(
+    () =>
+      (income?.months ?? []).map((m, index, all) => ({
+        month: m.month,
+        value: m.total,
+        displayValue: fmt.formatMoneyCompact(m.total, incomeCurrency),
+        tone: "neutral" as const,
+        isLive: Boolean(income?.partial_month) && index === all.length - 1,
+      })),
+    [income?.months, income?.partial_month, incomeCurrency],
+  );
+  const windowLabel = (w: IncomeWindow) => `${fmt.formatDate(w.from_date)} – ${fmt.formatDate(w.to_date)}`;
+  const splitText = (w: IncomeWindow) =>
+    `Dividends ${fmt.formatMoney(w.dividends, incomeCurrency)} · Interest ${fmt.formatMoney(w.interest, incomeCurrency)}`;
 
   return (
     <PageShell
-      title="Dividends"
-      subtitle="Cash dividends received, and what your holdings are projected to pay next."
-      activeRoute="/dividends"
+      title="Income"
+      subtitle="Dividends and interest received, compared with a year earlier, and what your holdings are projected to pay next."
+      activeRoute="/income"
       monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
     >
       {monthRes.isLoading && <div className="card" role="status">Loading…</div>}
       {monthRes.error && (
         <LoadError title="Couldn't load dividends" error={monthRes.error.message} onRetry={() => void monthRes.reload().catch(() => undefined)} />
+      )}
+      {incomeRes.error && (
+        <LoadError title="Couldn't load income totals" error={incomeRes.error.message} onRetry={() => void incomeRes.reload().catch(() => undefined)} />
       )}
 
       {monthSummary && (
@@ -143,8 +166,56 @@ export default function Dividends() {
           className="wealthOverviewLayout"
           busy={monthRes.isFetching || companyRes.isFetching || expectedRes.isFetching}
         >
+          {income ? (
+            <section className="incomeHeadline" aria-labelledby="income-headline-heading">
+              <h2 className="srOnly" id="income-headline-heading">Income compared with a year earlier</h2>
+              <HeroMetricCard
+                eyebrow="INCOME · LAST 12 MONTHS"
+                value={fmt.formatMoney(income.trailing_12.total, incomeCurrency)}
+                delta={{
+                  abs: income.trailing_12.total - income.prior_12.total,
+                  pct: income.trailing_12_change_pct,
+                  currency: incomeCurrency,
+                  baseline: "vs the 12 months before",
+                  missingReason: income.trailing_12_change_pct == null ? "no income in the 12 months before" : null,
+                }}
+                insightText={`${splitText(income.trailing_12)} · ${windowLabel(income.trailing_12)}`}
+                deltaRow={[
+                  {
+                    label: `YEAR TO DATE${income.partial_month ? " (TO " + fmt.formatDate(income.as_of).toUpperCase() + ")" : ""}`,
+                    value: fmt.formatMoney(income.ytd.total, incomeCurrency),
+                    positive: true,
+                  },
+                  {
+                    label: "SAME DATES LAST YEAR",
+                    value: fmt.formatMoney(income.prior_ytd.total, incomeCurrency),
+                    positive: true,
+                  },
+                  {
+                    label: "YEAR ON YEAR",
+                    value:
+                      income.ytd_change_pct == null
+                        ? "no comparison"
+                        : fmt.formatPercent(income.ytd_change_pct, { signed: true, decimals: 0 }),
+                    positive: (income.ytd_change_pct ?? 0) >= 0,
+                  },
+                ]}
+              />
+              <div className="card dividendHistoryCard">
+                <p className="dividendSignalLabel">Dividends + interest by month</p>
+                {incomePoints.every((p) => p.value === 0) ? (
+                  <div className="muted">No dividends or interest in these 12 months.</div>
+                ) : (
+                  <TrendBarChart points={incomePoints} ariaLabel="Monthly income, dividends plus interest" />
+                )}
+              </div>
+            </section>
+          ) : incomeRes.isLoading ? (
+            <div className="card" role="status">Loading income…</div>
+          ) : null}
+
           <HeroMetricCard
-            eyebrow="REALIZED THIS MONTH"
+            eyebrow="DIVIDENDS THIS MONTH"
             value={formatMoney(realizedMonth.payout_minus_tax)}
             delta={{ abs: momDeltaAbs, pct: momDeltaPct, currency: shownCurrency }}
             insightText={`Gross ${formatMoney(realizedMonth.gross)} · Withholding ${formatMoney(realizedMonth.withholding)}`}
@@ -153,7 +224,7 @@ export default function Dividends() {
               { label: "YEAR-TO-DATE", value: formatMoney(realizedYear.payout_minus_tax), positive: true },
             ]}
           />
-          <FxNote sources={[monthSummary, companySummary]} />
+          <FxNote sources={[monthSummary, companySummary, income]} />
 
           <section aria-labelledby="dividend-signals-heading">
             <div className="coSectionHeader">

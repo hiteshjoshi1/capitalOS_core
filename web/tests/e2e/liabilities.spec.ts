@@ -131,11 +131,17 @@ test("desktop: opens Liabilities, filters by card, and sees a charge warning", a
   await expect(page.locator(".coHeroValue")).toHaveText("S$ 49,022");
   await expect(page.getByText(/card charge.*need attention/)).toBeVisible();
 
-  // Recurring charges and notable charges both survive the merge into this page.
-  await expect(page.getByText("Recurring charges")).toBeVisible();
-  await expect(page.getByText("Netflix")).toBeVisible();
-  await expect(page.getByText("Notable charges")).toBeVisible();
-  await expect(page.getByText("Singapore Airlines")).toBeVisible();
+  // #266: one transaction list with filters replaces the Notable / Recurring / Fees sections.
+  const filters = page.getByRole("group", { name: "Filter transactions" });
+  await expect(filters.getByRole("button", { name: /^All/ })).toHaveAttribute("aria-pressed", "true");
+  // Rows show the merchant (SIA), or the statement text plus a Fee tag for a charge.
+  await filters.getByRole("button", { name: /^Notable/ }).click();
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(2); // header + the S$ 12,640 SIA fare
+  await expect(page.getByRole("table").getByRole("row", { name: /SIA/ })).toBeVisible();
+  await filters.getByRole("button", { name: /^Fees & charges/ }).click();
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(2); // header + the DBS annual fee
+  await expect(page.getByRole("table").getByRole("row", { name: /DBS Annual Membership Fee/ })).toBeVisible();
+  await filters.getByRole("button", { name: /^All/ }).click();
 
   // No loans linked in this fixture -> placeholder banner, not a fabricated balance.
   await expect(page.getByText("No loans linked")).toBeVisible();
@@ -147,8 +153,8 @@ test("desktop: opens Liabilities, filters by card, and sees a charge warning", a
 
   const table = page.getByRole("table");
   await expect(table.getByRole("row")).toHaveCount(2); // header + 1 DBS transaction
-  await expect(table.getByText("DBS Annual Membership Fee")).toBeVisible();
-  await expect(table.getByText("Singapore Airlines")).toHaveCount(0);
+  await expect(table.getByRole("row", { name: /DBS Annual Membership Fee/ })).toBeVisible();
+  await expect(table.getByRole("row", { name: /SIA/ })).toHaveCount(0);
 });
 
 test("mobile: Liabilities page loads with bottom nav and a scrollable card filter", async ({ page }) => {

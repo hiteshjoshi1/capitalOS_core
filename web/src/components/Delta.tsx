@@ -23,6 +23,19 @@ export type DeltaProps = {
 };
 
 /**
+ * The ▲/▼ alone (#268), for a figure already formatted elsewhere but coloured good/bad, so colour
+ * is never the only signal. Nothing for flat. Hidden from screen readers: the sign carries it.
+ */
+export function DeltaArrow({ direction }: { direction: "up" | "down" | "flat" }) {
+  if (direction === "flat") return null;
+  return (
+    <span className="deltaArrow" aria-hidden="true">
+      {direction === "up" ? "▲ " : "▼ "}
+    </span>
+  );
+}
+
+/**
  * The one way a change is shown (#224): ▲/▼ plus one colour pair (`--delta-up` /
  * `--delta-down`), the % in the same currency as the amount, and a sentence instead
  * of a number when the baseline is missing.

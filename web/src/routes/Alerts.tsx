@@ -35,7 +35,7 @@ export default function Alerts() {
         )}
 
         {state === "ready" && totalCount === 0 && (
-          <div className="card alertEmptyState" aria-label="No alerts">
+          <div className="card alertEmptyState" role="status" aria-label="No alerts">
             <p className="alertEmptyIcon" aria-hidden="true">✅</p>
             <p className="alertEmptyText">All accounts are up to date. No upload reminders.</p>
           </div>
@@ -44,9 +44,9 @@ export default function Alerts() {
         {state === "ready" && reminders.length > 0 && (
           <>
             <h2 className="alertSectionTitle">Upload Reminders</h2>
-            <div className="alertList" aria-label="Upload reminders">
+            <div className="alertList" role="group" aria-label="Upload reminders">
               {reminders.map((r) => (
-                <div key={r.account_id} className="card alertCard" aria-label={`Alert for ${r.account_name}`}>
+                <div key={r.account_id} className="card alertCard" role="group" aria-label={`Alert for ${r.account_name}`}>
                   <div className="alertCardHeader">
                     <span className="alertIcon" aria-hidden="true">⚠️</span>
                     <span className="alertAccountName">{r.account_name}</span>

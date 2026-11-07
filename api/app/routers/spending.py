@@ -13,12 +13,14 @@ from app.db.session import get_db
 from app.fx import FxRates, fx_status, get_rates, get_rates_by_date, rate_date
 from app.valuation.clock import (
     _anchor_ts,
+    _date_only,
     _app_today,
     _transaction_in_month_window,
     _transaction_month_key,
     _transaction_query_bounds,
 )
 from app.valuation.facts import _networth_components
+from app.portfolio.canonical_reads import canonical_snapshot_coverage_as_of
 from app.valuation.state import _effective_as_of
 from app.schemas.spending import (
     CategoryAmount,
@@ -366,13 +368,46 @@ def _inflow_source_label(row) -> str:
     return "Other"
 
 
-def _is_stable_recurring_charge(monthly_amounts: dict[str, float]) -> bool:
-    amounts = sorted(round(abs(amount), 2) for amount in monthly_amounts.values() if amount > 0)
-    if len(amounts) < 3:
-        return False
+# A card charge is a real repeat (#266): the trailing window it's judged over, in months
+# (the selected month included).
+RECURRING_LOOKBACK_MONTHS = 6
+
+
+def _month_index(month: str) -> int:
+    year, mon = month.split("-")
+    return int(year) * 12 + int(mon) - 1
+
+
+def detect_recurring_cadence(charges_by_month: dict[str, list[float]], month: str) -> str | None:
+    """Whether one merchant's card charges are a real repeat (#266), and its cadence.
+
+    ``charges_by_month``: ``YYYY-MM`` -> the positive charge amounts in that month, over the
+    trailing window. A real repeat is billed like a subscription:
+      - charged in the selected ``month``;
+      - in at least 3 distinct months;
+      - once a month at most (several charges in a month is shopping, not a subscription);
+      - every month: consecutive months, with at most one missed month in between
+        (a statement that landed late or a skipped cycle);
+      - a stable amount: every charge within max(2, 10%) of their median.
+    Returns ``"monthly"`` or ``None``. Quarterly or yearly charges can't show 3 times in
+    the window, so they are never called recurring.
+    """
+    present = {m: [a for a in amounts if a > 0] for m, amounts in charges_by_month.items()}
+    present = {m: a for m, a in present.items() if a}
+    if month not in present or len(present) < 3:
+        return None
+    if any(len(amounts) > 1 for amounts in present.values()):
+        return None
+    indexes = sorted(_month_index(m) for m in present)
+    gaps = [b - a for a, b in zip(indexes, indexes[1:])]
+    if any(gap > 2 for gap in gaps) or sum(1 for gap in gaps if gap == 2) > 1:
+        return None
+    amounts = sorted(round(a[0], 2) for a in present.values())
     median = amounts[len(amounts) // 2]
     tolerance = max(2.0, median * 0.10)
-    return all(abs(amount - median) <= tolerance for amount in amounts)
+    if not all(abs(amount - median) <= tolerance for amount in amounts):
+        return None
+    return "monthly"
 
 
 def _sorted_breakdown_items(items: dict[str, float], total: float, limit: int | None = None) -> list[CashFlowBreakdownItem]:
@@ -643,6 +678,57 @@ def _cash_flow_comparison(
     )
 
 
+# How far back the cash bridge can start: /cash-flow-detail loads transactions from five
+# months before the month (``lookback_rows``), so an older start snapshot would miss flows.
+CASH_BRIDGE_LOOKBACK_MONTHS = 5
+
+
+def _cash_snapshot_date(db: Session, anchor_ts: datetime, current_user_id: int) -> date | None:
+    """The newest cash fact (bank/broker/stablecoin balances, broker cash) at or before the
+    anchor: the cash snapshot the bridge's starting or ending cash comes from (#265)."""
+    as_of = canonical_snapshot_coverage_as_of(
+        db,
+        current_user_id=current_user_id,
+        anchor_date=anchor_ts.date(),
+        include_positions=False,
+        include_nav=False,
+    )
+    # Postgres gives a date, SQLite (tests) a string.
+    return _date_only(as_of)
+
+
+def _cash_bridge_span(
+    db: Session, month: str, prior_anchor: datetime, anchor: datetime, current_user_id: int
+) -> tuple[date | None, date | None, bool, str | None]:
+    """The cash bridge's period (#265, D-72): from the nearest cash snapshot at or before the
+    month's start anchor to the nearest at or before its end anchor (for the open month: the
+    newest so far). Exact snapshots on the anchors are no longer required.
+
+    Returns (start, end, available, reason). Not available when either snapshot is missing,
+    when there is no cash snapshot newer than the start one, or when the start is older than
+    the transactions the page loads (CASH_BRIDGE_LOOKBACK_MONTHS)."""
+    start = _cash_snapshot_date(db, prior_anchor, current_user_id)
+    end = _cash_snapshot_date(db, anchor, current_user_id)
+    floor = _add_months(_parse_month(month), -CASH_BRIDGE_LOOKBACK_MONTHS).date()
+    if start is None or end is None:
+        missing = prior_anchor if start is None else anchor
+        return start, end, False, (
+            f"The cash bridge needs a cash snapshot on or before {missing.date().isoformat()}; there is none yet. "
+            "Upload a bank or broker statement that covers it."
+        )
+    if start >= end:
+        return start, end, False, (
+            f"No cash snapshot newer than {start.isoformat()} yet, so there is no period to bridge. "
+            "Upload a newer bank or broker statement."
+        )
+    if start < floor:
+        return start, end, False, (
+            f"The nearest cash snapshot before this month is {start.isoformat()}, more than "
+            f"{CASH_BRIDGE_LOOKBACK_MONTHS} months earlier, so the bridge would miss transactions."
+        )
+    return start, end, True, None
+
+
 def _analytics_for_month(
     *,
     current_rows,
@@ -731,12 +817,23 @@ def _analytics_for_month(
     snapshot_start_as_of = _effective_as_of(db, prior_anchor, current_user_id)
     snapshot_end_as_of = _effective_as_of(db, anchor, current_user_id)
     boundary_exact = snapshot_start_as_of == prior_anchor and snapshot_end_as_of == anchor
+    span_start, span_end, bridge_available, unavailable_reason = _cash_bridge_span(
+        db, month, prior_anchor, anchor, current_user_id
+    )
     ending_cash = _networth_components(db, anchor, base_currency, current_user_id)["cash"]
     starting_cash = _networth_components(db, prior_anchor, base_currency, current_user_id)["cash"]
     transfers_and_funding = 0.0
     investment_and_fx_effects = None
     other_cash_movements = None
-    if snapshot_start_as_of is not None and snapshot_end_as_of is not None:
+    if bridge_available and span_start is not None and span_end is not None:
+        # The flows between the two cash snapshots, by the same boundary convention as before
+        # (after the start date's midnight, up to the end date's midnight).
+        window_start = datetime(span_start.year, span_start.month, span_start.day, tzinfo=timezone.utc)
+        window_end = datetime(span_end.year, span_end.month, span_end.day, tzinfo=timezone.utc)
+        reconciliation_rows = [
+            row for row in lookback_rows if window_start < _row_ts(row["ts"]) <= window_end
+        ]
+    elif snapshot_start_as_of is not None and snapshot_end_as_of is not None:
         reconciliation_rows = [
             row
             for row in lookback_rows
@@ -765,13 +862,12 @@ def _analytics_for_month(
             + transfers_and_funding
         )
         other_cash_movements = investment_and_fx_effects
-    availability_message = None
-    if not boundary_exact:
-        availability_message = (
-            f"Cash reconciliation needs exact cash snapshots on {prior_anchor.date().isoformat()} and {anchor.date().isoformat()}. "
-            f"Available snapshots are {(snapshot_start_as_of.date().isoformat() if snapshot_start_as_of is not None else 'missing')} "
-            f"and {(snapshot_end_as_of.date().isoformat() if snapshot_end_as_of is not None else 'missing')}."
-        )
+    # #265: why the bridge can't be drawn, or None when it can (it no longer needs exact
+    # snapshots on the anchors; span_start/span_end say which snapshots it uses).
+    availability_message = unavailable_reason
+    span_basis = None
+    if bridge_available and span_start is not None and span_end is not None:
+        span_basis = "exact" if span_start == prior_anchor.date() and span_end == anchor.date() else "nearest"
 
     top_outflow_merchants = sorted(
         merchant_totals.items(),
@@ -914,6 +1010,10 @@ def _analytics_for_month(
             snapshot_end_boundary_at=_tx_iso(anchor),
             boundary_exact=boundary_exact,
             availability_message=availability_message,
+            bridge_available=bridge_available,
+            span_start=span_start.isoformat() if span_start is not None else None,
+            span_end=span_end.isoformat() if span_end is not None else None,
+            span_basis=span_basis,
             ending_cash=ending_cash,
         ),
         answers=answers,
@@ -1057,8 +1157,8 @@ def _credit_card_recurring_payments(
     end: datetime,
     account_id: int | None = None,
 ) -> list[CreditCardRecurringPaymentItem]:
-    """Merchants charged in the selected month whose amount has stayed stable across
-    at least 3 of the trailing months — used as a recurring/subscription signal.
+    """Merchants charged in the selected month that are a real repeat
+    (``detect_recurring_cadence``, #266) over the trailing window from ``lookback_start``.
     Optionally scoped to a single owned CREDIT_CARD account."""
     recurring_q = text("""
         SELECT
@@ -1105,6 +1205,7 @@ def _credit_card_recurring_payments(
                 "merchant_counterparty": merchant,
                 "months": set(),
                 "monthly_amounts": defaultdict(float),
+                "charges_by_month": defaultdict(list),
                 "current_month_amount": 0.0,
             },
         )
@@ -1112,6 +1213,7 @@ def _credit_card_recurring_payments(
         amount = -converted
         record["months"].add(month_key)
         record["monthly_amounts"][month_key] += amount
+        record["charges_by_month"][month_key].append(amount)
         if month_key == month:
             record["current_month_amount"] += amount
 
@@ -1119,8 +1221,10 @@ def _credit_card_recurring_payments(
     for record in recurring_index.values():
         months_present = len(record["months"])
         current_month_amount = float(record["current_month_amount"])
-        if current_month_amount <= 0 or not _is_stable_recurring_charge(record["monthly_amounts"]):
+        cadence = detect_recurring_cadence(record["charges_by_month"], month)
+        if current_month_amount <= 0 or cadence is None:
             continue
+        amounts = sorted(a for charges in record["charges_by_month"].values() for a in charges if a > 0)
         recurring_payments.append(
             CreditCardRecurringPaymentItem(
                 account_id=record["account_id"],
@@ -1130,6 +1234,8 @@ def _credit_card_recurring_payments(
                 merchant_counterparty=record["merchant_counterparty"],
                 months_present=months_present,
                 current_month_amount=current_month_amount,
+                cadence=cadence,
+                typical_amount=float(amounts[len(amounts) // 2]),
             )
         )
 
@@ -1384,7 +1490,6 @@ def credit_card_transactions(
 ):
     start = _parse_month(month)
     end = _month_end(start)
-    lookback_start = _add_months(start, -2)
 
     cards = _credit_cards(db, current_user.id)
     spend = _spend_by_account(db, start, end, base_currency, current_user.id)
@@ -1454,7 +1559,9 @@ def credit_card_transactions(
         reverse=True,
     )[:5]
 
-    recurring_payments = _credit_card_recurring_payments(db, current_user.id, month, base_currency, lookback_start, end)
+    recurring_payments = _credit_card_recurring_payments(
+        db, current_user.id, month, base_currency, _add_months(start, -(RECURRING_LOOKBACK_MONTHS - 1)), end
+    )
 
     total_spend = sum(item.current_due for item in card_items)
     return CreditCardDetailOut(
@@ -1484,7 +1591,7 @@ def credit_card_analytics(
     prior_month = _month_key(prior_start)
     trend_start = _add_months(start, -(months - 1))
     fetch_start = min(trend_start, prior_start)
-    recurring_lookback_start = _add_months(start, -2)
+    recurring_lookback_start = _add_months(start, -(RECURRING_LOOKBACK_MONTHS - 1))
 
     cards_raw = _credit_cards(db, current_user.id)
     owned_account_ids = {int(c["account_id"]) for c in cards_raw}

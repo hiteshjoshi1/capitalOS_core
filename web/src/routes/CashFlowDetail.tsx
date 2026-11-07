@@ -13,6 +13,8 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
+import { DeltaArrow } from "../components/Delta";
+import { cashBridgeSpanText } from "../lib/cashBridge";
 import { chartColor, donutGradient } from "../lib/chartColors";
 import "../App.css";
 import MonthBar from "../components/MonthBar";
@@ -296,7 +298,7 @@ function DriverRows({ items, formatMoney }: { items: CashFlowCategoryDeltaItem[]
           <span className="cashFlowDriverLabel">{item.label}</span>
           <span className="cashFlowDriverValues">
             <span className="muted">{formatMoney(Math.abs(item.current_amount))}</span>
-            <strong className="bad">+{formatMoney(Math.abs(item.delta_amount))}</strong>
+            <strong className="bad"><DeltaArrow direction="up" />+{formatMoney(Math.abs(item.delta_amount))}</strong>
           </span>
         </div>
       ))}
@@ -321,6 +323,7 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
   ];
 
   const maxMagnitude = steps.reduce((largest, step) => Math.max(largest, Math.abs(step.value ?? 0)), 0);
+  const spanText = cashBridgeSpanText(waterfall);
 
   return (
     <section>
@@ -333,23 +336,23 @@ function CashBridgeSection({ waterfall, formatMoney }: { waterfall: CashFlowWate
       </div>
 
       <div className="card" style={{ padding: "28px 24px 20px" }}>
-        {waterfall.snapshot_start_as_of && waterfall.snapshot_end_as_of ? (
+        {spanText ? (
           <p className="muted" style={{ marginTop: 0 }}>
-            Reconciled across available cash snapshots from {fmt.formatDate(waterfall.snapshot_start_as_of)} to {fmt.formatDate(waterfall.snapshot_end_as_of)}.
+            {spanText}
           </p>
         ) : null}
 
-        {!waterfall.boundary_exact ? (
-          <div className="cashFlowUnavailableState" aria-label="Cash reconciliation unavailable">
+        {!spanText ? (
+          <div className="cashFlowUnavailableState" role="status" aria-label="Cash reconciliation unavailable">
             <p className="muted">
               {waterfall.availability_message ?? "Cash reconciliation is unavailable for the full month boundary."}
             </p>
             <p className="muted">
-              Upload statements or refresh balances to close the month cleanly before using this reconciliation view.
+              Upload a bank or broker statement to give the bridge a start and an end.
             </p>
           </div>
         ) : (
-          <div className="cashFlowBridge" aria-label="Cash bridge chart">
+          <div className="cashFlowBridge" role="group" aria-label="Cash bridge chart">
             {steps.map((step) => {
               const value = step.value ?? 0;
               return (
@@ -757,7 +760,7 @@ function ExpensesTab({
             ]}
           />
         </div>
-        <div className="card" aria-label={merchantsView === "dining" ? "Top dining merchants chart" : "Top merchants chart"}>
+        <div className="card" role="group" aria-label={merchantsView === "dining" ? "Top dining merchants chart" : "Top merchants chart"}>
           <MerchantRows items={activeMerchantItems} formatMoney={formatMoney} />
         </div>
       </section>

@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import Delta from "../components/Delta";
+import Delta, { DeltaArrow } from "../components/Delta";
 import { deltaDirection, deltaPercent, missingBaselineReason, noDataFor, noRateFor } from "../lib/delta";
 import { hasLivePrice, holdingPriceAge, priceBasis, priceSourceLabel } from "../lib/priceAge";
 
@@ -156,5 +156,17 @@ describe("lib/priceAge", () => {
     expect(hasLivePrice(upload)).toBe(false);
     expect(hasLivePrice({ ...upload, quote_freshness_status: "fresh" })).toBe(false);
     expect(hasLivePrice({ ...quote, quote_freshness_status: "stale" })).toBe(false);
+  });
+});
+
+describe("DeltaArrow (#268)", () => {
+  it("shows ▲/▼ hidden from screen readers, and nothing for flat", () => {
+    const { container, rerender } = render(<DeltaArrow direction="up" />);
+    expect(container.textContent).toBe("▲ ");
+    expect(container.firstElementChild).toHaveAttribute("aria-hidden", "true");
+    rerender(<DeltaArrow direction="down" />);
+    expect(container.textContent).toBe("▼ ");
+    rerender(<DeltaArrow direction="flat" />);
+    expect(container).toBeEmptyDOMElement();
   });
 });

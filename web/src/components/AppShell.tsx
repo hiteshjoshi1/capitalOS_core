@@ -148,7 +148,7 @@ export default function AppShell() {
       {/* Mobile bottom navigation — hidden on desktop via CSS */}
       <nav className="coMobileBottomNav" aria-label="Mobile navigation">
         <Link
-          className={`coMobileBottomNavItem${location.pathname.startsWith("/wealth") || location.pathname.startsWith("/holdings") || location.pathname.startsWith("/dividends") || location.pathname.startsWith("/crypto") || location.pathname.startsWith("/cash") || location.pathname.startsWith("/risk") ? " coMobileBottomNavItemActive" : ""}`}
+          className={`coMobileBottomNavItem${location.pathname.startsWith("/wealth") || location.pathname.startsWith("/holdings") || location.pathname.startsWith("/dividends") || location.pathname.startsWith("/income") || location.pathname.startsWith("/crypto") || location.pathname.startsWith("/cash") || location.pathname.startsWith("/risk") ? " coMobileBottomNavItemActive" : ""}`}
           to="/wealth"
         >
           <span className="coMobileBottomNavDot" aria-hidden="true" />

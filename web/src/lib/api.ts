@@ -782,6 +782,12 @@ export type CashFlowWaterfall = {
   boundary_exact: boolean;
   availability_message: string | null;
   ending_cash: number | null;
+  /** #265 (D-72): drawn between the nearest cash snapshots at or before the month's start and
+   * end anchors (the open month: the newest so far). Optional for older API responses. */
+  bridge_available?: boolean;
+  span_start?: string | null;
+  span_end?: string | null;
+  span_basis?: "exact" | "nearest" | string | null;
 };
 
 export type CashFlowDiagnosticAnswer = {
@@ -908,6 +914,9 @@ export type CreditCardRecurringPayment = {
   merchant_counterparty: string;
   months_present: number;
   current_month_amount: number;
+  /** #266: how it repeats ("monthly") and its usual amount (median charge). Older APIs omit them. */
+  cadence?: string;
+  typical_amount?: number | null;
 };
 
 export type CreditCardDetail = FxStatus & {
@@ -1725,6 +1734,37 @@ export type DividendSummaryBucket = DividendTotals & {
   bucket: string;
 };
 
+/** Dividends (net of withholding) plus interest over [from_date, to_date], inclusive (#267). */
+export type IncomeWindow = {
+  from_date: string;
+  to_date: string;
+  dividends: number;
+  interest: number;
+  total: number;
+};
+
+export type IncomeMonth = {
+  month: string;
+  dividends: number;
+  interest: number;
+  total: number;
+};
+
+/** GET /income/summary (#267): trailing 12 months and year to date, each vs a year earlier. */
+export type IncomeSummary = FxStatus & {
+  month: string;
+  base_currency: string;
+  as_of: string;
+  partial_month: boolean;
+  trailing_12: IncomeWindow;
+  prior_12: IncomeWindow;
+  trailing_12_change_pct: number | null;
+  ytd: IncomeWindow;
+  prior_ytd: IncomeWindow;
+  ytd_change_pct: number | null;
+  months: IncomeMonth[];
+};
+
 export type DividendsSummary = FxStatus & {
   from_month: string;
   to_month: string;
@@ -2078,6 +2118,10 @@ export const api = {
     req<UnifiedAlertsResponse>(`/alerts/notifications${month ? `?month=${encodeURIComponent(month)}` : ""}`),
   alertNotificationsCount: (month?: string) =>
     req<UnifiedAlertsCount>(`/alerts/notifications/count${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  incomeSummary: (month: string, baseCurrency = "SGD") =>
+    req<IncomeSummary>(
+      `/income/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`,
+    ),
   dividendsSummary: (
     fromMonth: string,
     toMonth: string,

@@ -87,8 +87,16 @@ class CashFlowWaterfallOut(BaseModel):
     snapshot_end_as_of: str | None = None
     snapshot_end_boundary_at: str | None = None
     boundary_exact: bool = False
+    # Why the bridge can't be drawn; None when it can (#265: exact snapshots no longer needed).
     availability_message: str | None = None
     ending_cash: float | None
+    # #265 (D-72): the bridge runs between the nearest cash snapshots at or before the month's
+    # start and end anchors (the open month: the newest so far). ``span_basis``: "exact" when
+    # both are on the anchors, "nearest" otherwise, None when not available.
+    bridge_available: bool = False
+    span_start: str | None = None
+    span_end: str | None = None
+    span_basis: str | None = None
 
 
 class CashFlowDiagnosticAnswer(BaseModel):
@@ -220,6 +228,9 @@ class CreditCardRecurringPaymentItem(BaseModel):
     merchant_counterparty: str
     months_present: int
     current_month_amount: float
+    # #266: how it repeats ("monthly"), and its usual amount (median charge, base currency).
+    cadence: str = "monthly"
+    typical_amount: float | None = None
 
 
 class CreditCardDetailOut(FxStatusFields):
