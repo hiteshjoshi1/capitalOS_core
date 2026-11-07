@@ -52,8 +52,30 @@ DELETE FROM broker_connections WHERE connection_type = 'dummy_seed' AND display_
 DELETE FROM accounts WHERE name LIKE 'DUMMY - %';
 DELETE FROM transactions WHERE source = 'DUMMY';
 DELETE FROM prices WHERE source = 'DUMMY';
+DELETE FROM fx_rates WHERE source = 'DUMMY';
 DELETE FROM market_dividend_yields WHERE source = 'DUMMY';
 DELETE FROM import_jobs WHERE original_filename LIKE 'DUMMY_%';
+
+-- #291: the empty "DBS Credit Card" that migration 059 gives the demo user (no transactions,
+-- no statements) rendered a card with nothing in it and an "overdue: no data yet" source.
+-- Removed only while nothing points at it; a real upload to it keeps it.
+DO $$
+BEGIN
+  DELETE FROM credit_card_accounts cca
+  USING accounts a, users u
+  WHERE cca.account_id = a.id AND u.id = a.user_id AND LOWER(u.username) = 'demo'
+    AND a.name = 'DBS Credit Card' AND a.account_type = 'CREDIT_CARD'
+    AND NOT EXISTS (SELECT 1 FROM transactions t WHERE t.account_id = a.id)
+    AND NOT EXISTS (SELECT 1 FROM account_balance_snapshots s WHERE s.account_id = a.id)
+    AND NOT EXISTS (SELECT 1 FROM import_jobs j WHERE j.account_id = a.id);
+  DELETE FROM accounts a
+  USING users u
+  WHERE u.id = a.user_id AND LOWER(u.username) = 'demo'
+    AND a.name = 'DBS Credit Card' AND a.account_type = 'CREDIT_CARD'
+    AND NOT EXISTS (SELECT 1 FROM credit_card_accounts c WHERE c.account_id = a.id);
+EXCEPTION WHEN foreign_key_violation THEN
+  RAISE NOTICE 'demo DBS Credit Card kept: other rows point at it';
+END $$;
 
 -- ═══════════════════════════════════════════════════════════════════
 -- Month scaffold: current month back to 11 months ago, used by every
@@ -76,6 +98,34 @@ FROM generate_series(0, 11) AS gs;
 -- today if the current month hasn't reached the 6th yet)
 ALTER TABLE seed_months ADD COLUMN as_of_date date;
 UPDATE seed_months SET as_of_date = (month_start + (day_cap - 1) * interval '1 day')::date;
+
+-- Snapshot dates for cash, holdings, prices and crypto (#291): the 1st of each month, the
+-- month-end anchor with SNAPSHOT_DAY=1, so every History month reads a snapshot taken on its
+-- anchor day (observed, not carried), plus today for the live month. The 1st of a month sits
+-- just under that month's growth step; today is the baseline.
+DROP TABLE IF EXISTS seed_snapshots;
+CREATE TEMP TABLE seed_snapshots AS
+SELECT DISTINCT ON (as_of_date) as_of_date, growth_factor
+FROM (
+  SELECT CURRENT_DATE AS as_of_date, 1::numeric AS growth_factor, 0 AS pick
+  UNION ALL
+  SELECT month_start, (1 - 0.03 * month_offset - 0.015)::numeric, 1 FROM seed_months
+) d
+ORDER BY as_of_date, pick;
+
+-- Exchange rates (#291) for every snapshot day and the days between, so past months value the
+-- USD and HKD holdings instead of leaving them out (D-30). USD-based like open.er-api rows,
+-- source DUMMY (removed by db-clear-dummy); a stored provider rate for a day is kept.
+INSERT INTO fx_rates (rate_date, base, quote, rate, source, fetched_at)
+SELECT d.day, 'USD', q.quote,
+       ROUND((q.mid + q.swing * sin((d.day - DATE '2000-01-01') / 45.0))::numeric, 6),
+       'DUMMY', NOW()
+FROM (
+  SELECT (SELECT MIN(as_of_date) FROM seed_snapshots) - 10 + n AS day
+  FROM generate_series(0, CURRENT_DATE - ((SELECT MIN(as_of_date) FROM seed_snapshots) - 10)) AS n
+) d
+CROSS JOIN (VALUES ('SGD', 1.34, 0.02), ('HKD', 7.80, 0.01)) AS q(quote, mid, swing)
+ON CONFLICT (rate_date, base, quote) DO NOTHING;
 
 -- Ensure assets exist (realistic symbols across US, SG, HK + cash and MMF)
 INSERT INTO assets (symbol, name, asset_class, quote_currency, home_country)
@@ -183,7 +233,7 @@ SELECT
   '{}'::jsonb
 FROM base b
 JOIN accounts a ON a.name = b.account_name
-CROSS JOIN seed_months sm
+CROSS JOIN seed_snapshots sm
 ON CONFLICT (account_id, as_of_date, currency, balance_type)
 WHERE authority_status = 'authoritative'
 DO UPDATE SET
@@ -285,7 +335,18 @@ SELECT * FROM (VALUES
   ('DUMMY - IBKR Global', 'IBKR', '0700', 'HKD', 7500, 280, 2100000),
   ('DUMMY - IBKR Global', 'IBKR', '9988', 'HKD', 20000, 72, 1440000),
   ('DUMMY - IBKR Global', 'IBKR', '0388', 'HKD', 5240, 210, 1100400)
-) AS t(account_name, platform_code, symbol, currency, quantity, avg_cost, market_value_base);
+) AS t(account_name, platform_code, symbol, currency, quantity, avg_cost, market_value_local);
+
+-- *_base amounts are in the ACCOUNT's currency (position_base_currency): IBKR's HKD holdings
+-- are converted to its USD base at the seed's HKD rate (#291); same-currency holdings are 1:1.
+ALTER TABLE seed_stock_holdings ADD COLUMN fx_rate_to_base numeric;
+UPDATE seed_stock_holdings h
+SET fx_rate_to_base = CASE
+  WHEN h.currency = a.currency THEN 1
+  WHEN h.currency = 'HKD' AND a.currency = 'USD' THEN ROUND(1 / 7.80, 8)
+  ELSE 1
+END
+FROM accounts a WHERE a.name = h.account_name;
 
 WITH resolved AS (
   SELECT
@@ -326,7 +387,7 @@ INSERT INTO broker_import_runs (
 SELECT DISTINCT
   r.broker_account_id, r.account_id, r.platform_code, 'DUMMY', 'daily', 'completed', sm.as_of_date, sm.as_of_date, '{}'::jsonb
 FROM resolved r
-CROSS JOIN seed_months sm;
+CROSS JOIN seed_snapshots sm;
 
 WITH resolved AS (
   SELECT
@@ -357,15 +418,15 @@ SELECT
   r.quantity,
   r.currency,
   r.avg_cost,
-  ROUND(r.market_value_base * sm.growth_factor, 2),
-  ROUND(r.market_value_base * sm.growth_factor, 2),
-  ROUND(r.market_value_base * sm.growth_factor, 2),
-  ROUND(r.market_value_base * sm.growth_factor, 2),
-  1,
+  ROUND(r.market_value_local * sm.growth_factor, 2),
+  ROUND(r.market_value_local * sm.growth_factor * r.fx_rate_to_base, 2),
+  ROUND(r.market_value_local * sm.growth_factor, 2),
+  ROUND(r.market_value_local * sm.growth_factor * r.fx_rate_to_base, 2),
+  r.fx_rate_to_base,
   'authoritative',
   '{}'::jsonb
 FROM resolved r
-CROSS JOIN seed_months sm
+CROSS JOIN seed_snapshots sm
 JOIN broker_import_runs bir
   ON bir.broker_account_id = r.broker_account_id
  AND bir.source_type = 'DUMMY'
@@ -432,7 +493,7 @@ SELECT
   'DUMMY'
 FROM v
 JOIN assets a ON a.symbol = v.symbol AND a.quote_currency = v.currency
-CROSS JOIN seed_months sm
+CROSS JOIN seed_snapshots sm
 ON CONFLICT (asset_id, ts, currency, source) DO UPDATE
 SET trade_date = EXCLUDED.trade_date,
     price = EXCLUDED.price,
@@ -550,7 +611,7 @@ WITH snap AS (
     '{}'::jsonb
   FROM seed_wallets sw
   JOIN crypto_wallets w ON w.label = sw.label
-  CROSS JOIN seed_months sm
+  CROSS JOIN seed_snapshots sm
   RETURNING id, wallet_id, as_of_date, total_usd
 )
 INSERT INTO crypto_wallet_snapshot_items (
@@ -574,7 +635,7 @@ SELECT
 FROM seed_wallet_items i
 JOIN seed_wallets sw ON sw.label = i.wallet_label
 JOIN crypto_wallets w ON w.label = sw.label
-JOIN seed_months sm ON TRUE
+JOIN seed_snapshots sm ON TRUE
 JOIN snap ON snap.wallet_id = w.id AND snap.as_of_date = sm.as_of_date;
 
 -- ═══════════════════════════════════════════════════════════════════
@@ -803,6 +864,7 @@ JOIN transactions in_tx
 ON CONFLICT (from_transaction_id, to_transaction_id) DO NOTHING;
 
 DROP TABLE IF EXISTS seed_months;
+DROP TABLE IF EXISTS seed_snapshots;
 DROP TABLE IF EXISTS seed_stock_holdings;
 DROP TABLE IF EXISTS seed_wallets;
 DROP TABLE IF EXISTS seed_wallet_items;

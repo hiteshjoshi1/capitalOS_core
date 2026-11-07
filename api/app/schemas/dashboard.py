@@ -710,6 +710,32 @@ class BridgeTrade(BaseModel):
     cash_recorded: bool = False
 
 
+class MoveCause(BaseModel):
+    """One data cause behind a period's change (#289): ``key`` first_statement | catch_up |
+    statement | new_position | fx_gap | price_fallback. ``amount`` is its size in the base
+    currency (None when unknown, e.g. an FX gap leaves amounts out)."""
+
+    key: str
+    label: str
+    detail: Optional[str] = None
+    amount: Optional[float] = None
+    significant: bool = False
+    account_id: Optional[int] = None
+    as_of: Optional[str] = None
+
+
+class MoveCauses(BaseModel):
+    """Why the headline moved (#289): the change, whether it is big (at least 5% of the
+    start), the causes found (significant first), and ``none_reason`` when a big move
+    has no significant data cause."""
+
+    change: float = 0.0
+    change_pct: Optional[float] = None
+    is_big_move: bool = False
+    causes: List[MoveCause] = []
+    none_reason: Optional[str] = None
+
+
 class MonthBridgeResponse(FxStatusFields):
     """GET /dashboard/month-bridge (#240): start + sum(lines) + unexplained = end."""
 
@@ -731,6 +757,7 @@ class MonthBridgeResponse(FxStatusFields):
     liabilities_change: float
     movers: List[BridgeMover]
     trades: List[BridgeTrade] = []
+    move_causes: Optional[MoveCauses] = None
 
 
 # #253: PlatformConcentration names PlatformAllocationItem, defined after it.

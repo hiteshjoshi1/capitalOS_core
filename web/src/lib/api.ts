@@ -331,6 +331,24 @@ export type FxStatus = {
   fx_stale_currencies?: string[];
 };
 
+/** FX back-fill (#290): `GET /fx/backfill-plan` and `POST /fx/backfill` (admin). */
+export type FxBackfillPlan = {
+  span_start: string | null;
+  span_end: string | null;
+  currencies: string[];
+  unsupported_currencies: string[];
+  uncovered_days: number;
+  planned_requests: Array<{ start: string; end: string }>;
+  remaining_requests: number;
+};
+
+export type FxBackfillResult = FxBackfillPlan & {
+  status: "completed" | "partial" | "failed" | "up_to_date" | "remote_disabled";
+  fetched_requests: number;
+  failed_requests: number;
+  rows_stored: number;
+};
+
 /** One comparison of a value with a baseline (net worth or a component). */
 export type NetWorthChange = {
   abs: number;
@@ -558,6 +576,28 @@ export type BridgeTrade = {
   cash_recorded: boolean;
 };
 
+/** One data cause behind a period's change (#289). `amount` is in the base currency;
+ * null when unknown (an FX gap leaves amounts out). */
+export type MoveCause = {
+  key: "first_statement" | "catch_up" | "statement" | "new_position" | "fx_gap" | "price_fallback" | string;
+  label: string;
+  detail?: string | null;
+  amount?: number | null;
+  significant: boolean;
+  account_id?: number | null;
+  as_of?: string | null;
+};
+
+/** Why the headline moved (#289): big = at least 5% of the start; `none_reason` when a
+ * big move has no significant data cause. */
+export type MoveCauses = {
+  change: number;
+  change_pct?: number | null;
+  is_big_move: boolean;
+  causes: MoveCause[];
+  none_reason?: string | null;
+};
+
 /** GET /dashboard/month-bridge (#240, D-60): start + sum(lines) + unexplained = end. */
 export type MonthBridge = FxStatus & {
   as_of_month: string;
@@ -574,6 +614,7 @@ export type MonthBridge = FxStatus & {
   liabilities_change: number;
   movers: BridgeMover[];
   trades?: BridgeTrade[];
+  move_causes?: MoveCauses | null;
 };
 
 /** One bar of a page's six-month trend (Stocks, Crypto, Cash). #241 (D-61): the open
@@ -2100,6 +2141,10 @@ export const api = {
   marketDataStatus: () => req<{ status: MarketDataExchangeStatus[] }>("/market-data/status"),
   marketDataRuns: (limit = 50) =>
     req<{ runs: MarketDataRun[] }>(`/market-data/runs?limit=${encodeURIComponent(String(limit))}`),
+  fxBackfillPlan: (baseCurrency: string) =>
+    req<FxBackfillPlan>(`/fx/backfill-plan?base_currency=${encodeURIComponent(baseCurrency)}`),
+  fxBackfill: (baseCurrency: string) =>
+    req<FxBackfillResult>(`/fx/backfill?base_currency=${encodeURIComponent(baseCurrency)}`, { method: "POST" }),
   marketDataRefreshNow: (adminKey?: string) =>
     req<{ status: string; exchanges: Array<Record<string, unknown>> }>("/market-data/refresh-now", {
       method: "POST",

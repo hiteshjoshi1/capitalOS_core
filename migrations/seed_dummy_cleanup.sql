@@ -18,6 +18,12 @@ FROM (
   ) p
   WHERE p.from_date IS NOT NULL
   UNION ALL
+  -- DUMMY exchange rates (#291) are shared too: every user, from the earliest one.
+  SELECT u.id, f.from_date
+  FROM users u
+  CROSS JOIN (SELECT MIN(rate_date) AS from_date FROM fx_rates WHERE source = 'DUMMY') f
+  WHERE f.from_date IS NOT NULL
+  UNION ALL
   SELECT a.user_id, DATE '1970-01-01' FROM accounts a WHERE a.name LIKE 'DUMMY - %' AND a.user_id IS NOT NULL
   UNION ALL
   SELECT w.user_id, DATE '1970-01-01' FROM crypto_wallets w WHERE w.label LIKE 'DUMMY - %' AND w.user_id IS NOT NULL
@@ -31,6 +37,7 @@ ON CONFLICT (user_id) DO UPDATE SET
 
 DELETE FROM market_dividend_yields WHERE source = 'DUMMY';
 DELETE FROM prices WHERE source = 'DUMMY';
+DELETE FROM fx_rates WHERE source = 'DUMMY';
 
 DELETE FROM transfer_links
 WHERE from_transaction_id IN (SELECT id FROM transactions WHERE source = 'DUMMY')
