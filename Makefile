@@ -62,7 +62,7 @@ endif
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild web-build web-rebuild tailnet-serve tailnet-serve-off deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-window-move db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair uob-card-repair market-symbol-override reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -640,6 +640,12 @@ card-balance-backfill:
 # holdings. Then refresh prices (Data Hub, or POST /market-data/refresh-now) to price them.
 sharekhan-instrument-repair:
 	$(COMPOSE) exec api python -m app.scripts.repair_sharekhan_instruments $(if $(filter 1,$(APPLY)),--apply,)
+
+# #299: UOB card uploads stored before the parser fix (a period printed twice; amounts replaced
+# by the "Previous Balance"). Re-parses each kept file: keeps, corrects in place, deletes
+# duplicates (category overrides kept), marks History dirty. Dry run unless APPLY=1.
+uob-card-repair:
+	$(COMPOSE) exec api python -m app.scripts.repair_uob_card_rows $(if $(filter 1,$(APPLY)),--apply,)
 
 # #222: quote one asset under another Yahoo symbol, e.g. an Indian holding Yahoo lists only on
 # BSE: make market-symbol-override SYMBOL=<CODE> CURRENCY=INR EXCHANGE=NSE YAHOO=<CODE>.BO
