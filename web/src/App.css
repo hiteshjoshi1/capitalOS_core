@@ -2298,7 +2298,18 @@ a.btn {
 
 .statusPill--bad {
   color: var(--bad);
-  background: color-mix(in srgb, var(--bad) 16%, transparent 84%);
+  /* #268: 16% made the dark theme's text 4.48:1 on it. */
+  background: color-mix(in srgb, var(--bad) 12%, transparent 88%);
+}
+
+/* #268: on the light theme the warn/bad text on its own tint was 4.07:1 ("Needs mapping", "No data
+   yet"); a darker shade of the same token clears AA (4.5:1). Checked by __tests__/contrast.test.ts. */
+[data-theme="light"] .statusPill--warn {
+  color: color-mix(in srgb, var(--warn) 80%, black);
+}
+
+[data-theme="light"] .statusPill--bad {
+  color: color-mix(in srgb, var(--bad) 80%, black);
 }
 
 .statusPill--neutral {

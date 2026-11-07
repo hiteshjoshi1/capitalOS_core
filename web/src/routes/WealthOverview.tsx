@@ -319,7 +319,7 @@ export default function WealthOverview() {
             </div>
 
             {isLive ? (
-              <div className="coFreshnessRow" aria-label="Data freshness by asset class">
+              <div className="coFreshnessRow" role="group" aria-label="Data freshness by asset class">
                 <AssetFreshnessChip label="Stocks" freshness={currentFreshness?.stocks} freshDays={DAILY_SOURCE_FRESH_DAYS} />
                 <AssetFreshnessChip label="Crypto" freshness={currentFreshness?.crypto} freshDays={DAILY_SOURCE_FRESH_DAYS} />
                 <AssetFreshnessChip label="Cash" freshness={currentFreshness?.cash} freshDays={MANUAL_SOURCE_FRESH_DAYS} />

@@ -5,6 +5,8 @@ import type { WealthTimelinePoint, WealthTopMovers } from "../lib/api";
 import { currentMonthYYYYMM } from "../lib/selectedMonth";
 import type { ComponentDeltas, MonthFlags } from "../lib/wealthHistoryAnalysis";
 import * as fmt from "../lib/format";
+import { deltaDirection } from "../lib/delta";
+import { DeltaArrow } from "./Delta";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -153,6 +155,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
       ) : (
         <>
           <div className={`whDrillDelta ${delta >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}>
+            <DeltaArrow direction={deltaDirection(delta)} />
             {fmt.formatSignedMoney(delta, baseCurrency)}
           </div>
           <div className="whDrillPct">
@@ -194,6 +197,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
                       />
                     </div>
                     <span className={`whWfVal ${v >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}`}>
+                      <DeltaArrow direction={deltaDirection(v)} />
                       {fmt.formatSignedMoney(v, baseCurrency)}
                     </span>
                   </div>
@@ -216,6 +220,7 @@ export default function WealthDrilldownPanel({ month, point, prevPoint, flags, b
                       <strong>{m.symbol}</strong> <span className="whMoverClass">{m.asset_class}</span>
                     </span>
                     <span className={m.delta_abs >= 0 ? "wealthTrendPositive" : "wealthTrendNegative"}>
+                      <DeltaArrow direction={deltaDirection(m.delta_abs)} />
                       {fmt.formatDelta(m.delta_abs, m.delta_pct, baseCurrency)}
                     </span>
                   </div>
