@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.ingestion.parsers import ParseResult
+from app.ingestion.masking import mask_account_numbers
 
 _DATE_FMT = "%d/%m/%Y"
 _FOREIGN_CURRENCY_RE = re.compile(r"\b([A-Z]{3})\s+([+-]?\d+(?:\.\d+)?)\s*$")
@@ -66,7 +67,7 @@ def parse_citi_credit_card_csv(file_path: str, delimiter: str) -> ParseResult:
 
             notes_parts = []
             if card_number:
-                notes_parts.append(f"card_number={card_number}")
+                notes_parts.append(f"card_number={mask_account_numbers(card_number)}")  # last 4 only (#301)
             foreign = _extract_foreign_currency(description)
             if foreign:
                 notes_parts.append(f"foreign_currency={foreign[0]} {foreign[1]}")

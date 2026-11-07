@@ -5,10 +5,12 @@ responses carry the file's header (``signature_debug``) and the parser's
 metadata, and those can hold a statement's full account or card number. They
 only ever need the last 4 digits, so a number there is masked to those.
 
-Only the copies the app makes itself are masked: transaction descriptions
-(``merchant_counterparty``, ``notes``, ``preview_transactions``) are the bank's
-own text and stay as they are (dedup keys, D-35, and merchant matching read
-them). The statement-identity link (#180) hashes the unmasked number before any
+Only the copies the app makes itself are masked. ``merchant_counterparty`` is
+the bank's own text and stays as it is (it is part of the dedup key, D-35, and
+merchant matching reads it). Transaction ``notes`` are masked too (#301): parsers
+put the statement's card or account number there (``card_number=...``), and no
+key or match reads the notes, so masking them changes no fingerprint or dedup.
+The statement-identity link (#180) hashes the unmasked number before any
 report is built, so masking never changes which account a statement links to.
 """
 from __future__ import annotations
@@ -58,6 +60,19 @@ def mask_account_numbers(value: str) -> str:
     if not value:
         return value
     return _TOKEN_RE.sub(lambda m: _mask_token(m.group(0)), value)
+
+
+def mask_transaction_notes(transactions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Mask account/card numbers in each parsed transaction's ``notes``, in place (#301).
+
+    Runs before the runner adds its ``| fp:<hash>`` suffix, so fingerprints are never
+    touched, and before the preview is built, so the report shows the masked text.
+    """
+    for tx in transactions:
+        notes = tx.get("notes")
+        if notes:
+            tx["notes"] = mask_account_numbers(str(notes))
+    return transactions
 
 
 def _mask_deep(value: Any) -> Any:

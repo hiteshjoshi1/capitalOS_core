@@ -72,7 +72,7 @@ def test_parse_citi_credit_card_csv_fixture():
     ]
     assert foreign_rows
     assert all("foreign_currency=USD" in (tx.get("notes") or "") for tx in foreign_rows)
-    assert all("card_number=4111111111111111" in (tx.get("notes") or "") for tx in result.transactions)
+    assert all("card_number=************1111" in (tx.get("notes") or "") for tx in result.transactions)  # #301
 
 
 def test_citi_ingest_upload_and_idempotent(client: TestClient, db_engine):
@@ -137,4 +137,4 @@ def test_citi_ingest_upload_and_idempotent(client: TestClient, db_engine):
 
     assert isinstance(notes, str)
     assert "foreign_currency=USD 21.80" in notes
-    assert "card_number=4111111111111111" in notes
+    assert "card_number=************1111" in notes  # last 4 only (#301)
