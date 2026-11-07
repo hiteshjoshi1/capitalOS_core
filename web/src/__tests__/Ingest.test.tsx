@@ -254,6 +254,47 @@ describe("Ingest", () => {
     expect(accountSelect).toHaveValue("22");
   });
 
+  it("prefills the account, statement date and what's due from a freshness link (#278)", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 21, name: "Synthetic Card", platform: "DBS", account_type: "CREDIT_CARD", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([]);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/ingest?account_id=21&as_of=2026-10-31&last_data=2026-09-30&cadence=monthly"]}>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByLabelText("Account")).toHaveValue("21");
+    expect(screen.getByLabelText("Statement date")).toHaveValue("2026-10-31");
+    expect(screen.getByTestId("ingest-expectation")).toHaveTextContent(
+      "Synthetic Card: statement due for October 2026 (last data 30 Sep 2026)",
+    );
+  });
+
+  it("ignores a malformed or future as_of from the link", async () => {
+    mockApi.accounts.mockResolvedValue([
+      { id: 21, name: "Synthetic Card", platform: "DBS", account_type: "CREDIT_CARD", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValue([]);
+
+    for (const bad of ["2026-02-30", "2999-01-01", "yesterday"]) {
+      const { unmount } = render(
+        <ThemeProvider>
+          <MemoryRouter initialEntries={[`/ingest?account_id=21&as_of=${bad}&cadence=monthly`]}>
+            <Ingest />
+          </MemoryRouter>
+        </ThemeProvider>
+      );
+      await screen.findByLabelText("Account");
+      expect(screen.getByLabelText("Statement date")).toHaveValue(todayLocalYYYYMMDD());
+      unmount();
+    }
+  });
+
   it("surfaces string-based errors from upload, registration, and load-job paths", async () => {
     mockApi.accounts.mockResolvedValueOnce([
       { id: 8, name: "Test", platform: "TEST", account_type: "BANK", currency: "SGD", country: "SG" },

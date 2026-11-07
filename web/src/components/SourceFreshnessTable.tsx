@@ -1,4 +1,5 @@
-import { useId, useState } from "react";
+import { useId, useState, type MouseEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
 
 import { api } from "../lib/api";
 import type { SourceFreshness, SourceFreshnessRow } from "../lib/api";
@@ -9,6 +10,9 @@ import {
   cadenceLabel,
   dueLabel,
   graceUnit,
+  localToday,
+  sourceLink,
+  sourceLinkLabel,
   sourceDetail,
   statusLabel,
   statusTone,
@@ -118,8 +122,10 @@ function SourceRow({
   onEdit,
   onDone,
   reload,
+  today,
 }: {
   row: SourceFreshnessRow;
+  today: string;
   cadences: string[];
   editing: boolean;
   onEdit: () => void;
@@ -127,11 +133,35 @@ function SourceRow({
   reload: () => Promise<unknown>;
 }) {
   const due = dueLabel(row);
+  const navigate = useNavigate();
+  const link = sourceLink(row, today);
+  // The whole row opens the link (#278); the name is the real, keyboard-focusable link, and
+  // clicks on the row's own controls (the cadence editor) are left alone.
+  const onRowClick = (e: MouseEvent<HTMLTableRowElement>) => {
+    if (!link || editing) return;
+    if ((e.target as HTMLElement).closest("a, button, input, select, textarea, label")) return;
+    navigate(link);
+  };
   return (
-    <tr data-testid={`source-freshness-row-${row.source_key}`}>
+    <tr
+      data-testid={`source-freshness-row-${row.source_key}`}
+      className={link ? "sourceFreshnessRowLink" : undefined}
+      onClick={link ? onRowClick : undefined}
+    >
       <td>
-        <span className="sourceFreshnessName">{row.label}</span>
+        {link ? (
+          <Link className="sourceFreshnessName sourceFreshnessNameLink" to={link} aria-label={sourceLinkLabel(row)}>
+            {row.label}
+          </Link>
+        ) : (
+          <span className="sourceFreshnessName">{row.label}</span>
+        )}
         <span className="sourceFreshnessMeta">{sourceDetail(row)}</span>
+        {link && row.kind !== "market_data" ? (
+          <span className="sourceFreshnessMeta sourceFreshnessAction" aria-hidden="true">
+            Upload statement →
+          </span>
+        ) : null}
       </td>
       <td data-label="Last data">{row.last_data_date ? fmt.formatDate(row.last_data_date) : "Never"}</td>
       <td data-label="Expected">
@@ -173,6 +203,7 @@ function SourceRow({
 export default function SourceFreshnessTable() {
   const res = useApiResource<SourceFreshness>(SOURCE_FRESHNESS_KEY, () => api.sourceFreshness());
   const [editing, setEditing] = useState<string | null>(null);
+  const today = localToday();
   const data = res.data;
   const cadences = data?.cadences?.length ? data.cadences : DEFAULT_CADENCES;
 
@@ -221,6 +252,7 @@ export default function SourceFreshnessTable() {
                       onEdit={() => setEditing(row.source_key)}
                       onDone={() => setEditing(null)}
                       reload={res.reload}
+                      today={today}
                     />
                   ))}
                 </tbody>

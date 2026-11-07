@@ -6,6 +6,7 @@ import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
+import { isIsoDate, uploadExpectationLine } from "../lib/sourceFreshness";
 import { dateFromFilename, describeAsOf, resolvePlatformParser, todayLocalYYYYMMDD } from "./ingestUtils";
 import type { SignatureDebug } from "./ingestUtils";
 import * as fmt from "../lib/format";
@@ -30,6 +31,13 @@ function formatPreviewAmount(amount: unknown, currency: unknown): string {
 export default function Ingest() {
   const [searchParams] = useSearchParams();
   const requestedAccountId = searchParams.get("account_id") ?? "";
+  // From a Data Hub freshness row (#278): the due statement's date, the source's last data
+  // date and cadence. A malformed or future date is ignored.
+  const requestedAsOf = searchParams.get("as_of");
+  const prefillAsOf = isIsoDate(requestedAsOf) && requestedAsOf <= todayLocalYYYYMMDD() ? requestedAsOf : null;
+  const requestedLastData = searchParams.get("last_data");
+  const requestedCadence = searchParams.get("cadence");
+  const fromFreshness = searchParams.has("as_of") || searchParams.has("last_data") || searchParams.has("cadence");
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -37,7 +45,7 @@ export default function Ingest() {
   const [accountId, setAccountId] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   // The statement's date, used only when the file states none of its own (#141).
-  const [asOf, setAsOf] = useState<string>(() => todayLocalYYYYMMDD());
+  const [asOf, setAsOf] = useState<string>(() => prefillAsOf ?? todayLocalYYYYMMDD());
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [uploading, setUploading] = useState<boolean>(false);
   const [report, setReport] = useState<Record<string, unknown> | null>(null);
@@ -49,6 +57,14 @@ export default function Ingest() {
   const [confirmRemoveJob, setConfirmRemoveJob] = useState<number | null>(null);
   const [removingJob, setRemovingJob] = useState<number | null>(null);
   const [removeNotice, setRemoveNotice] = useState<string>("");
+
+  // A new freshness link on the same page (#278) moves the statement date with it
+  // (adjusting state while rendering, React's pattern for "reset when a prop changes").
+  const [seenPrefillAsOf, setSeenPrefillAsOf] = useState(prefillAsOf);
+  if (prefillAsOf !== seenPrefillAsOf) {
+    setSeenPrefillAsOf(prefillAsOf);
+    if (prefillAsOf) setAsOf(prefillAsOf);
+  }
 
   useEffect(() => {
     (async () => {
@@ -210,6 +226,17 @@ export default function Ingest() {
   const canonical = reportData?.canonical_result ?? null;
   const asOfLabel = describeAsOf(canonical?.as_of_date ?? canonical?.report_date, canonical?.as_of_source);
 
+  const requestedAccount =
+    fromFreshness && accountId === requestedAccountId ? accounts.find((a) => String(a.id) === requestedAccountId) : undefined;
+  const expectation = requestedAccount
+    ? uploadExpectationLine(
+        requestedAccount.name,
+        prefillAsOf,
+        isIsoDate(requestedLastData) ? requestedLastData : null,
+        requestedCadence,
+      )
+    : null;
+
   return (
     <PageShell
       title="Import Statements"
@@ -225,6 +252,11 @@ export default function Ingest() {
         <div className="wealthOverviewLayout">
           <div className="card">
             <div className="cardTitle">Upload Statement CSV</div>
+            {expectation ? (
+              <p className="hint ingestExpectation" role="note" data-testid="ingest-expectation">
+                {expectation}
+              </p>
+            ) : null}
             {accounts.length === 0 ? (
               <div className="muted">
                 No accounts found. <Link to="/accounts/new">Create account</Link>
