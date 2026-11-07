@@ -13,14 +13,43 @@ vi.mock("../lib/api", () => ({
     dividendsSummary: vi.fn(),
     dividendsByCompany: vi.fn(),
     expectedDividendsOverview: vi.fn(),
+    incomeSummary: vi.fn(),
   },
 }));
+
+// #267: the Income headline's data (synthetic). Default for every test; one test overrides it.
+function incomeFixture(month = "2026-02") {
+  const w = (from_date: string, to_date: string, dividends: number, interest: number) => ({
+    from_date,
+    to_date,
+    dividends,
+    interest,
+    total: dividends + interest,
+  });
+  return {
+    month,
+    base_currency: "SGD",
+    as_of: "2026-02-28",
+    partial_month: false,
+    trailing_12: w("2025-03-01", "2026-02-28", 1000, 200),
+    prior_12: w("2024-03-01", "2025-02-28", 800, 200),
+    trailing_12_change_pct: 0.2,
+    ytd: w("2026-01-01", "2026-02-28", 150, 30),
+    prior_ytd: w("2025-01-01", "2025-02-28", 100, 20),
+    ytd_change_pct: 0.5,
+    months: [{ month: "2026-02", dividends: 105, interest: 10, total: 115 }],
+    fx_incomplete: false,
+    fx_missing_currencies: [],
+    fx_stale_currencies: [],
+  };
+}
 
 const mockApi = vi.mocked(api, true);
 
 describe("Dividends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockApi.incomeSummary.mockResolvedValue(incomeFixture());
   });
 
   it("renders period totals and company table", async () => {
@@ -115,8 +144,8 @@ describe("Dividends", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Dividends" })).toBeInTheDocument();
-    expect(await screen.findByText("REALIZED THIS MONTH")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Income" })).toBeInTheDocument();
+    expect(await screen.findByText("DIVIDENDS THIS MONTH")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "What's received vs. what's ahead" })).toBeInTheDocument();
     expect(screen.getByText("Expected, next 12 months")).toBeInTheDocument();
     expect(screen.getByText("Portfolio coverage")).toBeInTheDocument();
@@ -242,6 +271,70 @@ describe("Dividends", () => {
 });
 
 // #148: the realized-this-month hero follows the selected month, whatever order replies land in.
+describe("Income headline (#267)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    const empty = { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 };
+    mockApi.dividendsSummary.mockResolvedValue({
+      from_month: "2025-03", to_month: "2026-02", period: "month", base_currency: "SGD",
+      assumed_tax_rate: 0, country_tax_rates: {}, buckets: [], totals: empty,
+    });
+    mockApi.dividendsByCompany.mockResolvedValue({
+      from_month: "2026-02", to_month: "2026-02", base_currency: "SGD", assumed_tax_rate: 0,
+      country_tax_rates: {}, totals: empty, items: [],
+    });
+    mockApi.expectedDividendsOverview.mockResolvedValue({
+      from_month: "2025-03", to_month: "2026-02", base_currency: "SGD", assumed_tax_rate: 0, country_tax_rates: {},
+      holdings_considered: 0, assets_with_actions: 0, actions_evaluated: 0,
+      monthly: { period: "month", buckets: [] }, quarterly: { period: "quarter", buckets: [] },
+      yearly: { gross: 0, estimated_tax: 0, payout_minus_tax: 0 }, companies: [],
+    } as unknown as ExpectedDividendsOverview);
+  });
+
+  function renderPage() {
+    return render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <Dividends />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+  }
+
+  it("leads with the last 12 months and the year to date, each against a year earlier", async () => {
+    mockApi.incomeSummary.mockResolvedValue(incomeFixture());
+    renderPage();
+    const eyebrow = await screen.findByText("INCOME · LAST 12 MONTHS");
+    const hero = eyebrow.closest("article") as HTMLElement;
+    expect(hero).toHaveTextContent("S$ 1,200");
+    expect(hero).toHaveTextContent("vs the 12 months before");
+    expect(hero).toHaveTextContent("Dividends S$ 1,000 · Interest S$ 200");
+    expect(hero).toHaveTextContent("YEAR TO DATE");
+    expect(hero).toHaveTextContent("S$ 180");
+    expect(hero).toHaveTextContent("SAME DATES LAST YEAR");
+    expect(hero).toHaveTextContent("S$ 120");
+    expect(hero).toHaveTextContent("+50%");
+    // The month-on-month dividends card comes after the income headline.
+    const dividends = screen.getByText("DIVIDENDS THIS MONTH");
+    expect(eyebrow.compareDocumentPosition(dividends) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(mockApi.incomeSummary).toHaveBeenCalledWith(expect.stringMatching(/^\d{4}-\d{2}$/), "SGD");
+  });
+
+  it("says there's no comparison when the year before had no income", async () => {
+    const data = incomeFixture();
+    mockApi.incomeSummary.mockResolvedValue({
+      ...data,
+      prior_12: { ...data.prior_12, dividends: 0, interest: 0, total: 0 },
+      trailing_12_change_pct: null,
+      prior_ytd: { ...data.prior_ytd, dividends: 0, interest: 0, total: 0 },
+      ytd_change_pct: null,
+    });
+    renderPage();
+    const hero = (await screen.findByText("INCOME · LAST 12 MONTHS")).closest("article") as HTMLElement;
+    expect(hero).toHaveTextContent("no comparison");
+  });
+});
+
 describe("Dividends races", () => {
   const totals = { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 };
   const summaryFor = (month: string, payout: number): DividendsSummary => ({

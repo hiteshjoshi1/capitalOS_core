@@ -30,7 +30,8 @@ export const APP_SECTIONS: AppSection[] = [
       { label: "Stocks", to: "/holdings" },
       { label: "Crypto", to: "/crypto/holdings" },
       { label: "Cash", to: "/cash" },
-      { label: "Dividends", to: "/dividends" },
+      // #267: Dividends became Income (dividends + interest); /dividends redirects here.
+      { label: "Income", to: "/income", matchPaths: ["/dividends"] },
       { label: "Risk", to: "/risk" },
       { label: "History", to: "/wealth/history" },
     ],

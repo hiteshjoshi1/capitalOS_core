@@ -1725,6 +1725,37 @@ export type DividendSummaryBucket = DividendTotals & {
   bucket: string;
 };
 
+/** Dividends (net of withholding) plus interest over [from_date, to_date], inclusive (#267). */
+export type IncomeWindow = {
+  from_date: string;
+  to_date: string;
+  dividends: number;
+  interest: number;
+  total: number;
+};
+
+export type IncomeMonth = {
+  month: string;
+  dividends: number;
+  interest: number;
+  total: number;
+};
+
+/** GET /income/summary (#267): trailing 12 months and year to date, each vs a year earlier. */
+export type IncomeSummary = FxStatus & {
+  month: string;
+  base_currency: string;
+  as_of: string;
+  partial_month: boolean;
+  trailing_12: IncomeWindow;
+  prior_12: IncomeWindow;
+  trailing_12_change_pct: number | null;
+  ytd: IncomeWindow;
+  prior_ytd: IncomeWindow;
+  ytd_change_pct: number | null;
+  months: IncomeMonth[];
+};
+
 export type DividendsSummary = FxStatus & {
   from_month: string;
   to_month: string;
@@ -2078,6 +2109,10 @@ export const api = {
     req<UnifiedAlertsResponse>(`/alerts/notifications${month ? `?month=${encodeURIComponent(month)}` : ""}`),
   alertNotificationsCount: (month?: string) =>
     req<UnifiedAlertsCount>(`/alerts/notifications/count${month ? `?month=${encodeURIComponent(month)}` : ""}`),
+  incomeSummary: (month: string, baseCurrency = "SGD") =>
+    req<IncomeSummary>(
+      `/income/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`,
+    ),
   dividendsSummary: (
     fromMonth: string,
     toMonth: string,

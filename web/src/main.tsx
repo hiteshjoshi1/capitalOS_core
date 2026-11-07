@@ -48,7 +48,8 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/wealth/history" element={<WealthHistory />} />
                 <Route path="/wealth/cash-flow" element={<Navigate to="/cash-flow" replace />} />
                 <Route path="/risk" element={<WealthRisk />} />
-                <Route path="/dividends" element={<Dividends />} />
+                <Route path="/income" element={<Dividends />} />
+                <Route path="/dividends" element={<Navigate to="/income" replace />} />
                 <Route path="/holdings" element={<StockHoldings />} />
                 <Route path="/crypto" element={<CryptoWalletsPage />} />
                 <Route path="/crypto/holdings" element={<CryptoHoldings />} />
