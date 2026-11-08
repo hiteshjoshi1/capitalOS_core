@@ -671,6 +671,37 @@ export type StockHolding = DashboardSummary["top_holdings"][number] & {
   month_change?: StockMonthChange | null;
 };
 
+// #293 (D-78): realised P&L on sales, the month and its year to date.
+export type RealisedTotals = {
+  realised: number;
+  sales: number;
+  cost_unknown: number;
+  fx_missing_currencies: string[];
+  sources: Record<string, number>;
+};
+
+export type RealisedSale = {
+  trade_date: string;
+  symbol: string | null;
+  platform: string | null;
+  quantity: number;
+  proceeds: number;
+  cost: number | null;
+  realised: number | null;
+  currency: string;
+  realised_base: number | null;
+  /** ibkr | fifo | cost_unknown */
+  source: string;
+  fx_missing: boolean;
+};
+
+export type RealisedPnl = {
+  base_currency: string;
+  month: RealisedTotals;
+  year_to_date: RealisedTotals;
+  sales: RealisedSale[];
+};
+
 export type StockHoldingsSummary = FxStatus & {
   as_of_month: string;
   base_currency: string;
@@ -1012,6 +1043,10 @@ export type CreditCardBalancePeriod = {
   difference: number | null;
   flagged: boolean;
   paid_in_full: boolean | null;
+  /** #308: payments found only on the paying bank account (included in `payments`). */
+  bank_payments?: number;
+  /** #308: why a difference is left, when the ledger can tell. */
+  note?: string | null;
 };
 
 /** A card's running balance and statement check (#300, D-76). */
@@ -2051,6 +2086,8 @@ export const api = {
     req<RiskThresholdsSetting>("/dashboard/risk-thresholds", { method: "PUT", body: JSON.stringify(payload) }),
   monthBridge: (month: string, baseCurrency = "SGD") =>
     req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  realisedPnl: (month: string, baseCurrency = "SGD") =>
+    req<RealisedPnl>(`/dashboard/realised-pnl?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   netWorthSinceUpdate: (baseCurrency = "SGD") =>

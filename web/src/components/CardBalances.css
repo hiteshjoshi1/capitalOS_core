@@ -69,6 +69,12 @@
   color: var(--warn);
 }
 
+/* #308: what the ledger knows about a period (bank-side payments, same-day ordering). */
+.cardBalanceNote {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .cardBalanceChecks summary {
   cursor: pointer;
   font-size: 13px;

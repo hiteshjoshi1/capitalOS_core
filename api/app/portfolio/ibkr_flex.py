@@ -161,6 +161,20 @@ class FlexTrade:
     proceeds: Decimal | None
     commission: Decimal | None
     broker_execution_id: str | None
+    # IBKR's own realised P&L for the fill (FIFO, in the trade's currency, net of
+    # commission) and the fill's rate to the account's base currency (#293).
+    fifo_pnl_realized: Decimal | None = None
+    fx_rate_to_base: Decimal | None = None
+
+
+def trade_metadata(trade: "FlexTrade") -> dict[str, str]:
+    """What portfolio_trades.metadata_json keeps about a fill beyond its columns (#293)."""
+    out: dict[str, str] = {}
+    if trade.fifo_pnl_realized is not None:
+        out["fifo_pnl_realized"] = str(trade.fifo_pnl_realized)
+    if trade.fx_rate_to_base is not None:
+        out["fx_rate_to_base"] = str(trade.fx_rate_to_base)
+    return out
 
 
 @dataclass(frozen=True)
@@ -596,6 +610,8 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
                 proceeds=_decimal(_attr(row, "proceeds")),
                 commission=_decimal(_attr(row, "ibCommission", "commission")),
                 broker_execution_id=_attr(row, "ibExecID", "executionId", "execId", "transactionID"),
+                fifo_pnl_realized=_decimal(_attr(row, "fifoPnlRealized")),
+                fx_rate_to_base=_decimal(_attr(row, "fxRateToBase")),
             )
         )
 
@@ -793,6 +809,11 @@ def _data_dir() -> str:
 
 def _platform_json_default(db: Session) -> str:
     return "'{}'::jsonb" if db.bind and db.bind.dialect.name == "postgresql" else "'{}'"
+
+
+def _json_param(db: Session, name: str) -> str:
+    """A bound JSON text parameter as the column's type (jsonb on Postgres, text on SQLite)."""
+    return f"CAST(:{name} AS jsonb)" if db.bind and db.bind.dialect.name == "postgresql" else f":{name}"
 
 
 def _now() -> datetime:
@@ -2185,7 +2206,7 @@ def _insert_trades(
                 VALUES
                   (:broker_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
                    :trade_date, :settle_date, :side, :quantity, :price, :proceeds, :commission,
-                   :currency, :broker_execution_id, {_platform_json_default(db)})
+                   :currency, :broker_execution_id, {_json_param(db, "metadata_json")})
                 """
             ),
             {
@@ -2204,6 +2225,7 @@ def _insert_trades(
                 # An empty ibExecID is no id: stored NULL so uq_portfolio_trades_execution
                 # doesn't treat two id-less fills as the same execution.
                 "broker_execution_id": trade.broker_execution_id or None,
+                "metadata_json": json.dumps(trade_metadata(trade), sort_keys=True),
             },
         )
 

@@ -28,7 +28,7 @@ Dividends pages.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 from sqlalchemy import text
@@ -530,6 +530,20 @@ def _flows(
         elif bucket == "expense":
             out.spending += -amount
 
+    # A card payment seen only on the paying bank account (#308) lowers the card's liability
+    # like a payment in the card's own file, so it is card activity too (the bank row itself
+    # is a move between the user's accounts, not spending).
+    from app.valuation.card_payments import missing_bank_payments
+
+    for payment in missing_bank_payments(db, current_user_id):
+        day_ts = datetime.combine(payment.day, datetime.min.time(), tzinfo=timezone.utc)
+        if not _transaction_in_month_window(day_ts, start, end):
+            continue
+        rates: Mapping[str, float] = fx.get_rates_by_date([payment.day], base_currency, {payment.currency}).get(
+            fx.rate_date(payment.day), {}
+        )
+        out.card_activity += payment.amount * rates.get(payment.currency, 0.0)
+
     first, last = _ledger_window_dates(start, end)
     ledger = _ledger_rows(db, current_user_id, first, last)
     ledger_rates: Mapping[date, Mapping[str, float]] = fx.get_rates_by_date(
@@ -611,6 +625,39 @@ def _part(key: str, label: str, amount: float) -> Dict[str, Any]:
 
 def _note(key: str, label: str, amount: Optional[float] = None) -> Dict[str, Any]:
     return {"key": key, "label": label, "amount": amount}
+
+
+def _add_realised_note(
+    lines: list[Dict[str, Any]],
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    start_anchor: datetime,
+    end_anchor: datetime,
+) -> None:
+    """Markets' realised/unrealised split (#293, D-78), as a note so the line's total is
+    unchanged: Markets is price moves on what's held across the period (unrealised); a
+    sale's gain vs its cost is a different measure, named here with its amount."""
+    from app.portfolio.realised import realised_summary  # local: avoids a cycle via pages
+
+    first = start_anchor.date()
+    last = end_anchor.date() if end_anchor.date() == first else (end_anchor - timedelta(microseconds=1)).date()
+    summary = realised_summary(db, current_user_id, base_currency, first, last)
+    month = summary["month"]
+    if not month["sales"]:
+        return
+    for line in lines:
+        if line["key"] != "markets":
+            continue
+        for part in line.get("parts") or []:
+            if part["key"] == "stocks":
+                part["label"] = "Stocks & funds: price moves on what you hold (unrealised)"
+        label = f"Realised on {month['sales']} sale(s), vs their cost"
+        if month["cost_unknown"]:
+            label += f"; {month['cost_unknown']} with no known cost left out"
+        if month["fx_missing_currencies"]:
+            label += f"; no rate for {', '.join(month['fx_missing_currencies'])}: left out"
+        line.setdefault("notes", []).append(_note("realised", label, month["realised"]))
 
 
 def _line(
@@ -930,6 +977,7 @@ def month_bridge(
         fx_flags=fx.fx_status(),
         baseline_missing=baseline_missing(start_as_of, start_nw["total"]),
     )
+    _add_realised_note(lines, db, current_user_id, base_currency, start_anchor, end_anchor)
     return {
         "as_of_month": month,
         "base_currency": base_currency,
