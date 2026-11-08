@@ -115,15 +115,40 @@
 }
 
 .monthBridgeParts li {
+  padding: 2px 0;
+  min-width: 0;
+}
+
+/* A part's (or item's) label and amount on one row; the label wraps, the amount doesn't. */
+.monthBridgePartRow {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 2px 0;
+  min-width: 0;
 }
 
-.monthBridgeParts li span:last-child {
+.monthBridgePartRow span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.monthBridgePartRow span:last-child {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+/* #332: what each part is made of. */
+.monthBridgeItems {
+  list-style: none;
+  margin: 2px 0 6px;
+  padding: 0 0 0 12px;
+  border-left: 2px solid var(--line);
+  font-size: 12px;
+}
+
+.monthBridgeItemReason {
+  margin: 0 0 2px;
+  font-size: 11px;
 }
 
 .monthBridgeMovers ul {

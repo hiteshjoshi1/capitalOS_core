@@ -79,8 +79,26 @@ function BridgeRow({
             <ul className="monthBridgeParts">
               {line.parts.map((part) => (
                 <li key={part.key}>
-                  <span>{part.label}</span>
-                  <span>{fmt.formatSignedMoney(part.amount, currency)}</span>
+                  <div className="monthBridgePartRow">
+                    <span>{part.label}</span>
+                    <span>{fmt.formatSignedMoney(part.amount, currency)}</span>
+                  </div>
+                  {/* #332: what the part is made of, so "which one?" is answered here. */}
+                  {(part.items ?? []).length > 0 ? (
+                    <ul className="monthBridgeItems" aria-label={`${part.label}: items`}>
+                      {(part.items ?? []).map((item, index) => (
+                        <li key={`${item.label}-${index}`}>
+                          <div className="monthBridgePartRow">
+                            <span>
+                              {item.link ? <Link to={item.link}>{item.label}</Link> : item.label}
+                            </span>
+                            <span>{item.amount == null ? "—" : fmt.formatSignedMoney(item.amount, currency)}</span>
+                          </div>
+                          {item.reason ? <p className="monthBridgeItemReason muted">{item.reason}</p> : null}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </li>
               ))}
             </ul>
