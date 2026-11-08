@@ -494,8 +494,8 @@ function AccountCloseControl({ account, onChanged }: { account: Account; onChang
   return (
     <span className="accountCloseControl">
       <span className="statusPill statusPill--good">Active</span>
-      <button type="button" className="linkBtn" onClick={() => setEditing(true)} aria-label={`Close ${account.name}`}>
-        Close…
+      <button type="button" className="btn btnSmall" onClick={() => setEditing(true)} aria-label={`Close ${account.name}`}>
+        Close account…
       </button>
     </span>
   );

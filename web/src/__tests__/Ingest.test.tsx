@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
@@ -924,4 +924,36 @@ describe("Ingest", () => {
     expect(mockApi.removeIngestJob).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "Remove import 60" })).toBeInTheDocument();
   });
+
+  it("names each upload's account, and offers to fix an unknown format, opened by ?job= (#315)", async () => {
+    mockApi.accounts.mockResolvedValueOnce([
+      { id: 11, name: "Synthetic Card", platform: "CITI", account_type: "CREDIT_CARD", currency: "SGD", country: "SG" },
+    ]);
+    mockApi.ingestJobs.mockResolvedValueOnce([
+      { id: 7, status: "NEEDS_MAPPING", platform: "CITI", account_id: 11, original_filename: "odd.csv", created_at: "2026-11-01T00:00:00Z" },
+    ]);
+    mockApi.ingestJob.mockResolvedValue({
+      job: {
+        id: 7, status: "NEEDS_MAPPING", platform: "CITI", account_id: 11, original_filename: "odd.csv", stored_path: "x",
+        file_sha256: "x", format_signature: "sig", parser_key: null, report_path: null, error_message: null,
+      },
+      report: null,
+    } as unknown as Awaited<ReturnType<typeof api.ingestJob>>);
+
+    render(
+      <ThemeProvider>
+        <MemoryRouter initialEntries={["/ingest?job=7"]}>
+          <Ingest />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText(/CITI|Citi/)).toBeInTheDocument();
+    expect(screen.getByText(/Synthetic Card · /)).toBeInTheDocument();
+    expect(screen.queryByText(/Account 11/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Unknown format").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "Fix format" })).toBeInTheDocument();
+    await waitFor(() => expect(mockApi.ingestJob).toHaveBeenCalledWith(7));
+  });
 });
+

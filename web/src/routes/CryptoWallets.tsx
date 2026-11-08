@@ -448,7 +448,6 @@ export default function CryptoWallets() {
             </button>
           )}
         </div>
-        <div className="hintTag">Same sign-and-verify flow as today — just restyled.</div>
       </div>
       ) : (
       <div className="card cryptoMobileNotice">

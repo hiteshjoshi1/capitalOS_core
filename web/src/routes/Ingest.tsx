@@ -17,7 +17,8 @@ type LoadState = "idle" | "loading" | "ready" | "error";
 
 function jobStatusMeta(status?: string | null): { tone: "good" | "warn" | "neutral"; label: string } {
   if (status === "IMPORTED") return { tone: "good", label: "Completed" };
-  if (status === "NEEDS_MAPPING") return { tone: "warn", label: "Needs mapping" };
+  // NEEDS_MAPPING: no parser knows the file's format; opening the job offers to register it (#315).
+  if (status === "NEEDS_MAPPING") return { tone: "warn", label: "Unknown format" };
   if (status === "REJECTED") return { tone: "warn", label: "Refused" };
   if (status === "REMOVED") return { tone: "neutral", label: "Removed" };
   return { tone: "neutral", label: status ?? "—" };
@@ -31,6 +32,8 @@ function formatPreviewAmount(amount: unknown, currency: unknown): string {
 export default function Ingest() {
   const [searchParams] = useSearchParams();
   const requestedAccountId = searchParams.get("account_id") ?? "";
+  // ?job=<id> opens that upload's report (#315), e.g. from Data Hub to fix an unknown format.
+  const requestedJob = Number(searchParams.get("job") ?? "") || null;
   // From a Data Hub freshness row (#278): the due statement's date, the source's last data
   // date and cadence. A malformed or future date is ignored.
   const requestedAsOf = searchParams.get("as_of");
@@ -77,13 +80,21 @@ export default function Ingest() {
           setAccountId(requestedAccountId);
         }
         setState("ready");
+        if (requestedJob && j.some((job) => job.id === requestedJob)) {
+          void onLoadJob(requestedJob);
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         setErr(msg);
         setState("error");
       }
     })();
-  }, [requestedAccountId]);
+  }, [requestedAccountId, requestedJob]);
+
+  /** The account's name for a job row (#315); its number only if the account is gone. */
+  function accountName(id: number): string {
+    return accounts.find((a) => a.id === id)?.name ?? `Account ${id}`;
+  }
 
   async function onUpload(allowAccountMismatch = false) {
     if (!file || !accountId) return;
@@ -467,13 +478,25 @@ export default function Ingest() {
                     <div className="listRowMain">
                       <div className="listRowTitle">{j.original_filename}</div>
                       <div className="listRowMeta">
-                        {formatPlatformLabel(j.platform)} · Account {j.account_id} · {fmt.formatDate(j.created_at)}
+                        {formatPlatformLabel(j.platform)} · {accountName(j.account_id)} · {fmt.formatDate(j.created_at)}
                       </div>
                     </div>
                     <StatusPill
                       tone={jobStatusMeta(j.status).tone}
                       label={loadingJob === j.id ? "Loading…" : jobStatusMeta(j.status).label}
                     />
+                    {j.status === "NEEDS_MAPPING" && (
+                      <button
+                        type="button"
+                        className="btn btnSmall"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void onLoadJob(j.id);
+                        }}
+                      >
+                        Fix format
+                      </button>
+                    )}
                     {j.removable && (
                       <div className="actions" onClick={(e) => e.stopPropagation()}>
                         {confirmRemoveJob === j.id ? (

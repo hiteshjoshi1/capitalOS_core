@@ -152,4 +152,30 @@ describe("MarketData", () => {
     await userEvent.click(screen.getByText("NASDAQ"));
     expect(await screen.findByText("AAPL")).toBeInTheDocument();
   });
+
+  it("leaves out exchanges with nothing held, and gives fresh rows no reason line (#315)", async () => {
+    const summary = { active_symbols: 1, refreshed: 1, fresh: 1, stale: 0, failed: 0, deferred: 0, missing: 0 };
+    mockApi.marketDataStatus.mockResolvedValueOnce({
+      status: [
+        { provider: "Yahoo", exchange_code: "SGX", status: "Idle", diagnostics_summary: summary, symbols: [
+          { asset_id: 1, symbol: "D05", mapped_symbol: "D05.SI", latest_trade_date: "2026-11-06", freshness_status: "fresh",
+            refresh_status: "ok", provider: "Yahoo", source: "close", failure_reason: null },
+        ] },
+        { provider: "Yahoo", exchange_code: "TSE", status: "Idle", diagnostics_summary: { ...summary, active_symbols: 0, fresh: 0 }, symbols: [] },
+      ],
+    });
+    mockApi.marketDataRuns.mockResolvedValueOnce({ runs: [] });
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <MarketData />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+    expect(await screen.findByText("SGX")).toBeInTheDocument();
+    expect(screen.queryByText("TSE")).not.toBeInTheDocument();
+    expect(await screen.findByText("D05")).toBeInTheDocument(); // expanded by default
+    expect(screen.queryByText("Reason unavailable")).not.toBeInTheDocument();
+  });
 });
+
