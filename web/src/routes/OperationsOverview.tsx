@@ -11,7 +11,7 @@ import LoadError from "../components/LoadError";
 import SourceFreshnessTable from "../components/SourceFreshnessTable";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import { useAuth } from "../context/useAuth";
-import { sourceLink } from "../lib/sourceFreshness";
+import { INBOX_SEVERITY_LABEL, inboxItemRoute } from "../lib/inbox";
 
 /**
  * The Data Hub Overview is the Inbox (#316, #309's review): what needs you first, each
@@ -23,25 +23,11 @@ type RunKind = NonNullable<InboxAction["run"]>;
 type RunState = { status: "idle" | "running" | "done" | "error"; message: string };
 const IDLE: RunState = { status: "idle", message: "" };
 
-const SEVERITY_LABEL: Record<InboxItem["severity"], string> = { high: "Urgent", medium: "Needs a look", low: "When you can" };
-
 function formatWhen(value?: string | null): string {
   if (!value) return "never";
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return fmt.formatDate(value);
   const label = fmt.formatDateTime(value);
   return label === fmt.MISSING ? value : label;
-}
-
-function routeFor(item: InboxItem): string | null {
-  // An overdue upload source opens Upload prefilled (account, as-of, what's due, #278).
-  if (item.source) {
-    const link = sourceLink(item.source);
-    if (link && link.startsWith("/ingest")) return link;
-  }
-  const action = item.action;
-  if (!action?.route) return null;
-  const query = new URLSearchParams(action.params ?? {}).toString();
-  return query ? `${action.route}?${query}` : action.route;
 }
 
 export default function OperationsOverview() {
@@ -246,7 +232,7 @@ function InboxRow({
   onRun: (kind: RunKind, params: Record<string, string>) => void;
 }) {
   const action = item.action;
-  const route = routeFor(item);
+  const route = inboxItemRoute(item);
   let control: React.ReactNode = null;
   if (action && action.admin_only && !isAdmin) {
     control = <span className="muted inboxAdminHint">An admin can fix this</span>;
@@ -268,7 +254,7 @@ function InboxRow({
     <li className={`card inboxItem inboxItem-${item.severity}`} data-testid={`inbox-item-${item.kind}`}>
       <div className="inboxItemText">
         <p className="inboxItemTitle">
-          <span className={`inboxSeverity inboxSeverity-${item.severity}`}>{SEVERITY_LABEL[item.severity]}</span>
+          <span className={`inboxSeverity inboxSeverity-${item.severity}`}>{INBOX_SEVERITY_LABEL[item.severity]}</span>
           {item.title}
         </p>
         {item.detail && <p className="inboxItemDetail muted">{item.detail}</p>}

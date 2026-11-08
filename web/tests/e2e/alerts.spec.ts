@@ -1,45 +1,33 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mockAuthenticatedSession } from "./helpers/auth";
 
-async function mockAlertsApis(page: Page, uploadReminders: object[] = []) {
-  // Legacy endpoints — still available for compatibility
-  await page.route("**/alerts/upload-reminders/count", async (route) => {
-    await route.fulfill({ json: { count: uploadReminders.length } });
-  });
-  await page.route("**/alerts/upload-reminders", async (route) => {
-    await route.fulfill({ json: uploadReminders });
-  });
-  // New unified endpoint used by the Alerts page
-  await page.route("**/alerts/notifications", async (route) => {
+// #317: Alerts and the header bell read the Data Hub inbox (#316).
+async function mockInbox(page: Page, items: object[] = []) {
+  await page.route("**/operations/inbox", async (route) => {
     await route.fulfill({
-      json: {
-        upload_reminders: uploadReminders,
-        total_count: uploadReminders.length,
-      },
+      json: { as_of: "2026-11-08", count: items.length, items, all_good: [], recent_activity: [] },
     });
   });
 }
 
-const MOCK_ALERTS = [
+const ITEMS = [
   {
-    account_id: 1,
-    account_name: "DBS Savings",
-    platform: "DBS",
-    account_type: "BANK",
-    last_upload_date: "2025-11-01",
-    last_transaction_date: "2025-10-31",
-    days_since_upload: 45,
-    message: "Upload the latest statement for DBS Savings (DBS). Last upload was 2025-11-01 and last transaction tracked was 2025-10-31.",
+    id: "source:account:1",
+    kind: "source_overdue",
+    severity: "high",
+    title: "DBS Multiplier: 20 days overdue",
+    detail: "Last data 2026-10-01",
+    action: { label: "Upload", route: "/ingest", params: { account_id: "1" }, run: null, admin_only: false },
+    source: null,
   },
   {
-    account_id: 2,
-    account_name: "IBKR Brokerage",
-    platform: "IBKR",
-    account_type: "BROKER",
-    last_upload_date: "2025-10-15",
-    last_transaction_date: null,
-    days_since_upload: 62,
-    message: "Upload the latest statement for IBKR Brokerage (IBKR). Last upload was 2025-10-15.",
+    id: "import:4",
+    kind: "unknown_format",
+    severity: "medium",
+    title: "IBKR: file format not recognised",
+    detail: "odd.csv",
+    action: { label: "Fix format", route: "/ingest", params: { job: "4" }, run: null, admin_only: false },
+    source: null,
   },
 ];
 
@@ -47,33 +35,28 @@ test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 });
 
-test("navigates to /alerts and shows alert cards", async ({ page }) => {
-  await mockAlertsApis(page, MOCK_ALERTS);
+test("navigates to /alerts and shows the inbox items", async ({ page }) => {
+  await mockInbox(page, ITEMS);
   await page.goto("/alerts");
-
   await expect(page.getByRole("heading", { level: 1, name: "Alerts" })).toBeVisible();
-  await expect(page.getByLabel("Upload reminders")).toBeVisible();
-
-  await expect(page.getByText("DBS Savings", { exact: true })).toBeVisible();
-  await expect(page.getByText("IBKR Brokerage", { exact: true })).toBeVisible();
-  await expect(page.getByText(/45 days/)).toBeVisible();
-  await expect(page.getByText(/62 days/)).toBeVisible();
+  const list = page.getByRole("list", { name: "Alerts" });
+  await expect(list.getByText("DBS Multiplier: 20 days overdue")).toBeVisible();
+  await expect(list.getByText("IBKR: file format not recognised")).toBeVisible();
+  // The bell shows the same count.
+  await expect(page.getByLabel("2 items need you")).toBeVisible();
 });
 
-test("shows empty state when no alerts", async ({ page }) => {
-  await mockAlertsApis(page, []);
+test("shows the empty state when nothing needs you", async ({ page }) => {
+  await mockInbox(page, []);
   await page.goto("/alerts");
-
-  await expect(page.getByRole("heading", { level: 1, name: "Alerts" })).toBeVisible();
-  await expect(page.getByLabel("No alerts")).toBeVisible();
-  await expect(page.getByText(/All accounts are up to date/i)).toBeVisible();
+  await expect(page.getByText("Nothing needs you. Everything is up to date.")).toBeVisible();
+  await expect(page.getByLabel("Nothing needs you")).toBeVisible();
 });
 
-test("alert cards contain links to ingest page", async ({ page }) => {
-  await mockAlertsApis(page, MOCK_ALERTS);
+test("alert items link to their fix", async ({ page }) => {
+  await mockInbox(page, ITEMS);
   await page.goto("/alerts");
-
-  const ingestLinks = page.getByRole("link", { name: /Go to Ingest/i });
-  await expect(ingestLinks.first()).toBeVisible();
-  await expect(ingestLinks.first()).toHaveAttribute("href", "/ingest?account_id=1");
+  const list = page.getByRole("list", { name: "Alerts" });
+  await expect(list.getByRole("link", { name: "Upload" })).toHaveAttribute("href", "/ingest?account_id=1");
+  await expect(list.getByRole("link", { name: "Fix format" })).toHaveAttribute("href", "/ingest?job=4");
 });
