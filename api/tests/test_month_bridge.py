@@ -29,6 +29,8 @@ MONTHS: dict[str, tuple[str, tuple[str, ...]]] = {
     "first_us": ("2026-03", ("2026-02", "2026-01")),
 }
 LINES = ("new_money", "markets", "fx", "dividends_interest", "cash_kept")
+# Lines that appear only when they have something (#329): after the fixed ones, in this order.
+OPTIONAL_LINES = ("catch_up",)
 
 
 def _get(client: TestClient, path: str) -> dict[str, Any]:
@@ -54,7 +56,9 @@ def _mover(bridge: dict[str, Any], symbol: str) -> dict[str, Any]:
 
 
 def _assert_adds_up(bridge: dict[str, Any], where: str) -> None:
-    assert [line["key"] for line in bridge["lines"]] == list(LINES), where
+    keys = [line["key"] for line in bridge["lines"]]
+    assert keys[: len(LINES)] == list(LINES), where
+    assert keys[len(LINES):] == [k for k in OPTIONAL_LINES if k in keys], where
     total = bridge["start"]["value"] + sum(line["amount"] for line in bridge["lines"]) + bridge["unexplained"]["amount"]
     assert total == pytest.approx(bridge["end"]["value"], abs=1e-6), where
     for line in [*bridge["lines"], bridge["unexplained"]]:
