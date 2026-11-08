@@ -1012,6 +1012,10 @@ export type CreditCardBalancePeriod = {
   difference: number | null;
   flagged: boolean;
   paid_in_full: boolean | null;
+  /** #308: payments found only on the paying bank account (included in `payments`). */
+  bank_payments?: number;
+  /** #308: why a difference is left, when the ledger can tell. */
+  note?: string | null;
 };
 
 /** A card's running balance and statement check (#300, D-76). */

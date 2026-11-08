@@ -16,6 +16,8 @@ export function owedLabel(card: Pick<CreditCardBalanceItem, "owed_now" | "curren
 /** What a flagged statement's difference most likely means. */
 export function differenceReason(period: CreditCardBalancePeriod, currency: string): string | null {
   if (!period.flagged || period.difference == null) return null;
+  // The ledger's own explanation when it has one (#308): charges after the last upload, etc.
+  if (period.note) return period.note;
   const amount = money(Math.abs(period.difference), currency);
   if (period.transaction_count === 0) {
     return `No transactions between these dates: a statement is probably missing (${amount} unaccounted for).`;

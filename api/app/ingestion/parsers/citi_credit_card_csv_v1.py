@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.ingestion.parsers import ParseResult
+from app.ingestion.card_fees import CARD_FEE_CATEGORY, is_conversion_fee
 from app.ingestion.masking import mask_account_numbers
 
 _DATE_FMT = "%d/%m/%Y"
@@ -40,6 +41,8 @@ def _classify(description: str, amount: float) -> tuple[str, str]:
         return "TRANSFER", "CreditCard::Payment"
     if "LATE CHARGE FEE" in desc:
         return "FEE", "CreditCard::Fee"
+    if is_conversion_fee(desc):  # "CCY CONVERSION FEE" (#308)
+        return "FEE", CARD_FEE_CATEGORY
     if "BILLED FINANCE CHARGES" in desc or "RTL INT CRED ADJ" in desc:
         return "INTEREST", "CreditCard::Interest"
     if amount > 0:

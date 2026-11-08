@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from app.ingestion.card_fees import CARD_FEE_CATEGORY, is_conversion_fee
 from app.ingestion.masking import mask_account_numbers
 from app.ingestion.parsers import ParseResult
 from app.ingestion.parsers.uob_account_xls_v1 import (
@@ -310,6 +311,8 @@ def _classify(description: str, amount: float, merchant_counterparty: str | None
         return "TRANSFER", "CreditCard::Payment"
     if any(keyword in desc for keyword in _FEE_KEYWORDS):
         return "FEE", "CreditCard::Fee"
+    if is_conversion_fee(desc):  # a foreign transaction / conversion fee (#308)
+        return "FEE", CARD_FEE_CATEGORY
     if any(keyword in desc for keyword in _INTEREST_KEYWORDS):
         return "INTEREST", "CreditCard::Interest"
     if amount > 0:
