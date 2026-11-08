@@ -144,6 +144,7 @@ vi.mock("../lib/api", () => ({
     categoryOverride: vi.fn(),
     uploadReminderCount: vi.fn().mockResolvedValue({ count: 0 }),
     alertNotificationsCount: vi.fn().mockResolvedValue({ total_count: 0 }),
+    operationsInbox: vi.fn().mockResolvedValue({ as_of: "2026-11-08", count: 0, items: [], all_good: [], recent_activity: [] }),
     alertNotifications: vi.fn().mockResolvedValue({
       upload_reminders: [],
       total_count: 0,

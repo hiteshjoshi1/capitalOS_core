@@ -100,3 +100,242 @@
     text-align: left;
   }
 }
+
+/* ─── #313: any period, grouped per stock ──────────────────────────────── */
+.realisedHeader {
+  align-items: flex-start;
+}
+
+.realisedPicker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.realisedPicker .coSegmentedControl {
+  flex-wrap: wrap;
+}
+
+.realisedYearSelect {
+  width: auto;
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.realisedHero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.realisedPeriodLabel {
+  flex-basis: 100%;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.realisedAmount--big {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.realisedNone {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.realisedTotals dd {
+  font-size: 15px;
+}
+
+.realisedByStock {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.realisedByStockHead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.realisedSubtitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.realisedSplit {
+  font-size: 12px;
+}
+
+.realisedTable {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.realisedTable th,
+.realisedTable td {
+  padding: 8px 6px;
+  border-top: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.realisedTable thead th {
+  border-top: none;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.realisedTable .num {
+  text-align: right;
+  white-space: nowrap;
+}
+
+.realisedStockBtn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.realisedStockName {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.realisedStockName .muted {
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.realisedChevron {
+  color: var(--muted);
+  width: 12px;
+}
+
+.realisedGainCell {
+  display: table-cell;
+}
+
+.realisedRowNote {
+  display: block;
+  font-size: 11px;
+  color: var(--warn);
+  white-space: normal;
+}
+
+.realisedRow--open th,
+.realisedRow--open td {
+  background: color-mix(in srgb, var(--line) 30%, transparent);
+}
+
+.realisedDetailRow td {
+  border-top: none;
+  padding-top: 0;
+}
+
+.realisedNote {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* Phone and touch: each stock is a card; the sales open under it. */
+@media (max-width: 640px), (pointer: coarse) {
+  .realisedStockBtn {
+    min-height: 44px;
+  }
+
+  .realisedYearSelect {
+    min-height: 44px;
+  }
+}
+
+@media (max-width: 640px) {
+  .realisedTable thead {
+    display: none;
+  }
+
+  .realisedTable,
+  .realisedTable tbody,
+  .realisedTable tr,
+  .realisedTable th,
+  .realisedTable td {
+    display: block;
+    width: 100%;
+  }
+
+  .realisedTable tr.realisedRow {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 2px 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .realisedTable tr.realisedRow th,
+  .realisedTable tr.realisedRow td {
+    border-top: none;
+    padding: 0;
+  }
+
+  .realisedTable .realisedStockCell {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .realisedTable .realisedGainCell {
+    grid-column: 2;
+    grid-row: 1;
+    display: block;
+    text-align: right;
+  }
+
+  /* Sales · shares · proceeds · cost: one muted line under the name. */
+  .realisedTable tr.realisedRow td:not(.realisedGainCell) {
+    grid-column: 1 / -1;
+    display: inline;
+    width: auto;
+    text-align: left;
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .realisedTable tr.realisedRow td:not(.realisedGainCell)::before {
+    content: attr(data-label) ": ";
+  }
+
+  .realisedTable tr.realisedRow {
+    grid-template-columns: 1fr auto;
+  }
+
+  .realisedDetailRow td {
+    padding: 0;
+  }
+}

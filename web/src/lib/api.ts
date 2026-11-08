@@ -695,12 +695,54 @@ export type RealisedSale = {
   fx_missing: boolean;
 };
 
+// #313: any period, grouped per stock (per account).
+export type RealisedPeriodKey = "month" | "ytd" | "last_year" | "year" | "range";
+
+export type RealisedPeriod = {
+  key: RealisedPeriodKey;
+  start: string;
+  /** Inclusive, never after today. */
+  end: string;
+  label: string;
+};
+
+export type RealisedInstrument = {
+  symbol: string | null;
+  platform: string | null;
+  currency: string;
+  sales_count: number;
+  quantity: number;
+  /** Sales with a known cost and a rate only. */
+  realised_base: number;
+  proceeds_base: number;
+  cost_base: number;
+  /** In the trade currency, sales with a known cost. */
+  realised: number;
+  in_total: number;
+  cost_unknown: number;
+  fx_missing: boolean;
+  sources: Record<string, number>;
+  first_sale: string;
+  last_sale: string;
+  sales: RealisedSale[];
+};
+
 export type RealisedPnl = {
   base_currency: string;
   month: RealisedTotals;
   year_to_date: RealisedTotals;
   sales: RealisedSale[];
+  period?: RealisedPeriod | null;
+  period_totals?: RealisedTotals | null;
+  by_instrument?: RealisedInstrument[];
+  years_with_sales?: number[];
+  /** The earliest trade the app holds: no sales are known before it. */
+  trades_from?: string | null;
+  /** Broker platforms with holdings but no trade data. */
+  platforms_without_trades?: string[];
 };
+
+export type RealisedPeriodQuery = { period: RealisedPeriodKey; year?: number; from?: string; to?: string };
 
 export type StockHoldingsSummary = FxStatus & {
   as_of_month: string;
@@ -1804,6 +1846,47 @@ export type SourceFreshness = {
   sources: SourceFreshnessRow[];
 };
 
+/** The Data Hub inbox (#316): one item that needs the user, with its action. */
+export type InboxAction = {
+  label: string;
+  /** A page to open, with `params` as its query string. */
+  route: string | null;
+  params: Record<string, string>;
+  /** A refresh the page runs in place. */
+  run: "refresh_prices" | "fx_backfill" | "refresh_ibkr" | "refresh_crypto" | null;
+  /** Writes shared data (#152): only an admin gets the button. */
+  admin_only: boolean;
+};
+
+export type InboxItem = {
+  id: string;
+  kind:
+    | "source_overdue"
+    | "source_never_loaded"
+    | "unknown_format"
+    | "import_pending"
+    | "unpriced_holding"
+    | "fx_gap"
+    | "fx_unsupported"
+    | "job_failing"
+    | "unmapped_transactions"
+    | string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  detail: string | null;
+  action: InboxAction | null;
+  /** The source-freshness row, for the source kinds (prefilled Upload link, #278). */
+  source: SourceFreshnessRow | null;
+};
+
+export type InboxResponse = {
+  as_of: string;
+  count: number;
+  items: InboxItem[];
+  all_good: string[];
+  recent_activity: DataHubActivityItem[];
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -2086,13 +2169,22 @@ export const api = {
     req<RiskThresholdsSetting>("/dashboard/risk-thresholds", { method: "PUT", body: JSON.stringify(payload) }),
   monthBridge: (month: string, baseCurrency = "SGD") =>
     req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
-  realisedPnl: (month: string, baseCurrency = "SGD") =>
-    req<RealisedPnl>(`/dashboard/realised-pnl?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  realisedPnl: (month: string, baseCurrency = "SGD", period?: RealisedPeriodQuery) => {
+    const params = new URLSearchParams({ month, base_currency: baseCurrency });
+    if (period) {
+      params.set("period", period.period);
+      if (period.year != null) params.set("year", String(period.year));
+      if (period.from) params.set("from", period.from);
+      if (period.to) params.set("to", period.to);
+    }
+    return req<RealisedPnl>(`/dashboard/realised-pnl?${params.toString()}`);
+  },
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
     req<NetWorthSinceUpdate>(`/dashboard/net-worth-since-update?base_currency=${encodeURIComponent(baseCurrency)}`),
   dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
+  operationsInbox: () => req<InboxResponse>("/operations/inbox"),
   sourceFreshness: () => req<SourceFreshness>("/dashboard/source-freshness"),
   setSourceFreshnessCadence: (sourceKey: string, body: { cadence: string; grace_days: number }) =>
     req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, {

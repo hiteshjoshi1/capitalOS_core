@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "../context/ThemeContext";
@@ -61,9 +61,10 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Data Hub" })).toHaveClass("sidebarLinkActive");
   });
 
-  it("renders Alerts in the utility links and omits Settings", () => {
+  it("has no Utilities/Alerts section: Alerts is the header bell (#317)", () => {
     renderSidebar();
-    expect(screen.getByRole("link", { name: "Alerts" })).toBeInTheDocument();
+    expect(screen.queryByText("Utilities")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Alerts" })).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Settings" })).not.toBeInTheDocument();
   });
 
@@ -73,22 +74,9 @@ describe("Sidebar", () => {
     expect(screen.queryByRole("button", { name: "Toggle theme" })).not.toBeInTheDocument();
   });
 
-  it("shows no alert badge when the notifications count is 0", async () => {
-    mockApi.alertNotificationsCount.mockResolvedValueOnce({ total_count: 0 });
-    renderSidebar("/alerts");
-    await waitFor(() => {
-      expect(mockApi.alertNotificationsCount).toHaveBeenCalled();
-    });
-    expect(screen.queryByLabelText(/\d+ alerts/i)).not.toBeInTheDocument();
-  });
-
-  it("shows the alert badge from the lean notifications count (#149)", async () => {
-    mockApi.alertNotificationsCount.mockResolvedValueOnce({ total_count: 3 });
+  it("doesn't fetch alert counts any more (the bell reads the inbox, #317)", () => {
     renderSidebar("/wealth");
-    await waitFor(() => {
-      expect(screen.getByLabelText(/3 alerts/i)).toBeInTheDocument();
-    });
-    // The badge never pulls the whole notifications list.
+    expect(mockApi.alertNotificationsCount).not.toHaveBeenCalled();
     expect(mockApi.alertNotifications).not.toHaveBeenCalled();
   });
 

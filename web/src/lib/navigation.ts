@@ -72,9 +72,8 @@ export const APP_SECTIONS: AppSection[] = [
   },
 ];
 
-export const UTILITY_NAV_ITEMS: UtilityNavItem[] = [
-  { label: "Alerts", to: "/alerts", badgeKey: "alerts" },
-];
+// #317: Alerts moved to the header bell (the Data Hub inbox); /alerts still works.
+export const UTILITY_NAV_ITEMS: UtilityNavItem[] = [];
 
 function itemMatchScore(item: NavItem, pathname: string): number {
   const candidates = item.matchPaths ?? [item.to];

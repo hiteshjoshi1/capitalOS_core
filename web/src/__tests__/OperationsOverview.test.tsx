@@ -1,51 +1,74 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import OperationsOverview from "../routes/OperationsOverview";
 import { api } from "../lib/api";
-import type { Account, DataHubSummary } from "../lib/api";
+import type { Account, InboxItem, InboxResponse } from "../lib/api";
 import { clearApiCache } from "../lib/useApiResource";
 
 vi.mock("../lib/api", () => ({
   api: {
-    dataHubSummary: vi.fn(),
+    operationsInbox: vi.fn(),
     accounts: vi.fn(),
     marketDataRefreshNow: vi.fn(),
     ibkrFlexImportNow: vi.fn(),
     cryptoRefreshNow: vi.fn(),
+    fxBackfill: vi.fn(),
     sourceFreshness: vi.fn(),
   },
 }));
 
+const authState = { user: { id: 1, username: "demo", is_admin: true } as { id: number; username: string; is_admin: boolean } };
+vi.mock("../context/useAuth", () => ({ useAuth: () => authState }));
+
 const mockApi = vi.mocked(api, true);
 
-const ibkrAccountFixture: Account = {
-  id: 9,
-  name: "IBKR",
-  platform: "IBKR",
-  account_type: "BROKER",
-  currency: "USD",
+const ibkr: Account = { id: 9, name: "IBKR", platform: "IBKR", account_type: "BROKER", currency: "USD" };
+
+function item(partial: Partial<InboxItem> & Pick<InboxItem, "id" | "kind" | "title">): InboxItem {
+  return { severity: "medium", detail: null, action: null, source: null, ...partial };
+}
+
+const busyInbox: InboxResponse = {
+  as_of: "2026-11-08",
+  count: 4,
+  items: [
+    item({
+      id: "job:ibkr_flex",
+      kind: "job_failing",
+      severity: "high",
+      title: "IBKR Flex import is failing",
+      detail: "3 failed runs in a row",
+      action: { label: "Refresh IBKR", route: null, params: {}, run: "refresh_ibkr", admin_only: false },
+    }),
+    item({
+      id: "import:4",
+      kind: "unknown_format",
+      title: "Synthetic Bank: file format not recognised",
+      action: { label: "Fix format", route: "/ingest", params: { job: "4" }, run: null, admin_only: false },
+    }),
+    item({
+      id: "fx:gap",
+      kind: "fx_gap",
+      title: "Past exchange rates missing for 12 days",
+      action: { label: "Fetch past rates", route: null, params: {}, run: "fx_backfill", admin_only: true },
+    }),
+    item({
+      id: "unmapped",
+      kind: "unmapped_transactions",
+      severity: "low",
+      title: "5 transactions without a category",
+      action: { label: "Map transactions", route: "/cash-flow/map-transactions", params: {}, run: null, admin_only: false },
+    }),
+  ],
+  all_good: ["8 sources on time", "All 12 quotes fresh"],
+  recent_activity: [
+    { kind: "import", title: "Imported a statement", meta: "42 transactions", occurred_at: "2026-11-07" },
+  ],
 };
 
-const summaryFixture: DataHubSummary = {
-  linked_accounts: 6,
-  platform_count: 5,
-  currency_count: 3,
-  import_health: {
-    pending_count: 0,
-    last_import_platform: "DBS Multiplier",
-    last_import_at: "2 days ago",
-  },
-  market_data: { fresh: 39, stale: 3 },
-  connected_wallet_count: 3,
-  connected_wallet_labels: ["Ledger", "Phantom", "MetaMask"],
-  recent_activity: [
-    { kind: "import", title: "Imported DBS Multiplier statement", meta: "42 transactions · 3 duplicates skipped", occurred_at: "2 days ago" },
-    { kind: "market_data", title: "Refreshed SGX market data", meta: "3 stale quotes resolved", occurred_at: "6 hours ago" },
-  ],
-  job_status: [],
-};
+const quietInbox: InboxResponse = { ...busyInbox, count: 0, items: [] };
 
 function renderPage() {
   return render(
@@ -55,196 +78,116 @@ function renderPage() {
   );
 }
 
-describe("OperationsOverview (Data Hub Overview)", () => {
+describe("Data Hub Inbox (#316)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearApiCache();
-    mockApi.accounts.mockResolvedValue([ibkrAccountFixture]);
-    // The source freshness table (#252) has its own tests (SourceFreshness.test.tsx).
-    mockApi.sourceFreshness.mockResolvedValue({ as_of: "2026-11-06", overdue_count: 0, cadences: [], sources: [] });
+    authState.user = { id: 1, username: "demo", is_admin: true };
+    mockApi.accounts.mockResolvedValue([ibkr]);
+    mockApi.sourceFreshness.mockResolvedValue({ as_of: "2026-11-08", overdue_count: 0, cadences: [], sources: [] });
   });
 
-  it("renders live stat cards, quick actions, and recent activity", async () => {
-    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
+  it("lists what needs you first, each with its action", async () => {
+    mockApi.operationsInbox.mockResolvedValue(busyInbox);
     renderPage();
-
-    await waitFor(() => expect(screen.getByText("6")).toBeInTheDocument());
-
-    expect(screen.getByText("Linked accounts")).toBeInTheDocument();
-    expect(screen.getByText("Across 5 platforms · 3 currencies")).toBeInTheDocument();
-    expect(screen.getByText("0 pending")).toBeInTheDocument();
-    expect(screen.getByText("39 / 42 fresh")).toBeInTheDocument();
-    expect(screen.getByText("3 connected")).toBeInTheDocument();
-
-    expect(screen.getByText("Quick actions")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Import Statements/ })).toHaveAttribute("href", "/ingest");
-    expect(screen.getByRole("link", { name: /Add Crypto Wallets/ })).toHaveAttribute("href", "/crypto");
-
-    expect(screen.getByText("Recent activity")).toBeInTheDocument();
-    expect(screen.getByText("Imported DBS Multiplier statement")).toBeInTheDocument();
-    expect(screen.getByText("Refreshed SGX market data")).toBeInTheDocument();
+    const heading = await screen.findByRole("heading", { name: /Needs you/ });
+    expect(heading).toHaveTextContent("4");
+    const rows = screen.getAllByRole("listitem").filter((li) => li.className.includes("inboxItem"));
+    expect(rows.map((r) => r.querySelector(".inboxItemTitle")?.textContent)).toEqual([
+      "UrgentIBKR Flex import is failing",
+      "Needs a lookSynthetic Bank: file format not recognised",
+      "Needs a lookPast exchange rates missing for 12 days",
+      "When you can5 transactions without a category",
+    ]);
+    expect(screen.getByRole("link", { name: "Fix format" })).toHaveAttribute("href", "/ingest?job=4");
+    expect(screen.getByRole("link", { name: "Map transactions" })).toHaveAttribute("href", "/cash-flow/map-transactions");
   });
 
-  it("renders an empty state when there is no recent activity", async () => {
-    mockApi.dataHubSummary.mockResolvedValue({ ...summaryFixture, recent_activity: [] });
+  it("runs an item's refresh in place and reloads the list", async () => {
+    mockApi.operationsInbox.mockResolvedValueOnce(busyInbox).mockResolvedValue(quietInbox);
+    mockApi.ibkrFlexImportNow.mockResolvedValue({ counts: { positions: 7 } } as never);
     renderPage();
-
-    await waitFor(() => expect(screen.getByText("No recent activity yet.")).toBeInTheDocument());
+    fireEvent.click(await screen.findByRole("button", { name: "Refresh IBKR" }));
+    await waitFor(() => expect(mockApi.ibkrFlexImportNow).toHaveBeenCalledWith(9));
+    expect(await screen.findByText("IBKR: imported 7 positions.")).toBeInTheDocument();
+    expect(await screen.findByText(/Nothing needs you/)).toBeInTheDocument();
   });
 
-  it("triggers price, IBKR, and crypto refreshes from the Refresh now section", async () => {
-    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
-    mockApi.marketDataRefreshNow.mockResolvedValue({ status: "completed", exchanges: [{}, {}] });
-    mockApi.ibkrFlexImportNow.mockResolvedValue({ counts: { positions: 14, nav_snapshots: 2 } });
-    mockApi.cryptoRefreshNow.mockResolvedValue({ status: "queued", wallets_refreshed: 4 });
-
+  it("shows a non-admin who can fix a shared-data item, without the button", async () => {
+    authState.user = { id: 2, username: "viewer", is_admin: false };
+    mockApi.operationsInbox.mockResolvedValue(busyInbox);
     renderPage();
+    await screen.findByRole("heading", { name: /Needs you/ });
+    expect(screen.queryByRole("button", { name: "Fetch past rates" })).not.toBeInTheDocument();
+    expect(screen.getByText("An admin can fix this")).toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("Refresh now")).toBeInTheDocument();
+  it("collapses what's fine and shows the latest activity in one line", async () => {
+    mockApi.operationsInbox.mockResolvedValue(quietInbox);
+    renderPage();
+    expect(await screen.findByText(/Nothing needs you/)).toBeInTheDocument();
+    const good = screen.getByText(/All good \(2\)/).closest("details");
+    expect(good).not.toHaveAttribute("open");
+    expect(within(good as HTMLElement).getByText("8 sources on time")).toBeInTheDocument();
+    expect(screen.getByText(/Latest: Imported a statement/)).toBeInTheDocument();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh prices" }));
-    await waitFor(() => expect(screen.getByText("Refreshed 2 exchanges.")).toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole("button", { name: "Refresh IBKR" }));
-    await waitFor(() => expect(screen.getByText("Imported 14 positions, 2 NAV snapshots.")).toBeInTheDocument());
+  it("Refresh all runs every refresh the user may run; the menu runs one", async () => {
+    mockApi.operationsInbox.mockResolvedValue(quietInbox);
+    mockApi.marketDataRefreshNow.mockResolvedValue({ exchanges: ["SGX"] } as never);
+    mockApi.ibkrFlexImportNow.mockResolvedValue({ counts: { positions: 1 } } as never);
+    mockApi.cryptoRefreshNow.mockResolvedValue({ wallets_refreshed: 2 } as never);
+    mockApi.fxBackfill.mockResolvedValue({ status: "up_to_date", fetched_requests: 0, remaining_requests: 0 } as never);
+    renderPage();
+    await screen.findByText(/Nothing needs you/);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+    await waitFor(() => expect(mockApi.fxBackfill).toHaveBeenCalled());
+    expect(mockApi.marketDataRefreshNow).toHaveBeenCalledTimes(1);
+    expect(mockApi.cryptoRefreshNow).toHaveBeenCalledTimes(1);
     expect(mockApi.ibkrFlexImportNow).toHaveBeenCalledWith(9);
 
-    fireEvent.click(screen.getByRole("button", { name: "Refresh crypto" }));
-    await waitFor(() => expect(screen.getByText("Queued refresh for 4 wallets.")).toBeInTheDocument());
+    vi.clearAllMocks();
+    mockApi.operationsInbox.mockResolvedValue(quietInbox);
+    mockApi.cryptoRefreshNow.mockResolvedValue({ wallets_refreshed: 2 } as never);
+    await screen.findByRole("button", { name: "Refresh all" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Refresh all" })).not.toBeDisabled());
+    fireEvent.click(within(screen.getByRole("group", { name: "Refresh one source" })).getByRole("button", { name: "Crypto wallets" }));
+    await waitFor(() => expect(mockApi.cryptoRefreshNow).toHaveBeenCalledTimes(1));
+    expect(mockApi.marketDataRefreshNow).not.toHaveBeenCalled();
   });
 
-  it("shows a refresh error in full, as an alert (#121)", async () => {
-    const message =
-      "IBKR Flex isn't set up: IBKR_FLEX_TOKEN and IBKR_FLEX_QUERY_ID missing in .env.";
-    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
-    mockApi.accounts.mockResolvedValue([ibkrAccountFixture]);
-    mockApi.ibkrFlexImportNow.mockRejectedValue(new Error(message));
+  it("a non-admin's Refresh all leaves out the shared-data refreshes", async () => {
+    authState.user = { id: 2, username: "viewer", is_admin: false };
+    mockApi.operationsInbox.mockResolvedValue(quietInbox);
+    mockApi.ibkrFlexImportNow.mockResolvedValue({ counts: { positions: 1 } } as never);
+    mockApi.cryptoRefreshNow.mockResolvedValue({ wallets_refreshed: 0 } as never);
     renderPage();
-
-    expect(await screen.findByText("Refresh now")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Refresh IBKR" }));
-
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent(message);
-    expect(alert).toHaveClass("dataHubRefreshError");
+    await screen.findByText(/Nothing needs you/);
+    fireEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+    await waitFor(() => expect(mockApi.cryptoRefreshNow).toHaveBeenCalled());
+    expect(mockApi.marketDataRefreshNow).not.toHaveBeenCalled();
+    expect(mockApi.fxBackfill).not.toHaveBeenCalled();
   });
 
-  it("disables the IBKR refresh button when no IBKR account is linked", async () => {
-    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
-    mockApi.accounts.mockResolvedValue([]);
-    renderPage();
-
-    expect(await screen.findByText("Refresh now")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Refresh IBKR" })).toBeDisabled();
-  });
-  it("shows per-source job status and turns a source red after repeated failures (#156)", async () => {
-    mockApi.dataHubSummary.mockResolvedValue({
-      ...summaryFixture,
-      job_status: [
-        {
-          job: "ibkr_flex",
-          label: "IBKR Flex import",
-          state: "failing",
-          failure_threshold: 3,
-          last_success_at: "2026-11-02T10:35:00+00:00",
-          data_as_of: "2026-11-01",
-          consecutive_failures: 3,
-          last_error: "IbkrFlexError: statement not ready",
-          scopes: [],
-        },
-        {
-          job: "market_data",
-          label: "Quote refresh",
-          state: "ok",
-          failure_threshold: 3,
-          last_success_at: "2026-11-03T22:50:00+00:00",
-          data_as_of: "2026-11-03",
-          consecutive_failures: 0,
-          scopes: [],
-        },
-        {
-          job: "crypto_refresh",
-          label: "Crypto wallet refresh",
-          state: "not_configured",
-          failure_threshold: 3,
-          consecutive_failures: 0,
-          scopes: [],
-        },
+  it("an overdue upload source opens Upload prefilled (#278)", async () => {
+    mockApi.operationsInbox.mockResolvedValue({
+      ...busyInbox,
+      items: [
+        item({
+          id: "source:account:7",
+          kind: "source_overdue",
+          title: "UOB Card: 9 days overdue",
+          action: { label: "Upload", route: "/ingest", params: { account_id: "7" }, run: null, admin_only: false },
+          source: {
+            source_key: "account:7", kind: "card_statement", label: "UOB Card", platform: "UOB",
+            last_data_date: "2026-09-30", cadence: "monthly", grace_days: 5, default_cadence: "monthly",
+            default_grace_days: 5, overridden: false, due_date: "2026-11-04", status: "overdue", overdue: true, days_overdue: 4,
+          },
+        }),
       ],
     });
     renderPage();
-
-    await waitFor(() => expect(screen.getByText("Job status")).toBeInTheDocument());
-    const ibkr = screen.getByTestId("job-status-ibkr_flex");
-    expect(ibkr).toHaveClass("dataHubJobFailing");
-    expect(ibkr).toHaveTextContent("Failing");
-    expect(ibkr).toHaveTextContent("Data as of: 1 Nov 2026");
-    expect(ibkr).toHaveTextContent("3 failed runs in a row: IbkrFlexError: statement not ready");
-
-    const quotes = screen.getByTestId("job-status-market_data");
-    expect(quotes).toHaveTextContent("Healthy");
-    expect(quotes).not.toHaveClass("dataHubJobFailing");
-    expect(screen.queryByTestId("job-status-crypto_refresh")).toBeNull();
-  });
-
-  it("hides the job status section when nothing is configured", async () => {
-    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
-    renderPage();
-    await waitFor(() => expect(screen.getByText("Linked accounts")).toBeInTheDocument());
-    expect(screen.queryByText("Job status")).toBeNull();
-  });
-  it("lists held positions without a live price and says why (#222)", async () => {
-    mockApi.dataHubSummary.mockResolvedValue({
-      ...summaryFixture,
-      market_data: {
-        fresh: 39,
-        stale: 0,
-        unpriced: 2,
-        unpriced_holdings: [
-          { symbol: "ACMECHEM", name: "ACME CHEMICALS LTD", currency: "INR", exchange_code: "NSE", platform: "SHAREKHAN", reason: "no_asset" },
-          { symbol: "ZENPAPER", name: "ZENITH PAPER LTD", currency: "INR", exchange_code: "NSE", platform: "SHAREKHAN", reason: "no_quote" },
-        ],
-      },
-      job_status: [
-        {
-          job: "market_data",
-          label: "Quote refresh",
-          state: "warning",
-          failure_threshold: 3,
-          last_run_status: "success",
-          consecutive_failures: 0,
-          scopes: [
-            { scope: "exchange:US", label: "US", last_run_status: "success", consecutive_failures: 0 },
-            {
-              scope: "exchange:NSE",
-              label: "NSE",
-              last_run_status: "no_new_data",
-              consecutive_failures: 0,
-              last_error: "2 held positions on NSE can't be priced (no linked asset, ticker or quote)",
-            },
-          ],
-        },
-      ],
-    });
-    renderPage();
-
-    await waitFor(() => expect(screen.getByText("Holdings without a live price")).toBeInTheDocument());
-    expect(screen.getByText("2 holdings unpriced")).toBeInTheDocument();
-    const list = screen.getByTestId("unpriced-holdings");
-    expect(list).toHaveTextContent("ACMECHEM");
-    expect(list).toHaveTextContent("ACME CHEMICALS LTD · SHAREKHAN · NSE");
-    expect(list).toHaveTextContent("Not linked to an asset");
-    expect(list).toHaveTextContent("No quote from any provider");
-    const quotes = screen.getByTestId("job-status-market_data");
-    expect(quotes).toHaveTextContent("Needs a look");
-    expect(quotes).toHaveTextContent("2 held positions on NSE can't be priced");
-  });
-
-  it("shows no unpriced section when every holding is priced", async () => {
-    mockApi.dataHubSummary.mockResolvedValue(summaryFixture);
-    renderPage();
-    await waitFor(() => expect(screen.getByText("Linked accounts")).toBeInTheDocument());
-    expect(screen.queryByTestId("unpriced-holdings")).toBeNull();
-    expect(screen.getByText("3 stale")).toBeInTheDocument();
+    const link = await screen.findByRole("link", { name: "Upload" });
+    expect(link.getAttribute("href")).toMatch(/^\/ingest\?account_id=7&as_of=2026-10-31/);
   });
 });
