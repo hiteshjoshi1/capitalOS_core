@@ -30,7 +30,7 @@ MONTHS: dict[str, tuple[str, tuple[str, ...]]] = {
 }
 LINES = ("new_money", "markets", "fx", "dividends_interest", "cash_kept")
 # Lines that appear only when they have something (#329): after the fixed ones, in this order.
-OPTIONAL_LINES = ("catch_up",)
+OPTIONAL_LINES = ("catch_up", "newly_tracked")
 
 
 def _get(client: TestClient, path: str) -> dict[str, Any]:
