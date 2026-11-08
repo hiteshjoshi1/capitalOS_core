@@ -1,420 +1,279 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { Account, DataHubJobStatus, DataHubSummary } from "../lib/api";
-import { loadApiResource } from "../lib/useApiResource";
+import type { Account, InboxAction, InboxItem } from "../lib/api";
+import { loadApiResource, useApiResource } from "../lib/useApiResource";
 import "../App.css";
-import DirectoryListRow from "../components/DirectoryListRow";
+import "./OperationsInbox.css";
 import PageShell from "../components/PageShell";
-import StatusPill from "../components/StatusPill";
-import type { StatusPillTone } from "../components/StatusPill";
 import * as fmt from "../lib/format";
 import LoadError from "../components/LoadError";
 import SourceFreshnessTable from "../components/SourceFreshnessTable";
 import { useBaseCurrency } from "../context/CurrencyContext";
+import { useAuth } from "../context/useAuth";
+import { sourceLink } from "../lib/sourceFreshness";
 
-type LoadState = "idle" | "loading" | "ready" | "error";
-type RefreshStatus = "idle" | "running" | "done" | "error";
+/**
+ * The Data Hub Overview is the Inbox (#316, #309's review): what needs you first, each
+ * with its button; what's fine in one collapsed line; the latest activity in one line.
+ * "Refresh all" sits in the page header. The bell (#317) and Alerts read the same list.
+ */
 
-type RefreshRowState = {
-  status: RefreshStatus;
-  message: string;
-};
+type RunKind = NonNullable<InboxAction["run"]>;
+type RunState = { status: "idle" | "running" | "done" | "error"; message: string };
+const IDLE: RunState = { status: "idle", message: "" };
 
-const REFRESH_IDLE: RefreshRowState = { status: "idle", message: "" };
-
-type QuickAction = {
-  title: string;
-  desc: string;
-  to: string;
-};
-
-const QUICK_ACTIONS: QuickAction[] = [
-  { title: "Import Statements", desc: "Upload a new broker, bank, or card statement.", to: "/ingest" },
-  { title: "Add Accounts", desc: "Create an account under a linked platform.", to: "/accounts/new" },
-  { title: "Add Platforms", desc: "Register a new bank, broker, or exchange.", to: "/platforms" },
-  { title: "Add Crypto Wallets", desc: "Connect and verify a wallet.", to: "/crypto" },
-  { title: "Refresh Market Data", desc: "Pull the latest quotes across every exchange.", to: "/market-data" },
-];
-
-const JOB_STATE_PILL: Record<string, { tone: StatusPillTone; label: string }> = {
-  ok: { tone: "good", label: "Healthy" },
-  warning: { tone: "warn", label: "Needs a look" },
-  failing: { tone: "bad", label: "Failing" },
-  never_run: { tone: "neutral", label: "Not run yet" },
-};
+const SEVERITY_LABEL: Record<InboxItem["severity"], string> = { high: "Urgent", medium: "Needs a look", low: "When you can" };
 
 function formatWhen(value?: string | null): string {
   if (!value) return "never";
-  // A bare date (statement / trade date) stays a date; timestamps show local time.
   if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return fmt.formatDate(value);
   const label = fmt.formatDateTime(value);
   return label === fmt.MISSING ? value : label;
 }
 
-const UNPRICED_REASON_LABELS: Record<string, string> = {
-  no_asset: "Not linked to an asset",
-  no_symbol: "No ticker on a configured exchange",
-  no_quote: "No quote from any provider",
-};
-
-function jobStatusDetail(job: DataHubJobStatus): string | null {
-  if (job.consecutive_failures > 0) {
-    const runs = `${job.consecutive_failures} failed run${job.consecutive_failures === 1 ? "" : "s"} in a row`;
-    return job.last_error ? `${runs}: ${job.last_error}` : runs;
+function routeFor(item: InboxItem): string | null {
+  // An overdue upload source opens Upload prefilled (account, as-of, what's due, #278).
+  if (item.source) {
+    const link = sourceLink(item.source);
+    if (link && link.startsWith("/ingest")) return link;
   }
-  // A scope whose last run brought nothing, e.g. an exchange with held positions
-  // but no symbol to price (#222): say why.
-  const quiet = (job.scopes ?? []).find((scope) => scope.last_run_status === "no_new_data" && scope.last_error);
-  if (quiet?.last_error) return quiet.last_error;
-  if (job.last_run_status === "no_new_data") return "Last run brought no new data.";
-  return null;
-}
-
-function marketDataMeta(summary: DataHubSummary): string {
-  const unpriced = summary.market_data.unpriced ?? 0;
-  const parts: string[] = [];
-  if (summary.market_data.stale > 0) parts.push(`${summary.market_data.stale} stale`);
-  if (unpriced > 0) parts.push(`${unpriced} holding${unpriced === 1 ? "" : "s"} unpriced`);
-  return parts.length > 0 ? parts.join(" · ") : "All quotes fresh";
+  const action = item.action;
+  if (!action?.route) return null;
+  const query = new URLSearchParams(action.params ?? {}).toString();
+  return query ? `${action.route}?${query}` : action.route;
 }
 
 export default function OperationsOverview() {
-  const [state, setState] = useState<LoadState>("idle");
-  const [err, setErr] = useState<string>("");
-  const [summary, setSummary] = useState<DataHubSummary | null>(null);
-  const [ibkrAccounts, setIbkrAccounts] = useState<Account[]>([]);
-  const [selectedIbkrAccountId, setSelectedIbkrAccountId] = useState<number | null>(null);
-
-  const [priceRefresh, setPriceRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
-  const [fxBackfill, setFxBackfill] = useState<RefreshRowState>(REFRESH_IDLE);
+  const inbox = useApiResource("operationsInbox", () => api.operationsInbox());
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin === true;
   const [baseCurrency] = useBaseCurrency();
-  const [ibkrRefresh, setIbkrRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
-  const [cryptoRefresh, setCryptoRefresh] = useState<RefreshRowState>(REFRESH_IDLE);
-
-  const reloadSummary = async () => {
-    try {
-      const data = await api.dataHubSummary();
-      setSummary(data);
-    } catch {
-      // Refresh buttons already surface their own errors — a failed reload here
-      // just leaves the stat cards stale, not worth a second error banner.
-    }
-  };
+  const [ibkrAccounts, setIbkrAccounts] = useState<Account[]>([]);
+  const [run, setRun] = useState<RunState>(IDLE);
+  const menuRef = useRef<HTMLDetailsElement | null>(null);
 
   useEffect(() => {
-    (async () => {
-      try {
-        setState("loading");
-        const [data, accounts] = await Promise.all([api.dataHubSummary(), loadApiResource("accounts", () => api.accounts())]);
-        setSummary(data);
-        const ibkr = accounts.filter((a) => a.platform === "IBKR");
-        setIbkrAccounts(ibkr);
-        if (ibkr.length > 0) setSelectedIbkrAccountId(ibkr[0].id);
-        setState("ready");
-      } catch (e: unknown) {
-        setErr(e instanceof Error ? e.message : String(e));
-        setState("error");
-      }
-    })();
+    loadApiResource("accounts", () => api.accounts())
+      .then((accounts) => setIbkrAccounts(accounts.filter((a) => a.platform === "IBKR")))
+      .catch(() => undefined);
   }, []);
 
-  const runPriceRefresh = async () => {
-    setPriceRefresh({ status: "running", message: "" });
-    try {
-      const result = await api.marketDataRefreshNow();
-      const exchangeCount = result.exchanges?.length ?? 0;
-      setPriceRefresh({ status: "done", message: `Refreshed ${exchangeCount} exchange${exchangeCount === 1 ? "" : "s"}.` });
-      await reloadSummary();
-    } catch (e: unknown) {
-      setPriceRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
+  const runOne = async (kind: RunKind, params: Record<string, string> = {}): Promise<string> => {
+    switch (kind) {
+      case "refresh_prices": {
+        const result = await api.marketDataRefreshNow();
+        const n = result.exchanges?.length ?? 0;
+        return `Prices: refreshed ${n} exchange${n === 1 ? "" : "s"}.`;
+      }
+      case "fx_backfill": {
+        const result = await api.fxBackfill(baseCurrency);
+        if (result.status === "up_to_date") return "Past exchange rates: already complete.";
+        if (result.status === "failed") throw new Error("The exchange-rate provider didn't answer.");
+        if (result.status === "remote_disabled") return "Past exchange rates: fetching is off on this install.";
+        return `Past exchange rates: fetched ${result.fetched_requests} range${result.fetched_requests === 1 ? "" : "s"}${result.remaining_requests > 0 ? `, ${result.remaining_requests} to go` : ""}.`;
+      }
+      case "refresh_crypto": {
+        const result = await api.cryptoRefreshNow();
+        const n = (result.wallets_refreshed as number | undefined) ?? 0;
+        return `Wallets: queued ${n} refresh${n === 1 ? "" : "es"}.`;
+      }
+      case "refresh_ibkr": {
+        const ids = params.account_id ? [Number(params.account_id)] : ibkrAccounts.map((a) => a.id);
+        if (ids.length === 0) throw new Error("No IBKR account is linked.");
+        let positions = 0;
+        for (const id of ids) {
+          const result = await api.ibkrFlexImportNow(id);
+          positions += ((result.counts as Record<string, number> | undefined) ?? {}).positions ?? 0;
+        }
+        return `IBKR: imported ${positions} position${positions === 1 ? "" : "s"}.`;
+      }
     }
   };
 
-  // #290: past exchange rates for the span of your data (admin: shared table).
-  const runFxBackfill = async () => {
-    setFxBackfill({ status: "running", message: "" });
-    try {
-      const result = await api.fxBackfill(baseCurrency);
-      const message =
-        result.status === "up_to_date"
-          ? "Already up to date."
-          : result.status === "failed"
-            ? "The rate provider didn't answer."
-            : result.status === "remote_disabled"
-              ? "Fetching rates is off on this install."
-              : `Fetched ${result.fetched_requests} range${result.fetched_requests === 1 ? "" : "s"}${result.remaining_requests > 0 ? `, ${result.remaining_requests} to go` : ""}.`;
-      setFxBackfill({ status: result.status === "failed" ? "error" : "done", message });
-      await reloadSummary();
-    } catch (e: unknown) {
-      setFxBackfill({ status: "error", message: e instanceof Error ? e.message : String(e) });
+  const runAll = async (kinds: RunKind[], params: Record<string, string> = {}) => {
+    if (menuRef.current) menuRef.current.open = false;
+    setRun({ status: "running", message: "" });
+    const messages: string[] = [];
+    let failed = false;
+    for (const kind of kinds) {
+      try {
+        messages.push(await runOne(kind, params));
+      } catch (e: unknown) {
+        failed = true;
+        messages.push(e instanceof Error ? e.message : String(e));
+      }
     }
+    setRun({ status: failed ? "error" : "done", message: messages.join(" ") });
+    await inbox.reload().catch(() => undefined);
   };
 
-  const runIbkrRefresh = async () => {
-    if (selectedIbkrAccountId == null) {
-      setIbkrRefresh({ status: "error", message: "No IBKR account found to refresh." });
-      return;
-    }
-    setIbkrRefresh({ status: "running", message: "" });
-    try {
-      const result = await api.ibkrFlexImportNow(selectedIbkrAccountId);
-      const counts = (result.counts as Record<string, number> | undefined) ?? {};
-      setIbkrRefresh({
-        status: "done",
-        message: `Imported ${counts.positions ?? 0} position${counts.positions === 1 ? "" : "s"}, ${counts.nav_snapshots ?? 0} NAV snapshot${counts.nav_snapshots === 1 ? "" : "s"}.`,
-      });
-      await reloadSummary();
-    } catch (e: unknown) {
-      setIbkrRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
-    }
-  };
+  const allowedRefreshes: { kind: RunKind; label: string }[] = [
+    ...(isAdmin ? [{ kind: "refresh_prices" as const, label: "Prices" }] : []),
+    ...(ibkrAccounts.length > 0 ? [{ kind: "refresh_ibkr" as const, label: "IBKR" }] : []),
+    { kind: "refresh_crypto", label: "Crypto wallets" },
+    ...(isAdmin ? [{ kind: "fx_backfill" as const, label: "Past exchange rates" }] : []),
+  ];
 
-  const runCryptoRefresh = async () => {
-    setCryptoRefresh({ status: "running", message: "" });
-    try {
-      const result = await api.cryptoRefreshNow();
-      const walletsRefreshed = (result.wallets_refreshed as number | undefined) ?? 0;
-      setCryptoRefresh({
-        status: "done",
-        message: `Queued refresh for ${walletsRefreshed} wallet${walletsRefreshed === 1 ? "" : "s"}.`,
-      });
-      await reloadSummary();
-    } catch (e: unknown) {
-      setCryptoRefresh({ status: "error", message: e instanceof Error ? e.message : String(e) });
-    }
-  };
+  const refreshAll = (
+    <div className="inboxRefresh">
+      <button
+        className="btn"
+        type="button"
+        disabled={run.status === "running"}
+        onClick={() => runAll(allowedRefreshes.map((r) => r.kind))}
+      >
+        {run.status === "running" ? "Refreshing…" : "Refresh all"}
+      </button>
+      <details className="inboxRefreshMenu" ref={menuRef}>
+        <summary className="btn inboxRefreshMenuToggle" aria-label="Choose what to refresh">
+          <span aria-hidden="true">▾</span>
+        </summary>
+        <div className="inboxRefreshMenuPanel" role="group" aria-label="Refresh one source">
+          {allowedRefreshes.map((r) => (
+            <button
+              key={r.kind}
+              type="button"
+              className="inboxRefreshMenuItem"
+              disabled={run.status === "running"}
+              onClick={() => runAll([r.kind])}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </details>
+    </div>
+  );
 
-  const statCards = summary
-    ? [
-        {
-          label: "Linked accounts",
-          value: String(summary.linked_accounts),
-          meta: `Across ${summary.platform_count} platform${summary.platform_count === 1 ? "" : "s"} · ${summary.currency_count} currenc${summary.currency_count === 1 ? "y" : "ies"}`,
-        },
-        {
-          label: "Import health",
-          value: summary.import_health.pending_count === 0 ? "0 pending" : `${summary.import_health.pending_count} pending`,
-          meta: summary.import_health.last_import_at
-            ? `Last import ${formatWhen(summary.import_health.last_import_at)} · ${summary.import_health.last_import_platform ?? "—"}`
-            : "No imports yet",
-        },
-        {
-          label: "Market data",
-          value: `${summary.market_data.fresh} / ${summary.market_data.fresh + summary.market_data.stale} fresh`,
-          meta: marketDataMeta(summary),
-        },
-        {
-          label: "Crypto wallets",
-          value: `${summary.connected_wallet_count} connected`,
-          meta: summary.connected_wallet_labels.length > 0 ? summary.connected_wallet_labels.join(", ") : "No wallets connected",
-        },
-      ]
-    : [];
+  const data = inbox.data;
+  const items = data?.items ?? [];
+  const latest = data?.recent_activity?.[0];
 
   return (
-    <PageShell
-      title="Data Hub"
-      subtitle="Connections, imports, and market data health at a glance."
-    >
-      {state === "loading" && <div className="card" role="status">Loading…</div>}
-      {state === "error" && (
-        <LoadError title="Couldn't load the Data Hub" error={err} />
+    <PageShell title="Data Hub" subtitle="What needs you, and what's fine." headerActions={refreshAll}>
+      {run.status !== "idle" && run.status !== "running" && (
+        <p className={run.status === "error" ? "inboxRunMessage bad" : "inboxRunMessage"} role="status">
+          {run.message}
+        </p>
       )}
 
-      {state === "ready" && (
-        <div className="wealthOverviewLayout">
-          <section aria-label="Data Hub status">
-            <div className="dataHubStatGrid">
-              {statCards.map((stat) => (
-                <article className="card dataHubStatCard" key={stat.label}>
-                  <p className="dataHubStatLabel">{stat.label}</p>
-                  <p className="dataHubStatValue">{stat.value}</p>
-                  <p className="dataHubStatMeta">{stat.meta}</p>
-                </article>
-              ))}
-            </div>
-          </section>
+      {inbox.isLoading && <div className="card" role="status">Loading…</div>}
+      {inbox.error && !data && <LoadError title="Couldn't load the Data Hub" error={inbox.error.message} />}
 
-          <SourceFreshnessTable />
-
-          {summary && (summary.market_data.unpriced_holdings ?? []).length > 0 && (
-            <section aria-label="Unpriced holdings">
-              <div className="coSectionHeader">
-                <div>
-                  <p className="coEyebrow">MARKET DATA</p>
-                  <h2 className="coSectionTitle">Holdings without a live price</h2>
-                </div>
-              </div>
-              <div className="card" data-testid="unpriced-holdings">
-                <p className="muted">
-                  These stay at the price in their last statement until they can be quoted.
-                </p>
-                {(summary.market_data.unpriced_holdings ?? []).map((item, idx) => (
-                  <DirectoryListRow
-                    key={`${item.platform ?? ""}-${item.symbol ?? idx}`}
-                    title={item.symbol ?? "—"}
-                    meta={[item.name, item.platform, item.exchange_code ?? item.currency].filter(Boolean).join(" · ")}
-                    right={<StatusPill tone="warn" label={UNPRICED_REASON_LABELS[item.reason] ?? item.reason} />}
+      {data && (
+        <div className="inboxLayout">
+          <section aria-labelledby="inbox-needs-you">
+            <h2 className="inboxHeading" id="inbox-needs-you">
+              Needs you <span className="inboxCount">{items.length}</span>
+            </h2>
+            {items.length === 0 ? (
+              <p className="card inboxEmpty" role="status">
+                <span aria-hidden="true">✓ </span>Nothing needs you. Everything is up to date.
+              </p>
+            ) : (
+              <ul className="inboxList">
+                {items.map((item) => (
+                  <InboxRow
+                    key={item.id}
+                    item={item}
+                    isAdmin={isAdmin}
+                    running={run.status === "running"}
+                    onRun={(kind, params) => runAll([kind], params)}
                   />
                 ))}
-              </div>
-            </section>
+              </ul>
+            )}
+          </section>
+
+          <nav className="inboxAdd" aria-label="Add data">
+            <Link className="inboxAddLink" to="/ingest">Upload a statement</Link>
+            <Link className="inboxAddLink" to="/accounts/new">Add an account</Link>
+            <Link className="inboxAddLink" to="/crypto">Add a wallet</Link>
+            <Link className="inboxAddLink" to="/market-data">Market data</Link>
+          </nav>
+
+          {data.all_good.length > 0 && (
+            <details className="card inboxDetails">
+              <summary>
+                <span aria-hidden="true">✓ </span>All good ({data.all_good.length})
+              </summary>
+              <ul className="inboxGoodList">
+                {data.all_good.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+            </details>
           )}
 
-          {summary && summary.job_status.some((job) => job.state !== "not_configured") && (
-            <section aria-label="Job status">
-              <div className="coSectionHeader">
-                <div>
-                  <p className="coEyebrow">SCHEDULED JOBS</p>
-                  <h2 className="coSectionTitle">Job status</h2>
-                </div>
-              </div>
-              <div className="dataHubStatGrid">
-                {summary.job_status
-                  .filter((job) => job.state !== "not_configured")
-                  .map((job) => {
-                    const pill = JOB_STATE_PILL[job.state] ?? { tone: "neutral" as const, label: job.state };
-                    const detail = jobStatusDetail(job);
-                    return (
-                      <article
-                        className={`card dataHubStatCard${job.state === "failing" ? " dataHubJobFailing" : ""}`}
-                        key={job.job}
-                        data-testid={`job-status-${job.job}`}
-                      >
-                        <p className="dataHubStatLabel">{job.label}</p>
-                        <StatusPill tone={pill.tone} label={pill.label} />
-                        <p className="dataHubStatMeta">Last success: {formatWhen(job.last_success_at)}</p>
-                        <p className="dataHubStatMeta">Data as of: {formatWhen(job.data_as_of)}</p>
-                        {detail && (
-                          <p className={job.state === "failing" ? "dataHubRefreshError dataHubJobError" : "dataHubStatMeta"}>{detail}</p>
-                        )}
-                      </article>
-                    );
-                  })}
-              </div>
-            </section>
+          {latest && (
+            <details className="card inboxDetails">
+              <summary>
+                Latest: {latest.title} · {formatWhen(latest.occurred_at)}
+              </summary>
+              <ul className="inboxActivityList">
+                {data.recent_activity.map((a, idx) => (
+                  <li key={`${a.kind}-${idx}`}>
+                    <span>{a.title}</span>
+                    <span className="muted">
+                      {a.meta} · {formatWhen(a.occurred_at)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
 
-          <section aria-label="Quick actions">
-            <div className="coSectionHeader">
-              <div>
-                <p className="coEyebrow">ACTIONS</p>
-                <h2 className="coSectionTitle">Quick actions</h2>
-              </div>
-            </div>
-            <div className="dataHubActionGrid">
-              {QUICK_ACTIONS.map((action) => (
-                <Link className="dataHubActionCard" to={action.to} key={action.to}>
-                  <strong>{action.title}</strong>
-                  <span>{action.desc}</span>
-                </Link>
-              ))}
-            </div>
-          </section>
-
-          <section aria-label="Refresh data">
-            <div className="coSectionHeader">
-              <div>
-                <p className="coEyebrow">DATA SOURCES</p>
-                <h2 className="coSectionTitle">Refresh now</h2>
-              </div>
-            </div>
-            <div className="dataHubActionGrid">
-              <article className="card dataHubStatCard">
-                <p className="dataHubStatLabel">Price refresh</p>
-                <p className="muted">Pull the latest quotes across every configured exchange.</p>
-                <button className="btn" type="button" onClick={runPriceRefresh} disabled={priceRefresh.status === "running"}>
-                  {priceRefresh.status === "running" ? "Refreshing…" : "Refresh prices"}
-                </button>
-                {priceRefresh.status === "done" && <StatusPill tone="good" label={priceRefresh.message} />}
-                {priceRefresh.status === "error" && (
-                  <p className="dataHubRefreshError" role="alert">{priceRefresh.message}</p>
-                )}
-              </article>
-
-              <article className="card dataHubStatCard">
-                <p className="dataHubStatLabel">Past exchange rates</p>
-                <p className="muted">Fetch the daily rates missing for the span of your data, so past months include foreign holdings.</p>
-                <button className="btn" type="button" onClick={runFxBackfill} disabled={fxBackfill.status === "running"}>
-                  {fxBackfill.status === "running" ? "Fetching…" : "Fetch past rates"}
-                </button>
-                {fxBackfill.status === "done" && <StatusPill tone="good" label={fxBackfill.message} />}
-                {fxBackfill.status === "error" && (
-                  <p className="dataHubRefreshError" role="alert">{fxBackfill.message}</p>
-                )}
-              </article>
-
-              <article className="card dataHubStatCard">
-                <p className="dataHubStatLabel">IBKR refresh</p>
-                <p className="muted">Pull the latest Flex statement (positions, NAV, cash) for your IBKR account.</p>
-                {ibkrAccounts.length > 1 ? (
-                  <select
-                    className="coPillBtnInput"
-                    aria-label="IBKR account"
-                    value={selectedIbkrAccountId ?? ""}
-                    onChange={(e) => setSelectedIbkrAccountId(Number(e.target.value))}
-                  >
-                    {ibkrAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name}
-                      </option>
-                    ))}
-                  </select>
-                ) : null}
-                <button
-                  className="btn"
-                  type="button"
-                  onClick={runIbkrRefresh}
-                  disabled={ibkrRefresh.status === "running" || ibkrAccounts.length === 0}
-                  title={ibkrAccounts.length === 0 ? "No IBKR account linked" : undefined}
-                >
-                  {ibkrRefresh.status === "running" ? "Refreshing…" : "Refresh IBKR"}
-                </button>
-                {ibkrRefresh.status === "done" && <StatusPill tone="good" label={ibkrRefresh.message} />}
-                {ibkrRefresh.status === "error" && (
-                  <p className="dataHubRefreshError" role="alert">{ibkrRefresh.message}</p>
-                )}
-              </article>
-
-              <article className="card dataHubStatCard">
-                <p className="dataHubStatLabel">Crypto refresh</p>
-                <p className="muted">Queue a balance/price refresh for every connected wallet.</p>
-                <button className="btn" type="button" onClick={runCryptoRefresh} disabled={cryptoRefresh.status === "running"}>
-                  {cryptoRefresh.status === "running" ? "Refreshing…" : "Refresh crypto"}
-                </button>
-                {cryptoRefresh.status === "done" && <StatusPill tone="good" label={cryptoRefresh.message} />}
-                {cryptoRefresh.status === "error" && (
-                  <p className="dataHubRefreshError" role="alert">{cryptoRefresh.message}</p>
-                )}
-              </article>
-            </div>
-          </section>
-
-          <section aria-label="Recent activity">
-            <div className="coSectionHeader">
-              <div>
-                <p className="coEyebrow">TIMELINE</p>
-                <h2 className="coSectionTitle">Recent activity</h2>
-              </div>
-            </div>
-            <div className="card">
-              {summary && summary.recent_activity.length > 0 ? (
-                summary.recent_activity.map((item, idx) => (
-                  <DirectoryListRow
-                    key={`${item.kind}-${idx}`}
-                    title={item.title}
-                    meta={item.meta}
-                    right={formatWhen(item.occurred_at)}
-                  />
-                ))
-              ) : (
-                <p className="muted">No recent activity yet.</p>
-              )}
-            </div>
-          </section>
+          <details className="card inboxDetails">
+            <summary>Every source and its schedule</summary>
+            <SourceFreshnessTable />
+          </details>
         </div>
       )}
     </PageShell>
+  );
+}
+
+function InboxRow({
+  item,
+  isAdmin,
+  running,
+  onRun,
+}: {
+  item: InboxItem;
+  isAdmin: boolean;
+  running: boolean;
+  onRun: (kind: RunKind, params: Record<string, string>) => void;
+}) {
+  const action = item.action;
+  const route = routeFor(item);
+  let control: React.ReactNode = null;
+  if (action && action.admin_only && !isAdmin) {
+    control = <span className="muted inboxAdminHint">An admin can fix this</span>;
+  } else if (action?.run) {
+    const kind = action.run;
+    control = (
+      <button className="btn" type="button" disabled={running} onClick={() => onRun(kind, action.params ?? {})}>
+        {action.label}
+      </button>
+    );
+  } else if (action && route) {
+    control = (
+      <Link className="btn" to={route}>
+        {action.label}
+      </Link>
+    );
+  }
+  return (
+    <li className={`card inboxItem inboxItem-${item.severity}`} data-testid={`inbox-item-${item.kind}`}>
+      <div className="inboxItemText">
+        <p className="inboxItemTitle">
+          <span className={`inboxSeverity inboxSeverity-${item.severity}`}>{SEVERITY_LABEL[item.severity]}</span>
+          {item.title}
+        </p>
+        {item.detail && <p className="inboxItemDetail muted">{item.detail}</p>}
+      </div>
+      {control && <div className="inboxItemAction">{control}</div>}
+    </li>
   );
 }
