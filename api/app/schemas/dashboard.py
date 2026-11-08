@@ -763,3 +763,33 @@ class MonthBridgeResponse(FxStatusFields):
 # #253: PlatformConcentration names PlatformAllocationItem, defined after it.
 PlatformConcentration.model_rebuild()
 RiskSummaryResponse.model_rebuild()
+
+
+# ─── Realised P&L (#293, D-78) ─────────────────────────────────────────────────
+class RealisedTotals(BaseModel):
+    realised: float = Field(..., description="Realised P&L in base, sales with a known cost and a rate")
+    sales: int
+    cost_unknown: int = Field(..., description="Sales whose buy cost isn't in the data: left out")
+    fx_missing_currencies: List[str] = Field(default_factory=list, description="D-30: left out, never 1.0")
+    sources: Dict[str, int] = Field(default_factory=dict, description="ibkr | fifo | cost_unknown")
+
+
+class RealisedSale(BaseModel):
+    trade_date: str
+    symbol: Optional[str] = None
+    platform: Optional[str] = None
+    quantity: float
+    proceeds: float = Field(..., description="Net of commission, trade currency")
+    cost: Optional[float] = None
+    realised: Optional[float] = None
+    currency: str
+    realised_base: Optional[float] = None
+    source: str
+    fx_missing: bool = False
+
+
+class RealisedPnlResponse(BaseModel):
+    base_currency: str
+    month: RealisedTotals
+    year_to_date: RealisedTotals
+    sales: List[RealisedSale]

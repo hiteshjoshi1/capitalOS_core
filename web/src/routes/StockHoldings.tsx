@@ -15,6 +15,7 @@ import ExposurePieCard from "../components/ExposurePieCard";
 import MonthBar from "../components/MonthBar";
 import PriceFallbackInfo from "../components/PriceFallbackInfo";
 import StockMonthChange from "../components/StockMonthChange";
+import RealisedPnlCard from "../components/RealisedPnlCard";
 import PageShell from "../components/PageShell";
 import ValueTrendChart from "../components/ValueTrendChart";
 import { useBaseCurrency } from "../context/CurrencyContext";
@@ -368,6 +369,9 @@ export default function StockHoldings() {
               </p>
             ) : null}
           </article>
+
+          {/* ── Realised P&L on sales (#293) ──────────────────────────── */}
+          <RealisedPnlCard month={month} baseCurrency={baseCurrency} />
 
           {/* ── Exposure breakdown ────────────────────────────────────── */}
           <section aria-label="Stock exposure breakdown">

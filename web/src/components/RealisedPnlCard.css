@@ -1,0 +1,102 @@
+/* #293: realised P&L on the Stocks page. Stacks on a phone; nothing wider than the card. */
+.realisedCard {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.realisedHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
+.realisedHint,
+.realisedCount,
+.realisedSources,
+.realisedSaleSource {
+  font-size: 12px;
+}
+
+.realisedTotals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+
+.realisedTotals dt {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.realisedTotals dd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.realisedAmount--up {
+  color: var(--good);
+}
+
+.realisedAmount--down {
+  color: var(--bad);
+}
+
+.realisedCaveat {
+  margin: 0;
+  font-size: 12px;
+  color: var(--warn);
+}
+
+.realisedSources {
+  margin: 0;
+}
+
+.realisedToggle {
+  justify-self: start;
+}
+
+.realisedSales {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+}
+
+.realisedSale {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+
+.realisedSaleMain,
+.realisedSaleValue {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.realisedSaleValue {
+  text-align: right;
+}
+
+@media (max-width: 640px) {
+  .realisedSaleValue {
+    text-align: left;
+  }
+}
