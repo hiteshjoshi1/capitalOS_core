@@ -12,6 +12,7 @@ vi.mock("../lib/api", () => ({
   api: {
     stockHoldingsSummary: vi.fn(),
     marketDataRefreshNow: vi.fn(),
+    realisedPnl: vi.fn(),
   },
 }));
 
@@ -105,6 +106,9 @@ const summaryFixture: StockHoldingsSummary = {
 describe("StockHoldings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // #293: the realised P&L card loads on its own; no sales here.
+    const noSales = { realised: 0, sales: 0, cost_unknown: 0, fx_missing_currencies: [], sources: {} };
+    mockApi.realisedPnl.mockResolvedValue({ base_currency: "SGD", month: noSales, year_to_date: noSales, sales: [] });
     window.localStorage.clear();
     Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
   });

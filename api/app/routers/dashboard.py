@@ -2,6 +2,8 @@
 computed in app.valuation (#143); the Data Hub card in app.services.data_hub."""
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.auth_context import CurrentUser, require_current_user
 from app.db.session import get_db
 from app.schemas.dashboard import (
+    RealisedPnlResponse,
     BootstrapResponse,
     CashDepositsOut,
     DashboardSummaryResponse,
@@ -28,8 +31,9 @@ from app.schemas.dashboard import (
 )
 from app.services import data_hub
 from app.services.risk_thresholds import read_risk_thresholds, save_risk_thresholds
+from app.portfolio.realised import realised_summary
 from app.valuation import bridge, pages
-from app.valuation.clock import _parse_month
+from app.valuation.clock import _app_today, _parse_month
 from app.valuation.history import _backfill_wealth_rollups
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"], dependencies=[Depends(require_current_user)])
@@ -183,6 +187,21 @@ def stock_holdings_summary(
     current_user: CurrentUser = Depends(require_current_user),
 ):
     return pages.stock_holdings(db, current_user.id, month, _parse_month(month), base_currency)
+
+
+@router.get("/realised-pnl", response_model=RealisedPnlResponse)
+def realised_pnl(
+    month: str = Query(..., description="YYYY-MM"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Realised P&L on sales in the month and its year to date (#293, D-78): IBKR's own
+    figure per fill when the Flex report has it, else FIFO over the account's fills."""
+    start = _parse_month(month).date()
+    next_month = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
+    end = min(next_month - timedelta(days=1), _app_today())
+    return realised_summary(db, current_user.id, base_currency, start, end)
 
 
 @router.get("/net-worth-since-update", response_model=NetWorthSinceUpdateResponse)

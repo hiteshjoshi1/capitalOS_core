@@ -627,6 +627,39 @@ def _note(key: str, label: str, amount: Optional[float] = None) -> Dict[str, Any
     return {"key": key, "label": label, "amount": amount}
 
 
+def _add_realised_note(
+    lines: list[Dict[str, Any]],
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    start_anchor: datetime,
+    end_anchor: datetime,
+) -> None:
+    """Markets' realised/unrealised split (#293, D-78), as a note so the line's total is
+    unchanged: Markets is price moves on what's held across the period (unrealised); a
+    sale's gain vs its cost is a different measure, named here with its amount."""
+    from app.portfolio.realised import realised_summary  # local: avoids a cycle via pages
+
+    first = start_anchor.date()
+    last = end_anchor.date() if end_anchor.date() == first else (end_anchor - timedelta(microseconds=1)).date()
+    summary = realised_summary(db, current_user_id, base_currency, first, last)
+    month = summary["month"]
+    if not month["sales"]:
+        return
+    for line in lines:
+        if line["key"] != "markets":
+            continue
+        for part in line.get("parts") or []:
+            if part["key"] == "stocks":
+                part["label"] = "Stocks & funds: price moves on what you hold (unrealised)"
+        label = f"Realised on {month['sales']} sale(s), vs their cost"
+        if month["cost_unknown"]:
+            label += f"; {month['cost_unknown']} with no known cost left out"
+        if month["fx_missing_currencies"]:
+            label += f"; no rate for {', '.join(month['fx_missing_currencies'])}: left out"
+        line.setdefault("notes", []).append(_note("realised", label, month["realised"]))
+
+
 def _line(
     key: str,
     label: str,
@@ -944,6 +977,7 @@ def month_bridge(
         fx_flags=fx.fx_status(),
         baseline_missing=baseline_missing(start_as_of, start_nw["total"]),
     )
+    _add_realised_note(lines, db, current_user_id, base_currency, start_anchor, end_anchor)
     return {
         "as_of_month": month,
         "base_currency": base_currency,
