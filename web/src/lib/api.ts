@@ -1804,6 +1804,47 @@ export type SourceFreshness = {
   sources: SourceFreshnessRow[];
 };
 
+/** The Data Hub inbox (#316): one item that needs the user, with its action. */
+export type InboxAction = {
+  label: string;
+  /** A page to open, with `params` as its query string. */
+  route: string | null;
+  params: Record<string, string>;
+  /** A refresh the page runs in place. */
+  run: "refresh_prices" | "fx_backfill" | "refresh_ibkr" | "refresh_crypto" | null;
+  /** Writes shared data (#152): only an admin gets the button. */
+  admin_only: boolean;
+};
+
+export type InboxItem = {
+  id: string;
+  kind:
+    | "source_overdue"
+    | "source_never_loaded"
+    | "unknown_format"
+    | "import_pending"
+    | "unpriced_holding"
+    | "fx_gap"
+    | "fx_unsupported"
+    | "job_failing"
+    | "unmapped_transactions"
+    | string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  detail: string | null;
+  action: InboxAction | null;
+  /** The source-freshness row, for the source kinds (prefilled Upload link, #278). */
+  source: SourceFreshnessRow | null;
+};
+
+export type InboxResponse = {
+  as_of: string;
+  count: number;
+  items: InboxItem[];
+  all_good: string[];
+  recent_activity: DataHubActivityItem[];
+};
+
 export type DataHubSummary = {
   linked_accounts: number;
   platform_count: number;
@@ -2093,6 +2134,7 @@ export const api = {
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
     req<NetWorthSinceUpdate>(`/dashboard/net-worth-since-update?base_currency=${encodeURIComponent(baseCurrency)}`),
   dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
+  operationsInbox: () => req<InboxResponse>("/operations/inbox"),
   sourceFreshness: () => req<SourceFreshness>("/dashboard/source-freshness"),
   setSourceFreshnessCadence: (sourceKey: string, body: { cadence: string; grace_days: number }) =>
     req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, {
