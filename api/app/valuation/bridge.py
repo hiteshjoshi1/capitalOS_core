@@ -1,7 +1,7 @@
 """The "This month" bridge (#240, D-60): what moved net worth from the last
 month-end close to the figure Overview shows.
 
-    start + new money + markets + FX + dividends/interest + cash kept + unexplained = end
+    start + new money + markets + FX + dividends/interest + cash kept + catch-up + unexplained = end
 
 - **start** is the completed month-end Overview's "vs last month" compares with
   (``_month_view_compare_month_start``, D-24), valued like that month's History
@@ -19,6 +19,15 @@ the lines always add up, and the residual is shown, never hidden. Its known
 parts (trades with no cash record, crypto moved in or out of wallets, card
 balances that don't match card transactions, holdings the statement totals
 don't cover) are named, the rest is "other".
+
+**Catch-up** (#329, D-81): the start is the month-end close History shows, and each
+account's part of it is its newest figure at that anchor, which can be months old (a
+bank balance from July, a holdings statement from August). The end then includes every
+change since, but the period's lines only count the period's own flows, so earlier
+months landed in Unexplained. An account whose starting figure is more than
+CATCH_UP_STALE_DAYS older than the period's start gets its own Catch-up part: a cash
+account's change less its own transactions in the period, a holdings statement's
+change in quantity. The start itself is never changed (it is the contract figure).
 
 The position, NAV, cash and wallet facts are read through the canonical read
 layer (D-56), the same readers net worth uses, so start and end are exactly the
@@ -78,6 +87,9 @@ _EPS = 1e-9
 UNSPLIT_COUNT_MIN = 1.0
 # A change in quantity at least this big (base currency) is listed as a trade.
 TRADE_MIN = 1.0
+# An account's starting figure older than this before the period's start is stale: its
+# change over the period includes earlier months, shown as Catch-up (#329, D-81).
+CATCH_UP_STALE_DAYS = 7
 
 
 @dataclass
@@ -397,6 +409,138 @@ def _crypto_holdings(
             price_currency="USD",
         )
     return out, float(valuation.get("total_usd") or 0.0) * usd
+
+
+# ─── Catch-up: starting figures older than the period (#329, D-81) ───────────
+
+
+def _short_date(day: date) -> str:
+    """4 Jul, or 4 Jul 2025 outside ``year``'s calendar year: labels only."""
+    return f"{day.day} {day.strftime('%b')}"
+
+
+def _account_names(db: Session, current_user_id: int) -> Dict[int, str]:
+    rows = db.execute(
+        text("SELECT a.id, a.name FROM accounts a WHERE " + account_scope_sql("a")),
+        {"current_user_id": current_user_id},
+    ).all()
+    return {int(row[0]): str(row[1] or f"Account {row[0]}") for row in rows}
+
+
+def _cash_by_account(
+    db: Session, anchor: datetime, base_currency: str, current_user_id: int
+) -> Dict[int, tuple[float, Optional[date], str]]:
+    """Each account's cash balance at the anchor (kind ``balance`` only: an IBKR NAV's
+    cash moves with its trades and ledger, which the lines read): value in base, its
+    newest as-of date, its kind."""
+    out: Dict[int, tuple[float, Optional[date], str]] = {}
+    for entry in _cash_positions(db, anchor, base_currency, current_user_id):
+        if entry.get("account_id") is None:
+            continue
+        account_id = int(entry["account_id"])
+        value, as_of, kind = out.get(account_id, (0.0, None, str(entry.get("kind") or "balance")))
+        day = _date_only(entry.get("as_of_date"))
+        if day is not None and (as_of is None or day > as_of):
+            as_of = day
+        if str(entry.get("kind") or "balance") != "balance":
+            kind = str(entry.get("kind"))
+        out[account_id] = (value + float(entry["value"]), as_of, kind)
+    return out
+
+
+def _period_cash_by_account(
+    db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime
+) -> Dict[int, float]:
+    """Every non-card account's transactions in the period, all types, in base (each at
+    its own date's rate, D-30): what moved its balance within the period."""
+    rows = [dict(row) for row in _cash_flow_rows(db, start, end, current_user_id)]
+    rates = _build_row_rate_map(rows, base_currency)
+    out: Dict[int, float] = {}
+    for row in rows:
+        if str(row.get("account_type") or "").upper() == "CREDIT_CARD":
+            continue
+        if not _transaction_in_month_window(row["ts"], start, end):
+            continue
+        account_id = int(row["account_id"])
+        out[account_id] = out.get(account_id, 0.0) + _row_base_amount(row, base_currency, rates)
+    return out
+
+
+@dataclass
+class CatchUp:
+    """One account whose starting figure is older than the period: its part of the
+    period's change that belongs to earlier months."""
+
+    account_id: int
+    kind: str  # cash | holdings
+    label: str
+    since: date
+    until: Optional[date]
+    amount: float
+
+
+def _stale(as_of: Optional[date], period_start: date) -> bool:
+    return as_of is not None and (period_start - as_of).days > CATCH_UP_STALE_DAYS
+
+
+def cash_catch_up(
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    start: datetime,
+    end: datetime,
+    *,
+    skip_accounts: Iterable[int] = (),
+    names: Optional[Mapping[int, str]] = None,
+) -> list[CatchUp]:
+    """Cash accounts whose starting balance is stale (and has a newer one at the end):
+    their change over the period less their own transactions in it."""
+    skip = set(skip_accounts)
+    start0 = _cash_by_account(db, start, base_currency, current_user_id)
+    end1 = _cash_by_account(db, end, base_currency, current_user_id)
+    period_rows: Optional[Dict[int, float]] = None
+    out: list[CatchUp] = []
+    for account_id, (value0, as_of0, kind) in sorted(start0.items()):
+        if account_id in skip or kind != "balance" or not _stale(as_of0, start.date()):
+            continue
+        value1, as_of1, _kind = end1.get(account_id, (value0, as_of0, kind))
+        if as_of1 is None or as_of0 is None or as_of1 <= as_of0:
+            continue  # no newer balance: nothing from earlier months arrived
+        if period_rows is None:
+            period_rows = _period_cash_by_account(db, current_user_id, base_currency, start, end)
+        amount = (value1 - value0) - period_rows.get(account_id, 0.0)
+        name = (names or {}).get(account_id, f"Account {account_id}")
+        out.append(CatchUp(
+            account_id=account_id,
+            kind="cash",
+            label=f"{name}: balance of {_short_date(as_of0)} → {_short_date(as_of1)}",
+            since=as_of0,
+            until=as_of1,
+            amount=amount,
+        ))
+    return out
+
+
+def stale_holdings_accounts(
+    start: Mapping[tuple, _Holding], end: Mapping[tuple, _Holding], period_start: date
+) -> Dict[int, tuple[date, Optional[date]]]:
+    """Accounts whose holdings at the start come from a statement older than the period
+    and that have a newer statement at the end: account -> (start statement, end statement)."""
+    def _dates(holdings: Mapping[tuple, _Holding]) -> Dict[int, date]:
+        out: Dict[int, date] = {}
+        for holding in holdings.values():
+            if holding.account_id is None or holding.as_of is None:
+                continue
+            if holding.account_id not in out or holding.as_of > out[holding.account_id]:
+                out[holding.account_id] = holding.as_of
+        return out
+
+    first, last = _dates(start), _dates(end)
+    return {
+        account_id: (as_of0, last.get(account_id))
+        for account_id, as_of0 in first.items()
+        if _stale(as_of0, period_start) and last.get(account_id) is not None and last[account_id] > as_of0
+    }
 
 
 # ─── Flows in the period ─────────────────────────────────────────────────────
@@ -769,6 +913,11 @@ def month_bridge(
     unsplit_count = 0
     valuation_gap = 0.0
 
+    # Holdings statements older than the period (#329): their quantity changes up to the
+    # newer statement are catch-up, not this period's untracked trades.
+    stale_holdings = stale_holdings_accounts(stocks0, stocks1, start_anchor.date())
+    holdings_catch_up: Dict[int, float] = {}
+
     stock_changes = holding_changes(stocks0, stocks1)
     for holding in stock_changes:
         split, held = holding.split, holding.held
@@ -779,8 +928,11 @@ def month_bridge(
             unsplit += split.unsplit
             unsplit_count += int(abs(split.unsplit) >= UNSPLIT_COUNT_MIN)
         if split.quantity and (held.account_id is None or held.account_id not in cash_accounts):
-            untracked_trades += split.quantity
-            untracked_platforms.add(held.platform)
+            if held.account_id is not None and held.account_id in stale_holdings:
+                holdings_catch_up[held.account_id] = holdings_catch_up.get(held.account_id, 0.0) + split.quantity
+            else:
+                untracked_trades += split.quantity
+                untracked_platforms.add(held.platform)
 
     crypto_price = crypto_fx = crypto_moved = 0.0
     crypto_changes = holding_changes(crypto0, crypto1)
@@ -880,6 +1032,35 @@ def month_bridge(
         reason=None if flows.transaction_count else f"No transactions imported for {period}",
         parts=[_part("income", "Income", flows.income), _part("spending", "Spending", -flows.spending)],
     ))
+
+    names = _account_names(db, current_user_id)
+    catch_ups = cash_catch_up(
+        db, current_user_id, base_currency, start_anchor, end_anchor,
+        skip_accounts=ledger_accounts, names=names,
+    )
+    for account_id, amount in sorted(holdings_catch_up.items()):
+        since, until = stale_holdings[account_id]
+        name = names.get(account_id, f"Account {account_id}")
+        catch_ups.append(CatchUp(
+            account_id=account_id,
+            kind="holdings",
+            label=f"{name}: bought or sold between the {_short_date(since)} and "
+                  f"{_short_date(until) if until else 'newest'} statements",
+            since=since,
+            until=until,
+            amount=amount,
+        ))
+    if catch_ups:
+        lines.append(_line(
+            "catch_up",
+            "Catch-up since last statement",
+            sum(c.amount for c in catch_ups),
+            reason=(
+                "These accounts' starting figures are older than this period, so their newer data "
+                "also covers earlier months: that part is here, not in this period's lines"
+            ),
+            parts=[_part(f"{c.kind}:{c.account_id}", c.label, c.amount) for c in catch_ups],
+        ))
 
     change = end_nw["total"] - start_nw["total"]
     explained = sum(line["amount"] for line in lines)
