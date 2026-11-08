@@ -788,8 +788,44 @@ class RealisedSale(BaseModel):
     fx_missing: bool = False
 
 
+class RealisedPeriod(BaseModel):
+    key: str = Field(..., description="month | ytd | last_year | year | range")
+    start: str
+    end: str = Field(..., description="Inclusive, never after today")
+    label: str
+
+
+class RealisedInstrument(BaseModel):
+    """One stock (per account) in the period (#313)."""
+    symbol: Optional[str] = None
+    platform: Optional[str] = None
+    currency: str
+    sales_count: int
+    quantity: float
+    realised_base: float = Field(..., description="Sales with a known cost and a rate only")
+    proceeds_base: float = Field(..., description="Net of commission, the same sales as realised_base")
+    cost_base: float
+    realised: float = Field(..., description="In the trade currency, sales with a known cost")
+    in_total: int = Field(..., description="Sales counted in realised_base")
+    cost_unknown: int
+    fx_missing: bool
+    sources: Dict[str, int] = Field(default_factory=dict)
+    first_sale: str
+    last_sale: str
+    sales: List[RealisedSale]
+
+
 class RealisedPnlResponse(BaseModel):
     base_currency: str
     month: RealisedTotals
     year_to_date: RealisedTotals
     sales: List[RealisedSale]
+    # #313: the chosen period, grouped per stock.
+    period: Optional[RealisedPeriod] = None
+    period_totals: Optional[RealisedTotals] = None
+    by_instrument: List[RealisedInstrument] = Field(default_factory=list)
+    years_with_sales: List[int] = Field(default_factory=list)
+    trades_from: Optional[str] = Field(None, description="Earliest trade the app holds; no sales are known before it")
+    platforms_without_trades: List[str] = Field(
+        default_factory=list, description="Broker platforms with holdings but no trade data: no realised P&L for them"
+    )

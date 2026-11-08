@@ -674,9 +674,11 @@ class IbkrFlexClient:
         self._user_agent = user_agent.strip() if user_agent else None
 
     @classmethod
-    def from_env(cls) -> "IbkrFlexClient":
+    def from_env(cls, query_id: str | None = None) -> "IbkrFlexClient":
+        """The .env credentials; ``query_id`` replaces the .env query (#313: a separate
+        query, e.g. one whose own period covers an earlier year)."""
         token = _first_env_value("IBKR_FLEX_TOKEN", "IBKR_TOKEN")
-        query_id = _first_env_value("IBKR_FLEX_QUERY_ID", "IBKR_QUERY_ID")
+        query_id = (query_id or "").strip() or _first_env_value("IBKR_FLEX_QUERY_ID", "IBKR_QUERY_ID")
         base_url = _first_env_value("IBKR_FLEX_BASE_URL", "IBKR_FLEX_BASE", default=DEFAULT_IBKR_FLEX_BASE_URL)
         timeout_seconds = float(os.getenv("IBKR_FLEX_TIMEOUT_SECONDS", "30"))
         user_agent = _first_env_value("IBKR_USER_AGENT", default=DEFAULT_IBKR_USER_AGENT)
@@ -705,9 +707,17 @@ class IbkrFlexClient:
             return f"{self._base_url}/{modern_name}"
         return f"{self._base_url}/{legacy_name}"
 
-    def send_request(self) -> str:
+    def send_request(self, from_date: date | None = None, to_date: date | None = None) -> str:
+        """Ask IBKR to generate the query's statement. ``from_date``/``to_date`` (#313) override
+        the query's own period (Flex Web Service ``fd``/``td``, yyyyMMdd, sent together, at
+        most 365 days); without them the period set on the query in IBKR is used."""
         url = self._service_url("send")
         params = {"t": self._token, "q": self._query_id, "v": "3"}
+        if (from_date is None) != (to_date is None):
+            raise ValueError("from_date and to_date go together")
+        if from_date is not None and to_date is not None:
+            params["fd"] = from_date.strftime("%Y%m%d")
+            params["td"] = to_date.strftime("%Y%m%d")
         with httpx.Client(timeout=self._timeout_seconds) as client:
             response = client.get(url, params=params, headers=self._request_headers())
             response.raise_for_status()
@@ -728,8 +738,12 @@ class IbkrFlexClient:
         max_attempts: int = 5,
         initial_backoff_seconds: float = 2.0,
         max_backoff_seconds: float = 30.0,
+        from_date: date | None = None,
+        to_date: date | None = None,
     ) -> tuple[str, str]:
-        reference_code = self.send_request()
+        # Without a date override the call stays as before, so a client that only knows the
+        # query's own period (and test doubles of it) still works.
+        reference_code = self.send_request(from_date, to_date) if from_date is not None else self.send_request()
         for attempt in range(1, max_attempts + 1):
             try:
                 return reference_code, self.get_statement(reference_code)
