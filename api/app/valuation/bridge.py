@@ -35,6 +35,11 @@ less its own transactions in the period). **Staking rewards**: a rebasing stakin
 (stETH) whose quantity grows by at most STAKING_MAX_GROWTH is income, in Dividends &
 interest, not "crypto moved".
 
+**Items** (#332): every part of Catch-up, Newly tracked and Unexplained lists what it is
+made of (which holding, account, card, token), largest first, with a reason and, where
+there is something to do, a link. A part's items add up to it (a "rest" item when the
+list is cut at ITEMS_MAX).
+
 The position, NAV, cash and wallet facts are read through the canonical read
 layer (D-56), the same readers net worth uses, so start and end are exactly the
 contract figures (D-58). The flow lines read the same rows as the Cash flow and
@@ -42,7 +47,7 @@ Dividends pages.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -100,6 +105,9 @@ CATCH_UP_STALE_DAYS = 7
 # this share of the starting quantity is a deposit or a move, not rewards.
 STAKING_REBASING_SYMBOLS = frozenset({"STETH", "EETH"})
 STAKING_MAX_GROWTH = 0.02
+# A part lists at most this many items (#332); the rest add up into one "rest" item.
+ITEMS_MAX = 8
+ITEM_MIN = 0.5
 
 
 @dataclass
@@ -663,6 +671,89 @@ def staking_reward(change: "HoldingChange") -> float:
     return change.split.quantity
 
 
+# ─── Items: what each part is made of (#332) ─────────────────────────────────
+
+
+def _unsplit_reason(change: "HoldingChange", period_start: date) -> str:
+    h0, h1 = change.start, change.end
+    if h0 is not None and h0.rate() is None and (h1 is None or h1.rate() is not None):
+        return f"no price at the start ({_short_date(period_start)})" if h0.quantity else "no quantity at the start"
+    if h1 is not None and h1.rate() is None:
+        return "no price now" if h1.quantity else "no quantity now"
+    return "no price or quantity on either side"
+
+
+def _card_items(
+    db: Session,
+    current_user_id: int,
+    base_currency: str,
+    start: datetime,
+    end: datetime,
+    flows: "_Flows",
+    names: Mapping[int, str],
+    total: float,
+) -> list[Dict[str, Any]]:
+    """Each card's share of the card part: what it owes less at the end than at the start,
+    less its transactions in the period, and why (#332)."""
+    from app.valuation.facts import _credit_card_liability_details  # local: avoids a cycle
+
+    owed0 = {int(c["account_id"]): c for c in _credit_card_liability_details(db, start, base_currency, current_user_id)}
+    owed1 = {int(c["account_id"]): c for c in _credit_card_liability_details(db, end, base_currency, current_user_id)}
+    last_tx = {
+        int(row[0]): _date_only(row[1])
+        for row in db.execute(
+            text(
+                "SELECT t.account_id, MAX(t.ts) FROM transactions t JOIN accounts a ON a.id = t.account_id "
+                "WHERE a.account_type = 'CREDIT_CARD' AND " + account_scope_sql("a") + " GROUP BY t.account_id"
+            ),
+            {"current_user_id": current_user_id},
+        ).all()
+    }
+    rows = []
+    for card in sorted(set(owed0) | set(owed1)):
+        c0, c1 = owed0.get(card, {}), owed1.get(card, {})
+        amount = -(float(c1.get("value") or 0.0) - float(c0.get("value") or 0.0)) - flows.card_activity_by_account.get(card, 0.0)
+        method = c1.get("method") or c0.get("method")
+        if method == "transactions":
+            newest = last_tx.get(card)
+            reason = "no statement balance: estimated from this month's transactions"
+            if newest is not None and newest < start.date():
+                reason += f", and its transactions end {_short_date(newest)}"
+            reason += ". Enter its statement balance"
+        elif method == "running":
+            as_of = _date_only(c1.get("as_of_date") or c0.get("as_of_date"))
+            reason = f"statement balance of {_short_date(as_of)} plus transactions since" if as_of else "statement balance"
+        else:
+            reason = str(method or "")
+        rows.append(_item(names.get(card, f"Card {card}"), amount, reason, "/liabilities"))
+    return _items(rows, total)
+
+
+def _uncounted_rows(
+    db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime, names: Mapping[int, str]
+) -> list[Dict[str, Any]]:
+    """Bank transactions in the period that no line counts (transfers, excluded categories):
+    with no matching other side, they stay in Other. Per account and category (#332)."""
+    rows = [dict(row) for row in _cash_flow_rows(db, start, end, current_user_id)]
+    rates = _build_row_rate_map(rows, base_currency)
+    totals: Dict[tuple, float] = {}
+    for row in rows:
+        if str(row.get("account_type") or "").upper() in {"CREDIT_CARD", "BROKER"}:
+            continue
+        if not _transaction_in_month_window(row["ts"], start, end):
+            continue
+        if _is_dividend_row(row) or _cash_flow_bucket(row) in {"income", "expense"}:
+            continue
+        category = str(row.get("resolved_category") or row.get("type") or "Uncategorized")
+        key = (int(row["account_id"]), category)
+        totals[key] = totals.get(key, 0.0) + _row_base_amount(row, base_currency, rates)
+    return [
+        _item(f"{names.get(account_id, f'Account {account_id}')}: {category}", amount,
+              "not counted as income or spending; no other side recorded in your accounts")
+        for (account_id, category), amount in totals.items()
+    ]
+
+
 # ─── Flows in the period ─────────────────────────────────────────────────────
 
 
@@ -759,6 +850,7 @@ class _Flows:
     internal_moves: float = 0.0  # deposits into brokers from your own accounts (not counted)
     internal_count: int = 0
     card_activity: float = 0.0  # every card transaction a card's liability counts
+    card_activity_by_account: Dict[int, float] = field(default_factory=dict)  # the same, per card (#332)
     transaction_count: int = 0
 
 
@@ -779,6 +871,8 @@ def _flows(
         amount = _row_base_amount(row, base_currency, rates_by_date)
         if str(row.get("account_type") or "").upper() == "CREDIT_CARD" and str(row["type"]).upper() in CARD_LIABILITY_TYPES:
             out.card_activity += amount
+            card = int(row["account_id"])
+            out.card_activity_by_account[card] = out.card_activity_by_account.get(card, 0.0) + amount
         if _is_dividend_row(row):
             # The Dividends page's rule: a ledger-covered account's dividends come
             # from the ledger, so its transaction rows are skipped, not counted twice.
@@ -806,7 +900,11 @@ def _flows(
         rates: Mapping[str, float] = fx.get_rates_by_date([payment.day], base_currency, {payment.currency}).get(
             fx.rate_date(payment.day), {}
         )
-        out.card_activity += payment.amount * rates.get(payment.currency, 0.0)
+        paid = payment.amount * rates.get(payment.currency, 0.0)
+        out.card_activity += paid
+        out.card_activity_by_account[payment.card_account_id] = (
+            out.card_activity_by_account.get(payment.card_account_id, 0.0) + paid
+        )
 
     first, last = _ledger_window_dates(start, end)
     ledger = _ledger_rows(db, current_user_id, first, last)
@@ -883,8 +981,26 @@ def _flows(
 # ─── The bridge ──────────────────────────────────────────────────────────────
 
 
-def _part(key: str, label: str, amount: float) -> Dict[str, Any]:
-    return {"key": key, "label": label, "amount": amount}
+def _part(key: str, label: str, amount: float, items: Optional[list[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    return {"key": key, "label": label, "amount": amount, "items": items or []}
+
+
+def _item(label: str, amount: Optional[float], reason: Optional[str] = None, link: Optional[str] = None) -> Dict[str, Any]:
+    return {"label": label, "amount": amount, "reason": reason, "link": link}
+
+
+def _items(rows: Iterable[Dict[str, Any]], total: Optional[float] = None, rest: str = "Rest") -> list[Dict[str, Any]]:
+    """Items largest first, at most ITEMS_MAX, those under ITEM_MIN left out; with
+    ``total``, a last item for whatever the listed ones don't cover, so they add up to it."""
+    kept = sorted(
+        (row for row in rows if row["amount"] is None or abs(row["amount"]) >= ITEM_MIN),
+        key=lambda row: -abs(row["amount"] or 0.0),
+    )[:ITEMS_MAX]
+    if total is not None:
+        left = total - sum(row["amount"] or 0.0 for row in kept)
+        if abs(left) >= ITEM_MIN:
+            kept.append(_item(rest, left))
+    return kept
 
 
 def _note(key: str, label: str, amount: Optional[float] = None) -> Dict[str, Any]:
@@ -1040,6 +1156,12 @@ def month_bridge(
     # Accounts whose first holdings statement falls in the period (#330): new to the app.
     new_holdings_accounts = newly_tracked_holdings_accounts(stocks0, stocks1)
     holdings_new: Dict[int, list[tuple[str, float]]] = {}
+    # What each Unexplained part is made of (#332).
+    catch_up_rows: Dict[int, list[Dict[str, Any]]] = {}
+    untracked_rows: list[Dict[str, Any]] = []
+    unsplit_rows: list[Dict[str, Any]] = []
+    gap_rows: list[Dict[str, Any]] = []
+    moved_rows: list[Dict[str, Any]] = []
 
     stock_changes = holding_changes(stocks0, stocks1)
     for holding in stock_changes:
@@ -1047,17 +1169,26 @@ def month_bridge(
         stock_price += split.price
         stock_fx += split.fx
         valuation_gap += split.gap
+        if split.gap:
+            gap_rows.append(_item(f"{held.symbol} ({_platform_label(held.platform)})", split.gap,
+                                  "statement value differs from quantity × price × rate"))
         if split.unsplit:
             unsplit += split.unsplit
             unsplit_count += int(abs(split.unsplit) >= UNSPLIT_COUNT_MIN)
+            unsplit_rows.append(_item(f"{held.symbol} ({_platform_label(held.platform)})", split.unsplit,
+                                      _unsplit_reason(holding, start_anchor.date())))
         if split.quantity and (held.account_id is None or held.account_id not in cash_accounts):
+            side = "bought" if split.quantity > 0 else "sold"
             if held.account_id is not None and held.account_id in new_holdings_accounts:
                 holdings_new.setdefault(held.account_id, []).append((held.symbol, split.quantity))
             elif held.account_id is not None and held.account_id in stale_holdings:
                 holdings_catch_up[held.account_id] = holdings_catch_up.get(held.account_id, 0.0) + split.quantity
+                catch_up_rows.setdefault(held.account_id, []).append(_item(held.symbol, split.quantity, side))
             else:
                 untracked_trades += split.quantity
                 untracked_platforms.add(held.platform)
+                untracked_rows.append(_item(f"{held.symbol} ({_platform_label(held.platform)})", split.quantity,
+                                            f"{side}; no cash record at {_platform_label(held.platform)}"))
 
     crypto_price = crypto_fx = crypto_moved = 0.0
     staking = 0.0
@@ -1076,6 +1207,10 @@ def month_bridge(
         if split.unsplit:
             unsplit += split.unsplit
             unsplit_count += int(abs(split.unsplit) >= UNSPLIT_COUNT_MIN)
+            unsplit_rows.append(_item(holding.held.symbol, split.unsplit, _unsplit_reason(holding, start_anchor.date())))
+        if split.quantity - reward:
+            moved_rows.append(_item(holding.held.symbol, split.quantity - reward,
+                                    "more held" if split.quantity - reward > 0 else "less held"))
 
     # What the statement totals hold beyond the holdings split above (e.g. an IBKR
     # NAV's other asset types), at either end.
@@ -1193,13 +1328,21 @@ def month_bridge(
                 "These accounts' starting figures are older than this period, so their newer data "
                 "also covers earlier months: that part is here, not in this period's lines"
             ),
-            parts=[_part(f"{c.kind}:{c.account_id}", c.label, c.amount) for c in catch_ups],
+            parts=[
+                _part(
+                    f"{c.kind}:{c.account_id}", c.label, c.amount,
+                    _items(catch_up_rows.get(c.account_id, []), c.amount) if c.kind == "holdings" else [],
+                )
+                for c in catch_ups
+            ],
         ))
 
     newly: list[NewlyTracked] = newly_tracked_wallets(
         db, current_user_id, base_currency, start_anchor, end_anchor, live=is_live
     )
     crypto_moved -= sum(n.amount for n in newly)
+    if newly:
+        moved_rows.append(_item("In newly tracked wallets", -sum(n.amount for n in newly), "on the Newly tracked line"))
     newly += newly_tracked_cash(
         db, current_user_id, base_currency, start_anchor, end_anchor, skip_accounts=ledger_accounts, names=names,
     )
@@ -1219,7 +1362,10 @@ def month_bridge(
             "Newly tracked",
             sum(n.amount for n in newly),
             reason="Wallets and accounts first added in this period: their balance is new to the app, not money in or out",
-            parts=[_part(n.key, n.label, n.amount) for n in newly],
+            parts=[
+                _part(n.key, n.label, n.amount, _items((_item(symbol, value) for symbol, value in n.detail), n.amount))
+                for n in newly
+            ],
         ))
 
     change = end_nw["total"] - start_nw["total"]
@@ -1228,17 +1374,29 @@ def month_bridge(
 
     liabilities_change = end_nw["liabilities"] - start_nw["liabilities"]
     card_balances = -liabilities_change - flows.card_activity
+    if abs(holdings_gap) >= ITEM_MIN:
+        gap_rows.append(_item(
+            "Statement totals beyond the holdings listed", holdings_gap,
+            "e.g. an IBKR statement's accrued interest and dividends, which aren't holdings",
+        ))
     parts = [
         _part(
             "untracked_trades",
             f"Bought or sold with no cash record ({_platform_list(untracked_platforms)})"
             if untracked_platforms else "Bought or sold with no cash record",
             untracked_trades,
+            _items(untracked_rows, untracked_trades),
         ),
-        _part("crypto_moved", "Crypto moved into or out of wallets", crypto_moved),
-        _part("card_balances", "Card balances not matched by card transactions", card_balances),
-        _part("holdings_unsplit", "Holdings without a price or quantity", unsplit),
-        _part("statement_gap", "Statement values that differ from quantity x price x rate", valuation_gap + holdings_gap),
+        _part("crypto_moved", "Crypto moved into or out of wallets", crypto_moved, _items(moved_rows, crypto_moved)),
+        _part(
+            "card_balances", "Card balances not matched by card transactions", card_balances,
+            _card_items(db, current_user_id, base_currency, start_anchor, end_anchor, flows, names, card_balances),
+        ),
+        _part("holdings_unsplit", "Holdings without a price or quantity", unsplit, _items(unsplit_rows, unsplit)),
+        _part(
+            "statement_gap", "Statement values that differ from quantity x price x rate", valuation_gap + holdings_gap,
+            _items(gap_rows, valuation_gap + holdings_gap),
+        ),
     ]
     parts = [p for p in parts if abs(p["amount"]) >= 0.005]
     other = residual - sum(p["amount"] for p in parts)
@@ -1246,6 +1404,11 @@ def month_bridge(
         "other",
         "Other: balances and transactions on different dates, transfers with one side recorded, fees",
         other,
+        _items(
+            _uncounted_rows(db, current_user_id, base_currency, start_anchor, end_anchor, names),
+            other,
+            rest="Rest: balances and flows on different dates (e.g. a broker's cash vs its recorded flows)",
+        ),
     ))
     notes = []
     stale = _not_updated(db, current_user_id, base_currency, end_anchor, start_anchor.date())

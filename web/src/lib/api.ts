@@ -519,7 +519,10 @@ export type RiskThresholdsSetting = {
 };
 
 /** One part of a bridge line; a line's parts add up to its amount (#240). */
-export type BridgePart = { key: string; label: string; amount: number };
+/** What a part is made of (#332): a holding, account, card or token; a part's items add up to it. */
+export type BridgeItem = { label: string; amount: number | null; reason?: string | null; link?: string | null };
+
+export type BridgePart = { key: string; label: string; amount: number; items?: BridgeItem[] };
 
 /** Context for a bridge line that is not part of its amount. */
 export type BridgeNote = { key: string; label: string; amount: number | null };

@@ -237,4 +237,38 @@ describe("<MonthBridgeCard>", () => {
     const start = await screen.findByTestId("bridge-start");
     expect(within(start).getByText("USD 1,260,600")).toBeInTheDocument();
   });
+
+  it("names what each part is made of, with why and a link where there's something to do (#332)", async () => {
+    const bridge = makeBridge();
+    bridge.lines = [
+      ...bridge.lines,
+      line("catch_up", "Catch-up since last statement", 1200, {
+        parts: [{ key: "cash:9", label: "Bank: balance of 4 Jul → 7 Nov", amount: 1200, items: [] }],
+      }),
+    ];
+    bridge.unexplained = line("unexplained", "Unexplained", 300, {
+      parts: [
+        {
+          key: "card_balances",
+          label: "Card balances not matched by card transactions",
+          amount: 300,
+          items: [{ label: "Synthetic Card", amount: 300, reason: "no statement balance. Enter its statement balance", link: "/liabilities" }],
+        },
+      ],
+    });
+    mockApi.monthBridge.mockResolvedValue(bridge);
+    renderCard();
+    const catchUp = await screen.findByTestId("bridge-line-catch_up");
+    fireEvent.click(within(catchUp).getByRole("button", { name: /Catch-up since last statement/ }));
+    expect(within(catchUp).getByText("Bank: balance of 4 Jul → 7 Nov")).toBeInTheDocument();
+    expect(within(catchUp).getByRole("link", { name: BRIDGE_LINKS.catch_up.label })).toHaveAttribute("href", "/operations");
+
+    const rest = screen.getByTestId("bridge-line-unexplained");
+    fireEvent.click(within(rest).getByRole("button", { name: /Unexplained/ }));
+    const items = within(rest).getByRole("list", { name: "Card balances not matched by card transactions: items" });
+    expect(within(items).getByRole("link", { name: "Synthetic Card" })).toHaveAttribute("href", "/liabilities");
+    expect(within(items).getByText("+S$ 300.00")).toBeInTheDocument();
+    expect(within(items).getByText(/Enter its statement balance/)).toBeInTheDocument();
+  });
 });
+
