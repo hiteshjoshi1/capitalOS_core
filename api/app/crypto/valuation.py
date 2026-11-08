@@ -182,6 +182,11 @@ def latest_wallet_valuation(
         params,
     ).mappings().all()
     items = [dict(row) for row in item_rows]
+    # #331: an item with no price takes the newest price of the same token stored within
+    # CARRY_DAYS before it (marked "carried:<date>"), so a held coin isn't worth 0.
+    from app.crypto.price_backfill import carry_prices
+
+    carry_prices(db, current_user_id, items)
 
     totals_by_wallet: dict[str, float] = {}
     for item in items:
