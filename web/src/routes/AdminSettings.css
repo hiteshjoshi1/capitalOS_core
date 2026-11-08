@@ -1,0 +1,43 @@
+/* Settings → Admin (#321). */
+.adminLayout {
+  display: grid;
+  gap: 24px;
+  min-width: 0;
+}
+
+.adminJobs {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.adminJob {
+  padding: 12px 14px;
+  min-width: 0;
+}
+
+.adminJobHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.adminJobMeta,
+.adminJobError {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.adminAllowlistRows {
+  margin-top: 12px;
+}
+
+.settingsAdminLink {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}

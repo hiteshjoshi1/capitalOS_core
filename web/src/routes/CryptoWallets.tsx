@@ -6,9 +6,8 @@ import bs58 from "bs58";
 
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { CryptoWallet, CryptoAllowlistItem } from "../lib/api";
+import type { CryptoWallet } from "../lib/api";
 import "../App.css";
-import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import LoadError from "../components/LoadError";
 
@@ -44,9 +43,6 @@ type Eip1193Provider = {
 
 export default function CryptoWallets() {
   const [wallets, setWallets] = useState<CryptoWallet[]>([]);
-  const [allowlist, setAllowlist] = useState<CryptoAllowlistItem[]>([]);
-  const [allowChain, setAllowChain] = useState<string>("ethereum");
-  const [allowContract, setAllowContract] = useState<string>("");
   const [error, setError] = useState<string>("");
   const [status, setStatus] = useState<string>("");
   const [label, setLabel] = useState<string>("");
@@ -97,12 +93,6 @@ export default function CryptoWallets() {
     (async () => {
       const data = await api.cryptoWallets();
       if (!cancelled) setWallets(data);
-    })().catch((e) => {
-      if (!cancelled) setError(e?.message ?? String(e));
-    });
-    (async () => {
-      const data = await api.cryptoAllowlist();
-      if (!cancelled) setAllowlist(data);
     })().catch((e) => {
       if (!cancelled) setError(e?.message ?? String(e));
     });
@@ -306,25 +296,6 @@ export default function CryptoWallets() {
     }
   };
 
-  const addAllowlist = async () => {
-    setError("");
-    if (!allowContract) {
-      setError("Contract address is required.");
-      return;
-    }
-    try {
-      const item = await api.cryptoAllowlistAdd({
-        chain: allowChain,
-        contract_address: allowContract,
-      });
-      setAllowlist((prev) => [item, ...prev.filter((p) => p.id !== item.id)]);
-      setAllowContract("");
-      setStatus(`Added ${item.symbol ?? item.contract_address} to allowlist`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
   return (
     <PageShell
       title="Add Crypto Wallets"
@@ -470,62 +441,7 @@ export default function CryptoWallets() {
       </div>
       </section>
 
-      <section aria-label="Token allowlist">
-      <div className="card">
-        <div className="cardTitle">Token Allowlist</div>
-        <div className="muted" style={{ marginBottom: 8 }}>
-          Only allowlisted ERC-20 contracts are priced and shown. We validate against CoinGecko before adding.
-        </div>
-        {!isMobile && (
-          <>
-            <div className="formGrid">
-              <label className="field">
-                <span className="label">Chain</span>
-                <select
-                  className="input"
-                  value={allowChain}
-                  onChange={(e) => setAllowChain(e.target.value)}
-                >
-                  <option value="ethereum">Ethereum</option>
-                  <option value="base">Base</option>
-                  <option value="arbitrum">Arbitrum</option>
-                  <option value="optimism">Optimism</option>
-                  <option value="mantle">Mantle</option>
-                  <option value="scroll">Scroll</option>
-                  <option value="solana">Solana</option>
-                </select>
-              </label>
-              <label className="field">
-                <span className="label">Contract address</span>
-                <input
-                  className="input"
-                  value={allowContract}
-                  onChange={(e) => setAllowContract(e.target.value)}
-                  placeholder="0x..."
-                />
-              </label>
-            </div>
-            <div className="actions">
-              <button className="btn" onClick={addAllowlist}>Add token</button>
-            </div>
-          </>
-        )}
-        <div style={{ marginTop: 12 }}>
-          {allowlist.length === 0 ? (
-            <p className="muted">No allowlisted tokens yet.</p>
-          ) : (
-            allowlist.map((item) => (
-              <DirectoryListRow
-                key={item.id}
-                title={item.symbol ?? "—"}
-                meta={item.name ?? "—"}
-                right={<span className="tag">{item.chain}</span>}
-              />
-            ))
-          )}
-        </div>
-      </div>
-      </section>
+      {/* #321: the token allowlist moved to Settings → Admin. */}
       </div>
     </PageShell>
   );

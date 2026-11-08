@@ -2,7 +2,7 @@ import type { Page } from "@playwright/test";
 
 const E2E_TOKEN = "e2e-test-token";
 
-export async function mockAuthenticatedSession(page: Page): Promise<void> {
+export async function mockAuthenticatedSession(page: Page, options: { admin?: boolean } = {}): Promise<void> {
   // Mock /auth/refresh so AuthContext bootstrap succeeds without a real cookie.
   await page.route("**/auth/refresh", async (route) => {
     await route.fulfill({
@@ -17,7 +17,7 @@ export async function mockAuthenticatedSession(page: Page): Promise<void> {
         username: "e2e-user",
         display_name: "E2E User",
         email: null,
-        is_admin: false,
+        is_admin: options.admin === true,
       },
     });
   });

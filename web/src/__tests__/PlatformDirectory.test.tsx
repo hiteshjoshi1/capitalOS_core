@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
-import Platforms from "../routes/Platforms";
+import PlatformDirectory from "../components/PlatformDirectory";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
 
@@ -17,7 +17,7 @@ vi.mock("../lib/api", () => ({
 
 const mockApi = vi.mocked(api, true);
 
-describe("Platforms", () => {
+describe("Platform directory (Settings → Admin, #321)", () => {
   it("renders existing platform rows", async () => {
     mockApi.platforms.mockResolvedValueOnce([
       { id: 1, code: "IBKR", name: "Interactive Brokers", platform_type: "BROKER", country: "US", website: null },
@@ -31,12 +31,12 @@ describe("Platforms", () => {
     render(
       <ThemeProvider>
         <MemoryRouter>
-          <Platforms />
+          <PlatformDirectory />
         </MemoryRouter>
       </ThemeProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Add Platform" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Platform directory" })).toBeInTheDocument();
     expect(await screen.findByText("Interactive Brokers")).toBeInTheDocument();
     expect(screen.getByText("IBKR · BROKER · US")).toBeInTheDocument();
   });
@@ -70,7 +70,7 @@ describe("Platforms", () => {
     render(
       <ThemeProvider>
         <MemoryRouter>
-          <Platforms />
+          <PlatformDirectory />
         </MemoryRouter>
       </ThemeProvider>,
     );

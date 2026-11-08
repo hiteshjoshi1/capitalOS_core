@@ -164,8 +164,10 @@ test("loads dashboard shell", async ({ page }) => {
   await expect(page.getByRole("heading", { level: 1, name: "Wealth Overview" })).toBeVisible();
   await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
-  await expect(page.getByRole("link", { name: /^Import Statements$/ }).last()).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Refresh Market Data$/ }).last()).toBeVisible();
+  // #321: Data Hub's three tabs.
+  await expect(page.getByRole("link", { name: /^Inbox$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Accounts & sources$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Imports$/ }).last()).toBeVisible();
 });
 
 test("navigates to cash overview", async ({ page }) => {

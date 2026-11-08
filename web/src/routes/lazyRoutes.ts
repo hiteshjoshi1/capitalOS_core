@@ -19,7 +19,7 @@ export const WealthHistory = lazy(() => import("./WealthHistory.tsx"));
 export const WealthRisk = lazy(() => import("./WealthRisk.tsx"));
 export const Dividends = lazy(() => import("./Dividends.tsx"));
 export const Settings = lazy(() => import("./Settings.tsx"));
-export const Platforms = lazy(() => import("./Platforms.tsx"));
 export const LiabilitiesOverview = lazy(() => import("./LiabilitiesOverview.tsx"));
 export const OperationsOverview = lazy(() => import("./OperationsOverview.tsx"));
 export const AccountsSources = lazy(() => import("./AccountsSources.tsx"));
+export const AdminSettings = lazy(() => import("./AdminSettings.tsx"));
