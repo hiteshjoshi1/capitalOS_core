@@ -110,7 +110,8 @@ export default function MarketData() {
               {status.length === 0 ? (
                 <p className="muted">No runs yet.</p>
               ) : (
-                status.map((exchange) => {
+                // Exchanges with nothing held are left out (#315): nothing to refresh there.
+                status.filter((exchange) => exchange.symbols.length > 0).map((exchange) => {
                   const isExpanded = !!expanded[exchange.exchange_code];
                   return (
                     <div className="marketDataExchange" key={exchange.exchange_code}>
@@ -147,9 +148,12 @@ export default function MarketData() {
                               <span className="muted marketDataSymbolMeta">
                                 {fmt.formatDate(item.latest_trade_date?.slice(0, 10))} · {item.provider ?? item.source ?? "—"}
                               </span>
-                              <span className="muted">
-                                {item.reason_code ? REASON_LABELS[item.reason_code] : item.failure_reason ?? "Reason unavailable"}
-                              </span>
+                              {/* A reason only where there's a problem (#315). */}
+                              {item.freshness_status !== "fresh" ? (
+                                <span className="muted">
+                                  {item.reason_code ? REASON_LABELS[item.reason_code] : item.failure_reason ?? "Reason unavailable"}
+                                </span>
+                              ) : null}
                             </div>
                           ))}
                         </div>
