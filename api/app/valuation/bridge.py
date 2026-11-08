@@ -407,7 +407,7 @@ def _crypto_holdings(
         symbol = str(item.get("symbol") or "UNKNOWN").upper()
         quantity, value_usd = amounts.get(symbol, (0.0, 0.0))
         amounts[symbol] = (
-            quantity + float(item.get("normalized_amount") or 0.0),
+            quantity + (float(item.get("normalized_amount") or 0.0) if item.get("value_usd") is not None else 0.0),  # #331
             value_usd + float(item.get("value_usd") or 0.0),
         )
     out: Dict[tuple, _Holding] = {}
