@@ -1,130 +1,101 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import Alerts from "../routes/Alerts";
+import InboxBell from "../components/InboxBell";
 import { api } from "../lib/api";
-import { ThemeProvider } from "../context/ThemeContext";
+import type { InboxResponse } from "../lib/api";
+import { clearApiCache } from "../lib/useApiResource";
 
-vi.mock("../lib/api", () => ({
-  api: {
-    uploadReminders: vi.fn(),
-    uploadReminderCount: vi.fn(),
-    alertNotifications: vi.fn(),
-  },
-}));
-
+vi.mock("../lib/api", () => ({ api: { operationsInbox: vi.fn() } }));
 const mockApi = vi.mocked(api, true);
 
-const MOCK_REMINDERS = [
-  {
-    account_id: 1,
-    account_name: "DBS Savings",
-    platform: "DBS",
-    account_type: "BANK",
-    last_upload_date: "2025-11-01",
-    last_transaction_date: "2025-10-31",
-    days_since_upload: 45,
-    message: "Upload the latest statement for DBS Savings (DBS). Last upload was 2025-11-01 and last transaction tracked was 2025-10-31.",
-  },
-  {
-    account_id: 2,
-    account_name: "IBKR Brokerage",
-    platform: "IBKR",
-    account_type: "BROKER",
-    last_upload_date: "2025-10-15",
-    last_transaction_date: null,
-    days_since_upload: 62,
-    message: "Upload the latest statement for IBKR Brokerage (IBKR). Last upload was 2025-10-15.",
-  },
-];
-
-const EMPTY_NOTIFICATIONS = {
-  upload_reminders: [],
-  total_count: 0,
+const inbox: InboxResponse = {
+  as_of: "2026-11-08",
+  count: 3,
+  items: [
+    {
+      id: "job:market_data", kind: "job_failing", severity: "high", title: "Quote refresh is failing",
+      detail: "3 failed runs in a row", source: null,
+      action: { label: "Refresh prices", route: null, params: {}, run: "refresh_prices", admin_only: true },
+    },
+    {
+      id: "import:4", kind: "unknown_format", severity: "medium", title: "Synthetic Bank: file format not recognised",
+      detail: "odd.csv", source: null,
+      action: { label: "Fix format", route: "/ingest", params: { job: "4" }, run: null, admin_only: false },
+    },
+    {
+      id: "unmapped", kind: "unmapped_transactions", severity: "low", title: "5 transactions without a category",
+      detail: null, source: null,
+      action: { label: "Map transactions", route: "/cash-flow/map-transactions", params: {}, run: null, admin_only: false },
+    },
+  ],
+  all_good: [],
+  recent_activity: [],
 };
 
-function renderAlerts() {
+function renderWithBell(narrow = false) {
   return render(
-    <ThemeProvider>
-      <MemoryRouter>
-        <Alerts />
-      </MemoryRouter>
-    </ThemeProvider>
+    <MemoryRouter>
+      <InboxBell narrow={narrow} />
+      <Alerts />
+    </MemoryRouter>,
   );
 }
 
-describe("Alerts page", () => {
+describe("Alerts and the header bell read one list (#317)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockApi.alertNotifications.mockResolvedValue(EMPTY_NOTIFICATIONS);
+    clearApiCache();
   });
 
-  it("shows loading state initially", () => {
-    mockApi.alertNotifications.mockReturnValue(new Promise(() => {}));
-    renderAlerts();
-    expect(screen.getByText(/Loading alerts/i)).toBeInTheDocument();
+  it("bell count = inbox count = the Alerts list, from one request", async () => {
+    mockApi.operationsInbox.mockResolvedValue(inbox);
+    renderWithBell();
+    const list = await screen.findByRole("list", { name: "Alerts" });
+    const alerts = within(list).getAllByTestId("alert-item");
+    expect(screen.getByTestId("inbox-bell-count")).toHaveTextContent(String(inbox.count));
+    expect(alerts).toHaveLength(inbox.count);
+    expect(screen.getByLabelText("3 items need you")).toBeInTheDocument();
+    expect(mockApi.operationsInbox).toHaveBeenCalledTimes(1);
   });
 
-  it("renders upload reminder cards with mock data", async () => {
-    mockApi.alertNotifications.mockResolvedValueOnce({
-      upload_reminders: MOCK_REMINDERS,
-      total_count: 2,
-    });
-    renderAlerts();
-
-    expect(await screen.findByText("DBS Savings")).toBeInTheDocument();
-    expect(screen.getByText("IBKR Brokerage")).toBeInTheDocument();
-    expect(screen.getByText("DBS")).toBeInTheDocument();
-    expect(screen.getByText("IBKR")).toBeInTheDocument();
-    expect(screen.getByText(/45 days/)).toBeInTheDocument();
-    expect(screen.getByText(/62 days/)).toBeInTheDocument();
+  it("each alert links to its fix; a refresh opens the Data Hub", async () => {
+    mockApi.operationsInbox.mockResolvedValue(inbox);
+    renderWithBell();
+    const list = await screen.findByRole("list", { name: "Alerts" });
+    expect(within(list).getByRole("link", { name: "Fix format" })).toHaveAttribute("href", "/ingest?job=4");
+    expect(within(list).getByRole("link", { name: "Map transactions" })).toHaveAttribute("href", "/cash-flow/map-transactions");
+    expect(within(list).getByRole("link", { name: "Open the Data Hub" })).toHaveAttribute("href", "/operations");
   });
 
-  it("shows empty state when no alerts", async () => {
-    mockApi.alertNotifications.mockResolvedValueOnce(EMPTY_NOTIFICATIONS);
-    renderAlerts();
-
-    expect(await screen.findByText(/All accounts are up to date/i)).toBeInTheDocument();
+  it("nothing open: no count on the bell, and Alerts says so", async () => {
+    mockApi.operationsInbox.mockResolvedValue({ ...inbox, count: 0, items: [] });
+    renderWithBell();
+    expect(await screen.findByText(/Nothing needs you. Everything is up to date./)).toBeInTheDocument();
+    expect(screen.queryByTestId("inbox-bell-count")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Nothing needs you")).toBeInTheDocument();
   });
 
-  it("shows error state when API fails", async () => {
-    mockApi.alertNotifications.mockRejectedValueOnce(new Error("Network error"));
-    renderAlerts();
-
-    expect(await screen.findByText(/Failed to load alerts/i)).toBeInTheDocument();
-    expect(screen.getByText(/Network error/)).toBeInTheDocument();
+  it("on a phone the bell is a link to the Data Hub with the same count", async () => {
+    mockApi.operationsInbox.mockResolvedValue(inbox);
+    render(
+      <MemoryRouter>
+        <InboxBell narrow />
+      </MemoryRouter>,
+    );
+    const link = await screen.findByRole("link", { name: "3 items need you" });
+    expect(link).toHaveAttribute("href", "/operations");
   });
 
-  it("each upload reminder card links to ingest with the reminder account selected", async () => {
-    mockApi.alertNotifications.mockResolvedValueOnce({
-      upload_reminders: MOCK_REMINDERS,
-      total_count: 2,
-    });
-    renderAlerts();
-
-    await screen.findByText("DBS Savings");
-    const ingestLinks = screen.getAllByRole("link", { name: /Go to Ingest/i });
-    expect(ingestLinks.length).toBe(2);
-    expect(ingestLinks[0]).toHaveAttribute("href", "/ingest?account_id=1");
-    expect(ingestLinks[1]).toHaveAttribute("href", "/ingest?account_id=2");
-  });
-
-  it("shows last_transaction_date as em dash when null", async () => {
-    mockApi.alertNotifications.mockResolvedValueOnce({
-      upload_reminders: [MOCK_REMINDERS[1]],
-      total_count: 1,
-    });
-    renderAlerts();
-
-    await screen.findByText("IBKR Brokerage");
-    expect(screen.getByText("—")).toBeInTheDocument();
-  });
-
-  it("does not use polling (no setInterval)", () => {
-    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
-    renderAlerts();
-    expect(setIntervalSpy).not.toHaveBeenCalled();
-    setIntervalSpy.mockRestore();
+  it("shows a load error", async () => {
+    mockApi.operationsInbox.mockRejectedValue(new Error("Network error"));
+    render(
+      <MemoryRouter>
+        <Alerts />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/Couldn't load alerts/)).toBeInTheDocument();
   });
 });

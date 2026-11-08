@@ -1,6 +1,7 @@
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import Sidebar from "./Sidebar";
+import InboxBell from "./InboxBell";
 import RouteFallback from "./RouteFallback";
 import RouteErrorBoundary from "./RouteErrorBoundary";
 import { useAuth } from "../context/useAuth";
@@ -86,6 +87,8 @@ export default function AppShell() {
                   </button>
                 </div>
               )}
+              {/* #317: the Data Hub inbox count, the same on every page and on a phone. */}
+              <InboxBell narrow={narrow} />
               <details className="userMenu">
                 <summary className="userMenuSummary appShellUserPill">
                   <span className="appShellUserAvatarFrame" aria-hidden="true">
