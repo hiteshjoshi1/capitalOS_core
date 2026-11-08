@@ -22,3 +22,4 @@ export const Settings = lazy(() => import("./Settings.tsx"));
 export const Platforms = lazy(() => import("./Platforms.tsx"));
 export const LiabilitiesOverview = lazy(() => import("./LiabilitiesOverview.tsx"));
 export const OperationsOverview = lazy(() => import("./OperationsOverview.tsx"));
+export const AccountsSources = lazy(() => import("./AccountsSources.tsx"));

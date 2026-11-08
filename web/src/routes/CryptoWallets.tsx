@@ -4,6 +4,7 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Transaction, TransactionInstruction, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import type { CryptoWallet, CryptoAllowlistItem } from "../lib/api";
 import "../App.css";
@@ -454,26 +455,18 @@ export default function CryptoWallets() {
         <div className="cardTitle">Connect a wallet</div>
         <p className="muted">
           Connecting a new wallet needs a browser extension or hardware device — open Data Hub → Add Crypto Wallets
-          on desktop to add one. Your connected wallets are still visible below.
+          on desktop to add one. Your connected wallets are listed in Accounts & sources.
         </p>
       </div>
       )}
 
-      <div className="card">
-        <div className="cardTitle">Connected wallets</div>
-        {wallets.length === 0 ? (
-          <p className="muted">No wallets added yet.</p>
-        ) : (
-          wallets.map((w) => (
-            <DirectoryListRow
-              key={w.id}
-              title={w.label ?? "—"}
-              meta={`${w.chain_type}:${w.chain} · ${w.address}`}
-              right={<span className="statusPill statusPill--good">{w.status}</span>}
-            />
-          ))
-        )}
-      </div>
+      {/* #318: connected wallets are listed, with their status and Refresh, in Accounts & sources. */}
+      <p className="card muted">
+        {wallets.length === 0
+          ? "No wallets connected yet."
+          : `${wallets.length} wallet${wallets.length === 1 ? "" : "s"} connected.`}{" "}
+        <Link to="/operations/sources">See them in Accounts &amp; sources</Link>.
+      </p>
       </div>
       </section>
 

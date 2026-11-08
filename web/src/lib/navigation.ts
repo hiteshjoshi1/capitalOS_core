@@ -63,6 +63,8 @@ export const APP_SECTIONS: AppSection[] = [
     to: "/operations",
     tabs: [
       { label: "Overview", to: "/operations", exact: true },
+      // #318: every account, wallet and feed with its status and one action.
+      { label: "Accounts & sources", to: "/operations/sources" },
       { label: "Import Statements", to: "/ingest" },
       { label: "Add Accounts", to: "/accounts/new" },
       { label: "Add Platforms", to: "/platforms" },

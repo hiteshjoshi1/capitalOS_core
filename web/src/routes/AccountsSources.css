@@ -1,0 +1,183 @@
+/* Data Hub → Accounts & sources (#318): one row per source, its status and one action. */
+.sourcesLayout {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.sourcesToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sourcesFilters {
+  margin: 0;
+}
+
+.sourcesSearch {
+  width: 220px;
+  max-width: 100%;
+}
+
+.sourcesSummary {
+  margin: 0;
+}
+
+.sourcesList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sourcesRow {
+  display: grid;
+  grid-template-columns: minmax(0, 2.2fr) minmax(0, 1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-left: 3px solid var(--line);
+  min-width: 0;
+}
+
+/* A row with its ⋯ menu open sits above the rows after it, so the menu isn't covered. */
+.sourcesRow {
+  position: relative;
+}
+
+.sourcesRow:has(details[open]),
+.sourcesRow:focus-within {
+  z-index: 30;
+}
+
+.sourcesRowAttention {
+  border-left-color: var(--bad);
+}
+
+.sourcesRowClosed {
+  opacity: 0.7;
+}
+
+.sourcesMain,
+.sourcesData,
+.sourcesStatus {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  justify-items: start;
+}
+
+.sourcesName {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.sourcesMeta {
+  margin: 0;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.sourcesLabel {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sourcesActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.sourcesAction {
+  min-width: 96px;
+  text-align: center;
+}
+
+.sourcesAdminHint {
+  font-size: 12px;
+}
+
+.sourcesRunMessage,
+.sourcesPanel {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.sourcesRunMessage.bad {
+  color: var(--bad);
+}
+
+.sourcesPanel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.sourcesAddMenu .inboxRefreshMenuToggle {
+  padding-left: 14px;
+  padding-right: 14px;
+}
+
+a.inboxRefreshMenuItem {
+  text-decoration: none;
+}
+
+.addAccountSourcesLink {
+  margin-top: 16px;
+}
+
+/* Phone: name + status on top, action on the right; data stacks under. */
+@media (max-width: 640px) {
+  .sourcesRow {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "main actions"
+      "status actions"
+      "data data";
+    row-gap: 6px;
+  }
+
+  .sourcesMain {
+    grid-area: main;
+  }
+
+  .sourcesStatus {
+    grid-area: status;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .sourcesData {
+    grid-area: data;
+    display: flex;
+    gap: 6px;
+  }
+
+  .sourcesActions {
+    grid-area: actions;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .sourcesAction {
+    min-width: 0;
+  }
+
+  .sourcesSearch {
+    width: 100%;
+  }
+}
