@@ -133,6 +133,13 @@ function CardBalanceRow({
                   </div>
                 ) : null}
                 {period.flagged ? <div className="cardBalanceWarn">{differenceReason(period, card.currency)}</div> : null}
+                {(period.bank_payments ?? 0) > 0.005 ? (
+                  <div className="cardBalanceNote">
+                    Includes {money(period.bank_payments ?? 0, card.currency)} paid from your bank account that the card
+                    file doesn&apos;t list.
+                  </div>
+                ) : null}
+                {!period.flagged && period.note ? <div className="cardBalanceNote">{period.note}</div> : null}
               </li>
             ))}
           </ol>

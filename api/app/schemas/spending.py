@@ -224,6 +224,10 @@ class CreditCardBalancePeriod(BaseModel):
     difference: float | None = None
     flagged: bool = False
     paid_in_full: bool | None = None
+    # #308: payments found only on the paying bank account (included in ``payments``), and why
+    # a difference is left when the ledger can tell (e.g. no card transactions after a date).
+    bank_payments: float = 0.0
+    note: str | None = None
 
 
 class CreditCardBalanceItem(BaseModel):

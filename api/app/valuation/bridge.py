@@ -28,7 +28,7 @@ Dividends pages.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional
 
 from sqlalchemy import text
@@ -529,6 +529,20 @@ def _flows(
                 out.income += amount
         elif bucket == "expense":
             out.spending += -amount
+
+    # A card payment seen only on the paying bank account (#308) lowers the card's liability
+    # like a payment in the card's own file, so it is card activity too (the bank row itself
+    # is a move between the user's accounts, not spending).
+    from app.valuation.card_payments import missing_bank_payments
+
+    for payment in missing_bank_payments(db, current_user_id):
+        day_ts = datetime.combine(payment.day, datetime.min.time(), tzinfo=timezone.utc)
+        if not _transaction_in_month_window(day_ts, start, end):
+            continue
+        rates: Mapping[str, float] = fx.get_rates_by_date([payment.day], base_currency, {payment.currency}).get(
+            fx.rate_date(payment.day), {}
+        )
+        out.card_activity += payment.amount * rates.get(payment.currency, 0.0)
 
     first, last = _ledger_window_dates(start, end)
     ledger = _ledger_rows(db, current_user_id, first, last)

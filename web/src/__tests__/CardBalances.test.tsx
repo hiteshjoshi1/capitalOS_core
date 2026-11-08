@@ -68,6 +68,22 @@ describe("CardBalances (#300)", () => {
     expect(within(checks).getByText(/S\$ 28\.94 more is owed than your transactions add up to/)).toBeInTheDocument();
   });
 
+  it("says which payments came from the bank and why a gap is left (#308)", async () => {
+    const shifted = period({ note: "Transactions dated 2026-08-30 are counted in the next period: the balance on that day didn't include them yet." });
+    const gap = period({
+      from_date: "2026-08-30", to_date: "2026-10-02", printed: 242.44, difference: 242.44, flagged: true, bank_payments: 592.41,
+      note: "No card transactions after 2026-09-13: charges between then and 2026-10-02 aren't uploaded, so the balance is higher than the transactions add up to.",
+    });
+    mockApi.creditCardBalances.mockResolvedValue(
+      payload([card({ flagged_count: 1, periods: [card().periods[0], gap, shifted] })]),
+    );
+    render(<CardBalances baseCurrency="SGD" />);
+    const checks = (await screen.findByText(/Statement checks: 1 of 2 add up/)).closest("details")!;
+    expect(within(checks).getByText(/No card transactions after 2026-09-13/)).toBeInTheDocument();
+    expect(within(checks).getByText(/Includes S\$ 592\.41 paid from your bank account/)).toBeInTheDocument();
+    expect(within(checks).getByText(/counted in the next period/)).toBeInTheDocument();
+  });
+
   it("shows a credit for an overpaid card", () => {
     expect(owedLabel({ owed_now: -150, currency: "SGD" })).toBe("In credit S$ 150.00");
   });

@@ -199,6 +199,21 @@ def _credit_card_liability_details(
         if as_of is not None and _card_transaction_in_window(ts, as_of + timedelta(days=1), anchor_ts):
             since_balance[account_id] = since_balance.get(account_id, 0.0) + _owed(row)
 
+    # Payments to a card seen only on the paying bank account (#308, D-77): they lower what
+    # the running balance says is owed, as a payment in the card's own file would.
+    if newest_statement:
+        from app.valuation.card_payments import missing_bank_payments
+
+        for payment in missing_bank_payments(db, current_user_id):
+            as_of = newest_statement.get(payment.card_account_id)
+            day_ts = datetime.combine(payment.day, datetime.min.time(), tzinfo=timezone.utc)
+            if as_of is None or not _card_transaction_in_window(day_ts, as_of + timedelta(days=1), anchor_ts):
+                continue
+            rate = rates.get(payment.currency or base_currency, None)
+            if rate is None:
+                rate = fx.get_rates(anchor_ts, base_currency, {payment.currency}).get(payment.currency, 0.0)
+            since_balance[payment.card_account_id] = since_balance.get(payment.card_account_id, 0.0) - payment.amount * rate
+
     out: list[Dict[str, Any]] = []
     for card in cards:
         account_id = int(card["account_id"])

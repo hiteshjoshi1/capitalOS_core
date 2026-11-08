@@ -24,6 +24,7 @@ from app.portfolio.canonical_reads import canonical_snapshot_coverage_as_of
 from app.valuation.state import _effective_as_of
 from app.ingestion.card_balances import write_card_statement_balance
 from app.valuation.card_ledger import card_ledgers
+from app.valuation.card_payments import card_last4s, mark_own_card_payments
 from app.schemas.spending import (
     CreditCardBalanceIn,
     CreditCardBalanceItem,
@@ -237,7 +238,10 @@ def _cash_flow_rows(db: Session, start: datetime, end: datetime, current_user_id
           AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST', 'TRANSFER')
         ORDER BY t.ts DESC, t.id DESC
     """)
-    return _window_rows(db, cash_flow_q, {"current_user_id": current_user_id}, start, end)
+    rows = _window_rows(db, cash_flow_q, {"current_user_id": current_user_id}, start, end)
+    # A bank outflow that pays one of the user's own cards is a move between their accounts,
+    # not spending: the card's charges are (#308, D-77).
+    return mark_own_card_payments(rows, card_last4s(db, current_user_id))
 
 
 def _is_transfer_resolved_category(row) -> bool:
@@ -265,6 +269,8 @@ def _is_self_named_counterparty(row) -> bool:
 
 
 def _is_explicit_source_transfer(row) -> bool:
+    if row.get("own_card_payment"):
+        return True
     raw_category = str(row.get("raw_category") or "").strip().lower()
     if raw_category in EXPLICIT_TRANSFER_RAW_CATEGORIES:
         return True
@@ -1555,6 +1561,8 @@ def credit_card_balances(
                         difference=period.difference,
                         flagged=period.flagged,
                         paid_in_full=period.paid_in_full,
+                        bank_payments=round(period.bank_payments, 2),
+                        note=period.note,
                     )
                     for period in reversed(ledger.periods)
                 ],

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import re
 from typing import Any
 
+from app.ingestion.card_fees import CARD_FEE_CATEGORY, is_conversion_fee
 from app.ingestion.parsers import ParseResult
 
 
@@ -147,6 +148,8 @@ def _classify(description: str, transaction_type: str, amount: float) -> tuple[s
         return "INTEREST", "CreditCard::Interest"
     if "FEES" in row_type or "CHARGES" in row_type:
         return "FEE", "CreditCard::Fee"
+    if is_conversion_fee(desc):  # a foreign transaction / conversion fee (#308)
+        return "FEE", CARD_FEE_CATEGORY
     if any(keyword in desc for keyword in _PAYMENT_KEYWORDS):
         return "TRANSFER", "CreditCard::Payment"
     if "PAYMENT" in row_type:
