@@ -3,8 +3,9 @@ computed in app.valuation (#143); the Data Hub card in app.services.data_hub."""
 from __future__ import annotations
 
 from datetime import date, timedelta
+from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
@@ -31,7 +32,7 @@ from app.schemas.dashboard import (
 )
 from app.services import data_hub
 from app.services.risk_thresholds import read_risk_thresholds, save_risk_thresholds
-from app.portfolio.realised import realised_summary
+from app.portfolio.realised import realised_summary, resolve_period
 from app.valuation import bridge, pages
 from app.valuation.clock import _app_today, _parse_month
 from app.valuation.history import _backfill_wealth_rollups
@@ -193,15 +194,27 @@ def stock_holdings_summary(
 def realised_pnl(
     month: str = Query(..., description="YYYY-MM"),
     base_currency: str = Query("SGD"),
+    period: str = Query("month", description="month | ytd | last_year | year | range (#313)"),
+    year: Optional[int] = Query(None, ge=1990, le=2100, description="With period=year"),
+    date_from: Optional[date] = Query(None, alias="from", description="With period=range, YYYY-MM-DD"),
+    date_to: Optional[date] = Query(None, alias="to", description="With period=range, YYYY-MM-DD"),
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
 ):
     """Realised P&L on sales in the month and its year to date (#293, D-78): IBKR's own
-    figure per fill when the Flex report has it, else FIFO over the account's fills."""
+    figure per fill when the Flex report has it, else FIFO over the account's fills.
+    ``period`` (#313) adds that period's totals and its sales grouped per stock."""
     start = _parse_month(month).date()
     next_month = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
-    end = min(next_month - timedelta(days=1), _app_today())
-    return realised_summary(db, current_user.id, base_currency, start, end)
+    today = _app_today()
+    end = min(next_month - timedelta(days=1), today)
+    try:
+        chosen = resolve_period(
+            period, today=today, month_start=start, month_end=end, year=year, start=date_from, end=date_to
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return realised_summary(db, current_user.id, base_currency, start, end, chosen)
 
 
 @router.get("/net-worth-since-update", response_model=NetWorthSinceUpdateResponse)
