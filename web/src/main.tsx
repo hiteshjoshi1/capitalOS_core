@@ -26,10 +26,10 @@ import {
   WealthRisk,
   Dividends,
   Settings,
-  Platforms,
   LiabilitiesOverview,
   OperationsOverview,
   AccountsSources,
+  AdminSettings,
 } from "./routes/lazyRoutes.ts";
 
 createRoot(document.getElementById("root")!).render(
@@ -70,8 +70,10 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/ingest" element={<Ingest />} />
                 <Route path="/market-data" element={<MarketData />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/settings/admin" element={<AdminSettings />} />
                 <Route path="/accounts/new" element={<AddAccount />} />
-                <Route path="/platforms" element={<Platforms />} />
+                {/* #321: the platform directory moved to Settings → Admin. */}
+                <Route path="/platforms" element={<Navigate to="/settings/admin" replace />} />
               </Route>
             </Route>
           </Routes>

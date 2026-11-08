@@ -122,30 +122,33 @@ test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 });
 
-test("Operations nav includes Add Account and Platforms", async ({ page }) => {
+test("Data Hub has three tabs; Add Account opens from Accounts & sources (#321)", async ({ page }) => {
   await mockDashboardApis(page);
   await mockOperationsApis(page);
 
   await page.goto("/");
   await page.getByRole("link", { name: "Data Hub" }).click();
   await expect(page).toHaveURL(/\/operations$/);
-  await expect(page.getByRole("link", { name: /^Add Accounts$/ }).last()).toBeVisible();
-  await expect(page.getByRole("link", { name: /^Add Platforms$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Accounts & sources$/ }).last()).toBeVisible();
+  await expect(page.getByRole("link", { name: /^Add Platforms$/ })).toHaveCount(0);
 
-  await page.getByRole("link", { name: /^Add Accounts$/ }).last().click();
-  await expect(page).toHaveURL(/\/accounts\/new$/);
+  await page.goto("/accounts/new");
   await expect(page.getByRole("heading", { level: 1, name: "Add Account" })).toBeVisible();
-
-  await page.getByRole("link", { name: "Data Hub" }).click();
-  await expect(page).toHaveURL(/\/operations$/);
-  await page.getByRole("link", { name: /^Add Platforms$/ }).last().click();
-  await expect(page).toHaveURL(/\/platforms$/);
-  await expect(page.getByRole("heading", { level: 1, name: "Add Platform" })).toBeVisible();
+  // Add Account counts as the Accounts & sources tab.
+  await expect(page.locator(".appShellTabActive")).toHaveText("Accounts & sources");
 });
 
-test("Platforms page creates and shows a new platform", async ({ page }) => {
+test("Settings → Admin creates and shows a new platform; /platforms redirects there (#321)", async ({ page }) => {
+  await mockAuthenticatedSession(page, { admin: true });
   await mockOperationsApis(page);
+  await page.route("**/dashboard/data-hub-summary", async (route) => {
+    await route.fulfill({ json: { job_status: [], market_data: { unpriced_holdings: [] } } });
+  });
+  await page.route("**/crypto/allowlist", async (route) => {
+    await route.fulfill({ json: [] });
+  });
   await page.goto("/platforms");
+  await expect(page).toHaveURL(/\/settings\/admin$/);
 
   await page.getByLabel("Platform Code").fill("dbs");
   await page.getByLabel("Platform Name").fill("DBS Bank");

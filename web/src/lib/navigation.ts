@@ -62,14 +62,18 @@ export const APP_SECTIONS: AppSection[] = [
     icon: "settings_applications",
     to: "/operations",
     tabs: [
-      { label: "Overview", to: "/operations", exact: true },
-      // #318: every account, wallet and feed with its status and one action.
-      { label: "Accounts & sources", to: "/operations/sources" },
-      { label: "Import Statements", to: "/ingest" },
-      { label: "Add Accounts", to: "/accounts/new" },
-      { label: "Add Platforms", to: "/platforms" },
-      { label: "Add Crypto Wallets", to: "/crypto", exact: true },
-      { label: "Refresh Market Data", to: "/market-data" },
+      // #321 (#309): three tabs. What needs you, every source with its action, and uploads.
+      // Adding an account or wallet and Market data open from Accounts & sources ("+ Add",
+      // each row's action), so they count as that tab; the platform directory and token
+      // allowlist moved to Settings → Admin.
+      { label: "Inbox", to: "/operations", exact: true },
+      {
+        label: "Accounts & sources",
+        to: "/operations/sources",
+        matchPaths: ["/operations/sources", "/accounts/new", "/market-data"],
+      },
+      { label: "Imports", to: "/ingest" },
+      { label: "Add Crypto Wallets", to: "/crypto", exact: true, hidden: true },
     ],
   },
 ];
