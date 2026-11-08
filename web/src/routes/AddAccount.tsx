@@ -1,15 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { Account, AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
+import type { AccountOptions, Currency, Platform, PlatformOptions } from "../lib/api";
 import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
-import DirectoryListRow from "../components/DirectoryListRow";
 import PageShell from "../components/PageShell";
 import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
 import SuccessBanner from "../components/SuccessBanner";
-import { formatPlatformLabel } from "../lib/platformLabels";
-import { formatEnumLabel } from "../lib/format";
 import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -36,7 +33,6 @@ export default function AddAccount() {
   const [saving, setSaving] = useState<boolean>(false);
   const [success, setSuccess] = useState<string>("");
   const [platforms, setPlatforms] = useState<Platform[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
   const [options, setOptions] = useState<AccountOptions | null>(null);
   const [platformOptions, setPlatformOptions] = useState<PlatformOptions | null>(null);
   const [currencies, setCurrencies] = useState<Currency[]>([]);
@@ -56,18 +52,16 @@ export default function AddAccount() {
     (async () => {
       try {
         setState("loading");
-        const [p, o, po, c, a] = await Promise.all([
+        const [p, o, po, c] = await Promise.all([
           api.platforms(),
           api.accountOptions(),
           api.platformOptions(),
           api.currencies(),
-          loadApiResource("accounts", () => api.accounts()),
         ]);
         setPlatforms(p);
         setOptions(o);
         setPlatformOptions(po);
         setCurrencies(c);
-        setAccounts(a);
         setState("ready");
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -137,8 +131,8 @@ export default function AddAccount() {
       setForm(EMPTY_FORM);
       setCurrencySearch("");
       setCountrySearch("");
-      const refreshedAccounts = await loadApiResource("accounts", () => api.accounts(), { force: true });
-      setAccounts(refreshedAccounts);
+      // Other pages read the cached list (#149): refresh it so they see the new account.
+      await loadApiResource("accounts", () => api.accounts(), { force: true }).catch(() => undefined);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setErr(msg);
@@ -158,12 +152,6 @@ export default function AddAccount() {
     setOptions(o);
     setPlatformOptions(po);
     setCurrencies(c);
-  }
-
-  function onAccountChanged(updated: Account) {
-    setAccounts((prev) => prev.map((a) => (a.id === updated.id ? { ...a, ...updated } : a)));
-    // Other pages read the cached list (#149): refresh it so they see the change too.
-    void loadApiResource("accounts", () => api.accounts(), { force: true }).catch(() => undefined);
   }
 
   async function onCreatePlatform(e: React.FormEvent<HTMLFormElement>) {
@@ -395,108 +383,12 @@ export default function AddAccount() {
 
         </div>
 
-        <section aria-label="Linked accounts">
-          <div className="coSectionHeader">
-            <div>
-              <p className="coEyebrow">DIRECTORY</p>
-              <h2 className="coSectionTitle">Linked accounts</h2>
-            </div>
-          </div>
-          <div className="card">
-            {accounts.length === 0 ? (
-              <p className="muted">No accounts yet.</p>
-            ) : (
-              accounts.map((a) => (
-                <DirectoryListRow
-                  key={a.id}
-                  title={a.name}
-                  meta={
-                    <>
-                      {`${formatPlatformLabel(a.platform)} · ${formatEnumLabel(a.account_type)} · ${a.currency}`}
-                      {a.carried_forward_from ? (
-                        <span className="hint">
-                          {` · ${a.data_month ?? "Last month"} shows data from ${a.carried_forward_from} (carried forward)`}
-                        </span>
-                      ) : null}
-                    </>
-                  }
-                  right={<AccountCloseControl account={a} onChanged={onAccountChanged} />}
-                />
-              ))
-            )}
-          </div>
-        </section>
+        <p className="card muted addAccountSourcesLink">
+          Your accounts, their status and actions (upload, close, cadence) are in{" "}
+          <Link to="/operations/sources">Accounts &amp; sources</Link>.
+        </p>
         </div>
       )}
     </PageShell>
-  );
-}
-
-function todayIso(): string {
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-}
-
-/** Close an account on a date, or reopen it (#207). A closed account counts up to
- * its close date and contributes nothing to later months. */
-function AccountCloseControl({ account, onChanged }: { account: Account; onChanged: (a: Account) => void }) {
-  const [editing, setEditing] = useState(false);
-  const [closedOn, setClosedOn] = useState<string>(todayIso());
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function save(value: string | null) {
-    setBusy(true);
-    setError("");
-    try {
-      onChanged(await api.updateAccount(account.id, { closed_on: value }));
-      setEditing(false);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  if (account.closed_on) {
-    return (
-      <span className="accountCloseControl">
-        <span className="statusPill statusPill--neutral">Closed {account.closed_on}</span>
-        <button type="button" className="linkBtn" disabled={busy} onClick={() => save(null)}>
-          Reopen
-        </button>
-        {error && <span className="hint" role="alert">{error}</span>}
-      </span>
-    );
-  }
-  if (editing) {
-    return (
-      <span className="accountCloseControl">
-        <input
-          className="input"
-          type="date"
-          value={closedOn}
-          max={todayIso()}
-          aria-label={`Close date for ${account.name}`}
-          onChange={(e) => setClosedOn(e.target.value)}
-        />
-        <button type="button" className="btn" disabled={busy || !closedOn} onClick={() => save(closedOn)}>
-          {busy ? "Saving…" : "Close account"}
-        </button>
-        <button type="button" className="linkBtn" disabled={busy} onClick={() => setEditing(false)}>
-          Cancel
-        </button>
-        {error && <span className="hint" role="alert">{error}</span>}
-      </span>
-    );
-  }
-  return (
-    <span className="accountCloseControl">
-      <span className="statusPill statusPill--good">Active</span>
-      <button type="button" className="btn btnSmall" onClick={() => setEditing(true)} aria-label={`Close ${account.name}`}>
-        Close account…
-      </button>
-    </span>
   );
 }

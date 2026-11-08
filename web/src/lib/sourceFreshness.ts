@@ -17,6 +17,9 @@ const KIND_LABELS: Record<string, string> = {
   fx: "FX feed",
 };
 
+/** The cadences the editor offers when the API sends none. */
+export const DEFAULT_CADENCES = ["daily", "weekdays", "weekly", "monthly", "quarterly", "off"];
+
 export const CADENCE_LABELS: Record<string, string> = {
   daily: "Daily",
   weekdays: "Weekdays",

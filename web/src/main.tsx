@@ -29,6 +29,7 @@ import {
   Platforms,
   LiabilitiesOverview,
   OperationsOverview,
+  AccountsSources,
 } from "./routes/lazyRoutes.ts";
 
 createRoot(document.getElementById("root")!).render(
@@ -65,6 +66,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/loans" element={<Navigate to="/liabilities" replace />} />
                 <Route path="/alerts" element={<Alerts />} />
                 <Route path="/operations" element={<OperationsOverview />} />
+                <Route path="/operations/sources" element={<AccountsSources />} />
                 <Route path="/ingest" element={<Ingest />} />
                 <Route path="/market-data" element={<MarketData />} />
                 <Route path="/settings" element={<Settings />} />

@@ -187,28 +187,6 @@ describe("AddAccount", () => {
     });
   }, 15000);
 
-  it("renders the linked accounts directory", async () => {
-    mockApi.platforms.mockResolvedValueOnce(platformsFixture);
-    mockApi.accountOptions.mockResolvedValueOnce(optionsFixture);
-    mockApi.platformOptions.mockResolvedValueOnce(platformOptionsFixture);
-    mockApi.currencies.mockResolvedValueOnce([]);
-    mockApi.accounts.mockResolvedValueOnce([
-      { id: 5, name: "UOB One", platform: "UOB", account_type: "BANK", currency: "SGD", country: "SG" },
-    ]);
-
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <AddAccount />
-        </MemoryRouter>
-      </ThemeProvider>
-    );
-
-    expect(await screen.findByText("Linked accounts")).toBeInTheDocument();
-    expect(screen.getByText("UOB One")).toBeInTheDocument();
-    expect(screen.getByText("UOB · Bank · SGD")).toBeInTheDocument();
-  });
-
   it("shows load error when options fail", async () => {
     mockApi.platforms.mockResolvedValueOnce(platformsFixture);
     mockApi.accountOptions.mockRejectedValueOnce(new Error("No options"));
@@ -243,35 +221,11 @@ describe("AddAccount", () => {
     );
   }
 
-  it("closes an account on a date and reopens it (#207)", async () => {
-    const open = { id: 7, name: "Old Saver", platform: "CITI", account_type: "BANK", currency: "SGD", closed_on: null };
-    renderWithAccounts([open]);
-    mockApi.updateAccount.mockResolvedValueOnce({ ...open, closed_on: "2026-02-10" });
 
-    await userEvent.click(await screen.findByRole("button", { name: "Close Old Saver" }));
-    const dateInput = screen.getByLabelText("Close date for Old Saver");
-    await userEvent.clear(dateInput);
-    await userEvent.type(dateInput, "2026-02-10");
-    await userEvent.click(screen.getByRole("button", { name: "Close account" }));
-
-    expect(mockApi.updateAccount).toHaveBeenCalledWith(7, { closed_on: "2026-02-10" });
-    expect(await screen.findByText("Closed 2026-02-10")).toBeInTheDocument();
-
-    mockApi.updateAccount.mockResolvedValueOnce({ ...open, closed_on: null });
-    await userEvent.click(screen.getByRole("button", { name: "Reopen" }));
-    expect(mockApi.updateAccount).toHaveBeenLastCalledWith(7, { closed_on: null });
-    expect(await screen.findByText("Active")).toBeInTheDocument();
-  });
-
-  it("flags an account whose value is carried forward (#207)", async () => {
-    renderWithAccounts([
-      {
-        id: 8, name: "Quiet Account", platform: "CITI", account_type: "BANK", currency: "SGD",
-        data_month: "2026-02", last_data_as_of: "2025-12-20", carried_forward_from: "2025-12-20",
-      },
-    ]);
-    expect(
-      await screen.findByText(/2026-02 shows data from 2025-12-20 \(carried forward\)/)
-    ).toBeInTheDocument();
+  it("points to Accounts & sources for the account list (#318)", async () => {
+    renderWithAccounts([]);
+    const link = await screen.findByRole("link", { name: "Accounts & sources" });
+    expect(link).toHaveAttribute("href", "/operations/sources");
+    expect(screen.queryByText("Linked accounts")).not.toBeInTheDocument();
   });
 });

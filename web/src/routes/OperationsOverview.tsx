@@ -8,7 +8,6 @@ import "./OperationsInbox.css";
 import PageShell from "../components/PageShell";
 import * as fmt from "../lib/format";
 import LoadError from "../components/LoadError";
-import SourceFreshnessTable from "../components/SourceFreshnessTable";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import { useAuth } from "../context/useAuth";
 import { INBOX_SEVERITY_LABEL, inboxItemRoute } from "../lib/inbox";
@@ -210,10 +209,9 @@ export default function OperationsOverview() {
             </details>
           )}
 
-          <details className="card inboxDetails">
-            <summary>Every source and its schedule</summary>
-            <SourceFreshnessTable />
-          </details>
+          <Link className="card inboxDetails inboxSourcesLink" to="/operations/sources">
+            Every account and source, with its schedule and actions →
+          </Link>
         </div>
       )}
     </PageShell>
