@@ -4621,6 +4621,27 @@ a.btn {
   cursor: pointer;
 }
 
+/* #342: hidden (spam/unknown) wallet tokens and their toggle */
+.cryptoHoldingsToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cryptoHiddenToggle {
+  cursor: pointer;
+  font: inherit;
+}
+
+.cryptoHoldingHidden {
+  opacity: 0.6;
+}
+
+.cryptoVisibilityBtn {
+  margin-left: 8px;
+}
+
 /* Per-source freshness chips — replaces a single "As of ..." line so each
    source's own staleness is visible instead of averaged away. */
 .coFreshnessRow {
