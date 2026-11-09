@@ -632,12 +632,23 @@ class WealthTimelineBackfillResponse(BaseModel):
 # ─── This month's bridge (#240, D-60) ────────────────────────────────────────
 
 
+class BridgeItem(BaseModel):
+    """What a part is made of (#332): a holding, account, card or token, with why and,
+    where there's something to do, a link. A part's items add up to it."""
+
+    label: str
+    amount: Optional[float] = None
+    reason: Optional[str] = None
+    link: Optional[str] = None
+
+
 class BridgePart(BaseModel):
     """One part of a bridge line; a line's parts add up to its amount."""
 
     key: str
     label: str
     amount: float
+    items: List[BridgeItem] = Field(default_factory=list)
 
 
 class BridgeNote(BaseModel):

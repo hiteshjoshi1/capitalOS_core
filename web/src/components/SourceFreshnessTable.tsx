@@ -6,6 +6,7 @@ import type { SourceFreshness, SourceFreshnessRow } from "../lib/api";
 import * as fmt from "../lib/format";
 import {
   CADENCE_LABELS,
+  DEFAULT_CADENCES,
   SOURCE_FRESHNESS_KEY,
   cadenceLabel,
   dueLabel,
@@ -22,10 +23,9 @@ import LoadError from "./LoadError";
 import StatusPill from "./StatusPill";
 import "./SourceFreshness.css";
 
-const DEFAULT_CADENCES = ["daily", "weekdays", "weekly", "monthly", "quarterly", "off"];
 const MAX_GRACE_DAYS = 90;
 
-function CadenceEditor({
+export function CadenceEditor({
   row,
   cadences,
   onSaved,

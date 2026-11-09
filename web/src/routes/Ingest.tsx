@@ -250,7 +250,7 @@ export default function Ingest() {
 
   return (
     <PageShell
-      title="Import Statements"
+      title="Imports"
       subtitle="Upload a statement. We'll detect the format and show you what we found."
     >
       {state === "loading" && <div className="card" role="status">Loading…</div>}

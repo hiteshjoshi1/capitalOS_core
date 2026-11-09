@@ -1208,3 +1208,29 @@ def solana_preflight(payload: SolanaPreflightIn):
     if err:
         raise HTTPException(status_code=400, detail=f"Preflight failed: {err}")
     return {"ok": True}
+
+
+@router.get("/price-backfill-plan")
+def crypto_price_backfill_plan(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """#331: the caller's wallet snapshot items with no price whose token is priced elsewhere,
+    and the DefiLlama requests a back-fill would make. Reads only."""
+    from app.crypto.price_backfill import plan_backfill
+
+    return plan_backfill(db, current_user.id).as_dict()
+
+
+@router.post("/price-backfill")
+def crypto_price_backfill_run(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """#331: fetch those historical prices into the caller's own snapshots (their data, not a
+    shared table, so any signed-in user). Capped per run; run again to continue."""
+    from app.core.job_runs import TRIGGER_MANUAL
+    from app.crypto.price_backfill import run_backfill
+
+    return run_backfill(db, current_user.id, apply=True, trigger=TRIGGER_MANUAL)
+

@@ -38,6 +38,7 @@ const MOBILE_ROUTES = [
   "/liabilities",
   "/operations",
   "/ingest",
+  "/operations/sources",
   "/accounts/new",
   "/platforms",
   "/crypto",

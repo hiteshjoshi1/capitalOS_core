@@ -62,7 +62,7 @@ endif
 #   SLUG=<slug>), or pass ALLOW_BRANCH=1 deliberately.
 # - In a worktree: never the real-data project, containers or ports.
 GUARDED_TARGETS=up down build api-up api-build api-rebuild web-build web-rebuild tailnet-serve tailnet-serve-off deploy db-migrate db-reset db-restore db-adopt-migrations \
-	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair realised-pnl-backfill ibkr-flex-backfill uob-card-repair card-fee-repair market-symbol-override reports-mask authority-window-move db-create-mcp-role \
+	db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo demo-enable demo-disable ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair realised-pnl-backfill ibkr-flex-backfill uob-card-repair card-fee-repair crypto-price-backfill market-symbol-override reports-mask authority-window-move db-create-mcp-role \
 	user-set-password user-create user-grant-admin user-revoke-admin observability-up observability-down observability-smoke
 ifneq ($(filter $(GUARDED_TARGETS),$(MAKECMDGOALS)),)
 ifeq ($(CHECKOUT),main)
@@ -665,6 +665,12 @@ uob-card-repair:
 # fingerprint, id and category override kept); History marked dirty. Dry run unless APPLY=1.
 card-fee-repair:
 	$(COMPOSE) exec api python -m app.scripts.repair_card_fees $(if $(filter 1,$(APPLY)),--apply,)
+
+# #331: historical prices for wallet snapshot items with none (tokens priced elsewhere only;
+# spam no provider knows is skipped). Dry run unless APPLY=1; capped per run
+# (CRYPTO_PRICE_BACKFILL_MAX_REQUESTS, default 30); History marked dirty.
+crypto-price-backfill:
+	$(COMPOSE) exec api python -m app.scripts.crypto_price_backfill $(if $(filter 1,$(APPLY)),--apply,)
 
 # #222: quote one asset under another Yahoo symbol, e.g. an Indian holding Yahoo lists only on
 # BSE: make market-symbol-override SYMBOL=<CODE> CURRENCY=INR EXCHANGE=NSE YAHOO=<CODE>.BO

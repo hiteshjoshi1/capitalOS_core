@@ -2,11 +2,10 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import type { Platform, PlatformOptions } from "../lib/api";
 import "../App.css";
-import DirectoryListRow from "../components/DirectoryListRow";
-import PageShell from "../components/PageShell";
-import PlatformDetailsForm, { type PlatformDraft } from "../components/PlatformDetailsForm";
-import SuccessBanner from "../components/SuccessBanner";
-import LoadError from "../components/LoadError";
+import DirectoryListRow from "./DirectoryListRow";
+import PlatformDetailsForm, { type PlatformDraft } from "./PlatformDetailsForm";
+import SuccessBanner from "./SuccessBanner";
+import LoadError from "./LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -18,7 +17,9 @@ const EMPTY_PLATFORM_FORM: PlatformDraft = {
   website: "",
 };
 
-export default function Platforms() {
+/** The platform directory (banks, brokers, exchanges): add one, list them. Admin settings (#321);
+ * it was the Data Hub "Add Platforms" page. */
+export default function PlatformDirectory() {
   const [state, setState] = useState<LoadState>("idle");
   const [err, setErr] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
@@ -84,10 +85,9 @@ export default function Platforms() {
   }
 
   return (
-    <PageShell
-      title="Add Platform"
-      subtitle="Maintain the directory of banks, brokers, and exchanges that powers imports and account metadata."
-    >
+    <section aria-labelledby="admin-platforms">
+      <h2 className="coSectionTitle" id="admin-platforms">Platform directory</h2>
+      <p className="muted">The banks, brokers and exchanges that imports and accounts use.</p>
       {state === "loading" && <div className="card" role="status">Loading…</div>}
 
       {state === "error" && (
@@ -136,6 +136,6 @@ export default function Platforms() {
           </section>
         </div>
       )}
-    </PageShell>
+    </section>
   );
 }

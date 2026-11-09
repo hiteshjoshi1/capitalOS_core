@@ -259,34 +259,13 @@ describe("CryptoWallets route", () => {
     expect(await screen.findByText("connect failed")).toBeInTheDocument();
   });
 
-  it("validates allowlist contract and supports add", async () => {
+  it("lists no wallets here: they're in Accounts & sources (#318)", async () => {
     setEthereumProvider(undefined);
-    const user = userEvent.setup();
     renderRoute();
-
-    await user.click(await screen.findByRole("button", { name: "Add token" }));
-    expect(await screen.findByText("Contract address is required.")).toBeInTheDocument();
-
-    await user.type(screen.getByPlaceholderText("0x..."), "0xabc");
-    await user.click(screen.getByRole("button", { name: "Add token" }));
-    await waitFor(() => {
-      expect(mockApi.cryptoAllowlistAdd).toHaveBeenCalledWith({
-        chain: "ethereum",
-        contract_address: "0xabc",
-      });
-    });
-  });
-
-  it("uses allowlist fallback labels when symbol/name are missing", async () => {
-    setEthereumProvider(undefined);
-    mockApi.cryptoAllowlist.mockResolvedValueOnce([
-      { id: 1, chain: "ethereum", contract_address: "0xabc", symbol: null, name: null },
-    ]);
-
-    renderRoute();
-    expect(await screen.findByText("No wallets added yet.")).toBeInTheDocument();
-    // The allowlist is its own request: wait for its rows, not only the wallet list's (#233).
-    expect((await screen.findAllByText("—")).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/No wallets connected yet/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "See them in Accounts & sources" })).toHaveAttribute("href", "/operations/sources");
+    // #321: the token allowlist moved to Settings → Admin.
+    expect(screen.queryByRole("button", { name: "Add token" })).not.toBeInTheDocument();
   });
 
   it("shows a desktop-only notice instead of the connect form on narrow viewports", async () => {
