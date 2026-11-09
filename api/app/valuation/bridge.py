@@ -736,7 +736,11 @@ def _uncounted_rows(
     with no matching other side, they stay in Other. Per account and category (#332)."""
     rows = [dict(row) for row in _cash_flow_rows(db, start, end, current_user_id)]
     rates = _build_row_rate_map(rows, base_currency)
+    in_window = {
+        row.get("transaction_id") for row in rows if _transaction_in_month_window(row["ts"], start, end)
+    }
     totals: Dict[tuple, float] = {}
+    reasons: Dict[tuple, str] = {}
     for row in rows:
         if str(row.get("account_type") or "").upper() in {"CREDIT_CARD", "BROKER"}:
             continue
@@ -744,12 +748,26 @@ def _uncounted_rows(
             continue
         if _is_dividend_row(row) or _cash_flow_bucket(row) in {"income", "expense"}:
             continue
+        # Both sides of a move between the user's own accounts in the period cancel out
+        # (#339): not a cause of anything.
+        if row.get("own_transfer") == "pair" and row.get("own_transfer_partner_id") in in_window:
+            continue
         category = str(row.get("resolved_category") or row.get("type") or "Uncategorized")
+        if row.get("own_transfer"):
+            partner_day = row.get("own_transfer_partner_day")
+            category = "own-account transfer"
+            reason = (
+                f"between your own accounts; the other side is dated {_short_date(partner_day)}, outside the period"
+                if partner_day else
+                "between your own accounts; the other account's side isn't uploaded"
+            )
+        else:
+            reason = "not counted as income or spending; no other side recorded in your accounts"
         key = (int(row["account_id"]), category)
         totals[key] = totals.get(key, 0.0) + _row_base_amount(row, base_currency, rates)
+        reasons[key] = reason
     return [
-        _item(f"{names.get(account_id, f'Account {account_id}')}: {category}", amount,
-              "not counted as income or spending; no other side recorded in your accounts")
+        _item(f"{names.get(account_id, f'Account {account_id}')}: {category}", amount, reasons[(account_id, category)])
         for (account_id, category), amount in totals.items()
     ]
 

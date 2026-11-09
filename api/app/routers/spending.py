@@ -25,6 +25,7 @@ from app.valuation.state import _effective_as_of
 from app.ingestion.card_balances import write_card_statement_balance
 from app.valuation.card_ledger import card_ledgers
 from app.valuation.card_payments import card_last4s, mark_own_card_payments
+from app.valuation.own_transfers import OWN_TRANSFER_MATCH_DAYS, mark_own_transfers, owner_name_words
 from app.schemas.spending import (
     CreditCardBalanceIn,
     CreditCardBalanceItem,
@@ -238,10 +239,23 @@ def _cash_flow_rows(db: Session, start: datetime, end: datetime, current_user_id
           AND t.type IN ('INCOME', 'EXPENSE', 'FEE', 'TAX', 'INTEREST', 'TRANSFER')
         ORDER BY t.ts DESC, t.id DESC
     """)
-    rows = _window_rows(db, cash_flow_q, {"current_user_id": current_user_id}, start, end)
+    # A few days either side, so an own-account transfer's other side is found across the
+    # window's edge (#339); the rows returned are the window's only.
+    slack = timedelta(days=OWN_TRANSFER_MATCH_DAYS)
+    rows = _window_rows(db, cash_flow_q, {"current_user_id": current_user_id}, start - slack, end + slack)
     # A bank outflow that pays one of the user's own cards is a move between their accounts,
     # not spending: the card's charges are (#308, D-77).
-    return mark_own_card_payments(rows, card_last4s(db, current_user_id))
+    rows = mark_own_card_payments(rows, card_last4s(db, current_user_id))
+    # Money between the user's own accounts (a standing instruction to themselves, the other
+    # bank's credit of it) is neither income nor spending (#339, D-85).
+    owner = owner_name_words(rows[0].get("owner_display_name")) if rows else frozenset()
+    rows = mark_own_transfers(rows, owner, _is_transfer_like_before_own)
+    return [row for row in rows if _transaction_in_month_window(row["ts"], start, end)]
+
+
+def _is_transfer_like_before_own(row) -> bool:
+    """Transfer-like by the rules that don't depend on own-transfer pairing (#339)."""
+    return _is_transfer_resolved_category(row) or _is_non_operating_transfer_like(row)
 
 
 def _is_transfer_resolved_category(row) -> bool:
@@ -270,6 +284,9 @@ def _is_self_named_counterparty(row) -> bool:
 
 def _is_explicit_source_transfer(row) -> bool:
     if row.get("own_card_payment"):
+        return True
+    if row.get("own_transfer"):
+        # Between the user's own accounts (#339): by name, or paired with its other side.
         return True
     raw_category = str(row.get("raw_category") or "").strip().lower()
     if raw_category in EXPLICIT_TRANSFER_RAW_CATEGORIES:
