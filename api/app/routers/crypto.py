@@ -18,6 +18,9 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_admin, require_current_user
 from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
+from app.crypto.token_visibility import annotate as annotate_token_visibility
+from app.crypto.token_visibility import list_overrides as list_token_overrides
+from app.crypto.token_visibility import set_override as set_token_override
 from app.crypto.refresh import refresh_wallet_snapshot
 from app.db.session import get_db
 from app.crypto.verify import (
@@ -768,6 +771,10 @@ def crypto_summary(
         for item in snapshot_items
     }
 
+    # #342: spam/unknown tokens (never priced, not allowlisted) are flagged hidden; the
+    # lists hide them by default. Totals and exposure are unchanged (they're worth 0).
+    hidden_token_count = annotate_token_visibility(db, current_user.id, current_items)
+
     holdings: list[dict[str, Any]] = []
     eth_group = {"eth", "weth", "steth", "wsteth", "eeth", "weeth"}
     eth_usd = 0.0
@@ -830,6 +837,13 @@ def crypto_summary(
                 "price_as_of": row["price_as_of"].isoformat() if row.get("price_as_of") else None,
                 "holdings_provider": row.get("holdings_provider"),
                 "price_provider": row.get("price_provider"),
+                # #342
+                "contract_or_mint": row.get("contract_or_mint"),
+                "token_key": row.get("token_key"),
+                "unknown_token": bool(row.get("unknown_token")),
+                "visibility_override": row.get("visibility_override"),
+                "hidden": bool(row.get("hidden")),
+                "hidden_reason": row.get("hidden_reason"),
             }
         )
 
@@ -937,7 +951,9 @@ def crypto_summary(
             "value_usd": float(sol["value_usd"]) if sol is not None else 0,
             "value_base": float(sol["value_base"]) if sol is not None else 0,
         },
-        "top5_holdings": holdings[:5],
+        "top5_holdings": [item for item in holdings if not item["hidden"]][:5],
+        # #342: how many of top_holdings are hidden (spam/unknown or hidden by the user).
+        "hidden_token_count": hidden_token_count,
         "top_holdings": holdings,
         "wallet_exposure": wallet_exposure,
         "chain_exposure": chain_exposure,
@@ -1037,10 +1053,43 @@ def crypto_tokens(
         ),
         {"current_user_id": current_user.id},
     ).mappings().all()
+    tokens = [dict(r) for r in rows]
+    hidden = annotate_token_visibility(db, current_user.id, tokens)
     return {
         "total": len(rows),
-        "tokens": [dict(r) for r in rows],
+        "tokens": tokens,
+        "hidden_count": hidden,
     }
+
+
+class TokenVisibilityIn(BaseModel):
+    chain: str
+    contract_or_mint: str
+    # "shown" (not spam), "hidden", or null to go back to automatic.
+    visibility: str | None = None
+
+
+@router.get("/token-visibility")
+def crypto_token_visibility_list(
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """This user's per-token choices (#342)."""
+    return {"overrides": list_token_overrides(db, current_user.id)}
+
+
+@router.put("/token-visibility")
+def crypto_token_visibility_set(
+    payload: TokenVisibilityIn,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Show ("Not spam"), hide, or reset one wallet token for this user (#342)."""
+    try:
+        set_token_override(db, current_user.id, payload.chain, payload.contract_or_mint, payload.visibility)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"overrides": list_token_overrides(db, current_user.id)}
 
 
 class AllowlistIn(BaseModel):

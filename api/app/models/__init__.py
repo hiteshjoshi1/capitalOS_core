@@ -17,6 +17,7 @@ from .crypto import (
 from .user import User, UserCredential, AuthSession, OAuthIdentity
 from .canonical_balance import AccountBalanceSnapshot
 from .source_freshness import SourceFreshnessOverride
+from .token_visibility import CryptoTokenVisibility
 
 __all__ = [
     "Account",
@@ -41,4 +42,5 @@ __all__ = [
     "OAuthIdentity",
     "AccountBalanceSnapshot",
     "SourceFreshnessOverride",
+    "CryptoTokenVisibility",
 ]

@@ -7000,3 +7000,24 @@ html, body {
   text-decoration: underline;
   cursor: pointer;
 }
+
+/* #342: hidden (spam/unknown) wallet tokens and their toggle */
+.cryptoHoldingsToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cryptoHiddenToggle {
+  cursor: pointer;
+  font: inherit;
+}
+
+.cryptoHoldingHidden {
+  opacity: 0.6;
+}
+
+.cryptoVisibilityBtn {
+  margin-left: 8px;
+}

@@ -747,6 +747,20 @@ ALTER SEQUENCE public.crypto_assets_id_seq OWNED BY public.crypto_assets.id;
 
 
 --
+-- Name: crypto_token_visibility; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.crypto_token_visibility (
+    user_id bigint NOT NULL,
+    chain text NOT NULL,
+    contract_or_mint text NOT NULL,
+    visibility text NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT crypto_token_visibility_visibility_check CHECK ((visibility = ANY (ARRAY['shown'::text, 'hidden'::text])))
+);
+
+
+--
 -- Name: crypto_user_networth; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2900,6 +2914,14 @@ ALTER TABLE ONLY public.crypto_assets
 
 
 --
+-- Name: crypto_token_visibility crypto_token_visibility_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.crypto_token_visibility
+    ADD CONSTRAINT crypto_token_visibility_pkey PRIMARY KEY (user_id, chain, contract_or_mint);
+
+
+--
 -- Name: crypto_user_networth crypto_user_networth_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4079,6 +4101,14 @@ ALTER TABLE ONLY public.category_taxonomy
 
 ALTER TABLE ONLY public.credit_card_accounts
     ADD CONSTRAINT credit_card_accounts_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.accounts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: crypto_token_visibility crypto_token_visibility_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.crypto_token_visibility
+    ADD CONSTRAINT crypto_token_visibility_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --

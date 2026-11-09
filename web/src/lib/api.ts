@@ -1322,6 +1322,9 @@ export type CryptoWalletInitResponse = {
   expires_at: string;
 };
 
+export type TokenVisibility = "shown" | "hidden";
+export type TokenVisibilityOverride = { chain: string; contract_or_mint: string; visibility: TokenVisibility };
+
 export type CryptoSummary = FxStatus & {
   month?: string;
   is_live?: boolean;
@@ -1378,7 +1381,19 @@ export type CryptoSummary = FxStatus & {
     price_as_of?: string | null;
     holdings_provider?: string | null;
     price_provider?: string | null;
+    /** #342: the token's contract/mint and "chain:contract" key (null for a native coin). */
+    contract_or_mint?: string | null;
+    token_key?: string | null;
+    /** Never priced in any snapshot and not allowlisted: likely airdropped spam. */
+    unknown_token?: boolean;
+    /** The user's own choice: "shown" (not spam), "hidden", or null (automatic). */
+    visibility_override?: TokenVisibility | null;
+    /** Hidden from the lists by default (unknown, or hidden by the user). */
+    hidden?: boolean;
+    hidden_reason?: "unknown_token" | "user_hidden" | null;
   }>;
+  /** #342: how many of top_holdings are hidden. */
+  hidden_token_count?: number;
   wallet_exposure?: Array<{
     wallet_id: string;
     label?: string | null;
@@ -2326,6 +2341,12 @@ export const api = {
       headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
     }),
   cryptoAllowlist: () => req<CryptoAllowlistItem[]>("/crypto/allowlist"),
+  /** #342: show ("Not spam"), hide, or reset (null) one wallet token for this user. */
+  cryptoSetTokenVisibility: (payload: { chain: string; contract_or_mint: string; visibility: TokenVisibility | null }) =>
+    req<{ overrides: TokenVisibilityOverride[] }>("/crypto/token-visibility", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   cryptoAllowlistAdd: (payload: { chain: string; contract_address: string }) =>
     req<CryptoAllowlistItem>("/crypto/allowlist", {
       method: "POST",

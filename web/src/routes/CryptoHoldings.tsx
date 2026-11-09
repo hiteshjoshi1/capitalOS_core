@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { api } from "../lib/api";
+import { api, type CryptoSummary, type TokenVisibility } from "../lib/api";
 import { snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
@@ -22,6 +22,10 @@ export default function CryptoHoldings() {
   const [month, setMonth] = useSelectedMonth();
   const [baseCurrency] = useBaseCurrency();
   const [showDust, setShowDust] = useState<boolean>(false);
+  // #342: spam/unknown tokens (never priced, not allowlisted) and tokens the user hid.
+  const [showHidden, setShowHidden] = useState<boolean>(false);
+  const [savingToken, setSavingToken] = useState<string | null>(null);
+  const [visibilityError, setVisibilityError] = useState<string>("");
   const resource = useApiResource(resourceKey("cryptoSummary", month, baseCurrency), () =>
     api.cryptoSummary(month, baseCurrency),
   );
@@ -37,11 +41,38 @@ export default function CryptoHoldings() {
     valueBase != null && changeBase != null ? valueBase - changeBase : null;
 
   const allHoldings = useMemo(() => summary?.top_holdings ?? [], [summary?.top_holdings]);
+  const listedHoldings = useMemo(() => allHoldings.filter((h) => !h.hidden), [allHoldings]);
+  const hiddenTokenCount = summary?.hidden_token_count ?? allHoldings.length - listedHoldings.length;
+  // Hidden tokens show only with "Show hidden" (whatever their value); the rest follow the dust rule.
   const visibleHoldings = useMemo(
-    () => allHoldings.filter((h) => showDust || h.value_usd >= 10),
-    [allHoldings, showDust],
+    () => allHoldings.filter((h) => (h.hidden ? showHidden : showDust || h.value_usd >= 10)),
+    [allHoldings, showDust, showHidden],
   );
-  const hiddenDustCount = allHoldings.length - allHoldings.filter((h) => h.value_usd >= 10).length;
+  const hiddenDustCount = listedHoldings.length - listedHoldings.filter((h) => h.value_usd >= 10).length;
+
+  type Holding = CryptoSummary["top_holdings"][number];
+  /** "Not spam" / "Show" for a hidden token, "Hide" for a listed one (#342). Null resets to automatic. */
+  const nextVisibility = (h: Holding): TokenVisibility | null =>
+    h.hidden
+      ? h.hidden_reason === "user_hidden" && !h.unknown_token
+        ? null
+        : "shown"
+      : h.visibility_override === "shown"
+        ? null
+        : "hidden";
+  const changeVisibility = async (h: Holding) => {
+    if (!h.contract_or_mint) return;
+    setSavingToken(h.token_key ?? h.contract_or_mint);
+    setVisibilityError("");
+    try {
+      await api.cryptoSetTokenVisibility({ chain: h.chain, contract_or_mint: h.contract_or_mint, visibility: nextVisibility(h) });
+      await resource.reload();
+    } catch (e: unknown) {
+      setVisibilityError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingToken(null);
+    }
+  };
 
   const holdingsFresh = !(summary?.stale_holdings ?? summary?.is_stale);
   const pricesFresh = !(summary?.stale_prices ?? summary?.is_stale);
@@ -163,31 +194,63 @@ export default function CryptoHoldings() {
           <div className="card">
             <div className="stockHoldingsHeader">
               <h2>Top holdings</h2>
-              <label className="pill" style={{ display: "inline-flex" }}>
-                <input
-                  type="checkbox"
-                  checked={showDust}
-                  onChange={(e) => setShowDust(e.target.checked)}
-                  style={{ marginRight: 6 }}
-                />
-                Show holdings under USD 10
-              </label>
+              <div className="cryptoHoldingsToggles">
+                <label className="pill" style={{ display: "inline-flex" }}>
+                  <input
+                    type="checkbox"
+                    checked={showDust}
+                    onChange={(e) => setShowDust(e.target.checked)}
+                    style={{ marginRight: 6 }}
+                  />
+                  Show holdings under USD 10
+                </label>
+                {hiddenTokenCount > 0 && (
+                  <button
+                    type="button"
+                    className="pill cryptoHiddenToggle"
+                    aria-pressed={showHidden}
+                    onClick={() => setShowHidden((v) => !v)}
+                  >
+                    {showHidden ? `Hide unknown tokens (${hiddenTokenCount})` : `Show hidden (${hiddenTokenCount})`}
+                  </button>
+                )}
+              </div>
             </div>
             <div className="muted stockHoldingsMeta" style={{ marginBottom: 8 }}>
               {showDust
-                ? `Showing all ${allHoldings.length} holdings, including dust under USD 10`
-                : `Showing ${visibleHoldings.length} of ${allHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under USD 10` : ""}`}
+                ? `Showing all ${listedHoldings.length} holdings, including dust under USD 10`
+                : `Showing ${visibleHoldings.filter((h) => !h.hidden).length} of ${listedHoldings.length} holdings${hiddenDustCount > 0 ? ` · ${hiddenDustCount} hidden under USD 10` : ""}`}
+              {hiddenTokenCount > 0 &&
+                ` · ${hiddenTokenCount} unknown or hidden token${hiddenTokenCount === 1 ? "" : "s"} (no price source, likely airdropped spam)${showHidden ? ", shown below" : ""}`}
             </div>
+            {visibilityError && <div className="hint" role="alert">{visibilityError}</div>}
             <div className="listRows">
               {visibleHoldings.length === 0 ? (
                 <div className="muted">No crypto holdings yet.</div>
               ) : (
                 visibleHoldings.slice(0, 25).map((h) => (
-                  <div className="listRow" key={`${h.symbol}-${h.chain}-${h.wallet_id ?? ""}`}>
+                  <div
+                    className={`listRow${h.hidden ? " cryptoHoldingHidden" : ""}`}
+                    key={`${h.symbol}-${h.chain}-${h.wallet_id ?? ""}-${h.token_key ?? ""}`}
+                  >
                     <div className="listRowMain">
                       <span className="listRowTitle">
                         {h.symbol}
                         <span className="tag">{h.chain.toUpperCase()}</span>
+                        {h.hidden && (
+                          <span className="tag">{h.hidden_reason === "user_hidden" ? "Hidden" : "Unknown token"}</span>
+                        )}
+                        {h.contract_or_mint && (
+                          <button
+                            type="button"
+                            className="btn btnSmall cryptoVisibilityBtn"
+                            disabled={savingToken === (h.token_key ?? h.contract_or_mint)}
+                            onClick={() => void changeVisibility(h)}
+                            aria-label={`${h.hidden ? "Show" : "Hide"} ${h.symbol} on ${h.chain}`}
+                          >
+                            {h.hidden ? (h.hidden_reason === "user_hidden" ? "Show" : "Not spam") : "Hide"}
+                          </button>
+                        )}
                       </span>
                       <span className="listRowMeta">
                         <span>{formatNumber(h.amount, 6)} qty</span>
