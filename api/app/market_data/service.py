@@ -76,6 +76,9 @@ class SymbolMapRow:
     eodhd_symbol: str
     finnhub_symbol: str
     yahoo_symbol: str
+    # The map row carries a Yahoo override (#222): the automatic BSE fallback (#320)
+    # never replaces one somebody set.
+    has_yahoo_override: bool = False
 
 
 
@@ -226,6 +229,7 @@ def _load_symbols(db: Session, exchange_code: str, *, daily_limit: int) -> list[
                 eodhd_symbol=eod_symbol,
                 finnhub_symbol=_default_finnhub_symbol(sym),
                 yahoo_symbol=yahoo_symbol,
+                has_yahoo_override=bool(str(row.get("yahoo_symbol_override") or "").strip()),
             )
         )
     return out
@@ -1075,6 +1079,221 @@ def _fetch_quotes(
 
 
 
+# #320: an Indian stock Yahoo lists only on BSE (NSE Ltd itself, NSDL) has no <CODE>.NS quote.
+# After the provider chain, each NSE symbol still unpriced and without an override is tried
+# once as <CODE>.BO; when Yahoo has it, the price is stored and <CODE>.BO is saved as the
+# symbol's Yahoo override, so later refreshes ask for it directly. MARKET_DATA_BSE_FALLBACK=0
+# turns it off.
+BSE_FALLBACK_PROVIDER = "yfinance_bse"
+BSE_FALLBACK_NOTE = "auto: no NSE quote on Yahoo; BSE ticker {symbol} saved as the Yahoo override (#320)"
+
+
+def _bse_fallback_enabled() -> bool:
+    return os.getenv("MARKET_DATA_BSE_FALLBACK", "1").strip().lower() not in {"0", "false", "no", "off"}
+
+
+def bse_symbol_for(yahoo_symbol: str) -> str | None:
+    """``<CODE>.NS`` → ``<CODE>.BO``; None for anything else."""
+    symbol = (yahoo_symbol or "").strip().upper()
+    if symbol.endswith(".NS") and len(symbol) > 3:
+        return f"{symbol[:-3]}.BO"
+    return None
+
+
+def store_yahoo_override(db: Session, *, asset_id: int, exchange_code: str, yahoo_symbol: str) -> str:
+    """Save ``yahoo_symbol`` as the asset's Yahoo override on ``exchange_code``, creating the
+    map row if there's none. Returns "set", "create_map" or "unchanged". Doesn't commit."""
+    exchange_code = exchange_code.strip().upper()
+    yahoo_symbol = yahoo_symbol.strip().upper()
+    now = datetime.now(tz=timezone.utc)
+    row = db.execute(
+        text(
+            """
+            SELECT id, yahoo_symbol_override FROM market_symbol_map
+            WHERE asset_id = :asset_id AND exchange_code = :exchange_code
+            ORDER BY id LIMIT 1
+            """
+        ),
+        {"asset_id": asset_id, "exchange_code": exchange_code},
+    ).mappings().first()
+    if row is not None:
+        if str(row["yahoo_symbol_override"] or "").strip().upper() == yahoo_symbol:
+            return "unchanged"
+        db.execute(
+            text(
+                """
+                UPDATE market_symbol_map
+                SET yahoo_symbol_override = :override, is_active = TRUE, updated_at = :now
+                WHERE id = :id
+                """
+            ),
+            {"override": yahoo_symbol, "now": now, "id": int(row["id"])},
+        )
+        return "set"
+    asset = db.execute(
+        text("SELECT symbol, quote_currency FROM assets WHERE id = :id"), {"id": asset_id}
+    ).mappings().first()
+    if asset is None:
+        raise ValueError(f"No asset {asset_id}")
+    db.execute(
+        text(
+            """
+            INSERT INTO market_symbol_map
+              (asset_id, exchange_code, exchange_symbol, quote_currency, is_active,
+               yahoo_symbol_override, created_at, updated_at)
+            VALUES (:asset_id, :exchange_code, :exchange_symbol, :currency, TRUE, :override, :now, :now)
+            """
+        ),
+        {
+            "asset_id": asset_id,
+            "exchange_code": exchange_code,
+            "exchange_symbol": str(asset["symbol"] or "").strip().upper(),
+            "currency": str(asset["quote_currency"] or _EXCHANGE_DEFAULT_CCY.get(exchange_code, "USD")).upper(),
+            "override": yahoo_symbol,
+            "now": now,
+        },
+    )
+    return "create_map"
+
+
+def _try_bse_fallback(
+    db: Session,
+    *,
+    exchange_code: str,
+    rows: list[SymbolMapRow],
+    trade_date: date,
+    yfinance: YFinanceProvider,
+) -> tuple[list[SymbolMapRow], int, int | None]:
+    """(still unresolved, prices written, run id or None) after trying ``.BO`` for the
+    NSE rows left without a quote that have no override of their own."""
+    if exchange_code != "NSE" or not rows or not _bse_fallback_enabled():
+        return rows, 0, None
+    candidates: dict[str, list[SymbolMapRow]] = {}
+    for row in rows:
+        bse = None if row.has_yahoo_override else bse_symbol_for(row.yahoo_symbol)
+        if bse:
+            candidates.setdefault(bse, []).append(row)
+    if not candidates:
+        return rows, 0, None
+
+    run_id = _insert_run(db, provider=BSE_FALLBACK_PROVIDER, exchange_code=exchange_code, trade_date=trade_date)
+    error: str | None = None
+    try:
+        quotes = yfinance.fetch_prices(list(candidates), exchange_code=exchange_code, trade_date=trade_date)
+    except Exception as exc:  # noqa: BLE001
+        quotes, error = {}, str(exc)
+    written = 0
+    resolved: set[int] = set()
+    for bse, mapped_rows in candidates.items():
+        quote = quotes.get(bse.upper())
+        if quote is None or quote.close is None or not math.isfinite(float(quote.close)) or float(quote.close) <= 0:
+            continue
+        for row in mapped_rows:
+            if not _upsert_price(
+                db,
+                asset_id=row.asset_id,
+                trade_date=quote.trade_date,
+                price=quote.close,
+                currency=row.quote_currency,
+                source="yfinance_market",
+                exchange_code=exchange_code,
+                provider_symbol=bse,
+            ):
+                continue
+            store_yahoo_override(db, asset_id=row.asset_id, exchange_code=exchange_code, yahoo_symbol=bse)
+            _insert_item(
+                db,
+                run_id=run_id,
+                asset_id=row.asset_id,
+                provider=BSE_FALLBACK_PROVIDER,
+                exchange_code=exchange_code,
+                symbol=bse,
+                trade_date=quote.trade_date,
+                status="fallback_upserted",
+                price=quote.close,
+                currency=row.quote_currency,
+                source_note=BSE_FALLBACK_NOTE.format(symbol=bse),
+                reason_code=None,
+            )
+            written += 1
+            resolved.add(row.asset_id)
+    still = [row for row in rows if row.asset_id not in resolved]
+    _finish_run(
+        db,
+        run_id,
+        status="failed" if error and not written else ("success" if written == sum(map(len, candidates.values())) else "partial"),
+        requested_symbols=len(candidates),
+        received_rows=len(quotes),
+        upserted_rows=written,
+        missing_symbols=sum(map(len, candidates.values())) - written,
+        error_summary=error,
+    )
+    return still, written, run_id
+
+
+def probe_yahoo_ticker(
+    yahoo_symbol: str, *, exchange_code: str | None = None, yfinance: YFinanceProvider | None = None
+) -> dict[str, Any]:
+    """Ask Yahoo (yfinance) for one ticker's latest close (#320): {found, yahoo_symbol, close,
+    trade_date, currency, error}. A ticker without a market suffix gets the exchange's."""
+    candidate = _ticker_candidate(yahoo_symbol)
+    if candidate is None:
+        return {"found": False, "yahoo_symbol": (yahoo_symbol or "").strip().upper(), "error": "Not a ticker"}
+    symbol = _default_yahoo_symbol(candidate, exchange_code) if exchange_code else candidate
+    provider = yfinance or YFinanceProvider()
+    try:
+        quotes = provider.fetch_prices([symbol], exchange_code=exchange_code)
+    except Exception as exc:  # noqa: BLE001
+        return {"found": False, "yahoo_symbol": symbol, "error": str(exc)}
+    quote = quotes.get(symbol.upper())
+    if quote is None or quote.close is None or not math.isfinite(float(quote.close)) or float(quote.close) <= 0:
+        return {"found": False, "yahoo_symbol": symbol, "error": f"Yahoo has no quote for {symbol}"}
+    return {
+        "found": True,
+        "yahoo_symbol": symbol,
+        "close": float(quote.close),
+        "trade_date": quote.trade_date.isoformat() if quote.trade_date else None,
+        "currency": quote.currency,
+        "error": None,
+    }
+
+
+def apply_yahoo_ticker(
+    db: Session,
+    *,
+    asset_id: int,
+    exchange_code: str,
+    yahoo_symbol: str,
+    yfinance: YFinanceProvider | None = None,
+) -> dict[str, Any]:
+    """Test ``yahoo_symbol``; when Yahoo has it, save it as the asset's override on
+    ``exchange_code`` and store the quote, so the holding is priced at once (#320).
+    Raises ValueError when the asset is unknown or Yahoo has no quote."""
+    exchange_code = exchange_code.strip().upper()
+    asset = db.execute(
+        text("SELECT id, quote_currency FROM assets WHERE id = :id"), {"id": asset_id}
+    ).mappings().first()
+    if asset is None:
+        raise ValueError(f"No asset {asset_id}")
+    tested = probe_yahoo_ticker(yahoo_symbol, exchange_code=exchange_code, yfinance=yfinance)
+    if not tested["found"]:
+        raise ValueError(tested["error"] or f"Yahoo has no quote for {tested['yahoo_symbol']}")
+    action = store_yahoo_override(db, asset_id=asset_id, exchange_code=exchange_code, yahoo_symbol=tested["yahoo_symbol"])
+    currency = str(asset["quote_currency"] or tested.get("currency") or "USD").upper()
+    _upsert_price(
+        db,
+        asset_id=asset_id,
+        trade_date=date.fromisoformat(tested["trade_date"]) if tested.get("trade_date") else datetime.now(tz=timezone.utc).date(),
+        price=tested["close"],
+        currency=currency,
+        source="yfinance_market",
+        exchange_code=exchange_code,
+        provider_symbol=tested["yahoo_symbol"],
+    )
+    db.commit()
+    return {**tested, "asset_id": asset_id, "exchange_code": exchange_code, "action": action, "currency": currency}
+
+
 def run_exchange_refresh(
     db: Session,
     exchange_code: str,
@@ -1304,6 +1523,14 @@ def run_exchange_refresh(
             error_summary=provider_error,
         )
         unresolved = next_unresolved
+
+    unresolved, bse_upserted, bse_run_id = _try_bse_fallback(
+        db, exchange_code=exchange_code, rows=unresolved, trade_date=trade_date, yfinance=yfinance
+    )
+    if bse_run_id is not None:
+        total_upserted += bse_upserted
+        providers_used.append(BSE_FALLBACK_PROVIDER)
+        run_ids[BSE_FALLBACK_PROVIDER] = bse_run_id
 
     dividend_rows_upserted = _refresh_dividend_yields_for_exchange(
         db,
