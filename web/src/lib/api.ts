@@ -1745,6 +1745,42 @@ export type MarketDataSymbolDiagnostic = {
   attempt_status?: string | null;
 };
 
+/** A held stock or fund the quote refresh can't price (#222, #320), with Yahoo tickers worth trying. */
+export type MarketDataUnpricedItem = {
+  instrument_id: number;
+  asset_id: number | null;
+  symbol: string | null;
+  name: string | null;
+  currency: string | null;
+  exchange_code: string | null;
+  platform: string | null;
+  reason: "no_asset" | "no_symbol" | "no_quote" | string;
+  suggested_yahoo_symbols: string[];
+};
+
+export type MarketDataUnpriced = {
+  items: MarketDataUnpricedItem[];
+  /** Admins only: the symbol map and prices are shared data (#152). */
+  can_fix: boolean;
+};
+
+/** POST /market-data/ticker-test (#320). */
+export type MarketDataTickerTest = {
+  found: boolean;
+  yahoo_symbol: string;
+  close?: number | null;
+  trade_date?: string | null;
+  currency?: string | null;
+  error?: string | null;
+};
+
+/** POST /market-data/ticker (#320): the saved override and the stored quote. */
+export type MarketDataTickerSet = MarketDataTickerTest & {
+  asset_id: number;
+  exchange_code: string;
+  action: "set" | "create_map" | "unchanged" | string;
+};
+
 export type MarketDataExchangeStatus = Partial<MarketDataRun> & {
   exchange_code: string;
   diagnostics_summary: {
@@ -2338,10 +2374,24 @@ export const api = {
     req<FxBackfillPlan>(`/fx/backfill-plan?base_currency=${encodeURIComponent(baseCurrency)}`),
   fxBackfill: (baseCurrency: string) =>
     req<FxBackfillResult>(`/fx/backfill?base_currency=${encodeURIComponent(baseCurrency)}`, { method: "POST" }),
-  marketDataRefreshNow: (adminKey?: string) =>
-    req<{ status: string; exchanges: Array<Record<string, unknown>> }>("/market-data/refresh-now", {
+  marketDataRefreshNow: (adminKey?: string, exchange?: string) =>
+    req<{ status: string; exchanges: Array<Record<string, unknown>> }>(
+      `/market-data/refresh-now${exchange ? `?exchange=${encodeURIComponent(exchange)}` : ""}`,
+      {
+        method: "POST",
+        headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
+      },
+    ),
+  marketDataUnpriced: () => req<MarketDataUnpriced>("/market-data/unpriced"),
+  marketDataTickerTest: (yahooSymbol: string, exchangeCode?: string | null) =>
+    req<MarketDataTickerTest>("/market-data/ticker-test", {
       method: "POST",
-      headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
+      body: JSON.stringify({ yahoo_symbol: yahooSymbol, exchange_code: exchangeCode ?? null }),
+    }),
+  marketDataSetTicker: (assetId: number, exchangeCode: string, yahooSymbol: string) =>
+    req<MarketDataTickerSet>("/market-data/ticker", {
+      method: "POST",
+      body: JSON.stringify({ asset_id: assetId, exchange_code: exchangeCode, yahoo_symbol: yahooSymbol }),
     }),
   ibkrFlexImportNow: (accountId: number, adminKey?: string) =>
     req<Record<string, unknown>>(`/portfolio/ibkr-flex/import-now?account_id=${encodeURIComponent(String(accountId))}`, {

@@ -65,7 +65,7 @@ def test_unpriced_holdings_each_get_an_item():
     (item,) = ib._unpriced_items(_summary(unpriced=[holding]))
     assert (item.kind, item.title) == ("unpriced_holding", "ABC: no live price")
     assert item.detail == "SHAREKHAN, NSE; no ticker on a configured exchange"
-    assert item.action.route == "/market-data"
+    assert item.action.route == "/market-data#needs-fix"
 
 
 def _job(job, state, failures=0, error=None, label="Job"):

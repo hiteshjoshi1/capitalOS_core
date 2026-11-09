@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
 
 import MarketData from "../routes/MarketData";
@@ -12,10 +12,23 @@ vi.mock("../lib/api", () => ({
     marketDataStatus: vi.fn(),
     marketDataRuns: vi.fn(),
     marketDataRefreshNow: vi.fn(),
+    marketDataUnpriced: vi.fn(),
+    marketDataTickerTest: vi.fn(),
+    marketDataSetTicker: vi.fn(),
   },
 }));
 
+const authState: { user: { id: number; username: string; is_admin: boolean } } = {
+  user: { id: 1, username: "demo", is_admin: true },
+};
+vi.mock("../context/useAuth", () => ({ useAuth: () => authState }));
+
 const mockApi = vi.mocked(api, true);
+
+beforeEach(() => {
+  authState.user.is_admin = true;
+  mockApi.marketDataUnpriced.mockResolvedValue({ items: [], can_fix: true });
+});
 
 describe("MarketData", () => {
   it("renders latest market data tables", async () => {
@@ -176,6 +189,100 @@ describe("MarketData", () => {
     expect(screen.queryByText("TSE")).not.toBeInTheDocument();
     expect(await screen.findByText("D05")).toBeInTheDocument(); // expanded by default
     expect(screen.queryByText("Reason unavailable")).not.toBeInTheDocument();
+  });
+
+  describe("Needs a fix (#320)", () => {
+    const summary = { active_symbols: 1, refreshed: 1, fresh: 1, stale: 0, failed: 0, deferred: 0, missing: 0 };
+    const nseStatus = {
+      status: [
+        { provider: "yfinance", exchange_code: "NSE", status: "partial", diagnostics_summary: summary, symbols: [
+          { asset_id: 1, symbol: "TCS", mapped_symbol: "TCS.NS", latest_trade_date: "2026-11-06", freshness_status: "fresh",
+            refresh_status: "ok", provider: "yfinance", source: "close", failure_reason: null },
+        ] },
+      ],
+    };
+    const unpricedItem = {
+      instrument_id: 9, asset_id: 83, symbol: "SYNTHN", name: "Synthetic N", currency: "INR", exchange_code: "NSE",
+      platform: "SHAREKHAN", reason: "no_quote", suggested_yahoo_symbols: ["SYNTHN.NS", "SYNTHN.BO"],
+    };
+
+    function renderPage(path = "/market-data") {
+      return render(
+        <ThemeProvider>
+          <MemoryRouter initialEntries={[path]}>
+            <MarketData />
+          </MemoryRouter>
+        </ThemeProvider>,
+      );
+    }
+
+    it("lets an admin test a ticker, then save it", async () => {
+      mockApi.marketDataStatus.mockResolvedValue(nseStatus);
+      mockApi.marketDataRuns.mockResolvedValue({ runs: [] });
+      mockApi.marketDataUnpriced.mockResolvedValueOnce({ items: [unpricedItem], can_fix: true });
+      mockApi.marketDataTickerTest.mockResolvedValueOnce({
+        found: true, yahoo_symbol: "SYNTHN.BO", close: 1908.35, trade_date: "2026-11-06", currency: "INR",
+      });
+      mockApi.marketDataSetTicker.mockResolvedValueOnce({
+        found: true, yahoo_symbol: "SYNTHN.BO", close: 1908.35, trade_date: "2026-11-06", currency: "INR",
+        asset_id: 83, exchange_code: "NSE", action: "set",
+      });
+      renderPage("/market-data#needs-fix");
+
+      const row = await screen.findByTestId("needs-fix-SYNTHN");
+      expect(within(row).getByText(/Yahoo has no quote for its ticker/)).toBeInTheDocument();
+      const input = within(row).getByLabelText("Yahoo ticker for SYNTHN") as HTMLInputElement;
+      expect(input.value).toBe("SYNTHN.BO"); // the BSE suggestion: the NSE one already failed
+      const save = within(row).getByRole("button", { name: "Save ticker" });
+      expect(save).toBeDisabled(); // test first
+
+      await userEvent.click(within(row).getByRole("button", { name: "Test" }));
+      expect(mockApi.marketDataTickerTest).toHaveBeenCalledWith("SYNTHN.BO", "NSE");
+      expect(await within(row).findByRole("status")).toHaveTextContent("SYNTHN.BO");
+      expect(save).toBeEnabled();
+
+      await userEvent.click(save);
+      expect(mockApi.marketDataSetTicker).toHaveBeenCalledWith(83, "NSE", "SYNTHN.BO");
+      await waitFor(() => expect(screen.getByText(/SYNTHN now uses SYNTHN.BO/)).toBeInTheDocument());
+    });
+
+    it("a failed test keeps Save disabled", async () => {
+      mockApi.marketDataStatus.mockResolvedValue(nseStatus);
+      mockApi.marketDataRuns.mockResolvedValue({ runs: [] });
+      mockApi.marketDataUnpriced.mockResolvedValueOnce({ items: [unpricedItem], can_fix: true });
+      mockApi.marketDataTickerTest.mockResolvedValueOnce({ found: false, yahoo_symbol: "SYNTHN.NS", error: "Yahoo has no quote for SYNTHN.NS" });
+      renderPage();
+      const row = await screen.findByTestId("needs-fix-SYNTHN");
+      await userEvent.click(within(row).getByRole("button", { name: "SYNTHN.NS" }));
+      await userEvent.click(within(row).getByRole("button", { name: "Test" }));
+      expect(await within(row).findByRole("status")).toHaveTextContent("Yahoo has no quote for SYNTHN.NS");
+      expect(within(row).getByRole("button", { name: "Save ticker" })).toBeDisabled();
+    });
+
+    it("refreshes one exchange, or all", async () => {
+      mockApi.marketDataStatus.mockResolvedValue(nseStatus);
+      mockApi.marketDataRuns.mockResolvedValue({ runs: [] });
+      mockApi.marketDataRefreshNow.mockResolvedValue({ status: "ok", exchanges: [] });
+      renderPage();
+      await userEvent.click(await screen.findByRole("button", { name: "Refresh NSE" }));
+      expect(mockApi.marketDataRefreshNow).toHaveBeenCalledWith(undefined, "NSE");
+      await userEvent.click(screen.getByRole("button", { name: "Refresh all" }));
+      expect(mockApi.marketDataRefreshNow).toHaveBeenLastCalledWith();
+      expect(await screen.findByText("Every holding has a price.")).toBeInTheDocument();
+    });
+
+    it("shows a non-admin the list but no actions", async () => {
+      authState.user.is_admin = false;
+      mockApi.marketDataStatus.mockResolvedValue(nseStatus);
+      mockApi.marketDataRuns.mockResolvedValue({ runs: [] });
+      mockApi.marketDataUnpriced.mockResolvedValueOnce({ items: [unpricedItem], can_fix: false });
+      renderPage();
+      const row = await screen.findByTestId("needs-fix-SYNTHN");
+      expect(within(row).getByText("An admin can set its ticker.")).toBeInTheDocument();
+      expect(within(row).queryByRole("button", { name: "Test" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Refresh all" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Refresh NSE" })).not.toBeInTheDocument();
+    });
   });
 });
 

@@ -281,7 +281,7 @@ def test_repaired_holdings_are_priced_with_override_and_the_rest_listed(client, 
                 currency="INR",
             )
             for s in symbols
-            if s != "ZENPAPER.NS"  # a ticker no provider knows
+            if s not in ("ZENPAPER.NS", "ZENPAPER.BO")  # a ticker no provider knows, on NSE or BSE
         }
 
     monkeypatch.setattr("app.market_data.providers.YFinanceProvider.fetch_prices", fake_yfinance)
@@ -295,7 +295,8 @@ def test_repaired_holdings_are_priced_with_override_and_the_rest_listed(client, 
         unpriced = unpriced_held_positions(db, user_id=1)
     finally:
         db.close()
-    assert sorted(requested) == ["ACMECHEM.NS", "NWTRADE.NS", "ORBITLTD.BO", "ZENPAPER.NS"]
+    # ZENPAPER has no NSE quote, so its BSE ticker is tried too (#320); it has none either.
+    assert sorted(requested) == ["ACMECHEM.NS", "NWTRADE.NS", "ORBITLTD.BO", "ZENPAPER.BO", "ZENPAPER.NS"]
     assert result["requested_symbols"] == 4
     assert result["upserted_rows"] == 3
     assert result["unpriced_holdings"] == 1
