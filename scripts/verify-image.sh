@@ -69,6 +69,19 @@ case "$repo" in
     else
       echo "FAIL $name: provenance missing or not built from docker-library/$repo" >&2; exit 1
     fi ;;
+  # The web image's bases (#263): each publisher's BuildKit provenance names its source repo.
+  node)
+    if provenance_mentions "github.com/nodejs/docker-node"; then
+      echo "OK   $name: SLSA provenance from github.com/nodejs/docker-node (Docker Official Image)"
+    else
+      echo "FAIL $name: provenance missing or not built from nodejs/docker-node" >&2; exit 1
+    fi ;;
+  nginxinc/nginx-unprivileged)
+    if provenance_mentions "github.com/nginx/docker-nginx-unprivileged"; then
+      echo "OK   $name: SLSA provenance from github.com/nginx/docker-nginx-unprivileged"
+    else
+      echo "FAIL $name: provenance missing or not built from nginx/docker-nginx-unprivileged" >&2; exit 1
+    fi ;;
   grafana/alloy | tecnativa/docker-socket-proxy | us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox)
     if provenance_present; then
       echo "OK   $name: SLSA provenance attestation present"

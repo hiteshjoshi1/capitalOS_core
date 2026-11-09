@@ -12,6 +12,7 @@ import type { CryptoSummary } from "../lib/api";
 vi.mock("../lib/api", () => ({
   api: {
     cryptoSummary: vi.fn(),
+    cryptoSetTokenVisibility: vi.fn(),
   },
 }));
 
@@ -401,5 +402,50 @@ describe("CryptoHoldings races", () => {
     );
 
     expect(await screen.findByText(/vs Jan 2026 \(30 Jan 2026\)/)).toBeInTheDocument();
+  });
+
+  it("hides unknown tokens by default, shows them on request, and marks one as not spam (#342)", async () => {
+    const SPAM = "0x1111111111111111111111111111111111111111";
+    const withSpam: CryptoSummary = {
+      ...cryptoSummaryFixture,
+      hidden_token_count: 1,
+      top_holdings: [
+        { symbol: "ETH", chain: "ethereum", amount: 1.1, value_usd: 3500, value_base: 4700, asset_class: "CRYPTO",
+          token_key: null, contract_or_mint: null, hidden: false },
+        { symbol: "SOL", chain: "ethereum", amount: 5, value_usd: 0, value_base: 0, asset_class: "CRYPTO",
+          contract_or_mint: SPAM, token_key: `ethereum:${SPAM}`, unknown_token: true, hidden: true,
+          hidden_reason: "unknown_token", visibility_override: null },
+      ],
+      chain_exposure: [],
+      wallet_exposure: [],
+      wallet_chain_exposure: [],
+    };
+    mockApi.cryptoSummary.mockResolvedValue(withSpam);
+    mockApi.cryptoSetTokenVisibility.mockResolvedValueOnce({ overrides: [] });
+
+    const user = userEvent.setup();
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CryptoHoldings />
+        </MemoryRouter>
+      </ThemeProvider>
+    );
+
+    expect(await screen.findByText("Top holdings")).toBeInTheDocument();
+    expect(screen.queryByText("Unknown token")).not.toBeInTheDocument();
+    expect(screen.getByText(/1 unknown or hidden token \(no price source/)).toBeInTheDocument();
+    // Native coins have no Hide/Not spam control (no contract to key on).
+    expect(screen.queryByRole("button", { name: /Hide ETH/ })).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole("button", { name: "Show hidden (1)" });
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText("Unknown token")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show SOL on ethereum" }));
+    await waitFor(() =>
+      expect(mockApi.cryptoSetTokenVisibility).toHaveBeenCalledWith({ chain: "ethereum", contract_or_mint: SPAM, visibility: "shown" }),
+    );
   });
 });

@@ -4621,6 +4621,27 @@ a.btn {
   cursor: pointer;
 }
 
+/* #342: hidden (spam/unknown) wallet tokens and their toggle */
+.cryptoHoldingsToggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.cryptoHiddenToggle {
+  cursor: pointer;
+  font: inherit;
+}
+
+.cryptoHoldingHidden {
+  opacity: 0.6;
+}
+
+.cryptoVisibilityBtn {
+  margin-left: 8px;
+}
+
 /* Per-source freshness chips — replaces a single "As of ..." line so each
    source's own staleness is visible instead of averaged away. */
 .coFreshnessRow {
@@ -6999,4 +7020,87 @@ html, body {
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
+}
+
+/* ─── Market data: action bar and "Needs a fix" (#320) ──────────────── */
+.marketDataActions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin: 0 0 16px;
+}
+
+.needsFixList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.needsFixRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: 10px 20px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.needsFixRow:last-child {
+  border-bottom: none;
+}
+
+.needsFixWhat,
+.needsFixAction {
+  min-width: 0;
+}
+
+.needsFixMeta {
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.needsFixAction {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+}
+
+.needsFixField .input {
+  width: 100%;
+  max-width: 240px;
+  text-transform: uppercase;
+}
+
+.needsFixSuggestions,
+.needsFixButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.needsFixResult {
+  margin: 0;
+  font-size: 13px;
+  color: var(--good);
+}
+
+.needsFixResultBad {
+  color: var(--bad);
+}
+
+@media (max-width: 640px) {
+  .needsFixRow {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .needsFixField .input {
+    max-width: none;
+  }
+}
+
+/* A disabled "Save ticker" reads as disabled until the ticker is tested (#320). */
+.needsFixButtons .btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }

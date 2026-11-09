@@ -89,7 +89,8 @@ export function primaryAction(
     case "crypto_wallet":
       return { kind: "run", label: "Refresh", run: "refresh_crypto", adminOnly: false };
     case "market_data":
-      if (opts.unpriced > 0) return { kind: "link", label: `Fix ${opts.unpriced}`, to: "/market-data" };
+      // #320: the Market data page's "Needs a fix" list, where a ticker can be set.
+      if (opts.unpriced > 0) return { kind: "link", label: `Fix ${opts.unpriced}`, to: "/market-data#needs-fix" };
       return { kind: "run", label: "Refresh", run: "refresh_prices", adminOnly: true };
     case "fx":
       return { kind: "run", label: "Fetch past", run: "fx_backfill", adminOnly: true };

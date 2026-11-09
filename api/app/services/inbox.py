@@ -176,7 +176,8 @@ def _unpriced_items(summary: Any) -> list[InboxItem]:
             severity="medium",
             title=f"{label}: no live price",
             detail="; ".join(x for x in [where, UNPRICED_REASONS.get(holding.reason, holding.reason)] if x),
-            action=InboxAction(label="Open market data", route="/market-data"),
+            # #320: straight to the Market data page's "Needs a fix" list (set its ticker there).
+            action=InboxAction(label="Fix ticker", route="/market-data#needs-fix"),
         ))
     return items
 

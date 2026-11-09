@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { api } from "../lib/api";
-import type { MarketDataExchangeStatus, MarketDataRun } from "../lib/api";
+import type { MarketDataExchangeStatus, MarketDataRun, MarketDataUnpriced } from "../lib/api";
+import MarketDataNeedsFix from "../components/MarketDataNeedsFix";
+import { useAuth } from "../context/useAuth";
 import PageShell from "../components/PageShell";
 import StatusPill from "../components/StatusPill";
 import "../App.css";
@@ -22,13 +25,26 @@ export default function MarketData() {
   const [error, setError] = useState<string>("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [hasSetInitialExpand, setHasSetInitialExpand] = useState<boolean>(false);
+  // #320: held stocks the refresh can't price, each with "Set ticker" (admins).
+  const [unpriced, setUnpriced] = useState<MarketDataUnpriced>({ items: [], can_fix: false });
+  const [notice, setNotice] = useState<string>("");
+  const [refreshingExchange, setRefreshingExchange] = useState<string | null>(null);
+  const { user } = useAuth();
+  const isAdmin = user?.is_admin === true;
+  const location = useLocation();
+  const needsFixRef = useRef<HTMLElement | null>(null);
 
   const load = async () => {
     setError("");
-    const [statusRes, runsRes] = await Promise.all([api.marketDataStatus(), api.marketDataRuns(20)]);
+    const [statusRes, runsRes, unpricedRes] = await Promise.all([
+      api.marketDataStatus(),
+      api.marketDataRuns(20),
+      api.marketDataUnpriced().catch(() => ({ items: [], can_fix: false })),
+    ]);
     const statusRows = statusRes.status ?? [];
     setStatus(statusRows);
     setRuns(runsRes.runs ?? []);
+    setUnpriced(unpricedRes);
     if (!hasSetInitialExpand && statusRows.length > 0) {
       setExpanded({ [statusRows[0].exchange_code]: true });
       setHasSetInitialExpand(true);
@@ -49,15 +65,37 @@ export default function MarketData() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Data Hub's "Fix N" / Inbox "Fix ticker" links land here (#320).
+  useEffect(() => {
+    if (!loading && location.hash === "#needs-fix") {
+      needsFixRef.current?.scrollIntoView?.({ block: "start" });
+    }
+  }, [loading, location.hash]);
+
   const onRefresh = async () => {
     try {
       setRefreshing(true);
+      setNotice("");
       await api.marketDataRefreshNow();
       await load();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  const onRefreshExchange = async (exchangeCode: string) => {
+    try {
+      setRefreshingExchange(exchangeCode);
+      setNotice("");
+      await api.marketDataRefreshNow(undefined, exchangeCode);
+      await load();
+      setNotice(`${exchangeCode} refreshed.`);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRefreshingExchange(null);
     }
   };
 
@@ -79,12 +117,19 @@ export default function MarketData() {
     <PageShell
       title="Market Data"
       subtitle="Daily quote refresh status by exchange."
-      headerActions={(
-        <button className="btn" onClick={onRefresh} disabled={refreshing}>
-          {refreshing ? "Refreshing…" : "Refresh all quotes"}
-        </button>
-      )}
     >
+      {/* #320: the page's own action bar, not the top bar. Refreshing is admin-only (#152). */}
+      <div className="marketDataActions">
+        {isAdmin ? (
+          <button className="btn btnPrimary" onClick={onRefresh} disabled={refreshing || refreshingExchange !== null}>
+            {refreshing ? "Refreshing…" : "Refresh all"}
+          </button>
+        ) : (
+          <span className="muted">Quotes refresh daily; an admin can refresh them now.</span>
+        )}
+        {notice && <span className="muted" role="status">{notice}</span>}
+      </div>
+
       {loading && <div className="card" role="status">Loading…</div>}
       {error && (
         <LoadError title="Couldn't load market data" error={error} />
@@ -98,6 +143,27 @@ export default function MarketData() {
             <StatusPill tone="neutral" label={`${totals.failed} failed`} />
             <StatusPill tone="neutral" label={`${totals.deferred} deferred`} />
           </div>
+
+          <section aria-label="Needs a fix" id="needs-fix" ref={needsFixRef}>
+            <div className="coSectionHeader">
+              <div>
+                <p className="coEyebrow">Held, but no price</p>
+                <h2 className="coSectionTitle">
+                  Needs a fix{unpriced.items.length > 0 ? ` (${unpriced.items.length})` : ""}
+                </h2>
+              </div>
+            </div>
+            <div className="card">
+              <MarketDataNeedsFix
+                items={unpriced.items}
+                canFix={unpriced.can_fix}
+                onSaved={(message) => {
+                  setNotice(message);
+                  void load();
+                }}
+              />
+            </div>
+          </section>
 
           <section aria-label="Latest refresh status by exchange">
             <div className="coSectionHeader">
@@ -133,6 +199,21 @@ export default function MarketData() {
                           <span className="muted">
                             {exchange.diagnostics_summary.fresh} fresh · {exchange.diagnostics_summary.stale} stale
                           </span>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              className="btn btnSmall"
+                              disabled={refreshing || refreshingExchange !== null}
+                              aria-label={`Refresh ${exchange.exchange_code}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                void onRefreshExchange(exchange.exchange_code);
+                              }}
+                              onKeyDown={(e) => e.stopPropagation()}
+                            >
+                              {refreshingExchange === exchange.exchange_code ? "Refreshing…" : "Refresh"}
+                            </button>
+                          )}
                           <span className="marketDataChevron">{isExpanded ? "Hide symbols ▲" : "View symbols ▼"}</span>
                         </div>
                       </div>

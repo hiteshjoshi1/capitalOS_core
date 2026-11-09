@@ -1322,6 +1322,9 @@ export type CryptoWalletInitResponse = {
   expires_at: string;
 };
 
+export type TokenVisibility = "shown" | "hidden";
+export type TokenVisibilityOverride = { chain: string; contract_or_mint: string; visibility: TokenVisibility };
+
 export type CryptoSummary = FxStatus & {
   month?: string;
   is_live?: boolean;
@@ -1378,7 +1381,19 @@ export type CryptoSummary = FxStatus & {
     price_as_of?: string | null;
     holdings_provider?: string | null;
     price_provider?: string | null;
+    /** #342: the token's contract/mint and "chain:contract" key (null for a native coin). */
+    contract_or_mint?: string | null;
+    token_key?: string | null;
+    /** Never priced in any snapshot and not allowlisted: likely airdropped spam. */
+    unknown_token?: boolean;
+    /** The user's own choice: "shown" (not spam), "hidden", or null (automatic). */
+    visibility_override?: TokenVisibility | null;
+    /** Hidden from the lists by default (unknown, or hidden by the user). */
+    hidden?: boolean;
+    hidden_reason?: "unknown_token" | "user_hidden" | null;
   }>;
+  /** #342: how many of top_holdings are hidden. */
+  hidden_token_count?: number;
   wallet_exposure?: Array<{
     wallet_id: string;
     label?: string | null;
@@ -1743,6 +1758,42 @@ export type MarketDataSymbolDiagnostic = {
   failure_reason?: string | null;
   reason_code?: "RATE_LIMITED" | "NO_TRADE_REPORTED" | "PROVIDER_ERROR" | "INVALID_PRICE" | null;
   attempt_status?: string | null;
+};
+
+/** A held stock or fund the quote refresh can't price (#222, #320), with Yahoo tickers worth trying. */
+export type MarketDataUnpricedItem = {
+  instrument_id: number;
+  asset_id: number | null;
+  symbol: string | null;
+  name: string | null;
+  currency: string | null;
+  exchange_code: string | null;
+  platform: string | null;
+  reason: "no_asset" | "no_symbol" | "no_quote" | string;
+  suggested_yahoo_symbols: string[];
+};
+
+export type MarketDataUnpriced = {
+  items: MarketDataUnpricedItem[];
+  /** Admins only: the symbol map and prices are shared data (#152). */
+  can_fix: boolean;
+};
+
+/** POST /market-data/ticker-test (#320). */
+export type MarketDataTickerTest = {
+  found: boolean;
+  yahoo_symbol: string;
+  close?: number | null;
+  trade_date?: string | null;
+  currency?: string | null;
+  error?: string | null;
+};
+
+/** POST /market-data/ticker (#320): the saved override and the stored quote. */
+export type MarketDataTickerSet = MarketDataTickerTest & {
+  asset_id: number;
+  exchange_code: string;
+  action: "set" | "create_map" | "unchanged" | string;
 };
 
 export type MarketDataExchangeStatus = Partial<MarketDataRun> & {
@@ -2326,6 +2377,12 @@ export const api = {
       headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
     }),
   cryptoAllowlist: () => req<CryptoAllowlistItem[]>("/crypto/allowlist"),
+  /** #342: show ("Not spam"), hide, or reset (null) one wallet token for this user. */
+  cryptoSetTokenVisibility: (payload: { chain: string; contract_or_mint: string; visibility: TokenVisibility | null }) =>
+    req<{ overrides: TokenVisibilityOverride[] }>("/crypto/token-visibility", {
+      method: "PUT",
+      body: JSON.stringify(payload),
+    }),
   cryptoAllowlistAdd: (payload: { chain: string; contract_address: string }) =>
     req<CryptoAllowlistItem>("/crypto/allowlist", {
       method: "POST",
@@ -2338,10 +2395,24 @@ export const api = {
     req<FxBackfillPlan>(`/fx/backfill-plan?base_currency=${encodeURIComponent(baseCurrency)}`),
   fxBackfill: (baseCurrency: string) =>
     req<FxBackfillResult>(`/fx/backfill?base_currency=${encodeURIComponent(baseCurrency)}`, { method: "POST" }),
-  marketDataRefreshNow: (adminKey?: string) =>
-    req<{ status: string; exchanges: Array<Record<string, unknown>> }>("/market-data/refresh-now", {
+  marketDataRefreshNow: (adminKey?: string, exchange?: string) =>
+    req<{ status: string; exchanges: Array<Record<string, unknown>> }>(
+      `/market-data/refresh-now${exchange ? `?exchange=${encodeURIComponent(exchange)}` : ""}`,
+      {
+        method: "POST",
+        headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
+      },
+    ),
+  marketDataUnpriced: () => req<MarketDataUnpriced>("/market-data/unpriced"),
+  marketDataTickerTest: (yahooSymbol: string, exchangeCode?: string | null) =>
+    req<MarketDataTickerTest>("/market-data/ticker-test", {
       method: "POST",
-      headers: adminKey ? { "X-Admin-Key": adminKey } : undefined,
+      body: JSON.stringify({ yahoo_symbol: yahooSymbol, exchange_code: exchangeCode ?? null }),
+    }),
+  marketDataSetTicker: (assetId: number, exchangeCode: string, yahooSymbol: string) =>
+    req<MarketDataTickerSet>("/market-data/ticker", {
+      method: "POST",
+      body: JSON.stringify({ asset_id: assetId, exchange_code: exchangeCode, yahoo_symbol: yahooSymbol }),
     }),
   ibkrFlexImportNow: (accountId: number, adminKey?: string) =>
     req<Record<string, unknown>>(`/portfolio/ibkr-flex/import-now?account_id=${encodeURIComponent(String(accountId))}`, {

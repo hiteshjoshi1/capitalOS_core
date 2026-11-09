@@ -105,7 +105,7 @@ describe("Accounts & sources (#318)", () => {
     expect(within(card).getByRole("link", { name: "Upload" }).getAttribute("href")).toMatch(/^\/ingest\?account_id=2/);
     expect(within(screen.getByTestId("source-row-exchange:SGX")).getByRole("link", { name: "Fix 1" })).toHaveAttribute(
       "href",
-      "/market-data",
+      "/market-data#needs-fix",
     );
     expect(screen.getByText("2 need you · 5 up to date.")).toBeInTheDocument();
   });
