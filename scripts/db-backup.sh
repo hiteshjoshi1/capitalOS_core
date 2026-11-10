@@ -22,13 +22,38 @@
 #                      archive with that sha256. Otherwise .dump.failed with the reason.
 # Dumps without markers (made before this tool) are never pruned (D-11).
 #
-# Env: DB_CONTAINER, DB_USER, DB_NAME (from the Makefile), BACKUP_DIR (default backups),
+# Encryption (#356, D-95): with BACKUP_AGE_RECIPIENT set (an age public key), a new set is made and
+# verified in a private temp dir, then the dump, its counts and its data archive are encrypted
+# into BACKUP_DIR as <file>.age and the plaintext is deleted. Only the public key is needed to
+# make a backup. The markers (.verified, .failed) stay plain: they hold dates and counts, nothing
+# from the data. A set is still named by its logical dump path (capitalos_<ts>.dump) everywhere;
+# verify/restore/open decrypt into a private temp dir with BACKUP_AGE_IDENTITY (the private key,
+# outside the repo). Plain sets (older ones, worktrees, CI) work as before.
+#   db-backup.sh open <dump>         decrypt (or copy) a set into a new private temp dir and print
+#                                    its dump's path; the caller deletes that dir (test instance)
+#   db-backup.sh encrypt-existing    move plain sets from SRC_DIR (default <repo>/backups) into
+#                                    BACKUP_DIR encrypted, each file decrypted back and compared by
+#                                    sha256 before its plaintext goes; lists only unless APPLY=1
+#   db-backup.sh key-init            create the age key pair (refuses if one exists)
+#   db-backup.sh offsite-sync        copy verified encrypted sets missing from BACKUP_OFFSITE_DIR
+#                                    (#357; also run after every backup); prune keeps both folders
+#   db-backup.sh offsite-check       decrypt the newest off-site set and run the restore check
+#
+# Env: DB_CONTAINER, DB_USER, DB_NAME (from the Makefile), BACKUP_DIR, BACKUP_AGE_RECIPIENT,
+#      BACKUP_AGE_IDENTITY (scripts/backup-env.sh: environment, then .env, then defaults),
 #      BACKUP_DATA_DIR (default data, the host side of the api's /app/data).
 set -euo pipefail
 
+# shellcheck source=backup-env.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup-env.sh"
+AGE_TOOL="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/age-tool.sh"
+
 DB_USER=${DB_USER:-capitalos}
 DB_NAME=${DB_NAME:-capitalos}
-BACKUP_DIR=${BACKUP_DIR:-backups}
+# Run: main() resolves BACKUP_DIR and the keys (backup_env). Sourced (the tests): plain defaults.
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then
+  : "${BACKUP_DIR:=backups}" "${BACKUP_AGE_RECIPIENT:=}" "${BACKUP_AGE_IDENTITY:=$HOME/.capitalos/backup/age-identity.txt}" "${BACKUP_OFFSITE_DIR:=}"
+fi
 BACKUP_DATA_DIR=${BACKUP_DATA_DIR:-data}
 # Where the api container sees data/ (docker-compose.yml: ./data:/app/data).
 CONTAINER_DATA_DIR=/app/data
@@ -42,10 +67,13 @@ FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'B
 COUNTS_SQL="$COUNTS_SELECT ORDER BY table_name;"
 
 # One cleanup for every exit path: the snapshot session, temp dirs, the scratch DB.
-WORK="" SESSION_PID="" SCRATCH="" UNPACK="" STAGE=""
+WORK="" SESSION_PID="" SCRATCH="" UNPACK="" STAGE="" OPEN_DIR="" PLAIN_DIR=""
 cleanup() {
   exec 3>&- 2>/dev/null || true
   if [ -n "$SESSION_PID" ]; then wait "$SESSION_PID" 2>/dev/null || true; fi
+  # Decrypted or not-yet-encrypted plaintext (#356): always wiped.
+  if [ -n "$OPEN_DIR" ] && [ -d "$OPEN_DIR" ]; then rm -rf "$OPEN_DIR"; fi
+  if [ -n "$PLAIN_DIR" ] && [ -d "$PLAIN_DIR" ]; then rm -rf "$PLAIN_DIR"; fi
   if [ -n "$WORK" ]; then rm -f "$WORK"/sql "$WORK"/session.out "$WORK"/session.err "$WORK"/roles "$WORK"/acl.sql "$WORK"/skipped; rmdir "$WORK" 2>/dev/null || true; fi
   if [ -n "$UNPACK" ] && [ -d "$UNPACK" ]; then rm -rf "$UNPACK"; fi
   if [ -n "$STAGE" ] && [ -d "$STAGE" ]; then rm -rf "$STAGE"; fi
@@ -119,6 +147,170 @@ check_data() {  # <rows file> <dir>
 
 result_field() { sed -n "s/^RESULT.* $1=\([0-9]*\).*/\1/p" <<<"$2"; }
 
+# ---- encryption (#356) ----
+
+sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -c1-64; else shasum -a 256 "$1" | cut -c1-64; fi; }
+age_bin() { "$AGE_TOOL" path; }
+encrypting() { [ -n "$BACKUP_AGE_RECIPIENT" ]; }
+
+need_identity() {
+  [ -r "$BACKUP_AGE_IDENTITY" ] && return 0
+  say "FAILED: this backup is encrypted and the key to open it isn't at $BACKUP_AGE_IDENTITY (BACKUP_AGE_IDENTITY). Put the key saved in your password manager there (chmod 600), or point BACKUP_AGE_IDENTITY at it" >&2
+  return 1
+}
+
+encrypt_file() {  # <plain file> <out.age>
+  local age
+  age=$(age_bin) || return 1
+  "$age" -r "$BACKUP_AGE_RECIPIENT" -o "$2.part" "$1" || { rm -f "$2.part"; say "FAILED: could not encrypt $1" >&2; return 1; }
+  mv "$2.part" "$2"
+}
+
+decrypt_file() {  # <in.age> <plain out>
+  local age
+  age=$(age_bin) || return 1
+  need_identity || return 1
+  ( umask 077; "$age" -d -i "$BACKUP_AGE_IDENTITY" -o "$2" "$1" ) || { rm -f "$2"; say "FAILED: could not decrypt $1 with $BACKUP_AGE_IDENTITY (wrong key?)" >&2; return 1; }
+}
+
+set_present() { [ -f "$1" ] || [ -f "$1.age" ]; }  # <dump>
+set_encrypted() { [ -f "$1.age" ]; }
+
+# The files of a set, relative to its dump: the dump, its snapshot counts, its data archive.
+set_members() { printf '%s\n%s\n%s\n' "$1" "$1.counts" "$(archive_of "$1")"; }
+
+# Puts a plaintext copy of a set in OPEN_DIR (private, wiped on exit) and its dump path in
+# OPEN_DUMP. A plain set is used where it is unless <copy> is given.
+open_set() {  # <dump> [copy]
+  local dump=$1 copy=${2:-} m base
+  if ! set_encrypted "$dump" && [ -z "$copy" ]; then OPEN_DUMP=$dump; return 0; fi
+  OPEN_DIR=$(mktemp -d)
+  chmod 700 "$OPEN_DIR"
+  while IFS= read -r m; do
+    base=${m##*/}
+    if [ -f "$m.age" ]; then decrypt_file "$m.age" "$OPEN_DIR/$base" || return 1
+    elif [ -f "$m" ]; then cp -p "$m" "$OPEN_DIR/$base"; fi
+  done < <(set_members "$dump")
+  OPEN_DUMP="$OPEN_DIR/${dump##*/}"
+}
+
+# Encrypts a verified (or failed) plain set from its temp dir into <dir>: each member to .age,
+# then the markers; .verified last, so a set counts only once all of it is in place. When the
+# private key is here too, each .age is decrypted back and compared before the plaintext goes.
+seal_set() {  # <plain dump> <dir>
+  local dump=$1 dir=$2 m base f roundtrip=""
+  mkdir -p "$dir"
+  [ -r "$BACKUP_AGE_IDENTITY" ] && roundtrip=1
+  while IFS= read -r m; do
+    [ -f "$m" ] || continue
+    base=${m##*/}
+    encrypt_file "$m" "$dir/$base.age" || return 1
+    if [ -n "$roundtrip" ]; then
+      decrypt_file "$dir/$base.age" "$m.check" || return 1
+      [ "$(sha256_of "$m")" = "$(sha256_of "$m.check")" ] || { say "FAILED: $dir/$base.age does not decrypt to the file it was made from" >&2; return 1; }
+      rm -f "$m.check"
+    fi
+  done < <(set_members "$dump")
+  for f in "$dump".failed "$dump".diff "$dump".restore.log "$dump".data-check "$dump".restorable "$dump".verified; do
+    [ -f "$f" ] && mv "$f" "$dir/${f##*/}"
+  done
+  say "Encrypted to $dir/${dump##*/}.age (+ counts, data archive)$([ -n "$roundtrip" ] && echo '; each decrypted back and compared' || echo '; not decrypted back (no private key here)')"
+}
+
+# ---- off-site copy (#357) ----
+# BACKUP_OFFSITE_DIR (main checkout's .env; Hitesh: iCloud Drive) gets a copy of every verified,
+# ENCRYPTED set in BACKUP_DIR it doesn't have yet (so a missed day or a late-enabled iCloud catches
+# up), and the same retention (prune). Plain sets never go off-site. A missing or unwritable
+# off-site folder is a loud WARNING, never a failed backup: the local set is already safe.
+
+# macOS privacy controls can stop the 03:00 launchd job (/bin/bash) from touching ~/Documents or
+# iCloud Drive while the same command works in Terminal.
+tcc_hint() {  # <dir>
+  case "$1" in
+    "$HOME/Documents"* | "$HOME/Library/Mobile Documents"* | "$HOME/Desktop"*)
+      echo "  If this ran from the 03:00 job: macOS may be blocking it from $1. System Settings > Privacy & Security > Full Disk Access: add /bin/bash (the job's shell), then make backup-now." ;;
+  esac
+}
+
+offsite_warn() { say "WARNING (off-site copy): $*" >&2; }
+
+offsite_ready() {  # 0 when BACKUP_OFFSITE_DIR is set and writable
+  [ -n "${BACKUP_OFFSITE_DIR:-}" ] || return 1
+  local parent
+  parent=$(dirname "$BACKUP_OFFSITE_DIR")
+  if [ ! -d "$parent" ]; then
+    offsite_warn "$parent does not exist (iCloud Drive not turned on?); no off-site copy was made"; return 1
+  fi
+  if ! mkdir -p "$BACKUP_OFFSITE_DIR" 2>/dev/null || ! touch "$BACKUP_OFFSITE_DIR/.write-check" 2>/dev/null; then
+    offsite_warn "can't write to $BACKUP_OFFSITE_DIR; no off-site copy was made"; tcc_hint "$BACKUP_OFFSITE_DIR" >&2; return 1
+  fi
+  rm -f "$BACKUP_OFFSITE_DIR/.write-check"
+  return 0
+}
+
+# Copies one encrypted set; each .age file compared by sha256; the marker last.
+offsite_copy_set() {  # <dump in BACKUP_DIR>
+  local dump=$1 base m mb dest
+  base=${dump##*/}; dest="$BACKUP_OFFSITE_DIR/$base"
+  while IFS= read -r m; do
+    [ -f "$m.age" ] || continue
+    mb=${m##*/}
+    cp -p "$m.age" "$BACKUP_OFFSITE_DIR/$mb.age.part" 2>/dev/null &&
+      [ "$(sha256_of "$m.age")" = "$(sha256_of "$BACKUP_OFFSITE_DIR/$mb.age.part")" ] &&
+      mv "$BACKUP_OFFSITE_DIR/$mb.age.part" "$BACKUP_OFFSITE_DIR/$mb.age" ||
+      { rm -f "$BACKUP_OFFSITE_DIR/$mb.age.part"; offsite_warn "copying $m.age failed"; tcc_hint "$BACKUP_OFFSITE_DIR" >&2; return 1; }
+  done < <(set_members "$dump")
+  cp -p "$dump.verified" "$dest.verified" || { offsite_warn "copying $dump.verified failed"; return 1; }
+}
+
+# Every verified encrypted set missing off-site is copied. Never fails the caller.
+offsite_sync() {
+  local dump n=0 bad=0
+  offsite_ready || return 0
+  while IFS= read -r dump; do
+    [ -n "$dump" ] || continue
+    set_encrypted "$dump" || continue
+    [ -f "$BACKUP_OFFSITE_DIR/${dump##*/}.verified" ] && continue
+    if offsite_copy_set "$dump"; then n=$((n + 1)); else bad=$((bad + 1)); fi
+  done < <(verified_sets)
+  say "Off-site: $n set(s) copied to $BACKUP_OFFSITE_DIR$([ "$bad" -gt 0 ] && echo "; $bad FAILED (above)")"
+  return 0
+}
+
+# `offsite-check`: the newest off-site set, copied to a private temp dir (nothing off-site is
+# written), decrypted and put through the full restore check.
+offsite_check() {
+  local newest tmpset m base
+  [ -n "${BACKUP_OFFSITE_DIR:-}" ] || { say "FAILED: no BACKUP_OFFSITE_DIR set" >&2; return 1; }
+  newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 | sed 's/\.verified$//')
+  [ -n "$newest" ] || { say "FAILED: no verified set in $BACKUP_OFFSITE_DIR" >&2; return 1; }
+  need_identity || return 1
+  PLAIN_DIR=$(mktemp -d); chmod 700 "$PLAIN_DIR"
+  base=${newest##*/}
+  while IFS= read -r m; do
+    [ -f "$m.age" ] && cp "$m.age" "$PLAIN_DIR/${m##*/}.age"
+  done < <(set_members "$newest")
+  tmpset="$PLAIN_DIR/$base"
+  set_encrypted "$tmpset" || { say "FAILED: $newest has no .age dump" >&2; return 1; }
+  say "Checking the newest off-site set $newest"
+  verify "$tmpset" || { say "FAILED: the off-site set $newest did not pass the restore check" >&2; return 1; }
+  say "OFF-SITE OK: $newest decrypts and restores (counts identical, data files present)"
+}
+
+offsite_status() {
+  [ -n "${BACKUP_OFFSITE_DIR:-}" ] || { echo "Off-site copy: not set up (BACKUP_OFFSITE_DIR, #357)"; return 0; }
+  if [ ! -d "$BACKUP_OFFSITE_DIR" ]; then
+    echo "Off-site copy: WARNING $BACKUP_OFFSITE_DIR does not exist$([ -d "$(dirname "$BACKUP_OFFSITE_DIR")" ] || echo ' (iCloud Drive not turned on?)'); no off-site copy yet"
+    return 0
+  fi
+  local newest age_h n
+  newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 || true)
+  n=$(ls -1 "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | wc -l | tr -d ' ')
+  if [ -z "$newest" ]; then echo "Off-site copy: WARNING no set in $BACKUP_OFFSITE_DIR yet"; return 0; fi
+  age_h=$(( ($(date +%s) - $(stat -f %m "$newest" 2>/dev/null || stat -c %Y "$newest")) / 3600 ))
+  echo "Off-site copy: $BACKUP_OFFSITE_DIR, $n set(s), newest ${newest##*/} (${age_h}h ago)$([ "$age_h" -gt 48 ] && echo '  <- WARNING: OLDER THAN 2 DAYS')"
+}
+
 # The contents of data/ (not the directory itself), so a restore can unpack anywhere.
 make_archive() {  # <archive>
   local out=$1 src=$BACKUP_DATA_DIR empty=""
@@ -151,10 +343,21 @@ swap_in_data() {  # <stage dir> <timestamp>
 # Dump inside one REPEATABLE READ transaction whose snapshot pg_dump reuses, and take
 # the counts in that same transaction. Then archive data/ and verify both.
 create() {
-  mkdir -p "$BACKUP_DIR"
-  local ts out work fifo snapshot=""
+  local ts out work fifo snapshot="" dir=$BACKUP_DIR rc=0
+  # Loud when the folder can't be written: under launchd that is usually macOS privacy (#356).
+  if ! mkdir -p "$BACKUP_DIR" 2>/dev/null || ! touch "$BACKUP_DIR/.write-check" 2>/dev/null; then
+    say "FAILED: can't write to the backup folder $BACKUP_DIR" >&2; tcc_hint "$BACKUP_DIR" >&2; return 1
+  fi
+  rm -f "$BACKUP_DIR/.write-check"
+  if encrypting; then
+    # #356: made and verified in a private temp dir; only the encrypted files reach BACKUP_DIR.
+    age_bin >/dev/null || return 1
+    PLAIN_DIR=$(mktemp -d)
+    chmod 700 "$PLAIN_DIR"
+    dir=$PLAIN_DIR
+  fi
   ts=$(date +%Y%m%d_%H%M%S)
-  out="$BACKUP_DIR/capitalos_${ts}.dump"
+  out="$dir/capitalos_${ts}.dump"
   work=$(mktemp -d)
   WORK=$work
   fifo="$work/sql"
@@ -188,39 +391,54 @@ create() {
   mv "$out.counts.part" "$out.counts"
   say "Wrote $out ($(wc -c <"$out" | tr -d ' ') bytes, $(wc -l <"$out.counts" | tr -d ' ') tables)"
   # After the dump: every file a dumped row names already exists (written before its row).
-  make_archive "$(archive_of "$out")" || { fail "$out" "could not archive $BACKUP_DATA_DIR/"; return 1; }
-  verify "$out"
+  if ! make_archive "$(archive_of "$out")"; then
+    fail "$out" "could not archive $BACKUP_DATA_DIR/"; rc=1
+  else
+    verify "$out" || rc=$?
+  fi
+  if encrypting; then
+    seal_set "$out" "$BACKUP_DIR" || { say "FAILED: the backup was made but not stored encrypted; nothing written to $BACKUP_DIR counts as a backup" >&2; tcc_hint "$BACKUP_DIR" >&2; return 1; }
+  fi
+  # #357: the off-site copy; a problem there warns, it never fails the backup.
+  [ "$rc" -ne 0 ] || offsite_sync
+  return $rc
 }
 
 # Restore into a scratch database; compare counts when the backup has them; then check the
 # data archive against the restored rows.
 verify() {
-  local dump=${1:?verify needs a dump file} scratch restored archive rows result tables nrows
-  [ -f "$dump" ] || { say "FAILED: no such file $dump" >&2; return 1; }
+  local dump=${1:?verify needs a dump file} scratch restored archive rows result tables nrows src
+  set_present "$dump" || { say "FAILED: no such file $dump" >&2; return 1; }
+  # An encrypted set is checked from a decrypted copy (#356); markers stay next to the set. No key
+  # here says nothing about the set, so its markers are left alone; a set that won't decrypt
+  # with the key is a failed backup.
+  if set_encrypted "$dump"; then need_identity || return 1; fi
+  open_set "$dump" || { fail "$dump" "could not decrypt the set (see above)"; return 1; }
+  src=$OPEN_DUMP
   scratch="capitalos_verify_$$"
   SCRATCH=$scratch
   psql_db -d postgres -c "CREATE DATABASE $scratch" >/dev/null
   if ! docker exec -i "$DB_CONTAINER" pg_restore -U "$DB_USER" -d "$scratch" --no-owner --no-acl --exit-on-error \
-      <"$dump" 2>"$dump.restore.log"; then
+      <"$src" 2>"$dump.restore.log"; then
     fail "$dump" "pg_restore failed: $(grep -vi collation "$dump.restore.log" | tail -1)"; return 1
   fi
   rm -f "$dump.restore.log"
   restored=$(printf '%s\n' "$COUNTS_SQL" | psql_db -d "$scratch")
-  if [ ! -f "$dump.counts" ]; then
+  if [ ! -f "$src.counts" ]; then
     # A dump from before this tool: it restores, but there are no snapshot counts to compare.
     printf 'checked_at=%s\ntables=%s\nmethod=restore-only\n' "$(date -u +%FT%TZ)" \
       "$(printf '%s\n' "$restored" | grep -c '|')" >"$dump.restorable"
     say "RESTORABLE $dump: restored $(printf '%s\n' "$restored" | grep -c '|') tables (no snapshot counts to compare; not a verified backup)"
     return 0
   fi
-  if ! diff <(sort "$dump.counts") <(printf '%s\n' "$restored" | sort) >"$dump.diff"; then
+  if ! diff <(sort "$src.counts") <(printf '%s\n' "$restored" | sort) >"$dump.diff"; then
     fail "$dump" "row counts differ after restore (see $dump.diff)"; return 1
   fi
   rm -f "$dump.diff"
-  tables=$(wc -l <"$dump.counts" | tr -d ' ')
-  nrows=$(awk -F'|' '{s+=$2} END {print s+0}' "$dump.counts")
+  tables=$(wc -l <"$src.counts" | tr -d ' ')
+  nrows=$(awk -F'|' '{s+=$2} END {print s+0}' "$src.counts")
 
-  archive=$(archive_of "$dump")
+  archive=$(archive_of "$src")
   if [ ! -f "$archive" ]; then
     # A backup from before #155: the database part is proven, there is no data part. Its
     # markers are left as they are (a .verified marker needs both parts).
@@ -338,9 +556,12 @@ restore_sql() {  # <dump> <acl sql file>
 
 # Database first (data/ untouched if it fails), then data/ from the same set.
 restore() {
-  local dump=${1:?restore needs a dump file} archive ts rows result roles acl skipped
-  [ -f "$dump" ] || { say "FAILED: no such file $dump" >&2; return 1; }
-  archive=$(archive_of "$dump")
+  local dump=${1:?restore needs a dump file} archive ts rows result roles acl skipped src
+  set_present "$dump" || { say "FAILED: no such file $dump" >&2; return 1; }
+  # An encrypted set is restored from a decrypted copy in a private temp dir (#356).
+  open_set "$dump" || { say "FAILED: could not decrypt $dump; nothing was changed" >&2; return 1; }
+  src=$OPEN_DUMP
+  archive=$(archive_of "$src")
   ts=$(date +%Y%m%d_%H%M%S)
   [ -f "$dump.verified" ] || say "WARNING: $dump has no .verified marker"
   WORK=$(mktemp -d)
@@ -348,7 +569,7 @@ restore() {
   psql_db -d "$DB_NAME" -c "SELECT rolname FROM pg_catalog.pg_roles" >"$roles" ||
     { say "FAILED: could not list the roles of $DB_CONTAINER; nothing was changed" >&2; return 1; }
   : >"$skipped"
-  if ! docker exec -i "$DB_CONTAINER" pg_restore --schema-only -f - <"$dump" | acl_statements "$roles" "$skipped" >"$acl"; then
+  if ! docker exec -i "$DB_CONTAINER" pg_restore --schema-only -f - <"$src" | acl_statements "$roles" "$skipped" >"$acl"; then
     say "FAILED: could not read the privileges in $dump; nothing was changed" >&2; return 1
   fi
   if [ -f "$archive" ]; then
@@ -359,13 +580,13 @@ restore() {
     say "WARNING: no data archive for $dump (backup predates #155): only the database is restored, $BACKUP_DATA_DIR/ is left as it is"
   fi
   say "Restoring the database $DB_NAME in $DB_CONTAINER (one transaction)"
-  if ! restore_sql "$dump" "$acl" |
+  if ! restore_sql "$src" "$acl" |
       docker exec -i "$DB_CONTAINER" psql -X -q -v ON_ERROR_STOP=1 -U "$DB_USER" -d "$DB_NAME" >/dev/null \
       2> >(grep -vi collation >&2); then
     say "FAILED: the database restore failed and was rolled back; $BACKUP_DATA_DIR/ is unchanged" >&2; return 1
   fi
-  if [ -f "$dump.counts" ]; then
-    say "Database restored: $(wc -l <"$dump.counts" | tr -d ' ') tables, $(awk -F'|' '{s+=$2} END {print s+0}' "$dump.counts") rows, counts identical to the dump's snapshot; $(grep -c . "$acl" || true) of its privilege statements applied"
+  if [ -f "$src.counts" ]; then
+    say "Database restored: $(wc -l <"$src.counts" | tr -d ' ') tables, $(awk -F'|' '{s+=$2} END {print s+0}' "$src.counts") rows, counts identical to the dump's snapshot; $(grep -c . "$acl" || true) of its privilege statements applied"
   else
     say "Database restored (no snapshot counts to compare: the dump predates #41); $(grep -c . "$acl" || true) of its privilege statements applied"
   fi
@@ -384,7 +605,7 @@ restore() {
   rm -f "$rows"
   swap_in_data "$STAGE" "$ts"
   STAGE=""
-  say "Restored $BACKUP_DATA_DIR/ from $archive"
+  say "Restored $BACKUP_DATA_DIR/ from $(archive_of "$dump")$(set_encrypted "$dump" && echo .age)"
 }
 
 # The live database against data/ (read-only): would a backup's data check pass?
@@ -429,8 +650,9 @@ retention_prune_list() {  # <today YYYYmmdd> <cutoff YYYYmmdd> <months>
   done <<<"$sorted"
 }
 
-remove_set() {  # <dump>
-  rm -f "$1" "$1.counts" "$1.verified" "$1.failed" "$1.diff" "$1.restore.log" "$1.data-check" "$(archive_of "$1")"
+remove_set() {  # <dump>: plain and encrypted (#356) files alike
+  rm -f "$1" "$1.counts" "$1.verified" "$1.failed" "$1.diff" "$1.restore.log" "$1.data-check" "$(archive_of "$1")" \
+    "$1.age" "$1.counts.age" "$(archive_of "$1").age"
 }
 
 prune() {
@@ -452,44 +674,151 @@ prune() {
     say "$verb failed ${f%.failed}"
   done < <(find "$BACKUP_DIR" -maxdepth 1 -name 'capitalos_*.dump.failed' -mtime +7 2>/dev/null)
   say "$([ -n "${DRY_RUN:-}" ] && echo 'Dry run: would keep' || echo Kept) $((total - n)) verified set(s): every one since $cutoff, the first of each of the last $months months, and the newest; dumps without markers are never pruned"
+  # #357: the off-site folder keeps the same sets.
+  if [ -n "${BACKUP_OFFSITE_DIR:-}" ] && [ -d "$BACKUP_OFFSITE_DIR" ] && ! [ "$BACKUP_DIR" -ef "$BACKUP_OFFSITE_DIR" ]; then
+    say "Off-site, $BACKUP_OFFSITE_DIR:"
+    ( BACKUP_DIR=$BACKUP_OFFSITE_DIR; BACKUP_OFFSITE_DIR=""; prune ) || offsite_warn "pruning $BACKUP_OFFSITE_DIR failed"
+  fi
 }
 
 verified_sets() { ls -1 "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | sed 's/\.verified$//' || true; }
 verified_newest_first() { ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | sed 's/\.verified$//'; }
 
 status() {
-  local newest archive
+  local newest archive n_enc=0 n_all=0 s
+  echo "Backup folder: $BACKUP_DIR"
+  if encrypting; then
+    echo "Encryption: on (age, to $BACKUP_AGE_RECIPIENT); private key $([ -r "$BACKUP_AGE_IDENTITY" ] && echo "at $BACKUP_AGE_IDENTITY" || echo "NOT at $BACKUP_AGE_IDENTITY: restores need it (your password manager copy)")"
+  else
+    echo "Encryption: OFF (no BACKUP_AGE_RECIPIENT): new backups are plain files (make backup-key-init)"
+  fi
   newest=$(verified_newest_first | head -1)
   if [ -n "$newest" ]; then
-    echo "Newest verified backup: $newest"
+    echo "Newest verified backup: $newest ($(set_encrypted "$newest" && echo encrypted || echo PLAIN))"
     sed 's/^/  /' "$newest.verified"
     archive=$(archive_of "$newest")
-    if [ -f "$archive" ]; then echo "  data archive: $archive ($(wc -c <"$archive" | tr -d ' ') bytes)"
+    if [ -f "$archive.age" ]; then echo "  data archive: $archive.age ($(wc -c <"$archive.age" | tr -d ' ') bytes, encrypted)"
+    elif [ -f "$archive" ]; then echo "  data archive: $archive ($(wc -c <"$archive" | tr -d ' ') bytes)"
     else echo "  data archive: none (backup predates #155)"; fi
   else
     echo "Newest verified backup: none"
   fi
-  echo "Verified backups kept: $(verified_newest_first | wc -l | tr -d ' ') (retention: every set from the last 14 days + the first of each month for 12 months)"
+  while IFS= read -r s; do
+    [ -n "$s" ] || continue
+    n_all=$((n_all + 1)); set_encrypted "$s" && n_enc=$((n_enc + 1))
+  done < <(verified_newest_first)
+  echo "Verified backups kept: $n_all, $n_enc encrypted (retention: every set from the last 14 days + the first of each month for 12 months)"
   local failed
   failed=$(ls -1t "$BACKUP_DIR"/capitalos_*.dump.failed 2>/dev/null | head -1 || true)
   [ -n "$failed" ] && echo "Most recent failure: ${failed%.failed} ($(sed -n 's/^reason=//p' "$failed"))"
+  offsite_status
   return 0
+}
+
+# `open <dump>` (#356): a plaintext copy of a set in a new private temp dir, its dump's path
+# printed. The caller owns (and deletes) the dir: the test instance restores from it.
+open_cmd() {
+  local dump=${1:?open needs a dump file}
+  set_present "$dump" || { say "FAILED: no such file $dump" >&2; return 1; }
+  open_set "$dump" copy || return 1
+  printf '%s\n' "$OPEN_DUMP"
+  OPEN_DIR=""   # handed to the caller: not wiped on exit
+}
+
+# `key-init` (#356): the age key pair. The private key (identity) goes outside the repo, the
+# public key (recipient) into .env as BACKUP_AGE_RECIPIENT. Never overwrites a key.
+key_init() {
+  local keygen pub
+  keygen=$("$AGE_TOOL" keygen-path) || return 1
+  if [ -e "$BACKUP_AGE_IDENTITY" ]; then
+    say "A backup key already exists at $BACKUP_AGE_IDENTITY; not replacing it (backups made with it would become unreadable)." >&2
+    pub=$("$keygen" -y "$BACKUP_AGE_IDENTITY") && echo "Its public key: $pub"
+    return 1
+  fi
+  mkdir -p "$(dirname "$BACKUP_AGE_IDENTITY")"
+  chmod 700 "$(dirname "$BACKUP_AGE_IDENTITY")"
+  ( umask 077; "$keygen" -o "$BACKUP_AGE_IDENTITY" 2>/dev/null )
+  chmod 600 "$BACKUP_AGE_IDENTITY"
+  pub=$("$keygen" -y "$BACKUP_AGE_IDENTITY")
+  echo "Created the backup key: $BACKUP_AGE_IDENTITY (private, chmod 600, outside the repo)"
+  if ! backup_is_main_checkout "$PWD"; then
+    echo "Not the main checkout: add this line to the main checkout's .env: BACKUP_AGE_RECIPIENT=$pub"
+  elif [ -f .env ] && grep -q '^BACKUP_AGE_RECIPIENT=' .env; then
+    echo "WARNING: .env already has a BACKUP_AGE_RECIPIENT; set it to: $pub"
+  else
+    printf '\n# Backups are encrypted to this age public key (#356); the private key is %s\nBACKUP_AGE_RECIPIENT=%s\n' "$BACKUP_AGE_IDENTITY" "$pub" >>.env
+    echo "Added BACKUP_AGE_RECIPIENT=$pub to .env"
+  fi
+  echo
+  echo "NOW save the private key somewhere off this Mac (password manager, as a secure note):"
+  echo "  cat $BACKUP_AGE_IDENTITY"
+  echo "Without it no encrypted backup can be restored, including after a lost or dead Mac."
+}
+
+# `encrypt-existing` (#356): plain sets in SRC_DIR (default <repo>/backups) go to BACKUP_DIR as
+# .age, markers alongside. Each encrypted file is decrypted back and compared by sha256 before
+# its plaintext is deleted. Lists only unless APPLY=1. Unmarked old dumps are encrypted too.
+encrypt_existing() {
+  local src=${SRC_DIR:-$PWD/backups} apply=${APPLY:-} f base dump m mb n=0 bad=0 marker
+  encrypting || { say "FAILED: no BACKUP_AGE_RECIPIENT (make backup-key-init first)" >&2; return 1; }
+  age_bin >/dev/null || return 1
+  need_identity || return 1
+  [ -d "$src" ] || { say "Nothing to do: no $src"; return 0; }
+  [ -n "$apply" ] || say "Dry run (APPLY=1 to do it): $src -> $BACKUP_DIR"
+  mkdir -p "$BACKUP_DIR"
+  PLAIN_DIR=$(mktemp -d); chmod 700 "$PLAIN_DIR"
+  for f in "$src"/capitalos_*.dump; do
+    [ -f "$f" ] || continue
+    base=${f##*/}; dump="$BACKUP_DIR/$base"; n=$((n + 1))
+    if [ -z "$apply" ]; then
+      say "Would encrypt $f$([ -f "$f.verified" ] && echo ' (verified)' || echo ' (no .verified marker)') -> $dump.age (+ counts, data archive, markers)"
+      continue
+    fi
+    while IFS= read -r m; do
+      [ -f "$m" ] || continue
+      mb=${m##*/}
+      encrypt_file "$m" "$BACKUP_DIR/$mb.age" || { bad=$((bad + 1)); continue 2; }
+      decrypt_file "$BACKUP_DIR/$mb.age" "$PLAIN_DIR/$mb" || { bad=$((bad + 1)); continue 2; }
+      if [ "$(sha256_of "$m")" != "$(sha256_of "$PLAIN_DIR/$mb")" ]; then
+        say "FAILED: $BACKUP_DIR/$mb.age does not decrypt to $m; its plaintext is kept" >&2
+        rm -f "$PLAIN_DIR/$mb"; bad=$((bad + 1)); continue 2
+      fi
+      rm -f "$PLAIN_DIR/$mb"
+    done < <(set_members "$f")
+    for marker in verified failed restorable diff restore.log data-check; do
+      [ -f "$f.$marker" ] || continue
+      [ "$src" -ef "$BACKUP_DIR" ] || cp -p "$f.$marker" "$dump.$marker"
+    done
+    # Every member is safely encrypted: the plaintext goes (and, when moving, its markers).
+    rm -f "$f" "$f.counts" "$(archive_of "$f")"
+    [ "$src" -ef "$BACKUP_DIR" ] || for marker in verified failed restorable diff restore.log data-check; do rm -f "$f.$marker"; done
+    say "Encrypted $f -> $dump.age (each file decrypted back and compared)"
+  done
+  if [ -n "$apply" ]; then say "Done: $((n - bad)) of $n set(s) encrypted into $BACKUP_DIR$([ "$bad" -gt 0 ] && echo "; $bad left as they were (above)")"; offsite_sync
+  else say "Dry run: $n set(s) would be encrypted into $BACKUP_DIR"; fi
+  [ "$bad" -eq 0 ]
 }
 
 main() {
   cd "$(dirname "$0")/.."
   trap cleanup EXIT
+  backup_env "$PWD"
   case "${1:-}" in
-    create|verify|restore|check-data) DB_CONTAINER=${DB_CONTAINER:?DB_CONTAINER is required} ;;
+    create|verify|restore|check-data|offsite-check) DB_CONTAINER=${DB_CONTAINER:?DB_CONTAINER is required} ;;
   esac
   case "${1:-}" in
     create) create ;;
     verify) verify "${2:-}" ;;
     restore) restore "${2:-}" ;;
+    open) open_cmd "${2:-}" ;;
     check-data) check_live ;;
     prune) prune ;;
     status) status ;;
-    *) echo "usage: $0 create|verify <dump>|restore <dump>|check-data|prune|status" >&2; exit 2 ;;
+    key-init) key_init ;;
+    encrypt-existing) encrypt_existing ;;
+    offsite-sync) offsite_sync ;;
+    offsite-check) offsite_check ;;
+    *) echo "usage: $0 create|verify <dump>|restore <dump>|open <dump>|check-data|prune|status|key-init|encrypt-existing|offsite-sync|offsite-check" >&2; exit 2 ;;
   esac
 }
 

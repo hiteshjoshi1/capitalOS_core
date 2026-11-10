@@ -29,7 +29,12 @@ REPO=${TEST_INSTANCE_REPO:-$(cd "$(dirname "$0")/.." && pwd)}
 WORKTREES_DIR=${WORKTREES_DIR:-$(cd "$REPO/.." && pwd)/capitalOS-worktrees}
 TW="$WORKTREES_DIR/test-instance"
 STATE="$TW/.test-instance.state"
-BACKUP_DIR=${BACKUP_DIR:-$REPO/backups}
+# The real app's backup folder (#356: .env's BACKUP_DIR, else backups/), see backup-env.sh.
+# shellcheck source=backup-env.sh
+. "$(cd "$(dirname "$0")" && pwd)/backup-env.sh"
+backup_env "$REPO"
+# The batch's checks (make verify in the test worktree) inherit this environment: no off-site folder.
+BACKUP_OFFSITE_DIR=""
 export ISO_NAME=capitalos-test
 export ISO_API_PORT=${TEST_API_PORT:-8021} ISO_PG_PORT=${TEST_PG_PORT:-5434} ISO_WEB_PORT=${TEST_WEB_PORT:-5174}
 export ISO_GRAFANA_PORT=${TEST_GRAFANA_PORT:-3001} ISO_LOKI_PORT=${TEST_LOKI_PORT:-3101}
@@ -139,23 +144,31 @@ serve() {
   compose down -v --remove-orphans >/dev/null 2>&1 || true
   compose up -d postgres
   for _ in $(seq 1 60); do docker exec "$ISO_NAME-postgres" pg_isready -q -h 127.0.0.1 -U "$DB_USER" -d "$DB_NAME" && break; sleep 1; done
-  docker exec -i "$ISO_NAME-postgres" pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl --exit-on-error <"$dump" \
+  # #356: an encrypted set is decrypted into a private temp dir (a plain set is copied there), the
+  # copy restored from it, and the dir wiped on exit (PLAIN_SET_DIR, cleaned by the EXIT trap).
+  local plain
+  plain=$("$(cd "$(dirname "$0")" && pwd)/db-backup.sh" open "$dump") ||
+    die "could not open the backup $dump (encrypted: is the private key at $BACKUP_AGE_IDENTITY?)"
+  PLAIN_SET_DIR=$(dirname "$plain")
+  case "$(basename "$PLAIN_SET_DIR")" in tmp.*) ;; *) die "db-backup.sh open returned an unexpected path: $plain" ;; esac
+  trap 'rm -rf "${PLAIN_SET_DIR:-/nonexistent}"' EXIT
+  docker exec -i "$ISO_NAME-postgres" pg_restore -U "$DB_USER" -d "$DB_NAME" --no-owner --no-acl --exit-on-error <"$plain" \
     2> >(grep -vi collation >&2)
   # The copy must be exact before the batch touches it.
   local sql="SELECT table_name || '|' || (xpath('/row/c/text()', query_to_xml(format('SELECT count(*) AS c FROM %I.%I', table_schema, table_name), false, true, '')))[1]::text FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' ORDER BY table_name;"
-  if ! diff <(sort "$dump.counts") <(printf '%s\n' "$sql" | docker exec -i "$ISO_NAME-postgres" psql -X -q -At -U "$DB_USER" -d "$DB_NAME" 2>/dev/null | sort) >/dev/null; then
+  if ! diff <(sort "$plain.counts") <(printf '%s\n' "$sql" | docker exec -i "$ISO_NAME-postgres" psql -X -q -At -U "$DB_USER" -d "$DB_NAME" 2>/dev/null | sort) >/dev/null; then
     die "the restored copy's row counts differ from the backup's"
   fi
-  echo "Restored: $(wc -l <"$dump.counts" | tr -d ' ') tables, counts identical to the backup"
+  echo "Restored: $(wc -l <"$plain.counts" | tr -d ' ') tables, counts identical to the backup"
   # The raw files of the same backup set (#155), so rebuilds from raw statements work on the copy.
-  local archive="${dump%.dump}.data.tar.gz"
+  local archive="${plain%.dump}.data.tar.gz"
   if [ -f "$archive" ]; then
     mkdir -p "$TW/data"
     tar -xzf "$archive" -C "$TW/data"
     DB_CONTAINER="$ISO_NAME-postgres" DB_USER=$DB_USER DB_NAME=$DB_NAME BACKUP_DATA_DIR="$TW/data" \
       "$(cd "$(dirname "$0")" && pwd)/db-backup.sh" check-data | tail -1 ||
       die "the copy's data/ lacks or differs from files its database records"
-    echo "Data: $archive unpacked into $TW/data"
+    echo "Data: $(basename "$archive") unpacked into $TW/data"
   else
     echo "Data: no data archive with this backup (made before #155); $TW/data has no raw files"
   fi
