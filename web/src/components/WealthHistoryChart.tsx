@@ -462,7 +462,7 @@ export default function WealthHistoryChart({
             <span className="whHonestyDot whHonestyDotFresh" /> observed
           </span>
           <span className="whHonestyItem">
-            <span className="whHonestyDot whHonestyDotCarried" /> carried (stale source)
+            <span className="whHonestyDot whHonestyDotCarried" /> carried (no new data: last known value)
           </span>
           <span className="whHonestyItem">
             <span className="whHonestyDiamond" /> upload landed

@@ -1602,11 +1602,44 @@ export type WealthTimeline = {
     /** Platforms with a statement import in the still-open month (#138). */
     uploads: string[];
   };
+  /** #292: the span of the user's data (History's default range); null with no data. */
+  data_span?: WealthTimelineDataSpan | null;
 };
 
 export type WealthTimelineBackfillResult = {
   months_written: number;
   base_currency: string;
+};
+
+/** The span of the user's imported data (#292): History's default range. */
+export type WealthTimelineDataSpan = {
+  first_month: string;
+  months: number;
+};
+
+/** Step 1 of a "Generate history" run: past FX rates, fetched once and capped (#292). */
+export type HistoryGenerateFx = {
+  status?: string | null;
+  fetched_requests?: number | null;
+  failed_requests?: number | null;
+  remaining_requests?: number | null;
+  unsupported_currencies?: string[] | null;
+};
+
+/** A background "Generate history" run's progress (#292). */
+export type HistoryGenerateStatus = {
+  status: "idle" | "running" | "completed" | "failed";
+  stage: "fx" | "months" | "done";
+  base_currency: string;
+  months: number;
+  months_total: number;
+  months_done: number;
+  current_month: string | null;
+  months_written: number;
+  started_at: string | null;
+  finished_at: string | null;
+  fx: HistoryGenerateFx | null;
+  error: string | null;
 };
 
 export type WealthTopMover = {
@@ -2176,6 +2209,18 @@ export const api = {
     req<WealthTimelineBackfillResult>(
       `/dashboard/net-worth-timeline/backfill?months=${encodeURIComponent(String(months))}&base_currency=${encodeURIComponent(baseCurrency)}`,
       { method: "POST" },
+    ),
+  /** Starts "Generate history" in the background (#292); no `months` = the span of your data. */
+  netWorthTimelineGenerate: (baseCurrency = "SGD", months?: number) =>
+    req<HistoryGenerateStatus>(
+      `/dashboard/net-worth-timeline/generate?base_currency=${encodeURIComponent(baseCurrency)}${
+        months == null ? "" : `&months=${encodeURIComponent(String(months))}`
+      }`,
+      { method: "POST" },
+    ),
+  netWorthTimelineGenerateStatus: (baseCurrency = "SGD") =>
+    req<HistoryGenerateStatus>(
+      `/dashboard/net-worth-timeline/generate/status?base_currency=${encodeURIComponent(baseCurrency)}`,
     ),
   netWorthTimelineMovers: (month: string, baseCurrency = "SGD", limit = 5) =>
     req<WealthTopMovers>(
