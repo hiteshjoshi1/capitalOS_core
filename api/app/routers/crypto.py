@@ -26,8 +26,6 @@ from app.db.session import get_db
 from app.crypto.verify import (
     verify_evm_signature,
     verify_solana_signature,
-    verify_solana_signature_debug,
-    verify_solana_signature_bytes_debug,
 )
 from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refresh_lock, upsert_snapshot
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
@@ -63,12 +61,6 @@ class WalletVerifyIn(BaseModel):
     signature: str
     public_key: Optional[str] = None
     verification_id: Optional[int] = None
-
-
-class SolanaDebugVerifyIn(BaseModel):
-    address: str
-    message_bytes_b64: str
-    signature: str
 
 
 class SolanaVerifyOnchainIn(BaseModel):
@@ -1170,51 +1162,6 @@ def refresh_now(
     for r in rows:
         background.add_task(_refresh_wallet, str(r[0]))
     return {"status": "queued", "wallets_refreshed": len(rows)}
-
-
-@router.post("/debug/verify-sig")
-def debug_verify_sig(
-    payload: SolanaDebugVerifyIn,
-    x_admin_key: Optional[str] = Header(None),
-):
-    admin_key = os.getenv("CRYPTO_ADMIN_KEY", "")
-    if admin_key and x_admin_key != admin_key:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    try:
-        message_bytes = base64.b64decode(payload.message_bytes_b64)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Invalid message_bytes_b64: {exc}")
-    message = message_bytes.decode("utf-8", errors="replace")
-    result = verify_solana_signature_debug(message, payload.signature, payload.address)
-    return {
-        "ok": result.ok,
-        "error": result.error,
-        "matched_variant": result.matched_variant,
-        "decoder": result.decoder,
-        "decoded_len": result.decoded_len,
-    }
-
-
-@router.post("/debug/verify-bytes")
-def debug_verify_bytes(
-    payload: SolanaDebugVerifyIn,
-    x_admin_key: Optional[str] = Header(None),
-):
-    admin_key = os.getenv("CRYPTO_ADMIN_KEY", "")
-    if admin_key and x_admin_key != admin_key:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    try:
-        message_bytes = base64.b64decode(payload.message_bytes_b64)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Invalid message_bytes_b64: {exc}")
-    result = verify_solana_signature_bytes_debug(message_bytes, payload.signature, payload.address)
-    return {
-        "ok": result.ok,
-        "error": result.error,
-        "matched_variant": result.matched_variant,
-        "decoder": result.decoder,
-        "decoded_len": result.decoded_len,
-    }
 
 
 @router.get("/solana/blockhash")
