@@ -28,6 +28,11 @@ let accessTokenMemory: string | null = null;
 let refreshInFlight: Promise<AuthSession | null> | null = null;
 let authFailureHandler: (() => void) | null = null;
 
+/** Where "Sign in with Google" sends the browser (#358): a full-page navigation, not a fetch. */
+export function googleSignInUrl(next: string): string {
+  return `${API_BASE}/auth/google/start?next=${encodeURIComponent(next)}`;
+}
+
 export function getAccessToken(): string | null {
   return accessTokenMemory;
 }
@@ -245,6 +250,13 @@ export type Platform = {
   platform_type: string; // BANK | BROKER | EXCHANGE | CARD_ISSUER | WALLET_PROVIDER
   country: string;       // SG | US | IN | HK | GLOBAL
   website?: string | null;
+};
+
+/** GET /auth/methods (#358): which ways of signing in are on. */
+export type AuthMethods = {
+  password: boolean;
+  google: boolean;
+  signup: boolean;
 };
 
 export type AuthMe = {
@@ -2193,6 +2205,7 @@ export const api = {
   authRefresh: () =>
     req<AuthSession>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
   authMe: () => req<AuthMe>("/auth/me"),
+  authMethods: () => req<AuthMethods>("/auth/methods", undefined, { skipAuth: true, skipRefreshRetry: true }),
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
   changePassword: (payload: { current_password: string; new_password: string }) =>
     req<ChangePasswordResult>("/auth/change-password", { method: "POST", body: JSON.stringify(payload) }),
