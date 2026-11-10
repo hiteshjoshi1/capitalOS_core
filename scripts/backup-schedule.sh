@@ -49,11 +49,19 @@ EOF
     ;;
   status)
     if launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1; then
-      echo "Schedule: installed (daily at 03:00), last exit $(launchctl print "gui/$(id -u)/$LABEL" | sed -n 's/^[[:space:]]*last exit code = //p' | head -1)"
+      last=$(launchctl print "gui/$(id -u)/$LABEL" | sed -n 's/^[[:space:]]*last exit code = //p' | head -1)
+      echo "Schedule: installed (daily at 03:00), last exit $last"
+      case "$last" in 0 | "" | "(never exited)") ;; *) echo "  <- THE LAST SCHEDULED BACKUP FAILED: see the log below" ;; esac
     else
       echo "Schedule: not installed (make backup-schedule)"
     fi
     [ -f "$LOG" ] && { echo "Last log lines ($LOG):"; tail -5 "$LOG" | sed 's/^/  /'; }
+    # #356/#357: macOS privacy controls can block the job (/bin/bash under launchd) from ~/Documents
+    # or iCloud Drive while the same command works in Terminal.
+    if [ -f "$LOG" ] && tail -200 "$LOG" | grep -q "Operation not permitted\|can't write to"; then
+      echo "  <- macOS blocked the scheduled job from a folder (Operation not permitted). Fix once: System Settings >"
+      echo "     Privacy & Security > Full Disk Access > + > /bin/bash (Cmd-Shift-G, type /bin/bash), then make backup-now."
+    fi
     ;;
   run)
     launchctl kickstart -p "gui/$(id -u)/$LABEL" >/dev/null && echo "Started $LABEL; follow $LOG"

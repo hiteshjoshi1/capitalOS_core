@@ -76,6 +76,13 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   `make backup-key-init` (once), `make backup-encrypt-existing` (dry run; `APPLY=1`) moves old plain sets
   over. `age` is pinned by sha256 in `scripts/age-tool.sh` (`make host-tools`). Worktrees, CI and the
   test instance (which links the main `.env`) keep `./backups`; there `BACKUP_DIR` from `.env` is ignored.
+- Off-site (#357, D-93): `BACKUP_OFFSITE_DIR` (`.env`, iCloud Drive) gets a copy of every verified
+  encrypted set after each backup (missing ones too) and the same retention; a missing/unwritable folder
+  warns, never fails the backup. `backup-status` shows the newest off-site copy (warns > 2 days);
+  `make backup-offsite-check` decrypts the newest off-site set and runs the restore check;
+  `make backup-offsite-sync` copies what's missing now. The 03:00 job is `/bin/bash` under launchd: if macOS
+  privacy blocks it ("Operation not permitted" in the log, flagged by `backup-status`), give `/bin/bash`
+  Full Disk Access.
 - `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
   is down).
 

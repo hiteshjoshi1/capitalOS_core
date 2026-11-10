@@ -33,6 +33,8 @@ STATE="$TW/.test-instance.state"
 # shellcheck source=backup-env.sh
 . "$(cd "$(dirname "$0")" && pwd)/backup-env.sh"
 backup_env "$REPO"
+# The batch's checks (make verify in the test worktree) inherit this environment: no off-site folder.
+BACKUP_OFFSITE_DIR=""
 export ISO_NAME=capitalos-test
 export ISO_API_PORT=${TEST_API_PORT:-8021} ISO_PG_PORT=${TEST_PG_PORT:-5434} ISO_WEB_PORT=${TEST_WEB_PORT:-5174}
 export ISO_GRAFANA_PORT=${TEST_GRAFANA_PORT:-3001} ISO_LOKI_PORT=${TEST_LOKI_PORT:-3101}

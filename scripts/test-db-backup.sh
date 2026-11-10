@@ -5,6 +5,9 @@
 set -euo pipefail
 
 src=$(cd "$(dirname "$0")/.." && pwd)
+# Never the real backup folders, whatever the caller exported (the test instance exports them).
+export BACKUP_DIR="" BACKUP_OFFSITE_DIR="" BACKUP_AGE_RECIPIENT="" BACKUP_AGE_IDENTITY=""
+unset BACKUP_DIR BACKUP_AGE_IDENTITY
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 # shellcheck source=db-backup.sh
@@ -367,6 +370,47 @@ left=$(ls "$b" | sed 's/_030000.*//' | sort | uniq -c | awk '{print $2 ":" $1}' 
 if [ "$left" = "capitalos_20240101:1 capitalos_20251220:4 capitalos_20261103:4 " ]; then
   ok "prune: whole sets removed (dump, counts, marker, archive); unmarked dump kept"
 else bad "prune: whole sets removed; unmarked dump kept (left: $left)"; fi
+
+# ---- off-site copy (#357) ----
+# The backup dir: one encrypted verified set (enc2 from above), one plain verified set, one unmarked.
+local_dir=$enc2
+mkdir -p "$local_dir"
+for ext in .dump .dump.counts .dump.verified .data.tar.gz; do printf 'plain\n' >"$local_dir/capitalos_20261001_030000$ext"; done
+out=$( (BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$tmp/no-icloud/CapitalOS_backups offsite_sync) 2>&1) && rc=0 || rc=$?
+if [ "$rc" = 0 ] && [ ! -e "$tmp/no-icloud" ] && printf '%s' "$out" | grep -q "WARNING (off-site copy): .*no-icloud does not exist (iCloud Drive not turned on?)"; then
+  ok "off-site: no iCloud folder: a clear warning, no failure, nothing created"
+else bad "off-site: no iCloud folder warns without failing (exit $rc): $out"; fi
+mkdir -p "$tmp/icloud"
+off=$tmp/icloud/CapitalOS_backups
+(BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off offsite_sync) >/dev/null 2>&1
+if [ "$(ls "$off" | tr '\n' ' ')" = "capitalos_20261104_030000.data.tar.gz.age capitalos_20261104_030000.dump.age capitalos_20261104_030000.dump.counts.age capitalos_20261104_030000.dump.verified " ] &&
+  [ "$(sha "$off/capitalos_20261104_030000.dump.age")" = "$(sha "$local_dir/capitalos_20261104_030000.dump.age")" ]; then
+  ok "off-site: verified encrypted sets copied byte for byte; plain and unmarked sets never leave the Mac"
+else bad "off-site: only verified encrypted sets copied (got: $(ls "$off" | tr '\n' ' '))"; fi
+out=$( (BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off offsite_sync) 2>&1)
+printf '%s' "$out" | grep -q "Off-site: 0 set(s) copied" && ok "off-site: a set already there isn't copied again" || bad "off-site: idempotent ($out)"
+chmod 500 "$off"
+out=$( (BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off offsite_sync) 2>&1) && rc=0 || rc=$?
+chmod 700 "$off"
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q "can't write to $off"; then
+  ok "off-site: an unwritable folder warns, never fails the backup"
+else bad "off-site: unwritable folder warns (exit $rc): $out"; fi
+touch -t 202611010300 "$off/capitalos_20261104_030000.dump.verified"
+out=$(BACKUP_OFFSITE_DIR=$off offsite_status)
+printf '%s' "$out" | grep -q "1 set(s), newest capitalos_20261104_030000.dump.verified .*WARNING: OLDER THAN 2 DAYS" &&
+  ok "off-site status: the newest copy and a warning when it's over 2 days old" || bad "off-site status, stale: $out"
+out=$(BACKUP_OFFSITE_DIR=$tmp/no-icloud/x offsite_status)
+printf '%s' "$out" | grep -q "WARNING .* does not exist (iCloud Drive not turned on?)" &&
+  ok "off-site status: a missing folder is a warning" || bad "off-site status, missing: $out"
+# prune keeps the same retention off-site.
+b3=$tmp/b3; o3=$tmp/o3; mkdir -p "$b3" "$o3"
+for d in 20250101 20261103; do
+  for ext in .dump.age .dump.counts.age .dump.verified .data.tar.gz.age; do touch "$b3/capitalos_${d}_030000$ext" "$o3/capitalos_${d}_030000$ext"; done
+done
+BACKUP_DIR=$b3 BACKUP_OFFSITE_DIR=$o3 BACKUP_TODAY=20261104 "$src/scripts/db-backup.sh" prune >/dev/null
+if [ "$(ls "$o3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ] && [ "$(ls "$b3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ]; then
+  ok "off-site: prune applies the same retention to the off-site folder"
+else bad "off-site: prune off-site (local: $(ls "$b3" | tr '\n' ' '); off-site: $(ls "$o3" | tr '\n' ' '))"; fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

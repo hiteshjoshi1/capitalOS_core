@@ -9,6 +9,8 @@
 #                         Unset: plain sets, as before #356 (worktrees, CI, fresh clones).
 #   BACKUP_AGE_IDENTITY   the private key file that decrypts; default
 #                         ~/.capitalos/backup/age-identity.txt (outside the repo).
+#   BACKUP_OFFSITE_DIR    a second folder (iCloud Drive) that gets a copy of every encrypted set
+#                         (#357). Like BACKUP_DIR, from .env only in the main checkout; unset: none.
 # shellcheck shell=bash
 
 backup_env_value() {  # <.env file> <name>: the last NAME=value line, quotes stripped
@@ -32,11 +34,16 @@ backup_env() {  # <repo dir>
     BACKUP_DIR=${v:-$repo/backups}
   fi
   case "$BACKUP_DIR" in "~/"*) BACKUP_DIR="$HOME/${BACKUP_DIR#\~/}" ;; esac
+  if [ -z "${BACKUP_OFFSITE_DIR+set}" ]; then
+    BACKUP_OFFSITE_DIR=""
+    backup_is_main_checkout "$repo" && BACKUP_OFFSITE_DIR=$(backup_env_value "$env" BACKUP_OFFSITE_DIR)
+  fi
+  case "$BACKUP_OFFSITE_DIR" in "~/"*) BACKUP_OFFSITE_DIR="$HOME/${BACKUP_OFFSITE_DIR#\~/}" ;; esac
   if [ -z "${BACKUP_AGE_RECIPIENT+set}" ]; then BACKUP_AGE_RECIPIENT=$(backup_env_value "$env" BACKUP_AGE_RECIPIENT); fi
   if [ -z "${BACKUP_AGE_IDENTITY:-}" ]; then BACKUP_AGE_IDENTITY=$(backup_env_value "$env" BACKUP_AGE_IDENTITY); fi
   BACKUP_AGE_IDENTITY=${BACKUP_AGE_IDENTITY:-$HOME/.capitalos/backup/age-identity.txt}
   case "$BACKUP_AGE_IDENTITY" in "~/"*) BACKUP_AGE_IDENTITY="$HOME/${BACKUP_AGE_IDENTITY#\~/}" ;; esac
-  export BACKUP_DIR BACKUP_AGE_RECIPIENT BACKUP_AGE_IDENTITY
+  export BACKUP_DIR BACKUP_AGE_RECIPIENT BACKUP_AGE_IDENTITY BACKUP_OFFSITE_DIR
 }
 
 # The newest verified set's logical path (capitalos_<ts>.dump, whether stored plain or as .age).

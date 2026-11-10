@@ -367,7 +367,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
-.PHONY: backup-key-init backup-encrypt-existing
+.PHONY: backup-key-init backup-encrypt-existing backup-offsite-sync backup-offsite-check
 .PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
@@ -466,6 +466,16 @@ backup-key-init:
 
 backup-encrypt-existing:
 	@APPLY=$(APPLY) SRC_DIR=$(SRC_DIR) $(DB_BACKUP) encrypt-existing
+
+# Off-site copy (#357): BACKUP_OFFSITE_DIR in .env (iCloud Drive). Every backup copies the verified
+# encrypted sets it lacks there; backup-prune keeps the same retention there. A missing or unwritable
+# folder warns, never fails the backup. backup-offsite-check decrypts the newest off-site set and runs
+# the full restore check (monthly); backup-offsite-sync copies what's missing now.
+backup-offsite-sync:
+	@$(DB_BACKUP) offsite-sync
+
+backup-offsite-check: db-wait
+	@$(DB_BACKUP) offsite-check
 
 backup-schedule:
 	@scripts/backup-schedule.sh install

@@ -35,6 +35,9 @@
 #                                    BACKUP_DIR encrypted, each file decrypted back and compared by
 #                                    sha256 before its plaintext goes; lists only unless APPLY=1
 #   db-backup.sh key-init            create the age key pair (refuses if one exists)
+#   db-backup.sh offsite-sync        copy verified encrypted sets missing from BACKUP_OFFSITE_DIR
+#                                    (#357; also run after every backup); prune keeps both folders
+#   db-backup.sh offsite-check       decrypt the newest off-site set and run the restore check
 #
 # Env: DB_CONTAINER, DB_USER, DB_NAME (from the Makefile), BACKUP_DIR, BACKUP_AGE_RECIPIENT,
 #      BACKUP_AGE_IDENTITY (scripts/backup-env.sh: environment, then .env, then defaults),
@@ -49,7 +52,7 @@ DB_USER=${DB_USER:-capitalos}
 DB_NAME=${DB_NAME:-capitalos}
 # Run: main() resolves BACKUP_DIR and the keys (backup_env). Sourced (the tests): plain defaults.
 if [ "${BASH_SOURCE[0]}" != "$0" ]; then
-  : "${BACKUP_DIR:=backups}" "${BACKUP_AGE_RECIPIENT:=}" "${BACKUP_AGE_IDENTITY:=$HOME/.capitalos/backup/age-identity.txt}"
+  : "${BACKUP_DIR:=backups}" "${BACKUP_AGE_RECIPIENT:=}" "${BACKUP_AGE_IDENTITY:=$HOME/.capitalos/backup/age-identity.txt}" "${BACKUP_OFFSITE_DIR:=}"
 fi
 BACKUP_DATA_DIR=${BACKUP_DATA_DIR:-data}
 # Where the api container sees data/ (docker-compose.yml: ./data:/app/data).
@@ -214,6 +217,100 @@ seal_set() {  # <plain dump> <dir>
   say "Encrypted to $dir/${dump##*/}.age (+ counts, data archive)$([ -n "$roundtrip" ] && echo '; each decrypted back and compared' || echo '; not decrypted back (no private key here)')"
 }
 
+# ---- off-site copy (#357) ----
+# BACKUP_OFFSITE_DIR (main checkout's .env; Hitesh: iCloud Drive) gets a copy of every verified,
+# ENCRYPTED set in BACKUP_DIR it doesn't have yet (so a missed day or a late-enabled iCloud catches
+# up), and the same retention (prune). Plain sets never go off-site. A missing or unwritable
+# off-site folder is a loud WARNING, never a failed backup: the local set is already safe.
+
+# macOS privacy controls can stop the 03:00 launchd job (/bin/bash) from touching ~/Documents or
+# iCloud Drive while the same command works in Terminal.
+tcc_hint() {  # <dir>
+  case "$1" in
+    "$HOME/Documents"* | "$HOME/Library/Mobile Documents"* | "$HOME/Desktop"*)
+      echo "  If this ran from the 03:00 job: macOS may be blocking it from $1. System Settings > Privacy & Security > Full Disk Access: add /bin/bash (the job's shell), then make backup-now." ;;
+  esac
+}
+
+offsite_warn() { say "WARNING (off-site copy): $*" >&2; }
+
+offsite_ready() {  # 0 when BACKUP_OFFSITE_DIR is set and writable
+  [ -n "${BACKUP_OFFSITE_DIR:-}" ] || return 1
+  local parent
+  parent=$(dirname "$BACKUP_OFFSITE_DIR")
+  if [ ! -d "$parent" ]; then
+    offsite_warn "$parent does not exist (iCloud Drive not turned on?); no off-site copy was made"; return 1
+  fi
+  if ! mkdir -p "$BACKUP_OFFSITE_DIR" 2>/dev/null || ! touch "$BACKUP_OFFSITE_DIR/.write-check" 2>/dev/null; then
+    offsite_warn "can't write to $BACKUP_OFFSITE_DIR; no off-site copy was made"; tcc_hint "$BACKUP_OFFSITE_DIR" >&2; return 1
+  fi
+  rm -f "$BACKUP_OFFSITE_DIR/.write-check"
+  return 0
+}
+
+# Copies one encrypted set; each .age file compared by sha256; the marker last.
+offsite_copy_set() {  # <dump in BACKUP_DIR>
+  local dump=$1 base m mb dest
+  base=${dump##*/}; dest="$BACKUP_OFFSITE_DIR/$base"
+  while IFS= read -r m; do
+    [ -f "$m.age" ] || continue
+    mb=${m##*/}
+    cp -p "$m.age" "$BACKUP_OFFSITE_DIR/$mb.age.part" 2>/dev/null &&
+      [ "$(sha256_of "$m.age")" = "$(sha256_of "$BACKUP_OFFSITE_DIR/$mb.age.part")" ] &&
+      mv "$BACKUP_OFFSITE_DIR/$mb.age.part" "$BACKUP_OFFSITE_DIR/$mb.age" ||
+      { rm -f "$BACKUP_OFFSITE_DIR/$mb.age.part"; offsite_warn "copying $m.age failed"; tcc_hint "$BACKUP_OFFSITE_DIR" >&2; return 1; }
+  done < <(set_members "$dump")
+  cp -p "$dump.verified" "$dest.verified" || { offsite_warn "copying $dump.verified failed"; return 1; }
+}
+
+# Every verified encrypted set missing off-site is copied. Never fails the caller.
+offsite_sync() {
+  local dump n=0 bad=0
+  offsite_ready || return 0
+  while IFS= read -r dump; do
+    [ -n "$dump" ] || continue
+    set_encrypted "$dump" || continue
+    [ -f "$BACKUP_OFFSITE_DIR/${dump##*/}.verified" ] && continue
+    if offsite_copy_set "$dump"; then n=$((n + 1)); else bad=$((bad + 1)); fi
+  done < <(verified_sets)
+  say "Off-site: $n set(s) copied to $BACKUP_OFFSITE_DIR$([ "$bad" -gt 0 ] && echo "; $bad FAILED (above)")"
+  return 0
+}
+
+# `offsite-check`: the newest off-site set, copied to a private temp dir (nothing off-site is
+# written), decrypted and put through the full restore check.
+offsite_check() {
+  local newest tmpset m base
+  [ -n "${BACKUP_OFFSITE_DIR:-}" ] || { say "FAILED: no BACKUP_OFFSITE_DIR set" >&2; return 1; }
+  newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 | sed 's/\.verified$//')
+  [ -n "$newest" ] || { say "FAILED: no verified set in $BACKUP_OFFSITE_DIR" >&2; return 1; }
+  need_identity || return 1
+  PLAIN_DIR=$(mktemp -d); chmod 700 "$PLAIN_DIR"
+  base=${newest##*/}
+  while IFS= read -r m; do
+    [ -f "$m.age" ] && cp "$m.age" "$PLAIN_DIR/${m##*/}.age"
+  done < <(set_members "$newest")
+  tmpset="$PLAIN_DIR/$base"
+  set_encrypted "$tmpset" || { say "FAILED: $newest has no .age dump" >&2; return 1; }
+  say "Checking the newest off-site set $newest"
+  verify "$tmpset" || { say "FAILED: the off-site set $newest did not pass the restore check" >&2; return 1; }
+  say "OFF-SITE OK: $newest decrypts and restores (counts identical, data files present)"
+}
+
+offsite_status() {
+  [ -n "${BACKUP_OFFSITE_DIR:-}" ] || { echo "Off-site copy: not set up (BACKUP_OFFSITE_DIR, #357)"; return 0; }
+  if [ ! -d "$BACKUP_OFFSITE_DIR" ]; then
+    echo "Off-site copy: WARNING $BACKUP_OFFSITE_DIR does not exist$([ -d "$(dirname "$BACKUP_OFFSITE_DIR")" ] || echo ' (iCloud Drive not turned on?)'); no off-site copy yet"
+    return 0
+  fi
+  local newest age_h n
+  newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 || true)
+  n=$(ls -1 "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | wc -l | tr -d ' ')
+  if [ -z "$newest" ]; then echo "Off-site copy: WARNING no set in $BACKUP_OFFSITE_DIR yet"; return 0; fi
+  age_h=$(( ($(date +%s) - $(stat -f %m "$newest" 2>/dev/null || stat -c %Y "$newest")) / 3600 ))
+  echo "Off-site copy: $BACKUP_OFFSITE_DIR, $n set(s), newest ${newest##*/} (${age_h}h ago)$([ "$age_h" -gt 48 ] && echo '  <- WARNING: OLDER THAN 2 DAYS')"
+}
+
 # The contents of data/ (not the directory itself), so a restore can unpack anywhere.
 make_archive() {  # <archive>
   local out=$1 src=$BACKUP_DATA_DIR empty=""
@@ -246,8 +343,12 @@ swap_in_data() {  # <stage dir> <timestamp>
 # Dump inside one REPEATABLE READ transaction whose snapshot pg_dump reuses, and take
 # the counts in that same transaction. Then archive data/ and verify both.
 create() {
-  mkdir -p "$BACKUP_DIR"
   local ts out work fifo snapshot="" dir=$BACKUP_DIR rc=0
+  # Loud when the folder can't be written: under launchd that is usually macOS privacy (#356).
+  if ! mkdir -p "$BACKUP_DIR" 2>/dev/null || ! touch "$BACKUP_DIR/.write-check" 2>/dev/null; then
+    say "FAILED: can't write to the backup folder $BACKUP_DIR" >&2; tcc_hint "$BACKUP_DIR" >&2; return 1
+  fi
+  rm -f "$BACKUP_DIR/.write-check"
   if encrypting; then
     # #356: made and verified in a private temp dir; only the encrypted files reach BACKUP_DIR.
     age_bin >/dev/null || return 1
@@ -296,8 +397,10 @@ create() {
     verify "$out" || rc=$?
   fi
   if encrypting; then
-    seal_set "$out" "$BACKUP_DIR" || { say "FAILED: the backup was made but not stored encrypted; nothing written to $BACKUP_DIR counts as a backup" >&2; return 1; }
+    seal_set "$out" "$BACKUP_DIR" || { say "FAILED: the backup was made but not stored encrypted; nothing written to $BACKUP_DIR counts as a backup" >&2; tcc_hint "$BACKUP_DIR" >&2; return 1; }
   fi
+  # #357: the off-site copy; a problem there warns, it never fails the backup.
+  [ "$rc" -ne 0 ] || offsite_sync
   return $rc
 }
 
@@ -571,6 +674,11 @@ prune() {
     say "$verb failed ${f%.failed}"
   done < <(find "$BACKUP_DIR" -maxdepth 1 -name 'capitalos_*.dump.failed' -mtime +7 2>/dev/null)
   say "$([ -n "${DRY_RUN:-}" ] && echo 'Dry run: would keep' || echo Kept) $((total - n)) verified set(s): every one since $cutoff, the first of each of the last $months months, and the newest; dumps without markers are never pruned"
+  # #357: the off-site folder keeps the same sets.
+  if [ -n "${BACKUP_OFFSITE_DIR:-}" ] && [ -d "$BACKUP_OFFSITE_DIR" ] && ! [ "$BACKUP_DIR" -ef "$BACKUP_OFFSITE_DIR" ]; then
+    say "Off-site, $BACKUP_OFFSITE_DIR:"
+    ( BACKUP_DIR=$BACKUP_OFFSITE_DIR; BACKUP_OFFSITE_DIR=""; prune ) || offsite_warn "pruning $BACKUP_OFFSITE_DIR failed"
+  fi
 }
 
 verified_sets() { ls -1 "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | sed 's/\.verified$//' || true; }
@@ -603,6 +711,7 @@ status() {
   local failed
   failed=$(ls -1t "$BACKUP_DIR"/capitalos_*.dump.failed 2>/dev/null | head -1 || true)
   [ -n "$failed" ] && echo "Most recent failure: ${failed%.failed} ($(sed -n 's/^reason=//p' "$failed"))"
+  offsite_status
   return 0
 }
 
@@ -685,7 +794,7 @@ encrypt_existing() {
     [ "$src" -ef "$BACKUP_DIR" ] || for marker in verified failed restorable diff restore.log data-check; do rm -f "$f.$marker"; done
     say "Encrypted $f -> $dump.age (each file decrypted back and compared)"
   done
-  if [ -n "$apply" ]; then say "Done: $((n - bad)) of $n set(s) encrypted into $BACKUP_DIR$([ "$bad" -gt 0 ] && echo "; $bad left as they were (above)")"
+  if [ -n "$apply" ]; then say "Done: $((n - bad)) of $n set(s) encrypted into $BACKUP_DIR$([ "$bad" -gt 0 ] && echo "; $bad left as they were (above)")"; offsite_sync
   else say "Dry run: $n set(s) would be encrypted into $BACKUP_DIR"; fi
   [ "$bad" -eq 0 ]
 }
@@ -695,7 +804,7 @@ main() {
   trap cleanup EXIT
   backup_env "$PWD"
   case "${1:-}" in
-    create|verify|restore|check-data) DB_CONTAINER=${DB_CONTAINER:?DB_CONTAINER is required} ;;
+    create|verify|restore|check-data|offsite-check) DB_CONTAINER=${DB_CONTAINER:?DB_CONTAINER is required} ;;
   esac
   case "${1:-}" in
     create) create ;;
@@ -707,7 +816,9 @@ main() {
     status) status ;;
     key-init) key_init ;;
     encrypt-existing) encrypt_existing ;;
-    *) echo "usage: $0 create|verify <dump>|restore <dump>|open <dump>|check-data|prune|status|key-init|encrypt-existing" >&2; exit 2 ;;
+    offsite-sync) offsite_sync ;;
+    offsite-check) offsite_check ;;
+    *) echo "usage: $0 create|verify <dump>|restore <dump>|open <dump>|check-data|prune|status|key-init|encrypt-existing|offsite-sync|offsite-check" >&2; exit 2 ;;
   esac
 }
 

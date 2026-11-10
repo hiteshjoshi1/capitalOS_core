@@ -94,6 +94,35 @@ make backup-encrypt-existing APPLY=1    # SRC_DIR=<dir> for a folder other than 
 Worktrees, CI and the test instance keep `./backups` (a `BACKUP_DIR` in `.env` counts only
 in the main checkout), and without `BACKUP_AGE_RECIPIENT` backups are plain, as before.
 
+## An off-site copy (#357)
+
+A copy on the same Mac doesn't survive a lost or dead Mac. Point `BACKUP_OFFSITE_DIR` at a
+folder that syncs elsewhere, in the main checkout's `.env` (iCloud Drive here):
+
+```
+BACKUP_OFFSITE_DIR=~/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups
+```
+
+After every backup, each verified **encrypted** set the off-site folder lacks is copied
+there (compared by sha256; the `.verified` marker last), so a missed day or a late-enabled
+iCloud catches up. Plain sets never go off-site. `make backup-prune` keeps the same retention
+there. A missing folder (iCloud Drive not turned on) or one that can't be written is a
+loud warning in the log, never a failed backup: the local set is already safe.
+
+- `make backup-status`: the newest off-site copy and its age; a warning when it's missing or
+  older than 2 days.
+- `make backup-offsite-check`: copies the newest off-site set to a private temp dir, decrypts
+  it and runs the full restore check (do it monthly; nothing off-site is written).
+- `make backup-offsite-sync`: copy what's missing now.
+
+### macOS privacy (the 03:00 job)
+
+The schedule runs `/bin/bash` under launchd. macOS protects `~/Documents` and iCloud Drive,
+and may refuse the job ("Operation not permitted") while the same command works in Terminal.
+`make backup-status` flags a failed last run and that message. The one-time fix: System
+Settings > Privacy & Security > Full Disk Access > + > `/bin/bash` (Cmd-Shift-G to type the
+path), then `make backup-now` and `make backup-status`.
+
 ## Automate it
 
 Backups you have to remember to run don't help when you need them. Set up a
