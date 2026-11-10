@@ -307,7 +307,7 @@ offsite_status() {
   newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 || true)
   n=$(ls -1 "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | wc -l | tr -d ' ')
   if [ -z "$newest" ]; then echo "Off-site copy: WARNING no set in $BACKUP_OFFSITE_DIR yet"; return 0; fi
-  age_h=$(( ($(date +%s) - $(stat -f %m "$newest" 2>/dev/null || stat -c %Y "$newest")) / 3600 ))
+  age_h=$(( ($(date +%s) - $(stat -c %Y "$newest" 2>/dev/null || stat -f %m "$newest")) / 3600 ))
   echo "Off-site copy: $BACKUP_OFFSITE_DIR, $n set(s), newest ${newest##*/} (${age_h}h ago)$([ "$age_h" -gt 48 ] && echo '  <- WARNING: OLDER THAN 2 DAYS')"
 }
 
