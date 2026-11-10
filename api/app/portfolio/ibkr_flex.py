@@ -326,6 +326,32 @@ def _metric_code(raw: str) -> str:
     return "".join(out).strip("_")
 
 
+def _mask_account_id(account_id: str) -> str:
+    """"U1234567" -> "U123…": enough to tell accounts apart in a message, not the full number."""
+    return account_id if len(account_id) <= 4 else f"{account_id[:4]}…"
+
+
+def _reject_multiple_accounts(root: ET.Element) -> None:
+    """Refuse a Flex file covering more than one IBKR account (#366, #130 §3.5).
+
+    The account comes from the first statement while rows are collected from all
+    of them, so a multi-account file would merge two accounts into one. Every
+    element's accountId counts (statements, AccountInformation and rows); IBKR
+    uses "-" or "" on summary rows, which are ignored.
+    """
+    accounts: list[str] = []
+    for element in root.iter():
+        value = (_attr(element, "accountId", "accountid") or "").strip()
+        if value and value != "-" and value not in accounts:
+            accounts.append(value)
+    if len(accounts) > 1:
+        named = ", ".join(_mask_account_id(a) for a in accounts)
+        raise IbkrFlexImportError(
+            "multiple_accounts",
+            f"This Flex file has {len(accounts)} accounts ({named}); import each account's query separately",
+        )
+
+
 def parse_flex_statement(xml_text: str) -> FlexStatement:
     try:
         root = ET.fromstring(xml_text)
@@ -340,6 +366,7 @@ def parse_flex_statement(xml_text: str) -> FlexStatement:
         account_id = _attr(first_account, "accountId", "accountid") if first_account is not None else None
     if not account_id:
         raise IbkrFlexImportError("missing_account", "Flex statement does not include accountId")
+    _reject_multiple_accounts(root)
 
     generated_at = _datetime(_attr(statement, "whenGenerated", "generatedAt"))
     from_date = _date(_attr(statement, "fromDate", "periodFrom"))
