@@ -36,7 +36,7 @@ echo "Deployed:   $(git -C "$MAIN" rev-parse --short HEAD 2>/dev/null) on $(git 
 . "$(cd "$(dirname "$0")" && pwd)/backup-env.sh"
 newest=$(backup_env "$MAIN" && ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1)
 if [ -n "$newest" ]; then
-  age_h=$(( ($(date +%s) - $(stat -f %m "$newest" 2>/dev/null || stat -c %Y "$newest")) / 3600 ))
+  age_h=$(( ($(date +%s) - $(stat -c %Y "$newest" 2>/dev/null || stat -f %m "$newest")) / 3600 ))
   enc=$([ -f "${newest%.verified}.age" ] && echo encrypted || echo 'PLAIN (not encrypted, #356)')
   echo "Backup:     newest verified ${age_h}h ago, $enc$([ "$age_h" -gt 26 ] && echo '  <- OLDER THAN A DAY: make backup-status')"
 else
