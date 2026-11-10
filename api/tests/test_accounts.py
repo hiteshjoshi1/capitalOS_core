@@ -19,7 +19,7 @@ def test_accounts_create_validation(client: TestClient):
             "country": "SG",
         },
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 422
     assert resp.json()["detail"] == "name is required"
 
 def test_accounts_options(client: TestClient, db_engine):

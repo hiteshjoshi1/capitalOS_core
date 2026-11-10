@@ -37,7 +37,7 @@ def _parse_month(value: str) -> datetime:
     try:
         return datetime.strptime(value + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM, e.g. 2026-02")
+        raise HTTPException(status_code=422, detail="Invalid month format. Use YYYY-MM, e.g. 2026-02")
 
 
 def _add_months(dt: datetime, months: int) -> datetime:
@@ -89,7 +89,7 @@ def _resolve_range(from_month: str | None, to_month: str | None) -> tuple[dateti
     else:
         from_start = _add_months(to_start, -11)
     if from_start > to_start:
-        raise HTTPException(status_code=400, detail="from_month must be <= to_month")
+        raise HTTPException(status_code=422, detail="from_month must be <= to_month")
     end = _month_end(to_start)
     return from_start, end, from_start.strftime("%Y-%m"), to_start.strftime("%Y-%m")
 
@@ -437,7 +437,7 @@ def dividends_history(
     current_user: CurrentUser = Depends(require_current_user),
 ):
     if asset_id is None and (symbol is None or not symbol.strip()):
-        raise HTTPException(status_code=400, detail="Either asset_id or symbol is required")
+        raise HTTPException(status_code=422, detail="Either asset_id or symbol is required")
 
     start, end, from_key, to_key = _resolve_range(from_month, to_month)
     normalized_default_rate = _normalize_tax_rate(assumed_tax_rate)

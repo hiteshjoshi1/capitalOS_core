@@ -42,7 +42,7 @@ def _parse_month(month: str) -> tuple[datetime, datetime]:
         start = datetime.strptime(month + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError as exc:
         raise HTTPException(
-            status_code=400,
+            status_code=422,
             detail="Invalid month format. Use YYYY-MM, e.g. 2026-02",
         ) from exc
     if start.month == 12:
@@ -89,7 +89,7 @@ def _validate_rule_values(payload: dict) -> dict:
     if "name" in payload and payload["name"] is not None:
         payload["name"] = payload["name"].strip()
         if not payload["name"]:
-            raise HTTPException(status_code=400, detail="name is required")
+            raise HTTPException(status_code=422, detail="name is required")
 
     for field in ("merchant_pattern", "description_pattern", "source_category_pattern"):
         if field in payload:
@@ -100,14 +100,14 @@ def _validate_rule_values(payload: dict) -> dict:
         if not txn_type:
             payload["txn_type"] = None
         elif txn_type not in VALID_TXN_TYPES:
-            raise HTTPException(status_code=400, detail="invalid txn_type")
+            raise HTTPException(status_code=422, detail="invalid txn_type")
         else:
             payload["txn_type"] = txn_type
 
     min_amount = payload.get("min_amount")
     max_amount = payload.get("max_amount")
     if min_amount is not None and max_amount is not None and min_amount > max_amount:
-        raise HTTPException(status_code=400, detail="min_amount cannot exceed max_amount")
+        raise HTTPException(status_code=422, detail="min_amount cannot exceed max_amount")
 
     return payload
 

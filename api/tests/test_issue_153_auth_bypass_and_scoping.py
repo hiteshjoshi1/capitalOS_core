@@ -360,7 +360,7 @@ def test_register_requires_admin(client, db_engine, needs_mapping_job):
 def test_register_rejects_unknown_parser_key(client, db_engine, needs_mapping_job):
     with act_as(USER_A, admin=True):
         resp = client.post(f"/ingest/jobs/{needs_mapping_job}/register", json={"parser_key": "made_up_parser_v9"})
-    assert resp.status_code == 400
+    assert resp.status_code == 422
     assert "Unknown parser_key" in resp.json()["detail"]
     assert _registered(db_engine) is None
 

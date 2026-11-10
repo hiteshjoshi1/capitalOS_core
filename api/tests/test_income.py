@@ -88,7 +88,7 @@ def test_income_summary_no_prior_year_has_no_change(client, db_engine):
 
 
 def test_income_summary_rejects_a_bad_month(client):
-    assert client.get("/income/summary?month=June").status_code == 400
+    assert client.get("/income/summary?month=June").status_code == 422
 
 
 def test_current_month_compares_like_for_like_to_date(db_engine):
