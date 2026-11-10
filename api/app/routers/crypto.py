@@ -33,7 +33,16 @@ from app.crypto.ingest import acquire_refresh_lock, ingest_wallet, release_refre
 from app.crypto.pricing import lookup_contract_metadata, price_by_contract, price_by_mint
 from app.crypto.valuation import latest_wallet_valuation
 from app.fx import fx_status, get_rates_by_date, rate_date
-from app.schemas.crypto import StablecoinsResponse
+from app.schemas.crypto import (
+    CryptoAllowlistOut,
+    CryptoSummaryResponse,
+    CryptoTokensResponse,
+    CryptoWalletOut,
+    PriceBackfillPlanOut,
+    SolanaBlockhashOut,
+    StablecoinsResponse,
+    TokenVisibilityResponse,
+)
 from app.valuation import clock as valuation_clock
 from app.valuation.clock import _month_window
 from app.valuation.clock import _anchor_ts as _anchor_date
@@ -102,26 +111,26 @@ def _message(nonce: str, address: str, chain: str) -> str:
 def _validate_address(chain_type: str, address: str) -> None:
     if chain_type == "evm":
         if not address.startswith("0x") or len(address) < 42:
-            raise HTTPException(status_code=400, detail="Invalid EVM address")
+            raise HTTPException(status_code=422, detail="Invalid EVM address")
     elif chain_type == "solana":
         try:
             import base58
             decoded = base58.b58decode(address)
         except Exception:
-            raise HTTPException(status_code=400, detail="Invalid Solana address")
+            raise HTTPException(status_code=422, detail="Invalid Solana address")
         if len(decoded) != 32:
-            raise HTTPException(status_code=400, detail="Invalid Solana address")
+            raise HTTPException(status_code=422, detail="Invalid Solana address")
     else:
-        raise HTTPException(status_code=400, detail="Unsupported chain_type")
+        raise HTTPException(status_code=422, detail="Unsupported chain_type")
 
 
 def _validate_chain(chain_type: str, chain: str) -> None:
     evm_chains = {"ethereum", "base", "arbitrum", "optimism", "mantle", "scroll"}
     sol_chains = {"solana"}
     if chain_type == "evm" and chain not in evm_chains:
-        raise HTTPException(status_code=400, detail="Unsupported EVM chain")
+        raise HTTPException(status_code=422, detail="Unsupported EVM chain")
     if chain_type == "solana" and chain not in sol_chains:
-        raise HTTPException(status_code=400, detail="Unsupported Solana chain")
+        raise HTTPException(status_code=422, detail="Unsupported Solana chain")
 
 
 def _solana_rpc_urls() -> list[str]:
@@ -524,7 +533,7 @@ def _parse_month_start(month: str | None) -> datetime:
     try:
         return datetime.strptime(f"{month}-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM.") from exc
+        raise HTTPException(status_code=422, detail="Invalid month format. Use YYYY-MM.") from exc
 
 
 def _effective_anchor_for_month(month_start: datetime) -> tuple[datetime, bool]:
@@ -666,7 +675,7 @@ def _crypto_total_and_freshness(wallet_rows: list[dict[str, Any]]) -> tuple[floa
     return total_usd, last_refreshed, is_stale
 
 
-@router.get("/wallets")
+@router.get("/wallets", response_model=list[CryptoWalletOut])
 def list_wallets(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
@@ -682,7 +691,7 @@ def list_wallets(
     return [dict(r) for r in rows]
 
 
-@router.get("/summary")
+@router.get("/summary", response_model=CryptoSummaryResponse)
 def crypto_summary(
     month: str | None = None,
     base_currency: str = "USD",
@@ -1026,7 +1035,7 @@ def crypto_stablecoins(
     }
 
 
-@router.get("/tokens")
+@router.get("/tokens", response_model=CryptoTokensResponse)
 def crypto_tokens(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
@@ -1069,7 +1078,7 @@ class TokenVisibilityIn(BaseModel):
     visibility: str | None = None
 
 
-@router.get("/token-visibility")
+@router.get("/token-visibility", response_model=TokenVisibilityResponse)
 def crypto_token_visibility_list(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
@@ -1078,7 +1087,7 @@ def crypto_token_visibility_list(
     return {"overrides": list_token_overrides(db, current_user.id)}
 
 
-@router.put("/token-visibility")
+@router.put("/token-visibility", response_model=TokenVisibilityResponse)
 def crypto_token_visibility_set(
     payload: TokenVisibilityIn,
     db: Session = Depends(get_db),
@@ -1097,7 +1106,7 @@ class AllowlistIn(BaseModel):
     contract_address: str
 
 
-@router.get("/allowlist")
+@router.get("/allowlist", response_model=list[CryptoAllowlistOut])
 def crypto_allowlist(db: Session = Depends(get_db)):
     rows = db.execute(
         text("SELECT id, chain, contract_address, symbol, name, created_at FROM crypto_allowlist ORDER BY created_at DESC")
@@ -1217,7 +1226,7 @@ def debug_verify_bytes(
     }
 
 
-@router.get("/solana/blockhash")
+@router.get("/solana/blockhash", response_model=SolanaBlockhashOut)
 def solana_blockhash():
     try:
         result = _solana_rpc("getLatestBlockhash", [])
@@ -1232,7 +1241,7 @@ def solana_submit(payload: SolanaSubmitTxIn):
     try:
         tx_bytes = base64.b64decode(payload.tx_b64)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Invalid tx_b64: {exc}")
+        raise HTTPException(status_code=422, detail=f"Invalid tx_b64: {exc}")
     raw_b64 = base64.b64encode(tx_bytes).decode("utf-8")
     # Use sendTransaction (widely supported). Some providers return 404 for sendRawTransaction.
     result = _solana_rpc("sendTransaction", [raw_b64, {"encoding": "base64"}])
@@ -1244,7 +1253,7 @@ def solana_preflight(payload: SolanaPreflightIn):
     try:
         tx_bytes = base64.b64decode(payload.tx_b64)
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=f"Invalid tx_b64: {exc}")
+        raise HTTPException(status_code=422, detail=f"Invalid tx_b64: {exc}")
     raw_b64 = base64.b64encode(tx_bytes).decode("utf-8")
     # Basic health check
     _solana_rpc("getHealth", [])
@@ -1259,7 +1268,7 @@ def solana_preflight(payload: SolanaPreflightIn):
     return {"ok": True}
 
 
-@router.get("/price-backfill-plan")
+@router.get("/price-backfill-plan", response_model=PriceBackfillPlanOut)
 def crypto_price_backfill_plan(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),

@@ -259,7 +259,7 @@ def test_future_as_of_is_rejected(client, db_engine, tmp_path, sharekhan_account
             files={"file": ("h.xls", f, "application/vnd.ms-excel")},
             data={"as_of": (app_today() + timedelta(days=5)).isoformat()},
         )
-    assert resp.status_code == 400
+    assert resp.status_code == 422
     assert _snapshot_dates(db_engine) == {}
 
 

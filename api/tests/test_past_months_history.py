@@ -419,9 +419,9 @@ def test_close_date_is_validated_and_owner_only(client, db_engine):
             ),
             {"a": BANK},
         )
-    assert client.patch(f"/accounts/{BANK}", json={"closed_on": "2999-01-01"}).status_code == 400
+    assert client.patch(f"/accounts/{BANK}", json={"closed_on": "2999-01-01"}).status_code == 422
     assert client.patch(f"/accounts/{BANK}", json={"closed_on": "not-a-date"}).status_code == 422
-    assert client.patch(f"/accounts/{BANK}", json={}).status_code == 400
+    assert client.patch(f"/accounts/{BANK}", json={}).status_code == 422
     assert client.patch("/accounts/999999", json={"closed_on": "2026-01-01"}).status_code == 404
     other = signed_in_client(db_engine, 2)
     assert other.patch(f"/accounts/{BANK}", json={"closed_on": "2026-01-01"}).status_code == 404

@@ -26,7 +26,7 @@ SEED_INCOME = 5000.0 + 999.0 * USD_SGD
 
 def test_dashboard_invalid_month(client: TestClient):
     resp = client.get("/dashboard/summary?month=2026-13")
-    assert resp.status_code == 400
+    assert resp.status_code == 422
     assert "Invalid month format" in resp.json()["detail"]
 
 

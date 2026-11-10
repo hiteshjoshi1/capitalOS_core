@@ -41,7 +41,7 @@ def _parse_month(month: str) -> datetime:
     try:
         return datetime.strptime(month + "-01", "%Y-%m-%d").replace(tzinfo=timezone.utc)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid month format. Use YYYY-MM, e.g. 2026-02")
+        raise HTTPException(status_code=422, detail="Invalid month format. Use YYYY-MM, e.g. 2026-02")
 
 
 def _add_months(dt: datetime, months: int) -> datetime:
