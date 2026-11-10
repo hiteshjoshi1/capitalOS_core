@@ -117,11 +117,17 @@ loud warning in the log, never a failed backup: the local set is already safe.
 
 ### macOS privacy (the 03:00 job)
 
-The schedule runs `/bin/bash` under launchd. macOS protects `~/Documents` and iCloud Drive,
-and may refuse the job ("Operation not permitted") while the same command works in Terminal.
-`make backup-status` flags a failed last run and that message. The one-time fix: System
-Settings > Privacy & Security > Full Disk Access > + > `/bin/bash` (Cmd-Shift-G to type the
-path), then `make backup-now` and `make backup-status`.
+The schedule runs `/bin/bash` under launchd. macOS protects `~/Documents` and iCloud Drive
+differently for it than for Terminal. Probed on 2026-11-10: in iCloud Drive the job may copy,
+move, delete, stat and test files by name, but listing the folder is refused ("Operation not
+permitted"). So the off-site steps never list the folder: the sync works from the local set
+names and records what it copied in `.capitalos-offsite-index` (in the off-site folder, written
+atomically); prune, `backup-status` and `backup-offsite-check` read that index. With no index and
+no listing, the sync says so and finds the sets by their local names, then writes the index.
+
+No permission grant is needed. Don't give `/bin/bash` Full Disk Access: it would open the whole
+disk to every bash script. If `backup-status` flags "Operation not permitted", run
+`make backup-now` in Terminal to see whether it works there, and report what the log says.
 
 ## Automate it
 

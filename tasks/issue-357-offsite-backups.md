@@ -8,10 +8,13 @@ Built in the #356 branch/PR (Hitesh, 2026-11-10: iCloud Drive). Decision D-96.
 - `backup-status`: newest off-site copy, warning when missing or > 2 days old.
 - `make backup-offsite-check`: newest off-site set copied to a temp dir, decrypted, full restore check.
 - `make backup-offsite-sync`: copy what's missing now.
-- macOS privacy: the 03:00 job is `/bin/bash` under launchd; `backup-status` flags a failed last run and
-  "Operation not permitted"; fix = Full Disk Access for `/bin/bash`. A launchd probe on 2026-11-10 could
-  write, list and read inside a new `~/Documents` subfolder (only listing `~/Documents` itself was refused);
-  iCloud Drive was off, so it couldn't be probed.
+- macOS privacy: the 03:00 job is `/bin/bash` under launchd. Launchd probes on 2026-11-10: in a new
+  `~/Documents` subfolder it could write, list and read (only listing `~/Documents` itself was refused); in
+  iCloud Drive it could cp, mv, rm, stat and `test -e` files, but NOT list the folder. So nothing lists the
+  off-site folder: the sync goes by the local set names and keeps `.capitalos-offsite-index` there (atomic
+  tmp+mv); prune, status and offsite-check read it. No Full Disk Access (Hitesh: too broad for /bin/bash).
+- Wrong key (found trialling on the test instance): a decrypt failure says "cannot decrypt … with <key>:
+  wrong or missing key" and writes no marker or log next to the set; `verify <set>.dump.age` is the set.
 
 ## Verification
 - `scripts/test-db-backup.sh`: no iCloud folder (warns, nothing created), copy of encrypted sets only

@@ -80,9 +80,9 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   encrypted set after each backup (missing ones too) and the same retention; a missing/unwritable folder
   warns, never fails the backup. `backup-status` shows the newest off-site copy (warns > 2 days);
   `make backup-offsite-check` decrypts the newest off-site set and runs the restore check;
-  `make backup-offsite-sync` copies what's missing now. The 03:00 job is `/bin/bash` under launchd: if macOS
-  privacy blocks it ("Operation not permitted" in the log, flagged by `backup-status`), give `/bin/bash`
-  Full Disk Access.
+  `make backup-offsite-sync` copies what's missing now. The 03:00 job is `/bin/bash` under launchd, which macOS
+  lets open files in iCloud Drive but not list the folder: the off-site steps never list it (they use the
+  local set names and `.capitalos-offsite-index`). Don't grant `/bin/bash` Full Disk Access (too broad).
 - `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
   is down).
 

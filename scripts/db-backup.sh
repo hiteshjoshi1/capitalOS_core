@@ -170,7 +170,7 @@ decrypt_file() {  # <in.age> <plain out>
   local age
   age=$(age_bin) || return 1
   need_identity || return 1
-  ( umask 077; "$age" -d -i "$BACKUP_AGE_IDENTITY" -o "$2" "$1" ) || { rm -f "$2"; say "FAILED: could not decrypt $1 with $BACKUP_AGE_IDENTITY (wrong key?)" >&2; return 1; }
+  ( umask 077; "$age" -d -i "$BACKUP_AGE_IDENTITY" -o "$2" "$1" ) || { rm -f "$2"; say "FAILED: cannot decrypt $1 with $BACKUP_AGE_IDENTITY: wrong or missing key" >&2; return 1; }
 }
 
 set_present() { [ -f "$1" ] || [ -f "$1.age" ]; }  # <dump>
@@ -223,12 +223,15 @@ seal_set() {  # <plain dump> <dir>
 # up), and the same retention (prune). Plain sets never go off-site. A missing or unwritable
 # off-site folder is a loud WARNING, never a failed backup: the local set is already safe.
 
-# macOS privacy controls can stop the 03:00 launchd job (/bin/bash) from touching ~/Documents or
-# iCloud Drive while the same command works in Terminal.
+# macOS privacy controls (TCC) treat the 03:00 launchd job (/bin/bash) differently from Terminal.
+# Probed 2026-11-10: in iCloud Drive the job may copy, move, delete, stat and test files, but may
+# NOT list the folder. So nothing here lists the off-site folder: it is driven by the local set
+# names plus an index file this script writes (OFFSITE_INDEX_NAME). No Full Disk Access is needed (and
+# Hitesh doesn't want /bin/bash to have it: far too broad).
 tcc_hint() {  # <dir>
   case "$1" in
     "$HOME/Documents"* | "$HOME/Library/Mobile Documents"* | "$HOME/Desktop"*)
-      echo "  If this ran from the 03:00 job: macOS may be blocking it from $1. System Settings > Privacy & Security > Full Disk Access: add /bin/bash (the job's shell), then make backup-now." ;;
+      echo "  If this ran from the 03:00 job: macOS privacy controls may be blocking it from $1. Run make backup-now in Terminal to see whether it works there, and check $1 is a folder you own." ;;
   esac
 }
 
@@ -263,18 +266,74 @@ offsite_copy_set() {  # <dump in BACKUP_DIR>
   cp -p "$dump.verified" "$dest.verified" || { offsite_warn "copying $dump.verified failed"; return 1; }
 }
 
+# The off-site index: one set name (capitalos_<ts>.dump) per line, the sets this script put there.
+OFFSITE_INDEX_NAME=.capitalos-offsite-index
+offsite_index() { printf '%s/%s' "$BACKUP_OFFSITE_DIR" "$OFFSITE_INDEX_NAME"; }
+
+# Lists the off-site folder's verified set names, or fails where macOS forbids listing (launchd).
+# BACKUP_TEST_UNLISTABLE=1 simulates that refusal (scripts/test-db-backup.sh).
+offsite_listing() {
+  [ -z "${BACKUP_TEST_UNLISTABLE:-}" ] || return 1
+  ls -1 "$BACKUP_OFFSITE_DIR" >/dev/null 2>&1 || return 1
+  ls -1 "$BACKUP_OFFSITE_DIR" 2>/dev/null | sed -n 's/^\(capitalos_.*\.dump\)\.verified$/\1/p'
+}
+
+offsite_index_write() {  # names on stdin; atomic (tmp + mv)
+  local idx tmp
+  idx=$(offsite_index); tmp="$idx.part"
+  sort -u | grep . >"$tmp" 2>/dev/null || true
+  mv "$tmp" "$idx" 2>/dev/null || { rm -f "$tmp"; offsite_warn "could not write $idx"; return 1; }
+}
+
+# The verified set names off-site, without listing the folder when possible: the index, kept to
+# names whose marker is still there; with no index, a listing (interactive) or else the local
+# names that are off-site too. [write] also saves the index it worked out.
+offsite_names() {  # [write]
+  local idx names n
+  idx=$(offsite_index)
+  if [ -f "$idx" ]; then
+    names=$(while IFS= read -r n; do [ -n "$n" ] && [ -e "$BACKUP_OFFSITE_DIR/$n.verified" ] && echo "$n"; done <"$idx" || true)
+  elif names=$(offsite_listing); then
+    :
+  else
+    offsite_warn "can't list $BACKUP_OFFSITE_DIR (macOS allows the 03:00 job to open files there, not to list them) and it has no $OFFSITE_INDEX_NAME yet; using the local set names" >&2
+    names=$(verified_sets | while IFS= read -r n; do n=${n##*/}; [ -e "$BACKUP_OFFSITE_DIR/$n.verified" ] && echo "$n"; done || true)
+  fi
+  [ "${1:-}" = write ] && printf '%s\n' "$names" | offsite_index_write
+  printf '%s\n' "$names" | grep . | sort -u || true
+}
+
 # Every verified encrypted set missing off-site is copied. Never fails the caller.
 offsite_sync() {
-  local dump n=0 bad=0
+  local dump n=0 bad=0 names
   offsite_ready || return 0
+  names=$(offsite_names)
   while IFS= read -r dump; do
     [ -n "$dump" ] || continue
     set_encrypted "$dump" || continue
-    [ -f "$BACKUP_OFFSITE_DIR/${dump##*/}.verified" ] && continue
-    if offsite_copy_set "$dump"; then n=$((n + 1)); else bad=$((bad + 1)); fi
+    if [ -e "$BACKUP_OFFSITE_DIR/${dump##*/}.verified" ]; then names=$(printf '%s\n%s' "$names" "${dump##*/}"); continue; fi
+    if offsite_copy_set "$dump"; then n=$((n + 1)); names=$(printf '%s\n%s' "$names" "${dump##*/}"); else bad=$((bad + 1)); fi
   done < <(verified_sets)
+  printf '%s\n' "$names" | offsite_index_write || true
   say "Off-site: $n set(s) copied to $BACKUP_OFFSITE_DIR$([ "$bad" -gt 0 ] && echo "; $bad FAILED (above)")"
   return 0
+}
+
+# Retention off-site (#357): the same rule over the index's names; the index is rewritten.
+offsite_prune() {
+  local today=$1 cutoff=$2 months=$3 names gone n=0 verb=Pruned
+  [ -n "${DRY_RUN:-}" ] && verb="Would prune"
+  names=$(offsite_names)
+  gone=$(printf '%s\n' "$names" | grep . | sed "s|^|$BACKUP_OFFSITE_DIR/|" | retention_prune_list "$today" "$cutoff" "$months")
+  while IFS= read -r dump; do
+    [ -n "$dump" ] || continue
+    n=$((n + 1))
+    [ -z "${DRY_RUN:-}" ] && remove_set "$dump"
+    say "$verb $dump"
+  done <<<"$gone"
+  [ -n "${DRY_RUN:-}" ] && return 0
+  printf '%s\n' "$names" | grep -vxF -f <(printf '%s\n' "$gone" | sed 's|.*/||' | grep . || echo '/') | offsite_index_write || true
+  say "Off-site: kept $(( $(printf '%s\n' "$names" | grep -c . || true) - n )) set(s)"
 }
 
 # `offsite-check`: the newest off-site set, copied to a private temp dir (nothing off-site is
@@ -282,8 +341,9 @@ offsite_sync() {
 offsite_check() {
   local newest tmpset m base
   [ -n "${BACKUP_OFFSITE_DIR:-}" ] || { say "FAILED: no BACKUP_OFFSITE_DIR set" >&2; return 1; }
-  newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 | sed 's/\.verified$//')
+  newest=$(offsite_names | tail -1)
   [ -n "$newest" ] || { say "FAILED: no verified set in $BACKUP_OFFSITE_DIR" >&2; return 1; }
+  newest="$BACKUP_OFFSITE_DIR/$newest"
   need_identity || return 1
   PLAIN_DIR=$(mktemp -d); chmod 700 "$PLAIN_DIR"
   base=${newest##*/}
@@ -303,10 +363,12 @@ offsite_status() {
     echo "Off-site copy: WARNING $BACKUP_OFFSITE_DIR does not exist$([ -d "$(dirname "$BACKUP_OFFSITE_DIR")" ] || echo ' (iCloud Drive not turned on?)'); no off-site copy yet"
     return 0
   fi
-  local newest age_h n
-  newest=$(ls -1t "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 || true)
-  n=$(ls -1 "$BACKUP_OFFSITE_DIR"/capitalos_*.dump.verified 2>/dev/null | wc -l | tr -d ' ')
+  local names newest age_h n
+  names=$(offsite_names 2>/dev/null)
+  n=$(printf '%s\n' "$names" | grep -c . || true)
+  newest=$(printf '%s\n' "$names" | grep . | tail -1 || true)
   if [ -z "$newest" ]; then echo "Off-site copy: WARNING no set in $BACKUP_OFFSITE_DIR yet"; return 0; fi
+  newest="$BACKUP_OFFSITE_DIR/$newest.verified"
   age_h=$(( ($(date +%s) - $(stat -c %Y "$newest" 2>/dev/null || stat -f %m "$newest")) / 3600 ))
   echo "Off-site copy: $BACKUP_OFFSITE_DIR, $n set(s), newest ${newest##*/} (${age_h}h ago)$([ "$age_h" -gt 48 ] && echo '  <- WARNING: OLDER THAN 2 DAYS')"
 }
@@ -409,11 +471,10 @@ create() {
 verify() {
   local dump=${1:?verify needs a dump file} scratch restored archive rows result tables nrows src
   set_present "$dump" || { say "FAILED: no such file $dump" >&2; return 1; }
-  # An encrypted set is checked from a decrypted copy (#356); markers stay next to the set. No key
-  # here says nothing about the set, so its markers are left alone; a set that won't decrypt
-  # with the key is a failed backup.
+  # An encrypted set is checked from a decrypted copy (#356); markers stay next to the set. A
+  # missing or wrong key says nothing about the set itself, so no marker or log is written.
   if set_encrypted "$dump"; then need_identity || return 1; fi
-  open_set "$dump" || { fail "$dump" "could not decrypt the set (see above)"; return 1; }
+  open_set "$dump" || return 1
   src=$OPEN_DUMP
   scratch="capitalos_verify_$$"
   SCRATCH=$scratch
@@ -559,7 +620,7 @@ restore() {
   local dump=${1:?restore needs a dump file} archive ts rows result roles acl skipped src
   set_present "$dump" || { say "FAILED: no such file $dump" >&2; return 1; }
   # An encrypted set is restored from a decrypted copy in a private temp dir (#356).
-  open_set "$dump" || { say "FAILED: could not decrypt $dump; nothing was changed" >&2; return 1; }
+  open_set "$dump" || { say "FAILED: $dump was not opened (see above); nothing was changed" >&2; return 1; }
   src=$OPEN_DUMP
   archive=$(archive_of "$src")
   ts=$(date +%Y%m%d_%H%M%S)
@@ -677,7 +738,7 @@ prune() {
   # #357: the off-site folder keeps the same sets.
   if [ -n "${BACKUP_OFFSITE_DIR:-}" ] && [ -d "$BACKUP_OFFSITE_DIR" ] && ! [ "$BACKUP_DIR" -ef "$BACKUP_OFFSITE_DIR" ]; then
     say "Off-site, $BACKUP_OFFSITE_DIR:"
-    ( BACKUP_DIR=$BACKUP_OFFSITE_DIR; BACKUP_OFFSITE_DIR=""; prune ) || offsite_warn "pruning $BACKUP_OFFSITE_DIR failed"
+    offsite_prune "$today" "$cutoff" "$months" || offsite_warn "pruning $BACKUP_OFFSITE_DIR failed"
   fi
 }
 
@@ -808,9 +869,10 @@ main() {
   esac
   case "${1:-}" in
     create) create ;;
-    verify) verify "${2:-}" ;;
-    restore) restore "${2:-}" ;;
-    open) open_cmd "${2:-}" ;;
+    # A set is named by its dump; capitalos_<ts>.dump.age (what ls shows for an encrypted set) works too.
+    verify) verify "${2%.age}" ;;
+    restore) restore "${2%.age}" ;;
+    open) open_cmd "${2%.age}" ;;
     check-data) check_live ;;
     prune) prune ;;
     status) status ;;

@@ -59,8 +59,8 @@ EOF
     # #356/#357: macOS privacy controls can block the job (/bin/bash under launchd) from ~/Documents
     # or iCloud Drive while the same command works in Terminal.
     if [ -f "$LOG" ] && tail -200 "$LOG" | grep -q "Operation not permitted\|can't write to"; then
-      echo "  <- macOS blocked the scheduled job from a folder (Operation not permitted). Fix once: System Settings >"
-      echo "     Privacy & Security > Full Disk Access > + > /bin/bash (Cmd-Shift-G, type /bin/bash), then make backup-now."
+      echo "  <- macOS blocked the scheduled job from a folder (Operation not permitted). Run make backup-now in"
+      echo "     Terminal to compare; don't grant /bin/bash Full Disk Access (docs/setup/backups.md, macOS privacy)."
     fi
     ;;
   run)
