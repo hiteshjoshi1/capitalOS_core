@@ -618,15 +618,52 @@ class WealthTimelineNow(BaseModel):
     uploads: List[str] = Field(default_factory=list)
 
 
+class WealthTimelineDataSpan(BaseModel):
+    """The span of the user's imported data (#292): History's default range."""
+
+    first_month: str
+    months: int
+
+
 class WealthTimelineResponse(BaseModel):
     base_currency: str
     points: List[WealthTimelinePoint]
     now: WealthTimelineNow
+    # #292: None with no data yet.
+    data_span: Optional[WealthTimelineDataSpan] = None
 
 
 class WealthTimelineBackfillResponse(BaseModel):
     months_written: int
     base_currency: str
+
+
+class HistoryGenerateFx(BaseModel):
+    """Step 1 of a run: past FX rates fetched once, capped (#292, #290)."""
+
+    status: Optional[str] = None
+    fetched_requests: Optional[int] = None
+    failed_requests: Optional[int] = None
+    remaining_requests: Optional[int] = None
+    unsupported_currencies: Optional[List[str]] = None
+
+
+class HistoryGenerateStatus(BaseModel):
+    """A background "Generate history" run's progress (#292). status: idle | running |
+    completed | failed; stage: fx | months | done."""
+
+    status: str
+    stage: str
+    base_currency: str
+    months: int
+    months_total: int
+    months_done: int
+    current_month: Optional[str] = None
+    months_written: int
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    fx: Optional[HistoryGenerateFx] = None
+    error: Optional[str] = None
 
 
 # ─── This month's bridge (#240, D-60) ────────────────────────────────────────

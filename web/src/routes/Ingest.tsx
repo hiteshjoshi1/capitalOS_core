@@ -270,7 +270,7 @@ export default function Ingest() {
             ) : null}
             {accounts.length === 0 ? (
               <div className="muted">
-                No accounts found. <Link to="/accounts/new">Create account</Link>
+                No accounts found. <Link to="/add">Create account</Link>
               </div>
             ) : (
               <div className="formGrid">

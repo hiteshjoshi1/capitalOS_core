@@ -6,12 +6,14 @@ import WealthHistory from "../routes/WealthHistory";
 import { api } from "../lib/api";
 import { currentMonth } from "../lib/format";
 import { shiftMonth } from "../lib/selectedMonth";
-import type { WealthTimeline, WealthTimelinePoint } from "../lib/api";
+import type { HistoryGenerateStatus, WealthTimeline, WealthTimelinePoint } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     netWorthTimeline: vi.fn(),
     netWorthTimelineBackfill: vi.fn(),
+    netWorthTimelineGenerate: vi.fn(),
+    netWorthTimelineGenerateStatus: vi.fn(),
     netWorthTimelineMovers: vi.fn(),
     dividendsSummary: vi.fn(),
     cashFlowDetail: vi.fn(),
@@ -72,6 +74,24 @@ function timeline(points: WealthTimelinePoint[]): WealthTimeline {
   };
 }
 
+function runStatus(overrides: Partial<HistoryGenerateStatus> = {}): HistoryGenerateStatus {
+  return {
+    status: "running",
+    stage: "fx",
+    base_currency: "SGD",
+    months: 10,
+    months_total: 0,
+    months_done: 0,
+    current_month: null,
+    months_written: 0,
+    started_at: "2026-06-15T00:00:00+00:00",
+    finished_at: null,
+    fx: null,
+    error: null,
+    ...overrides,
+  };
+}
+
 const emptyDividends = { from_month: "2026-01", to_month: "2026-06", period: "month" as const, base_currency: "SGD", assumed_tax_rate: 0, country_tax_rates: {}, buckets: [] };
 const emptyCashFlow = { month: "2026-06", base_currency: "SGD", trend: [] } as never;
 
@@ -84,6 +104,7 @@ describe("WealthHistory route", () => {
     mockApi.cashFlowTrend.mockResolvedValue(emptyCashFlow as never);
     mockApi.spendingSummary.mockResolvedValue({ month: "2026-06", base_currency: "SGD", income_total: 0, expense_total: 0, net: 0, savings_rate: null, income_categories: [], expense_categories: [] } as never);
     mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-05", gainers: [], detractors: [] });
+    mockApi.netWorthTimelineGenerateStatus.mockResolvedValue(runStatus({ status: "idle", stage: "done", months: 0 }));
   });
 
   it("shows an empty state with a Generate history action when every point is a gap", async () => {
@@ -99,10 +120,14 @@ describe("WealthHistory route", () => {
     expect(screen.queryByText("Net worth")).not.toBeInTheDocument();
   });
 
-  it("generating history calls the backfill endpoint and refetches the timeline", async () => {
+  it("generating history runs in the background with progress, then refetches the timeline (#292)", async () => {
     mockApi.netWorthTimeline.mockResolvedValueOnce(timeline([gapPoint("2026-06")]));
-    mockApi.netWorthTimelineBackfill.mockResolvedValue({ months_written: 1, base_currency: "SGD" });
     mockApi.netWorthTimeline.mockResolvedValueOnce(timeline([dataPoint("2026-06")]));
+    mockApi.netWorthTimelineGenerate.mockResolvedValue(runStatus());
+    mockApi.netWorthTimelineGenerateStatus
+      .mockResolvedValueOnce(runStatus({ status: "idle", stage: "done" }))
+      .mockResolvedValueOnce(runStatus({ stage: "months", months_total: 10, months_done: 2, current_month: "2026-03" }))
+      .mockResolvedValue(runStatus({ status: "completed", stage: "done", months_total: 10, months_done: 10, months_written: 9 }));
 
     render(
       <MemoryRouter>
@@ -110,16 +135,80 @@ describe("WealthHistory route", () => {
       </MemoryRouter>,
     );
 
-    const generateBtn = await screen.findByRole("button", { name: "Generate history" });
-    fireEvent.click(generateBtn);
+    fireEvent.click(await screen.findByRole("button", { name: "Generate history" }));
 
-    await waitFor(() => {
-      expect(mockApi.netWorthTimelineBackfill).toHaveBeenCalledWith(24, "SGD");
+    // No months: the server's default, the span of the data.
+    await waitFor(() => expect(mockApi.netWorthTimelineGenerate).toHaveBeenCalledWith("SGD", undefined));
+    expect(await screen.findByText(/Fetching past exchange rates…/)).toBeInTheDocument();
+    expect(await screen.findByText(/Valuing month 3 of 10 \(Mar/, {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(await screen.findByText("Net worth", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(mockApi.netWorthTimeline).toHaveBeenCalledTimes(2);
+    expect(mockApi.netWorthTimelineBackfill).not.toHaveBeenCalled();
+  });
+
+  it("a run already going when the page opens shows its progress (#292)", async () => {
+    mockApi.netWorthTimeline.mockResolvedValue(timeline([dataPoint("2026-06")]));
+    mockApi.netWorthTimelineGenerateStatus.mockResolvedValue(
+      runStatus({ stage: "months", months_total: 4, months_done: 0, current_month: "2026-02" }),
+    );
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Valuing month 1 of 4/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Refreshing…" })).toBeDisabled();
+  });
+
+  it("a failed run says so and offers a retry (#292)", async () => {
+    mockApi.netWorthTimeline.mockResolvedValue(timeline([gapPoint("2026-06")]));
+    mockApi.netWorthTimelineGenerate.mockResolvedValue(
+      runStatus({ status: "failed", stage: "done", error: "History generation failed. Try again." }),
+    );
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Generate history" }));
+    expect(await screen.findByText("Couldn't generate history")).toBeInTheDocument();
+  });
+
+  it("says when the capped FX fetch left rates for the next run (#292)", async () => {
+    mockApi.netWorthTimeline.mockResolvedValue(timeline([gapPoint("2026-06")]));
+    mockApi.netWorthTimelineGenerate.mockResolvedValue(
+      runStatus({ status: "completed", stage: "done", fx: { status: "partial", remaining_requests: 3, unsupported_currencies: [] } }),
+    );
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Generate history" }));
+    expect(await screen.findByText(/Some past exchange rates are still missing/)).toBeInTheDocument();
+  });
+
+  it("the default range is the span of the data, and Carried is explained (#292)", async () => {
+    mockApi.netWorthTimeline.mockResolvedValue({
+      ...timeline([dataPoint("2026-05"), dataPoint("2026-06")]),
+      data_span: { first_month: "2025-11", months: 8 },
     });
-    await waitFor(() => {
-      expect(mockApi.netWorthTimeline).toHaveBeenCalledTimes(2);
-    });
-    expect(await screen.findByText("Net worth")).toBeInTheDocument();
+
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(mockApi.netWorthTimeline).toHaveBeenCalledWith(12, "SGD"));
+    expect(mockApi.netWorthTimeline).toHaveBeenNthCalledWith(1, 24, "SGD");
+    expect(screen.getByText(/means no new statement or price for that month/)).toBeInTheDocument();
   });
 
   it("renders the chart, attribution strip, and a table row per month once populated", async () => {

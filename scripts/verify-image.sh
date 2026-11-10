@@ -57,6 +57,7 @@ signed_by() {
   fi
 }
 GHA=https://token.actions.githubusercontent.com
+TOOLBOX_NO_PROVENANCE_EXCEPTION=us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox:1.16.0@sha256:190bd9d9b3cfe81bed19470bef8f9991d64c113313ec499234e0dd38ca11a841
 
 case "$repo" in
   aquasec/trivy)
@@ -85,6 +86,10 @@ case "$repo" in
   grafana/alloy | tecnativa/docker-socket-proxy | us-central1-docker.pkg.dev/database-toolbox/toolbox/toolbox)
     if provenance_present; then
       echo "OK   $name: SLSA provenance attestation present"
+    elif [ "$ref" = "$TOOLBOX_NO_PROVENANCE_EXCEPTION" ]; then
+      # D-90: MCP Toolbox ships no provenance since 1.15 (googleapis/mcp-toolbox#4457); 1.16.0
+      # fixes 1 CRITICAL + 12 HIGH CVEs (#89). Exactly this digest is accepted; any newer one fails again.
+      echo "WARN $name: no provenance; accepted for this digest only (D-90, #89)"
     else
       echo "FAIL $name: provenance attestation missing (publisher normally ships one)" >&2; exit 1
     fi ;;

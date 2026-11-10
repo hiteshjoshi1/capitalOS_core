@@ -12,8 +12,7 @@ import RequireAuth from "./components/RequireAuth.tsx";
 import Login from "./routes/Login.tsx";
 import Signup from "./routes/Signup.tsx";
 import {
-  CryptoWalletsPage,
-  AddAccount,
+  AddFlow,
   Ingest,
   CryptoHoldings,
   StockHoldings,
@@ -52,7 +51,8 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/income" element={<Dividends />} />
                 <Route path="/dividends" element={<Navigate to="/income" replace />} />
                 <Route path="/holdings" element={<StockHoldings />} />
-                <Route path="/crypto" element={<CryptoWalletsPage />} />
+                {/* #319: adding a wallet is a path through "+ Add". */}
+                <Route path="/crypto" element={<Navigate to="/add?what=wallet" replace />} />
                 <Route path="/crypto/holdings" element={<CryptoHoldings />} />
                 <Route path="/cash" element={<CashOverview />} />
                 <Route path="/cash-flow" element={<CashFlowDetail />} />
@@ -71,7 +71,9 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="/market-data" element={<MarketData />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/settings/admin" element={<AdminSettings />} />
-                <Route path="/accounts/new" element={<AddAccount />} />
+                <Route path="/add" element={<AddFlow />} />
+                {/* #319: the Add Account form became the "+ Add" stepper. */}
+                <Route path="/accounts/new" element={<Navigate to="/add" replace />} />
                 {/* #321: the platform directory moved to Settings → Admin. */}
                 <Route path="/platforms" element={<Navigate to="/settings/admin" replace />} />
               </Route>

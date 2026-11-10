@@ -1,8 +1,8 @@
-import { Suspense, type ReactNode } from "react";
+import { Suspense, lazy, type ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// #145: the Solana wallet stack must load only with the Crypto Wallets page.
+// #145: the Solana wallet stack must load only with the wallet step of "+ Add" (#319).
 // Each mocked Solana module records when it is evaluated, so we can tell whether
 // importing the app entry pulled it in.
 const { loaded, walletProviderProps } = vi.hoisted(() => ({
@@ -61,7 +61,7 @@ vi.mock("@solana/wallet-adapter-react-ui/styles.css", () => {
   return {};
 });
 
-vi.mock("../routes/CryptoWallets.tsx", () => ({ default: () => <p>wallet page body</p> }));
+vi.mock("../wallet/WalletConnectForm.tsx", () => ({ default: () => <p>wallet page body</p> }));
 
 describe("Solana wallet stack is lazy (#145)", () => {
   beforeEach(() => {
@@ -73,11 +73,16 @@ describe("Solana wallet stack is lazy (#145)", () => {
     expect([...loaded]).toEqual([]);
   });
 
-  it("the /crypto route loads the wallet shell with Phantom and autoConnect", async () => {
-    const { CryptoWalletsPage } = await import("../routes/lazyRoutes.ts");
+  it("importing the + Add route does not load any Solana module", async () => {
+    await import("../routes/AddFlow.tsx");
+    expect([...loaded]).toEqual([]);
+  });
+
+  it("the wallet step loads the wallet shell with Phantom and autoConnect", async () => {
+    const WalletConnectStep = lazy(() => import("../wallet/WalletConnectStep.tsx"));
     render(
       <Suspense fallback={<p>loading route</p>}>
-        <CryptoWalletsPage />
+        <WalletConnectStep chainType="evm" label="" onVerified={() => undefined} />
       </Suspense>,
     );
 

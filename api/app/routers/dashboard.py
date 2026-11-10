@@ -18,6 +18,7 @@ from app.schemas.dashboard import (
     DashboardSummaryResponse,
     DataHubSummaryResponse,
     GeographyExposureOut,
+    HistoryGenerateStatus,
     MonthBridgeResponse,
     NetWorthChangeResponse,
     NetWorthSinceUpdateResponse,
@@ -33,7 +34,7 @@ from app.schemas.dashboard import (
 from app.services import data_hub
 from app.services.risk_thresholds import read_risk_thresholds, save_risk_thresholds
 from app.portfolio.realised import realised_summary, resolve_period
-from app.valuation import bridge, pages
+from app.valuation import bridge, history_job, pages
 from app.valuation.clock import _app_today, _parse_month
 from app.valuation.history import _backfill_wealth_rollups
 
@@ -81,6 +82,29 @@ def net_worth_timeline_backfill(
     """
     written = _backfill_wealth_rollups(db, current_user.id, base_currency, months)
     return {"months_written": written, "base_currency": base_currency}
+
+
+@router.post("/net-worth-timeline/generate", response_model=HistoryGenerateStatus)
+def net_worth_timeline_generate(
+    months: Optional[int] = Query(None, ge=1, le=120, description="Trailing months; default the span of your data"),
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Start "Generate history" in the background (#292): past FX rates first (capped),
+    then every month of the range. Returns the run's progress at once; poll
+    ``/net-worth-timeline/generate/status``. A run already going is returned as is."""
+    span_months = months if months is not None else history_job.default_months(db, current_user.id)
+    return history_job.start(history_job.session_factory_for(db), current_user.id, base_currency, span_months)
+
+
+@router.get("/net-worth-timeline/generate/status", response_model=HistoryGenerateStatus)
+def net_worth_timeline_generate_status(
+    base_currency: str = Query("SGD"),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """The newest "Generate history" run's progress for this currency (#292); ``idle`` if none."""
+    return history_job.status(current_user.id, base_currency)
 
 
 @router.get("/net-worth-timeline", response_model=WealthTimelineResponse)

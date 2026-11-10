@@ -52,6 +52,7 @@ from app.valuation.history import (
     _trailing_month_keys,
     baseline_missing,
 )
+from app.valuation.history_job import history_span
 from app.valuation.holdings import (
     _quote_freshness_summary,
     _stock_exposure,
@@ -172,6 +173,8 @@ def net_worth_timeline(db: Session, current_user_id: int, months: int, base_curr
             # The open month has no stored point; its upload ticks go on "now".
             "uploads": upload_markers.get(current_month_key, []),
         },
+        # #292: the span of the user's data, History's default range.
+        "data_span": history_span(db, current_user_id),
     }
 
 

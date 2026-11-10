@@ -70,10 +70,9 @@ export const APP_SECTIONS: AppSection[] = [
       {
         label: "Accounts & sources",
         to: "/operations/sources",
-        matchPaths: ["/operations/sources", "/accounts/new", "/market-data"],
+        matchPaths: ["/operations/sources", "/add", "/market-data"],
       },
       { label: "Imports", to: "/ingest" },
-      { label: "Add Crypto Wallets", to: "/crypto", exact: true, hidden: true },
     ],
   },
 ];

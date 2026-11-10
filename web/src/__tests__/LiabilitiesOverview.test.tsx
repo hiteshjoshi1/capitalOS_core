@@ -327,7 +327,7 @@ describe("LiabilitiesOverview route", () => {
     renderPage();
 
     expect(await screen.findByText("No credit cards linked yet")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Add account" })).toHaveAttribute("href", "/accounts/new");
+    expect(screen.getByRole("link", { name: "Add account" })).toHaveAttribute("href", "/add?what=card");
   });
 
   it("shows empty states for notable charges, recurring charges, and category breakdown", async () => {
