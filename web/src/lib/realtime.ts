@@ -17,6 +17,8 @@ export function buildRealtimeUrl(apiBase: string, pageUrl: string): URL {
 
 /** The server's close code for "sign in again" (expired token or ended session, #364). */
 export const REALTIME_CLOSE_SIGN_IN_AGAIN = 4401;
+// WebSocket.OPEN, spelled out so it doesn't depend on the global (tests stub WebSocket).
+const WS_OPEN = 1;
 
 type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
@@ -39,11 +41,25 @@ class RealtimeClient {
 
   subscribe<TPayload = Record<string, unknown>>(topic: string, handlers: RealtimeHandlers<TPayload>): () => void {
     const listener: RealtimeListener = { topic, handlers: handlers as RealtimeHandlers };
+    const isNewTopic = ![...this.listeners].some((existing) => existing.topic === topic);
     this.listeners.add(listener);
     this.shouldReconnect = true;
+    if (this.socket?.readyState === WS_OPEN) {
+      // Already connected (#367): the open handler has sent its topics, so a topic added now must
+      // be subscribed on its own or the server never sends its events.
+      handlers.onStatusChange?.("connected");
+      if (isNewTopic) {
+        this.socket.send(JSON.stringify({ action: "subscribe", topics: [topic] }));
+      }
+      return this.unsubscriber(listener);
+    }
     handlers.onStatusChange?.("connecting");
     void this.ensureConnected();
 
+    return this.unsubscriber(listener);
+  }
+
+  private unsubscriber(listener: RealtimeListener): () => void {
     return () => {
       this.listeners.delete(listener);
       if (!this.listeners.size) {
@@ -93,8 +109,8 @@ class RealtimeClient {
     });
 
     this.socket.addEventListener("message", (message) => {
-      const parsed = JSON.parse(message.data as string) as { type?: string } & RealtimeEventEnvelope;
-      if (parsed.type !== "event") {
+      const parsed = parseRealtimeMessage(message.data);
+      if (!parsed || parsed.type !== "event") {
         return;
       }
       for (const listener of this.listeners) {
@@ -136,6 +152,26 @@ class RealtimeClient {
       listener.handlers.onStatusChange?.(status);
     }
   }
+}
+
+/** A server message, or null for anything that isn't a JSON object (#367): one bad frame must
+ * not throw inside the socket's handler. */
+export function parseRealtimeMessage(data: unknown): ({ type?: string } & RealtimeEventEnvelope) | null {
+  if (typeof data !== "string") {
+    return null;
+  }
+  try {
+    const parsed: unknown = JSON.parse(data);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as { type?: string } & RealtimeEventEnvelope;
+    }
+  } catch {
+    // fall through
+  }
+  if (import.meta.env.DEV) {
+    console.warn("Ignoring a malformed realtime message", data);
+  }
+  return null;
 }
 
 function tokenExpiresSoon(token: string): boolean {
