@@ -52,6 +52,16 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   USERNAME=<name> ADMIN=1` makes one; `make user-grant-admin` / `user-revoke-admin USERNAME=<name>`.
   Shared-data writes (platforms, currencies, token allowlist, market-data refresh) are admin-only (403).
   Failed sign-ins are throttled per username and per IP (429 + Retry-After; in memory, see `.env.example`).
+- Google sign-in (#358, D-97): "Sign in with Google" on the login page once four `.env` settings are set (off
+  otherwise; password sign-in stays as a break-glass, `AUTH_PASSWORD_LOGIN=0` turns it off). One-time setup in
+  Google Cloud Console (console.cloud.google.com, any project): **Google Auth Platform → Branding** (app name),
+  **Audience**: External, keep it in *Testing* and add your Gmail under Test users (no Google review needed);
+  **Clients → Create client → Web application**, Authorized redirect URIs:
+  `https://<mac>.<tailnet>.ts.net:8443/api/auth/google/callback` and `http://localhost:5173/api/auth/google/callback`.
+  Put the client ID/secret in `.env` as `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`, the same URIs in
+  `GOOGLE_OAUTH_REDIRECT_URL` (comma-separated), and `GOOGLE_ALLOWED_EMAILS=<gmail>=<username>`; then `make deploy`
+  (or `make api-rebuild`). Sessions last 30 days and renew on use (`AUTH_REFRESH_TOKEN_TTL_DAYS`). Google is
+  offered only at an address listed in `GOOGLE_OAUTH_REDIRECT_URL` (so not on a test instance).
 - Passwords: Settings → Change password (signs out your other sessions). Forgotten one:
   `make user-set-password USERNAME=<name>` prompts for a new one and signs out all its sessions (#72).
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
@@ -68,6 +78,21 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   current `data/` is moved to `data.pre-restore-<ts>/`). The database part is one transaction, committed
   only when every table's count matches the dump's snapshot; grants to a role the target lacks (e.g.
   `capitalos_mcp_ro` on a new stack: run `make db-create-mcp-role` after) are left out and named (#233).
+- Encrypted, outside the repo (#356, D-95): the main checkout's `.env` sets `BACKUP_DIR`
+  (`~/Documents/CapitalOS_backups`) and `BACKUP_AGE_RECIPIENT` (age public key); each set is made and
+  verified in a private temp dir, then stored as `.age` files (dump, counts, data archive) with plain
+  `.verified`/`.failed` markers. Verify/restore/the test instance decrypt with the private key
+  `~/.capitalos/backup/age-identity.txt` (`BACKUP_AGE_IDENTITY`; a copy lives in Hitesh's password manager).
+  `make backup-key-init` (once), `make backup-encrypt-existing` (dry run; `APPLY=1`) moves old plain sets
+  over. `age` is pinned by sha256 in `scripts/age-tool.sh` (`make host-tools`). Worktrees, CI and the
+  test instance (which links the main `.env`) keep `./backups`; there `BACKUP_DIR` from `.env` is ignored.
+- Off-site (#357, D-96): `BACKUP_OFFSITE_DIR` (`.env`, iCloud Drive) gets a copy of every verified
+  encrypted set after each backup (missing ones too) and the same retention; a missing/unwritable folder
+  warns, never fails the backup. `backup-status` shows the newest off-site copy (warns > 2 days);
+  `make backup-offsite-check` decrypts the newest off-site set and runs the restore check;
+  `make backup-offsite-sync` copies what's missing now. The 03:00 job is `/bin/bash` under launchd, which macOS
+  lets open files in iCloud Drive but not list the folder: the off-site steps never list it (they use the
+  local set names and `.capitalos-offsite-index`). Don't grant `/bin/bash` Full Disk Access (too broad).
 - `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
   is down).
 
@@ -110,6 +135,10 @@ From the main checkout:
   NULL-owner rows (the `client` fixture signs in with a real token; `tests/auth_helpers.py` for other users), and
   `tests/test_cross_user_isolation.py` checks every GET route as a second user.
 - `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
+- Full-stack smoke + screenshot diffs (#73, CI job `smoke`): `make e2e-smoke` runs a throwaway Postgres + API + web
+  container on the demo seed and opens every page at 375/1440px in the pinned Playwright image; screenshots are
+  compared with `web/tests/smoke/__screenshots__`. An intended visual change: `make e2e-smoke-update`, look at the
+  PNGs, commit them. A page calling a new endpoint: `make e2e-smoke-record` (re-records the demo fixture), then update.
 - Python dependency change: edit `api/requirements*.in` / `orchestration/requirements.in` (direct pins),
   then `make api-lock` / `make orch-lock` regenerates the hashed lock `requirements*.txt` the image and venv
   install with `--require-hashes` (#81). A transitive package under 14 days old fails the lock (and CI):

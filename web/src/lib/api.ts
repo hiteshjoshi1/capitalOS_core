@@ -28,6 +28,11 @@ let accessTokenMemory: string | null = null;
 let refreshInFlight: Promise<AuthSession | null> | null = null;
 let authFailureHandler: (() => void) | null = null;
 
+/** Where "Sign in with Google" sends the browser (#358): a full-page navigation, not a fetch. */
+export function googleSignInUrl(next: string): string {
+  return `${API_BASE}/auth/google/start?next=${encodeURIComponent(next)}`;
+}
+
 export function getAccessToken(): string | null {
   return accessTokenMemory;
 }
@@ -245,6 +250,13 @@ export type Platform = {
   platform_type: string; // BANK | BROKER | EXCHANGE | CARD_ISSUER | WALLET_PROVIDER
   country: string;       // SG | US | IN | HK | GLOBAL
   website?: string | null;
+};
+
+/** GET /auth/methods (#358): which ways of signing in are on. */
+export type AuthMethods = {
+  password: boolean;
+  google: boolean;
+  signup: boolean;
 };
 
 export type AuthMe = {
@@ -1001,9 +1013,12 @@ export type CreditCardSummary = FxStatus & {
     current_due_source?: string;
     statement_day: number;
     due_day: number;
-    due_date: string;
+    /** #352: printed or configured; null = unknown (never guessed). */
+    due_date: string | null;
     current_due: number;
     utilization: number | null;
+    due_source?: CardDueSource | null;
+    due_status?: CardDueStatus | null;
   }>;
 };
 
@@ -1057,8 +1072,16 @@ export type CreditCardAnalyticsCard = {
   available_limit_as_of?: string | null;
   statement_day: number;
   due_day: number;
-  due_date: string;
+  /** #352: printed or configured; null = unknown (never guessed). */
+  due_date: string | null;
+  due_source?: CardDueSource | null;
+  due_status?: CardDueStatus | null;
 };
+
+/** Where a card's due date came from (#352, D-94). */
+export type CardDueSource = "statement" | "manual" | "configured";
+/** Where the newest statement's payment stands (#352). */
+export type CardDueStatus = "paid" | "overdue" | "due_soon" | "upcoming";
 
 export type CreditCardAnalyticsTrendPoint = {
   month: string;
@@ -1113,6 +1136,15 @@ export type CreditCardBalanceItem = {
   charges_since: number;
   paid_in_full: boolean | null;
   due_date: string | null;
+  // #352, D-94: the newest statement's payment due, card currency.
+  due_source?: CardDueSource | null;
+  due_statement_date?: string | null;
+  amount_due?: number | null;
+  minimum_due?: number | null;
+  paid_toward_due?: number | null;
+  remaining_due?: number | null;
+  due_status?: CardDueStatus | null;
+  minimum_paid?: boolean | null;
   fees_interest_ytd: number;
   last_transaction_date: string | null;
   flagged_count: number;
@@ -1957,6 +1989,8 @@ export type InboxItem = {
     | "fx_unsupported"
     | "job_failing"
     | "unmapped_transactions"
+    | "card_due_soon"
+    | "card_overdue"
     | string;
   severity: "high" | "medium" | "low";
   title: string;
@@ -2193,6 +2227,7 @@ export const api = {
   authRefresh: () =>
     req<AuthSession>("/auth/refresh", { method: "POST" }, { skipAuth: true, skipRefreshRetry: true }),
   authMe: () => req<AuthMe>("/auth/me"),
+  authMethods: () => req<AuthMethods>("/auth/methods", undefined, { skipAuth: true, skipRefreshRetry: true }),
   authLogout: () => req<{ status: string }>("/auth/logout", { method: "POST" }),
   changePassword: (payload: { current_password: string; new_password: string }) =>
     req<ChangePasswordResult>("/auth/change-password", { method: "POST", body: JSON.stringify(payload) }),
@@ -2313,9 +2348,23 @@ export const api = {
   creditCardBalances: (baseCurrency = "SGD") =>
     req<CreditCardBalances>(`/spending/credit-card-balances?base_currency=${encodeURIComponent(baseCurrency)}`),
   // A statement balance typed in by hand (#300), for a card whose files state none.
-  setCreditCardBalance: (accountId: number, payload: { as_of_date: string; owed: number }, baseCurrency = "SGD") =>
+  setCreditCardBalance: (
+    accountId: number,
+    payload: { as_of_date: string; owed: number; due_date?: string | null; minimum_due?: number | null },
+    baseCurrency = "SGD",
+  ) =>
     req<CreditCardBalances>(
       `/spending/credit-card-balances/${encodeURIComponent(String(accountId))}?base_currency=${encodeURIComponent(baseCurrency)}`,
+      { method: "POST", body: JSON.stringify(payload) },
+    ),
+  /** A payment due date typed in from a card statement (#352). */
+  setCreditCardDue: (
+    accountId: number,
+    payload: { statement_date: string; due_date: string; amount_due?: number | null; minimum_due?: number | null },
+    baseCurrency = "SGD",
+  ) =>
+    req<CreditCardBalances>(
+      `/spending/credit-card-dues/${encodeURIComponent(String(accountId))}?base_currency=${encodeURIComponent(baseCurrency)}`,
       { method: "POST", body: JSON.stringify(payload) },
     ),
   creditCardAnalytics: (month: string, baseCurrency = "SGD", months = 12, accountId?: number | null) =>

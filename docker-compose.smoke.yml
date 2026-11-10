@@ -1,0 +1,26 @@
+# The full-stack smoke run (#73, scripts/e2e-smoke.sh): a throwaway Postgres + API + the
+# production web container, on top of docker-compose.isolated.yml. Nothing is published on
+# the host: the Playwright container shares the web container's network namespace and opens
+# http://localhost:8080 (nginx answers only Host localhost / *.ts.net). The checkout's .env
+# is never read, so no API keys or real DATABASE_URL reach this stack, and nothing is written to the
+# checkout's data/.
+services:
+  postgres:
+    ports: !reset []
+
+  api:
+    ports: !reset []
+    env_file: !reset []
+    # No checkout data/ either: uploads and the generated signing key (.auth_secret) go to a
+    # tmpfs owned by the API user, so the run works on any host uid (CI's runner isn't 10001).
+    volumes: !override
+      - ./config:/app/config:ro
+      - ./migrations:/app/migrations:ro
+      - ./api/app:/app/app:ro
+    tmpfs:
+      - /tmp
+      - /app/data:uid=10001,gid=10001
+
+  web:
+    container_name: ${ISO_NAME:?}-web
+    ports: !reset []

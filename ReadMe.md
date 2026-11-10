@@ -465,11 +465,12 @@ make db-reset
 ### Backing up / restoring database
 
 ```bash
-make db-backup                                    # writes backups/capitalos_<timestamp>.dump + .data.tar.gz (data/)
-make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump   # database and data/
+make backup-key-init                              # once: an age key pair, so backups are encrypted (#356)
+make db-backup                                    # writes $BACKUP_DIR/capitalos_<timestamp>.dump + .data.tar.gz (data/), .age when encrypted
+make db-restore BACKUP_FILE=<backup dir>/capitalos_<timestamp>.dump   # database and data/
 ```
 
-See [`docs/setup/backups.md`](docs/setup/backups.md) for automating this on a schedule.
+See [`docs/setup/backups.md`](docs/setup/backups.md) for encryption, where backups live, and automating this on a schedule.
 
 ---
 

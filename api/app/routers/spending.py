@@ -24,10 +24,12 @@ from app.portfolio.canonical_reads import canonical_snapshot_coverage_as_of
 from app.valuation.state import _effective_as_of
 from app.ingestion.card_balances import write_card_statement_balance
 from app.valuation.card_ledger import card_ledgers
+from app.valuation.card_dues import DueState, card_due_states, due_states, load_due_records, write_due
 from app.valuation.card_payments import card_last4s, mark_own_card_payments
 from app.valuation.own_transfers import OWN_TRANSFER_MATCH_DAYS, mark_own_transfers, owner_name_words
 from app.schemas.spending import (
     CreditCardBalanceIn,
+    CreditCardDueIn,
     CreditCardBalanceItem,
     CreditCardBalancePeriod,
     CreditCardBalancesOut,
@@ -1276,11 +1278,24 @@ def _credit_card_recurring_payments(
     return recurring_payments
 
 
+def _card_due_fields(card, dues: dict[int, DueState], start: datetime) -> tuple[str | None, str | None, str | None]:
+    """(due_date, due_source, due_status) for one card (#352, D-94): the due date its newest
+    statement printed or its owner typed in; else the configured due day in the month
+    (credit_card_accounts); else unknown. Never a default day."""
+    state = dues.get(int(card["account_id"]))
+    if state is not None:
+        return state.due_date.isoformat(), state.source, state.status
+    if card["configured_due_day"]:
+        return _clamp_day(start, int(card["due_day"])).date().isoformat(), "configured", None
+    return None, None, None
+
+
 def _credit_card_items(
     cards,
     spend_by_account: dict[int, float],
     start: datetime,
     base_currency: str,
+    dues: dict[int, DueState] | None = None,
 ) -> list[CreditCardItem]:
     account_currencies = {(c["account_currency"] or base_currency).upper() for c in cards}
     account_rates = get_rates(start, base_currency, account_currencies)
@@ -1301,7 +1316,7 @@ def _credit_card_items(
             current_due = spend_by_account.get(int(card["account_id"]), 0.0)
             current_due_source = "transactions"
         utilization = (current_due / credit_limit) if credit_limit > 0 else None
-        due_date = _clamp_day(start, int(card["due_day"])).date().isoformat()
+        due_date, due_source, due_status = _card_due_fields(card, dues or {}, start)
         items.append(
             CreditCardItem(
                 account_id=int(card["account_id"]),
@@ -1321,6 +1336,8 @@ def _credit_card_items(
                 due_date=due_date,
                 current_due=current_due,
                 utilization=utilization,
+                due_source=due_source,
+                due_status=due_status,
             )
         )
     return items
@@ -1499,7 +1516,7 @@ def credit_card_summary(
 
     cards = _credit_cards(db, current_user.id)
     spend = _spend_by_account(db, start, end, base_currency, current_user.id)
-    items = _credit_card_items(cards, spend, start, base_currency)
+    items = _credit_card_items(cards, spend, start, base_currency, card_due_states(db, current_user.id, today=_app_today()))
 
     total_spend = sum(i.current_due for i in items)
     return CreditCardSummaryOut(
@@ -1523,6 +1540,7 @@ def credit_card_balances(
     today = _app_today()
     cards = {int(c["account_id"]): c for c in _credit_cards(db, current_user.id)}
     ledgers = card_ledgers(db, current_user.id, today=today)
+    dues = due_states(load_due_records(db, current_user.id, today=today), ledgers, today=today)
     rates = get_rates(datetime.combine(today, datetime.min.time(), tzinfo=timezone.utc), base_currency,
                       {ledger.currency for ledger in ledgers})
 
@@ -1535,13 +1553,20 @@ def credit_card_balances(
         if card is None:
             continue
         due_date = None
-        if ledger.last_balance_date is not None and ledger.paid_in_full is False and card["configured_due_day"]:
+        due_source = None
+        state = dues.get(ledger.account_id)
+        if state is not None:
+            # #352: the due date the newest statement printed (or its owner typed in from it).
+            due_date = state.due_date.isoformat()
+            due_source = state.source
+        elif ledger.last_balance_date is not None and ledger.paid_in_full is False and card["configured_due_day"]:
             # The configured due day after the newest statement (credit_card_accounts).
             due = _clamp_day(datetime.combine(ledger.last_balance_date, datetime.min.time(), tzinfo=timezone.utc),
                              int(card["due_day"]))
             if due.date() <= ledger.last_balance_date:
                 due = _clamp_day(_add_months(due.replace(day=1), 1), int(card["due_day"]))
             due_date = due.date().isoformat()
+            due_source = "configured"
         items.append(
             CreditCardBalanceItem(
                 account_id=ledger.account_id,
@@ -1559,6 +1584,14 @@ def credit_card_balances(
                 charges_since=ledger.charges_since,
                 paid_in_full=ledger.paid_in_full,
                 due_date=due_date,
+                due_source=due_source,
+                due_statement_date=_iso(state.statement_date) if state else None,
+                amount_due=state.amount_due if state else None,
+                minimum_due=state.minimum_due if state else None,
+                paid_toward_due=state.paid if state else None,
+                remaining_due=state.remaining if state else None,
+                due_status=state.status if state else None,
+                minimum_paid=state.minimum_paid if state else None,
                 fees_interest_ytd=ledger.fees_interest_ytd,
                 last_transaction_date=_iso(ledger.last_transaction_date),
                 flagged_count=ledger.flagged_count,
@@ -1610,6 +1643,8 @@ def set_credit_card_balance(
         raise HTTPException(status_code=404, detail="Credit card not found")
     if payload.as_of_date > _app_today():
         raise HTTPException(status_code=422, detail="The statement date can't be in the future")
+    if payload.due_date is not None and payload.due_date < payload.as_of_date:
+        raise HTTPException(status_code=422, detail="The due date can't be before the statement date")
     write_card_statement_balance(
         db,
         account_id=account_id,
@@ -1618,6 +1653,56 @@ def set_credit_card_balance(
         parser_meta={"statement_balances": [
             {"as_of_date": payload.as_of_date.isoformat(), "owed": round(payload.owed, 2), "source": "manual"}
         ]},
+    )
+    if payload.due_date is not None:
+        _write_typed_due(db, account_id, payload.as_of_date, payload.due_date, round(payload.owed, 2), payload.minimum_due)
+    db.commit()
+    return credit_card_balances(base_currency=base_currency, db=db, current_user=current_user)
+
+
+def _write_typed_due(
+    db: Session, account_id: int, statement_date: date, due_date: date, amount_due: float | None, minimum_due: float | None
+) -> None:
+    try:
+        write_due(
+            db,
+            account_id=account_id,
+            statement_date=statement_date,
+            due_date=due_date,
+            amount_due=amount_due,
+            minimum_due=None if minimum_due is None else round(minimum_due, 2),
+            source="manual",
+        )
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.post("/credit-card-dues/{account_id}", response_model=CreditCardBalancesOut)
+def set_credit_card_due(
+    account_id: int,
+    payload: CreditCardDueIn,
+    base_currency: str = Query("SGD"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Record the payment due date a card statement prints, typed in by the card's owner
+    (#352, D-94). None of the supported card exports state it, so this is where it comes
+    from; the Inbox then reminds before it and until the card's payments cover the statement."""
+    card = next((c for c in _credit_cards(db, current_user.id) if int(c["account_id"]) == account_id), None)
+    if card is None:
+        raise HTTPException(status_code=404, detail="Credit card not found")
+    if payload.statement_date > _app_today():
+        raise HTTPException(status_code=422, detail="The statement date can't be in the future")
+    if payload.due_date < payload.statement_date:
+        raise HTTPException(status_code=422, detail="The due date can't be before the statement date")
+    _write_typed_due(
+        db,
+        account_id,
+        payload.statement_date,
+        payload.due_date,
+        None if payload.amount_due is None else round(payload.amount_due, 2),
+        payload.minimum_due,
     )
     db.commit()
     return credit_card_balances(base_currency=base_currency, db=db, current_user=current_user)
@@ -1635,7 +1720,7 @@ def credit_card_transactions(
 
     cards = _credit_cards(db, current_user.id)
     spend = _spend_by_account(db, start, end, base_currency, current_user.id)
-    card_items = _credit_card_items(cards, spend, start, base_currency)
+    card_items = _credit_card_items(cards, spend, start, base_currency, card_due_states(db, current_user.id, today=_app_today()))
 
     tx_q = text("""
         SELECT
@@ -1736,6 +1821,7 @@ def credit_card_analytics(
     recurring_lookback_start = _add_months(start, -(RECURRING_LOOKBACK_MONTHS - 1))
 
     cards_raw = _credit_cards(db, current_user.id)
+    analytics_dues = card_due_states(db, current_user.id, today=_app_today())
     owned_account_ids = {int(c["account_id"]) for c in cards_raw}
     if account_id is not None and account_id not in owned_account_ids:
         # 404 rather than 403 — do not disclose whether the id exists for another user.
@@ -1781,6 +1867,7 @@ def credit_card_analytics(
         if row["type"] == "EXPENSE":
             count_by_account[acct] += 1
 
+    due_fields = {int(c["account_id"]): _card_due_fields(c, analytics_dues, start) for c in cards_raw}
     card_items = [
         CreditCardAnalyticsCardItem(
             account_id=int(c["account_id"]),
@@ -1795,7 +1882,9 @@ def credit_card_analytics(
             ),
             statement_day=int(c["statement_day"]),
             due_day=int(c["due_day"]),
-            due_date=_clamp_day(start, int(c["due_day"])).date().isoformat(),
+            due_date=due_fields[int(c["account_id"])][0],
+            due_source=due_fields[int(c["account_id"])][1],
+            due_status=due_fields[int(c["account_id"])][2],
         )
         for c in cards_raw
     ]

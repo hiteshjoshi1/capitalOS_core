@@ -1064,6 +1064,7 @@ def clear_db():
             "user_preferences",  # a home timezone (#202) must not leak into the next test
             "source_freshness_overrides",
             "crypto_token_visibility",
+            "card_statement_dues",
             "portfolio_import_locks",
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",

@@ -22,6 +22,8 @@ set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 cd "$REPO"
+# shellcheck source=backup-env.sh
+. "$REPO/scripts/backup-env.sh"   # where the pre-migration backup lands (#356)
 LOG="$REPO/deployments.log"
 say() { printf '\n== %s\n' "$*"; }
 die() { printf 'deploy: %s\n' "$*" >&2; exit 1; }
@@ -75,7 +77,7 @@ trap 'rc=$?; [ $rc -ne 0 ] && record "failed(exit $rc)"; exit $rc' EXIT
 if [ "$NEW_MIGRATIONS" -gt 0 ]; then
   say "Verified backup before $NEW_MIGRATIONS new migration(s)"
   make -s db-backup || die "backup failed: nothing was changed"
-  BACKUP=$(ls -1t backups/capitalos_*.dump.verified | head -1 | sed 's/\.verified$//')
+  BACKUP=$(backup_env "$PWD" && backup_newest_verified)
 fi
 
 # 3. Code

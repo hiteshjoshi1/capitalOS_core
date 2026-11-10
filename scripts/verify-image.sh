@@ -93,7 +93,7 @@ case "$repo" in
     else
       echo "FAIL $name: provenance attestation missing (publisher normally ships one)" >&2; exit 1
     fi ;;
-  grafana/loki | grafana/grafana)
+  grafana/loki | grafana/grafana | mcr.microsoft.com/playwright)
     echo "INFO $name: publisher ships no signature/provenance; trusted via digest pin + Trivy gate" ;;
   *)
     echo "FAIL $name: no trust policy for '$repo'; add one to scripts/verify-image.sh" >&2; exit 1 ;;

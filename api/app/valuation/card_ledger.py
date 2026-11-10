@@ -95,6 +95,17 @@ class CardLedger:
     fees_interest_ytd: float = 0.0
     last_transaction_date: date | None = None
     periods: list[Period] = field(default_factory=list)  # oldest first
+    # The card's transactions (day, type, amount), bank-side payments included (#308): what
+    # ``paid_after`` reads for a statement's payment due date (#352).
+    transactions: list[tuple[date, str, float]] = field(default_factory=list, repr=False)
+
+    def paid_after(self, day: date, *, through: date | None = None) -> float:
+        """Payments and credits after ``day`` (up to ``through``), as ``paid_since`` counts them."""
+        scratch = Period(from_date=day, to_date=None, opening=0.0)
+        for tx_day, kind, amount in self.transactions:
+            if tx_day > day and (through is None or tx_day <= through):
+                _add(scratch, kind, amount)
+        return round(scratch.payments + scratch.credits, 2)
 
     @property
     def paid_in_full(self) -> bool | None:
@@ -164,7 +175,7 @@ def build_ledger(
         owed = sum(-amount for day, kind, amount in rows if month_start <= day <= today and kind != BANK_PAYMENT)
         return CardLedger(
             account_id=account_id, currency=currency, method="transactions", owed_now=round(max(owed, 0.0), 2),
-            fees_interest_ytd=round(fees_interest_ytd, 2), last_transaction_date=last_tx,
+            fees_interest_ytd=round(fees_interest_ytd, 2), last_transaction_date=last_tx, transactions=rows,
         )
 
     def _period(index: int, deferred: set[date]) -> Period:
@@ -240,6 +251,7 @@ def build_ledger(
         fees_interest_ytd=round(fees_interest_ytd, 2),
         last_transaction_date=last_tx,
         periods=periods,
+        transactions=rows,
     )
 
 

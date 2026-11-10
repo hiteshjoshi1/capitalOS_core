@@ -498,6 +498,45 @@ ALTER SEQUENCE public.broker_instruments_id_seq OWNED BY public.broker_instrumen
 
 
 --
+-- Name: card_statement_dues; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.card_statement_dues (
+    id bigint NOT NULL,
+    account_id bigint NOT NULL,
+    statement_date date NOT NULL,
+    due_date date NOT NULL,
+    amount_due numeric(38,2),
+    minimum_due numeric(38,2),
+    source text NOT NULL,
+    import_job_id bigint,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT card_statement_dues_due_after_statement CHECK ((due_date >= statement_date)),
+    CONSTRAINT card_statement_dues_source_check CHECK ((source = ANY (ARRAY['statement'::text, 'manual'::text])))
+);
+
+
+--
+-- Name: card_statement_dues_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.card_statement_dues_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: card_statement_dues_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.card_statement_dues_id_seq OWNED BY public.card_statement_dues.id;
+
+
+--
 -- Name: category_overrides; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2399,6 +2438,13 @@ ALTER TABLE ONLY public.broker_instruments ALTER COLUMN id SET DEFAULT nextval('
 
 
 --
+-- Name: card_statement_dues id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_statement_dues ALTER COLUMN id SET DEFAULT nextval('public.card_statement_dues_id_seq'::regclass);
+
+
+--
 -- Name: category_overrides id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2807,6 +2853,22 @@ ALTER TABLE ONLY public.broker_import_runs
 
 ALTER TABLE ONLY public.broker_instruments
     ADD CONSTRAINT broker_instruments_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: card_statement_dues card_statement_dues_one_per_statement; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_statement_dues
+    ADD CONSTRAINT card_statement_dues_one_per_statement UNIQUE (account_id, statement_date);
+
+
+--
+-- Name: card_statement_dues card_statement_dues_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_statement_dues
+    ADD CONSTRAINT card_statement_dues_pkey PRIMARY KEY (id);
 
 
 --
@@ -3442,6 +3504,13 @@ ALTER TABLE ONLY public.wealth_rollup_dirty
 
 
 --
+-- Name: card_statement_dues_import_job_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX card_statement_dues_import_job_idx ON public.card_statement_dues USING btree (import_job_id);
+
+
+--
 -- Name: idx_account_balance_snapshots_account_date; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -4045,6 +4114,22 @@ ALTER TABLE ONLY public.broker_import_runs
 
 ALTER TABLE ONLY public.broker_instruments
     ADD CONSTRAINT broker_instruments_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES public.assets(id) ON DELETE SET NULL;
+
+
+--
+-- Name: card_statement_dues card_statement_dues_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_statement_dues
+    ADD CONSTRAINT card_statement_dues_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.accounts(id) ON DELETE CASCADE;
+
+
+--
+-- Name: card_statement_dues card_statement_dues_import_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.card_statement_dues
+    ADD CONSTRAINT card_statement_dues_import_job_id_fkey FOREIGN KEY (import_job_id) REFERENCES public.import_jobs(id) ON DELETE SET NULL;
 
 
 --
