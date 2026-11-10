@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { mockAuthenticatedSession } from "../e2e/helpers/auth";
 import { FIXED_NOW, apiKey, loadFixture, settle } from "../e2e/helpers/pages";
-import { SMOKE_ROUTES, VIEWPORTS, routeSlug } from "./smoke";
+import { SMOKE_ROUTES, VIEWPORTS, routeSlug, waitForStableSize } from "./smoke";
 
 // #73 part 2: screenshot diffs. Every page at phone and desktop width, compared with the
 // committed baseline in __screenshots__/. The data must not move, so the API answers come from
@@ -44,8 +44,20 @@ for (const viewport of VIEWPORTS) {
         await page.goto(route);
         await settle(page);
         await page.evaluate(() => document.fonts.ready);
+        await waitForStableSize(page);
         expect(missing, "API calls missing from tests/e2e/fixtures/demo-api.json: re-record it").toEqual([]);
-        await expect(page).toHaveScreenshot(`${viewport.name}-${routeSlug(route)}.png`, { fullPage: true });
+        // Not fullPage: Chromium's full-page capture resizes the window to the page, and some pages
+        // then grow a few px and shrink back, so the shot never settles. Instead the window is made
+        // as tall as the page once, and that window is captured.
+        const height = await page.evaluate(() => document.documentElement.scrollHeight);
+        await page.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, height) });
+        // The section tab rail scrolls its active tab into view on a route change, but only if the
+        // tab has rendered by then (lazy pages); line it up the same way every time.
+        await page.evaluate(() =>
+          document.querySelector(".appShellTabActive")?.scrollIntoView({ block: "nearest", inline: "nearest" }),
+        );
+        await waitForStableSize(page);
+        await expect(page).toHaveScreenshot(`${viewport.name}-${routeSlug(route)}.png`);
       });
     }
   });
