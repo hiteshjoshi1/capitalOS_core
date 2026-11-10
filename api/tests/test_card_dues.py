@@ -1,4 +1,4 @@
-"""Card payment due dates (#352, D-91). All names and amounts are synthetic.
+"""Card payment due dates (#352, D-94). All names and amounts are synthetic.
 
 - ``due_state``: upcoming, due within 5 days, overdue, paid (card or bank-side payment),
   minimum paid; the statement's own balance when no amount was given.

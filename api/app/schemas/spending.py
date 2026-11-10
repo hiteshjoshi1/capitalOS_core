@@ -256,7 +256,7 @@ class CreditCardBalanceItem(BaseModel):
     fees_interest_ytd: float = 0.0
     last_transaction_date: str | None = None
     flagged_count: int = 0
-    # #352, D-91: the newest statement's payment due (card_statement_dues), card currency.
+    # #352, D-94: the newest statement's payment due (card_statement_dues), card currency.
     # ``due_source`` statement | manual | configured (credit_card_accounts.due_day) | None (unknown).
     due_source: str | None = None
     due_statement_date: str | None = None

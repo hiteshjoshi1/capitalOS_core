@@ -1,4 +1,4 @@
--- Card payment due dates (#352, D-91): what one card statement says is due, and by when.
+-- Card payment due dates (#352, D-94): what one card statement says is due, and by when.
 --
 -- One row per card statement: its date, the payment due date, what it says is owed and the
 -- minimum payment. `source`: 'statement' (read from an uploaded statement by its parser,

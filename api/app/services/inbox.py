@@ -11,7 +11,7 @@ header bell (#317) and the Alerts page can't disagree:
 - scheduled jobs failing (job_runs, #156);
 - transactions of this or last month without a category (Map transactions);
 - card payments due within 5 days or overdue, from the due date a statement printed
-  (#352, D-91), until the card's payments since the statement cover it.
+  (#352, D-94), until the card's payments since the statement cover it.
 Items are ordered high, medium, low; within a severity, as listed above.
 """
 from __future__ import annotations

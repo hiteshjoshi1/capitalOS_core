@@ -151,7 +151,7 @@ function CardBalanceRow({
   );
 }
 
-/** The newest statement's payment due (#352, D-91): printed or typed in, never guessed. */
+/** The newest statement's payment due (#352, D-94): printed or typed in, never guessed. */
 function DueLine({
   card,
   onSaved,

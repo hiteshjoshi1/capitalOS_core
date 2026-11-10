@@ -1066,7 +1066,7 @@ export type CreditCardAnalyticsCard = {
   due_status?: CardDueStatus | null;
 };
 
-/** Where a card's due date came from (#352, D-91). */
+/** Where a card's due date came from (#352, D-94). */
 export type CardDueSource = "statement" | "manual" | "configured";
 /** Where the newest statement's payment stands (#352). */
 export type CardDueStatus = "paid" | "overdue" | "due_soon" | "upcoming";
@@ -1124,7 +1124,7 @@ export type CreditCardBalanceItem = {
   charges_since: number;
   paid_in_full: boolean | null;
   due_date: string | null;
-  // #352, D-91: the newest statement's payment due, card currency.
+  // #352, D-94: the newest statement's payment due, card currency.
   due_source?: CardDueSource | null;
   due_statement_date?: string | null;
   amount_due?: number | null;

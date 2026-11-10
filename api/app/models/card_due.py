@@ -1,4 +1,4 @@
-"""What one card statement says is due, and by when (#352, D-91): migration 084.
+"""What one card statement says is due, and by when (#352, D-94): migration 084.
 
 No row means the card's due date is unknown; it is never guessed (``app.valuation.card_dues``)."""
 

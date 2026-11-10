@@ -13,7 +13,7 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/352
 - So no supported card file yields a due date; the PDF statements do, and are not parsed.
 
 ## Architecture Decisions
-- `card_statement_dues` (migration 084): one row per card statement (statement date, due date, amount due, minimum, source statement|manual, import job). D-91.
+- `card_statement_dues` (migration 084): one row per card statement (statement date, due date, amount due, minimum, source statement|manual, import job). D-94.
 - Typed in from the statement on Liabilities → Card balances ("Add due date", or with a typed-in balance). A parser that reads one sets `parser_meta["payment_due"]` (hook in the import runner; removed with its upload).
 - Current due = newest statement up to today; paid = card payments + credits after the statement date, bank-side included (#308).
 - Inbox: `card_due_soon` (≤5 days, medium) and `card_overdue` (high) until paid; "Card payments up to date" in all-good.

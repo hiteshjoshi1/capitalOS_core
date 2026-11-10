@@ -1279,7 +1279,7 @@ def _credit_card_recurring_payments(
 
 
 def _card_due_fields(card, dues: dict[int, DueState], start: datetime) -> tuple[str | None, str | None, str | None]:
-    """(due_date, due_source, due_status) for one card (#352, D-91): the due date its newest
+    """(due_date, due_source, due_status) for one card (#352, D-94): the due date its newest
     statement printed or its owner typed in; else the configured due day in the month
     (credit_card_accounts); else unknown. Never a default day."""
     state = dues.get(int(card["account_id"]))
@@ -1687,7 +1687,7 @@ def set_credit_card_due(
     current_user: CurrentUser = Depends(require_current_user),
 ):
     """Record the payment due date a card statement prints, typed in by the card's owner
-    (#352, D-91). None of the supported card exports state it, so this is where it comes
+    (#352, D-94). None of the supported card exports state it, so this is where it comes
     from; the Inbox then reminds before it and until the card's payments cover the statement."""
     card = next((c for c in _credit_cards(db, current_user.id) if int(c["account_id"]) == account_id), None)
     if card is None:

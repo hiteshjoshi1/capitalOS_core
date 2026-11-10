@@ -1,4 +1,4 @@
-"""Card payment due dates (#352, D-91): what a statement says is due, by when, and
+"""Card payment due dates (#352, D-94): what a statement says is due, by when, and
 whether the card's payments since have covered it.
 
 A due date is only ever one a statement printed: read by the card's parser
