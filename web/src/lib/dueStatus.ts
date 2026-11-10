@@ -16,11 +16,21 @@ export type DueStatus = {
  * data, the due date is unreliable and must never be estimated — show "Not synced".
  */
 export function computeDueStatus(
-  params: { dueDate?: string | null; dueSource?: string | null },
+  params: {
+    dueDate?: string | null;
+    dueSource?: string | null;
+    /** #352: the server's status for a statement's due ("paid" once payments cover it). */
+    paymentStatus?: string | null;
+    /** What to say with no date (cards: "Due date unknown", #352; it is never guessed). */
+    unknownLabel?: string;
+  },
   today: Date = new Date(),
 ): DueStatus {
   if (params.dueSource === "available_limit" || !params.dueDate) {
-    return { tone: "not-synced", label: "Not synced", daysUntil: null };
+    return { tone: "not-synced", label: params.unknownLabel ?? "Not synced", daysUntil: null };
+  }
+  if (params.paymentStatus === "paid") {
+    return { tone: "normal", label: "Paid", daysUntil: null };
   }
 
   const days = Math.round((new Date(params.dueDate).getTime() - today.getTime()) / 86_400_000);

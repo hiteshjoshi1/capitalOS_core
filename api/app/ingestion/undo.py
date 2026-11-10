@@ -235,6 +235,11 @@ def remove_import_job(db: Session, job: ImportJob) -> dict[str, Any]:
     affected.extend(d for d in (_as_date(r[0]) for r in balance_dates) if d)
     counts["balance_snapshots"] = len(balance_dates)
     db.execute(text("DELETE FROM account_balance_snapshots WHERE import_job_id = :job_id"), {"job_id": job.id})
+    # A due date the upload's statement stated goes with it (#352).
+    db.execute(
+        text("DELETE FROM card_statement_dues WHERE import_job_id = :job_id AND source = 'statement'"),
+        {"job_id": job.id},
+    )
 
     if run_ids:
         placeholders, params = _in_clause("run", run_ids)

@@ -194,9 +194,13 @@ class CreditCardItem(BaseModel):
     current_due_source: str = "transactions"
     statement_day: int
     due_day: int
-    due_date: str
+    # #352: a due date a statement printed (card_statement_dues), else the configured due day
+    # (credit_card_accounts), else None: unknown, never guessed.
+    due_date: str | None = None
     current_due: float
     utilization: float | None
+    due_source: str | None = None  # statement | manual | configured | None
+    due_status: str | None = None  # paid | overdue | due_soon | upcoming (statement dues only)
 
 
 class CreditCardSummaryOut(FxStatusFields):
@@ -252,6 +256,16 @@ class CreditCardBalanceItem(BaseModel):
     fees_interest_ytd: float = 0.0
     last_transaction_date: str | None = None
     flagged_count: int = 0
+    # #352, D-91: the newest statement's payment due (card_statement_dues), card currency.
+    # ``due_source`` statement | manual | configured (credit_card_accounts.due_day) | None (unknown).
+    due_source: str | None = None
+    due_statement_date: str | None = None
+    amount_due: float | None = None
+    minimum_due: float | None = None
+    paid_toward_due: float | None = None
+    remaining_due: float | None = None
+    due_status: str | None = None  # paid | overdue | due_soon | upcoming
+    minimum_paid: bool | None = None
     periods: list[CreditCardBalancePeriod] = []  # newest first
 
 
@@ -260,6 +274,19 @@ class CreditCardBalanceIn(BaseModel):
     (negative: a credit). For a card whose files state none (Citi)."""
     as_of_date: date
     owed: float
+    # #352: the statement's payment due date and minimum payment, when typed in with it.
+    due_date: date | None = None
+    minimum_due: float | None = None
+
+
+class CreditCardDueIn(BaseModel):
+    """A payment due date typed in from a card statement (#352): the statement's date, the
+    date it says payment is due, and optionally what it says is owed and the minimum. Without
+    ``amount_due``, the card's balance dated on the statement date is used."""
+    statement_date: date
+    due_date: date
+    amount_due: float | None = None
+    minimum_due: float | None = None
 
 
 class CreditCardBalancesOut(FxStatusFields):
@@ -320,7 +347,10 @@ class CreditCardAnalyticsCardItem(BaseModel):
     available_limit_as_of: str | None = None
     statement_day: int
     due_day: int
-    due_date: str
+    # #352: as CreditCardItem.due_date: printed or configured, else None (unknown).
+    due_date: str | None = None
+    due_source: str | None = None
+    due_status: str | None = None
 
 
 class CreditCardAnalyticsTrendPoint(BaseModel):

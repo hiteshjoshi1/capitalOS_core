@@ -9,7 +9,9 @@ header bell (#317) and the Alerts page can't disagree:
 - past exchange rates missing for the data's span, or a currency the provider
   doesn't publish (#290, D-30);
 - scheduled jobs failing (job_runs, #156);
-- transactions of this or last month without a category (Map transactions).
+- transactions of this or last month without a category (Map transactions);
+- card payments due within 5 days or overdue, from the due date a statement printed
+  (#352, D-91), until the card's payments since the statement cover it.
 Items are ordered high, medium, low; within a severity, as listed above.
 """
 from __future__ import annotations
@@ -43,7 +45,9 @@ KIND_ORDER = {
     for i, kind in enumerate(
         [
             "job_failing",
+            "card_overdue",
             "source_overdue",
+            "card_due_soon",
             "unknown_format",
             "source_never_loaded",
             "import_pending",
@@ -259,6 +263,58 @@ def _unmapped_items(db: Session, user: CurrentUser, today: date) -> list[InboxIt
     )]
 
 
+def _money(amount: float, currency: str) -> str:
+    return f"{currency} {amount:,.2f}"
+
+
+def _card_due_items(db: Session, user: CurrentUser, today: date) -> tuple[list[InboxItem], bool]:
+    """Card payments due soon or overdue (#352): (items, every known due is paid)."""
+    from app.valuation.card_dues import card_due_states
+
+    states = card_due_states(db, user.id, today=today)
+    if not states:
+        return [], False
+    names = {
+        int(row["id"]): (str(row["name"]), str(row["currency"] or "SGD").upper())
+        for row in db.execute(
+            text("SELECT a.id, a.name, a.currency FROM accounts a WHERE a.account_type = 'CREDIT_CARD' AND "
+                 + account_scope_sql("a")),
+            {"current_user_id": user.id},
+        ).mappings()
+    }
+    items: list[InboxItem] = []
+    for account_id, state in sorted(states.items()):
+        if state.status not in ("overdue", "due_soon") or account_id not in names:
+            continue
+        name, currency = names[account_id]
+        due_label = f"{state.due_date.day} {state.due_date.strftime('%b')}"
+        amount = state.remaining if state.remaining is not None else None
+        what = f"{_money(amount, currency)} " if amount is not None else "payment "
+        if state.status == "overdue":
+            title = f"{name}: {what}overdue since {due_label}"
+        elif state.days_until == 0:
+            title = f"{name}: {what}due today"
+        else:
+            title = f"{name}: {what}due {due_label} ({_plural(state.days_until, 'day')})"
+        detail_parts = [f"Statement of {state.statement_date.isoformat()}"]
+        if state.paid > 0.005:
+            detail_parts.append(f"{_money(state.paid, currency)} paid since")
+        if state.minimum_paid:
+            detail_parts.append("minimum paid: interest still runs on the rest")
+        elif state.minimum_due is not None:
+            detail_parts.append(f"minimum {_money(state.minimum_due, currency)}")
+        items.append(InboxItem(
+            id=f"card_due:{account_id}:{state.statement_date.isoformat()}",
+            kind="card_overdue" if state.status == "overdue" else "card_due_soon",
+            severity="high" if state.status == "overdue" else "medium",
+            title=title,
+            detail="; ".join(detail_parts) + ".",
+            action=InboxAction(label="Open card balances", route="/liabilities", params={"card": str(account_id)}),
+        ))
+    all_paid = all(state.status == "paid" for state in states.values())
+    return items, all_paid
+
+
 def _saved_base_currency(db: Session, user_id: int) -> str:
     row = db.execute(
         text("SELECT base_currency FROM user_preferences WHERE user_id = :uid"), {"uid": user_id}
@@ -281,6 +337,7 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
     source_items, on_time = _source_items(freshness["sources"])
     job_items, healthy_jobs = _job_items(summary)
     fx_items, fx_ok = _safe(lambda: _fx_items(db, user, _saved_base_currency(db, user.id)), ([], False))
+    card_items, cards_paid = _safe(lambda: _card_due_items(db, user, today), ([], False))
     items = (
         source_items
         + _safe(lambda: _import_items(db, user), [])
@@ -288,6 +345,7 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         + fx_items
         + job_items
         + _safe(lambda: _unmapped_items(db, user, today), [])
+        + card_items
     )
     items.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 9), KIND_ORDER.get(i.kind, 99), i.title.lower()))
 
@@ -301,6 +359,8 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         all_good.append(f"{_plural(healthy_jobs, 'scheduled job')} healthy")
     if fx_ok:
         all_good.append("Past exchange rates complete")
+    if cards_paid:
+        all_good.append("Card payments up to date")
     if summary.import_health.pending_count == 0 and summary.import_health.last_import_at:
         all_good.append("No uploads waiting")
 
