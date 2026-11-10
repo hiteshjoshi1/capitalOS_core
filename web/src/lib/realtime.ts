@@ -15,6 +15,9 @@ export function buildRealtimeUrl(apiBase: string, pageUrl: string): URL {
   return url;
 }
 
+/** The server's close code for "sign in again" (expired token or ended session, #364). */
+export const REALTIME_CLOSE_SIGN_IN_AGAIN = 4401;
+
 type RealtimeStatus = "connecting" | "connected" | "disconnected";
 
 type RealtimeHandlers<TPayload = Record<string, unknown>> = {
@@ -101,16 +104,23 @@ class RealtimeClient {
       }
     });
 
-    this.socket.addEventListener("close", () => {
+    this.socket.addEventListener("close", (event) => {
       this.socket = null;
       this.notifyStatus("disconnected");
       if (!this.shouldReconnect || !this.listeners.size) {
         return;
       }
+      // 4401 (#364): the server closed because the access token expired or the session ended.
+      // Refresh first; if the session has ended, the refresh fails and connect() stops there.
+      const mustRefresh = !opened || event.code === REALTIME_CLOSE_SIGN_IN_AGAIN;
       this.reconnectTimer = setTimeout(async () => {
         this.reconnectTimer = null;
-        if (!opened) {
-          await refreshAccessTokenNow();
+        if (mustRefresh) {
+          const token = await refreshAccessTokenNow();
+          if (!token) {
+            this.notifyStatus("disconnected");
+            return;
+          }
         }
         await this.ensureConnected();
       }, 1000);
