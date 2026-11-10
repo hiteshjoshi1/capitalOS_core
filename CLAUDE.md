@@ -61,7 +61,9 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   Put the client ID/secret in `.env` as `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`, the same URIs in
   `GOOGLE_OAUTH_REDIRECT_URL` (comma-separated), and `GOOGLE_ALLOWED_EMAILS=<gmail>=<username>`; then `make deploy`
   (or `make api-rebuild`). Sessions last 30 days and renew on use (`AUTH_REFRESH_TOKEN_TTL_DAYS`). Google is
-  offered only at an address listed in `GOOGLE_OAUTH_REDIRECT_URL` (so not on a test instance).
+  offered only at an address listed in `GOOGLE_OAUTH_REDIRECT_URL`. Worktree stacks never use it (empty there).
+  The test instance has its own (#373): `https://<mac>.<tailnet>.ts.net:8444` (served by `tailscale serve`
+  while it runs, removed by `test-instance-drop`) and `http://localhost:5174`, both registered in the Google client.
 - Passwords: Settings → Change password (signs out your other sessions). Forgotten one:
   `make user-set-password USERNAME=<name>` prompts for a new one and signs out all its sessions (#72).
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
@@ -110,7 +112,7 @@ From the main checkout:
   `../capitalOS-worktrees/test-instance`), runs `make verify`, takes a **fresh verified backup** of the
   real app and restores it there (counts checked; #287, `SKIP_BACKUP=1` reuses the newest; the banner
   and `make test-instance-status` show the copy's time and any newer real imports), applies the batch's migrations, and serves it with a red TEST
-  banner: web **:5174** (also via Tailscale), API :8021, Postgres :5434. Schedulers are off.
+  banner: web **:5174** (also via Tailscale, and over HTTPS at `:8444` for Sign in with Google, #373), API :8021, Postgres :5434. Schedulers are off.
   It links the main checkout's `.env` (API keys, IBKR Flex) so refreshes work; a `DATABASE_URL` there is refused (#120).
 - A conflict stops and is named: resolve and commit in that worktree, then `make test-instance-start`.
 - `make test-instance-status`, then `make test-instance-pr` (one PR test/<date> → main, `Closes`
