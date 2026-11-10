@@ -197,6 +197,14 @@
    "currency_pattern": "^[A-Z]{3}$"
   }
  },
+ "/auth/methods": {
+  "status": 200,
+  "body": {
+   "password": true,
+   "google": false,
+   "signup": false
+  }
+ },
  "/auth/preferences": {
   "status": 200,
   "body": {
@@ -490,7 +498,7 @@
    "fx_stale_currencies": [],
    "month": "2026-11",
    "is_live": true,
-   "as_of": "2026-11-10T11:30:13.102246+00:00",
+   "as_of": "2026-11-10T14:13:40.936977+00:00",
    "base_currency": "SGD",
    "symbols": [
     "USDC",
@@ -505,10 +513,10 @@
      "value_usd": 250000,
      "value_base": 330287.5,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00"
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00"
     },
     {
      "symbol": "USDC",
@@ -517,10 +525,10 @@
      "value_usd": 80000,
      "value_base": 105692,
      "asset_class": "CRYPTO",
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "wallet_label": "DUMMY - Phantom",
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00"
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00"
     },
     {
      "symbol": "USDC",
@@ -529,10 +537,10 @@
      "value_usd": 60000,
      "value_base": 79269,
      "asset_class": "CRYPTO",
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "wallet_label": "DUMMY - MetaMask",
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00"
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00"
     }
    ]
   }
@@ -543,7 +551,7 @@
    "month": "2026-11",
    "is_live": true,
    "compare_month": "2026-10",
-   "as_of": "2026-11-10T11:30:11.920736+00:00",
+   "as_of": "2026-11-10T14:13:39.739097+00:00",
    "snapshot_day": 1,
    "snapshot_as_of": "2026-11-01",
    "total_crypto_usd": 1425000,
@@ -611,7 +619,7 @@
      "value_usd": 500000,
      "value_base": 660575,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 3000,
@@ -622,8 +630,8 @@
      "snapshot_value_base": 651505.1025,
      "snapshot_delta_base": 9069.897499999963,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": null,
@@ -640,7 +648,7 @@
      "value_usd": 250000,
      "value_base": 330287.5,
      "asset_class": "CRYPTO",
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "wallet_label": "DUMMY - Phantom",
      "wallet_address": "7xKXtg2CW3xxxxxxxxxxxxxxxxxxxxxxxxxxxxF3q1",
      "price_usd": 160,
@@ -651,8 +659,8 @@
      "snapshot_value_base": 325752.55125,
      "snapshot_delta_base": 4534.948749999981,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": null,
@@ -669,7 +677,7 @@
      "value_usd": 250000,
      "value_base": 330287.5,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 1,
@@ -680,8 +688,8 @@
      "snapshot_value_base": 325752.55125,
      "snapshot_delta_base": 4534.948749999981,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
@@ -698,7 +706,7 @@
      "value_usd": 100000,
      "value_base": 132115,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 80000,
@@ -709,8 +717,8 @@
      "snapshot_value_base": 130301.0205,
      "snapshot_delta_base": 1813.9795000000013,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": null,
@@ -727,7 +735,7 @@
      "value_usd": 85000,
      "value_base": 112297.75,
      "asset_class": "CRYPTO",
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "wallet_label": "DUMMY - Phantom",
      "wallet_address": "7xKXtg2CW3xxxxxxxxxxxxxxxxxxxxxxxxxxxxF3q1",
      "price_usd": 0.85,
@@ -738,8 +746,8 @@
      "snapshot_value_base": 110755.867425,
      "snapshot_delta_base": 1541.882574999996,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
@@ -759,7 +767,7 @@
      "value_usd": 500000,
      "value_base": 660575,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 3000,
@@ -770,8 +778,8 @@
      "snapshot_value_base": 651505.1025,
      "snapshot_delta_base": 9069.897499999963,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": null,
@@ -788,7 +796,7 @@
      "value_usd": 250000,
      "value_base": 330287.5,
      "asset_class": "CRYPTO",
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "wallet_label": "DUMMY - Phantom",
      "wallet_address": "7xKXtg2CW3xxxxxxxxxxxxxxxxxxxxxxxxxxxxF3q1",
      "price_usd": 160,
@@ -799,8 +807,8 @@
      "snapshot_value_base": 325752.55125,
      "snapshot_delta_base": 4534.948749999981,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": null,
@@ -817,7 +825,7 @@
      "value_usd": 250000,
      "value_base": 330287.5,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 1,
@@ -828,8 +836,8 @@
      "snapshot_value_base": 325752.55125,
      "snapshot_delta_base": 4534.948749999981,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
@@ -846,7 +854,7 @@
      "value_usd": 100000,
      "value_base": 132115,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 80000,
@@ -857,8 +865,8 @@
      "snapshot_value_base": 130301.0205,
      "snapshot_delta_base": 1813.9795000000013,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": null,
@@ -875,7 +883,7 @@
      "value_usd": 85000,
      "value_base": 112297.75,
      "asset_class": "CRYPTO",
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "wallet_label": "DUMMY - Phantom",
      "wallet_address": "7xKXtg2CW3xxxxxxxxxxxxxxxxxxxxxxxxxxxxF3q1",
      "price_usd": 0.85,
@@ -886,8 +894,8 @@
      "snapshot_value_base": 110755.867425,
      "snapshot_delta_base": 1541.882574999996,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
@@ -904,7 +912,7 @@
      "value_usd": 80000,
      "value_base": 105692,
      "asset_class": "CRYPTO",
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "wallet_label": "DUMMY - Phantom",
      "wallet_address": "7xKXtg2CW3xxxxxxxxxxxxxxxxxxxxxxxxxxxxF3q1",
      "price_usd": 1,
@@ -915,8 +923,8 @@
      "snapshot_value_base": 104240.81640000001,
      "snapshot_delta_base": 1451.1835999999894,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
@@ -933,7 +941,7 @@
      "value_usd": 60000,
      "value_base": 79269,
      "asset_class": "CRYPTO",
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "wallet_label": "DUMMY - MetaMask",
      "wallet_address": "0xdE00000000000000000000000000000000000002",
      "price_usd": 1,
@@ -944,8 +952,8 @@
      "snapshot_value_base": 78180.61230000001,
      "snapshot_delta_base": 1088.387699999992,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
@@ -962,7 +970,7 @@
      "value_usd": 35000,
      "value_base": 46240.25,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 18,
@@ -973,8 +981,8 @@
      "snapshot_value_base": 45605.357175000005,
      "snapshot_delta_base": 634.8928249999954,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0x514910771AF9Ca656af840dff83E8264EcF986CA",
@@ -991,7 +999,7 @@
      "value_usd": 25000,
      "value_base": 33028.75,
      "asset_class": "CRYPTO",
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "wallet_label": "DUMMY - MetaMask",
      "wallet_address": "0xdE00000000000000000000000000000000000002",
      "price_usd": 1,
@@ -1002,8 +1010,8 @@
      "snapshot_value_base": 32575.255125,
      "snapshot_delta_base": 453.4948750000003,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0x912CE59144191C1204E64559FE8253a0e49E6548",
@@ -1020,7 +1028,7 @@
      "value_usd": 20000,
      "value_base": 26423,
      "asset_class": "CRYPTO",
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "wallet_label": "DUMMY - MetaMask",
      "wallet_address": "0xdE00000000000000000000000000000000000002",
      "price_usd": 7.5,
@@ -1031,8 +1039,8 @@
      "snapshot_value_base": 26060.204100000003,
      "snapshot_delta_base": 362.79589999999735,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984",
@@ -1049,7 +1057,7 @@
      "value_usd": 12000,
      "value_base": 15853.800000000001,
      "asset_class": "CRYPTO",
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "wallet_label": "DUMMY - MetaMask",
      "wallet_address": "0xdE00000000000000000000000000000000000002",
      "price_usd": 300,
@@ -1060,8 +1068,8 @@
      "snapshot_value_base": 15636.12246,
      "snapshot_delta_base": 217.6775400000006,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0x7Fc66500c84A76Ad7E9c93437bFc5Ac33E2DDaE9",
@@ -1078,7 +1086,7 @@
      "value_usd": 8000,
      "value_base": 10569.2,
      "asset_class": "CRYPTO",
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "wallet_label": "DUMMY - Ledger (cold)",
      "wallet_address": "0xdE00000000000000000000000000000000000001",
      "price_usd": 1500,
@@ -1089,8 +1097,8 @@
      "snapshot_value_base": 10424.08164,
      "snapshot_delta_base": 145.1183600000004,
      "snapshot_delta_pct": 0.015228426395939087,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": "DUMMY",
      "contract_or_mint": "0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2",
@@ -1103,7 +1111,7 @@
    ],
    "wallet_exposure": [
     {
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "label": "DUMMY - Ledger (cold)",
      "address": "0xdE00000000000000000000000000000000000001",
      "chain_type": "evm",
@@ -1111,15 +1119,15 @@
      "total_usd": 893000,
      "total_base": 1179786.95,
      "percent": 62.66666666666667,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": null,
      "stale_holdings": false,
      "stale_prices": false
     },
     {
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "label": "DUMMY - MetaMask",
      "address": "0xdE00000000000000000000000000000000000002",
      "chain_type": "evm",
@@ -1127,15 +1135,15 @@
      "total_usd": 117000,
      "total_base": 154574.55000000002,
      "percent": 8.210526315789474,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": null,
      "stale_holdings": false,
      "stale_prices": false
     },
     {
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "label": "DUMMY - Phantom",
      "address": "7xKXtg2CW3xxxxxxxxxxxxxxxxxxxxxxxxxxxxF3q1",
      "chain_type": "solana",
@@ -1143,8 +1151,8 @@
      "total_usd": 415000,
      "total_base": 548277.25,
      "percent": 29.122807017543863,
-     "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-     "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+     "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+     "price_as_of": "2026-11-10T14:12:57.768277+00:00",
      "holdings_provider": null,
      "price_provider": null,
      "stale_holdings": false,
@@ -1173,81 +1181,81 @@
    ],
    "wallet_chain_exposure": [
     {
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "chain": "ethereum",
      "total_usd": 500000,
      "total_base": 660575
     },
     {
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "chain": "solana",
      "total_usd": 250000,
      "total_base": 330287.5
     },
     {
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "chain": "ethereum",
      "total_usd": 250000,
      "total_base": 330287.5
     },
     {
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "chain": "ethereum",
      "total_usd": 100000,
      "total_base": 132115
     },
     {
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "chain": "solana",
      "total_usd": 85000,
      "total_base": 112297.75
     },
     {
-     "wallet_id": "f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "wallet_id": "daed43d3-8621-496f-8ada-9b585699afeb",
      "chain": "solana",
      "total_usd": 80000,
      "total_base": 105692
     },
     {
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "chain": "arbitrum",
      "total_usd": 60000,
      "total_base": 79269
     },
     {
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "chain": "ethereum",
      "total_usd": 35000,
      "total_base": 46240.25
     },
     {
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "chain": "arbitrum",
      "total_usd": 25000,
      "total_base": 33028.75
     },
     {
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "chain": "arbitrum",
      "total_usd": 20000,
      "total_base": 26423
     },
     {
-     "wallet_id": "e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "wallet_id": "660b0360-897e-486f-89ab-ae7de2f046c2",
      "chain": "arbitrum",
      "total_usd": 12000,
      "total_base": 15853.800000000001
     },
     {
-     "wallet_id": "da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "wallet_id": "b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "chain": "ethereum",
      "total_usd": 8000,
      "total_base": 10569.2
     }
    ],
-   "last_refreshed_at": "2026-11-10T11:29:32.948577+00:00",
-   "holdings_as_of": "2026-11-10T11:29:32.948577+00:00",
-   "price_as_of": "2026-11-10T11:29:32.948577+00:00",
+   "last_refreshed_at": "2026-11-10T14:12:57.768277+00:00",
+   "holdings_as_of": "2026-11-10T14:12:57.768277+00:00",
+   "price_as_of": "2026-11-10T14:12:57.768277+00:00",
    "stale_holdings": false,
    "stale_prices": false,
    "is_stale": false,
@@ -1267,7 +1275,7 @@
    "base_currency": "SGD",
    "snapshot_day": 1,
    "is_live": true,
-   "current_net_worth_as_of": "2026-11-10T19:30:09+08:00",
+   "current_net_worth_as_of": "2026-11-10T22:13:37+08:00",
    "current_net_worth": {
     "total": 11372802.68471829,
     "cash": 1974805,
@@ -1360,7 +1368,7 @@
    "base_currency": "SGD",
    "snapshot_day": 1,
    "is_live": true,
-   "net_worth_boundary_at": "2026-11-10T19:30:13+08:00",
+   "net_worth_boundary_at": "2026-11-10T22:13:40+08:00",
    "compare_month": "2026-10",
    "current_cash_as_of": "2026-11-10T00:00:00+00:00",
    "snapshot_cash_as_of": "2026-11-01T00:00:00+00:00",
@@ -1451,7 +1459,7 @@
    "import_health": {
     "pending_count": 1,
     "last_import_platform": "CITI",
-    "last_import_at": "2026-11-04T11:29:32.948577+00:00"
+    "last_import_at": "2026-11-04T14:12:57.768277+00:00"
    },
    "market_data": {
     "fresh": 32,
@@ -1638,7 +1646,7 @@
    "snapshot_day": 1,
    "is_live": true,
    "period_start": "2026-11-01",
-   "period_end": "2026-11-10T19:30:09+08:00",
+   "period_end": "2026-11-10T22:13:37+08:00",
    "start": {
     "month": "2026-10",
     "boundary_at": "2026-11-01T00:00:00+00:00",
@@ -1655,7 +1663,7 @@
    },
    "end": {
     "month": "2026-11",
-    "boundary_at": "2026-11-10T19:30:09+08:00",
+    "boundary_at": "2026-11-10T22:13:37+08:00",
     "as_of": "2026-11-10T00:00:00+00:00",
     "value": 11372802.68471829,
     "net_worth": {
@@ -2193,7 +2201,7 @@
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
     "liabilities": 53512.9,
-    "as_of": "2026-11-10T19:30:16+08:00",
+    "as_of": "2026-11-10T22:13:44+08:00",
     "uploads": [
      "CITI"
     ]
@@ -2215,7 +2223,7 @@
     "stocks_funds": 7568871.834718291,
     "crypto": 1882638.75,
     "liabilities": 53512.9,
-    "as_of": "2026-11-10T19:30:16+08:00",
+    "as_of": "2026-11-10T22:13:44+08:00",
     "uploads": [
      "CITI"
     ]
@@ -2665,7 +2673,7 @@
     "crypto": 1882638.75,
     "liabilities": 53512.9
    },
-   "net_worth_boundary_at": "2026-11-10T19:30:15+08:00",
+   "net_worth_boundary_at": "2026-11-10T22:13:43+08:00",
    "currency_exposure": {
     "total": 11372802.684718292,
     "items": [
@@ -2943,7 +2951,7 @@
      "days_overdue": null
     },
     {
-     "source_key": "wallet:da442b0a-26c0-48eb-bb74-a7facea59ae0",
+     "source_key": "wallet:b0fd3e84-2560-4231-bd71-109ed568fd8a",
      "kind": "crypto_wallet",
      "label": "DUMMY - Ledger (cold)",
      "platform": "ethereum",
@@ -2959,7 +2967,7 @@
      "days_overdue": null
     },
     {
-     "source_key": "wallet:e48785d4-2432-4273-b356-af11f8f2bcc6",
+     "source_key": "wallet:660b0360-897e-486f-89ab-ae7de2f046c2",
      "kind": "crypto_wallet",
      "label": "DUMMY - MetaMask",
      "platform": "arbitrum",
@@ -2975,7 +2983,7 @@
      "days_overdue": null
     },
     {
-     "source_key": "wallet:f45ede67-29ba-4799-87ce-470e1eba7f06",
+     "source_key": "wallet:daed43d3-8621-496f-8ada-9b585699afeb",
      "kind": "crypto_wallet",
      "label": "DUMMY - Phantom",
      "platform": "solana",
@@ -3069,9 +3077,9 @@
    "is_live": true,
    "compare_month": "2026-10",
    "current_holdings_as_of": "2026-11-10T00:00:00+00:00",
-   "net_worth_as_of": "2026-11-10T19:30:10+08:00",
+   "net_worth_as_of": "2026-11-10T22:13:38+08:00",
    "net_worth_snapshot_as_of": "2026-11-01T00:00:00+00:00",
-   "net_worth_boundary_at": "2026-11-10T19:30:10+08:00",
+   "net_worth_boundary_at": "2026-11-10T22:13:38+08:00",
    "net_worth_boundary_exact": true,
    "net_worth_freshness_status": "exact",
    "top_holdings": [
@@ -4664,7 +4672,7 @@
    "base_currency": "SGD",
    "snapshot_day": 1,
    "is_live": true,
-   "current_net_worth_as_of": "2026-11-10T19:30:09+08:00",
+   "current_net_worth_as_of": "2026-11-10T22:13:37+08:00",
    "current_net_worth": {
     "total": 11372802.68471829,
     "cash": 1974805,
@@ -5752,7 +5760,7 @@
     "vs_prev_month": {
      "abs": 1063394.2388418317,
      "pct": 0.1031479395180202,
-     "current_as_of": "2026-11-10T19:30:09+08:00",
+     "current_as_of": "2026-11-10T22:13:37+08:00",
      "compare_as_of": "2026-11-01T00:00:00+00:00",
      "compare_month": "2026-10",
      "compare_value": 10309408.445876459,
@@ -5761,7 +5769,7 @@
     "vs_prev_year": {
      "abs": 11372802.68471829,
      "pct": null,
-     "current_as_of": "2026-11-10T19:30:09+08:00",
+     "current_as_of": "2026-11-10T22:13:37+08:00",
      "compare_as_of": null,
      "compare_month": "2025-10",
      "compare_value": 0,
@@ -6162,7 +6170,7 @@
     "platform": "CITI",
     "account_id": 11,
     "original_filename": "DUMMY_citi_card.csv",
-    "created_at": "2026-11-04T11:29:32.948577+00:00",
+    "created_at": "2026-11-04T14:12:57.768277+00:00",
     "error_message": null,
     "removed_at": null,
     "removable": false
@@ -6173,7 +6181,7 @@
     "platform": "AMEX",
     "account_id": 10,
     "original_filename": "DUMMY_amex_card.csv",
-    "created_at": "2026-11-02T11:29:32.948577+00:00",
+    "created_at": "2026-11-02T14:12:57.768277+00:00",
     "error_message": "Some merchants require mapping review",
     "removed_at": null,
     "removable": false
@@ -6184,7 +6192,7 @@
     "platform": "DBS",
     "account_id": 8,
     "original_filename": "DUMMY_dbs_card.csv",
-    "created_at": "2026-10-31T11:29:32.948577+00:00",
+    "created_at": "2026-10-31T14:12:57.768277+00:00",
     "error_message": null,
     "removed_at": null,
     "removable": false
@@ -6195,7 +6203,7 @@
     "platform": "IBKR",
     "account_id": 5,
     "original_filename": "DUMMY_ibkr.csv",
-    "created_at": "2026-10-27T11:29:32.948577+00:00",
+    "created_at": "2026-10-27T14:12:57.768277+00:00",
     "error_message": null,
     "removed_at": null,
     "removable": false
@@ -6206,7 +6214,7 @@
     "platform": "UOB",
     "account_id": 4,
     "original_filename": "DUMMY_uob.xls",
-    "created_at": "2026-10-25T11:29:32.948577+00:00",
+    "created_at": "2026-10-25T14:12:57.768277+00:00",
     "error_message": null,
     "removed_at": null,
     "removable": false
@@ -6217,7 +6225,7 @@
     "platform": "OCBC",
     "account_id": 3,
     "original_filename": "DUMMY_ocbc.csv",
-    "created_at": "2026-10-23T11:29:32.948577+00:00",
+    "created_at": "2026-10-23T14:12:57.768277+00:00",
     "error_message": null,
     "removed_at": null,
     "removable": false
@@ -6228,7 +6236,7 @@
     "platform": "DBS",
     "account_id": 2,
     "original_filename": "DUMMY_dbs_savings.csv",
-    "created_at": "2026-10-21T11:29:32.948577+00:00",
+    "created_at": "2026-10-21T14:12:57.768277+00:00",
     "error_message": null,
     "removed_at": null,
     "removable": false
@@ -8339,7 +8347,9 @@
      "available_limit_as_of": null,
      "statement_day": 15,
      "due_day": 22,
-     "due_date": "2026-11-22"
+     "due_date": "2026-11-22",
+     "due_source": "configured",
+     "due_status": null
     },
     {
      "account_id": 11,
@@ -8352,7 +8362,9 @@
      "available_limit_as_of": null,
      "statement_day": 8,
      "due_day": 15,
-     "due_date": "2026-11-15"
+     "due_date": "2026-11-15",
+     "due_source": "configured",
+     "due_status": null
     },
     {
      "account_id": 8,
@@ -8365,7 +8377,9 @@
      "available_limit_as_of": null,
      "statement_day": 20,
      "due_day": 25,
-     "due_date": "2026-11-25"
+     "due_date": "2026-11-25",
+     "due_source": "configured",
+     "due_status": null
     },
     {
      "account_id": 9,
@@ -8378,7 +8392,9 @@
      "available_limit_as_of": null,
      "statement_day": 10,
      "due_day": 18,
-     "due_date": "2026-11-18"
+     "due_date": "2026-11-18",
+     "due_source": "configured",
+     "due_status": null
     }
    ],
    "charges": [
@@ -9189,6 +9205,14 @@
      "fees_interest_ytd": 196.2,
      "last_transaction_date": "2026-11-07",
      "flagged_count": 0,
+     "due_source": null,
+     "due_statement_date": null,
+     "amount_due": null,
+     "minimum_due": null,
+     "paid_toward_due": null,
+     "remaining_due": null,
+     "due_status": null,
+     "minimum_paid": null,
      "periods": []
     },
     {
@@ -9210,6 +9234,14 @@
      "fees_interest_ytd": 0,
      "last_transaction_date": "2026-11-06",
      "flagged_count": 0,
+     "due_source": null,
+     "due_statement_date": null,
+     "amount_due": null,
+     "minimum_due": null,
+     "paid_toward_due": null,
+     "remaining_due": null,
+     "due_status": null,
+     "minimum_paid": null,
      "periods": []
     },
     {
@@ -9231,6 +9263,14 @@
      "fees_interest_ytd": 0,
      "last_transaction_date": "2026-11-07",
      "flagged_count": 0,
+     "due_source": null,
+     "due_statement_date": null,
+     "amount_due": null,
+     "minimum_due": null,
+     "paid_toward_due": null,
+     "remaining_due": null,
+     "due_status": null,
+     "minimum_paid": null,
      "periods": []
     },
     {
@@ -9252,6 +9292,14 @@
      "fees_interest_ytd": 114.86,
      "last_transaction_date": "2026-11-07",
      "flagged_count": 0,
+     "due_source": null,
+     "due_statement_date": null,
+     "amount_due": null,
+     "minimum_due": null,
+     "paid_toward_due": null,
+     "remaining_due": null,
+     "due_status": null,
+     "minimum_paid": null,
      "periods": []
     }
    ]
