@@ -1,0 +1,246 @@
+/* Data Hub → "+ Add" (#319): a four-step flow; one column, phone-first. */
+.addFlow {
+  display: grid;
+  gap: 16px;
+  max-width: 760px;
+  min-width: 0;
+}
+
+.addFlowSteps {
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+
+.addFlowStep {
+  flex: 1 1 0;
+  min-width: 0;
+  border-bottom: 3px solid var(--line);
+  padding-bottom: 6px;
+}
+
+.addFlowStepCurrent {
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.addFlowStepDone {
+  border-bottom-color: var(--accent);
+  opacity: 0.8;
+}
+
+.addFlowStepBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+button.addFlowStepBtn {
+  cursor: pointer;
+}
+
+button.addFlowStepBtn > span:not(.addFlowStepNum) {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.addFlowStepBtn > span:not(.addFlowStepNum) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addFlowStepNum {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.addFlowStepCurrent .addFlowStepNum,
+.addFlowStepDone .addFlowStepNum {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--bg);
+}
+
+.addFlowTitle {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  font-size: 20px;
+  outline: none;
+}
+
+.addFlowTitleText {
+  color: var(--text);
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.addFlowStepOf {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.addFlowChoices {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+
+.addFlowPlatforms {
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.addFlowChoice {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.addFlowChoice:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.addFlowChoiceOn {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.addFlowChoice input {
+  margin-top: 3px;
+  flex: none;
+}
+
+.addFlowChoiceText {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.addFlowChoiceText .muted {
+  font-size: 13px;
+}
+
+.addFlowMore {
+  justify-self: start;
+}
+
+.addFlowInline {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+}
+
+.addFlowSummary {
+  margin: 0;
+}
+
+.addFlowBlocked {
+  margin: 0;
+  padding: 8px 12px;
+  border-left: 3px solid var(--warn);
+  background: var(--panel);
+}
+
+.addFlowBlocked p {
+  margin: 0 0 6px;
+}
+
+.addFlowError {
+  color: var(--bad);
+}
+
+.addFlowDone {
+  margin: 0;
+  font-weight: 600;
+}
+
+.addFlowResult {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.addFlowResult p {
+  margin: 0;
+}
+
+.addFlowBreak {
+  overflow-wrap: anywhere;
+}
+
+.addFlowActions {
+  flex-wrap: wrap;
+}
+
+.addFlowCancel {
+  margin-left: auto;
+}
+
+@media (max-width: 600px) {
+  /* Phone: numbers only in the step bar; the heading names the step. */
+  .addFlowStepBtn > span:not(.addFlowStepNum) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .addFlowStepCurrent .addFlowStepBtn > span:not(.addFlowStepNum):not(.srOnly) {
+    position: static;
+    width: auto;
+    height: auto;
+    clip: auto;
+  }
+
+  .addFlowChoices {
+    grid-template-columns: 1fr;
+  }
+
+  .addFlowActions > .btn {
+    flex: 1 1 auto;
+    text-align: center;
+  }
+
+  .addFlowCancel {
+    margin-left: 0;
+  }
+}

@@ -89,7 +89,7 @@ export default function DashboardHeader({
           <div className="userMenuPanel">
             <section className="userMenuSection" aria-label="Manage">
               <div className="cardTitle">Manage</div>
-              <Link className="menuLink menuLinkPrimary" to="/accounts/new">
+              <Link className="menuLink menuLinkPrimary" to="/add">
                 <span aria-hidden="true">+</span>
                 <span>Add Account</span>
               </Link>

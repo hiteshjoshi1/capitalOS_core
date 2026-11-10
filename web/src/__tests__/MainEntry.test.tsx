@@ -14,9 +14,8 @@ vi.mock("react-dom/client", () => ({
 
 vi.mock("../App.tsx", () => ({ default: () => null }));
 vi.mock("../components/AppShell.tsx", () => ({ default: () => null }));
-vi.mock("../routes/AddAccount.tsx", () => ({ default: () => null }));
+vi.mock("../routes/AddFlow.tsx", () => ({ default: () => null }));
 vi.mock("../routes/Ingest.tsx", () => ({ default: () => null }));
-vi.mock("../routes/CryptoWalletsPage.tsx", () => ({ default: () => null }));
 vi.mock("../routes/CryptoHoldings.tsx", () => ({ default: () => null }));
 vi.mock("../routes/StockHoldings.tsx", () => ({ default: () => null }));
 vi.mock("../routes/CashOverview.tsx", () => ({ default: () => null }));

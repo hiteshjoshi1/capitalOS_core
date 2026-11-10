@@ -173,8 +173,8 @@ export default function OperationsOverview() {
 
           <nav className="inboxAdd" aria-label="Add data">
             <Link className="inboxAddLink" to="/ingest">Upload a statement</Link>
-            <Link className="inboxAddLink" to="/accounts/new">Add an account</Link>
-            <Link className="inboxAddLink" to="/crypto">Add a wallet</Link>
+            <Link className="inboxAddLink" to="/add">Add an account</Link>
+            <Link className="inboxAddLink" to="/add?what=wallet">Add a wallet</Link>
             <Link className="inboxAddLink" to="/market-data">Market data</Link>
           </nav>
 

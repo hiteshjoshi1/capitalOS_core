@@ -5,8 +5,8 @@ import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import "@solana/wallet-adapter-react-ui/styles.css";
 
 // The Solana wallet stack (providers, Phantom adapter, modal CSS, @solana/web3.js) is
-// only needed by the Crypto Wallets page. This module is reached only through the
-// lazily loaded CryptoWalletsPage, so none of it is in the initial bundle (#145).
+// only needed to add a wallet. This module is reached only through the
+// lazily loaded WalletConnectStep ("+ Add", #319), so none of it is in the initial bundle (#145).
 const solanaEndpoint =
   (import.meta.env.VITE_SOLANA_RPC as string) || "https://api.mainnet-beta.solana.com";
 // Module level: one adapter instance for the whole session, created the first time the

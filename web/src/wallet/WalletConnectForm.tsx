@@ -4,14 +4,13 @@ import { useWallet } from "@solana/wallet-adapter-react";
 import { Transaction, TransactionInstruction, PublicKey } from "@solana/web3.js";
 import bs58 from "bs58";
 
-import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { CryptoWallet } from "../lib/api";
 import "../App.css";
-import PageShell from "../components/PageShell";
-import LoadError from "../components/LoadError";
 
-const MOBILE_BREAKPOINT_PX = 900;
+// The connect-and-sign part of adding a self-custody wallet (#319: the "+ Add" stepper's last step;
+// it was the Add Crypto Wallets page). The stepper picks the chain and label; this connects the
+// wallet, has it sign the server's challenge, and verifies it, which starts its first sync.
+// Rendered only inside SolanaWalletShell (WalletConnectStep), so the Solana stack stays lazy (#145).
 
 const EVM_CHAIN_MAP: Record<number, string> = {
   1: "ethereum",
@@ -41,12 +40,16 @@ type Eip1193Provider = {
   removeListener: (event: string, listener: (...args: unknown[]) => void) => void;
 };
 
-export default function CryptoWallets() {
-  const [wallets, setWallets] = useState<CryptoWallet[]>([]);
+export type WalletConnectFormProps = {
+  chainType: "evm" | "solana";
+  /** Optional name for the wallet; sent with the challenge. */
+  label: string;
+  /** Called once the server has verified the signature (the message names the wallet). */
+  onVerified: (message: string) => void;
+};
+
+export default function WalletConnectForm({ chainType, label, onVerified }: WalletConnectFormProps) {
   const [error, setError] = useState<string>("");
-  const [status, setStatus] = useState<string>("");
-  const [label, setLabel] = useState<string>("");
-  const [chainType, setChainType] = useState<"evm" | "solana">("evm");
   const [evmAddress, setEvmAddress] = useState<string>("");
   const [evmChainId, setEvmChainId] = useState<number>(1);
   const [connectingEvm, setConnectingEvm] = useState<boolean>(false);
@@ -64,42 +67,14 @@ export default function CryptoWallets() {
     }
   }
 
-  const [isMobile, setIsMobile] = useState<boolean>(() => window.innerWidth <= MOBILE_BREAKPOINT_PX);
-
-  useEffect(() => {
-    const handleResize = () => setIsMobile(window.innerWidth <= MOBILE_BREAKPOINT_PX);
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
   const evmChain = useMemo(() => EVM_CHAIN_MAP[evmChainId] || "ethereum", [evmChainId]);
   const evmConnected = evmAddress.length > 0;
   const solAddress = publicKey?.toString() ?? "";
-  const walletCount = wallets.length;
 
   const getEthereum = (): Eip1193Provider | null => {
     const provider = (window as Window & { ethereum?: Eip1193Provider }).ethereum;
     return provider ?? null;
   };
-
-  const loadWallets = async () => {
-    const data = await api.cryptoWallets();
-    setWallets(data);
-  };
-
-  useEffect(() => {
-    // State is only set in the promise callbacks; `cancelled` drops responses that land after unmount.
-    let cancelled = false;
-    (async () => {
-      const data = await api.cryptoWallets();
-      if (!cancelled) setWallets(data);
-    })().catch((e) => {
-      if (!cancelled) setError(e?.message ?? String(e));
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     const provider = getEthereum();
@@ -197,7 +172,6 @@ export default function CryptoWallets() {
     }
     try {
       setError("");
-      setStatus("");
       const init = await api.cryptoWalletInit({
         chain_type: "evm",
         chain: evmChain,
@@ -218,9 +192,7 @@ export default function CryptoWallets() {
         signature: signatureResult,
         verification_id: init.verification_id,
       });
-      setStatus(`Wallet ${res.wallet_id} verified`);
-      setLabel("");
-      await loadWallets();
+      onVerified(`Wallet ${res.wallet_id} verified`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -233,7 +205,6 @@ export default function CryptoWallets() {
     }
     try {
       setError("");
-      setStatus("");
       const init = await api.cryptoWalletInit({
         chain_type: "solana",
         chain: "solana",
@@ -267,7 +238,7 @@ export default function CryptoWallets() {
           signature: sig.signature,
           verification_id: init.verification_id ?? 0,
         });
-        setStatus(`Wallet ${res.wallet_id} verified via on-chain memo`);
+        onVerified(`Wallet ${res.wallet_id} verified via on-chain memo`);
       } else {
         const messageBytes = init.message_bytes_b64
           ? Uint8Array.from(atob(init.message_bytes_b64), (c) => c.charCodeAt(0))
@@ -287,162 +258,98 @@ export default function CryptoWallets() {
           signature,
           verification_id: init.verification_id,
         });
-        setStatus(`Wallet ${res.wallet_id} verified`);
+        onVerified(`Wallet ${res.wallet_id} verified`);
       }
-      setLabel("");
-      await loadWallets();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : String(e));
     }
   };
 
   return (
-    <PageShell
-      title="Add Crypto Wallets"
-      subtitle="Connect a wallet, sign a message, and verify ownership. Verification triggers ingestion."
-      headerActions={<span className="pill">Wallets: {walletCount}</span>}
-    >
-      <div className="wealthOverviewLayout">
-      {error && (
-        <LoadError title="Error" error={error} />
-      )}
-
-      {status && (
-        <div className="card">
-          <div className="cardTitle">Status</div>
-          <div>{status}</div>
-        </div>
-      )}
-
-      <section aria-label="Connect a wallet and view connected wallets">
-      <div className="coExposureGrid">
-      {!isMobile ? (
-      <div className="card">
-        <div className="cardTitle">Add wallet</div>
-        <div className="formGrid">
-          <label className="field">
-            <span className="label">Chain Type</span>
-            <select
-              className="input"
-              aria-label="Chain Type"
-              value={chainType}
-              onChange={(e) => setChainType(e.target.value as "evm" | "solana")}
-            >
-              <option value="evm">EVM</option>
-              <option value="solana">Solana</option>
-            </select>
-          </label>
-          <label className="field">
-            <span className="label">Label</span>
-            <input
-              className="input"
-              aria-label="Label"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder="Optional label"
-            />
-          </label>
-          <div className="field">
-            <span className="label">Wallet</span>
-            {chainType === "evm" ? (
-              <div style={{ marginTop: 6 }}>
-                {!evmConnected ? (
-                  <button
-                    className="btn"
-                    onClick={connectEvm}
-                    disabled={connectingEvm}
-                  >
-                    {connectingEvm ? "Connecting..." : "Connect wallet"}
-                  </button>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div className="muted">Connected: {evmAddress}</div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <select
-                        className="input"
-                        value={evmChainId}
-                        onChange={(e) => void switchEvmChain(Number(e.target.value))}
-                        style={{ maxWidth: 220 }}
-                      >
-                        {EVM_CHAINS.map((chain) => (
-                          <option key={chain.id} value={chain.id}>
-                            {chain.name}
-                          </option>
-                        ))}
-                      </select>
-                      {evmAddress && (
-                        <button
-                          className="btn"
-                          onClick={() => navigator.clipboard.writeText(evmAddress)}
-                        >
-                          Copy address
-                        </button>
-                      )}
-                      <button className="btn" onClick={() => setEvmAddress("")}>Disconnect</button>
-                    </div>
-                  </div>
-                )}
-              </div>
+    <div className="formGrid">
+      <div className="field">
+        <span className="label">Wallet</span>
+        {chainType === "evm" ? (
+          <div style={{ marginTop: 6 }}>
+            {!evmConnected ? (
+              <button className="btn" type="button" onClick={connectEvm} disabled={connectingEvm}>
+                {connectingEvm ? "Connecting..." : "Connect wallet"}
+              </button>
             ) : (
-              <div style={{ marginTop: 6 }}>
-                <WalletMultiButton />
-                <div className="muted" style={{ marginTop: 6 }}>
-                  {connected && solAddress ? `Connected: ${solAddress}` : "Not connected"}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                <div className="muted addFlowBreak">Connected: {evmAddress}</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <select
+                    className="input"
+                    aria-label="Network"
+                    value={evmChainId}
+                    onChange={(e) => void switchEvmChain(Number(e.target.value))}
+                    style={{ maxWidth: 220 }}
+                  >
+                    {EVM_CHAINS.map((chain) => (
+                      <option key={chain.id} value={chain.id}>
+                        {chain.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(evmAddress)}>
+                    Copy address
+                  </button>
+                  <button className="btn" type="button" onClick={() => setEvmAddress("")}>
+                    Disconnect
+                  </button>
                 </div>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                  <input
-                    type="checkbox"
-                    checked={useHardwareSolana}
-                    onChange={(e) => setUseHardwareSolana(e.target.checked)}
-                  />
-                  <span>Using Ledger / hardware wallet (verify via on-chain memo)</span>
-                </label>
-                {connected && solAddress && (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-                    <button className="btn" onClick={() => navigator.clipboard.writeText(solAddress)}>
-                      Copy address
-                    </button>
-                    <button className="btn" onClick={() => disconnectSolana()}>Disconnect</button>
-                  </div>
-                )}
               </div>
             )}
           </div>
-        </div>
-        <div className="actions">
-          {chainType === "evm" ? (
-            <button className="btn" onClick={verifyEvm} disabled={!evmConnected}>
-              Sign & verify
-            </button>
-          ) : (
-            <button className="btn" onClick={verifySolana} disabled={!connected}>
-              Sign & verify
-            </button>
-          )}
-        </div>
+        ) : (
+          <div style={{ marginTop: 6 }}>
+            <WalletMultiButton />
+            <div className="muted addFlowBreak" style={{ marginTop: 6 }}>
+              {connected && solAddress ? `Connected: ${solAddress}` : "Not connected"}
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+              <input
+                type="checkbox"
+                checked={useHardwareSolana}
+                onChange={(e) => setUseHardwareSolana(e.target.checked)}
+              />
+              <span>Using Ledger / hardware wallet (verify via on-chain memo)</span>
+            </label>
+            {connected && solAddress && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                <button className="btn" type="button" onClick={() => navigator.clipboard.writeText(solAddress)}>
+                  Copy address
+                </button>
+                <button className="btn" type="button" onClick={() => disconnectSolana()}>
+                  Disconnect
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
-      ) : (
-      <div className="card cryptoMobileNotice">
-        <div className="cardTitle">Connect a wallet</div>
-        <p className="muted">
-          Connecting a new wallet needs a browser extension or hardware device — open Data Hub → Add Crypto Wallets
-          on desktop to add one. Your connected wallets are listed in Accounts & sources.
+
+      <div className="actions">
+        <button
+          className="btn btnPrimary"
+          type="button"
+          onClick={chainType === "evm" ? verifyEvm : verifySolana}
+        >
+          Sign &amp; verify
+        </button>
+      </div>
+      {/* #319: say what's missing instead of a disabled button. */}
+      {!error && !(chainType === "evm" ? evmConnected : connected) && (
+        <p className="hint" role="note">
+          To sign: connect the wallet first.
         </p>
-      </div>
       )}
-
-      {/* #318: connected wallets are listed, with their status and Refresh, in Accounts & sources. */}
-      <p className="card muted">
-        {wallets.length === 0
-          ? "No wallets connected yet."
-          : `${wallets.length} wallet${wallets.length === 1 ? "" : "s"} connected.`}{" "}
-        <Link to="/operations/sources">See them in Accounts &amp; sources</Link>.
-      </p>
-      </div>
-      </section>
-
-      {/* #321: the token allowlist moved to Settings → Admin. */}
-      </div>
-    </PageShell>
+      {error && (
+        <p className="hint addFlowError" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

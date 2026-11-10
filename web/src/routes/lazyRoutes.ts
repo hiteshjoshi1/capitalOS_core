@@ -3,10 +3,9 @@ import { lazy } from "react";
 // The landing page (/wealth, where / and login redirect) and the auth pages load eagerly;
 // every other route is its own chunk, fetched on first visit. AppShell wraps its Outlet in
 // Suspense, so the shell stays on screen while a chunk loads (#145).
-// The Crypto Wallets page brings its own Solana providers (CryptoWalletsPage), so the
-// wallet-adapter / @solana/web3.js stack loads only with that page.
-export const CryptoWalletsPage = lazy(() => import("./CryptoWalletsPage.tsx"));
-export const AddAccount = lazy(() => import("./AddAccount.tsx"));
+// "+ Add" (#319) loads its wallet step (with the Solana providers) lazily on top, so the
+// wallet-adapter / @solana/web3.js stack loads only when a wallet is being added.
+export const AddFlow = lazy(() => import("./AddFlow.tsx"));
 export const Ingest = lazy(() => import("./Ingest.tsx"));
 export const CryptoHoldings = lazy(() => import("./CryptoHoldings.tsx"));
 export const StockHoldings = lazy(() => import("./StockHoldings.tsx"));

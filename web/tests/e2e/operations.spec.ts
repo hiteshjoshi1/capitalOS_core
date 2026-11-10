@@ -122,7 +122,7 @@ test.beforeEach(async ({ page }) => {
   await mockAuthenticatedSession(page);
 });
 
-test("Data Hub has three tabs; Add Account opens from Accounts & sources (#321)", async ({ page }) => {
+test("Data Hub has three tabs; + Add opens from Accounts & sources (#321, #319)", async ({ page }) => {
   await mockDashboardApis(page);
   await mockOperationsApis(page);
 
@@ -132,9 +132,12 @@ test("Data Hub has three tabs; Add Account opens from Accounts & sources (#321)"
   await expect(page.getByRole("link", { name: /^Accounts & sources$/ }).last()).toBeVisible();
   await expect(page.getByRole("link", { name: /^Add Platforms$/ })).toHaveCount(0);
 
+  // The old Add Account address opens the + Add stepper (#319).
   await page.goto("/accounts/new");
-  await expect(page.getByRole("heading", { level: 1, name: "Add Account" })).toBeVisible();
-  // Add Account counts as the Accounts & sources tab.
+  await expect(page).toHaveURL(/\/add$/);
+  await expect(page.getByRole("heading", { level: 1, name: "Add" })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /Bank account/ })).toBeVisible();
+  // + Add counts as the Accounts & sources tab.
   await expect(page.locator(".appShellTabActive")).toHaveText("Accounts & sources");
 });
 
