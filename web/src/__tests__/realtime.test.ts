@@ -151,6 +151,8 @@ describe("realtime client", () => {
 
     unsubscribe();
     vi.useRealTimers();
+  });
+
   async function connectedClient() {
     vi.stubGlobal("fetch", vi.fn());
     vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
