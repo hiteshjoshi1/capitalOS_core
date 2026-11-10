@@ -192,7 +192,7 @@ export default function LiabilitiesOverview() {
               <strong>No credit cards linked yet</strong>
               <span className="muted">Add a credit card account to see monthly spend, charges, and trends here.</span>
             </div>
-            <a className="btn" href="/accounts/new">
+            <a className="btn" href="/add?what=card">
               Add account
             </a>
           </div>

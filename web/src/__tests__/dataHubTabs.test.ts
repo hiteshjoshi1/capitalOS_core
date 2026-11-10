@@ -15,7 +15,7 @@ describe("Data Hub tabs (#321)", () => {
   it.each([
     ["/operations", "Inbox"],
     ["/operations/sources", "Accounts & sources"],
-    ["/accounts/new", "Accounts & sources"],
+    ["/add", "Accounts & sources"],
     ["/market-data", "Accounts & sources"],
     ["/ingest", "Imports"],
   ])("%s is under Data Hub → %s", (path, tab) => {
@@ -23,9 +23,14 @@ describe("Data Hub tabs (#321)", () => {
     expect(findActiveTab(hub, path)?.label).toBe(tab);
   });
 
-  it("keeps /crypto (add a wallet) in Data Hub and /crypto/holdings in Wealth", () => {
-    expect(findActiveSection("/crypto")?.id).toBe("operations");
+  it("keeps /crypto/holdings in Wealth", () => {
     expect(findActiveSection("/crypto/holdings")?.id).toBe("wealth");
+  });
+
+  it("redirects the old add pages to the + Add stepper (#319)", () => {
+    const main = readFileSync(resolve(__dirname, "../main.tsx"), "utf8");
+    expect(main).toMatch(/path="\/accounts\/new" element=\{<Navigate to="\/add" replace \/>\}/);
+    expect(main).toMatch(/path="\/crypto" element=\{<Navigate to="\/add\?what=wallet" replace \/>\}/);
   });
 
   it("redirects the old platforms page to Settings → Admin", () => {

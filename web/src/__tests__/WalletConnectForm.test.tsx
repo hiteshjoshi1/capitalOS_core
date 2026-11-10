@@ -1,10 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { MemoryRouter } from "react-router-dom";
 
-import CryptoWallets from "../routes/CryptoWallets";
-import { ThemeProvider } from "../context/ThemeContext";
+import WalletConnectForm from "../wallet/WalletConnectForm";
 
 const { mockApi } = vi.hoisted(() => ({
   mockApi: {
@@ -57,17 +55,14 @@ function setEthereumProvider(provider: EthereumProviderMock | undefined) {
   });
 }
 
-function renderRoute() {
-  return render(
-    <ThemeProvider>
-      <MemoryRouter>
-        <CryptoWallets />
-      </MemoryRouter>
-    </ThemeProvider>,
-  );
+const onVerified = vi.fn();
+
+function renderRoute(chainType: "evm" | "solana" = "evm") {
+  return render(<WalletConnectForm chainType={chainType} label="" onVerified={onVerified} />);
 }
 
-describe("CryptoWallets route", () => {
+// #319: the connect-and-sign step of "+ Add" (was the Add Crypto Wallets page).
+describe("WalletConnectForm", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSolanaState.publicKey = null;
@@ -96,11 +91,10 @@ describe("CryptoWallets route", () => {
     });
   });
 
-  it("renders page shell and shows connect wallet action", async () => {
+  it("shows the connect wallet action", async () => {
     setEthereumProvider(undefined);
     renderRoute();
-    expect(await screen.findByText("Add wallet")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Connect wallet" })).toBeInTheDocument();
   });
 
   it("shows error when trying to connect EVM without provider", async () => {
@@ -151,6 +145,7 @@ describe("CryptoWallets route", () => {
         verification_id: 9,
       });
     });
+    expect(onVerified).toHaveBeenCalledWith("Wallet w1 verified");
   });
 
   it("shows verification error when wallet returns invalid signature", async () => {
@@ -174,7 +169,7 @@ describe("CryptoWallets route", () => {
     expect(await screen.findByText("Wallet did not return a valid signature.")).toBeInTheDocument();
   });
 
-  it("keeps EVM verify disabled until an address is connected", async () => {
+  it("says to connect first instead of a disabled Sign & verify (#319)", async () => {
     const request = vi.fn(async ({ method }: { method: string }) => {
       if (method === "eth_accounts") return [];
       if (method === "eth_chainId") return "0x1";
@@ -188,10 +183,11 @@ describe("CryptoWallets route", () => {
 
     const user = userEvent.setup();
     renderRoute();
-    await screen.findByText("Add wallet");
-    expect(screen.getByRole("button", { name: "Sign & verify" })).toBeDisabled();
+    expect(await screen.findByText("To sign: connect the wallet first.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign & verify" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "Sign & verify" }));
-    expect(screen.queryByText("Connect your EVM wallet first.")).not.toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Connect your EVM wallet first.");
+    expect(mockApi.cryptoWalletInit).not.toHaveBeenCalled();
   });
 
   it("shows Solana connection error when trying to verify without a connected wallet", async () => {
@@ -199,9 +195,8 @@ describe("CryptoWallets route", () => {
     mockSolanaState.connected = true;
     mockSolanaState.publicKey = null;
     const user = userEvent.setup();
-    renderRoute();
+    renderRoute("solana");
 
-    await user.selectOptions(screen.getByLabelText("Chain Type"), "solana");
     await user.click(screen.getByRole("button", { name: "Sign & verify" }));
 
     expect(await screen.findByText("Connect your Solana wallet first.")).toBeInTheDocument();
@@ -226,14 +221,14 @@ describe("CryptoWallets route", () => {
     mockSolanaState.wallet = { adapter: { name: "ledger nano" } };
 
     const user = userEvent.setup();
-    renderRoute();
+    const { rerender } = renderRoute();
     await user.click(await screen.findByRole("button", { name: "Connect wallet" }));
     await screen.findByText("Connected: 0xabc");
 
-    await user.selectOptions(screen.getAllByRole("combobox")[1], "8453");
+    await user.selectOptions(screen.getByLabelText("Network"), "8453");
     expect(await screen.findByText("switch failed")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Chain Type"), "solana");
+    rerender(<WalletConnectForm chainType="solana" label="" onVerified={onVerified} />);
     expect(await screen.findByText("Connected: SoL123456789")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Copy address" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Disconnect" })).toBeInTheDocument();
@@ -257,27 +252,5 @@ describe("CryptoWallets route", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect wallet" }));
     expect(await screen.findByText("connect failed")).toBeInTheDocument();
-  });
-
-  it("lists no wallets here: they're in Accounts & sources (#318)", async () => {
-    setEthereumProvider(undefined);
-    renderRoute();
-    expect(await screen.findByText(/No wallets connected yet/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "See them in Accounts & sources" })).toHaveAttribute("href", "/operations/sources");
-    // #321: the token allowlist moved to Settings → Admin.
-    expect(screen.queryByRole("button", { name: "Add token" })).not.toBeInTheDocument();
-  });
-
-  it("shows a desktop-only notice instead of the connect form on narrow viewports", async () => {
-    setEthereumProvider(undefined);
-    Object.defineProperty(window, "innerWidth", { value: 480, configurable: true, writable: true });
-
-    renderRoute();
-
-    expect(await screen.findByText(/desktop to add one/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Connect wallet" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add token" })).not.toBeInTheDocument();
-
-    Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
   });
 });

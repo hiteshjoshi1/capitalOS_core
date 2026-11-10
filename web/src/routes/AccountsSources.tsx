@@ -62,8 +62,8 @@ export default function AccountsSources() {
     <details className="inboxRefreshMenu sourcesAddMenu">
       <summary className="btn btnPrimary inboxRefreshMenuToggle">+ Add ▾</summary>
       <div className="inboxRefreshMenuPanel" role="group" aria-label="Add">
-        <Link className="inboxRefreshMenuItem" to="/accounts/new">Account</Link>
-        <Link className="inboxRefreshMenuItem" to="/crypto">Wallet</Link>
+        <Link className="inboxRefreshMenuItem" to="/add">Account or card</Link>
+        <Link className="inboxRefreshMenuItem" to="/add?what=wallet">Wallet</Link>
         <Link className="inboxRefreshMenuItem" to="/ingest">Statement upload</Link>
       </div>
     </details>
@@ -267,11 +267,6 @@ function SourceRow({
               <button type="button" className="inboxRefreshMenuItem" onClick={() => openPanel("close")}>
                 {row.closed ? "Reopen account…" : "Close account…"}
               </button>
-            )}
-            {f.kind === "crypto_wallet" && (
-              <Link className="inboxRefreshMenuItem" to="/crypto">
-                Wallet settings
-              </Link>
             )}
             {(f.kind === "market_data" || f.kind === "fx") && (
               <Link className="inboxRefreshMenuItem" to="/market-data">

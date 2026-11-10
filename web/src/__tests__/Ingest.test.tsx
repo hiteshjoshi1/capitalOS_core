@@ -232,7 +232,7 @@ describe("Ingest", () => {
     );
 
     expect(await screen.findByText("No accounts found.")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Create account" })).toHaveAttribute("href", "/accounts/new");
+    expect(screen.getByRole("link", { name: "Create account" })).toHaveAttribute("href", "/add");
   });
 
   it("preselects the account from the alert account_id query parameter", async () => {
