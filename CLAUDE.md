@@ -110,6 +110,10 @@ From the main checkout:
   NULL-owner rows (the `client` fixture signs in with a real token; `tests/auth_helpers.py` for other users), and
   `tests/test_cross_user_isolation.py` checks every GET route as a second user.
 - `make verify` runs frontend and backend lint + typecheck + backend/frontend tests.
+- Full-stack smoke + screenshot diffs (#73, CI job `smoke`): `make e2e-smoke` runs a throwaway Postgres + API + web
+  container on the demo seed and opens every page at 375/1440px in the pinned Playwright image; screenshots are
+  compared with `web/tests/smoke/__screenshots__`. An intended visual change: `make e2e-smoke-update`, look at the
+  PNGs, commit them. A page calling a new endpoint: `make e2e-smoke-record` (re-records the demo fixture), then update.
 - Python dependency change: edit `api/requirements*.in` / `orchestration/requirements.in` (direct pins),
   then `make api-lock` / `make orch-lock` regenerates the hashed lock `requirements*.txt` the image and venv
   install with `--require-hashes` (#81). A transitive package under 14 days old fails the lock (and CI):
