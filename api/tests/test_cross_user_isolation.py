@@ -82,14 +82,20 @@ SHARED_ROUTES: dict[str, str] = {
     "/currencies": "the shared currency list",
     "/crypto/allowlist": "the shared token allowlist (admin-maintained)",
     "/market-data/runs": "shared market-data job history (prices are shared data)",
+    "/auth/methods": "which sign-in methods are on (server config, no user data)",
 }
 # Not called, with the reason.
 SKIPPED_ROUTES: dict[str, str] = {
     "/crypto/solana/blockhash": "relays a public Solana RPC call over the network; reads no stored data",
+    "/auth/google/start": "redirects to Google to sign in (#358); reads no stored data",
+    "/auth/google/callback": "Google's redirect back with a one-time code (#358); signs in, reads no user data",
 }
 # Answer without a login, with the reason. Every other GET must refuse an anonymous call.
 PUBLIC_ROUTES: dict[str, str] = {
     "/health": "liveness probe for Docker and make deploy",
+    "/auth/methods": "the sign-in page asks which methods are on before anyone is signed in (#358)",
+    "/auth/google/start": "starts Sign in with Google, before anyone is signed in (#358)",
+    "/auth/google/callback": "where Google sends the browser back to finish signing in (#358)",
 }
 # Positive control: A's own answer differs from B's here, so A's data reaches these routes.
 A_SEES_OWN_DATA = (

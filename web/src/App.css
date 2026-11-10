@@ -2396,6 +2396,21 @@ a.btn {
   font-size: 13px;
 }
 
+/* #358: Sign in with Google, then a quiet divider before the password form. */
+.authGoogleBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-decoration: none;
+}
+
+.authDivider {
+  margin: 4px 0 0;
+  text-align: center;
+  font-size: 13px;
+}
+
 /* ── Alert Cards ────────────────────────────────────────────── */
 .alertSectionTitle {
   margin: 0 0 10px;

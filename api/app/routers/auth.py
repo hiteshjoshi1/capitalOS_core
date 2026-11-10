@@ -3,7 +3,10 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 
+import html
+
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -11,6 +14,7 @@ from app.auth_context import CurrentUser, account_scope_sql, require_current_use
 from app.core.clock import default_timezone_name, normalize_timezone_name
 from app.db.session import get_db
 from app.schemas.auth import (
+    AuthMethodsResponse,
     AuthMeResponse,
     AuthSessionResponse,
     ChangePasswordRequest,
@@ -33,7 +37,8 @@ from app.services.auth import (
     refresh_token_ttl_seconds,
     verify_password,
 )
-from app.services.login_throttle import client_ip, login_throttle
+from app.services import google_oauth
+from app.services.login_throttle import client_ip, login_throttle, request_authority
 from app.services.passwords import set_user_password
 from app.services.user_preferences import BASE_CURRENCIES, timezone_source
 from app.wealth_rollup_dirty import mark_rollups_dirty
@@ -55,6 +60,11 @@ def _dummy_hash() -> str:
 def signup_allowed() -> bool:
     """Signup is off unless AUTH_ALLOW_SIGNUP is set to a true value (#152)."""
     return os.getenv("AUTH_ALLOW_SIGNUP", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def password_login_allowed() -> bool:
+    """Password sign-in is on unless AUTH_PASSWORD_LOGIN is set to a false value (#358)."""
+    return os.getenv("AUTH_PASSWORD_LOGIN", "1").strip().lower() not in {"0", "false", "no", "off"}
 
 
 def _refresh_grace_seconds() -> int:
@@ -231,6 +241,8 @@ def signup(payload: SignupRequest, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=AuthSessionResponse)
 def login(payload: LoginRequest, request: Request, response: Response, db: Session = Depends(get_db)):
+    if not password_login_allowed():
+        raise HTTPException(status_code=403, detail="Password sign-in is turned off; use Sign in with Google")
     username_input = payload.username.strip()
     ip = client_ip(request)
     wait = login_throttle.retry_after(username=username_input, ip=ip)
@@ -432,6 +444,144 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
         db.commit()
     response.delete_cookie(refresh_cookie_name(), path="/")
     return {"status": "ok"}
+
+
+@router.get("/methods", response_model=AuthMethodsResponse)
+def auth_methods(request: Request):
+    """Which ways of signing in are on (public: the sign-in page asks before anyone is signed in).
+
+    Google counts as on only at an address it's set up for, so a test instance (another port,
+    sharing the real app's .env) shows the password form alone.
+    """
+    config = google_oauth.google_config()
+    google = config is not None and google_oauth.pick_redirect_url(config, request_authority(request)) is not None
+    return AuthMethodsResponse(password=password_login_allowed(), google=google, signup=signup_allowed())
+
+
+def _google_flow_cookie_name() -> str:
+    # Per instance like the refresh cookie (#65), so a test instance's flow never meets the real app's.
+    return f"{refresh_cookie_name()}_google"
+
+
+_GOOGLE_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+{refresh}<title>CapitalOS sign-in</title>
+<style>body{{font-family:system-ui,sans-serif;max-width:420px;margin:15vh auto;padding:0 16px;line-height:1.5}}
+@media (prefers-color-scheme: dark){{body{{background:#111;color:#eee}}a{{color:#7cc4ff}}}}</style></head>
+<body><h1 style="font-size:20px">{title}</h1><p>{message}</p><p><a href="{link}">{link_text}</a></p></body></html>"""
+
+
+def _google_page(status: int, title: str, message: str, *, link: str = "/login", link_text: str = "Back to sign in", go: bool = False) -> HTMLResponse:
+    refresh = f'<meta http-equiv="refresh" content="0;url={html.escape(link, quote=True)}">' if go else ""
+    body = _GOOGLE_PAGE.format(
+        refresh=refresh,
+        title=html.escape(title),
+        message=html.escape(message),
+        link=html.escape(link, quote=True),
+        link_text=html.escape(link_text),
+    )
+    return HTMLResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+def _google_error_page(err: google_oauth.GoogleSignInError) -> HTMLResponse:
+    return _google_page(err.status, "Couldn't sign in with Google", err.message)
+
+
+@router.get("/google/start")
+def google_start(request: Request, next: str | None = None):  # noqa: A002 - the query parameter's name
+    config = google_oauth.google_config()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Google sign-in isn't set up")
+    redirect_url = google_oauth.pick_redirect_url(config, request_authority(request))
+    if redirect_url is None:
+        return _google_page(
+            400,
+            "Google sign-in isn't set up for this address",
+            "Open CapitalOS at the address set up for Google sign-in (GOOGLE_OAUTH_REDIRECT_URL), or sign in with your password.",
+        )
+    auth_url, flow_cookie = google_oauth.start_flow(
+        config, redirect_url=redirect_url, next_path=google_oauth.safe_next_path(next)
+    )
+    response = RedirectResponse(auth_url, status_code=302, headers={"Cache-Control": "no-store"})
+    # Lax, not Strict: the browser must send it on Google's cross-site redirect back to the callback.
+    response.set_cookie(
+        key=_google_flow_cookie_name(),
+        value=flow_cookie,
+        httponly=True,
+        secure=redirect_url.startswith("https://"),
+        samesite="lax",
+        max_age=google_oauth.FLOW_TTL_SECONDS,
+        path="/",
+    )
+    return response
+
+
+@router.get("/google/callback")
+def google_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+    error: str | None = None,
+    db: Session = Depends(get_db),
+):
+    config = google_oauth.google_config()
+    if config is None:
+        raise HTTPException(status_code=404, detail="Google sign-in isn't set up")
+    ip = client_ip(request)
+    response: HTMLResponse
+    try:
+        wait = login_throttle.retry_after(username="google", ip=ip)
+        if wait > 0:
+            response = _google_page(429, "Too many sign-in attempts", "Too many failed sign-in attempts; try again later.")
+            response.headers["Retry-After"] = str(wait)
+            return response
+        if error:
+            raise google_oauth.GoogleSignInError(400, "Google sign-in was cancelled.", code="cancelled")
+        flow = google_oauth.read_flow(request.cookies.get(_google_flow_cookie_name()), state)
+        if not code:
+            raise google_oauth.GoogleSignInError(400, "Google didn't send a sign-in code. Try again.", code="state")
+        tokens = google_oauth.exchange_code(
+            config, code=code, redirect_uri=str(flow["redirect_uri"]), verifier=str(flow["verifier"])
+        )
+        id_token = tokens.get("id_token")
+        if not isinstance(id_token, str) or not id_token:
+            raise google_oauth.GoogleSignInError(502, "Google didn't send an identity token. Try again.", code="token")
+        email = google_oauth.verify_id_token(config, id_token, nonce=str(flow["nonce"]))
+
+        username = config.allowed.get(email)
+        row = None
+        if username is not None:
+            row = db.execute(
+                text(
+                    """
+                    SELECT id, username, COALESCE(is_active, TRUE) AS is_active
+                    FROM users WHERE LOWER(username) = LOWER(:username) LIMIT 1
+                    """
+                ),
+                {"username": username},
+            ).mappings().one_or_none()
+        if row is None or not bool(row["is_active"]):
+            login_throttle.record_failure(username=f"google:{email}", ip=ip)
+            raise google_oauth.GoogleSignInError(
+                403, f"{email} isn't allowed to sign in to this CapitalOS.", code="not_allowed"
+            )
+    except google_oauth.GoogleSignInError as err:
+        if err.code in {"state", "token"}:
+            login_throttle.record_failure(username="google", ip=ip)
+        response = _google_error_page(err)
+        response.delete_cookie(_google_flow_cookie_name(), path="/")
+        return response
+
+    login_throttle.record_success(username=f"google:{email}")
+    user_id = int(row["id"])
+    refresh_token = _create_refresh_session(db, user_id=user_id)
+    db.commit()
+    # A same-site hop (meta refresh) to the app, so its Strict refresh cookie is sent on the next load.
+    next_path = google_oauth.safe_next_path(str(flow.get("next") or ""))
+    response = _google_page(200, "Signed in", "Opening CapitalOS…", link=next_path, link_text="Continue", go=True)
+    _set_refresh_cookie(response, refresh_token)
+    response.delete_cookie(_google_flow_cookie_name(), path="/")
+    return response
 
 
 @router.post("/change-password", response_model=ChangePasswordResponse)

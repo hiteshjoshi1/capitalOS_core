@@ -176,6 +176,22 @@ def _parse_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | Non
     return address
 
 
+def from_trusted_proxy(request: Request) -> bool:
+    """Whether the direct peer is a proxy we trust for X-Forwarded-* (AUTH_TRUSTED_PROXIES)."""
+    peer = _parse_ip(request.client.host if request.client else "")
+    return peer is not None and any(peer in net for net in _trusted_proxy_networks())
+
+
+def request_authority(request: Request) -> str:
+    """The host[:port] the browser used: X-Forwarded-Host from a trusted proxy (nginx, Vite,
+    tailscale serve), else the Host header (#358)."""
+    if from_trusted_proxy(request):
+        forwarded = request.headers.get("x-forwarded-host", "").split(",")[0].strip()
+        if forwarded:
+            return forwarded
+    return request.headers.get("host", "")
+
+
 def client_ip(request: Request) -> str:
     peer_raw = request.client.host if request.client else ""
     peer = _parse_ip(peer_raw)

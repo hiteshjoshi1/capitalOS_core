@@ -28,6 +28,14 @@ class AuthTokenResponse(BaseModel):
     expires_in: int
 
 
+class AuthMethodsResponse(BaseModel):
+    """Which ways of signing in are on (#358)."""
+
+    password: bool
+    google: bool
+    signup: bool
+
+
 class AuthMeResponse(BaseModel):
     id: int
     username: str

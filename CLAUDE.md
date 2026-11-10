@@ -52,6 +52,16 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   USERNAME=<name> ADMIN=1` makes one; `make user-grant-admin` / `user-revoke-admin USERNAME=<name>`.
   Shared-data writes (platforms, currencies, token allowlist, market-data refresh) are admin-only (403).
   Failed sign-ins are throttled per username and per IP (429 + Retry-After; in memory, see `.env.example`).
+- Google sign-in (#358, D-97): "Sign in with Google" on the login page once four `.env` settings are set (off
+  otherwise; password sign-in stays as a break-glass, `AUTH_PASSWORD_LOGIN=0` turns it off). One-time setup in
+  Google Cloud Console (console.cloud.google.com, any project): **Google Auth Platform → Branding** (app name),
+  **Audience**: External, keep it in *Testing* and add your Gmail under Test users (no Google review needed);
+  **Clients → Create client → Web application**, Authorized redirect URIs:
+  `https://<mac>.<tailnet>.ts.net:8443/api/auth/google/callback` and `http://localhost:5173/api/auth/google/callback`.
+  Put the client ID/secret in `.env` as `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`, the same URIs in
+  `GOOGLE_OAUTH_REDIRECT_URL` (comma-separated), and `GOOGLE_ALLOWED_EMAILS=<gmail>=<username>`; then `make deploy`
+  (or `make api-rebuild`). Sessions last 30 days and renew on use (`AUTH_REFRESH_TOKEN_TTL_DAYS`). Google is
+  offered only at an address listed in `GOOGLE_OAUTH_REDIRECT_URL` (so not on a test instance).
 - Passwords: Settings → Change password (signs out your other sessions). Forgotten one:
   `make user-set-password USERNAME=<name>` prompts for a new one and signs out all its sessions (#72).
 - `make down` / `make api-rebuild` / `make web-rebuild` / `make db-reset` (**deletes the DB
