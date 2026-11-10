@@ -31,6 +31,7 @@ JOB_CRYPTO = "crypto_refresh"
 JOB_FX = "fx_fill"
 JOB_FX_BACKFILL = "fx_backfill"  # #290: past rates for a user's data span
 JOB_CRYPTO_PRICE_BACKFILL = "crypto_price_backfill"  # #331: past prices for wallet snapshots
+JOB_HISTORY = "history_generate"  # #292: a "Generate history" run, per user and currency
 
 JOB_LABELS = {
     JOB_IBKR_FLEX: "IBKR Flex import",
@@ -39,6 +40,7 @@ JOB_LABELS = {
     JOB_FX: "FX rates",
     JOB_FX_BACKFILL: "FX back-fill",
     JOB_CRYPTO_PRICE_BACKFILL: "Crypto price back-fill",
+    JOB_HISTORY: "History generation",
 }
 
 STATUS_SUCCESS = "success"

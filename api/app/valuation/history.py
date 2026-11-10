@@ -221,6 +221,7 @@ def _refresh_wealth_rollups(
     *,
     months: Optional[list[str]] = None,
     force: bool = False,
+    on_month: Optional[Callable[[int, int, str], None]] = None,
 ) -> Dict[str, int]:
     """Bring stored rollup rows up to date (#138). Commits only if it wrote.
 
@@ -233,6 +234,8 @@ def _refresh_wealth_rollups(
       another anchor (the old rule, or a SNAPSHOT_DAY change); or when a dirty
       mark covers its anchor and the row predates that mark.
     Then the user's dirty mark is settled (app.wealth_rollup_dirty).
+    ``on_month(done, total, month)`` is called before each considered month (#292's
+    progress: ``done`` months finished so far).
     """
     dirty_from, generation = dirty_state(db, current_user_id)
     stored = {
@@ -250,7 +253,9 @@ def _refresh_wealth_rollups(
 
     written = 0
     deleted = 0
-    for month_key in candidates:
+    for index, month_key in enumerate(candidates):
+        if on_month is not None:
+            on_month(index, len(candidates), month_key)
         month_start = _parse_month(month_key)
         row = stored.get(month_key)
         if not _rollup_month_completed(month_start):

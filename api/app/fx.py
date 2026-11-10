@@ -97,8 +97,29 @@ def _fetch_lock(key: tuple) -> threading.Lock:
         return lock
 
 
+_REMOTE_OFF: ContextVar[bool] = ContextVar("fx_remote_off", default=False)
+
+
 def remote_enabled() -> bool:
     return os.getenv("FX_DISABLE_REMOTE", "0") != "1"
+
+
+def provider_allowed() -> bool:
+    """Whether a read may ask the provider: remote FX on, and not inside
+    ``stored_rates_only`` (#292)."""
+    return remote_enabled() and not _REMOTE_OFF.get()
+
+
+@contextmanager
+def stored_rates_only() -> Iterator[None]:
+    """Reads in this context use stored rates only, never the provider (#292): a
+    History run fetches past rates once, capped (``fx_backfill``), then values every
+    month from the store instead of one provider call per month."""
+    token = _REMOTE_OFF.set(True)
+    try:
+        yield
+    finally:
+        _REMOTE_OFF.reset(token)
 
 
 # ─── Results ─────────────────────────────────────────────────────────────────
@@ -608,7 +629,7 @@ def _resolve(todo: set[tuple[date, str]], base: str, found: dict[tuple[date, str
     rows = _load_rows(lo, days[-1], currencies)
     wanted = _attempt(rows, todo, lookback)
 
-    if wanted and remote_enabled():
+    if wanted and provider_allowed():
         want_days = sorted({day for day, _ in wanted})
         answered = fill_rates(
             want_days[0] - timedelta(days=lookback),

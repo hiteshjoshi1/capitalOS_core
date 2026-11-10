@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../lib/api";
-import type { CashFlowTrendPoint, DividendSummaryBucket, FxStatus, WealthTimeline } from "../lib/api";
+import type { CashFlowTrendPoint, DividendSummaryBucket, FxStatus, HistoryGenerateStatus, WealthTimeline } from "../lib/api";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
 import WealthHistoryChart, { type WealthHistoryChartMode } from "../components/WealthHistoryChart";
@@ -22,6 +22,22 @@ const RANGE_OPTIONS: { label: string; months: number }[] = [
   { label: "2Y", months: 24 },
   { label: "All", months: 60 },
 ];
+
+/** How often a running "Generate history" is polled (#292). */
+export const GENERATE_POLL_MS = 800;
+
+/** The smallest range option covering `months` of data, else `months` itself (≤ 120). */
+function rangeForSpan(months: number): number {
+  return RANGE_OPTIONS.find((opt) => opt.months >= months)?.months ?? Math.min(120, months);
+}
+
+/** One line for a running "Generate history" (#292). */
+function generateProgressLabel(run: HistoryGenerateStatus): string {
+  if (run.stage === "fx") return "Fetching past exchange rates…";
+  const at = Math.min(run.months_done + 1, Math.max(run.months_total, 1));
+  const month = run.current_month ? ` (${fmt.formatMonth(run.current_month, "short")})` : "";
+  return `Valuing month ${at} of ${run.months_total}${month}…`;
+}
 
 function currentMonth(): string {
   return fmt.currentMonth();
@@ -59,7 +75,14 @@ export default function WealthHistory() {
   const [timelineErr, setTimelineErr] = useState("");
   const [timeline, setTimeline] = useState<WealthTimeline | null>(null);
   const [timelineReload, setTimelineReload] = useState(0);
-  const [backfilling, setBackfilling] = useState(false);
+  // #292: "Generate history" runs in the background; this is its progress, polled.
+  const [run, setRun] = useState<HistoryGenerateStatus | null>(null);
+  const [runStartError, setRunStartError] = useState("");
+  const backfilling = run?.status === "running";
+  // #292: the default range is the span of the user's data, applied once, unless a
+  // range was picked by hand.
+  const rangeTouched = useRef(false);
+  const spanApplied = useRef(false);
 
   const [dividendsState, setDividendsState] = useState<LoadState>("loading");
   const [dividendBuckets, setDividendBuckets] = useState<DividendSummaryBucket[]>([]);
@@ -107,6 +130,11 @@ export default function WealthHistory() {
         if (ignore) return;
         setTimeline(data);
         setTimelineState("ready");
+        if (data.data_span && !spanApplied.current && !rangeTouched.current) {
+          spanApplied.current = true;
+          const target = Math.max(rangeForSpan(data.data_span.months), rangeCovering(selectedMonth, 6));
+          if (target !== range) setRange(target);
+        }
       } catch (error: unknown) {
         if (ignore) return;
         setTimelineErr(error instanceof Error ? error.message : String(error));
@@ -116,7 +144,49 @@ export default function WealthHistory() {
     return () => {
       ignore = true;
     };
+    // selectedMonth is read once, for the span default; a new month already changes `range`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [range, baseCurrency, timelineReload]);
+
+  // #292: pick up a run already going (e.g. started before a reload), then poll while it runs.
+  useEffect(() => {
+    let ignore = false;
+    void api
+      .netWorthTimelineGenerateStatus(baseCurrency)
+      .then((status) => {
+        if (!ignore && status.status === "running") setRun(status);
+      })
+      .catch(() => undefined);
+    return () => {
+      ignore = true;
+    };
+  }, [baseCurrency]);
+
+  useEffect(() => {
+    if (run?.status !== "running") return;
+    let ignore = false;
+    const timer = window.setTimeout(() => {
+      void api
+        .netWorthTimelineGenerateStatus(baseCurrency)
+        .then((status) => {
+          if (ignore) return;
+          setRun(status);
+          if (status.status !== "running") {
+            // Finished: show what it wrote.
+            setTimelineState("loading");
+            setTimelineReload((n) => n + 1);
+          }
+        })
+        .catch(() => {
+          // A missed poll: try again on the next tick.
+          if (!ignore) setRun((current) => (current ? { ...current } : current));
+        });
+    }, GENERATE_POLL_MS);
+    return () => {
+      ignore = true;
+      window.clearTimeout(timer);
+    };
+  }, [run, baseCurrency]);
 
   useEffect(() => {
     let ignore = false;
@@ -148,17 +218,37 @@ export default function WealthHistory() {
     };
   }, [range, baseCurrency]);
 
-  const handleGenerateHistory = useCallback(async () => {
-    setBackfilling(true);
-    try {
-      await api.netWorthTimelineBackfill(range, baseCurrency);
-      // Refetch the timeline through the effect above.
-      setTimelineState("loading");
-      setTimelineReload((n) => n + 1);
-    } finally {
-      setBackfilling(false);
-    }
-  }, [range, baseCurrency]);
+  // #292: starts a background run (no `months` = the span of the data); the poll above
+  // reloads the timeline when it finishes.
+  const handleGenerateHistory = useCallback(
+    async (months?: number) => {
+      setRunStartError("");
+      try {
+        const status = await api.netWorthTimelineGenerate(baseCurrency, months);
+        setRun(status);
+        if (status.status !== "running") {
+          setTimelineState("loading");
+          setTimelineReload((n) => n + 1);
+        }
+      } catch (error: unknown) {
+        setRunStartError(error instanceof Error ? error.message : String(error));
+      }
+    },
+    [baseCurrency],
+  );
+
+  const pickRange = useCallback((months: number) => {
+    rangeTouched.current = true;
+    setRange(months);
+  }, []);
+
+  // "All" reaches back to the start of the data when that's more than 5 years (#292).
+  const rangeOptions = useMemo(() => {
+    const spanMonths = timeline?.data_span?.months ?? 0;
+    return RANGE_OPTIONS.map((opt) =>
+      opt.label === "All" ? { ...opt, months: Math.min(120, Math.max(opt.months, spanMonths)) } : opt,
+    );
+  }, [timeline]);
 
   const formatMoney = useCallback(
     (value?: number | null, decimals?: number) => fmt.formatMoney(value, baseCurrency, { decimals }),
@@ -197,17 +287,17 @@ export default function WealthHistory() {
   return (
     <PageShell
       title="History"
-      subtitle="How your wealth evolved — and why. Carried data is shown dashed; gaps stay gaps."
+      subtitle="How your wealth evolved — and why."
       monthBar={<MonthBar month={selectedMonth} onMonthChange={setSelectedMonth} />}
     >
       <div className="whFilters">
         <div className="coSegmentedControl" role="group" aria-label="Range">
-          {RANGE_OPTIONS.map((opt) => (
+          {rangeOptions.map((opt) => (
             <button
               key={opt.label}
               type="button"
               className={`coSegmentedBtn${range === opt.months ? " coSegmentedBtnActive" : ""}`}
-              onClick={() => setRange(opt.months)}
+              onClick={() => pickRange(opt.months)}
             >
               {opt.label}
             </button>
@@ -231,6 +321,44 @@ export default function WealthHistory() {
         </div>
       </div>
 
+      <p className="muted whCarriedNote">
+        <strong>Carried</strong> means no new statement or price for that month, so the last known value is
+        used. Carried months are dashed; months with no data stay empty.
+      </p>
+
+      {run?.status === "running" ? (
+        <div className="card whGenerateProgress" role="status">
+          <p>{generateProgressLabel(run)} You can leave this page; it keeps going.</p>
+          <progress
+            max={Math.max(run.months_total, 1)}
+            value={run.stage === "fx" ? 0 : run.months_done}
+            aria-label="History generation progress"
+          />
+        </div>
+      ) : null}
+      {run?.status === "failed" ? (
+        <LoadError
+          title="Couldn't generate history"
+          error={run.error ?? "Unknown error"}
+          onRetry={() => void handleGenerateHistory(run.months || undefined)}
+        />
+      ) : null}
+      {runStartError ? (
+        <LoadError title="Couldn't start generating history" error={runStartError} onRetry={() => void handleGenerateHistory()} />
+      ) : null}
+      {run?.status === "completed" && (run.fx?.remaining_requests ?? 0) > 0 ? (
+        <p className="muted whGenerateNote" role="note">
+          Some past exchange rates are still missing (each run fetches a limited number). Refresh again to fetch
+          the rest.
+        </p>
+      ) : null}
+      {run?.status === "completed" && (run.fx?.unsupported_currencies?.length ?? 0) > 0 ? (
+        <p className="muted whGenerateNote" role="note">
+          No past rates are published for {run.fx?.unsupported_currencies?.join(", ")}: those holdings use the
+          nearest older rate, or are left out.
+        </p>
+      ) : null}
+
       {timelineState === "loading" ? <div className="card" role="status">Loading…</div> : null}
       {timelineState === "error" ? (
         <LoadError title="Couldn't load history" error={timelineErr} onRetry={() => setTimelineReload((n) => n + 1)} />
@@ -241,8 +369,9 @@ export default function WealthHistory() {
           <div className="card whEmptyState">
             <p className="cardTitle">No history yet</p>
             <p className="muted">
-              Generate the timeline from your existing statements and snapshots. This can be re-run any time — it's
-              always safe to repeat.
+              Builds one point per month from your statements and snapshots
+              {timeline.data_span ? `, ${monthLabel(timeline.data_span.first_month)} (your earliest data) to now` : ""}. Past
+              exchange rates are fetched first. It runs in the background and is always safe to repeat.
             </p>
             <button type="button" className="btn" onClick={() => void handleGenerateHistory()} disabled={backfilling}>
               {backfilling ? "Generating…" : "Generate history"}
@@ -263,7 +392,7 @@ export default function WealthHistory() {
                 <button
                   type="button"
                   className="whRefreshBtn"
-                  onClick={() => void handleGenerateHistory()}
+                  onClick={() => void handleGenerateHistory(range)}
                   disabled={backfilling}
                   title="Recompute this range from the latest data"
                 >
