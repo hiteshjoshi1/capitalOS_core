@@ -10,6 +10,7 @@ vi.mock("../lib/api", () => ({
   api: {
     creditCardBalances: vi.fn(),
     setCreditCardBalance: vi.fn(),
+    setCreditCardDue: vi.fn(),
   },
 }));
 
@@ -104,8 +105,55 @@ describe("CardBalances (#300)", () => {
     fireEvent.change(screen.getByLabelText("Amount owed (SGD)"), { target: { value: "524.21" } });
     fireEvent.click(screen.getByRole("button", { name: "Save balance" }));
     await waitFor(() =>
-      expect(mockApi.setCreditCardBalance).toHaveBeenCalledWith(1, { as_of_date: "2026-10-13", owed: 524.21 }, "SGD"),
+      expect(mockApi.setCreditCardBalance).toHaveBeenCalledWith(
+        1,
+        { as_of_date: "2026-10-13", owed: 524.21, due_date: null, minimum_due: null },
+        "SGD",
+      ),
     );
     expect(await screen.findByText("Owes S$ 674.98")).toBeInTheDocument();
+  });
+
+  it("says a due date is unknown and lets one be typed in from the statement (#352)", async () => {
+    mockApi.creditCardBalances.mockResolvedValue(payload([card()]));
+    mockApi.setCreditCardDue.mockResolvedValue(payload([card()]));
+    render(<CardBalances baseCurrency="SGD" />);
+    expect(await screen.findByText(/Payment due date unknown/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Add due date" }));
+    const form = screen.getByRole("form", { name: "Payment due date for Synthetic Card" });
+    expect(within(form).getByLabelText("Statement date")).toHaveValue("2026-10-13");
+    fireEvent.change(within(form).getByLabelText("Payment due date"), { target: { value: "2026-11-07" } });
+    fireEvent.change(within(form).getByLabelText("Minimum payment (SGD, optional)"), { target: { value: "50" } });
+    fireEvent.click(within(form).getByRole("button", { name: "Save due date" }));
+    await waitFor(() =>
+      expect(mockApi.setCreditCardDue).toHaveBeenCalledWith(
+        1,
+        { statement_date: "2026-10-13", due_date: "2026-11-07", minimum_due: 50 },
+        "SGD",
+      ),
+    );
+  });
+
+  it("shows what is left to pay and by when, and when only the minimum was paid (#352)", async () => {
+    const due = card({
+      paid_in_full: false, paid_since: 60, due_date: "2026-11-23", due_source: "manual", due_status: "overdue",
+      due_statement_date: "2026-10-13", amount_due: 524.21, minimum_due: 50, paid_toward_due: 60,
+      remaining_due: 464.21, minimum_paid: true,
+    });
+    mockApi.creditCardBalances.mockResolvedValue(payload([due]));
+    render(<CardBalances baseCurrency="SGD" />);
+    const line = await screen.findByText(/S\$ 464\.21 to pay, overdue since 23 Nov 2026/);
+    expect(line).toHaveClass("cardBalanceWarn");
+    expect(line).toHaveTextContent("minimum paid, interest runs on the rest");
+    // The "still to pay" line doesn't repeat the due date.
+    expect(screen.getByText(/of it still to pay$/)).toBeInTheDocument();
+  });
+
+  it("shows a paid statement's due as paid (#352)", async () => {
+    const paid = card({ due_date: "2026-11-07", due_source: "statement", due_status: "paid", due_statement_date: "2026-10-13" });
+    mockApi.creditCardBalances.mockResolvedValue(payload([paid]));
+    render(<CardBalances baseCurrency="SGD" />);
+    expect(await screen.findByText(/Paid, due 7 Nov 2026 \(statement of 13 Oct 2026\)/)).toHaveClass("cardBalanceGood");
+    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
   });
 });

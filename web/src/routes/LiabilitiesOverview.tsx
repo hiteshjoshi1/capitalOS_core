@@ -122,13 +122,18 @@ export default function LiabilitiesOverview() {
 
   const upcomingRows: UpcomingRow[] = useMemo(() => {
     const cardRows: UpcomingRow[] = (data?.cards ?? []).map((c) => {
-      const dueStatus = computeDueStatus({ dueDate: c.due_date });
+      // #352: only a due date a statement printed (or that was configured); else unknown.
+      const dueStatus = computeDueStatus({
+        dueDate: c.due_date,
+        paymentStatus: c.due_status,
+        unknownLabel: "Due date unknown",
+      });
       return {
         key: `card-${c.account_id}`,
         name: c.card_name,
         typeLabel: "Credit card",
         dueStatus,
-        dueDateLabel: formatShortDate(c.due_date),
+        dueDateLabel: c.due_date ? formatShortDate(c.due_date) : null,
         sortValue: dueSortValue(dueStatus, c.due_date),
       };
     });

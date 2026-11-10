@@ -38,6 +38,7 @@ from app.ingestion.account_checks import (
     statement_identity,
 )
 from app.ingestion.card_balances import CARD_BALANCE_PARSERS, write_card_statement_balance
+from app.valuation.card_dues import write_statement_due
 from app.ingestion.undo import card_limits_row, new_undo_log
 from app.models.import_job import ImportJob
 from app.wealth_rollup_dirty import mark_rollups_dirty
@@ -760,6 +761,10 @@ def _run_ingestion_with_context(
                 parser_meta=parser_meta,
                 undo=undo,
             )
+        if account_type == "CREDIT_CARD":
+            # The payment due date, when the statement prints one (#352): none of today's
+            # card exports do; a parser that reads one sets parser_meta["payment_due"].
+            write_statement_due(db, account_id=account_id, import_job_id=int(job.id), parser_meta=parser_meta)
 
         if identity is not None:
             # The first identified import links the account to the file's number;

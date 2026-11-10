@@ -128,3 +128,17 @@
   min-height: 36px;
   max-width: 100%;
 }
+
+/* #352: the newest statement's payment due, and its form */
+.cardBalanceDue {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.cardBalanceFormActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}

@@ -18,8 +18,10 @@ from .user import User, UserCredential, AuthSession, OAuthIdentity
 from .canonical_balance import AccountBalanceSnapshot
 from .source_freshness import SourceFreshnessOverride
 from .token_visibility import CryptoTokenVisibility
+from .card_due import CardStatementDue
 
 __all__ = [
+    "CardStatementDue",
     "Account",
     "Platform",
     "Currency",
