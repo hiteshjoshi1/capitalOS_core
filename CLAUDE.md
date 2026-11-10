@@ -52,7 +52,7 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   USERNAME=<name> ADMIN=1` makes one; `make user-grant-admin` / `user-revoke-admin USERNAME=<name>`.
   Shared-data writes (platforms, currencies, token allowlist, market-data refresh) are admin-only (403).
   Failed sign-ins are throttled per username and per IP (429 + Retry-After; in memory, see `.env.example`).
-- Google sign-in (#358, D-92): "Sign in with Google" on the login page once four `.env` settings are set (off
+- Google sign-in (#358, D-97): "Sign in with Google" on the login page once four `.env` settings are set (off
   otherwise; password sign-in stays as a break-glass, `AUTH_PASSWORD_LOGIN=0` turns it off). One-time setup in
   Google Cloud Console (console.cloud.google.com, any project): **Google Auth Platform → Branding** (app name),
   **Audience**: External, keep it in *Testing* and add your Gmail under Test users (no Google review needed);

@@ -1,4 +1,4 @@
-"""Sign in with Google (#358, D-92): the whole flow with Google's endpoints mocked.
+"""Sign in with Google (#358, D-97): the whole flow with Google's endpoints mocked.
 
 ID tokens are real RS256 JWTs signed with a test key, so the signature, issuer, audience, expiry
 and nonce checks run for real; only the network calls (token exchange, JWKS) are replaced.

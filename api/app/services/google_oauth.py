@@ -1,4 +1,4 @@
-"""Sign in with Google (#358, D-92): OAuth 2.0 authorization code flow with PKCE, state and nonce.
+"""Sign in with Google (#358, D-97): OAuth 2.0 authorization code flow with PKCE, state and nonce.
 
 The API does the whole exchange server-side; the browser only follows redirects:
 

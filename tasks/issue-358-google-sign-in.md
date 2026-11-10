@@ -7,7 +7,7 @@ Issue: https://github.com/hiteshjoshi1/capitalOS_core/issues/358
 - Nobody else gets in: one allow-list in `.env`; password sign-in stays as a break-glass.
 
 ## Architecture Decisions
-- D-92: server-side OAuth 2.0 authorization code flow with PKCE (S256), state and nonce; ID token verified with
+- D-97: server-side OAuth 2.0 authorization code flow with PKCE (S256), state and nonce; ID token verified with
   PyJWT against Google's JWKS (no new dependency: PyJWT, cryptography and httpx are already locked).
 - A signed, 10-minute, HttpOnly, SameSite=Lax flow cookie (per-instance name) carries state/nonce/verifier.
 - Success creates the same auth_sessions row + Strict refresh cookie as a password login (30 days, renewed on use).
