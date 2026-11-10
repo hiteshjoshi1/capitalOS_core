@@ -1,4 +1,8 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+# The most transactions one bulk override may name (#363): far above one month's unmapped list,
+# and it bounds the work a single request can ask for.
+MAX_BULK_OVERRIDE_IDS = 1000
 
 
 class CategoryTaxonomyOut(BaseModel):
@@ -89,7 +93,7 @@ class UnmappedTransactionOut(BaseModel):
 
 
 class CategoryOverrideBulkCreate(BaseModel):
-    transaction_ids: list[int]
+    transaction_ids: list[int] = Field(max_length=MAX_BULK_OVERRIDE_IDS)
     category_id: int
 
 
