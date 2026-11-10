@@ -285,9 +285,20 @@ if [ "$rc" != 0 ] && [ -f "$edump.verified" ] && [ ! -e "$edump.failed" ]; then
 else bad "verify: without the private key, markers untouched (exit $rc; $(ls "$enc" | tr '\n' ' '))"; fi
 "$keygen" -o "$tmp/key/other.txt" 2>/dev/null
 rc=0; out=$( (trap cleanup EXIT; BACKUP_AGE_IDENTITY=$tmp/key/other.txt BACKUP_DATA_DIR=$target DB_CONTAINER=fake restore "$edump") 2>&1) || rc=$?
-if [ "$rc" != 0 ] && [ -f "$target/current.txt" ] && printf '%s' "$out" | grep -q 'could not decrypt'; then
-  ok "restore: the wrong private key stops it, nothing changed"
+if [ "$rc" != 0 ] && [ -f "$target/current.txt" ] && printf '%s' "$out" | grep -q "cannot decrypt .* with $tmp/key/other.txt: wrong or missing key"; then
+  ok "restore: the wrong private key stops it, names the key, nothing changed"
 else bad "restore: the wrong private key stops it (exit $rc): $out"; fi
+rc=0; out=$( (trap cleanup EXIT; BACKUP_AGE_IDENTITY=$tmp/key/other.txt DB_CONTAINER=fake verify "$edump") 2>&1) || rc=$?
+if [ "$rc" != 0 ] && [ -f "$edump.verified" ] && [ ! -e "$edump.failed" ] && [ ! -e "$edump.restore.log" ] && [ ! -e "$edump.age.failed" ] &&
+  printf '%s' "$out" | grep -q "with $tmp/key/other.txt: wrong or missing key"; then
+  ok "verify: the wrong private key fails, names the key, writes no .failed or log next to the good set"
+else bad "verify: wrong key leaves the set alone (exit $rc; $(ls "$enc" | tr '\n' ' ')): $out"; fi
+# Named by its .age file (what ls shows), through the script: the same set, the same answer.
+rc=0; out=$(BACKUP_DIR=$enc BACKUP_AGE_IDENTITY=$tmp/key/other.txt DB_CONTAINER=fake "$src/scripts/db-backup.sh" verify "$edump.age" 2>&1) || rc=$?
+if [ "$rc" != 0 ] && [ ! -e "$edump.age.failed" ] && [ ! -e "$edump.age.restore.log" ] && [ ! -e "$edump.failed" ] &&
+  printf '%s' "$out" | grep -q "wrong or missing key"; then
+  ok "verify <set>.dump.age: treated as the set, not as a plain dump (no pg_restore of ciphertext, no marker)"
+else bad "verify <set>.dump.age (exit $rc; $(ls "$enc" | tr '\n' ' ')): $out"; fi
 unset -f docker
 
 # encrypt-existing: plain sets move into the backup dir encrypted, checked, plaintext gone.
@@ -402,15 +413,39 @@ printf '%s' "$out" | grep -q "1 set(s), newest capitalos_20261104_030000.dump.ve
 out=$(BACKUP_OFFSITE_DIR=$tmp/no-icloud/x offsite_status)
 printf '%s' "$out" | grep -q "WARNING .* does not exist (iCloud Drive not turned on?)" &&
   ok "off-site status: a missing folder is a warning" || bad "off-site status, missing: $out"
+# macOS under launchd may open files in iCloud Drive but not list the folder: nothing may list it.
+# BACKUP_TEST_UNLISTABLE=1 makes listing fail; files stay reachable by name.
+grep -qx capitalos_20261104_030000.dump "$off/.capitalos-offsite-index" &&
+  ok "off-site: the sets copied are recorded in .capitalos-offsite-index" || bad "off-site: index written ($(cat "$off/.capitalos-offsite-index" 2>&1))"
+off2=$tmp/icloud/Unlistable
+mkdir -p "$off2"
+out=$( (BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off2 offsite_sync) 2>&1) && rc=0 || rc=$?
+if [ "$rc" = 0 ] && [ -f "$off2/capitalos_20261104_030000.dump.verified" ] && grep -qx capitalos_20261104_030000.dump "$off2/.capitalos-offsite-index" &&
+  printf '%s' "$out" | grep -q "Off-site: 1 set(s) copied"; then
+  ok "off-site, unlistable folder: the sync copies by name and writes the index"
+else bad "off-site, unlistable folder: sync (exit $rc): $out"; fi
+out=$( (BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off2 offsite_sync) 2>&1)
+printf '%s' "$out" | grep -q "Off-site: 0 set(s) copied" && ok "off-site, unlistable folder: a set already there isn't copied again" || bad "off-site, unlistable: idempotent ($out)"
+out=$(BACKUP_TEST_UNLISTABLE=1 BACKUP_OFFSITE_DIR=$off2 offsite_status)
+printf '%s' "$out" | grep -q "1 set(s), newest capitalos_20261104_030000.dump.verified" &&
+  ok "off-site status, unlistable folder: read from the index" || bad "off-site status, unlistable: $out"
+rm -f "$off2/.capitalos-offsite-index"
+out=$( (BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off2 offsite_sync) 2>&1) && rc=0 || rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q "can't list $off2" && printf '%s' "$out" | grep -q "Off-site: 0 set(s) copied" &&
+  grep -qx capitalos_20261104_030000.dump "$off2/.capitalos-offsite-index"; then
+  ok "off-site, unlistable folder, no index: says so, finds sets by the local names, rebuilds the index"
+else bad "off-site, no index, unlistable (exit $rc): $out"; fi
 # prune keeps the same retention off-site.
 b3=$tmp/b3; o3=$tmp/o3; mkdir -p "$b3" "$o3"
 for d in 20250101 20261103; do
   for ext in .dump.age .dump.counts.age .dump.verified .data.tar.gz.age; do touch "$b3/capitalos_${d}_030000$ext" "$o3/capitalos_${d}_030000$ext"; done
 done
-BACKUP_DIR=$b3 BACKUP_OFFSITE_DIR=$o3 BACKUP_TODAY=20261104 "$src/scripts/db-backup.sh" prune >/dev/null
-if [ "$(ls "$o3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ] && [ "$(ls "$b3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ]; then
-  ok "off-site: prune applies the same retention to the off-site folder"
-else bad "off-site: prune off-site (local: $(ls "$b3" | tr '\n' ' '); off-site: $(ls "$o3" | tr '\n' ' '))"; fi
+printf '%s\n' capitalos_20250101_030000.dump capitalos_20261103_030000.dump >"$o3/.capitalos-offsite-index"
+BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$b3 BACKUP_OFFSITE_DIR=$o3 BACKUP_TODAY=20261104 "$src/scripts/db-backup.sh" prune >/dev/null
+if [ "$(ls "$o3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ] && [ "$(ls "$b3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ] &&
+  [ "$(cat "$o3/.capitalos-offsite-index")" = capitalos_20261103_030000.dump ]; then
+  ok "off-site: prune applies the same retention off-site, by the index (no listing), and rewrites it"
+else bad "off-site: prune off-site (local: $(ls "$b3" | tr '\n' ' '); off-site: $(ls "$o3" | tr '\n' ' '); index: $(cat "$o3/.capitalos-offsite-index"))"; fi
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]
