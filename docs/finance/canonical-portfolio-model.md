@@ -55,7 +55,7 @@ The current investment data path writes mostly into:
 | `import_jobs` | Upload job metadata and reports. |
 | `parser_registry` | Upload file signature to parser mapping. |
 | `assets` | Current security/cash display table, keyed weakly by `(symbol, quote_currency)`. |
-| `positions` | Retired read-only archive of legacy snapshot-ish holdings keyed by `(account_id, asset_id, as_of)`. Not portfolio truth. |
+| `positions` | Dropped in migration 085 (#359); was the retired legacy holdings archive. |
 | `transactions` | Generic spending, cash, and broker activity table. |
 | `prices` | Market prices by asset/date/source. |
 | `market_symbol_map` | Asset to exchange/provider symbol mapping. |
@@ -242,43 +242,12 @@ INDEX (content_sha256)
 
 Raw XML/upload content must be retained securely. Secrets in request URLs are not stored.
 
-### Legacy Position Backfill And Parity Audit
+### Legacy positions (retired, then dropped)
 
-Issue 181 uses a migration bridge to copy eligible legacy `positions` facts into canonical storage without deleting `positions`.
-
-As of Issue 183, `positions` is retired in place as an archive table. Migration
-`057_retire_legacy_positions_guard.sql` installs write-blocking triggers for
-insert, update, and delete so new authoritative holdings cannot be silently
-reintroduced through the legacy table. Table deletion is intentionally deferred
-to a separate destructive migration.
-
-Run the backfill for one user:
-
-```bash
-docker compose run --rm api python -m app.portfolio.legacy_backfill --user-id 1
-```
-
-Dry-run the same scope without writes:
-
-```bash
-docker compose run --rm api python -m app.portfolio.legacy_backfill --user-id 1 --dry-run
-```
-
-Generate the parity report at an explicit anchor date:
-
-```bash
-docker compose run --rm api python -m app.portfolio.parity_report --user-id 1 --anchor-date 2026-01-31
-```
-
-Interpretation:
-
-- `net_worth.delta_total`, `delta_stock_fund`, and `delta_cash` should be zero or within rounding tolerance after backfill.
-- `stock_holdings`, `cash_balances`, `platform_alloc`, and `geography_alloc` show row-level legacy-versus-canonical deltas.
-- `summary.parity_ok` is true only when stock quantities and cash balances match.
-- Legacy latest-row selection is anchored: both stock/fund and cash reads choose `MAX(as_of)` only from rows where `as_of <= anchor_date`.
-- `portfolio_data_quality_events` records skipped/conflicting canonical facts so existing authoritative rows are not overwritten.
-
----
+Issue 181 copied eligible legacy `positions` facts into canonical storage, Issue 183 retired the table in
+place (write-blocking triggers, migration 057), and #359 dropped it (migration 085, D-98) once it was empty
+everywhere. The backfill (`app.portfolio.legacy_backfill`) and parity report (`app.portfolio.parity_report`)
+went with it; canonical facts are the only holdings source.
 
 ## Instrument And Stock Modeling
 

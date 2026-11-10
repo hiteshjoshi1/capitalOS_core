@@ -23,7 +23,6 @@ from app.ingestion.signature import compute_format_signature
 from app.portfolio import authority
 from app.portfolio.ibkr_flex import HOLDINGS_FACT_SCOPE, NAV_ONLY_STATUS, run_ibkr_flex_import_from_xml
 from app.portfolio.ibkr_flex import SOURCE_TYPE as FLEX_SOURCE_TYPE
-from app.portfolio.legacy_backfill import BACKFILL_SOURCE_KIND, BACKFILL_SOURCE_TYPE
 from app.portfolio.upload_canonical import _BALANCE_SOURCE_KIND, _INCOMPLETE_SCOPES, _PLATFORM_SOURCE_KIND
 from app.routers.health import _migrations_dir
 from app.scripts.constraint_precheck import Drop, parse_checks, parse_drops, precheck_sql
@@ -32,6 +31,9 @@ from app.valuation.state import CASH_BALANCE_TYPES
 from tests.auth_helpers import signed_in_client
 from tests.postgres_support import pg_engine  # noqa: F401  (fixture)
 from tests.valuation_household import FLEX_REPORTS, flex_xml
+
+# The retired legacy-positions backfill's source value (#359): still allowed, so rows it once wrote stay valid.
+BACKFILL_SOURCE_TYPE = BACKFILL_SOURCE_KIND = "legacy_positions_backfill"
 
 MIGRATION = "079_db_guardrails.sql"
 
@@ -45,6 +47,28 @@ def _migrations() -> Path:
 
 def _sql() -> str:
     return (_migrations() / MIGRATION).read_text(encoding="utf-8")
+
+
+# 085 (#359) dropped these tables and the snapshot tables' legacy_account_id columns, and with them
+# their 079 constraints. "079 against today's schema" leaves those statements out.
+_GONE_TABLES = ("portfolio_event_groups",)
+_GONE_CONSTRAINTS = (
+    "portfolio_position_snapshots_legacy_account_id_fkey",
+    "portfolio_cash_balance_snapshots_legacy_account_id_fkey",
+    "portfolio_nav_snapshots_legacy_account_id_fkey",
+)
+
+
+def _sql_today() -> str:
+    """079's statements that still apply after 085 (one statement per line in 079)."""
+    keep = []
+    for line in _sql().splitlines():
+        if any(re.match(rf"\s*ALTER TABLE {t}\b", line) for t in _GONE_TABLES):
+            continue
+        if any(name in line for name in _GONE_CONSTRAINTS):
+            continue
+        keep.append(line)
+    return "\n".join(keep)
 
 
 def _allowed() -> dict[tuple[str, str], set[str]]:
@@ -155,13 +179,15 @@ def test_nothing_cascades_or_unlinks_from_runs_raw_documents_or_legacy_accounts(
     runs = _fk_delete_rules(pg_engine, "broker_import_runs")
     raw = _fk_delete_rules(pg_engine, "raw_broker_documents")
     accounts = {k: v for k, v in _fk_delete_rules(pg_engine, "accounts").items() if k.endswith(".legacy_account_id")}
-    assert len(runs) == 14 and len(raw) == 13 and len(accounts) == 5
+    # 085 (#359) dropped portfolio_event_groups (one FK to runs, one to raw documents) and the
+    # snapshot tables' legacy_account_id copies (three FKs to accounts).
+    assert len(runs) == 13 and len(raw) == 12 and len(accounts) == 2
     assert {k: v for k, v in {**runs, **raw, **accounts}.items() if v != "r"} == {}
 
 
 @pytest.mark.postgres
 def test_every_079_constraint_exists_and_is_validated(pg_engine):  # noqa: F811
-    names = re.findall(r"ADD CONSTRAINT (\w+)", _sql())
+    names = re.findall(r"ADD CONSTRAINT (\w+)", _sql_today())
     with pg_engine.connect() as conn:
         rows = dict(
             conn.execute(
@@ -220,9 +246,9 @@ def _seed_run(engine) -> dict[str, int]:
         ).scalar_one()
         conn.execute(
             text(
-                "INSERT INTO portfolio_position_snapshots (broker_account_id, legacy_account_id, broker_instrument_id, "
+                "INSERT INTO portfolio_position_snapshots (broker_account_id, broker_instrument_id, "
                 "import_run_id, raw_document_id, report_date, quantity, currency, market_value_local, "
-                "market_value_base, fx_rate_to_base, authority_status) VALUES (:b, :a, :i, :r, :d, '2026-03-16', "
+                "market_value_base, fx_rate_to_base, authority_status) VALUES (:b, :i, :r, :d, '2026-03-16', "
                 "10, 'USD', 1000, 1000, 1, 'authoritative')"
             ),
             {"b": broker_account_id, "a": BROKER, "i": instrument_id, "r": run_id, "d": raw_id},
@@ -301,7 +327,7 @@ def _run_precheck(engine, migration_sql: str) -> list[str]:
 @pytest.mark.postgres
 def test_precheck_passes_on_a_clean_database_and_lists_rejected_rows(pg_engine):  # noqa: F811
     _seed_run(pg_engine)
-    notices = _run_precheck(pg_engine, _sql())
+    notices = _run_precheck(pg_engine, _sql_today())
     assert any("All pass" in n for n in notices)
 
     # A database from before 079 with a value 079 would reject.
@@ -309,7 +335,7 @@ def test_precheck_passes_on_a_clean_database_and_lists_rejected_rows(pg_engine):
         conn.execute(text("ALTER TABLE broker_import_runs DROP CONSTRAINT broker_import_runs_status_check"))
         conn.execute(text("UPDATE broker_import_runs SET status = 'running'"))
     with pytest.raises(Exception, match=r"1 problem\(s\)"):
-        _run_precheck(pg_engine, _sql())
+        _run_precheck(pg_engine, _sql_today())
     with pg_engine.connect() as conn:  # and it changed nothing
         assert conn.execute(text("SELECT status FROM broker_import_runs")).scalar_one() == "running"
 

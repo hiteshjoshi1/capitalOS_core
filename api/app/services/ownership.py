@@ -19,11 +19,12 @@ class OwnershipReassignResult:
 def preview_unowned_counts(db: Session) -> OwnershipReassignResult:
     accounts = db.execute(text("SELECT COUNT(*) FROM accounts WHERE user_id IS NULL")).scalar_one()
     wallets = db.execute(text("SELECT COUNT(*) FROM crypto_wallets WHERE user_id IS NULL")).scalar_one()
-    networth = db.execute(text("SELECT COUNT(*) FROM crypto_user_networth WHERE user_id IS NULL")).scalar_one()
+    # crypto_networth_updated stays in the response (fields are only added) but is always 0:
+    # the crypto_user_networth table was never written and is gone (#359, D-98).
     return OwnershipReassignResult(
         accounts_updated=int(accounts or 0),
         wallets_updated=int(wallets or 0),
-        crypto_networth_updated=int(networth or 0),
+        crypto_networth_updated=0,
     )
 
 
@@ -61,18 +62,7 @@ def reassign_legacy_ownership(db: Session, *, target_user_id: int, dry_run: bool
         {"target_user_id": target_user_id},
     ).rowcount or 0
 
-    networth_updated = db.execute(
-        text(
-            """
-            UPDATE crypto_user_networth
-            SET user_id = :target_user_id
-            WHERE user_id IS NULL
-            """
-        ),
-        {"target_user_id": target_user_id},
-    ).rowcount or 0
-
-    if accounts_updated or wallets_updated or networth_updated:
+    if accounts_updated or wallets_updated:
         # Unowned data was visible to every user (legacy mode) and now belongs
         # to one: everyone's History changes, at every date (#138).
         mark_rollups_dirty(db, ALL_HISTORY, reason="ownership_reassigned")
@@ -80,6 +70,6 @@ def reassign_legacy_ownership(db: Session, *, target_user_id: int, dry_run: bool
     return OwnershipReassignResult(
         accounts_updated=int(accounts_updated),
         wallets_updated=int(wallets_updated),
-        crypto_networth_updated=int(networth_updated),
+        crypto_networth_updated=0,
     )
 

@@ -335,10 +335,7 @@ def test_ocbc_upload_writes_canonical_balance_not_legacy_positions(client: TestC
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        legacy_count = db.execute(
-            text("SELECT COUNT(*) FROM positions WHERE account_id = :aid"),
-            {"aid": account_id},
-        ).scalar()
+        legacy_count = 0  # the legacy positions table is gone (#359): nothing can be written there
         assert legacy_count == 0, "No legacy positions rows for OCBC bank account"
 
         balance_count = db.execute(

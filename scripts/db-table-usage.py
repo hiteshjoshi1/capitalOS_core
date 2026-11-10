@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Usage report for the candidate dead tables (#158, #130 finding 1.9). Read-only.
+"""Usage report for the candidate dead tables (#158, #130 finding 1.9; most dropped by #359). Read-only.
 
 For each candidate table it prints:
 - where the app code (api/app) reads it (FROM / JOIN), writes it (INSERT / UPDATE /
@@ -28,32 +28,15 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Candidates from #130 finding 1.9, with what dropping each would take.
 CANDIDATES: dict[str, str] = {
-    "asset_identifiers": "DROP TABLE (FKs out to assets / broker_instruments only; nothing references it).",
-    "portfolio_event_groups": (
-        "Drop the event_group_id FKs (and columns, if never set) on portfolio_cash_ledger_entries, "
-        "portfolio_trades and portfolio_corporate_action_events, then DROP TABLE."
-    ),
-    "transfer_links": (
-        "DROP TABLE; remove its explicit delete in app/ingestion/undo.py and its rows in "
-        "migrations/seed_dummy.sql / seed_dummy_cleanup.sql in the same change."
-    ),
-    "wallet_accounts": "DROP TABLE (FKs out to accounts / chains only).",
-    "raw_files": "DROP TABLE (before ingestion_jobs: it references it).",
-    "ingestion_jobs": "DROP TABLE after raw_files (the upload flow uses import_jobs).",
-    "crypto_user_networth": (
-        "Remove its ownership count/reassign in app/services/ownership.py and the ORM model "
-        "(app/models/crypto.py), then DROP TABLE."
-    ),
+    # Dropped by migration 085 (#359, D-98): positions, asset_identifiers, portfolio_event_groups
+    # (+ the event_group_id columns), wallet_accounts, raw_files, ingestion_jobs,
+    # crypto_user_networth, and the legacy_account_id copies on the three snapshot tables.
+    "transfer_links": "Keep: read by app/valuation/bridge.py and cleaned up by app/ingestion/undo.py. Not dead.",
     "portfolio_report_metrics": (
-        "Stop the IBKR Flex import writing it (app/portfolio/ibkr_flex.py), then DROP TABLE. "
+        "Stop the IBKR Flex import writing it (app/portfolio/ibkr_flex.py), then drop it. "
         "Its rows are also kept in the raw Flex XMLs."
     ),
     "portfolio_fx_rates": "Keep: read by app/fx.py since #197 (statement FX rates). Not dead any more.",
-    "positions": (
-        "Keep until its last readers go: legacy_backfill.py, parity_report.py and "
-        "market_data/service.py held_asset_ids (#153); "
-        "then drop its BEFORE DELETE/UPDATE/INSERT guard triggers (057) and DROP TABLE."
-    ),
 }
 
 SCAN = {

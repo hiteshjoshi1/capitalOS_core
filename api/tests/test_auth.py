@@ -380,17 +380,6 @@ def test_reassign_legacy_ownership_service(db_engine):
             ),
             {"now": now},
         )
-        conn.execute(
-            text(
-                """
-                INSERT INTO crypto_user_networth (id, user_id, as_of_date, total_usd, crypto_usd, updated_at)
-                VALUES
-                  (1, NULL, '2026-03-01', 100, 100, :now),
-                  (2, 101, '2026-03-01', 200, 200, :now)
-                """
-            ),
-            {"now": now},
-        )
 
     from app.db.session import SessionLocal
     from app.services.ownership import reassign_legacy_ownership
@@ -400,12 +389,12 @@ def test_reassign_legacy_ownership_service(db_engine):
         dry_run = reassign_legacy_ownership(db, target_user_id=101, dry_run=True)
         assert dry_run.accounts_updated == 1
         assert dry_run.wallets_updated == 1
-        assert dry_run.crypto_networth_updated == 1
+        assert dry_run.crypto_networth_updated == 0  # table gone (#359); field kept
 
         applied = reassign_legacy_ownership(db, target_user_id=101, dry_run=False)
         assert applied.accounts_updated == 1
         assert applied.wallets_updated == 1
-        assert applied.crypto_networth_updated == 1
+        assert applied.crypto_networth_updated == 0
     finally:
         db.close()
 
@@ -416,12 +405,8 @@ def test_reassign_legacy_ownership_service(db_engine):
         owned_wallets = conn.execute(
             text("SELECT COUNT(*) FROM crypto_wallets WHERE user_id = 101")
         ).scalar_one()
-        owned_networth = conn.execute(
-            text("SELECT COUNT(*) FROM crypto_user_networth WHERE user_id = 101")
-        ).scalar_one()
         assert int(owned_accounts) == 2
         assert int(owned_wallets) == 2
-        assert int(owned_networth) == 2
 
 
 def test_auth_refresh_cookie_name_is_per_instance(client, db_engine, monkeypatch):

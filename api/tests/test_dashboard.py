@@ -1988,10 +1988,10 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
             text(
                 """
                 INSERT INTO portfolio_nav_snapshots
-                  (id, broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+                  (id, broker_account_id, import_run_id, report_date, base_currency,
                    cash_base, stock_base, total_nav_base, authority_status, metadata_json)
                 VALUES
-                  (3, 1, 2, 3, '2026-03-09', 'SGD', 0, 55000, 55000, 'authoritative', '{}')
+                  (3, 1, 3, '2026-03-09', 'SGD', 0, 55000, 55000, 'authoritative', '{}')
                 """
             )
         )
@@ -1999,11 +1999,11 @@ def test_dashboard_summary_exposes_current_net_worth_separately_from_snapshot(cl
             text(
                 """
                 INSERT INTO portfolio_position_snapshots
-                  (id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                  (id, broker_account_id, broker_instrument_id, import_run_id, report_date,
                    quantity, currency, market_price, market_value_local, market_value_base,
                    cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
                 VALUES
-                  (3, 1, 2, 1, 3, '2026-03-09', 10, 'USD', 5500, 55000, 55000, 50000, 50000, 1, 'authoritative', '{}')
+                  (3, 1, 1, 3, '2026-03-09', 10, 'USD', 5500, 55000, 55000, 50000, 50000, 1, 'authoritative', '{}')
                 """
             )
         )

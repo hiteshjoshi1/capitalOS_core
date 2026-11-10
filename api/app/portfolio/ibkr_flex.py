@@ -1718,11 +1718,11 @@ def _insert_position_snapshot(
         text(
             f"""
             INSERT INTO portfolio_position_snapshots
-              (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, raw_document_id,
+              (broker_account_id, broker_instrument_id, import_run_id, raw_document_id,
                report_date, quantity, currency, market_price, market_value_local, market_value_base,
                cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
             VALUES
-              (:broker_account_id, :legacy_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
+              (:broker_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
                :report_date, :quantity, :currency, :market_price, :market_value_local, :market_value_base,
                :cost_basis_local, :cost_basis_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
             """
@@ -1761,10 +1761,10 @@ def _insert_cash_balance_snapshot(
         text(
             f"""
             INSERT INTO portfolio_cash_balance_snapshots
-              (broker_account_id, legacy_account_id, import_run_id, raw_document_id, report_date,
+              (broker_account_id, import_run_id, raw_document_id, report_date,
                currency, cash_balance, cash_balance_base, fx_rate_to_base, authority_status, metadata_json)
             VALUES
-              (:broker_account_id, :legacy_account_id, :import_run_id, :raw_document_id, :report_date,
+              (:broker_account_id, :import_run_id, :raw_document_id, :report_date,
                :currency, :cash_balance, :cash_balance_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
             """
         ),
@@ -1908,11 +1908,11 @@ def _insert_statement_facts(
             text(
                 f"""
                 INSERT INTO portfolio_nav_snapshots
-                  (broker_account_id, legacy_account_id, import_run_id, raw_document_id, report_date,
+                  (broker_account_id, import_run_id, raw_document_id, report_date,
                    base_currency, cash_base, stock_base, options_base, funds_base, bonds_base,
                    interest_accrual_base, dividend_accrual_base, total_nav_base, authority_status, metadata_json)
                 VALUES
-                  (:broker_account_id, :legacy_account_id, :import_run_id, :raw_document_id, :report_date,
+                  (:broker_account_id, :import_run_id, :raw_document_id, :report_date,
                    :base_currency, :cash_base, :stock_base, :options_base, :funds_base, :bonds_base,
                    :interest_accrual_base, :dividend_accrual_base, :total_nav_base, :authority_status, {_platform_json_default(db)})
                 """
