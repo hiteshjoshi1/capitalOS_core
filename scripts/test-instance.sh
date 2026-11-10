@@ -38,6 +38,11 @@ BACKUP_OFFSITE_DIR=""
 export ISO_NAME=capitalos-test
 export ISO_API_PORT=${TEST_API_PORT:-8021} ISO_PG_PORT=${TEST_PG_PORT:-5434} ISO_WEB_PORT=${TEST_WEB_PORT:-5174}
 export ISO_GRAFANA_PORT=${TEST_GRAFANA_PORT:-3001} ISO_LOKI_PORT=${TEST_LOKI_PORT:-3101}
+# Google sign-in on the copy (#373): Google only sends you back to https (or localhost), so the
+# test web is also served over the tailnet's HTTPS on this port by `tailscale serve` (tailnet
+# only, never funnel). The real app has :8443 and InvestOS :443; those are never touched.
+TEST_TAILNET_PORT=${TEST_TAILNET_PORT:-8444}
+TAILSCALE_BIN=${TAILSCALE_BIN:-$(command -v tailscale 2>/dev/null || ls /Applications/Tailscale.app/Contents/MacOS/Tailscale 2>/dev/null || true)}
 DB_USER=capitalos DB_NAME=capitalos
 # The real-data stack's database (read-only queries: the newest import, for "has it changed since
 # the copy"), and how a fresh backup is taken (#287). Both can be overridden, e.g. by the test.
@@ -182,6 +187,10 @@ serve() {
   fi
 
   say "API"
+  # Its own Google redirect list (#373): docker-compose.isolated.yml passes it as the API's
+  # GOOGLE_OAUTH_REDIRECT_URL, so the main .env's (the real app's) never applies here.
+  ISO_GOOGLE_OAUTH_REDIRECT_URL=$(test_google_redirects)
+  export ISO_GOOGLE_OAUTH_REDIRECT_URL
   compose up -d --build api
   for _ in $(seq 1 90); do curl -sf "http://127.0.0.1:$ISO_API_PORT/health" >/dev/null && break; sleep 2; done
   curl -sf "http://127.0.0.1:$ISO_API_PORT/health" >/dev/null || die "the API didn't become healthy (make -C $TW api-logs)"
@@ -197,8 +206,42 @@ serve() {
   (cd "$TW" && nohup make -s web-up INSTANCE_LABEL="$label" INSTANCE_REPO_URL="$repo_url" >"$TW/.test-instance-web.log" 2>&1 & echo $! >"$TW/.test-instance-web.pid")
   for _ in $(seq 1 90); do curl -sf -o /dev/null "http://127.0.0.1:$ISO_WEB_PORT/" && break; sleep 2; done
   curl -sf "http://127.0.0.1:$ISO_WEB_PORT/api/health" >/dev/null || die "the web app didn't come up (see $TW/.test-instance-web.log)"
+  tailnet_serve_on
   state_set served "$(date '+%F %T')"
   status
+}
+
+# The Mac's tailnet name (hiteshs-macbook-pro.tailb99000.ts.net), or nothing without Tailscale.
+tailnet_name() {
+  [ -n "$TAILSCALE_BIN" ] || return 0
+  "$TAILSCALE_BIN" status --json 2>/dev/null |
+    python3 -c 'import json, sys; print((json.load(sys.stdin).get("Self") or {}).get("DNSName", "").rstrip("."))' 2>/dev/null || true
+}
+
+# The copy's own Google redirect URLs (#373), never the real app's: the tailnet HTTPS port and
+# localhost. Registered once in Google Cloud next to the real app's two.
+test_google_redirects() {  # [<tailnet name>]
+  local name=${1-$(tailnet_name)} local_url="http://localhost:$ISO_WEB_PORT/api/auth/google/callback"
+  if [ -n "$name" ]; then echo "https://$name:$TEST_TAILNET_PORT/api/auth/google/callback,$local_url"; else echo "$local_url"; fi
+}
+
+guard_tailnet_port() {  # the real app's and InvestOS's ports are never the copy's
+  case "$TEST_TAILNET_PORT" in
+    443|8443) die "TEST_TAILNET_PORT=$TEST_TAILNET_PORT belongs to InvestOS / the real app; pick another" ;;
+  esac
+}
+
+tailnet_serve_on() {
+  guard_tailnet_port
+  [ -n "$TAILSCALE_BIN" ] || { echo "  (no tailscale CLI: Google sign-in only at localhost:$ISO_WEB_PORT)"; return 0; }
+  "$TAILSCALE_BIN" serve --bg --https="$TEST_TAILNET_PORT" "http://127.0.0.1:$ISO_WEB_PORT" >/dev/null ||
+    echo "  WARNING: tailscale serve on :$TEST_TAILNET_PORT failed; Google sign-in only at localhost:$ISO_WEB_PORT" >&2
+}
+
+tailnet_serve_off() {
+  guard_tailnet_port
+  [ -n "$TAILSCALE_BIN" ] || return 0
+  "$TAILSCALE_BIN" serve --https="$TEST_TAILNET_PORT" off >/dev/null 2>&1 || true
 }
 
 stop_web() {
@@ -266,7 +309,7 @@ batch_issues() {
 
 status() {
   [ -d "$TW" ] || { echo "No test instance (make test-instance PRS=\"<n> <n>\")"; return 0; }
-  local ts
+  local ts name
   ts=$(tailscale ip -4 2>/dev/null | head -1 || true)
   echo "Test instance: $(git -C "$TW" branch --show-current) in $TW"
   echo "  PRs merged:  $(state_get merged)"
@@ -278,6 +321,8 @@ status() {
     data_drift "$(newest_import "$REAL_DB_CONTAINER")" "$(newest_import "$ISO_NAME-postgres")"
   fi
   echo "  Web:         http://localhost:$ISO_WEB_PORT${ts:+   (phone: http://$ts:$ISO_WEB_PORT)}"
+  name=$(tailnet_name)
+  [ -n "$name" ] && echo "  HTTPS:       https://$name:$TEST_TAILNET_PORT   (tailnet only; Sign in with Google works here and at localhost:$ISO_WEB_PORT)"
   echo "  API:         http://127.0.0.1:$ISO_API_PORT   Postgres: 127.0.0.1:$ISO_PG_PORT"
   echo "  After testing: make test-instance-pr (one PR to main), then make test-instance-drop"
 }
@@ -327,6 +372,7 @@ case "${1:-}" in
     [ -d "$TW" ] || { echo "No test instance."; exit 0; }
     branch=$(git -C "$TW" branch --show-current)
     stop_web
+    tailnet_serve_off
     compose --profile observability --profile tools down -v --remove-orphans
     git -C "$REPO" worktree remove --force "$TW"
     git -C "$REPO" branch -D "$branch" >/dev/null 2>&1 || true

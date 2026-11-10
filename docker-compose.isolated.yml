@@ -30,6 +30,9 @@ services:
       # Tailscale IP) would share the real app's refresh cookie and log each other out
       # (#65). Each instance gets its own; the real app keeps the default name.
       AUTH_REFRESH_COOKIE_NAME: capitalos_refresh_${ISO_NAME:?}
+      # Google sign-in (#358, #373): an instance never uses the real app's redirect URLs from a linked
+      # .env. Empty (worktrees) turns Google off; the test instance sets its own (:8444 + localhost:5174).
+      GOOGLE_OAUTH_REDIRECT_URL: ${ISO_GOOGLE_OAUTH_REDIRECT_URL:-}
 
   loki:
     container_name: ${ISO_NAME:?}-loki
