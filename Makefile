@@ -104,7 +104,8 @@ WEB_NODE_MODULES_STAMP=$(WEB_DIR)/node_modules/.install-stamp
 # Host runtimes (#91): CapitalOS's own Node and Python, so a security fix doesn't wait on the
 # machine-wide defaults (shared with other projects). `make host-tools` installs them: Node via
 # nvm (the shared default is left alone) and a uv-managed CPython in ~/.capitalos/python (no PATH
-# shims, invisible to other projects' uv). Without them, targets use node / python3 from PATH.
+# shims, invisible to other projects' uv), plus the pinned `age` that encrypts backups (#356,
+# ~/.capitalos/age). Without them, targets use node / python3 from PATH.
 NODE_VERSION:=$(shell cat .nvmrc 2>/dev/null)
 CAPITALOS_NODE_BIN:=$(HOME)/.nvm/versions/node/v$(NODE_VERSION)/bin
 ifneq ($(wildcard $(CAPITALOS_NODE_BIN)/node),)
@@ -261,6 +262,7 @@ host-tools:
 		nvm install "$(NODE_VERSION)" >/dev/null; cp -R "$$saved/." "$$NVM_DIR/alias/"; rm -r "$$saved"; \
 		echo "node $(NODE_VERSION) ready; nvm default unchanged ($$(nvm version default))"'
 	UV_PYTHON_INSTALL_DIR="$(CAPITALOS_PYTHON_DIR)" uv python install --no-bin $(HOST_PYTHON_VERSION)
+	scripts/age-tool.sh install
 
 # The test instance (#45): a batch of PRs on a separate app with a copy of the real data,
 # tested by Hitesh before main. Run from the main checkout. See scripts/test-instance.sh.
@@ -365,6 +367,7 @@ $(WEB_NODE_MODULES_STAMP): $(WEB_PACKAGE_MANIFESTS)
 web-deps: $(WEB_NODE_MODULES_STAMP)
 
 # ---- DB helpers ----
+.PHONY: backup-key-init backup-encrypt-existing
 .PHONY: user-set-password user-create user-grant-admin user-revoke-admin demo-enable demo-disable db-shell db-wait db-migrate db-adopt-migrations db-reset db-seed-dummy db-clear-dummy db-seed-demo db-clear-demo db-query ownership-reassign ibkr-rebuild-snapshots card-balance-backfill sharekhan-instrument-repair market-symbol-override reports-mask authority-windows authority-window-move db-backup db-restore db-create-mcp-role db-backup-verify backup-prune backup-status backup-schedule backup-unschedule backup-now db-migrations-applied backup-data-check db-schema-check db-schema-update db-schema-check-drop db-constraint-check db-table-usage
 
 # Forgotten password (#72): prompts for the new one (never on the command line) and signs
@@ -435,7 +438,7 @@ db-backup: db-wait
 	@$(DB_BACKUP) create
 
 db-backup-verify: db-wait
-	@test -n "$(BACKUP)" || (echo "Usage: make db-backup-verify BACKUP=backups/capitalos_<timestamp>.dump" && exit 2)
+	@test -n "$(BACKUP)" || (echo "Usage: make db-backup-verify BACKUP=<backup dir>/capitalos_<timestamp>.dump" && exit 2)
 	@$(DB_BACKUP) verify "$(BACKUP)"
 
 # Retention (#155): every verified set from the last KEEP_DAYS (14) days, plus the first verified
@@ -452,6 +455,17 @@ backup-data-check: db-wait
 backup-status:
 	@$(DB_BACKUP) status
 	@scripts/backup-schedule.sh status
+
+# Encrypted backups (#356, D-92). Once: `make backup-key-init` makes the age key pair (private key
+# in ~/.capitalos/backup/, public key into .env as BACKUP_AGE_RECIPIENT); save the private key in
+# your password manager. From then on every backup is encrypted into BACKUP_DIR (.env).
+# `make backup-encrypt-existing` (dry run) / `APPLY=1` moves the plain sets from backups/ there,
+# encrypted, each file decrypted back and compared before its plaintext is deleted.
+backup-key-init:
+	@$(DB_BACKUP) key-init
+
+backup-encrypt-existing:
+	@APPLY=$(APPLY) SRC_DIR=$(SRC_DIR) $(DB_BACKUP) encrypt-existing
 
 backup-schedule:
 	@scripts/backup-schedule.sh install
@@ -470,8 +484,8 @@ backup-now:
 # the dump's snapshot; grants to roles this Postgres lacks (capitalos_mcp_ro on a new stack) are
 # left out and named, and the restored tables carry exactly the dump's grants.
 db-restore: db-wait
-	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=backups/capitalos_<timestamp>.dump" && exit 2)
-	@test -f "$(BACKUP_FILE)" || (echo "Backup file not found: $(BACKUP_FILE)" && exit 2)
+	@test -n "$(BACKUP_FILE)" || (echo "Usage: make db-restore BACKUP_FILE=<backup dir>/capitalos_<timestamp>.dump (make backup-status shows the dir)" && exit 2)
+	@test -f "$(BACKUP_FILE)" || test -f "$(BACKUP_FILE).age" || (echo "Backup file not found: $(BACKUP_FILE) (or $(BACKUP_FILE).age)" && exit 2)
 	@echo "WARNING: this overwrites the current database ($(DB_NAME)) in $(DB_CONTAINER), and replaces data/ with the backup's (the current one is moved aside)."
 	@read -p "Type 'yes' to continue: " confirm; [ "$$confirm" = "yes" ] || (echo "Aborted." && exit 1)
 	$(COMPOSE) stop api

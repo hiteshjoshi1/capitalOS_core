@@ -48,6 +48,52 @@ dump and its data archive are removed together. `make backup-prune DRY_RUN=1`
 lists what it would remove. Dumps without a `.verified` marker are never
 pruned.
 
+## Encrypted, and outside the repo (#356)
+
+Backups hold every statement you uploaded, so they are encrypted with
+[age](https://age-encryption.org) and kept outside the checkout.
+
+```bash
+make host-tools            # installs the pinned age (sha256-checked) into ~/.capitalos/age
+make backup-key-init       # once: creates the key pair
+```
+
+`backup-key-init` writes the **private key** to `~/.capitalos/backup/age-identity.txt`
+(chmod 600, outside the repo) and adds the **public key** to `.env` as
+`BACKUP_AGE_RECIPIENT`. Save the private key somewhere off this machine now (a
+password manager's secure note): without it, no encrypted backup can be restored,
+which is exactly the situation after a lost or dead Mac.
+
+Then set where backups go, in the main checkout's `.env`:
+
+```
+BACKUP_DIR=~/Documents/CapitalOS_backups
+```
+
+From then on `make db-backup` makes and verifies the set in a private temp dir, then
+stores `capitalos_<ts>.dump.age`, `.dump.counts.age` and `.data.tar.gz.age` in
+`BACKUP_DIR`; the plaintext is deleted. Only the public key is needed to make a backup.
+The `.verified` / `.failed` markers stay plain (dates and row counts, nothing from your
+data), so `make backup-status` and `make backup-prune` work without the private key.
+`make db-backup-verify`, `make db-restore` and the test instance decrypt with the private
+key (`BACKUP_AGE_IDENTITY` points elsewhere if you keep it elsewhere). Use the set's
+logical name, without `.age`:
+
+```bash
+make db-restore BACKUP_FILE=~/Documents/CapitalOS_backups/capitalos_20261110_030000.dump
+```
+
+Move the older plain sets over (each file is decrypted back and compared before its
+plaintext is deleted):
+
+```bash
+make backup-encrypt-existing            # dry run: lists what it would do
+make backup-encrypt-existing APPLY=1    # SRC_DIR=<dir> for a folder other than ./backups
+```
+
+Worktrees, CI and the test instance keep `./backups` (a `BACKUP_DIR` in `.env` counts only
+in the main checkout), and without `BACKUP_AGE_RECIPIENT` backups are plain, as before.
+
 ## Automate it
 
 Backups you have to remember to run don't help when you need them. Set up a
@@ -90,7 +136,7 @@ Runs daily at 2am; requires Docker Desktop to be running at that time.
 
 ## Make sure the backups themselves survive
 
-`backups/` is a normal directory of plain files, so:
+The backup folder is a normal directory of files (encrypted, see above), so:
 
 - **Time Machine** (macOS) will pick it up automatically as long as it's not
   excluded and your Mac is on/awake at some point during the backup window.
