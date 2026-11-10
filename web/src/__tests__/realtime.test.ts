@@ -4,6 +4,8 @@ class MockWebSocket {
   static instances: MockWebSocket[] = [];
 
   readonly url: string;
+  readyState = 0;
+  sent: string[] = [];
   private listeners = new Map<string, Array<(event?: unknown) => void>>();
 
   constructor(url: string) {
@@ -17,13 +19,17 @@ class MockWebSocket {
     this.listeners.set(type, existing);
   }
 
-  send() {}
+  send(data: string) {
+    this.sent.push(data);
+  }
 
   close() {
     this.emit("close", { code: 1000 });
   }
 
   emit(type: string, event?: unknown) {
+    if (type === "open") this.readyState = 1;
+    if (type === "close") this.readyState = 3;
     for (const handler of this.listeners.get(type) ?? []) {
       handler(event);
     }
@@ -86,5 +92,54 @@ describe("realtime client", () => {
     expect(MockWebSocket.instances[0].url).toContain(encodeURIComponent(refreshedToken));
 
     unsubscribe();
+  });
+  async function connectedClient() {
+    vi.stubGlobal("fetch", vi.fn());
+    vi.stubGlobal("WebSocket", MockWebSocket as unknown as typeof WebSocket);
+    const { setAccessToken } = await import("../lib/api");
+    setAccessToken(makeToken(3600));
+    return import("../lib/realtime");
+  }
+
+  it("subscribes a topic added after the socket opened (#367)", async () => {
+    const { subscribeToRealtimeTopic } = await connectedClient();
+    const first = subscribeToRealtimeTopic("portfolio-refresh", {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const socket = MockWebSocket.instances[0];
+    socket.emit("open");
+    expect(socket.sent.map((m) => JSON.parse(m))).toEqual([{ action: "subscribe", topics: ["portfolio-refresh"] }]);
+
+    const statuses: string[] = [];
+    const second = subscribeToRealtimeTopic("imports", { onStatusChange: (s) => statuses.push(s) });
+    expect(socket.sent.map((m) => JSON.parse(m))[1]).toEqual({ action: "subscribe", topics: ["imports"] });
+    expect(statuses).toEqual(["connected"]);
+    // A second listener on a topic already subscribed sends nothing new.
+    const third = subscribeToRealtimeTopic("imports", {});
+    expect(socket.sent).toHaveLength(2);
+    expect(MockWebSocket.instances).toHaveLength(1);
+
+    first();
+    second();
+    third();
+  });
+
+  it("ignores malformed messages instead of throwing (#367)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { subscribeToRealtimeTopic, parseRealtimeMessage } = await connectedClient();
+    const events: unknown[] = [];
+    const unsubscribe = subscribeToRealtimeTopic("portfolio-refresh", { onEvent: (e) => events.push(e) });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const socket = MockWebSocket.instances[0];
+    socket.emit("open");
+
+    expect(() => socket.emit("message", { data: "not json{" })).not.toThrow();
+    expect(() => socket.emit("message", { data: "[1,2]" })).not.toThrow();
+    socket.emit("message", { data: JSON.stringify({ type: "event", topic: "portfolio-refresh", payload: {} }) });
+    expect(events).toHaveLength(1);
+    expect(parseRealtimeMessage("null")).toBeNull();
+    expect(parseRealtimeMessage(42)).toBeNull();
+
+    unsubscribe();
+    warn.mockRestore();
   });
 });
