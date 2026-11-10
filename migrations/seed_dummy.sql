@@ -37,7 +37,7 @@ BEGIN
     'portfolio_position_snapshots', 'portfolio_cash_balance_snapshots', 'portfolio_nav_snapshots',
     'portfolio_cash_ledger_entries', 'portfolio_trades', 'portfolio_corporate_action_events',
     'portfolio_fx_rates', 'portfolio_data_completeness', 'portfolio_data_quality_events',
-    'portfolio_reconciliations', 'portfolio_report_metrics', 'portfolio_event_groups'
+    'portfolio_reconciliations', 'portfolio_report_metrics'
   ] LOOP
     EXECUTE format('DELETE FROM %I WHERE import_run_id = ANY($1)', fact_table) USING run_ids;
   END LOOP;
@@ -405,13 +405,12 @@ WITH resolved AS (
    AND bi.currency = h.currency
 )
 INSERT INTO portfolio_position_snapshots (
-  broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+  broker_account_id, broker_instrument_id, import_run_id, report_date,
   quantity, currency, market_price, market_value_local, market_value_base,
   cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json
 )
 SELECT
   r.broker_account_id,
-  r.account_id,
   r.broker_instrument_id,
   bir.id,
   sm.as_of_date,

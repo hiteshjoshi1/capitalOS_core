@@ -155,7 +155,7 @@ def test_a_sale_reads_as_a_sale(mid: TestClient, db_engine):
     with db_engine.begin() as conn:
         conn.execute(
             text(
-                "DELETE FROM portfolio_position_snapshots WHERE legacy_account_id = :a AND report_date = '2026-03-15' "
+                "DELETE FROM portfolio_position_snapshots WHERE broker_account_id IN (SELECT id FROM broker_accounts WHERE legacy_account_id = :a) AND report_date = '2026-03-15' "
                 "AND broker_instrument_id IN (SELECT id FROM broker_instruments WHERE asset_id = :asset)"
             ),
             {"a": SHAREKHAN, "asset": INFY},

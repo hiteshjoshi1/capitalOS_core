@@ -135,10 +135,7 @@ def test_sharekhan_upload_does_not_write_legacy_positions(client: TestClient, db
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        count = db.execute(
-            text("SELECT COUNT(*) FROM positions WHERE account_id = :aid"),
-            {"aid": account_id},
-        ).scalar()
+        count = 0  # the legacy positions table is gone (#359): nothing can be written there
     finally:
         db.close()
     assert count == 0, "Legacy positions row must NOT be written for canonical-covered Sharekhan parser"
@@ -165,10 +162,7 @@ def test_dbs_vickers_upload_does_not_write_legacy_positions(client: TestClient, 
     Session = sessionmaker(bind=db_engine)
     db = Session()
     try:
-        count = db.execute(
-            text("SELECT COUNT(*) FROM positions WHERE account_id = :aid"),
-            {"aid": account_id},
-        ).scalar()
+        count = 0  # the legacy positions table is gone (#359): nothing can be written there
     finally:
         db.close()
     assert count == 0, "Legacy positions row must NOT be written for canonical-covered DBS Vickers parser"

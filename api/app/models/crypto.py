@@ -79,14 +79,3 @@ class CryptoWalletSnapshotItem(Base):
     price_usd = Column(Numeric, nullable=True)
     value_usd = Column(Numeric, nullable=True)
     price_source = Column(Text, nullable=True)
-
-
-class CryptoUserNetworth(Base):
-    __tablename__ = "crypto_user_networth"
-
-    id = Column(BigInteger, primary_key=True)
-    user_id = Column(BigInteger, nullable=True)
-    as_of_date = Column(Date, nullable=False)
-    total_usd = Column(Numeric, nullable=True)
-    crypto_usd = Column(Numeric, nullable=True)
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

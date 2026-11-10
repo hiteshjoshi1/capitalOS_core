@@ -12,7 +12,6 @@ from .crypto import (
     CryptoAsset,
     CryptoWalletSnapshot,
     CryptoWalletSnapshotItem,
-    CryptoUserNetworth,
 )
 from .user import User, UserCredential, AuthSession, OAuthIdentity
 from .canonical_balance import AccountBalanceSnapshot
@@ -37,7 +36,6 @@ __all__ = [
     "CryptoAsset",
     "CryptoWalletSnapshot",
     "CryptoWalletSnapshotItem",
-    "CryptoUserNetworth",
     "User",
     "UserCredential",
     "AuthSession",

@@ -108,21 +108,6 @@ CREATE TYPE public.txn_type AS ENUM (
 );
 
 
---
--- Name: prevent_legacy_positions_write(); Type: FUNCTION; Schema: public; Owner: -
---
-
-CREATE FUNCTION public.prevent_legacy_positions_write() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
-BEGIN
-  RAISE EXCEPTION
-    'legacy positions is retired and read-only; write canonical portfolio facts instead'
-    USING ERRCODE = 'check_violation';
-END;
-$$;
-
-
 SET default_tablespace = '';
 
 SET default_table_access_method = heap;
@@ -225,41 +210,6 @@ CREATE SEQUENCE public.accounts_id_seq
 --
 
 ALTER SEQUENCE public.accounts_id_seq OWNED BY public.accounts.id;
-
-
---
--- Name: asset_identifiers; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.asset_identifiers (
-    id bigint NOT NULL,
-    asset_id bigint,
-    broker_instrument_id bigint,
-    identifier_namespace text NOT NULL,
-    identifier_type text NOT NULL,
-    identifier_value text NOT NULL,
-    metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: asset_identifiers_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.asset_identifiers_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: asset_identifiers_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.asset_identifiers_id_seq OWNED BY public.asset_identifiers.id;
 
 
 --
@@ -800,39 +750,6 @@ CREATE TABLE public.crypto_token_visibility (
 
 
 --
--- Name: crypto_user_networth; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.crypto_user_networth (
-    id bigint NOT NULL,
-    user_id bigint,
-    as_of_date date NOT NULL,
-    total_usd numeric,
-    crypto_usd numeric,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: crypto_user_networth_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.crypto_user_networth_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: crypto_user_networth_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.crypto_user_networth_id_seq OWNED BY public.crypto_user_networth.id;
-
-
---
 -- Name: crypto_wallet_snapshot_items; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1069,41 +986,6 @@ CREATE SEQUENCE public.import_jobs_id_seq
 --
 
 ALTER SEQUENCE public.import_jobs_id_seq OWNED BY public.import_jobs.id;
-
-
---
--- Name: ingestion_jobs; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.ingestion_jobs (
-    id bigint NOT NULL,
-    source text NOT NULL,
-    started_at timestamp with time zone DEFAULT now() NOT NULL,
-    finished_at timestamp with time zone,
-    status text DEFAULT 'RUNNING'::text NOT NULL,
-    records integer DEFAULT 0 NOT NULL,
-    errors integer DEFAULT 0 NOT NULL,
-    error_summary text
-);
-
-
---
--- Name: ingestion_jobs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.ingestion_jobs_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: ingestion_jobs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.ingestion_jobs_id_seq OWNED BY public.ingestion_jobs.id;
 
 
 --
@@ -1411,7 +1293,6 @@ ALTER SEQUENCE public.platforms_id_seq OWNED BY public.platforms.id;
 CREATE TABLE public.portfolio_cash_balance_snapshots (
     id bigint NOT NULL,
     broker_account_id bigint NOT NULL,
-    legacy_account_id bigint,
     import_run_id bigint NOT NULL,
     raw_document_id bigint,
     report_date date NOT NULL,
@@ -1455,7 +1336,6 @@ CREATE TABLE public.portfolio_cash_ledger_entries (
     broker_account_id bigint NOT NULL,
     import_run_id bigint NOT NULL,
     raw_document_id bigint,
-    event_group_id bigint,
     activity_date date NOT NULL,
     currency text NOT NULL,
     amount numeric(38,18) NOT NULL,
@@ -1496,7 +1376,6 @@ CREATE TABLE public.portfolio_corporate_action_events (
     broker_instrument_id bigint,
     import_run_id bigint NOT NULL,
     raw_document_id bigint,
-    event_group_id bigint,
     action_date date NOT NULL,
     action_type text,
     quantity numeric(38,18),
@@ -1605,42 +1484,6 @@ ALTER SEQUENCE public.portfolio_data_quality_events_id_seq OWNED BY public.portf
 
 
 --
--- Name: portfolio_event_groups; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.portfolio_event_groups (
-    id bigint NOT NULL,
-    broker_account_id bigint NOT NULL,
-    import_run_id bigint NOT NULL,
-    raw_document_id bigint,
-    event_date date NOT NULL,
-    event_type text NOT NULL,
-    broker_event_id text,
-    metadata_json jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: portfolio_event_groups_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.portfolio_event_groups_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: portfolio_event_groups_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.portfolio_event_groups_id_seq OWNED BY public.portfolio_event_groups.id;
-
-
---
 -- Name: portfolio_fx_rates; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -1697,7 +1540,6 @@ CREATE TABLE public.portfolio_import_locks (
 CREATE TABLE public.portfolio_nav_snapshots (
     id bigint NOT NULL,
     broker_account_id bigint NOT NULL,
-    legacy_account_id bigint,
     import_run_id bigint NOT NULL,
     raw_document_id bigint,
     report_date date NOT NULL,
@@ -1744,7 +1586,6 @@ ALTER SEQUENCE public.portfolio_nav_snapshots_id_seq OWNED BY public.portfolio_n
 CREATE TABLE public.portfolio_position_snapshots (
     id bigint NOT NULL,
     broker_account_id bigint NOT NULL,
-    legacy_account_id bigint,
     broker_instrument_id bigint NOT NULL,
     import_run_id bigint NOT NULL,
     raw_document_id bigint,
@@ -1959,7 +1800,6 @@ CREATE TABLE public.portfolio_trades (
     broker_instrument_id bigint,
     import_run_id bigint NOT NULL,
     raw_document_id bigint,
-    event_group_id bigint,
     trade_date date NOT NULL,
     settle_date date,
     side text,
@@ -1991,41 +1831,6 @@ CREATE SEQUENCE public.portfolio_trades_id_seq
 --
 
 ALTER SEQUENCE public.portfolio_trades_id_seq OWNED BY public.portfolio_trades.id;
-
-
---
--- Name: positions; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.positions (
-    id bigint NOT NULL,
-    account_id bigint NOT NULL,
-    asset_id bigint NOT NULL,
-    as_of timestamp with time zone NOT NULL,
-    quantity numeric(38,18) DEFAULT 0 NOT NULL,
-    avg_cost numeric(38,18),
-    cost_basis_base numeric(38,18),
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: positions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.positions_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: positions_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.positions_id_seq OWNED BY public.positions.id;
 
 
 --
@@ -2103,41 +1908,6 @@ CREATE SEQUENCE public.raw_broker_documents_id_seq
 --
 
 ALTER SEQUENCE public.raw_broker_documents_id_seq OWNED BY public.raw_broker_documents.id;
-
-
---
--- Name: raw_files; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.raw_files (
-    id bigint NOT NULL,
-    ingestion_job_id bigint,
-    filename text NOT NULL,
-    content_type text,
-    byte_size bigint,
-    sha256 text,
-    stored_path text,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
--- Name: raw_files_id_seq; Type: SEQUENCE; Schema: public; Owner: -
---
-
-CREATE SEQUENCE public.raw_files_id_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: raw_files_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
---
-
-ALTER SEQUENCE public.raw_files_id_seq OWNED BY public.raw_files.id;
 
 
 --
@@ -2307,18 +2077,6 @@ ALTER SEQUENCE public.users_id_seq OWNED BY public.users.id;
 
 
 --
--- Name: wallet_accounts; Type: TABLE; Schema: public; Owner: -
---
-
-CREATE TABLE public.wallet_accounts (
-    account_id bigint NOT NULL,
-    chain_id bigint NOT NULL,
-    address text NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL
-);
-
-
---
 -- Name: wealth_monthly_rollups; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2386,13 +2144,6 @@ ALTER TABLE ONLY public.account_balance_snapshots ALTER COLUMN id SET DEFAULT ne
 --
 
 ALTER TABLE ONLY public.accounts ALTER COLUMN id SET DEFAULT nextval('public.accounts_id_seq'::regclass);
-
-
---
--- Name: asset_identifiers id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.asset_identifiers ALTER COLUMN id SET DEFAULT nextval('public.asset_identifiers_id_seq'::regclass);
 
 
 --
@@ -2494,13 +2245,6 @@ ALTER TABLE ONLY public.crypto_assets ALTER COLUMN id SET DEFAULT nextval('publi
 
 
 --
--- Name: crypto_user_networth id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.crypto_user_networth ALTER COLUMN id SET DEFAULT nextval('public.crypto_user_networth_id_seq'::regclass);
-
-
---
 -- Name: crypto_wallet_snapshot_items id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2540,13 +2284,6 @@ ALTER TABLE ONLY public.fx_rates ALTER COLUMN id SET DEFAULT nextval('public.fx_
 --
 
 ALTER TABLE ONLY public.import_jobs ALTER COLUMN id SET DEFAULT nextval('public.import_jobs_id_seq'::regclass);
-
-
---
--- Name: ingestion_jobs id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ingestion_jobs ALTER COLUMN id SET DEFAULT nextval('public.ingestion_jobs_id_seq'::regclass);
 
 
 --
@@ -2641,13 +2378,6 @@ ALTER TABLE ONLY public.portfolio_data_quality_events ALTER COLUMN id SET DEFAUL
 
 
 --
--- Name: portfolio_event_groups id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_event_groups ALTER COLUMN id SET DEFAULT nextval('public.portfolio_event_groups_id_seq'::regclass);
-
-
---
 -- Name: portfolio_fx_rates id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2704,13 +2434,6 @@ ALTER TABLE ONLY public.portfolio_trades ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
--- Name: positions id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.positions ALTER COLUMN id SET DEFAULT nextval('public.positions_id_seq'::regclass);
-
-
---
 -- Name: prices id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2722,13 +2445,6 @@ ALTER TABLE ONLY public.prices ALTER COLUMN id SET DEFAULT nextval('public.price
 --
 
 ALTER TABLE ONLY public.raw_broker_documents ALTER COLUMN id SET DEFAULT nextval('public.raw_broker_documents_id_seq'::regclass);
-
-
---
--- Name: raw_files id; Type: DEFAULT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raw_files ALTER COLUMN id SET DEFAULT nextval('public.raw_files_id_seq'::regclass);
 
 
 --
@@ -2781,14 +2497,6 @@ ALTER TABLE ONLY public.account_statement_identities
 
 ALTER TABLE ONLY public.accounts
     ADD CONSTRAINT accounts_pkey PRIMARY KEY (id);
-
-
---
--- Name: asset_identifiers asset_identifiers_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.asset_identifiers
-    ADD CONSTRAINT asset_identifiers_pkey PRIMARY KEY (id);
 
 
 --
@@ -2984,22 +2692,6 @@ ALTER TABLE ONLY public.crypto_token_visibility
 
 
 --
--- Name: crypto_user_networth crypto_user_networth_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.crypto_user_networth
-    ADD CONSTRAINT crypto_user_networth_pkey PRIMARY KEY (id);
-
-
---
--- Name: crypto_user_networth crypto_user_networth_user_id_as_of_date_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.crypto_user_networth
-    ADD CONSTRAINT crypto_user_networth_user_id_as_of_date_key UNIQUE (user_id, as_of_date);
-
-
---
 -- Name: crypto_wallet_snapshot_items crypto_wallet_snapshot_items_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3077,14 +2769,6 @@ ALTER TABLE ONLY public.fx_rates
 
 ALTER TABLE ONLY public.import_jobs
     ADD CONSTRAINT import_jobs_pkey PRIMARY KEY (id);
-
-
---
--- Name: ingestion_jobs ingestion_jobs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.ingestion_jobs
-    ADD CONSTRAINT ingestion_jobs_pkey PRIMARY KEY (id);
 
 
 --
@@ -3248,14 +2932,6 @@ ALTER TABLE ONLY public.portfolio_data_quality_events
 
 
 --
--- Name: portfolio_event_groups portfolio_event_groups_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_event_groups
-    ADD CONSTRAINT portfolio_event_groups_pkey PRIMARY KEY (id);
-
-
---
 -- Name: portfolio_fx_rates portfolio_fx_rates_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3344,22 +3020,6 @@ ALTER TABLE ONLY public.portfolio_trades
 
 
 --
--- Name: positions positions_account_id_asset_id_as_of_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.positions
-    ADD CONSTRAINT positions_account_id_asset_id_as_of_key UNIQUE (account_id, asset_id, as_of);
-
-
---
--- Name: positions positions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.positions
-    ADD CONSTRAINT positions_pkey PRIMARY KEY (id);
-
-
---
 -- Name: prices prices_asset_id_ts_currency_source_key; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -3381,14 +3041,6 @@ ALTER TABLE ONLY public.prices
 
 ALTER TABLE ONLY public.raw_broker_documents
     ADD CONSTRAINT raw_broker_documents_pkey PRIMARY KEY (id);
-
-
---
--- Name: raw_files raw_files_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raw_files
-    ADD CONSTRAINT raw_files_pkey PRIMARY KEY (id);
 
 
 --
@@ -3469,22 +3121,6 @@ ALTER TABLE ONLY public.users
 
 ALTER TABLE ONLY public.users
     ADD CONSTRAINT users_username_key UNIQUE (username);
-
-
---
--- Name: wallet_accounts wallet_accounts_chain_id_address_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.wallet_accounts
-    ADD CONSTRAINT wallet_accounts_chain_id_address_key UNIQUE (chain_id, address);
-
-
---
--- Name: wallet_accounts wallet_accounts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.wallet_accounts
-    ADD CONSTRAINT wallet_accounts_pkey PRIMARY KEY (account_id);
 
 
 --
@@ -3620,13 +3256,6 @@ CREATE INDEX idx_category_rules_user_id ON public.category_rules USING btree (us
 --
 
 CREATE INDEX idx_category_taxonomy_parent_id ON public.category_taxonomy USING btree (parent_id);
-
-
---
--- Name: idx_crypto_user_networth_user_id; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_crypto_user_networth_user_id ON public.crypto_user_networth USING btree (user_id);
 
 
 --
@@ -3770,20 +3399,6 @@ CREATE INDEX idx_portfolio_source_authority_active ON public.portfolio_source_au
 
 
 --
--- Name: idx_positions_account_id_as_of; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_positions_account_id_as_of ON public.positions USING btree (account_id, as_of DESC);
-
-
---
--- Name: idx_positions_as_of; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE INDEX idx_positions_as_of ON public.positions USING btree (as_of);
-
-
---
 -- Name: idx_prices_asset_ts; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3833,13 +3448,6 @@ CREATE UNIQUE INDEX uq_account_balance_snapshots_authoritative ON public.account
 
 
 --
--- Name: uq_asset_identifiers_namespace_value; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_asset_identifiers_namespace_value ON public.asset_identifiers USING btree (identifier_namespace, identifier_type, identifier_value);
-
-
---
 -- Name: uq_broker_instruments_platform_contract; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3865,13 +3473,6 @@ CREATE UNIQUE INDEX uq_portfolio_cash_ledger_activity_id ON public.portfolio_cas
 --
 
 CREATE UNIQUE INDEX uq_portfolio_corporate_actions_broker_action ON public.portfolio_corporate_action_events USING btree (broker_account_id, COALESCE(broker_action_id, ''::text)) WHERE (broker_action_id IS NOT NULL);
-
-
---
--- Name: uq_portfolio_event_groups_broker_event; Type: INDEX; Schema: public; Owner: -
---
-
-CREATE UNIQUE INDEX uq_portfolio_event_groups_broker_event ON public.portfolio_event_groups USING btree (broker_account_id, event_date, event_type, COALESCE(broker_event_id, ''::text));
 
 
 --
@@ -3952,27 +3553,6 @@ CREATE UNIQUE INDEX ux_users_username_lower ON public.users USING btree (lower(u
 
 
 --
--- Name: positions trg_prevent_legacy_positions_delete; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_prevent_legacy_positions_delete BEFORE DELETE ON public.positions FOR EACH ROW EXECUTE FUNCTION public.prevent_legacy_positions_write();
-
-
---
--- Name: positions trg_prevent_legacy_positions_insert; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_prevent_legacy_positions_insert BEFORE INSERT ON public.positions FOR EACH ROW EXECUTE FUNCTION public.prevent_legacy_positions_write();
-
-
---
--- Name: positions trg_prevent_legacy_positions_update; Type: TRIGGER; Schema: public; Owner: -
---
-
-CREATE TRIGGER trg_prevent_legacy_positions_update BEFORE UPDATE ON public.positions FOR EACH ROW EXECUTE FUNCTION public.prevent_legacy_positions_write();
-
-
---
 -- Name: account_balance_snapshots account_balance_snapshots_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4034,22 +3614,6 @@ ALTER TABLE ONLY public.account_statement_identities
 
 ALTER TABLE ONLY public.accounts
     ADD CONSTRAINT accounts_platform_id_fkey FOREIGN KEY (platform_id) REFERENCES public.platforms(id);
-
-
---
--- Name: asset_identifiers asset_identifiers_asset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.asset_identifiers
-    ADD CONSTRAINT asset_identifiers_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES public.assets(id) ON DELETE SET NULL;
-
-
---
--- Name: asset_identifiers asset_identifiers_broker_instrument_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.asset_identifiers
-    ADD CONSTRAINT asset_identifiers_broker_instrument_id_fkey FOREIGN KEY (broker_instrument_id) REFERENCES public.broker_instruments(id) ON DELETE SET NULL;
 
 
 --
@@ -4309,14 +3873,6 @@ ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
 
 
 --
--- Name: portfolio_cash_balance_snapshots portfolio_cash_balance_snapshots_legacy_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
-    ADD CONSTRAINT portfolio_cash_balance_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
-
-
---
 -- Name: portfolio_cash_balance_snapshots portfolio_cash_balance_snapshots_raw_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4330,14 +3886,6 @@ ALTER TABLE ONLY public.portfolio_cash_balance_snapshots
 
 ALTER TABLE ONLY public.portfolio_cash_ledger_entries
     ADD CONSTRAINT portfolio_cash_ledger_entries_broker_account_id_fkey FOREIGN KEY (broker_account_id) REFERENCES public.broker_accounts(id) ON DELETE CASCADE;
-
-
---
--- Name: portfolio_cash_ledger_entries portfolio_cash_ledger_entries_event_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_cash_ledger_entries
-    ADD CONSTRAINT portfolio_cash_ledger_entries_event_group_id_fkey FOREIGN KEY (event_group_id) REFERENCES public.portfolio_event_groups(id) ON DELETE SET NULL;
 
 
 --
@@ -4370,14 +3918,6 @@ ALTER TABLE ONLY public.portfolio_corporate_action_events
 
 ALTER TABLE ONLY public.portfolio_corporate_action_events
     ADD CONSTRAINT portfolio_corporate_action_events_broker_instrument_id_fkey FOREIGN KEY (broker_instrument_id) REFERENCES public.broker_instruments(id) ON DELETE SET NULL;
-
-
---
--- Name: portfolio_corporate_action_events portfolio_corporate_action_events_event_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_corporate_action_events
-    ADD CONSTRAINT portfolio_corporate_action_events_event_group_id_fkey FOREIGN KEY (event_group_id) REFERENCES public.portfolio_event_groups(id) ON DELETE SET NULL;
 
 
 --
@@ -4445,30 +3985,6 @@ ALTER TABLE ONLY public.portfolio_data_quality_events
 
 
 --
--- Name: portfolio_event_groups portfolio_event_groups_broker_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_event_groups
-    ADD CONSTRAINT portfolio_event_groups_broker_account_id_fkey FOREIGN KEY (broker_account_id) REFERENCES public.broker_accounts(id) ON DELETE CASCADE;
-
-
---
--- Name: portfolio_event_groups portfolio_event_groups_import_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_event_groups
-    ADD CONSTRAINT portfolio_event_groups_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
-
-
---
--- Name: portfolio_event_groups portfolio_event_groups_raw_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_event_groups
-    ADD CONSTRAINT portfolio_event_groups_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
-
-
---
 -- Name: portfolio_fx_rates portfolio_fx_rates_import_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4509,14 +4025,6 @@ ALTER TABLE ONLY public.portfolio_nav_snapshots
 
 
 --
--- Name: portfolio_nav_snapshots portfolio_nav_snapshots_legacy_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_nav_snapshots
-    ADD CONSTRAINT portfolio_nav_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
-
-
---
 -- Name: portfolio_nav_snapshots portfolio_nav_snapshots_raw_document_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4546,14 +4054,6 @@ ALTER TABLE ONLY public.portfolio_position_snapshots
 
 ALTER TABLE ONLY public.portfolio_position_snapshots
     ADD CONSTRAINT portfolio_position_snapshots_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
-
-
---
--- Name: portfolio_position_snapshots portfolio_position_snapshots_legacy_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_position_snapshots
-    ADD CONSTRAINT portfolio_position_snapshots_legacy_account_id_fkey FOREIGN KEY (legacy_account_id) REFERENCES public.accounts(id) ON DELETE RESTRICT;
 
 
 --
@@ -4637,14 +4137,6 @@ ALTER TABLE ONLY public.portfolio_trades
 
 
 --
--- Name: portfolio_trades portfolio_trades_event_group_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.portfolio_trades
-    ADD CONSTRAINT portfolio_trades_event_group_id_fkey FOREIGN KEY (event_group_id) REFERENCES public.portfolio_event_groups(id) ON DELETE SET NULL;
-
-
---
 -- Name: portfolio_trades portfolio_trades_import_run_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -4658,22 +4150,6 @@ ALTER TABLE ONLY public.portfolio_trades
 
 ALTER TABLE ONLY public.portfolio_trades
     ADD CONSTRAINT portfolio_trades_raw_document_id_fkey FOREIGN KEY (raw_document_id) REFERENCES public.raw_broker_documents(id) ON DELETE RESTRICT;
-
-
---
--- Name: positions positions_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.positions
-    ADD CONSTRAINT positions_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.accounts(id) ON DELETE CASCADE;
-
-
---
--- Name: positions positions_asset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.positions
-    ADD CONSTRAINT positions_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES public.assets(id) ON DELETE CASCADE;
 
 
 --
@@ -4698,14 +4174,6 @@ ALTER TABLE ONLY public.raw_broker_documents
 
 ALTER TABLE ONLY public.raw_broker_documents
     ADD CONSTRAINT raw_broker_documents_import_run_id_fkey FOREIGN KEY (import_run_id) REFERENCES public.broker_import_runs(id) ON DELETE RESTRICT;
-
-
---
--- Name: raw_files raw_files_ingestion_job_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.raw_files
-    ADD CONSTRAINT raw_files_ingestion_job_id_fkey FOREIGN KEY (ingestion_job_id) REFERENCES public.ingestion_jobs(id) ON DELETE SET NULL;
 
 
 --
@@ -4770,22 +4238,6 @@ ALTER TABLE ONLY public.user_credentials
 
 ALTER TABLE ONLY public.user_preferences
     ADD CONSTRAINT user_preferences_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
-
-
---
--- Name: wallet_accounts wallet_accounts_account_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.wallet_accounts
-    ADD CONSTRAINT wallet_accounts_account_id_fkey FOREIGN KEY (account_id) REFERENCES public.accounts(id) ON DELETE CASCADE;
-
-
---
--- Name: wallet_accounts wallet_accounts_chain_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.wallet_accounts
-    ADD CONSTRAINT wallet_accounts_chain_id_fkey FOREIGN KEY (chain_id) REFERENCES public.chains(id);
 
 
 --

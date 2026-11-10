@@ -30,8 +30,6 @@ module = [
     "app.market_data.providers",
     "app.market_data.service",
     "app.portfolio.ibkr_flex",
-    "app.portfolio.legacy_backfill",
-    "app.portfolio.parity_report",
     "app.routers.alerts",
     "app.routers.auth",
     "app.routers.crypto",

@@ -202,9 +202,9 @@ def add_242_edges(engine: Engine) -> None:
         ).one()
         conn.execute(
             text(
-                "INSERT INTO portfolio_cash_balance_snapshots (broker_account_id, legacy_account_id, import_run_id, "
+                "INSERT INTO portfolio_cash_balance_snapshots (broker_account_id, import_run_id, "
                 "report_date, currency, cash_balance, cash_balance_base, fx_rate_to_base, authority_status, metadata_json) "
-                "VALUES (:b, :a, :r, :d, 'USD', 55, 55, 1, 'authoritative', '{}')"
+                "VALUES (:b, :r, :d, 'USD', 55, 55, 1, 'authoritative', '{}')"
             ),
             {"b": broker[0], "a": IBKR, "r": broker[1], "d": FLEX_OWNED_BROKER_CASH_DATE.isoformat()},
         )
