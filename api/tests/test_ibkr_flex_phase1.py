@@ -13,6 +13,7 @@ from app.portfolio.ibkr_flex import (
     IbkrFlexResponseError,
     IbkrFlexStatementNotReady,
     is_ibkr_flex_cutover_active,
+    parse_flex_statement,
     run_ibkr_flex_import_from_xml,
 )
 import app.portfolio.scheduler as portfolio_scheduler
@@ -691,3 +692,91 @@ def test_ibkr_import_now_asks_for_the_owner_only_when_credentials_are_set(client
 
     assert response.status_code == 503, response.text
     assert "IBKR_FLEX_USERNAME" in response.json()["detail"]
+
+
+# --- #366: a Flex file with more than one account is refused, not merged ---------------
+
+def _two_account_xml() -> str:
+    # Synthetic, masked: two statements in one file, as a query covering two accounts returns.
+    return """
+    <FlexQueryResponse>
+      <FlexStatements count="2">
+        <FlexStatement accountId="U1111111" fromDate="2026-02-20" toDate="2026-02-20" baseCurrency="SGD">
+          <EquitySummaryInBase>
+            <EquitySummaryByReportDateInBase reportDate="2026-02-20" cash="10.00" stock="0" total="10.00" />
+          </EquitySummaryInBase>
+        </FlexStatement>
+        <FlexStatement accountId="U2222222" fromDate="2026-02-20" toDate="2026-02-20" baseCurrency="SGD">
+          <EquitySummaryInBase>
+            <EquitySummaryByReportDateInBase reportDate="2026-02-20" cash="20.00" stock="0" total="20.00" />
+          </EquitySummaryInBase>
+        </FlexStatement>
+      </FlexStatements>
+    </FlexQueryResponse>
+    """
+
+
+def test_flex_file_with_two_statements_for_two_accounts_is_refused():
+    with pytest.raises(IbkrFlexImportError) as exc:
+        parse_flex_statement(_two_account_xml())
+    assert exc.value.code == "multiple_accounts"
+    assert "2 accounts (U111…, U222…)" in exc.value.message
+    assert "import each account's query separately" in exc.value.message
+    # Masked: the full account numbers never reach the run row.
+    assert "U1111111" not in exc.value.message and "U2222222" not in exc.value.message
+
+
+def test_flex_rows_from_another_account_are_refused_even_in_one_statement():
+    xml = """
+    <FlexQueryResponse><FlexStatements count="1">
+      <FlexStatement accountId="U1111111" fromDate="2026-02-20" toDate="2026-02-20">
+        <OpenPositions>
+          <OpenPosition accountId="U1111111" symbol="AAA" position="1" />
+          <OpenPosition accountId="U3333333" symbol="BBB" position="1" />
+        </OpenPositions>
+      </FlexStatement>
+    </FlexStatements></FlexQueryResponse>
+    """
+    with pytest.raises(IbkrFlexImportError) as exc:
+        parse_flex_statement(xml)
+    assert exc.value.code == "multiple_accounts"
+
+
+def test_flex_summary_rows_without_a_real_account_do_not_count():
+    xml = """
+    <FlexQueryResponse><FlexStatements count="1">
+      <FlexStatement accountId="U1111111" fromDate="2026-02-20" toDate="2026-02-20" baseCurrency="SGD">
+        <EquitySummaryInBase>
+          <EquitySummaryByReportDateInBase accountId="U1111111" reportDate="2026-02-20" cash="10.00" stock="0" total="10.00" />
+        </EquitySummaryInBase>
+        <CashReport>
+          <CashReportCurrency accountId="-" currency="BASE_SUMMARY" toDate="2026-02-20" endingCash="10.00" />
+          <CashReportCurrency accountId="" currency="SGD" toDate="2026-02-20" endingCash="10.00" />
+        </CashReport>
+      </FlexStatement>
+    </FlexStatements></FlexQueryResponse>
+    """
+    assert parse_flex_statement(xml).broker_account_id == "U1111111"
+
+
+def test_multi_account_import_fails_the_run_and_writes_no_facts(db_engine, tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    _seed_ibkr_account(db_engine)
+
+    Session = sessionmaker(bind=db_engine)
+    db = Session()
+    try:
+        with pytest.raises(IbkrFlexImportError) as exc:
+            run_ibkr_flex_import_from_xml(
+                db,
+                current_user_id=1,
+                legacy_account_id=300,
+                xml_text=_two_account_xml(),
+                cutover_date=date(2026, 2, 1),
+            )
+        assert exc.value.code == "multiple_accounts"
+        assert db.execute(text("SELECT status FROM broker_import_runs ORDER BY id DESC LIMIT 1")).scalar() == "failed"
+        assert db.execute(text("SELECT COUNT(*) FROM portfolio_nav_snapshots")).scalar() == 0
+        assert db.execute(text("SELECT COUNT(*) FROM broker_accounts")).scalar() == 0
+    finally:
+        db.close()
