@@ -1,8 +1,7 @@
-import { test, expect, type Page, type Request } from "@playwright/test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { test, expect } from "@playwright/test";
+import { writeFileSync } from "node:fs";
 import { mockAuthenticatedSession } from "./helpers/auth";
+import { FIXED_NOW, FIXTURE_PATH, MAIN_ROUTES, apiKey, loadFixture, measure, settle, type Fixture } from "./helpers/pages";
 
 // #239: no page may be wider than a 375px phone. Every main route is opened at 375px and
 // must not scroll sideways. `html, body { overflow-x: hidden }` (App.css) clips the root,
@@ -15,94 +14,18 @@ import { mockAuthenticatedSession } from "./helpers/auth";
 // month the pages ask for matches the recording. A request not in the fixture gets a 404,
 // never a real API.
 //
-// Re-record (after an API shape change) against a worktree stack with demo data:
+// Re-record (after an API shape change, or when a page calls a new endpoint):
+//   make e2e-smoke-record
+// (#73: a throwaway stack with the demo seed, scripts/e2e-smoke.sh). Or against a worktree
+// stack with demo data:
 //   E2E_RECORD_FROM=http://localhost:<worktree web port> npx playwright test mobile-no-overflow
-// That run logs in as demo/Test@1234 on that stack, measures the same routes on live demo
-// data, and rewrites the fixture.
+// That run logs in as demo/Test@1234, measures the same routes on live demo data, and rewrites
+// the fixture.
 
 const VIEWPORT = { width: 375, height: 812 };
-const FIXED_NOW = new Date("2026-11-06T12:00:00+08:00");
-
-const MOBILE_ROUTES = [
-  "/wealth",
-  "/holdings",
-  "/crypto/holdings",
-  "/cash",
-  "/dividends",
-  "/risk",
-  "/wealth/history",
-  "/cash-flow",
-  "/cash-flow/income",
-  "/cash-flow/expenses",
-  "/cash-flow/map-transactions",
-  "/liabilities",
-  "/operations",
-  "/ingest",
-  "/operations/sources",
-  "/add",
-  "/platforms",
-  "/add?what=wallet",
-  "/market-data",
-  "/alerts",
-  "/settings",
-];
-
-const here = dirname(fileURLToPath(import.meta.url));
-const FIXTURE_PATH = resolve(here, "fixtures/demo-api.json");
+// Routes, clock, fixture and the measuring live in helpers/pages.ts, shared with tests/smoke (#73).
+const MOBILE_ROUTES = MAIN_ROUTES;
 const RECORD_FROM = process.env.E2E_RECORD_FROM?.replace(/\/+$/, "");
-
-type Fixture = Record<string, { status: number; body: unknown }>;
-
-/** The API key of a request (path + query, without the dev proxy's /api prefix), or null
- *  when it is not an API call (the app's own modules, fonts). */
-function apiKey(request: Request, pageOrigin: string): string | null {
-  const url = new URL(request.url());
-  if (url.hostname.endsWith("googleapis.com") || url.hostname.endsWith("gstatic.com")) return null;
-  if (url.origin === pageOrigin) {
-    if (!url.pathname.startsWith("/api/")) return null;
-    return `${url.pathname.slice(4)}${url.search}`;
-  }
-  return `${url.pathname}${url.search}`;
-}
-
-async function measure(page: Page) {
-  return page.evaluate(() => {
-    const vw = document.documentElement.clientWidth;
-    const main = document.getElementById("main-content");
-    const widest = Math.max(
-      document.documentElement.scrollWidth,
-      document.body.scrollWidth,
-      main ? main.scrollWidth : 0,
-    );
-    // Name the elements that stick out, so a failure says where to look.
-    const offenders: string[] = [];
-    for (const el of Array.from(document.querySelectorAll("body *"))) {
-      const rect = el.getBoundingClientRect();
-      if (rect.width === 0 || rect.right <= vw + 0.5) continue;
-      let clipped = false;
-      // A sideways scroller inside the page (a table, a chip rail) is fine; #main-content
-      // itself scrolling sideways is not, so the walk stops there.
-      for (let p = el.parentElement; p && p !== document.body && p !== main; p = p.parentElement) {
-        if (getComputedStyle(p).overflowX !== "visible" && p.getBoundingClientRect().right <= vw + 0.5) {
-          clipped = true;
-          break;
-        }
-      }
-      if (!clipped) {
-        const cls = typeof el.className === "string" ? el.className.split(" ").filter(Boolean).slice(0, 2).join(".") : "";
-        offenders.push(`${el.tagName.toLowerCase()}${cls ? `.${cls}` : ""} (right ${Math.round(rect.right)}px)`);
-      }
-    }
-    return { vw, widest, offenders: offenders.slice(0, 6) };
-  });
-}
-
-async function settle(page: Page) {
-  await page.waitForLoadState("networkidle").catch(() => undefined);
-  // Loading cards are replaced by content; give the last render a moment.
-  await expect(page.getByRole("status").filter({ hasText: /^Loading…$/ })).toHaveCount(0, { timeout: 10_000 });
-  await page.waitForTimeout(200);
-}
 
 test.describe("mobile: no page wider than 375px (#239)", () => {
   test.use({ viewport: VIEWPORT });
@@ -116,7 +39,8 @@ test.describe("mobile: no page wider than 375px (#239)", () => {
         const request = response.request();
         if (request.method() !== "GET") return;
         const key = apiKey(request, origin);
-        if (!key || key.startsWith("/auth/")) return;
+        // Session calls are mocked (helpers/auth.ts); /auth/preferences is page data, so it's kept.
+        if (!key || /^\/auth\/(refresh|login|logout|me)\b/.test(key)) return;
         try {
           recorded[key] = { status: response.status(), body: await response.json() };
         } catch {
@@ -137,6 +61,13 @@ test.describe("mobile: no page wider than 375px (#239)", () => {
         console.log(`${route}: ${m.widest}px`);
         if (m.widest > m.vw) failures.push(`${route}: ${m.widest}px > ${m.vw}px — ${m.offenders.join(", ")}`);
       }
+      // The screenshot diffs (tests/smoke, #73) also open every page at desktop width, which
+      // can ask for more (e.g. sidebar counts): record those answers too.
+      await page.setViewportSize({ width: 1440, height: 900 });
+      for (const route of MOBILE_ROUTES) {
+        await page.goto(`${RECORD_FROM}${route}`);
+        await settle(page);
+      }
       const sorted = Object.fromEntries(Object.entries(recorded).sort(([a], [b]) => a.localeCompare(b)));
       writeFileSync(FIXTURE_PATH, `${JSON.stringify(sorted, null, 1)}\n`);
       expect(failures).toEqual([]);
@@ -144,7 +75,7 @@ test.describe("mobile: no page wider than 375px (#239)", () => {
     return;
   }
 
-  const fixture = JSON.parse(readFileSync(FIXTURE_PATH, "utf8")) as Fixture;
+  const fixture = loadFixture();
 
   test.beforeEach(async ({ page, baseURL }) => {
     await page.clock.setFixedTime(FIXED_NOW);

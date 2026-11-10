@@ -11,3 +11,7 @@ FROM aquasec/trivy:0.76.1@sha256:790fd66d1697395d8693d1acaa1ea702406a20f109b6fc7
 
 # Signature verification (scripts/verify-image.sh)
 FROM ghcr.io/sigstore/cosign/cosign:v3.1.4@sha256:0f06154836d2de34f887a5c273506d52ca43edaa1d9e53e6510fa78a48f69c2d AS cosign
+
+# Browser runner for the full-stack smoke and screenshot diffs (scripts/e2e-smoke.sh, #73).
+# Its version must equal web/package.json's @playwright/test (the script checks): bump both together.
+FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:2f05f8a734509a7b3f26a912639488ee08f58a7b292d14d62271bcff9038768f AS playwright

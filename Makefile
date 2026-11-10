@@ -729,7 +729,7 @@ orch-lock:
 	CUSTOM_COMPILE_COMMAND="make orch-lock" "$$tmp/venv/bin/pip-compile" $(PIP_COMPILE_ARGS) -o orchestration/requirements.txt orchestration/requirements.in
 	scripts/check-lock-age.py orchestration/requirements.txt orchestration/requirements.in
 
-.PHONY: lint typecheck test-backend golden-update contract-backend test-frontend contract-frontend e2e test test-all verify
+.PHONY: lint typecheck test-backend golden-update contract-backend test-frontend contract-frontend e2e e2e-smoke e2e-smoke-update e2e-smoke-record test test-all verify
 
 lint: web-deps
 	cd $(WEB_DIR) && npm run lint
@@ -769,6 +769,19 @@ contract-frontend: web-deps
 e2e: web-deps
 	@test -f "$(WEB_DIR)/playwright.config.ts" -o -f "$(WEB_DIR)/playwright.config.js" || (echo "Playwright is not configured in ./web yet." && exit 2)
 	cd $(WEB_DIR) && npx playwright test
+
+# #73: the real stack's pages on demo data (throwaway Postgres + API + web container) and screenshot
+# diffs, in the pinned Playwright image. ARGS go to playwright (e.g. ARGS=--project=screens).
+e2e-smoke: web-deps
+	@MAKE="$(MAKE)" scripts/e2e-smoke.sh check $(ARGS)
+
+# Rewrite the screenshot baselines (web/tests/smoke/__screenshots__) after an intended change.
+e2e-smoke-update: web-deps
+	@MAKE="$(MAKE)" scripts/e2e-smoke.sh update $(ARGS)
+
+# Re-record the demo API fixture (web/tests/e2e/fixtures/demo-api.json) from a fresh demo stack.
+e2e-smoke-record: web-deps
+	@MAKE="$(MAKE)" scripts/e2e-smoke.sh record $(ARGS)
 
 test-all: test-backend contract-backend test-frontend contract-frontend orch-test e2e
 
