@@ -1,6 +1,6 @@
 # Issue #357: Backups: encrypted off-site copy (iCloud Drive)
 
-Built in the #356 branch/PR (Hitesh, 2026-11-10: iCloud Drive). Decision D-93.
+Built in the #356 branch/PR (Hitesh, 2026-11-10: iCloud Drive). Decision D-96.
 
 - `BACKUP_OFFSITE_DIR` (main checkout's `.env`): after each backup, every verified encrypted set
   missing there is copied (sha256-compared, marker last); prune keeps the same retention there.

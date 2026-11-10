@@ -456,7 +456,7 @@ backup-status:
 	@$(DB_BACKUP) status
 	@scripts/backup-schedule.sh status
 
-# Encrypted backups (#356, D-92). Once: `make backup-key-init` makes the age key pair (private key
+# Encrypted backups (#356, D-95). Once: `make backup-key-init` makes the age key pair (private key
 # in ~/.capitalos/backup/, public key into .env as BACKUP_AGE_RECIPIENT); save the private key in
 # your password manager. From then on every backup is encrypted into BACKUP_DIR (.env).
 # `make backup-encrypt-existing` (dry run) / `APPLY=1` moves the plain sets from backups/ there,

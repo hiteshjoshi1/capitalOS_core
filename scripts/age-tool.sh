@@ -1,5 +1,5 @@
 #!/bin/bash
-# The pinned `age` (https://age-encryption.org) that encrypts backups (#356, D-92).
+# The pinned `age` (https://age-encryption.org) that encrypts backups (#356, D-95).
 #   age-tool.sh install   download the release for this OS/CPU into ~/.capitalos/age/<version>/,
 #                         checked against the sha256 below (no-op when already there)
 #   age-tool.sh path      print the age binary's path (AGE_BIN overrides); fails if not installed

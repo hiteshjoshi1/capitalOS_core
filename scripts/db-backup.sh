@@ -22,7 +22,7 @@
 #                      archive with that sha256. Otherwise .dump.failed with the reason.
 # Dumps without markers (made before this tool) are never pruned (D-11).
 #
-# Encryption (#356, D-92): with BACKUP_AGE_RECIPIENT set (an age public key), a new set is made and
+# Encryption (#356, D-95): with BACKUP_AGE_RECIPIENT set (an age public key), a new set is made and
 # verified in a private temp dir, then the dump, its counts and its data archive are encrypted
 # into BACKUP_DIR as <file>.age and the plaintext is deleted. Only the public key is needed to
 # make a backup. The markers (.verified, .failed) stay plain: they hold dates and counts, nothing

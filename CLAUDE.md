@@ -68,7 +68,7 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   current `data/` is moved to `data.pre-restore-<ts>/`). The database part is one transaction, committed
   only when every table's count matches the dump's snapshot; grants to a role the target lacks (e.g.
   `capitalos_mcp_ro` on a new stack: run `make db-create-mcp-role` after) are left out and named (#233).
-- Encrypted, outside the repo (#356, D-92): the main checkout's `.env` sets `BACKUP_DIR`
+- Encrypted, outside the repo (#356, D-95): the main checkout's `.env` sets `BACKUP_DIR`
   (`~/Documents/CapitalOS_backups`) and `BACKUP_AGE_RECIPIENT` (age public key); each set is made and
   verified in a private temp dir, then stored as `.age` files (dump, counts, data archive) with plain
   `.verified`/`.failed` markers. Verify/restore/the test instance decrypt with the private key
@@ -76,7 +76,7 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   `make backup-key-init` (once), `make backup-encrypt-existing` (dry run; `APPLY=1`) moves old plain sets
   over. `age` is pinned by sha256 in `scripts/age-tool.sh` (`make host-tools`). Worktrees, CI and the
   test instance (which links the main `.env`) keep `./backups`; there `BACKUP_DIR` from `.env` is ignored.
-- Off-site (#357, D-93): `BACKUP_OFFSITE_DIR` (`.env`, iCloud Drive) gets a copy of every verified
+- Off-site (#357, D-96): `BACKUP_OFFSITE_DIR` (`.env`, iCloud Drive) gets a copy of every verified
   encrypted set after each backup (missing ones too) and the same retention; a missing/unwritable folder
   warns, never fails the backup. `backup-status` shows the newest off-site copy (warns > 2 days);
   `make backup-offsite-check` decrypts the newest off-site set and runs the restore check;

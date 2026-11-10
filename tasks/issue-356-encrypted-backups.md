@@ -15,7 +15,7 @@ instance. Off-site copy is #357.
   decrypt into a private temp dir; prune and status know `.age`; `key-init`; `encrypt-existing`.
 - deploy.sh, status.sh, test-instance.sh read the backup dir from backup-env.sh; the test instance
   restores from `db-backup.sh open`.
-- D-92.
+- D-95.
 
 ## Verification
 - `scripts/test-db-backup.sh`: seal, open (byte-for-byte, 700 dir), encrypted restore end to end,
