@@ -367,3 +367,24 @@ def test_bulk_override_does_not_affect_single_override_endpoint(client: TestClie
     body = resp.json()
     assert body["source"] == "manual"
     assert body["transaction_id"] == 904
+
+
+def test_bulk_override_rejects_more_than_the_cap(client: TestClient, db_engine):
+    """#363: a bulk override names at most MAX_BULK_OVERRIDE_IDS transactions; more is a 422, nothing applied."""
+    from app.schemas.category import MAX_BULK_OVERRIDE_IDS
+
+    category_ids = _seed_bulk_override_data(db_engine)
+    too_many = list(range(1, MAX_BULK_OVERRIDE_IDS + 2))
+    resp = client.post(
+        "/categories/override-bulk",
+        json={"transaction_ids": too_many, "category_id": category_ids["rideshare"]},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["detail"][0]["loc"][-1] == "transaction_ids"
+
+    # The seeded rows are still unmapped: nothing was applied.
+    ok = client.post(
+        "/categories/override-bulk",
+        json={"transaction_ids": [901], "category_id": category_ids["rideshare"]},
+    )
+    assert ok.status_code == 200
