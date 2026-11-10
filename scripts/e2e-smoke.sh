@@ -103,4 +103,9 @@ docker run --rm --init --ipc=host \
   -e E2E_RECORD_FROM="$record_from" \
   -v "$PWD/web:/work" -w /work \
   "$image" \
-  node_modules/.bin/playwright test -c playwright.smoke.config.ts "$@"
+  node_modules/.bin/playwright test -c playwright.smoke.config.ts "$@" || {
+    rc=$?
+    echo "== Playwright failed ($rc): the API's last log lines" >&2
+    compose logs --no-color --tail 80 api >&2 || true
+    exit $rc
+  }

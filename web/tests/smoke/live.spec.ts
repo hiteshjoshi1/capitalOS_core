@@ -17,7 +17,10 @@ async function signIn(page: Page) {
   await page.getByLabel("Username").fill("demo");
   await page.getByLabel("Password").fill("Test@1234");
   await page.getByRole("button", { name: "Sign In" }).click();
-  await page.waitForURL(/\/wealth/);
+  // Fail fast with the page's message (e.g. "Server error") instead of the test timeout.
+  await page.waitForURL(/\/wealth/, { timeout: 20_000 }).catch(async () => {
+    throw new Error(`sign-in failed: ${(await page.locator("main, body").first().innerText()).replace(/\s+/g, " ").slice(0, 200)}`);
+  });
 }
 
 for (const viewport of VIEWPORTS) {
