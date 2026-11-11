@@ -72,6 +72,9 @@ PATH_PARAMS: dict[str, str] = {
 QUERY_PARAMS: dict[str, str] = {
     "month": MONTH,
     "base_currency": "SGD",
+    # History → Compare (#398): the month before A's to A's month.
+    "from": "2026-02",
+    "to": MONTH,
 }
 
 # Same answer for every user (checked: A and B get identical answers), and it may change
@@ -111,6 +114,7 @@ A_SEES_OWN_DATA = (
     "/crypto/tokens",
     "/crypto/wallets",
     "/dashboard/bootstrap",
+    "/dashboard/bridge",
     "/dashboard/cash-deposits",
     "/dashboard/data-hub-summary",
     "/dashboard/net-worth-since-update",

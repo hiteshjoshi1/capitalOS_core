@@ -272,6 +272,34 @@ export type MonthBridge = FxStatus & {
   move_causes?: MoveCauses | null;
 };
 
+/** One month inside a compared span (#398): its own close-to-close change. */
+export type SpanBridgeMonth = {
+  month: string;
+  start_value: number;
+  end_value: number;
+  change: number;
+};
+
+/** GET /dashboard/bridge?from=&to= (#398, D-110): month A's close to month B's close, the
+ * month bridges A+1 … B added up line by line. start + sum(lines) + unexplained = end. */
+export type SpanBridge = FxStatus & {
+  from_month: string;
+  to_month: string;
+  base_currency: string;
+  snapshot_day: number;
+  /** The span ends at the open month: its end is live now. */
+  is_live: boolean;
+  months: SpanBridgeMonth[];
+  start: BridgeEndpoint;
+  end: BridgeEndpoint;
+  change: number;
+  lines: BridgeLine[];
+  unexplained: BridgeLine;
+  liabilities_change: number;
+  movers: BridgeMover[];
+  trades?: BridgeTrade[];
+};
+
 /** One bar of a page's six-month trend (Stocks, Crypto, Cash). #241 (D-61): the open
  * month's bar is live, month to date (the page's live headline); every other bar is a
  * completed month-end, or has no value when that month-end hasn't passed yet. */
