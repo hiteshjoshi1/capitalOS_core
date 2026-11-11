@@ -172,7 +172,8 @@ From the main checkout:
 - Pin every image by `tag@sha256:` and every Action by commit SHA (`scripts/check-pinned-refs.sh`, run
   by `make lint`). Images used outside compose live in `tools/Dockerfile`. Dependabot bumps the pins.
 - Never remove a field from an API response; only add. Keep TS types mirroring backend
-  response shapes (see `AGENTS.md` § API Contract Rules).
+  response shapes (see `AGENTS.md` § API Contract Rules). They live per area in `web/src/lib/api/types/<area>.ts`,
+  the calls in `web/src/lib/api/clients/<area>.ts`; pages import both from `web/src/lib/api` (the barrel, #368).
 
 ## Image supply chain (maintenance)
 - Fast security fixes (D-18): `make image-fixes` reports, per pinned image, whether the newest release in its
