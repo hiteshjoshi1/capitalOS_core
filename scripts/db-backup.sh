@@ -238,7 +238,7 @@ seal_set() {  # <plain dump> <dir>
 # up), and the same retention (prune). Plain sets never go off-site. A missing or unwritable
 # off-site folder is a loud WARNING, never a failed backup: the local set is already safe.
 
-# macOS privacy controls (TCC) treat the 03:00 launchd job (/bin/bash) differently from Terminal.
+# macOS privacy controls (TCC) treat the daily launchd job (/bin/bash) differently from Terminal.
 # Probed 2026-11-10/11: in iCloud Drive the job may create, rename, delete, stat and read files but
 # may NOT list the folder; in the user's personal folders it was refused renames too (#383), so
 # backups live in one iCloud Drive folder and nothing here lists a backup folder without falling
@@ -247,7 +247,7 @@ seal_set() {  # <plain dump> <dir>
 tcc_hint() {  # <dir>
   case "$1" in
     "$HOME/Library/Mobile Documents"*)
-      echo "  If this ran from the 03:00 job: macOS privacy controls may be blocking it from $1. Run make backup-now in Terminal to see whether it works there, and check $1 is a folder you own." ;;
+      echo "  If this ran from the daily job: macOS privacy controls may be blocking it from $1. Run make backup-now in Terminal to see whether it works there, and check $1 is a folder you own." ;;
   esac
 }
 
@@ -284,13 +284,13 @@ offsite_copy_set() {  # <dump in BACKUP_DIR>
 
 # The set index (#357, #383): one verified set name (capitalos_<ts>.dump) per line, kept in each
 # backup folder (BACKUP_DIR and the optional BACKUP_OFFSITE_DIR). Under launchd macOS lets the
-# 03:00 job open, write, rename and delete files in iCloud Drive but not LIST the folder, so
+# daily job open, write, rename and delete files in iCloud Drive but not LIST the folder, so
 # every "which sets are there" question is answered from a listing when one is allowed (and the
 # index refreshed from it) and from the index otherwise. The pre-#383 off-site index name is
 # read too, so a folder that was the off-site copy keeps its history (adopted, then rewritten).
 INDEX_NAME=.capitalos-index
 LEGACY_INDEX_NAME=.capitalos-offsite-index
-# Where a folder's index lives. In iCloud Drive the 03:00 job (launchd) could neither read nor
+# Where a folder's index lives. In iCloud Drive the daily job (launchd) could neither read nor
 # replace an index file Terminal had written there ("Operation not permitted", #383), so an iCloud
 # folder's index is kept on the Mac in ~/.capitalos/backup/index/ (no privacy controls there; it
 # is only a list of names, rebuilt from a listing in Terminal if lost). BACKUP_INDEX_DIR overrides
@@ -343,7 +343,7 @@ dir_names() {  # <dir>
   if names=$(dir_listing "$dir"); then
     [ -w "$dir" ] && printf '%s\n' "$names" | index_write "$dir" 2>/dev/null
   elif ! names=$(index_names "$dir"); then
-    say "WARNING: can't list $dir (macOS lets the 03:00 job open files there, not list them) and it has no $INDEX_NAME yet; run make backup-status once in Terminal to create it" >&2
+    say "WARNING: can't list $dir (macOS lets the daily job open files there, not list them) and it has no $INDEX_NAME yet; run make backup-status once in Terminal to create it" >&2
     names=""
   fi
   printf '%s\n' "$names" | grep . | sort -u || true
@@ -373,7 +373,7 @@ offsite_names() {  # [write]
   elif names=$(index_names "$BACKUP_OFFSITE_DIR"); then
     :
   else
-    offsite_warn "can't list $BACKUP_OFFSITE_DIR (macOS allows the 03:00 job to open files there, not to list them) and it has no $INDEX_NAME yet; using the local set names" >&2
+    offsite_warn "can't list $BACKUP_OFFSITE_DIR (macOS allows the daily job to open files there, not to list them) and it has no $INDEX_NAME yet; using the local set names" >&2
     names=$(verified_sets | while IFS= read -r n; do n=${n##*/}; [ -e "$BACKUP_OFFSITE_DIR/$n.verified" ] && echo "$n"; done || true)
   fi
   [ "${1:-}" = write ] && printf '%s\n' "$names" | index_write "$BACKUP_OFFSITE_DIR"
@@ -538,7 +538,7 @@ create() {
   if encrypting; then
     seal_set "$out" "$BACKUP_DIR" || { say "FAILED: the backup was made but not stored encrypted; nothing written to $BACKUP_DIR counts as a backup" >&2; tcc_hint "$BACKUP_DIR" >&2; return 1; }
   fi
-  # #383: recorded in the folder's index, which the 03:00 job reads where it can't list.
+  # #383: recorded in the folder's index, which the daily job reads where it can't list.
   [ -e "$BACKUP_DIR/${out##*/}.verified" ] && { index_add "$BACKUP_DIR" "${out##*/}" || true; }
   # #357: the off-site copy; a problem there warns, it never fails the backup.
   [ "$rc" -ne 0 ] || offsite_sync
@@ -823,7 +823,7 @@ prune() {
 }
 
 # BACKUP_DIR's verified sets as paths (#383: from a listing or the folder's index, never a bare
-# glob, which the 03:00 job can't do in iCloud Drive). Names carry the timestamp: name order is age.
+# glob, which the daily job can't do in iCloud Drive). Names carry the timestamp: name order is age.
 verified_sets() { dir_names "$BACKUP_DIR" | sed "s|^|$BACKUP_DIR/|"; }
 verified_newest_first() { verified_sets | sort -r; }
 

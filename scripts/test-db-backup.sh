@@ -447,7 +447,7 @@ if [ "$(ls "$o3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20
   ok "off-site: prune applies the same retention off-site, by the index (no listing), and rewrites it"
 else bad "off-site: prune off-site (local: $(ls "$b3" | tr '\n' ' '); off-site: $(ls "$o3" | tr '\n' ' '); index: $(cat "$o3/.capitalos-index"))"; fi
 
-# #383: one backup folder in iCloud Drive, which the 03:00 job may not list. BACKUP_DIR itself is
+# #383: one backup folder in iCloud Drive, which the daily job may not list. BACKUP_DIR itself is
 # then driven by its index (.capitalos-index, or the pre-#383 off-site one, adopted).
 b4=$tmp/b4; mkdir -p "$b4"
 mkset() { local ext; for ext in .dump.age .dump.counts.age .dump.verified .data.tar.gz.age; do touch "$1/capitalos_${2}_030000$ext"; done; }
@@ -484,7 +484,7 @@ printf '%s' "$out" | grep -q "can't list $b5 .*no .capitalos-index yet" &&
   ok "backup folder: a listing (Terminal) rebuilds the index" || bad "index rebuild from listing: $(cat "$b5/.capitalos-index" 2>&1)"
 
 # #383: an iCloud folder's index lives outside it (BACKUP_INDEX_DIR here; ~/.capitalos/backup/index
-# for real), because the 03:00 job could not read or replace an index Terminal wrote in iCloud.
+# for real), because the daily job could not read or replace an index Terminal wrote in iCloud.
 b6=$tmp/b6; ix=$tmp/index; mkdir -p "$b6"; mkset "$b6" 20261103
 printf '%s\n' capitalos_20261103_030000.dump >"$b6/.capitalos-index"
 out=$(BACKUP_INDEX_DIR=$ix BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b6 backup_newest_verified)
