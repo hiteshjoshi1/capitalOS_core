@@ -45,11 +45,13 @@ jobs:
       - name: Optional E2E
         run: |
           if [ -f web/playwright.config.ts ] || [ -f web/playwright.config.js ]; then
-            cd web
-            npm ci
-            npx playwright install --with-deps chromium
-            cd ..
-            make e2e
+            # #407: run in the pinned Playwright image (browser and fonts built in, as the smoke job
+            # does), instead of `playwright install --with-deps`, which apt-installed ~30 packages
+            # from Ubuntu's servers on every run and failed when they were unreachable.
+            (cd web && npm ci)
+            image=$(scripts/tool-image.sh playwright)
+            docker run --rm --init --ipc=host --user "$(id -u):$(id -g)" -e HOME=/tmp -e CI=1 \
+              -v "$PWD/web:/work" -w /work "$image" node_modules/.bin/playwright test
           else
             echo "Playwright config not found. Skipping e2e."
           fi
