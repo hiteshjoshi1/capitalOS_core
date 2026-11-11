@@ -126,11 +126,11 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert data["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
     assert data["net_worth_boundary_exact"] is False
     assert data["net_worth_freshness_status"] == "synthetic"
-    assert data["net_worth"]["total"] == pytest.approx(SEED_NW)
-    assert data["cash_flow"]["income"] == pytest.approx(SEED_INCOME)
+    assert float(data["net_worth"]["total"]) == pytest.approx(SEED_NW)
+    assert float(data["cash_flow"]["income"]) == pytest.approx(SEED_INCOME)
     assert data["cash_flow"]["expenses"] == 2100.0
-    assert data["cash_flow"]["net"] == pytest.approx(SEED_INCOME - 2100.0)
-    assert data["cash_flow"]["savings_rate"] == pytest.approx((SEED_INCOME - 2100.0) / SEED_INCOME, rel=1e-4)
+    assert float(data["cash_flow"]["net"]) == pytest.approx(SEED_INCOME - 2100.0)
+    assert float(data["cash_flow"]["savings_rate"]) == pytest.approx((SEED_INCOME - 2100.0) / SEED_INCOME, rel=1e-4)
     assert data["cash_percent"] == round(30000.0 / SEED_NW * 100, 2)
     assert data["fx_incomplete"] is False
     assert data["fx_missing_currencies"] == []
@@ -140,12 +140,12 @@ def test_dashboard_summary_basic(client: TestClient, seed_dashboard_data):
     assert top[0]["symbol"] == "AAPL"
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == pytest.approx(SEED_NW - SEED_PREV_NW)
-    assert changes["pct"] == pytest.approx((SEED_NW - SEED_PREV_NW) / SEED_PREV_NW)
+    assert float(changes["abs"]) == pytest.approx(SEED_NW - SEED_PREV_NW)
+    assert float(changes["pct"]) == pytest.approx((SEED_NW - SEED_PREV_NW) / SEED_PREV_NW)
     component_changes = data["net_worth_component_change"]
     assert component_changes["cash"]["abs"] == 0.0
     assert component_changes["stocks_funds"]["abs"] == 5000.0
-    assert component_changes["crypto"]["abs"] == pytest.approx(5000.0 * USD_SGD)
+    assert float(component_changes["crypto"]["abs"]) == pytest.approx(5000.0 * USD_SGD)
     assert data["top_movers"]["compare_month"] == "2026-01"
     assert "gainers" in data["top_movers"]
     assert "detractors" in data["top_movers"]
@@ -169,8 +169,8 @@ def test_dashboard_net_worth_change_lightweight(client: TestClient, seed_dashboa
     assert "vs_prev_year" not in data["net_worth_change"]
 
     changes = data["net_worth_change"]["vs_prev_month"]
-    assert changes["abs"] == pytest.approx(SEED_NW - SEED_PREV_NW)
-    assert changes["pct"] == pytest.approx((SEED_NW - SEED_PREV_NW) / SEED_PREV_NW)
+    assert float(changes["abs"]) == pytest.approx(SEED_NW - SEED_PREV_NW)
+    assert float(changes["pct"]) == pytest.approx((SEED_NW - SEED_PREV_NW) / SEED_PREV_NW)
 
 
 def test_canonical_net_worth_ignores_legacy_position_roll_forward(db_engine, monkeypatch):
@@ -282,8 +282,8 @@ def test_net_worth_includes_dbs_credit_card_liability_once(db_engine, monkeypatc
         db.close()
 
     assert components["cash"] == 1000.0
-    assert components["liabilities"] == pytest.approx(expected_liability)
-    assert components["total"] == pytest.approx(1000.0 - expected_liability)
+    assert float(components["liabilities"]) == pytest.approx(expected_liability)
+    assert float(components["total"]) == pytest.approx(1000.0 - expected_liability)
 
 
 def test_stock_holdings_summary_is_stocks_only_payload(client: TestClient, seed_dashboard_data):
@@ -678,15 +678,15 @@ def test_platform_allocation(client: TestClient, seed_dashboard_data):
     assert summary_resp.status_code == 200
     summary = summary_resp.json()
 
-    assert data["total"] == pytest.approx(summary["net_worth"]["total"])
+    assert float(data["total"]) == pytest.approx(summary["net_worth"]["total"])
     assert data["as_of"] is not None
 
     items = data["items"]
     by_platform = {item["platform"]: item for item in items}
     assert set(by_platform) == {"IBKR", "DBS", "CRYPTO"}
-    assert by_platform["IBKR"]["value"] == pytest.approx(50000.0)
-    assert by_platform["DBS"]["value"] == pytest.approx(30000.0)
-    assert by_platform["CRYPTO"]["value"] == pytest.approx(20000.0 * USD_SGD)
+    assert float(by_platform["IBKR"]["value"]) == pytest.approx(50000.0)
+    assert float(by_platform["DBS"]["value"]) == pytest.approx(30000.0)
+    assert float(by_platform["CRYPTO"]["value"]) == pytest.approx(20000.0 * USD_SGD)
 
 
 def test_platform_allocation_prefers_account_platform_over_platform_id(client: TestClient, db_engine):
@@ -740,9 +740,9 @@ def test_platform_allocation_prefers_account_platform_over_platform_id(client: T
 
     assert set(by_platform) == {"DBS_VICKERS", "DBS"}
     assert by_platform["DBS"]["platform_type"] == "BANK"
-    assert by_platform["DBS"]["value"] == pytest.approx(1000.0)
+    assert float(by_platform["DBS"]["value"]) == pytest.approx(1000.0)
     assert by_platform["DBS_VICKERS"]["platform_type"] == "BROKER"
-    assert by_platform["DBS_VICKERS"]["value"] == pytest.approx(2000.0)
+    assert float(by_platform["DBS_VICKERS"]["value"]) == pytest.approx(2000.0)
 
 
 def test_platform_allocation_uses_current_holdings_with_latest_price(client: TestClient, db_engine, monkeypatch):
@@ -815,9 +815,9 @@ def test_platform_allocation_uses_current_holdings_with_latest_price(client: Tes
     data = resp.json()
 
     assert data["as_of"] == "2026-06-10T00:00:00+00:00"
-    assert data["total"] == pytest.approx(4000.0)
+    assert float(data["total"]) == pytest.approx(4000.0)
     assert data["items"][0]["platform"] == "TESTBROKER"
-    assert data["items"][0]["value"] == pytest.approx(4000.0)
+    assert float(data["items"][0]["value"]) == pytest.approx(4000.0)
 
 
 def test_dashboard_geography_exposure_breakdown_maps_crypto_to_us(client: TestClient, seed_dashboard_data, monkeypatch):
@@ -1066,7 +1066,7 @@ def test_summary_positions_follow_a_past_month(client: TestClient, db_engine, mo
 
     assert may["is_live"] is False
     assert [h["symbol"] for h in may["top_holdings"]] == ["MAYHOLD"]
-    assert may["top_holdings"][0]["percent_of_networth"] == pytest.approx(100.0)
+    assert float(may["top_holdings"][0]["percent_of_networth"]) == pytest.approx(100.0)
     assert [g["country"] for g in may["geography"]] == ["SG"]
     # The past month's movers and comparisons are its own (D-24): May vs April.
     assert may["net_worth_change"]["vs_prev_month"]["compare_month"] == "2026-04"
@@ -1672,8 +1672,8 @@ def test_dashboard_top_holdings_infers_geo_and_exposes_detail_fields(client: Tes
     assert row["exchange_code"] == "HKEX"
     assert row["geo"] == "HK"
     assert row["quantity"] == 30.0
-    assert row["avg_cost"] == pytest.approx((100.0 * 10.0 + 200.0 * 20.0) / 30.0)
-    assert row["value"] == pytest.approx(4500.0)
+    assert float(row["avg_cost"]) == pytest.approx((100.0 * 10.0 + 200.0 * 20.0) / 30.0)
+    assert float(row["value"]) == pytest.approx(4500.0)
     assert row["latest_price"] == 150.0
     assert row["quote_currency"] == "HKD"
     assert row["latest_trade_date"] == "2026-02-06"
@@ -1896,7 +1896,7 @@ def test_dashboard_bootstrap_returns_correct_schema(client: TestClient, db_engin
     assert isinstance(body["net_worth"]["total"], (int, float))
     assert "stock_exposure_total" in body, "stock_exposure_total missing"
     # AAPL: no latest price, so falls back to cost_basis_base=20000 (rate=1.0 for USD)
-    assert body["stock_exposure_total"] == pytest.approx(20000.0, rel=1e-4), (
+    assert float(body["stock_exposure_total"]) == pytest.approx(20000.0, rel=1e-4), (
         f"stock_exposure_total expected ~20000, got {body['stock_exposure_total']}"
     )
     assert "crypto_exposure_total" in body, "crypto_exposure_total missing"
@@ -2210,10 +2210,10 @@ def test_stock_holdings_geography_performance_reflects_daily_price_change(
     assert live_body["is_live"] is True
     assert live_body["geography_performance_as_of"] is not None
     us_perf = next(item for item in live_body["geography_performance"] if item["geography"] == "US")
-    assert us_perf["current_value"] == pytest.approx(2200.0)
-    assert us_perf["snapshot_value"] == pytest.approx(2000.0)
-    assert us_perf["delta_abs"] == pytest.approx(200.0)
-    assert us_perf["delta_pct"] == pytest.approx(0.1)
+    assert float(us_perf["current_value"]) == pytest.approx(2200.0)
+    assert float(us_perf["snapshot_value"]) == pytest.approx(2000.0)
+    assert float(us_perf["delta_abs"]) == pytest.approx(200.0)
+    assert float(us_perf["delta_pct"]) == pytest.approx(0.1)
 
     # A historical (non-live) month has no meaningful "since yesterday" comparison.
     historical_resp = client.get("/dashboard/stock-holdings?month=2026-06&base_currency=USD")
@@ -2250,14 +2250,14 @@ def test_net_worth_since_update_reflects_price_driven_delta(client: TestClient, 
     assert resp.status_code == 200
     body = resp.json()
 
-    assert body["net_worth_change"]["abs"] == pytest.approx(100.0)
-    assert body["net_worth_change"]["pct"] == pytest.approx(0.1)
-    assert body["component_change"]["stocks_funds"]["abs"] == pytest.approx(100.0)
-    assert body["component_change"]["cash"]["abs"] == pytest.approx(0.0)
+    assert float(body["net_worth_change"]["abs"]) == pytest.approx(100.0)
+    assert float(body["net_worth_change"]["pct"]) == pytest.approx(0.1)
+    assert float(body["component_change"]["stocks_funds"]["abs"]) == pytest.approx(100.0)
+    assert float(body["component_change"]["cash"]["abs"]) == pytest.approx(0.0)
     gainers = body["top_movers"]["gainers"]
     assert len(gainers) == 1
     assert gainers[0]["symbol"] == "MSFT"
-    assert gainers[0]["delta_abs"] == pytest.approx(100.0)
+    assert float(gainers[0]["delta_abs"]) == pytest.approx(100.0)
     assert body["top_movers"]["detractors"] == []
 
 
@@ -2316,7 +2316,7 @@ def test_net_worth_since_update_is_zero_when_price_is_stale(client: TestClient, 
     resp = client.get("/dashboard/net-worth-since-update?base_currency=USD")
     assert resp.status_code == 200
     body = resp.json()
-    assert body["net_worth_change"]["abs"] == pytest.approx(0.0)
+    assert float(body["net_worth_change"]["abs"]) == pytest.approx(0.0)
     assert body["top_movers"]["gainers"] == []
     assert body["top_movers"]["detractors"] == []
 
@@ -2376,19 +2376,19 @@ def test_net_worth_since_update_shows_crypto_change(client: TestClient, db_engin
     body = resp.json()
 
     components = body["component_change"]
-    assert components["crypto"]["abs"] == pytest.approx(60.0)
-    assert components["crypto"]["pct"] == pytest.approx(0.2)
-    assert components["stocks_funds"]["abs"] == pytest.approx(100.0)
-    assert components["cash"]["abs"] == pytest.approx(0.0)
-    assert body["net_worth_change"]["abs"] == pytest.approx(160.0)
-    assert body["net_worth_change"]["abs"] == pytest.approx(sum(c["abs"] for c in components.values()))
+    assert float(components["crypto"]["abs"]) == pytest.approx(60.0)
+    assert float(components["crypto"]["pct"]) == pytest.approx(0.2)
+    assert float(components["stocks_funds"]["abs"]) == pytest.approx(100.0)
+    assert float(components["cash"]["abs"]) == pytest.approx(0.0)
+    assert float(body["net_worth_change"]["abs"]) == pytest.approx(160.0)
+    assert float(body["net_worth_change"]["abs"]) == pytest.approx(sum(c["abs"] for c in components.values()))
     eth = next(row for row in body["top_movers"]["gainers"] if row["symbol"] == "ETH")
-    assert eth["delta_abs"] == pytest.approx(components["crypto"]["abs"])
+    assert float(eth["delta_abs"]) == pytest.approx(components["crypto"]["abs"])
 
     # "Now" stays on the newest valuation.
     bootstrap = client.get("/dashboard/bootstrap?month=2026-07&base_currency=USD")
     assert bootstrap.status_code == 200
-    assert bootstrap.json()["current_net_worth"]["crypto"] == pytest.approx(360.0)
+    assert float(bootstrap.json()["current_net_worth"]["crypto"]) == pytest.approx(360.0)
 
 
 # --- #133: comparisons for the open (current) month are like for like -------------
@@ -2447,11 +2447,11 @@ def test_summary_current_net_worth_change_compares_live_with_latest_month_end(
 
     # Live (Mar 10) vs the latest completed month-end (February's anchor, Mar 1).
     assert live_change["vs_prev_month"]["compare_month"] == "2026-02"
-    assert live_change["vs_prev_month"]["abs"] == pytest.approx(live_total - 100000.0)
+    assert float(live_change["vs_prev_month"]["abs"]) == pytest.approx(live_total - 100000.0)
     assert live_change["vs_prev_month"]["current_as_of"] == "2026-03-10T00:00:00+00:00"
     # ...and the same month-end one year earlier.
     assert live_change["vs_prev_year"]["compare_month"] == "2025-02"
-    assert live_change["vs_prev_year"]["abs"] == pytest.approx(live_total)
+    assert float(live_change["vs_prev_year"]["abs"]) == pytest.approx(live_total)
 
     # The headline is live whatever month is selected, so its comparison is too.
     past = client.get("/dashboard/summary?month=2026-01&compare=prev_month,prev_year").json()

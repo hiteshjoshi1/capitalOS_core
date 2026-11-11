@@ -2,6 +2,8 @@
 lazy recompute from dirty marks (#138), and month-on-month changes."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 import json
 from datetime import date, datetime, timezone
 from typing import Any, Callable, Dict, Optional
@@ -17,6 +19,7 @@ from app.valuation.clock import _add_months, _anchor_ts, _date_only, _iso_value,
 from app.valuation.facts import _networth_components
 from app.valuation.state import _crypto_snapshot_coverage_as_of, _effective_as_of
 from app.wealth_rollup_dirty import dirty_state, dirty_user_ids, settle_dirty_mark
+from app.valuation.money import D, ZERO
 
 
 # ─── Wealth Timeline rollups (Phase 2) ──────────────────────────────────────
@@ -34,6 +37,12 @@ _DAILY_CADENCE_PLATFORMS = {"IBKR", "CRYPTO", "COINBASE"}
 _DAILY_CADENCE_FRESH_DAYS = 3
 _MANUAL_CADENCE_FRESH_DAYS = 31
 
+
+
+def _db_money(value: Any, is_postgres: bool) -> Any:
+    """A Decimal amount as a bound parameter: exact on Postgres (NUMERIC); SQLite's
+    driver takes no Decimal, so a Decimal there (tests)."""
+    return D(value) if is_postgres else float(D(value))
 
 def _platform_cadence_days(platform: str | None) -> int:
     return _DAILY_CADENCE_FRESH_DAYS if (platform or "").upper() in _DAILY_CADENCE_PLATFORMS else _MANUAL_CADENCE_FRESH_DAYS
@@ -185,11 +194,11 @@ def _upsert_wealth_rollup(
             "month": month,
             "anchor_date": row["anchor_date"],
             "base_currency": base_currency,
-            "total": components["total"],
-            "cash": components["cash"],
-            "stocks_funds": components["stocks_funds"],
-            "crypto": components["crypto"],
-            "liabilities": components["liabilities"],
+            "total": _db_money(components["total"], is_postgres),
+            "cash": _db_money(components["cash"], is_postgres),
+            "stocks_funds": _db_money(components["stocks_funds"], is_postgres),
+            "crypto": _db_money(components["crypto"], is_postgres),
+            "liabilities": _db_money(components["liabilities"], is_postgres),
             "source_freshness": json.dumps(row["source_freshness"]),
             "freshness_status": row["freshness_status"],
             "computed_at": computed_at,
@@ -402,11 +411,11 @@ def _stored_timeline_points(
         points.append({
             "month": row["month"],
             "anchor_date": anchor_date if isinstance(anchor_date, str) else anchor_date.isoformat(),
-            "total": float(row["total"]),
-            "cash": float(row["cash"]),
-            "stocks_funds": float(row["stocks_funds"]),
-            "crypto": float(row["crypto"]),
-            "liabilities": float(row["liabilities"]),
+            "total": D(row["total"]),
+            "cash": D(row["cash"]),
+            "stocks_funds": D(row["stocks_funds"]),
+            "crypto": D(row["crypto"]),
+            "liabilities": D(row["liabilities"]),
             "source_freshness": source_freshness,
             "freshness_status": row["freshness_status"],
             "computed_at": _iso_value(row["computed_at"]),
@@ -420,8 +429,8 @@ def _cached_networth_components(
     anchor: datetime,
     base_currency: str,
     current_user_id: int,
-    nw_cache: Optional[Dict[datetime, Dict[str, float]]],
-) -> Dict[str, float]:
+    nw_cache: Optional[Dict[datetime, Dict[str, Decimal]]],
+) -> Dict[str, Decimal]:
     """Snapshot-mode _networth_components, memoised per request by anchor."""
     if nw_cache is None:
         return _networth_components(db, anchor, base_currency, current_user_id)
@@ -430,11 +439,11 @@ def _cached_networth_components(
     return nw_cache[anchor]
 
 
-def baseline_missing(compare_as_of: Any, compare_value: float) -> bool:
+def baseline_missing(compare_as_of: Any, compare_value: Decimal) -> bool:
     """No data at all for a comparison (#224): nothing at or before its anchor,
     so its value is a placeholder zero, not a real one. Callers show
     "no data for <month>" instead of a delta the size of the whole figure."""
-    return compare_as_of is None and abs(float(compare_value or 0.0)) < 1e-9
+    return compare_as_of is None and abs(D(compare_value)) < Decimal("1e-9")
 
 
 def _snapshot_compare_months(snapshot_month_start: datetime, compare_set: set[str]) -> Dict[str, datetime]:
@@ -464,11 +473,11 @@ def _compute_net_worth_changes(
     db: Session,
     compare_months: Dict[str, datetime],
     as_of: datetime | None,
-    current_value: float,
+    current_value: Decimal,
     base_currency: str,
     current_user_id: int,
-    value_selector: Callable[[Dict[str, float]], float] = lambda nw: nw["total"],
-    nw_cache: Optional[Dict[datetime, Dict[str, float]]] = None,
+    value_selector: Callable[[Dict[str, Decimal]], Decimal] = lambda nw: nw["total"],
+    nw_cache: Optional[Dict[datetime, Dict[str, Decimal]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """`current_value` vs each comparison month's completed anchor. Build
     `compare_months` with _snapshot_compare_months (a value taken at a month's
@@ -506,10 +515,10 @@ def _compute_component_changes(
     db: Session,
     month_start: datetime,
     as_of: datetime | None,
-    current_components: Dict[str, float],
+    current_components: Dict[str, Decimal],
     base_currency: str,
     current_user_id: int,
-    nw_cache: Optional[Dict[datetime, Dict[str, float]]] = None,
+    nw_cache: Optional[Dict[datetime, Dict[str, Decimal]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Per-component change vs the completed anchor one month before
     `month_start` (the month the current components were taken at, #133)."""

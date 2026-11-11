@@ -302,9 +302,11 @@ class TestFXValues:
         )
         sgd_rows = [r for r in rows if r["currency"] == "SGD"]
         assert len(sgd_rows) == 1
-        assert abs(sgd_rows[0]["balance_local"] - local) < 0.01
-        assert abs(sgd_rows[0]["balance_base"] - base) < 0.01
-        assert abs(sgd_rows[0]["fx_rate"] - fx) < 0.001
+        assert abs(float(sgd_rows[0]["balance_local"]) - local) < 0.01
+        assert abs(float(sgd_rows[0]["balance_base"]) - base) < 0.01
+        assert abs(float(sgd_rows[0]["fx_rate"]) - fx) < 0.001
+        # Money leaves the canonical reader as Decimal (#360, D-106), never a float.
+        assert all(isinstance(sgd_rows[0][k], Decimal) for k in ("balance_local", "balance_base", "fx_rate"))
 
     def test_default_fx_rate_one_for_base_currency(self, db_engine, db_session, seeded):
         """When currency == base currency, fx_rate should default to 1."""
@@ -395,7 +397,7 @@ class TestSourceAuthority:
             if r["account_id"] == ACCT_A1 and r["currency"] == "USD" and r["balance_type"] == "cash"
         ]
         assert len(usd_rows) == 1
-        assert abs(usd_rows[0]["balance_local"] - 1100.0) < 0.01
+        assert abs(float(usd_rows[0]["balance_local"]) - 1100.0) < 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +493,7 @@ class TestBrokerCashPromotion:
         acct_rows = [r for r in rows if r["account_id"] == ACCT_A2]
         assert len(acct_rows) >= 1, "PCBS row for ACCT_A2 must be surfaced"
         assert acct_rows[0]["source"] == "portfolio_cash_balance_snapshots"
-        assert abs(acct_rows[0]["balance_local"] - 3000.0) < 0.01
+        assert abs(float(acct_rows[0]["balance_local"]) - 3000.0) < 0.01
 
     def test_pcbs_not_returned_when_abs_exists(self, db_engine, db_session, seeded):
         """ACCT_A2 has both ABS and PCBS — only ABS must appear (no double-count)."""

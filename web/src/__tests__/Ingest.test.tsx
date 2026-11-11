@@ -430,7 +430,6 @@ describe("Ingest", () => {
         file_sha256: "x",
         format_signature: "sig",
         parser_key: "dbs_transaction_history_csv_v1",
-        report_path: null,
         error_message: null,
         created_at: "2026-02-01T00:00:00Z",
         updated_at: "2026-02-01T00:00:00Z",
@@ -746,7 +745,6 @@ describe("Ingest", () => {
         file_sha256: "sha",
         format_signature: "sig",
         parser_key: "ibkr_activity_csv_v1",
-        report_path: "/data/reports/99.json",
         error_message: null,
         created_at: "2026-02-01T00:00:00Z",
         updated_at: "2026-02-01T00:00:00Z",
@@ -933,7 +931,7 @@ describe("Ingest", () => {
     mockApi.ingestJob.mockResolvedValue({
       job: {
         id: 7, status: "NEEDS_MAPPING", platform: "CITI", account_id: 11, original_filename: "odd.csv",
-        file_sha256: "x", format_signature: "sig", parser_key: null, report_path: null, error_message: null,
+        file_sha256: "x", format_signature: "sig", parser_key: null, error_message: null,
       },
       report: null,
     } as unknown as Awaited<ReturnType<typeof api.ingestJob>>);

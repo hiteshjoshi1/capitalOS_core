@@ -47,12 +47,13 @@ from app.valuation.state import (
     _wallet_valuation,
 )
 from app.valuation_cache import valuation_cached
+from app.valuation.money import D, ZERO, dsum
 
 
 _UPPERCASE_SOURCE_CODES = {"DBS", "OCBC", "UOB", "IBKR", "POSB", "CITI", "HSBC", "SCB"}
 
 
-def _serialize_net_worth(components: Dict[str, float]) -> Dict[str, float]:
+def _serialize_net_worth(components: Dict[str, Decimal]) -> Dict[str, Decimal]:
     return {
         "total": components["total"],
         "cash": components["cash"],
@@ -84,7 +85,7 @@ def _card_liability_transaction_start(anchor_ts: datetime) -> date:
 
 def _card_statements_by_account(
     rows: List[Dict[str, Any]], base_currency: str
-) -> Dict[int, tuple[date, list[tuple[str, float]]]]:
+) -> Dict[int, tuple[date, list[tuple[str, Decimal]]]]:
     """Per card: (its statement date, [(currency, balance)]) from the rows of
     ``canonical_card_statement_rows`` (each card's newest statement, D-52)."""
     newest_statement: dict[int, date] = {}
@@ -95,12 +96,12 @@ def _card_statements_by_account(
         account_id = int(row["account_id"])
         if account_id not in newest_statement or as_of > newest_statement[account_id]:
             newest_statement[account_id] = as_of
-    statement_balances: dict[int, list[tuple[str, float]]] = {}
+    statement_balances: dict[int, list[tuple[str, Decimal]]] = {}
     for row in rows:
         account_id = int(row["account_id"])
         if _date_only(row["as_of_date"]) == newest_statement.get(account_id):
             statement_balances.setdefault(account_id, []).append(
-                (str(row["currency"] or base_currency).upper(), float(row["balance_local"] or 0.0))
+                (str(row["currency"] or base_currency).upper(), D(row["balance_local"]))
             )
     return {account_id: (newest_statement[account_id], balances) for account_id, balances in statement_balances.items()}
 
@@ -184,20 +185,20 @@ def _credit_card_liability_details(
     currencies.update(currency for balances in statement_balances.values() for currency, _ in balances)
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
 
-    def _owed(row: Mapping[str, Any]) -> float:
+    def _owed(row: Mapping[str, Any]) -> Decimal:
         currency = str(row["currency"] or base_currency).upper()
-        return -float(row["amount"] or 0.0) * rates.get(currency, 0.0)
+        return -D(row["amount"]) * D(rates.get(currency))
 
-    window_outstanding: dict[int, float] = {}
-    since_balance: dict[int, float] = {}
+    window_outstanding: dict[int, Decimal] = {}
+    since_balance: dict[int, Decimal] = {}
     for row in transaction_rows:
         account_id = int(row["account_id"])
         ts = _normalize_ts(row["ts"]) or row["ts"]
         if _card_transaction_in_window(ts, start_day, anchor_ts):
-            window_outstanding[account_id] = window_outstanding.get(account_id, 0.0) + _owed(row)
+            window_outstanding[account_id] = window_outstanding.get(account_id, ZERO) + _owed(row)
         as_of = newest_statement.get(account_id)
         if as_of is not None and _card_transaction_in_window(ts, as_of + timedelta(days=1), anchor_ts):
-            since_balance[account_id] = since_balance.get(account_id, 0.0) + _owed(row)
+            since_balance[account_id] = since_balance.get(account_id, ZERO) + _owed(row)
 
     # Payments to a card seen only on the paying bank account (#308, D-77): they lower what
     # the running balance says is owed, as a payment in the card's own file would.
@@ -211,8 +212,8 @@ def _credit_card_liability_details(
                 continue
             rate = rates.get(payment.currency or base_currency, None)
             if rate is None:
-                rate = fx.get_rates(anchor_ts, base_currency, {payment.currency}).get(payment.currency, 0.0)
-            since_balance[payment.card_account_id] = since_balance.get(payment.card_account_id, 0.0) - payment.amount * rate
+                rate = D(fx.get_rates(anchor_ts, base_currency, {payment.currency}).get(payment.currency))
+            since_balance[payment.card_account_id] = since_balance.get(payment.card_account_id, ZERO) - D(payment.amount) * D(rate)
 
     out: list[Dict[str, Any]] = []
     for card in cards:
@@ -222,14 +223,14 @@ def _credit_card_liability_details(
         closed_on = _date_only(card["closed_on"])
         if closed_on is not None and closed_on < anchor_date:
             out.append(
-                {"account_id": account_id, "currency": card_currency, "method": "closed", "as_of_date": None, "value": 0.0}
+                {"account_id": account_id, "currency": card_currency, "method": "closed", "as_of_date": None, "value": ZERO}
             )
             continue
         if account_id in statement_balances:
             # A card's balance is negative while money is owed (the holder's view,
             # like its transactions), so what it owes is minus the balance.
-            anchor_value = sum(-amount * rates.get(currency, 0.0) for currency, amount in statement_balances[account_id])
-            since_value = since_balance.get(account_id, 0.0)
+            anchor_value = sum(-amount * D(rates.get(currency)) for currency, amount in statement_balances[account_id])
+            since_value = since_balance.get(account_id, ZERO)
             out.append(
                 {
                     "account_id": account_id,
@@ -248,7 +249,7 @@ def _credit_card_liability_details(
                 "currency": card_currency,
                 "method": "transactions",
                 "as_of_date": None,
-                "value": max(window_outstanding.get(account_id, 0.0), 0.0),
+                "value": max(window_outstanding.get(account_id, ZERO), ZERO),
             }
         )
     return out
@@ -259,7 +260,7 @@ def _credit_card_liability_component(
     anchor_ts: datetime,
     base_currency: str,
     current_user_id: int,
-) -> tuple[float, set[int]]:
+) -> tuple[Decimal, set[int]]:
     details = _credit_card_liability_details(db, anchor_ts, base_currency, current_user_id)
     return sum(card["value"] for card in details), {int(card["account_id"]) for card in details}
 
@@ -328,7 +329,7 @@ def _current_networth_state(db: Session, base_currency: str, current_user_id: in
         if entry["balance_type"] in _CASH_FRESHNESS_BALANCE_TYPES
     ]
 
-    cash_percent = round((components["cash"] / components["total"]) * 100, 2) if components["total"] > 0 else 0.0
+    cash_percent = round((components["cash"] / components["total"]) * 100, 2) if components["total"] > 0 else ZERO
     return {
         "anchor": anchor,
         "net_worth": _serialize_net_worth(components),
@@ -387,9 +388,9 @@ def _networth_asset_components(
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
     currencies.add("USD")  # Include USD for crypto wallet conversions
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
-    cash = sum(float(entry["value"]) for entry in cash_entries)
-    stocks_funds = 0.0
-    crypto = 0.0
+    cash = sum(D(entry["value"]) for entry in cash_entries)
+    stocks_funds = ZERO
+    crypto = ZERO
     for r in canonical_pos_rows:
         asset_class = str(r["asset_class"] or "").upper()
         if asset_class in ("STOCK", "FUND"):
@@ -397,14 +398,14 @@ def _networth_asset_components(
     nav_deltas = _nav_live_price_deltas(nav_live_rows, nav_live_prices, rates, base_currency)
     for row in canonical_nav_rows:
         nav_currency = str(row["base_currency"] or base_currency).upper()
-        rate = rates.get(nav_currency, 0.0)
-        cash_base = float(row["cash_base"] or 0.0)
-        total_nav_base = float(row["total_nav_base"] or 0.0)
+        rate = D(rates.get(nav_currency))
+        cash_base = D(row["cash_base"])
+        total_nav_base = D(row["total_nav_base"])
         # The NAV's cash is in cash_entries (_cash_positions).
-        stocks_funds += (total_nav_base - cash_base) * rate + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
-    wallet_usd = float(_wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)["total_usd"])
+        stocks_funds += (total_nav_base - cash_base) * rate + nav_deltas.get(int(row["legacy_account_id"]), ZERO)
+    wallet_usd = D(_wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)["total_usd"])
     if wallet_usd:
-        usd_rate = rates.get("USD", 0.0)
+        usd_rate = D(rates.get("USD"))
         crypto += wallet_usd * usd_rate
     return {
         "cash": cash,
@@ -427,7 +428,7 @@ def _networth_components(
     *,
     price_overlay: bool = False,
     return_rows: Literal[False] = False,
-) -> Dict[str, float]: ...
+) -> Dict[str, Decimal]: ...
 
 
 @overload
@@ -439,7 +440,7 @@ def _networth_components(
     *,
     price_overlay: bool = False,
     return_rows: Literal[True],
-) -> tuple[Dict[str, float], Dict[str, Any]]: ...
+) -> tuple[Dict[str, Decimal], Dict[str, Any]]: ...
 
 
 def _networth_components(
@@ -450,7 +451,7 @@ def _networth_components(
     *,
     price_overlay: bool = False,
     return_rows: bool = False,
-) -> Dict[str, float] | tuple[Dict[str, float], Dict[str, Any]]:
+) -> Dict[str, Decimal] | tuple[Dict[str, Decimal], Dict[str, Any]]:
     """Compute reporting net worth components from canonical snapshots only.
 
     When return_rows=True, also returns the raw canonical rows this call fetched
@@ -458,7 +459,7 @@ def _networth_components(
     (the wealth rollup) don't have to re-issue the same queries.
     """
     if anchor_ts is None:
-        empty = {"cash": 0.0, "stocks_funds": 0.0, "crypto": 0.0, "liabilities": 0.0, "total": 0.0}
+        empty = {"cash": ZERO, "stocks_funds": ZERO, "crypto": ZERO, "liabilities": ZERO, "total": ZERO}
         if return_rows:
             return empty, {"positions": [], "nav": [], "cash": []}
         return empty
@@ -488,8 +489,8 @@ def _networth_components(
     return result
 
 
-def _sum_balances(items: list[dict[str, Any]]) -> float:
-    return sum(float(item.get("value") or 0.0) for item in items)
+def _sum_balances(items: list[dict[str, Any]]) -> Decimal:
+    return dsum(item.get("value") for item in items)
 
 
 def _cash_currency_bucket(currency: str | None) -> str:
@@ -499,10 +500,10 @@ def _cash_currency_bucket(currency: str | None) -> str:
     return "Other"
 
 
-def _cash_currency_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
-    grouped = {"USD": 0.0, "SGD": 0.0, "HKD": 0.0, "INR": 0.0, "Other": 0.0}
+def _cash_currency_value_map(items: list[dict[str, Any]]) -> dict[str, Decimal]:
+    grouped = {"USD": ZERO, "SGD": ZERO, "HKD": ZERO, "INR": ZERO, "Other": ZERO}
     for item in items:
-        grouped[_cash_currency_bucket(item.get("currency"))] += float(item.get("value") or 0.0)
+        grouped[_cash_currency_bucket(item.get("currency"))] += D(item.get("value"))
     return grouped
 
 
@@ -514,8 +515,8 @@ def _cash_currency_breakdown(
     snapshot_values = _cash_currency_value_map(snapshot_balances)
     items: list[dict[str, Any]] = []
     for currency in ("USD", "SGD", "HKD", "INR", "Other"):
-        current_value = current_values.get(currency, 0.0)
-        snapshot_value = snapshot_values.get(currency, 0.0)
+        current_value = current_values.get(currency, ZERO)
+        snapshot_value = snapshot_values.get(currency, ZERO)
         delta_abs = current_value - snapshot_value
         items.append(
             {
@@ -559,14 +560,14 @@ def _stablecoin_cash_balances(
         ),
         {"as_of_date": anchor_ts.date(), "current_user_id": current_user_id},
     ).mappings().all()
-    total_usd = sum(float(row.get("total_usd") or 0.0) for row in rows)
+    total_usd = sum(D(row.get("total_usd")) for row in rows)
     if total_usd <= 0:
         return []
-    usd_rate = fx.get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 0.0)
+    usd_rate = D(fx.get_rates(anchor_ts, base_currency, {"USD"}).get("USD"))
     return [{"currency": "USD", "value": total_usd * usd_rate}]
 
 
-def _stablecoin_usd_by_date(db: Session, anchor_dates: list[date], current_user_id: int) -> Dict[date, float]:
+def _stablecoin_usd_by_date(db: Session, anchor_dates: list[date], current_user_id: int) -> Dict[date, Decimal]:
     """USDC/USDT held at each anchor date, in USD: per active wallet, the items
     of its latest snapshot at/before that date (what _stablecoin_cash_balances
     sums for one date), for several dates with two queries instead of one per
@@ -601,7 +602,7 @@ def _stablecoin_usd_by_date(db: Session, anchor_dates: list[date], current_user_
                 used[anchor_date].add((wallet_id, max(eligible)))
     needed = set().union(*used.values())
     if not needed:
-        return {anchor_date: 0.0 for anchor_date in anchor_dates}
+        return {anchor_date: ZERO for anchor_date in anchor_dates}
     wallet_ids = sorted({w for w, _ in needed}, key=str)
     wallet_list = ",".join(f":w{i}" for i in range(len(wallet_ids)))
     date_list = sorted({d for _, d in needed})
@@ -622,14 +623,14 @@ def _stablecoin_usd_by_date(db: Session, anchor_dates: list[date], current_user_
         params,
     ).mappings().all()
     by_snapshot = {(row["wallet_id"], _date_only(row["as_of_date"])): row["total_usd"] for row in rows}
-    out: Dict[date, float] = {}
+    out: Dict[date, Decimal] = {}
     for anchor_date in anchor_dates:
         values = [by_snapshot[pair] for pair in used[anchor_date] if by_snapshot.get(pair) is not None]
         # Postgres returns exact NUMERIC sums: add them exactly, as one SQL SUM would.
         if values and all(isinstance(v, Decimal) for v in values):
-            out[anchor_date] = float(sum(values, Decimal(0)))
+            out[anchor_date] = D(sum(values, Decimal(0)))
         else:
-            out[anchor_date] = sum(float(v) for v in values)
+            out[anchor_date] = dsum(values)
     return out
 
 
@@ -657,9 +658,9 @@ def _cash_trend(
                 # The same figures as the live headline (pages.cash_deposits).
                 stablecoin = _stablecoin_cash_balances(db, anchor, base_currency, current_user_id)
             else:
-                total_usd = stablecoin_usd.get(anchor.date(), 0.0)
+                total_usd = stablecoin_usd.get(anchor.date(), ZERO)
                 if total_usd > 0:
-                    usd_rate = fx.get_rates(anchor, base_currency, {"USD"}).get("USD", 0.0)
+                    usd_rate = D(fx.get_rates(anchor, base_currency, {"USD"}).get("USD"))
                     stablecoin = [{"currency": "USD", "value": total_usd * usd_rate}]
             value = _sum_balances(_cash_balances(db, anchor, base_currency, current_user_id) + stablecoin)
         points.append({"month": candidate_month.strftime("%Y-%m"), "value": value, "is_live": is_live})
@@ -668,9 +669,9 @@ def _cash_trend(
 
 def _cash_balances(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> List[Dict[str, Any]]:
     """Net-worth cash by the currency it is held in (_cash_positions)."""
-    buckets: Dict[str, float] = {}
+    buckets: Dict[str, Decimal] = {}
     for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id):
-        buckets[entry["currency"]] = buckets.get(entry["currency"], 0.0) + float(entry["value"])
+        buckets[entry["currency"]] = buckets.get(entry["currency"], ZERO) + D(entry["value"])
     return [
         {"currency": currency, "value": value}
         for currency, value in sorted(buckets.items(), key=lambda x: x[1], reverse=True)
@@ -691,10 +692,10 @@ def _display_source(value: str | None) -> str:
 def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current_user_id: int) -> Dict[str, Any]:
     """The Cash page's "where cash sits": net-worth cash plus stablecoins
     (_cash_positions, Cash-page scope) by platform, stablecoins by chain."""
-    buckets: Dict[str, float] = {}
+    buckets: Dict[str, Decimal] = {}
     for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id, scope=CASH_SCOPE_CASH_PAGE):
         source = _display_source(entry.get("platform"))
-        buckets[source] = buckets.get(source, 0.0) + float(entry["value"])
+        buckets[source] = buckets.get(source, ZERO) + D(entry["value"])
 
     total = sum(buckets.values())
     items = []
@@ -703,7 +704,7 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current
             {
                 "source": source,
                 "value": value,
-                "percent": round((value / total) * 100, 2) if total > 0 else 0.0,
+                "percent": round((value / total) * 100, 2) if total > 0 else ZERO,
             }
         )
     return {"items": items, "total": total}
@@ -740,14 +741,14 @@ def _cashflow(db: Session, start: datetime, end: datetime, base_currency: str, c
     # for the response's fx_status (and keeps this result out of the shared cache).
     currencies = {(r["currency"] or base_currency).upper() for r in rows}
     row_dates = [_cashflow_rate_date(r["ts"]) for r in rows]
-    rates_by_date: Mapping[date, Mapping[str, float]] = (
+    rates_by_date: Mapping[date, Mapping[str, Decimal]] = (
         fx.get_rates_by_date(row_dates, base_currency, currencies) if rows else {}
     )
-    income = 0.0
-    expenses = 0.0
+    income = ZERO
+    expenses = ZERO
     for r, day in zip(rows, row_dates):
         cur = (r["currency"] or base_currency).upper()
-        amount = float(r["amount"]) * rates_by_date.get(day, {}).get(cur, 0.0)
+        amount = D(r["amount"]) * D(rates_by_date.get(day, {}).get(cur))
         if r["type"] == "INCOME":
             income += amount
         elif r["type"] in ("EXPENSE", "FEE", "TAX", "INTEREST"):

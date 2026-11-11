@@ -47,6 +47,8 @@ Dividends pages.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Iterable, Mapping, Optional
@@ -77,6 +79,7 @@ from app.valuation.facts import _networth_components, _serialize_net_worth
 from app.valuation.history import baseline_missing
 from app.valuation.prices import _canonical_base_currency, _latest_prices_for_positions
 from app.valuation.state import _cash_positions, _effective_as_of, _wallet_valuation
+from app.valuation.money import D, ONE, ZERO, D_or_none, dsum, float_edge
 
 # IBKR Statement of Funds codes for money paid in or taken out, and for interest.
 LEDGER_DEPOSIT_CODES = frozenset({"DEP", "WITH", "DEPOSIT", "WITHDRAWAL"})
@@ -84,30 +87,30 @@ LEDGER_INTEREST_CODES = frozenset({"CINT", "DINT"})
 # A deposit into a broker is a move between your own accounts when another of your
 # accounts has a TRANSFER of the opposite amount, same currency, this many days apart.
 TRANSFER_MATCH_DAYS = 5
-TRANSFER_MATCH_TOLERANCE = 0.01
+TRANSFER_MATCH_TOLERANCE = Decimal("0.01")
 # What a card's liability counts (app.valuation.facts._credit_card_liability_details).
 CARD_LIABILITY_TYPES = frozenset({"EXPENSE", "FEE", "TAX", "INTEREST", "TRANSFER", "INCOME"})
 STOCK_CLASSES = frozenset({"STOCK", "FUND"})
 # A holding's value may imply an FX rate this far from the stored one (an IBKR
 # statement converts at its own date's rate); further off, the value doesn't match
 # its quantity x price and the stored rate is used instead.
-RATE_TOLERANCE = 0.01
-_EPS = 1e-9
+RATE_TOLERANCE = Decimal("0.01")
+_EPS = Decimal("1e-9")
 # The line's "N holding(s) without a price" note counts holdings whose unsplit change is
 # at least this much in the base currency (dust tokens that lost their quote don't).
-UNSPLIT_COUNT_MIN = 1.0
+UNSPLIT_COUNT_MIN = Decimal(1)
 # A change in quantity at least this big (base currency) is listed as a trade.
-TRADE_MIN = 1.0
+TRADE_MIN = Decimal(1)
 # An account's starting figure older than this before the period's start is stale: its
 # change over the period includes earlier months, shown as Catch-up (#329, D-81).
 CATCH_UP_STALE_DAYS = 7
 # Rebasing staking tokens: their quantity grows with the rewards (#330, D-82). Growth over
 # this share of the starting quantity is a deposit or a move, not rewards.
 STAKING_REBASING_SYMBOLS = frozenset({"STETH", "EETH"})
-STAKING_MAX_GROWTH = 0.02
+STAKING_MAX_GROWTH = Decimal("0.02")
 # A part lists at most this many items (#332); the rest add up into one "rest" item.
 ITEMS_MAX = 8
-ITEM_MIN = 0.5
+ITEM_MIN = Decimal("0.5")
 
 
 @dataclass
@@ -121,15 +124,22 @@ class _Holding:
     asset_class: str
     platform: Optional[str]
     account_id: Optional[int]
-    quantity: Optional[float]
-    price: Optional[float]  # in the currency it is quoted in
-    value: float
-    fx_rate: Optional[float] = None  # base currency per unit of the price's currency, at the anchor
+    quantity: Optional[Decimal]
+    price: Optional[Decimal]  # in the currency it is quoted in
+    value: Decimal
+    fx_rate: Optional[Decimal] = None  # base currency per unit of the price's currency, at the anchor
     price_currency: Optional[str] = None  # the currency ``price`` is in
     as_of: Optional[date] = None  # the statement date the holding comes from (#289)
     fallback_reason: Optional[str] = None  # D-21: why a live view used the statement price (#289)
 
-    def rate(self) -> Optional[float]:
+    def __post_init__(self) -> None:
+        # Decimal throughout (#360): whatever the caller passed (a float rate, a live price).
+        self.quantity = D_or_none(self.quantity)
+        self.price = D_or_none(self.price)
+        self.value = D(self.value)
+        self.fx_rate = D_or_none(self.fx_rate)
+
+    def rate(self) -> Optional[Decimal]:
         """Base currency per unit of the price's currency: the rate the value itself
         implies (value / (quantity * price): an IBKR statement's own conversion, on
         its own date), unless that is over RATE_TOLERANCE from the stored rate at the
@@ -141,27 +151,27 @@ class _Holding:
         if abs(local) < _EPS:
             return None
         implied = self.value / local
-        if self.fx_rate is not None and self.fx_rate > 0 and abs(implied / self.fx_rate - 1.0) > RATE_TOLERANCE:
+        if self.fx_rate is not None and self.fx_rate > 0 and abs(implied / self.fx_rate - ONE) > RATE_TOLERANCE:
             return self.fx_rate
         return implied
 
     def is_empty(self) -> bool:
-        return abs(self.value) < _EPS and not (self.quantity or 0.0)
+        return abs(self.value) < _EPS and not (self.quantity or ZERO)
 
 
 @dataclass
 class _Split:
-    price: float = 0.0
-    fx: float = 0.0
-    quantity: float = 0.0
-    unsplit: float = 0.0  # a change that can't be split (no price or quantity on one side)
+    price: Decimal = ZERO
+    fx: Decimal = ZERO
+    quantity: Decimal = ZERO
+    unsplit: Decimal = ZERO  # a change that can't be split (no price or quantity on one side)
     # The part of the change in value that quantity x price x rate doesn't give: a
     # statement value that differs from its own quantity x price (or IBKR's rate
     # from the stored one). value1 - value0 = price + fx + quantity + unsplit + gap.
-    gap: float = 0.0
+    gap: Decimal = ZERO
 
     @property
-    def total(self) -> float:
+    def total(self) -> Decimal:
         return self.price + self.fx + self.quantity + self.unsplit + self.gap
 
 
@@ -193,10 +203,10 @@ def _split(start: Optional[_Holding], end: Optional[_Holding]) -> _Split:
         priced = end if r1 is not None else start
         rate = r1 if r1 is not None else r0
         assert rate is not None and priced.price is not None
-        quantity = (float(end.quantity) - float(start.quantity)) * priced.price * rate
+        quantity = (D(end.quantity) - D(start.quantity)) * priced.price * rate
         return _Split(quantity=quantity, unsplit=end.value - start.value - quantity)
-    q0, p0 = float(start.quantity or 0.0), float(start.price or 0.0)
-    q1, p1 = float(end.quantity or 0.0), float(end.price or 0.0)
+    q0, p0 = D(start.quantity), D(start.price)
+    q1, p1 = D(end.quantity), D(end.price)
     gap = (end.value - q1 * p1 * r1) - (start.value - q0 * p0 * r0)
     return _Split(price=q0 * (p1 - p0) * r1, fx=q0 * p0 * (r1 - r0), quantity=(q1 - q0) * p1 * r1, gap=gap)
 
@@ -238,29 +248,29 @@ class AssetChange:
     name: Optional[str]
     asset_class: str
     platform: Optional[str]
-    start_value: float = 0.0
-    end_value: float = 0.0
-    price_effect: float = 0.0
-    quantity_effect: float = 0.0
-    fx_effect: float = 0.0
-    unsplit: float = 0.0
+    start_value: Decimal = ZERO
+    end_value: Decimal = ZERO
+    price_effect: Decimal = ZERO
+    quantity_effect: Decimal = ZERO
+    fx_effect: Decimal = ZERO
+    unsplit: Decimal = ZERO
     cash_recorded: bool = False
     held_at_start: bool = False
     held_at_end: bool = False
-    start_quantity: Optional[float] = None
-    end_quantity: Optional[float] = None
-    start_price: Optional[float] = None
-    end_price: Optional[float] = None
+    start_quantity: Optional[Decimal] = None
+    end_quantity: Optional[Decimal] = None
+    start_price: Optional[Decimal] = None
+    end_price: Optional[Decimal] = None
     price_currency: Optional[str] = None
-    start_rate: Optional[float] = None
-    end_rate: Optional[float] = None
+    start_rate: Optional[Decimal] = None
+    end_rate: Optional[Decimal] = None
 
     @property
-    def change(self) -> float:
+    def change(self) -> Decimal:
         return self.end_value - self.start_value
 
     @property
-    def market_effect(self) -> float:
+    def market_effect(self) -> Decimal:
         return self.price_effect + self.fx_effect
 
     @property
@@ -273,7 +283,7 @@ class AssetChange:
         return "held"
 
 
-def _add_quantity(total: Optional[float], quantity: Optional[float]) -> Optional[float]:
+def _add_quantity(total: Optional[Decimal], quantity: Optional[Decimal]) -> Optional[Decimal]:
     if quantity is None:
         return total
     return quantity if total is None else total + quantity
@@ -293,8 +303,8 @@ def asset_changes(changes: Iterable[HoldingChange], cash_accounts: Iterable[int]
             asset_class=held.asset_class,
             platform=held.platform,
         ))
-        asset.start_value += h0.value if h0 else 0.0
-        asset.end_value += h1.value if h1 else 0.0
+        asset.start_value += h0.value if h0 else ZERO
+        asset.end_value += h1.value if h1 else ZERO
         asset.price_effect += split.price
         asset.quantity_effect += split.quantity
         asset.fx_effect += split.fx
@@ -351,7 +361,7 @@ def _stock_holdings(
         asset_key: Any = int(row["asset_id"]) if row.get("asset_id") is not None else symbol.upper()
         account_id = int(row["account_id"]) if row.get("account_id") is not None else None
         key = (account_id, row.get("broker_account_id"), asset_key)
-        quantity = float(row["quantity"]) if row.get("quantity") is not None else None
+        quantity = D(row["quantity"]) if row.get("quantity") is not None else None
         report_date = _date_only(row.get("report_date"))
         held = out.get(key)
         if held is None:
@@ -364,7 +374,7 @@ def _stock_holdings(
                 platform=row.get("platform"),
                 account_id=account_id,
                 quantity=quantity,
-                price=float(price) if price is not None else None,
+                price=D(price) if price is not None else None,
                 value=priced.value,
                 fx_rate=fx_rate,
                 price_currency=str(price_currency).upper() if price_currency else None,
@@ -397,18 +407,18 @@ def stock_mover_key(asset_id: Any, symbol: Any) -> tuple:
 
 def _crypto_holdings(
     db: Session, anchor: datetime, base_currency: str, current_user_id: int, *, live: bool
-) -> tuple[Dict[tuple, _Holding], float]:
+) -> tuple[Dict[tuple, _Holding], Decimal]:
     """Each token across the active wallets (quantity, USD price) at this anchor, from
     the wallet valuation net worth uses; and that valuation's total in base currency."""
     valuation = _wallet_valuation(db, anchor, current_user_id, price_overlay=live)
-    usd = fx.get_rates(anchor, base_currency, {"USD"}).get("USD", 0.0)
-    amounts: Dict[str, tuple[float, float]] = {}
+    usd = D(fx.get_rates(anchor, base_currency, {"USD"}).get("USD"))
+    amounts: Dict[str, tuple[Decimal, Decimal]] = {}
     for item in valuation.get("items", []):
         symbol = str(item.get("symbol") or "UNKNOWN").upper()
-        quantity, value_usd = amounts.get(symbol, (0.0, 0.0))
+        quantity, value_usd = amounts.get(symbol, (ZERO, ZERO))
         amounts[symbol] = (
-            quantity + (float(item.get("normalized_amount") or 0.0) if item.get("value_usd") is not None else 0.0),  # #331
-            value_usd + float(item.get("value_usd") or 0.0),
+            quantity + (D(item.get("normalized_amount")) if item.get("value_usd") is not None else ZERO),  # #331
+            value_usd + D(item.get("value_usd")),
         )
     out: Dict[tuple, _Holding] = {}
     for symbol, (quantity, value_usd) in amounts.items():
@@ -426,7 +436,7 @@ def _crypto_holdings(
             fx_rate=usd or None,
             price_currency="USD",
         )
-    return out, float(valuation.get("total_usd") or 0.0) * usd
+    return out, D(valuation.get("total_usd")) * usd
 
 
 # ─── Catch-up: starting figures older than the period (#329, D-81) ───────────
@@ -447,40 +457,40 @@ def _account_names(db: Session, current_user_id: int) -> Dict[int, str]:
 
 def _cash_by_account(
     db: Session, anchor: datetime, base_currency: str, current_user_id: int
-) -> Dict[int, tuple[float, Optional[date], str]]:
+) -> Dict[int, tuple[Decimal, Optional[date], str]]:
     """Each account's cash balance at the anchor (kind ``balance`` only: an IBKR NAV's
     cash moves with its trades and ledger, which the lines read): value in base, its
     newest as-of date, its kind."""
-    out: Dict[int, tuple[float, Optional[date], str]] = {}
+    out: Dict[int, tuple[Decimal, Optional[date], str]] = {}
     for entry in _cash_positions(db, anchor, base_currency, current_user_id):
         if entry.get("account_id") is None:
             continue
         account_id = int(entry["account_id"])
-        value, as_of, kind = out.get(account_id, (0.0, None, str(entry.get("kind") or "balance")))
+        value, as_of, kind = out.get(account_id, (ZERO, None, str(entry.get("kind") or "balance")))
         day = _date_only(entry.get("as_of_date"))
         if day is not None and (as_of is None or day > as_of):
             as_of = day
         if str(entry.get("kind") or "balance") != "balance":
             kind = str(entry.get("kind"))
-        out[account_id] = (value + float(entry["value"]), as_of, kind)
+        out[account_id] = (value + D(entry["value"]), as_of, kind)
     return out
 
 
 def _period_cash_by_account(
     db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime
-) -> Dict[int, float]:
+) -> Dict[int, Decimal]:
     """Every non-card account's transactions in the period, all types, in base (each at
     its own date's rate, D-30): what moved its balance within the period."""
     rows = [dict(row) for row in _cash_flow_rows(db, start, end, current_user_id)]
     rates = _build_row_rate_map(rows, base_currency)
-    out: Dict[int, float] = {}
+    out: Dict[int, Decimal] = {}
     for row in rows:
         if str(row.get("account_type") or "").upper() == "CREDIT_CARD":
             continue
         if not _transaction_in_month_window(row["ts"], start, end):
             continue
         account_id = int(row["account_id"])
-        out[account_id] = out.get(account_id, 0.0) + _row_base_amount(row, base_currency, rates)
+        out[account_id] = out.get(account_id, ZERO) + D(_row_base_amount(row, base_currency, rates))
     return out
 
 
@@ -494,7 +504,7 @@ class CatchUp:
     label: str
     since: date
     until: Optional[date]
-    amount: float
+    amount: Decimal
 
 
 def _stale(as_of: Optional[date], period_start: date) -> bool:
@@ -516,7 +526,7 @@ def cash_catch_up(
     skip = set(skip_accounts)
     start0 = _cash_by_account(db, start, base_currency, current_user_id)
     end1 = _cash_by_account(db, end, base_currency, current_user_id)
-    period_rows: Optional[Dict[int, float]] = None
+    period_rows: Optional[Dict[int, Decimal]] = None
     out: list[CatchUp] = []
     for account_id, (value0, as_of0, kind) in sorted(start0.items()):
         if account_id in skip or kind != "balance" or not _stale(as_of0, start.date()):
@@ -526,7 +536,7 @@ def cash_catch_up(
             continue  # no newer balance: nothing from earlier months arrived
         if period_rows is None:
             period_rows = _period_cash_by_account(db, current_user_id, base_currency, start, end)
-        amount = (value1 - value0) - period_rows.get(account_id, 0.0)
+        amount = (value1 - value0) - period_rows.get(account_id, ZERO)
         name = (names or {}).get(account_id, f"Account {account_id}")
         out.append(CatchUp(
             account_id=account_id,
@@ -569,8 +579,8 @@ class NewlyTracked:
     key: str  # wallet:<id> | cash:<account> | holdings:<account>
     label: str
     first: Optional[date]
-    amount: float
-    detail: list[tuple[str, float]]  # (token or holding, value in base), largest first
+    amount: Decimal
+    detail: list[tuple[str, Decimal]]  # (token or holding, value in base), largest first
 
 
 def new_wallets(db: Session, current_user_id: int, period_start: date) -> Dict[str, tuple[str, date]]:
@@ -607,21 +617,21 @@ def newly_tracked_wallets(
     if not wallets:
         return []
     valuation = _wallet_valuation(db, end, current_user_id, price_overlay=live)
-    usd = fx.get_rates(end, base_currency, {"USD"}).get("USD", 0.0)
-    tokens: Dict[str, Dict[str, float]] = {}
+    usd = D(fx.get_rates(end, base_currency, {"USD"}).get("USD"))
+    tokens: Dict[str, Dict[str, Decimal]] = {}
     for item in valuation.get("items", []):
         wallet_id = str(item.get("wallet_id"))
         if wallet_id not in wallets:
             continue
         symbol = str(item.get("symbol") or "UNKNOWN").upper()
         per = tokens.setdefault(wallet_id, {})
-        per[symbol] = per.get(symbol, 0.0) + float(item.get("value_usd") or 0.0) * usd
+        per[symbol] = per.get(symbol, ZERO) + D(item.get("value_usd")) * usd
     out = []
     for wallet_id, (label, first) in sorted(wallets.items(), key=lambda kv: kv[1][1]):
         per = tokens.get(wallet_id, {})
         detail = sorted(per.items(), key=lambda kv: -abs(kv[1]))
         out.append(NewlyTracked(f"wallet:{wallet_id}", f"{label}: first seen {_short_date(first)}", first,
-                                sum(per.values()), detail))
+                                dsum(per.values()), detail))
     return out
 
 
@@ -649,7 +659,7 @@ def newly_tracked_cash(
         value, first, _kind = end1[account_id]
         name = (names or {}).get(account_id, f"Account {account_id}")
         label = f"{name}: first balance {_short_date(first)}" if first else f"{name}: first balance"
-        out.append(NewlyTracked(f"cash:{account_id}", label, first, value - rows.get(account_id, 0.0), []))
+        out.append(NewlyTracked(f"cash:{account_id}", label, first, value - rows.get(account_id, ZERO), []))
     return out
 
 
@@ -659,15 +669,15 @@ def newly_tracked_holdings_accounts(start: Mapping[tuple, _Holding], end: Mappin
     return {h.account_id for h in end.values() if h.account_id is not None and h.account_id not in before}
 
 
-def staking_reward(change: "HoldingChange") -> float:
+def staking_reward(change: "HoldingChange") -> Decimal:
     """A rebasing staking token's quantity growth (#330): rewards, when held at both ends
     and growing by at most STAKING_MAX_GROWTH; else 0."""
     h0, h1 = change.start, change.end
     if h0 is None or h1 is None or h0.symbol.upper() not in STAKING_REBASING_SYMBOLS:
-        return 0.0
-    q0, q1 = h0.quantity or 0.0, h1.quantity or 0.0
+        return ZERO
+    q0, q1 = h0.quantity or ZERO, h1.quantity or ZERO
     if q0 <= _EPS or q1 <= q0 or (q1 - q0) / q0 > STAKING_MAX_GROWTH:
-        return 0.0
+        return ZERO
     return change.split.quantity
 
 
@@ -691,7 +701,7 @@ def _card_items(
     end: datetime,
     flows: "_Flows",
     names: Mapping[int, str],
-    total: float,
+    total: Decimal,
 ) -> list[Dict[str, Any]]:
     """Each card's share of the card part: what it owes less at the end than at the start,
     less its transactions in the period, and why (#332)."""
@@ -712,7 +722,7 @@ def _card_items(
     rows = []
     for card in sorted(set(owed0) | set(owed1)):
         c0, c1 = owed0.get(card, {}), owed1.get(card, {})
-        amount = -(float(c1.get("value") or 0.0) - float(c0.get("value") or 0.0)) - flows.card_activity_by_account.get(card, 0.0)
+        amount = -(D(c1.get("value")) - D(c0.get("value"))) - flows.card_activity_by_account.get(card, ZERO)
         method = c1.get("method") or c0.get("method")
         if method == "transactions":
             newest = last_tx.get(card)
@@ -739,7 +749,7 @@ def _uncounted_rows(
     in_window = {
         row.get("transaction_id") for row in rows if _transaction_in_month_window(row["ts"], start, end)
     }
-    totals: Dict[tuple, float] = {}
+    totals: Dict[tuple, Decimal] = {}
     reasons: Dict[tuple, str] = {}
     for row in rows:
         if str(row.get("account_type") or "").upper() in {"CREDIT_CARD", "BROKER"}:
@@ -764,7 +774,7 @@ def _uncounted_rows(
         else:
             reason = "not counted as income or spending; no other side recorded in your accounts"
         key = (int(row["account_id"]), category)
-        totals[key] = totals.get(key, 0.0) + _row_base_amount(row, base_currency, rates)
+        totals[key] = totals.get(key, ZERO) + D(_row_base_amount(row, base_currency, rates))
         reasons[key] = reason
     return [
         _item(f"{names.get(account_id, f'Account {account_id}')}: {category}", amount, reasons[(account_id, category)])
@@ -859,16 +869,16 @@ def _linked_transaction_ids(db: Session, current_user_id: int, ids: Iterable[int
 
 @dataclass
 class _Flows:
-    income: float = 0.0  # Cash flow's income, without dividends and interest
-    spending: float = 0.0  # Cash flow's expenses (positive)
-    dividends: float = 0.0  # net of withholding, as the Dividends page
-    interest: float = 0.0
-    new_money_in: float = 0.0
-    new_money_out: float = 0.0  # negative
-    internal_moves: float = 0.0  # deposits into brokers from your own accounts (not counted)
+    income: Decimal = ZERO  # Cash flow's income, without dividends and interest
+    spending: Decimal = ZERO  # Cash flow's expenses (positive)
+    dividends: Decimal = ZERO  # net of withholding, as the Dividends page
+    interest: Decimal = ZERO
+    new_money_in: Decimal = ZERO
+    new_money_out: Decimal = ZERO  # negative
+    internal_moves: Decimal = ZERO  # deposits into brokers from your own accounts (not counted)
     internal_count: int = 0
-    card_activity: float = 0.0  # every card transaction a card's liability counts
-    card_activity_by_account: Dict[int, float] = field(default_factory=dict)  # the same, per card (#332)
+    card_activity: Decimal = ZERO  # every card transaction a card's liability counts
+    card_activity_by_account: Dict[int, Decimal] = field(default_factory=dict)  # the same, per card (#332)
     transaction_count: int = 0
 
 
@@ -886,11 +896,11 @@ def _flows(
     out.transaction_count = len(in_period)
 
     for row in in_period:
-        amount = _row_base_amount(row, base_currency, rates_by_date)
+        amount = D(_row_base_amount(row, base_currency, rates_by_date))
         if str(row.get("account_type") or "").upper() == "CREDIT_CARD" and str(row["type"]).upper() in CARD_LIABILITY_TYPES:
             out.card_activity += amount
             card = int(row["account_id"])
-            out.card_activity_by_account[card] = out.card_activity_by_account.get(card, 0.0) + amount
+            out.card_activity_by_account[card] = out.card_activity_by_account.get(card, ZERO) + amount
         if _is_dividend_row(row):
             # The Dividends page's rule: a ledger-covered account's dividends come
             # from the ledger, so its transaction rows are skipped, not counted twice.
@@ -915,24 +925,24 @@ def _flows(
         day_ts = datetime.combine(payment.day, datetime.min.time(), tzinfo=timezone.utc)
         if not _transaction_in_month_window(day_ts, start, end):
             continue
-        rates: Mapping[str, float] = fx.get_rates_by_date([payment.day], base_currency, {payment.currency}).get(
+        rates: Mapping[str, Decimal] = fx.get_rates_by_date([payment.day], base_currency, {payment.currency}).get(
             fx.rate_date(payment.day), {}
         )
-        paid = payment.amount * rates.get(payment.currency, 0.0)
+        paid = D(payment.amount) * D(rates.get(payment.currency))
         out.card_activity += paid
         out.card_activity_by_account[payment.card_account_id] = (
-            out.card_activity_by_account.get(payment.card_account_id, 0.0) + paid
+            out.card_activity_by_account.get(payment.card_account_id, ZERO) + paid
         )
 
     first, last = _ledger_window_dates(start, end)
     ledger = _ledger_rows(db, current_user_id, first, last)
-    ledger_rates: Mapping[date, Mapping[str, float]] = fx.get_rates_by_date(
+    ledger_rates: Mapping[date, Mapping[str, Decimal]] = fx.get_rates_by_date(
         [row["activity_date"] for row in ledger], base_currency, {str(row["currency"]).upper() for row in ledger}
     ) if ledger else {}
 
-    def _ledger_base(row: Dict[str, Any]) -> float:
-        rates: Mapping[str, float] = ledger_rates.get(fx.rate_date(row["activity_date"]), {})
-        return float(row["amount"] or 0.0) * rates.get(str(row["currency"]).upper(), 0.0)
+    def _ledger_base(row: Dict[str, Any]) -> Decimal:
+        rates: Mapping[str, Decimal] = ledger_rates.get(fx.rate_date(row["activity_date"]), {})
+        return D(row["amount"]) * D(rates.get(str(row["currency"]).upper()))
 
     # Money into or out of a broker: the ledger's deposits/withdrawals, and TRANSFER
     # rows on broker accounts the ledger doesn't cover.
@@ -948,7 +958,7 @@ def _flows(
                 "transaction_id": None,
                 "account_id": int(row["account_id"]),
                 "currency": str(row["currency"]).upper(),
-                "amount": float(row["amount"] or 0.0),
+                "amount": D(row["amount"]),
                 "day": _date_only(row["activity_date"]),
                 "base": _ledger_base(row),
             })
@@ -961,9 +971,9 @@ def _flows(
             "transaction_id": int(row["transaction_id"]),
             "account_id": int(row["account_id"]),
             "currency": str(row["currency"] or base_currency).upper(),
-            "amount": float(row["amount"] or 0.0),
+            "amount": D(row["amount"]),
             "day": clock._transaction_date(row["ts"]),
-            "base": _row_base_amount(row, base_currency, rates_by_date),
+            "base": D(_row_base_amount(row, base_currency, rates_by_date)),
         })
 
     linked = _linked_transaction_ids(db, current_user_id, [c["transaction_id"] for c in candidates if c["transaction_id"]])
@@ -978,7 +988,7 @@ def _flows(
                     continue
                 if str(row["currency"] or base_currency).upper() != candidate["currency"]:
                     continue
-                if abs(float(row["amount"] or 0.0) + candidate["amount"]) > TRANSFER_MATCH_TOLERANCE:
+                if abs(D(row["amount"]) + candidate["amount"]) > TRANSFER_MATCH_TOLERANCE:
                     continue
                 day = clock._transaction_date(row["ts"])
                 if candidate["day"] is None or abs((day - candidate["day"]).days) > TRANSFER_MATCH_DAYS:
@@ -999,29 +1009,29 @@ def _flows(
 # ─── The bridge ──────────────────────────────────────────────────────────────
 
 
-def _part(key: str, label: str, amount: float, items: Optional[list[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def _part(key: str, label: str, amount: Decimal, items: Optional[list[Dict[str, Any]]] = None) -> Dict[str, Any]:
     return {"key": key, "label": label, "amount": amount, "items": items or []}
 
 
-def _item(label: str, amount: Optional[float], reason: Optional[str] = None, link: Optional[str] = None) -> Dict[str, Any]:
+def _item(label: str, amount: Optional[Decimal], reason: Optional[str] = None, link: Optional[str] = None) -> Dict[str, Any]:
     return {"label": label, "amount": amount, "reason": reason, "link": link}
 
 
-def _items(rows: Iterable[Dict[str, Any]], total: Optional[float] = None, rest: str = "Rest") -> list[Dict[str, Any]]:
+def _items(rows: Iterable[Dict[str, Any]], total: Optional[Decimal] = None, rest: str = "Rest") -> list[Dict[str, Any]]:
     """Items largest first, at most ITEMS_MAX, those under ITEM_MIN left out; with
     ``total``, a last item for whatever the listed ones don't cover, so they add up to it."""
     kept = sorted(
         (row for row in rows if row["amount"] is None or abs(row["amount"]) >= ITEM_MIN),
-        key=lambda row: -abs(row["amount"] or 0.0),
+        key=lambda row: -abs(row["amount"] or ZERO),
     )[:ITEMS_MAX]
     if total is not None:
-        left = total - sum(row["amount"] or 0.0 for row in kept)
+        left = total - sum(row["amount"] or ZERO for row in kept)
         if abs(left) >= ITEM_MIN:
             kept.append(_item(rest, left))
     return kept
 
 
-def _note(key: str, label: str, amount: Optional[float] = None) -> Dict[str, Any]:
+def _note(key: str, label: str, amount: Optional[Decimal] = None) -> Dict[str, Any]:
     return {"key": key, "label": label, "amount": amount}
 
 
@@ -1061,7 +1071,7 @@ def _add_realised_note(
 def _line(
     key: str,
     label: str,
-    amount: float,
+    amount: Decimal,
     *,
     status: str = "ok",
     reason: Optional[str] = None,
@@ -1093,21 +1103,21 @@ def _platform_label(platform: Optional[str]) -> str:
 
 def _cash_fx(
     db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime
-) -> float:
+) -> Decimal:
     """The start's foreign-currency cash revalued from the start's rates to the end's."""
-    by_currency: Dict[str, float] = {}
+    by_currency: Dict[str, Decimal] = {}
     for entry in _cash_positions(db, start, base_currency, current_user_id):
-        by_currency[entry["currency"]] = by_currency.get(entry["currency"], 0.0) + float(entry["value"])
+        by_currency[entry["currency"]] = by_currency.get(entry["currency"], ZERO) + D(entry["value"])
     foreign = {c for c in by_currency if c != base_currency.upper()}
     if not foreign:
-        return 0.0
+        return ZERO
     r0 = fx.get_rates(start, base_currency, foreign)
     r1 = fx.get_rates(end, base_currency, foreign)
-    total = 0.0
+    total = ZERO
     for currency in foreign:
-        a, b = r0.get(currency, 0.0), r1.get(currency, 0.0)
+        a, b = r0.get(currency, ZERO), r1.get(currency, ZERO)
         if a > 0 and b > 0:
-            total += by_currency[currency] * (b / a - 1.0)
+            total += by_currency[currency] * (D(b) / D(a) - ONE)
     return total
 
 
@@ -1131,6 +1141,7 @@ def _not_updated(db: Session, current_user_id: int, base_currency: str, end: dat
     return sorted(label for label, day in newest.items() if day <= since)
 
 
+@float_edge
 def month_bridge(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str, movers_limit: int = 3
 ) -> Dict[str, Any]:
@@ -1160,20 +1171,20 @@ def month_bridge(
     }
     ledger_accounts = set(ledger_covered_since(db, current_user_id))
 
-    stock_price = stock_fx = 0.0
-    untracked_trades = 0.0
+    stock_price = stock_fx = ZERO
+    untracked_trades = ZERO
     untracked_platforms: set[Optional[str]] = set()
-    unsplit = 0.0
+    unsplit = ZERO
     unsplit_count = 0
-    valuation_gap = 0.0
+    valuation_gap = ZERO
 
     # Holdings statements older than the period (#329): their quantity changes up to the
     # newer statement are catch-up, not this period's untracked trades.
     stale_holdings = stale_holdings_accounts(stocks0, stocks1, start_anchor.date())
-    holdings_catch_up: Dict[int, float] = {}
+    holdings_catch_up: Dict[int, Decimal] = {}
     # Accounts whose first holdings statement falls in the period (#330): new to the app.
     new_holdings_accounts = newly_tracked_holdings_accounts(stocks0, stocks1)
-    holdings_new: Dict[int, list[tuple[str, float]]] = {}
+    holdings_new: Dict[int, list[tuple[str, Decimal]]] = {}
     # What each Unexplained part is made of (#332).
     catch_up_rows: Dict[int, list[Dict[str, Any]]] = {}
     untracked_rows: list[Dict[str, Any]] = []
@@ -1200,7 +1211,7 @@ def month_bridge(
             if held.account_id is not None and held.account_id in new_holdings_accounts:
                 holdings_new.setdefault(held.account_id, []).append((held.symbol, split.quantity))
             elif held.account_id is not None and held.account_id in stale_holdings:
-                holdings_catch_up[held.account_id] = holdings_catch_up.get(held.account_id, 0.0) + split.quantity
+                holdings_catch_up[held.account_id] = holdings_catch_up.get(held.account_id, ZERO) + split.quantity
                 catch_up_rows.setdefault(held.account_id, []).append(_item(held.symbol, split.quantity, side))
             else:
                 untracked_trades += split.quantity
@@ -1208,8 +1219,8 @@ def month_bridge(
                 untracked_rows.append(_item(f"{held.symbol} ({_platform_label(held.platform)})", split.quantity,
                                             f"{side}; no cash record at {_platform_label(held.platform)}"))
 
-    crypto_price = crypto_fx = crypto_moved = 0.0
-    staking = 0.0
+    crypto_price = crypto_fx = crypto_moved = ZERO
+    staking = ZERO
     staking_symbols: set[str] = set()
     crypto_changes = holding_changes(crypto0, crypto1)
     for holding in crypto_changes:
@@ -1341,7 +1352,7 @@ def month_bridge(
         lines.append(_line(
             "catch_up",
             "Catch-up since last statement",
-            sum(c.amount for c in catch_ups),
+            dsum(c.amount for c in catch_ups),
             reason=(
                 "These accounts' starting figures are older than this period, so their newer data "
                 "also covers earlier months: that part is here, not in this period's lines"
@@ -1358,9 +1369,9 @@ def month_bridge(
     newly: list[NewlyTracked] = newly_tracked_wallets(
         db, current_user_id, base_currency, start_anchor, end_anchor, live=is_live
     )
-    crypto_moved -= sum(n.amount for n in newly)
+    crypto_moved -= dsum(n.amount for n in newly)
     if newly:
-        moved_rows.append(_item("In newly tracked wallets", -sum(n.amount for n in newly), "on the Newly tracked line"))
+        moved_rows.append(_item("In newly tracked wallets", -dsum(n.amount for n in newly), "on the Newly tracked line"))
     newly += newly_tracked_cash(
         db, current_user_id, base_currency, start_anchor, end_anchor, skip_accounts=ledger_accounts, names=names,
     )
@@ -1371,14 +1382,14 @@ def month_bridge(
             f"holdings:{account_id}",
             f"{name}: first statement {_short_date(first)}" if first else f"{name}: first statement",
             first,
-            sum(amount for _symbol, amount in held_rows),
+            dsum(amount for _symbol, amount in held_rows),
             sorted(held_rows, key=lambda kv: -abs(kv[1])),
         ))
     if newly:
         lines.append(_line(
             "newly_tracked",
             "Newly tracked",
-            sum(n.amount for n in newly),
+            dsum(n.amount for n in newly),
             reason="Wallets and accounts first added in this period: their balance is new to the app, not money in or out",
             parts=[
                 _part(n.key, n.label, n.amount, _items((_item(symbol, value) for symbol, value in n.detail), n.amount))

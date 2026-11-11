@@ -3,6 +3,8 @@ split the same cash, stocks/funds and crypto net worth adds up), and net worth
 by currency (#253)."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from datetime import datetime
 from typing import Any, Dict, List
 
@@ -21,6 +23,7 @@ from app.valuation.prices import (
 )
 from app.valuation.state import CASH_KIND_BALANCE, _cash_positions, _wallet_valuation
 from app.valuation_cache import valuation_cached
+from app.valuation.money import D, ZERO
 
 # USD stablecoins: cash in US dollars wherever exposure is split (geography: US
 # cash; currency exposure: USD). The list /crypto/stablecoins names (D-57).
@@ -33,7 +36,7 @@ CRYPTO_EXPOSURE_KEY = "CRYPTO"
 def _geography(
     db: Session,
     anchor_ts: datetime,
-    total: float,
+    total: Decimal,
     base_currency: str,
     current_user_id: int,
     *,
@@ -52,8 +55,8 @@ def _geography(
         for item in exposure["items"]
     ]
 
-def _blank_geo_country_bucket() -> Dict[str, float]:
-    return {"stocks_funds": 0.0, "cash": 0.0, "crypto": 0.0}
+def _blank_geo_country_bucket() -> Dict[str, Decimal]:
+    return {"stocks_funds": ZERO, "cash": ZERO, "crypto": ZERO}
 
 
 @valuation_cached(shared=True, date_args=("anchor_ts",))
@@ -71,29 +74,29 @@ def _geography_exposure(
     stocks/funds + crypto at the same anchor and price mode (#144)."""
     stock_payload = _stock_exposure(db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay)
     rates = fx.get_rates(anchor_ts, base_currency, {"USD"})
-    usd_rate = rates.get("USD", 0.0)
+    usd_rate = D(rates.get("USD"))
 
-    buckets: Dict[str, Dict[str, float]] = {}
+    buckets: Dict[str, Dict[str, Decimal]] = {}
 
-    def _bucket(country: str) -> Dict[str, float]:
+    def _bucket(country: str) -> Dict[str, Decimal]:
         if country not in buckets:
             buckets[country] = _blank_geo_country_bucket()
         return buckets[country]
 
     for row in stock_payload["by_country"]:
-        value_base = float(row.get("value") or 0.0)
+        value_base = D(row.get("value"))
         if value_base <= 0:
             continue
         country = row.get("key") or "UNKNOWN"
         _bucket(country)["stocks_funds"] += value_base
 
     for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id):
-        _bucket(entry.get("country") or "UNKNOWN")["cash"] += float(entry["value"])
+        _bucket(entry.get("country") or "UNKNOWN")["cash"] += D(entry["value"])
 
     valuation = _wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)
-    wallet_usd = float(valuation.get("total_usd") or 0.0)
+    wallet_usd = D(valuation.get("total_usd"))
     stable_usd = sum(
-        float(item.get("value_usd") or 0.0)
+        D(item.get("value_usd"))
         for item in valuation.get("items", [])
         if str(item.get("symbol") or "").upper() in _STABLECOIN_SYMBOLS
     )
@@ -103,7 +106,7 @@ def _geography_exposure(
         us_bucket["crypto"] += (wallet_usd - stable_usd) * usd_rate
 
     items: List[Dict[str, Any]] = []
-    grand_total = 0.0
+    grand_total = ZERO
     for country, vals in buckets.items():
         country_total = vals["stocks_funds"] + vals["cash"] + vals["crypto"]
         if country_total <= 0:
@@ -121,7 +124,7 @@ def _geography_exposure(
 
     items.sort(key=lambda row: row["total"], reverse=True)
     for row in items:
-        row["percent"] = round((row["total"] / grand_total) * 100, 2) if grand_total > 0 else 0.0
+        row["percent"] = round((row["total"] / grand_total) * 100, 2) if grand_total > 0 else ZERO
 
     return {"base_currency": base_currency, "total": grand_total, "items": items}
 
@@ -154,7 +157,7 @@ def _platform_allocation(
         for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id)
         if entry["kind"] == CASH_KIND_BALANCE
     ]
-    wallet_usd = float(_wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)["total_usd"] or 0.0)
+    wallet_usd = D(_wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)["total_usd"])
     currencies = {_canonical_base_currency(row, base_currency) for row in canonical_pos_rows}
     currencies.update(str(price["currency"]).upper() for price in latest_prices.values() if price.get("currency"))
     currencies.update(row["base_currency"] for row in canonical_nav_rows if row.get("base_currency"))
@@ -163,7 +166,7 @@ def _platform_allocation(
         currencies.add("USD")
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
     nav_deltas = _nav_live_price_deltas(nav_live_rows, nav_live_prices, rates, base_currency)
-    buckets: Dict[tuple, float] = {}
+    buckets: Dict[tuple, Decimal] = {}
 
     for row in canonical_pos_rows:
         asset_class = str(row.get("asset_class") or "").upper()
@@ -171,24 +174,24 @@ def _platform_allocation(
             continue
         value = _canonical_position_value(row, rates, base_currency, latest_prices)
         key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("platform_country"))
-        buckets[key] = buckets.get(key, 0.0) + value
+        buckets[key] = buckets.get(key, ZERO) + value
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
-        value = float(row.get("total_nav_base") or 0.0) * rates.get(nav_currency, 0.0)
-        value += nav_deltas.get(int(row["legacy_account_id"]), 0.0) if row.get("legacy_account_id") is not None else 0.0
+        value = D(row.get("total_nav_base")) * D(rates.get(nav_currency))
+        value += nav_deltas.get(int(row["legacy_account_id"]), ZERO) if row.get("legacy_account_id") is not None else ZERO
         key = (row.get("platform") or "UNKNOWN", row.get("platform_type"), row.get("country"))
-        buckets[key] = buckets.get(key, 0.0) + value
+        buckets[key] = buckets.get(key, ZERO) + value
     for entry in cash_entries:
         key = (entry.get("platform") or "UNKNOWN", entry.get("platform_type"), entry.get("country"))
-        buckets[key] = buckets.get(key, 0.0) + float(entry["value"])
+        buckets[key] = buckets.get(key, ZERO) + D(entry["value"])
     if wallet_usd:
-        buckets[("CRYPTO", "WALLET_PROVIDER", None)] = buckets.get(("CRYPTO", "WALLET_PROVIDER", None), 0.0) + (
-            wallet_usd * rates.get("USD", 0.0)
+        buckets[("CRYPTO", "WALLET_PROVIDER", None)] = buckets.get(("CRYPTO", "WALLET_PROVIDER", None), ZERO) + (
+            wallet_usd * D(rates.get("USD"))
         )
     total = sum(buckets.values())
     items = []
     for (platform, platform_type, country), value in sorted(buckets.items(), key=lambda x: x[1], reverse=True):
-        percent = round((value / total) * 100, 2) if total > 0 else 0.0
+        percent = round((value / total) * 100, 2) if total > 0 else ZERO
         items.append({
             "platform": platform,
             "platform_type": platform_type,
@@ -215,28 +218,28 @@ def _currency_exposure(
     bucket (not a currency), less each card's liability in the card's currency.
     The same parts, anchor and price mode as _networth_components, so the values
     add up to net worth; ``percent`` is the share of net worth."""
-    buckets: Dict[str, Dict[str, float]] = {}
+    buckets: Dict[str, Dict[str, Decimal]] = {}
 
-    def _add(currency: str | None, part: str, value: float) -> None:
+    def _add(currency: str | None, part: str, value: Decimal) -> None:
         key = str(currency or base_currency).upper()
         bucket = buckets.setdefault(
-            key, {"cash": 0.0, "stocks_funds": 0.0, "stablecoins": 0.0, "crypto": 0.0, "liabilities": 0.0}
+            key, {"cash": ZERO, "stocks_funds": ZERO, "stablecoins": ZERO, "crypto": ZERO, "liabilities": ZERO}
         )
         bucket[part] += value
 
     stock_payload = _stock_exposure(db, anchor_ts, base_currency, current_user_id, price_overlay=price_overlay)
     for row in stock_payload["by_currency"]:
-        _add(row["key"], "stocks_funds", float(row.get("value") or 0.0))
+        _add(row["key"], "stocks_funds", D(row.get("value")))
 
     for entry in _cash_positions(db, anchor_ts, base_currency, current_user_id):
-        _add(entry.get("currency"), "cash", float(entry["value"]))
+        _add(entry.get("currency"), "cash", D(entry["value"]))
 
     valuation = _wallet_valuation(db, anchor_ts, current_user_id, price_overlay=price_overlay)
-    wallet_usd = float(valuation.get("total_usd") or 0.0)
+    wallet_usd = D(valuation.get("total_usd"))
     if wallet_usd:
-        usd_rate = fx.get_rates(anchor_ts, base_currency, {"USD"}).get("USD", 0.0)
+        usd_rate = D(fx.get_rates(anchor_ts, base_currency, {"USD"}).get("USD"))
         stable_usd = sum(
-            float(item.get("value_usd") or 0.0)
+            D(item.get("value_usd"))
             for item in valuation.get("items", [])
             if str(item.get("symbol") or "").upper() in _STABLECOIN_SYMBOLS
         )
@@ -247,7 +250,7 @@ def _currency_exposure(
 
     for card in _credit_card_liability_details(db, anchor_ts, base_currency, current_user_id):
         if card["value"]:
-            _add(card.get("currency"), "liabilities", float(card["value"]))
+            _add(card.get("currency"), "liabilities", D(card["value"]))
 
     items: List[Dict[str, Any]] = []
     for currency, parts in buckets.items():
@@ -258,5 +261,5 @@ def _currency_exposure(
     total = sum(item["value"] for item in items)
     items.sort(key=lambda row: (-row["value"], row["currency"]))
     for row in items:
-        row["percent"] = round((row["value"] / total) * 100, 2) if total > 0 else 0.0
+        row["percent"] = round((row["value"] / total) * 100, 2) if total > 0 else ZERO
     return {"base_currency": base_currency, "total": total, "items": items}

@@ -71,8 +71,8 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
 - Backups (#41, #155): `make db-backup` dumps **and proves it restores** (scratch-DB restore with exact
   per-table counts from the dump's own snapshot), and archives `data/` (raw statements) as
   `capitalos_<ts>.data.tar.gz` next to the dump: every file a restored row records must be in it with
-  its sha256, or the backup fails. It runs daily at 03:00 via launchd
-  (`make backup-schedule`); `make backup-status` shows the newest verified backup and the
+  its sha256, or the backup fails. It runs daily at `BACKUP_TIME` (`.env`, default 13:00, #387) via launchd
+  (`make backup-schedule`; rerun it after changing the time; a Mac asleep then runs it on wake); `make backup-status` shows the newest verified backup and the
   schedule; `make backup-data-check` checks the live DB's files against `data/` (read-only).
   `make backup-prune` keeps every verified set of the last 14 days plus the first of each month for
   12 months (and the newest), dump and archive together, never the older unmarked dumps
@@ -91,7 +91,7 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   test instance (which links the main `.env`) keep `./backups`; there `BACKUP_DIR` from `.env` is ignored.
 - Second copy (#357, D-96, optional; unset since #383): `BACKUP_OFFSITE_DIR` gets a copy of every verified
   encrypted set after each backup and the same retention; a missing/unwritable folder warns, never fails the
-  backup. `make backup-offsite-check` / `backup-offsite-sync`. The 03:00 job is `/bin/bash` under launchd,
+  backup. `make backup-offsite-check` / `backup-offsite-sync`. The daily job is `/bin/bash` under launchd,
   which macOS lets open/rename/delete files in iCloud Drive but not list the folder (and refused renames in
   personal folders): every backup folder keeps `.capitalos-index` (a new set is added, prune rewrites it;
   a pre-#383 `.capitalos-offsite-index` is adopted), read wherever listing is refused, rebuilt from a listing
@@ -172,7 +172,8 @@ From the main checkout:
 - Pin every image by `tag@sha256:` and every Action by commit SHA (`scripts/check-pinned-refs.sh`, run
   by `make lint`). Images used outside compose live in `tools/Dockerfile`. Dependabot bumps the pins.
 - Never remove a field from an API response; only add. Keep TS types mirroring backend
-  response shapes (see `AGENTS.md` § API Contract Rules).
+  response shapes (see `AGENTS.md` § API Contract Rules). They live per area in `web/src/lib/api/types/<area>.ts`,
+  the calls in `web/src/lib/api/clients/<area>.ts`; pages import both from `web/src/lib/api` (the barrel, #368).
 
 ## Image supply chain (maintenance)
 - Fast security fixes (D-18): `make image-fixes` reports, per pinned image, whether the newest release in its

@@ -31,7 +31,6 @@ class ImportJobDetail(BaseModel):
     file_sha256: Optional[str] = None
     format_signature: Optional[str] = None
     parser_key: Optional[str] = None
-    report_path: Optional[str] = None
     error_message: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

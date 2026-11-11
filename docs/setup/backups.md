@@ -73,7 +73,7 @@ BACKUP_DIR=~/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups
 ```
 
 Don't put backups in your personal folders (Documents, Desktop): under launchd macOS refused
-the 03:00 job renames there (11 Nov 2026), and Claude Code is denied those folders.
+the daily job renames there (11 Nov 2026), and Claude Code is denied those folders.
 
 From then on `make db-backup` makes and verifies the set in a private temp dir, then
 stores `capitalos_<ts>.dump.age`, `.dump.counts.age` and `.data.tar.gz.age` in
@@ -121,7 +121,7 @@ loud warning in the log, never a failed backup: the local set is already safe.
   it and runs the full restore check (do it monthly; nothing off-site is written).
 - `make backup-offsite-sync`: copy what's missing now.
 
-### macOS privacy (the 03:00 job)
+### macOS privacy (the daily job)
 
 The schedule runs `/bin/bash` under launchd. macOS protects iCloud Drive (and your personal
 folders) differently for it than for Terminal. Probed on 2026-11-10/11: in iCloud Drive the job
@@ -143,39 +143,18 @@ disk to every bash script. If `backup-status` flags "Operation not permitted", r
 Backups you have to remember to run don't help when you need them. Set up a
 daily scheduled job:
 
-**macOS (launchd)** — create `~/Library/LaunchAgents/com.capitalos.dbbackup.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key><string>com.capitalos.dbbackup</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/usr/bin/make</string>
-    <string>-C</string>
-    <string>/absolute/path/to/capitalOS</string>
-    <string>db-backup</string>
-  </array>
-  <key>StartCalendarInterval</key>
-  <dict>
-    <key>Hour</key><integer>2</integer>
-    <key>Minute</key><integer>0</integer>
-  </dict>
-  <key>StandardOutPath</key><string>/tmp/capitalos-db-backup.log</string>
-  <key>StandardErrorPath</key><string>/tmp/capitalos-db-backup.log</string>
-</dict>
-</plist>
-```
-
-Then `launchctl load ~/Library/LaunchAgents/com.capitalos.dbbackup.plist`.
-Runs daily at 2am; requires Docker Desktop to be running at that time.
+**macOS (launchd)** — `make backup-schedule` installs the job
+(`~/Library/LaunchAgents/com.capitalos.db-backup.plist`): `make db-backup && make backup-prune`
+daily at `BACKUP_TIME` (HH:MM, 24-hour local time, from `.env`; default **13:00**, #387, because the
+Mac is usually asleep at night). A Mac asleep at that time runs the job when it wakes; Docker Desktop
+must be running. After changing `BACKUP_TIME`, run `make backup-schedule` again; `make backup-status`
+shows the installed time and warns when it differs from `BACKUP_TIME`. `make backup-now` runs the job
+at once, exactly as launchd does; `make backup-unschedule` removes it.
 
 **Linux / cron** — `crontab -e`:
 
 ```
-0 2 * * * cd /absolute/path/to/capitalOS && make db-backup >> /tmp/capitalos-db-backup.log 2>&1
+0 13 * * * cd /absolute/path/to/capitalOS && make db-backup >> /tmp/capitalos-db-backup.log 2>&1
 ```
 
 ## Make sure the backups themselves survive
