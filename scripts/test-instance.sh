@@ -90,8 +90,8 @@ merge_prs() {  # merge every PR in state "pending" into the test branch, in orde
   state_set conflict ""
 }
 
-newest_verified_backup() {
-  ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 | sed 's/\.verified$//'
+newest_verified_backup() {  # #383: listing or the folder's index (backup-env.sh)
+  backup_newest_verified
 }
 
 # The dump to serve (#287): a fresh verified backup of the real app, so the copy has everything

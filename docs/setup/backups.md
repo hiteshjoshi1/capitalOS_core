@@ -64,11 +64,16 @@ make backup-key-init       # once: creates the key pair
 password manager's secure note): without it, no encrypted backup can be restored,
 which is exactly the situation after a lost or dead Mac.
 
-Then set where backups go, in the main checkout's `.env`:
+Then set where backups go, in the main checkout's `.env`. One folder in iCloud Drive (#383):
+it is the Mac's copy and, synced by iCloud, the off-site one too. In Finder, right-click it and
+choose **Keep Downloaded** so macOS never swaps old sets for cloud-only placeholders.
 
 ```
-BACKUP_DIR=~/Documents/CapitalOS_backups
+BACKUP_DIR=~/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups
 ```
+
+Don't put backups in your personal folders (Documents, Desktop): under launchd macOS refused
+the 03:00 job renames there (11 Nov 2026), and Claude Code is denied those folders.
 
 From then on `make db-backup` makes and verifies the set in a private temp dir, then
 stores `capitalos_<ts>.dump.age`, `.dump.counts.age` and `.data.tar.gz.age` in
@@ -80,7 +85,7 @@ key (`BACKUP_AGE_IDENTITY` points elsewhere if you keep it elsewhere). Use the s
 logical name, without `.age`:
 
 ```bash
-make db-restore BACKUP_FILE=~/Documents/CapitalOS_backups/capitalos_20261110_030000.dump
+make db-restore BACKUP_FILE="$HOME/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups/capitalos_20261110_030000.dump"
 ```
 
 Move the older plain sets over (each file is decrypted back and compared before its
@@ -94,13 +99,14 @@ make backup-encrypt-existing APPLY=1    # SRC_DIR=<dir> for a folder other than 
 Worktrees, CI and the test instance keep `./backups` (a `BACKUP_DIR` in `.env` counts only
 in the main checkout), and without `BACKUP_AGE_RECIPIENT` backups are plain, as before.
 
-## An off-site copy (#357)
+## A second copy (#357, optional)
 
-A copy on the same Mac doesn't survive a lost or dead Mac. Point `BACKUP_OFFSITE_DIR` at a
-folder that syncs elsewhere, in the main checkout's `.env` (iCloud Drive here):
+With `BACKUP_DIR` in iCloud Drive (#383) the sets are already off the Mac, and
+`BACKUP_OFFSITE_DIR` stays unset. It remains for a second folder elsewhere, e.g. an external
+drive, in the main checkout's `.env`:
 
 ```
-BACKUP_OFFSITE_DIR=~/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups
+BACKUP_OFFSITE_DIR=/Volumes/<drive>/CapitalOS_backups
 ```
 
 After every backup, each verified **encrypted** set the off-site folder lacks is copied
@@ -117,13 +123,16 @@ loud warning in the log, never a failed backup: the local set is already safe.
 
 ### macOS privacy (the 03:00 job)
 
-The schedule runs `/bin/bash` under launchd. macOS protects `~/Documents` and iCloud Drive
-differently for it than for Terminal. Probed on 2026-11-10: in iCloud Drive the job may copy,
-move, delete, stat and test files by name, but listing the folder is refused ("Operation not
-permitted"). So the off-site steps never list the folder: the sync works from the local set
-names and records what it copied in `.capitalos-offsite-index` (in the off-site folder, written
-atomically); prune, `backup-status` and `backup-offsite-check` read that index. With no index and
-no listing, the sync says so and finds the sets by their local names, then writes the index.
+The schedule runs `/bin/bash` under launchd. macOS protects iCloud Drive (and your personal
+folders) differently for it than for Terminal. Probed on 2026-11-10/11: in iCloud Drive the job
+may create, rename, delete, stat and read files by name, but listing the folder is refused
+("Operation not permitted"). So every backup folder keeps an index, `.capitalos-index` (one set
+name per line, written atomically): a new set is added to it, prune rewrites it, and
+`backup-status`, prune, `make deploy`, `make status` and the test instance read it whenever the
+folder can't be listed. Where listing works (Terminal) the index is rebuilt from the listing. A
+folder that was the off-site copy before #383 keeps its `.capitalos-offsite-index`, which is read
+until the first rewrite. With no index and no listing, the job says so: run `make backup-status`
+once in Terminal to create it.
 
 No permission grant is needed. Don't give `/bin/bash` Full Disk Access: it would open the whole
 disk to every bash script. If `backup-status` flags "Operation not permitted", run

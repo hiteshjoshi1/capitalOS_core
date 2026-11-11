@@ -224,13 +224,14 @@ seal_set() {  # <plain dump> <dir>
 # off-site folder is a loud WARNING, never a failed backup: the local set is already safe.
 
 # macOS privacy controls (TCC) treat the 03:00 launchd job (/bin/bash) differently from Terminal.
-# Probed 2026-11-10: in iCloud Drive the job may copy, move, delete, stat and test files, but may
-# NOT list the folder. So nothing here lists the off-site folder: it is driven by the local set
-# names plus an index file this script writes (OFFSITE_INDEX_NAME). No Full Disk Access is needed (and
-# Hitesh doesn't want /bin/bash to have it: far too broad).
+# Probed 2026-11-10/11: in iCloud Drive the job may create, rename, delete, stat and read files but
+# may NOT list the folder; in the user's personal folders it was refused renames too (#383), so
+# backups live in one iCloud Drive folder and nothing here lists a backup folder without falling
+# back to its index (INDEX_NAME below). No Full Disk Access is needed (and Hitesh doesn't want
+# /bin/bash to have it: far too broad).
 tcc_hint() {  # <dir>
   case "$1" in
-    "$HOME/Documents"* | "$HOME/Library/Mobile Documents"* | "$HOME/Desktop"*)
+    "$HOME/Library/Mobile Documents"*)
       echo "  If this ran from the 03:00 job: macOS privacy controls may be blocking it from $1. Run make backup-now in Terminal to see whether it works there, and check $1 is a folder you own." ;;
   esac
 }
@@ -266,40 +267,93 @@ offsite_copy_set() {  # <dump in BACKUP_DIR>
   cp -p "$dump.verified" "$dest.verified" || { offsite_warn "copying $dump.verified failed"; return 1; }
 }
 
-# The off-site index: one set name (capitalos_<ts>.dump) per line, the sets this script put there.
-OFFSITE_INDEX_NAME=.capitalos-offsite-index
-offsite_index() { printf '%s/%s' "$BACKUP_OFFSITE_DIR" "$OFFSITE_INDEX_NAME"; }
+# The set index (#357, #383): one verified set name (capitalos_<ts>.dump) per line, kept in each
+# backup folder (BACKUP_DIR and the optional BACKUP_OFFSITE_DIR). Under launchd macOS lets the
+# 03:00 job open, write, rename and delete files in iCloud Drive but not LIST the folder, so
+# every "which sets are there" question is answered from a listing when one is allowed (and the
+# index refreshed from it) and from the index otherwise. The pre-#383 off-site index name is
+# read too, so a folder that was the off-site copy keeps its history (adopted, then rewritten).
+INDEX_NAME=.capitalos-index
+LEGACY_INDEX_NAME=.capitalos-offsite-index
+index_of() { printf '%s/%s' "$1" "$INDEX_NAME"; }  # <dir>
 
-# Lists the off-site folder's verified set names, or fails where macOS forbids listing (launchd).
-# BACKUP_TEST_UNLISTABLE=1 simulates that refusal (scripts/test-db-backup.sh).
-offsite_listing() {
-  [ -z "${BACKUP_TEST_UNLISTABLE:-}" ] || return 1
-  ls -1 "$BACKUP_OFFSITE_DIR" >/dev/null 2>&1 || return 1
-  ls -1 "$BACKUP_OFFSITE_DIR" 2>/dev/null | sed -n 's/^\(capitalos_.*\.dump\)\.verified$/\1/p'
+# BACKUP_TEST_UNLISTABLE simulates the refusal (scripts/test-db-backup.sh): 1 or offsite = the
+# off-site folder, local = BACKUP_DIR, all = both.
+listing_refused() {  # <dir>
+  case "${BACKUP_TEST_UNLISTABLE:-}" in
+    all) return 0 ;;
+    local) [ "$1" = "$BACKUP_DIR" ] ;;
+    1|offsite) [ -n "${BACKUP_OFFSITE_DIR:-}" ] && [ "$1" = "$BACKUP_OFFSITE_DIR" ] ;;
+    *) return 1 ;;
+  esac
 }
 
-offsite_index_write() {  # names on stdin; atomic (tmp + mv)
+# The folder's verified set names from a listing, or fails where listing is refused.
+dir_listing() {  # <dir>
+  listing_refused "$1" && return 1
+  ls -1 "$1" >/dev/null 2>&1 || return 1
+  ls -1 "$1" 2>/dev/null | sed -n 's/^\(capitalos_.*\.dump\)\.verified$/\1/p'
+}
+
+index_write() {  # <dir>; names on stdin; atomic (tmp + mv); quiet when unchanged
   local idx tmp
-  idx=$(offsite_index); tmp="$idx.part"
+  idx=$(index_of "$1"); tmp="$idx.part"
   sort -u | grep . >"$tmp" 2>/dev/null || true
-  mv "$tmp" "$idx" 2>/dev/null || { rm -f "$tmp"; offsite_warn "could not write $idx"; return 1; }
+  if [ -f "$idx" ] && cmp -s "$tmp" "$idx"; then rm -f "$tmp"; return 0; fi
+  mv "$tmp" "$idx" 2>/dev/null || { rm -f "$tmp"; say "WARNING: could not write $idx" >&2; return 1; }
 }
 
-# The verified set names off-site, without listing the folder when possible: the index, kept to
-# names whose marker is still there; with no index, a listing (interactive) or else the local
-# names that are off-site too. [write] also saves the index it worked out.
+# The index's names (the current file, else the pre-#383 one), kept to sets whose marker is there.
+index_names() {  # <dir>
+  local idx n
+  idx=$(index_of "$1")
+  [ -f "$idx" ] || idx="$1/$LEGACY_INDEX_NAME"
+  [ -f "$idx" ] || return 1
+  while IFS= read -r n; do [ -n "$n" ] && [ -e "$1/$n.verified" ] && echo "$n"; done <"$idx" || true
+}
+
+# The verified set names in <dir>, oldest first. A listing when allowed (the index is refreshed
+# from it if the folder is writable), else the index, else nothing (a warning says why).
+dir_names() {  # <dir>
+  local dir=$1 names
+  [ -d "$dir" ] || return 0
+  if names=$(dir_listing "$dir"); then
+    [ -w "$dir" ] && printf '%s\n' "$names" | index_write "$dir" 2>/dev/null
+  elif ! names=$(index_names "$dir"); then
+    say "WARNING: can't list $dir (macOS lets the 03:00 job open files there, not list them) and it has no $INDEX_NAME yet; run make backup-status once in Terminal to create it" >&2
+    names=""
+  fi
+  printf '%s\n' "$names" | grep . | sort -u || true
+}
+
+# Rewrites <dir>'s index to the sets still there (after a prune). With no listing and no index
+# there is nothing to go by, so nothing is written.
+index_refresh() {  # <dir>
+  local names
+  names=$(dir_names "$1")
+  [ -n "$names" ] || [ -f "$(index_of "$1")" ] || [ -f "$1/$LEGACY_INDEX_NAME" ] || return 0
+  printf '%s\n' "$names" | index_write "$1"
+}
+
+index_add() {  # <dir> <set name>: records one more set
+  { dir_names "$1"; printf '%s\n' "$2"; } | index_write "$1"
+}
+
+offsite_index() { index_of "$BACKUP_OFFSITE_DIR"; }
+
+# The verified set names off-site. With neither a listing nor an index, the local sets that are
+# off-site too. [write] also saves the index it worked out.
 offsite_names() {  # [write]
-  local idx names n
-  idx=$(offsite_index)
-  if [ -f "$idx" ]; then
-    names=$(while IFS= read -r n; do [ -n "$n" ] && [ -e "$BACKUP_OFFSITE_DIR/$n.verified" ] && echo "$n"; done <"$idx" || true)
-  elif names=$(offsite_listing); then
+  local names n
+  if names=$(dir_listing "$BACKUP_OFFSITE_DIR"); then
+    :
+  elif names=$(index_names "$BACKUP_OFFSITE_DIR"); then
     :
   else
-    offsite_warn "can't list $BACKUP_OFFSITE_DIR (macOS allows the 03:00 job to open files there, not to list them) and it has no $OFFSITE_INDEX_NAME yet; using the local set names" >&2
+    offsite_warn "can't list $BACKUP_OFFSITE_DIR (macOS allows the 03:00 job to open files there, not to list them) and it has no $INDEX_NAME yet; using the local set names" >&2
     names=$(verified_sets | while IFS= read -r n; do n=${n##*/}; [ -e "$BACKUP_OFFSITE_DIR/$n.verified" ] && echo "$n"; done || true)
   fi
-  [ "${1:-}" = write ] && printf '%s\n' "$names" | offsite_index_write
+  [ "${1:-}" = write ] && printf '%s\n' "$names" | index_write "$BACKUP_OFFSITE_DIR"
   printf '%s\n' "$names" | grep . | sort -u || true
 }
 
@@ -314,7 +368,7 @@ offsite_sync() {
     if [ -e "$BACKUP_OFFSITE_DIR/${dump##*/}.verified" ]; then names=$(printf '%s\n%s' "$names" "${dump##*/}"); continue; fi
     if offsite_copy_set "$dump"; then n=$((n + 1)); names=$(printf '%s\n%s' "$names" "${dump##*/}"); else bad=$((bad + 1)); fi
   done < <(verified_sets)
-  printf '%s\n' "$names" | offsite_index_write || true
+  printf '%s\n' "$names" | index_write "$BACKUP_OFFSITE_DIR" || true
   say "Off-site: $n set(s) copied to $BACKUP_OFFSITE_DIR$([ "$bad" -gt 0 ] && echo "; $bad FAILED (above)")"
   return 0
 }
@@ -332,7 +386,7 @@ offsite_prune() {
     say "$verb $dump"
   done <<<"$gone"
   [ -n "${DRY_RUN:-}" ] && return 0
-  printf '%s\n' "$names" | grep -vxF -f <(printf '%s\n' "$gone" | sed 's|.*/||' | grep . || echo '/') | offsite_index_write || true
+  printf '%s\n' "$names" | grep -vxF -f <(printf '%s\n' "$gone" | sed 's|.*/||' | grep . || echo '/') | index_write "$BACKUP_OFFSITE_DIR" || true
   say "Off-site: kept $(( $(printf '%s\n' "$names" | grep -c . || true) - n )) set(s)"
 }
 
@@ -461,6 +515,8 @@ create() {
   if encrypting; then
     seal_set "$out" "$BACKUP_DIR" || { say "FAILED: the backup was made but not stored encrypted; nothing written to $BACKUP_DIR counts as a backup" >&2; tcc_hint "$BACKUP_DIR" >&2; return 1; }
   fi
+  # #383: recorded in the folder's index, which the 03:00 job reads where it can't list.
+  [ -e "$BACKUP_DIR/${out##*/}.verified" ] && { index_add "$BACKUP_DIR" "${out##*/}" || true; }
   # #357: the off-site copy; a problem there warns, it never fails the backup.
   [ "$rc" -ne 0 ] || offsite_sync
   return $rc
@@ -734,6 +790,7 @@ prune() {
     [ -z "${DRY_RUN:-}" ] && remove_set "${f%.failed}"
     say "$verb failed ${f%.failed}"
   done < <(find "$BACKUP_DIR" -maxdepth 1 -name 'capitalos_*.dump.failed' -mtime +7 2>/dev/null)
+  [ -n "${DRY_RUN:-}" ] || index_refresh "$BACKUP_DIR"
   say "$([ -n "${DRY_RUN:-}" ] && echo 'Dry run: would keep' || echo Kept) $((total - n)) verified set(s): every one since $cutoff, the first of each of the last $months months, and the newest; dumps without markers are never pruned"
   # #357: the off-site folder keeps the same sets.
   if [ -n "${BACKUP_OFFSITE_DIR:-}" ] && [ -d "$BACKUP_OFFSITE_DIR" ] && ! [ "$BACKUP_DIR" -ef "$BACKUP_OFFSITE_DIR" ]; then
@@ -742,8 +799,10 @@ prune() {
   fi
 }
 
-verified_sets() { ls -1 "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | sed 's/\.verified$//' || true; }
-verified_newest_first() { ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | sed 's/\.verified$//'; }
+# BACKUP_DIR's verified sets as paths (#383: from a listing or the folder's index, never a bare
+# glob, which the 03:00 job can't do in iCloud Drive). Names carry the timestamp: name order is age.
+verified_sets() { dir_names "$BACKUP_DIR" | sed "s|^|$BACKUP_DIR/|"; }
+verified_newest_first() { verified_sets | sort -r; }
 
 status() {
   local newest archive n_enc=0 n_all=0 s
@@ -853,6 +912,7 @@ encrypt_existing() {
     # Every member is safely encrypted: the plaintext goes (and, when moving, its markers).
     rm -f "$f" "$f.counts" "$(archive_of "$f")"
     [ "$src" -ef "$BACKUP_DIR" ] || for marker in verified failed restorable diff restore.log data-check; do rm -f "$f.$marker"; done
+    [ -e "$dump.verified" ] && { index_add "$BACKUP_DIR" "$base" || true; }
     say "Encrypted $f -> $dump.age (each file decrypted back and compared)"
   done
   if [ -n "$apply" ]; then say "Done: $((n - bad)) of $n set(s) encrypted into $BACKUP_DIR$([ "$bad" -gt 0 ] && echo "; $bad left as they were (above)")"; offsite_sync

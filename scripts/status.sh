@@ -34,7 +34,8 @@ echo "Deployed:   $(git -C "$MAIN" rev-parse --short HEAD 2>/dev/null) on $(git 
 # Backups: the newest verified one, and a warning when it's over a day old.
 # shellcheck source=backup-env.sh
 . "$(cd "$(dirname "$0")" && pwd)/backup-env.sh"
-newest=$(backup_env "$MAIN" && ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1)
+newest=$(backup_env "$MAIN" && backup_newest_verified)
+[ -n "$newest" ] && newest="$newest.verified"  # #383: the index where the folder can't be listed
 if [ -n "$newest" ]; then
   age_h=$(( ($(date +%s) - $(stat -c %Y "$newest" 2>/dev/null || stat -f %m "$newest")) / 3600 ))
   enc=$([ -f "${newest%.verified}.age" ] && echo encrypted || echo 'PLAIN (not encrypted, #356)')
