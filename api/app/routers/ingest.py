@@ -395,7 +395,6 @@ def get_job(
             "file_sha256": job["file_sha256"],
             "format_signature": job["format_signature"],
             "parser_key": job["parser_key"],
-            "report_path": job["report_path"],
             "error_message": job["error_message"],
             "created_at": job["created_at"].isoformat() if job["created_at"] else None,
             "updated_at": job["updated_at"].isoformat() if job["updated_at"] else None,

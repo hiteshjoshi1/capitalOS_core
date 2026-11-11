@@ -37,3 +37,34 @@ def test_job_detail_has_no_stored_path():
     from app.schemas.ingest import ImportJobDetail
 
     assert "stored_path" not in ImportJobDetail.model_fields
+
+
+def test_job_detail_has_no_report_path_but_still_returns_the_report(client, db_engine, tmp_path):
+    """#388: report_path (a server file path) leaves GET /ingest/jobs/{id}; the report itself
+    is still read through it and returned."""
+    import json
+
+    from sqlalchemy import text
+
+    from app.schemas.ingest import ImportJobDetail
+
+    assert "report_path" not in ImportJobDetail.model_fields
+    report_file = tmp_path / "93881.json"
+    report_file.write_text(json.dumps({"job_id": 93881, "status": "IMPORTED", "counts": {"rows_total": 2}}))
+    with db_engine.begin() as conn:
+        conn.execute(text("DELETE FROM import_jobs WHERE id = 93881"))
+        conn.execute(text("DELETE FROM accounts WHERE id = 93881"))
+        conn.execute(text(
+            "INSERT INTO accounts (id, name, platform, account_type, currency, country, user_id) "
+            "VALUES (93881, 'Report Bank', 'DBS', 'BANK', 'SGD', 'SG', 1)"
+        ))
+        conn.execute(text(
+            "INSERT INTO import_jobs (id, account_id, platform, original_filename, stored_path, file_sha256, status, report_path) "
+            "VALUES (93881, 93881, 'DBS', 'r.csv', '/tmp/x', 'synthetic', 'IMPORTED', :p)"
+        ), {"p": str(report_file)})
+    resp = client.get("/ingest/jobs/93881")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "report_path" not in body["job"]
+    assert "stored_path" not in body["job"]
+    assert body["report"]["counts"] == {"rows_total": 2}

@@ -53,7 +53,6 @@ export type ImportJobDetail = {
     file_sha256: string | null;
     format_signature: string | null;
     parser_key: string | null;
-    report_path: string | null;
     error_message: string | null;
     created_at: string | null;
     updated_at: string | null;
