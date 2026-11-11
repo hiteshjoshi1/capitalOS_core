@@ -42,6 +42,9 @@ docker-compose.oss-test.yml
 # Local DB backups (never commit real data)
 #######################################
 backups/
+# The backup script's status file for the app (#399); the folder itself is tracked.
+state/*
+!state/.gitkeep
 
 #######################################
 # Python (FastAPI backend)

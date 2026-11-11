@@ -33,6 +33,8 @@ x-api-common: &api-common
     - ./config:/app/config:ro
     # Read-only, so /health can report the newest migration file next to the newest applied (#155).
     - ./migrations:/app/migrations:ro
+    # The backup script's status file (#399, D-111): Data Hub's "Last verified backup" line.
+    - ./state:/app/state:ro
 
 services:
   postgres:

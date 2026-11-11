@@ -9394,5 +9394,282 @@
     }
    ]
   }
+ },
+ "/currencies": {
+  "status": 200,
+  "body": [
+   {
+    "id": 30,
+    "code": "AED",
+    "name": "UAE Dirham",
+    "country": "United Arab Emirates"
+   },
+   {
+    "id": 34,
+    "code": "ARS",
+    "name": "Argentine Peso",
+    "country": "Argentina"
+   },
+   {
+    "id": 6,
+    "code": "AUD",
+    "name": "Australian Dollar",
+    "country": "Australia"
+   },
+   {
+    "id": 16,
+    "code": "BDT",
+    "name": "Bangladeshi Taka",
+    "country": "Bangladesh"
+   },
+   {
+    "id": 15,
+    "code": "BRL",
+    "name": "Brazilian Real",
+    "country": "Brazil"
+   },
+   {
+    "id": 7,
+    "code": "CAD",
+    "name": "Canadian Dollar",
+    "country": "Canada"
+   },
+   {
+    "id": 38,
+    "code": "CDF",
+    "name": "Congolese Franc",
+    "country": "DR Congo"
+   },
+   {
+    "id": 8,
+    "code": "CHF",
+    "name": "Swiss Franc",
+    "country": "Switzerland"
+   },
+   {
+    "id": 36,
+    "code": "CLP",
+    "name": "Chilean Peso",
+    "country": "Chile"
+   },
+   {
+    "id": 5,
+    "code": "CNY",
+    "name": "Chinese Renminbi (Yuan)",
+    "country": "China"
+   },
+   {
+    "id": 33,
+    "code": "COP",
+    "name": "Colombian Peso",
+    "country": "Colombia"
+   },
+   {
+    "id": 26,
+    "code": "EGP",
+    "name": "Egyptian Pound",
+    "country": "Egypt"
+   },
+   {
+    "id": 19,
+    "code": "ETB",
+    "name": "Ethiopian Birr",
+    "country": "Ethiopia"
+   },
+   {
+    "id": 2,
+    "code": "EUR",
+    "name": "Euro",
+    "country": "European Union (Eurozone)"
+   },
+   {
+    "id": 4,
+    "code": "GBP",
+    "name": "British Pound",
+    "country": "United Kingdom"
+   },
+   {
+    "id": 9,
+    "code": "HKD",
+    "name": "Hong Kong Dollar",
+    "country": "Hong Kong (SAR)"
+   },
+   {
+    "id": 12,
+    "code": "IDR",
+    "name": "Indonesian Rupiah",
+    "country": "Indonesia"
+   },
+   {
+    "id": 32,
+    "code": "ILS",
+    "name": "Israeli New Shekel",
+    "country": "Israel"
+   },
+   {
+    "id": 11,
+    "code": "INR",
+    "name": "Indian Rupee",
+    "country": "India"
+   },
+   {
+    "id": 31,
+    "code": "IQD",
+    "name": "Iraqi Dinar",
+    "country": "Iraq"
+   },
+   {
+    "id": 27,
+    "code": "IRR",
+    "name": "Iranian Rial",
+    "country": "Iran"
+   },
+   {
+    "id": 3,
+    "code": "JPY",
+    "name": "Japanese Yen",
+    "country": "Japan"
+   },
+   {
+    "id": 25,
+    "code": "KRW",
+    "name": "South Korean Won",
+    "country": "South Korea"
+   },
+   {
+    "id": 18,
+    "code": "MXN",
+    "name": "Mexican Peso",
+    "country": "Mexico"
+   },
+   {
+    "id": 23,
+    "code": "MYR",
+    "name": "Malaysian Ringgit",
+    "country": "Malaysia"
+   },
+   {
+    "id": 14,
+    "code": "NGN",
+    "name": "Nigerian Naira",
+    "country": "Nigeria"
+   },
+   {
+    "id": 10,
+    "code": "NZD",
+    "name": "New Zealand Dollar",
+    "country": "New Zealand"
+   },
+   {
+    "id": 35,
+    "code": "PEN",
+    "name": "Peruvian Sol",
+    "country": "Peru"
+   },
+   {
+    "id": 20,
+    "code": "PHP",
+    "name": "Philippine Peso",
+    "country": "Philippines"
+   },
+   {
+    "id": 13,
+    "code": "PKR",
+    "name": "Pakistani Rupee",
+    "country": "Pakistan"
+   },
+   {
+    "id": 17,
+    "code": "RUB",
+    "name": "Russian Ruble",
+    "country": "Russia"
+   },
+   {
+    "id": 29,
+    "code": "SAR",
+    "name": "Saudi Riyal",
+    "country": "Saudi Arabia"
+   },
+   {
+    "id": 24,
+    "code": "SGD",
+    "name": "Singapore Dollar",
+    "country": "Singapore"
+   },
+   {
+    "id": 22,
+    "code": "THB",
+    "name": "Thai Baht",
+    "country": "Thailand"
+   },
+   {
+    "id": 28,
+    "code": "TRY",
+    "name": "Turkish Lira",
+    "country": "Turkey"
+   },
+   {
+    "id": 39,
+    "code": "TZS",
+    "name": "Tanzanian Shilling",
+    "country": "Tanzania"
+   },
+   {
+    "id": 1,
+    "code": "USD",
+    "name": "U.S. Dollar",
+    "country": "United States"
+   },
+   {
+    "id": 37,
+    "code": "VES",
+    "name": "Venezuelan Bolívar",
+    "country": "Venezuela"
+   },
+   {
+    "id": 21,
+    "code": "VND",
+    "name": "Vietnamese Dong",
+    "country": "Vietnam"
+   },
+   {
+    "id": 40,
+    "code": "ZAR",
+    "name": "South African Rand",
+    "country": "South Africa"
+   }
+  ]
+ },
+ "/operations/backup-status": {
+  "status": 200,
+  "body": {
+   "available": false,
+   "last_verified_at": null,
+   "age_hours": null,
+   "stale": false,
+   "very_stale": false,
+   "next_run_at": null,
+   "daily_time": null,
+   "location": null,
+   "location_label": null,
+   "sets": null,
+   "encrypted": null,
+   "last_run_at": null,
+   "last_run_ok": null,
+   "status_written_at": null
+  }
+ },
+ "/settings/facts": {
+  "status": 200,
+  "body": {
+   "snapshot_day": 1,
+   "upload_stale_days": 30,
+   "base_currencies": [
+    "SGD",
+    "USD",
+    "HKD",
+    "INR"
+   ]
+  }
  }
 }

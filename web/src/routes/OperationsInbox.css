@@ -341,3 +341,35 @@
     height: 44px;
   }
 }
+
+/* Backups (#399, U22): one line, amber when stale, red when very stale or the last run failed. */
+.backupLine {
+  display: grid;
+  gap: 4px;
+  border-left: 3px solid var(--good, #3ba776);
+}
+.backupLine-warn {
+  border-left-color: var(--warn);
+}
+.backupLine-bad {
+  border-left-color: var(--bad);
+}
+.backupLineText {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+}
+.backupLineIcon {
+  font-size: 18px;
+}
+.backupLine-warn .backupLineIcon {
+  color: var(--warn);
+}
+.backupLine-bad .backupLineIcon {
+  color: var(--bad);
+}
+.backupLineDetail {
+  font-size: 0.85em;
+}

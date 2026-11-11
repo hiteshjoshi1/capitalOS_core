@@ -858,6 +858,61 @@ status() {
   return 0
 }
 
+# ---- status file for the app (#399, D-111) ----
+# The API runs in Docker and can't see the backup folder, so after a backup, a prune and
+# `make backup-status` this writes a small JSON file into the checkout's state/ folder, which
+# compose mounts read-only into the API (Data Hub's "Last verified backup" line and the Inbox).
+# No paths or keys: when the newest verified set was made, how many are kept, encrypted or not,
+# icloud or local, the daily time and this Mac's UTC offset, and how the last run went.
+# state/ is not data/, so it's never in a backup archive. Writing it never fails a backup.
+utc_offset() { local z; z=$(date +%z); printf '%s:%s' "${z:0:3}" "${z:3:2}"; }
+iso_now() { printf '%s%s' "$(date +%Y-%m-%dT%H:%M:%S)" "$(utc_offset)"; }
+set_iso_time() {  # <dump path>: its name's local time as ISO 8601 with this Mac's offset
+  local ts=${1##*/capitalos_}
+  ts=${ts%.dump}
+  [[ "$ts" =~ ^([0-9]{4})([0-9]{2})([0-9]{2})_([0-9]{2})([0-9]{2})([0-9]{2})$ ]] || return 1
+  printf '%s-%s-%sT%s:%s:%s%s' "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" \
+    "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[6]}" "$(utc_offset)"
+}
+json_field() {  # <file> <name>: a string or bare value from our own one-field-per-line JSON
+  sed -n "s/^  \"$2\": \"\{0,1\}\([^\",]*\)\"\{0,1\},\{0,1\}$/\1/p" "$1" 2>/dev/null | head -1
+}
+write_status() {  # [run <rc>]: rewrite the status file; with `run`, record this run's result
+  local f=${BACKUP_STATUS_FILE:-$PWD/state/backup-status.json} newest="" newest_at=null n=0 enc=null loc=local
+  local last_at=null last_ok=null old t prev
+  mkdir -p "$(dirname "$f")" 2>/dev/null || return 1
+  newest=$(verified_newest_first 2>/dev/null | head -1 || true)
+  n=$(verified_sets 2>/dev/null | grep -c . || true)
+  if [ -n "$newest" ]; then
+    t=$(set_iso_time "$newest" || true)
+    [ -n "$t" ] && newest_at="\"$t\""
+    if set_encrypted "$newest"; then enc=true; else enc=false; fi
+  fi
+  case "$BACKUP_DIR" in "$HOME/Library/Mobile Documents/"*) loc=icloud ;; esac
+  if [ "${1:-}" = run ]; then
+    last_at="\"$(iso_now)\""
+    if [ "${2:-1}" = 0 ]; then last_ok=true; else last_ok=false; fi
+  elif [ -f "$f" ]; then
+    prev=$(json_field "$f" last_run_at); [ -n "$prev" ] && [ "$prev" != null ] && last_at="\"$prev\""
+    old=$(json_field "$f" last_run_ok); case "$old" in true|false) last_ok=$old ;; esac
+  fi
+  {
+    printf '{\n'
+    printf '  "version": 1,\n'
+    printf '  "written_at": "%s",\n' "$(iso_now)"
+    printf '  "newest_verified_at": %s,\n' "$newest_at"
+    printf '  "sets": %s,\n' "${n:-0}"
+    printf '  "encrypted": %s,\n' "$enc"
+    printf '  "location": "%s",\n' "$loc"
+    printf '  "daily_time": "%s",\n' "$(backup_time "$PWD")"
+    printf '  "utc_offset": "%s",\n' "$(utc_offset)"
+    printf '  "last_run_at": %s,\n' "$last_at"
+    printf '  "last_run_ok": %s\n' "$last_ok"
+    printf '}\n'
+  } >"$f.part" && mv "$f.part" "$f"
+}
+write_status_quietly() { write_status "$@" || say "WARNING: could not write the backup status file for the app" >&2; }
+
 # `open <dump>` (#356): a plaintext copy of a set in a new private temp dir, its dump's path
 # printed. The caller owns (and deletes) the dir: the test instance restores from it.
 open_cmd() {
@@ -951,14 +1006,14 @@ main() {
     create|verify|restore|check-data|offsite-check) DB_CONTAINER=${DB_CONTAINER:?DB_CONTAINER is required} ;;
   esac
   case "${1:-}" in
-    create) create ;;
+    create) local rc=0; create || rc=$?; write_status_quietly run "$rc"; return "$rc" ;;
     # A set is named by its dump; capitalos_<ts>.dump.age (what ls shows for an encrypted set) works too.
     verify) verify "${2%.age}" ;;
     restore) restore "${2%.age}" ;;
     open) open_cmd "${2%.age}" ;;
     check-data) check_live ;;
-    prune) prune ;;
-    status) status ;;
+    prune) local rc=0; prune || rc=$?; [ -n "${DRY_RUN:-}" ] || write_status_quietly; return "$rc" ;;
+    status) status; write_status_quietly ;;
     key-init) key_init ;;
     encrypt-existing) encrypt_existing ;;
     offsite-sync) offsite_sync ;;

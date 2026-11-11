@@ -1,7 +1,7 @@
 import { useEffect, useState, type DragEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { api, UploadRefusedError } from "../lib/api";
-import type { Account, ImportJobListItem, UploadRefusal } from "../lib/api";
+import type { Account, ImportJobListItem, UploadDetect, UploadRefusal } from "../lib/api";
 import { loadApiResource } from "../lib/useApiResource";
 import "../App.css";
 import PageShell from "../components/PageShell";
@@ -11,6 +11,7 @@ import { dateFromFilename, describeAsOf, resolvePlatformParser, todayLocalYYYYMM
 import type { SignatureDebug } from "./ingestUtils";
 import * as fmt from "../lib/format";
 import { formatPlatformLabel } from "../lib/platformLabels";
+import { detectNote, groupAccounts } from "../lib/uploadAccount";
 import LoadError from "../components/LoadError";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
@@ -46,6 +47,7 @@ export default function Ingest() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [jobs, setJobs] = useState<ImportJobListItem[]>([]);
   const [accountId, setAccountId] = useState<string>("");
+  const [detected, setDetected] = useState<UploadDetect | null>(null);
   const [file, setFile] = useState<File | null>(null);
   // The statement's date, used only when the file states none of its own (#141).
   const [asOf, setAsOf] = useState<string>(() => prefillAsOf ?? todayLocalYYYYMMDD());
@@ -182,8 +184,22 @@ export default function Ingest() {
   // user sees it and can change it. Holdings exports often state no date inside.
   function chooseFile(next: File | null) {
     setFile(next);
+    setDetected(null);
     const named = dateFromFilename(next?.name);
     if (named && named <= todayLocalYYYYMMDD()) setAsOf(named);
+    if (!next) return;
+    // #399 (U27): which account the file fits, read before uploading (nothing is stored). It only
+    // pre-selects when no account is picked yet and exactly one fits; it never changes a choice.
+    api.ingestDetect(next).then(
+      (d) => {
+        setDetected(d);
+        const id = d.suggested_account_id;
+        if (id != null && accounts.some((a) => a.id === id)) {
+          setAccountId((current) => current || String(id));
+        }
+      },
+      () => setDetected(null),
+    );
   }
 
   function handleDrop(event: DragEvent<HTMLLabelElement>) {
@@ -262,7 +278,7 @@ export default function Ingest() {
       {state === "ready" && (
         <div className="wealthOverviewLayout">
           <div className="card">
-            <div className="cardTitle">Upload Statement CSV</div>
+            <div className="cardTitle">Upload a statement</div>
             {expectation ? (
               <p className="hint ingestExpectation" role="note" data-testid="ingest-expectation">
                 {expectation}
@@ -284,13 +300,22 @@ export default function Ingest() {
                     <option value="" disabled>
                       Select account
                     </option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} ({a.currency})
-                      </option>
+                    {groupAccounts(accounts).map((group) => (
+                      <optgroup key={group.label} label={group.label}>
+                        {group.accounts.map((a) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name} ({a.currency})
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </label>
+                {detectNote(detected, accounts, accountId) ? (
+                  <p className="hint ingestDetect" role="status" data-testid="ingest-detect">
+                    {detectNote(detected, accounts, accountId)}
+                  </p>
+                ) : null}
                 <label
                   className={`ingestDropzone${dragActive ? " ingestDropzoneActive" : ""}`}
                   onDragOver={(e) => {

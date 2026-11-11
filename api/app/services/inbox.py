@@ -11,7 +11,8 @@ header bell (#317) and the Alerts page can't disagree:
 - scheduled jobs failing (job_runs, #156);
 - transactions of this or last month without a category (Map transactions);
 - card payments due within 5 days or overdue, from the due date a statement printed
-  (#352, D-94), until the card's payments since the statement cover it.
+  (#352, D-94), until the card's payments since the statement cover it;
+- backups: no verified backup in 48 hours, or the last daily run failed (#399, D-111).
 Items are ordered high, medium, low; within a severity, as listed above.
 """
 from __future__ import annotations
@@ -27,6 +28,7 @@ from app.core.clock import app_today
 from app.fx_backfill import plan_backfill
 from app.schemas.inbox import InboxAction, InboxItem, InboxResponse
 from app.services import data_hub
+from app.services.backup_status import backup_status
 from app.services.source_freshness import (
     KIND_ACCOUNT_STATEMENT,
     KIND_BANK_STATEMENT,
@@ -45,6 +47,7 @@ KIND_ORDER = {
     for i, kind in enumerate(
         [
             "job_failing",
+            "backup_stale",
             "card_overdue",
             "source_overdue",
             "card_due_soon",
@@ -315,6 +318,37 @@ def _card_due_items(db: Session, user: CurrentUser, today: date) -> tuple[list[I
     return items, all_paid
 
 
+def _backup_items() -> tuple[list[InboxItem], Optional[str]]:
+    """An item when the backups are stale (#399); else the all-good line, or nothing where no
+    backup reports (worktrees, the test instance)."""
+    status = backup_status()
+    if not status.available:
+        return [], None
+    if not status.stale:
+        hours = status.age_hours or 0
+        when = "under an hour" if hours < 1 else _plural(int(hours), "hour")
+        return [], f"Backup verified {when} ago"
+    if status.last_run_ok is False:
+        title, detail = "The last daily backup failed", "The newest good backup is older than the failed run."
+    elif status.last_verified_at is None:
+        title, detail = "No verified backup yet", None
+    else:
+        days = int((status.age_hours or 0) // 24)
+        title, detail = f"No verified backup for {_plural(days, 'day')}", None
+    hint = "On the Mac, run make backup-now (or make backup-status to see why)."
+    return [
+        InboxItem(
+            id="backup_stale",
+            kind="backup_stale",
+            severity="high" if status.very_stale else "medium",
+            title=title,
+            detail=f"{detail} {hint}" if detail else hint,
+            # Nothing the app can run: the backups run on the Mac (launchd), not in the API.
+            action=None,
+        )
+    ], None
+
+
 def _saved_base_currency(db: Session, user_id: int) -> str:
     row = db.execute(
         text("SELECT base_currency FROM user_preferences WHERE user_id = :uid"), {"uid": user_id}
@@ -338,6 +372,7 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
     job_items, healthy_jobs = _job_items(summary)
     fx_items, fx_ok = _safe(lambda: _fx_items(db, user, _saved_base_currency(db, user.id)), ([], False))
     card_items, cards_paid = _safe(lambda: _card_due_items(db, user, today), ([], False))
+    backup_items, backup_ok = _safe(_backup_items, ([], None))
     items = (
         source_items
         + _safe(lambda: _import_items(db, user), [])
@@ -346,6 +381,7 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         + job_items
         + _safe(lambda: _unmapped_items(db, user, today), [])
         + card_items
+        + backup_items
     )
     items.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 9), KIND_ORDER.get(i.kind, 99), i.title.lower()))
 
@@ -363,6 +399,8 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         all_good.append("Card payments up to date")
     if summary.import_health.pending_count == 0 and summary.import_health.last_import_at:
         all_good.append("No uploads waiting")
+    if backup_ok:
+        all_good.append(backup_ok)
 
     return InboxResponse(
         as_of=today.isoformat(),
