@@ -851,8 +851,9 @@ def _analytics_for_month(
     span_start, span_end, bridge_available, unavailable_reason = _cash_bridge_span(
         db, month, prior_anchor, anchor, current_user_id
     )
-    ending_cash = _networth_components(db, anchor, base_currency, current_user_id)["cash"]
-    starting_cash = _networth_components(db, prior_anchor, base_currency, current_user_id)["cash"]
+    # Valuation computes in Decimal (#360); this router works in floats.
+    ending_cash = float(_networth_components(db, anchor, base_currency, current_user_id)["cash"])
+    starting_cash = float(_networth_components(db, prior_anchor, base_currency, current_user_id)["cash"])
     transfers_and_funding = 0.0
     investment_and_fx_effects = None
     other_cash_movements = None

@@ -33,6 +33,7 @@ On the golden household plus the #231 edges, old and new rules agree everywhere
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Iterator
 
@@ -210,8 +211,22 @@ def add_242_edges(engine: Engine) -> None:
         )
 
 
+def _numbers(value: Any) -> Any:
+    """Readers return Decimal money (#360); the references, DOUBLE PRECISION floats. Compare
+    the numbers, to 9 places (avg_cost is now a Decimal division, not a float one)."""
+    if isinstance(value, bool) or value is None:
+        return value
+    if isinstance(value, (Decimal, float)):
+        return round(float(value), 9)
+    if isinstance(value, dict):
+        return {k: _numbers(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_numbers(v) for v in value]
+    return value
+
+
 def _canonical(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, default=str)
+    return json.dumps(_numbers(value), sort_keys=True, default=str)
 
 
 def _as_bag(rows: list[dict[str, Any]]) -> list[str]:

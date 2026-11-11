@@ -31,7 +31,31 @@ from sqlalchemy.orm import Session
 
 from app.portfolio import effective_facts as ef
 from app.portfolio.effective_facts import CARD_STATEMENT_MAX_AGE_DAYS
+from app.valuation.money import D_or_none
 from app.valuation_cache import valuation_cached
+
+# Money and quantity columns each reader returns as Decimal (#360, D-106): NUMERIC from
+# Postgres already is; SQLite (tests) gives int/float, turned into the same Decimal here.
+_POSITION_MONEY = (
+    "quantity",
+    "cost_basis_base",
+    "snapshot_market_price",
+    "snapshot_market_value_local",
+    "snapshot_market_value_base",
+    "snapshot_cost_basis_local",
+    "snapshot_cost_basis_base",
+)
+_NAV_MONEY = ("cash_base", "stock_base", "total_nav_base")
+_BALANCE_MONEY = ("balance_local", "balance_base", "fx_rate")
+_CARD_MONEY = ("balance_local",)
+
+
+def _money_row(row: Any, columns: tuple[str, ...]) -> dict[str, Any]:
+    item = dict(row)
+    for column in columns:
+        if column in item:
+            item[column] = D_or_none(item[column])
+    return item
 
 
 @valuation_cached(shared=True)
@@ -100,26 +124,15 @@ def canonical_position_rows_by_legacy_account(
           COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
           """ + ef.has_nav_sql("ba") + """ AS has_nav_snapshot,
           ps.report_date AS report_date,
-          CAST(ps.quantity AS DOUBLE PRECISION) AS quantity,
-          CASE
-            WHEN ps.quantity IS NOT NULL
-             AND CAST(ps.quantity AS DOUBLE PRECISION) != 0
-             AND ps.cost_basis_local IS NOT NULL
-              THEN CAST(ps.cost_basis_local AS DOUBLE PRECISION) / CAST(ps.quantity AS DOUBLE PRECISION)
-            WHEN ps.quantity IS NOT NULL
-             AND CAST(ps.quantity AS DOUBLE PRECISION) != 0
-             AND ps.cost_basis_base IS NOT NULL
-              THEN CAST(ps.cost_basis_base AS DOUBLE PRECISION) / CAST(ps.quantity AS DOUBLE PRECISION)
-            ELSE NULL
-          END AS avg_cost,
+          CAST(ps.quantity AS NUMERIC) AS quantity,
           -- The real cost basis (#130 2.7: this used to repeat market_value_base,
           -- so a holding without a market value fell back to 0, not to its cost).
-          CAST(ps.cost_basis_base AS DOUBLE PRECISION) AS cost_basis_base,
-          CAST(ps.market_price AS DOUBLE PRECISION) AS snapshot_market_price,
-          CAST(ps.market_value_local AS DOUBLE PRECISION) AS snapshot_market_value_local,
-          CAST(ps.market_value_base AS DOUBLE PRECISION) AS snapshot_market_value_base,
-          CAST(ps.cost_basis_local AS DOUBLE PRECISION) AS snapshot_cost_basis_local,
-          CAST(ps.cost_basis_base AS DOUBLE PRECISION) AS snapshot_cost_basis_base
+          CAST(ps.cost_basis_base AS NUMERIC) AS cost_basis_base,
+          CAST(ps.market_price AS NUMERIC) AS snapshot_market_price,
+          CAST(ps.market_value_local AS NUMERIC) AS snapshot_market_value_local,
+          CAST(ps.market_value_base AS NUMERIC) AS snapshot_market_value_base,
+          CAST(ps.cost_basis_local AS NUMERIC) AS snapshot_cost_basis_local,
+          CAST(ps.cost_basis_base AS NUMERIC) AS snapshot_cost_basis_base
         FROM effective_positions ps
         JOIN broker_accounts ba ON ba.id = ps.broker_account_id
         JOIN accounts acc ON acc.id = ba.legacy_account_id
@@ -147,8 +160,15 @@ def canonical_position_rows_by_legacy_account(
     ).mappings().all()
     out: list[dict[str, Any]] = []
     for row in rows:
-        item = dict(row)
+        item = _money_row(row, _POSITION_MONEY)
         item["has_nav_snapshot"] = bool(item.get("has_nav_snapshot"))
+        # Average cost per unit, in the local currency when the local cost is known (else base),
+        # computed here in Decimal (#360; it used to be a DOUBLE PRECISION division in SQL).
+        qty = item.get("quantity")
+        cost = item.get("snapshot_cost_basis_local")
+        if cost is None:
+            cost = item.get("snapshot_cost_basis_base")
+        item["avg_cost"] = cost / qty if qty is not None and qty != 0 and cost is not None else None
         out.append(item)
     return out
 
@@ -187,7 +207,7 @@ def latest_authoritative_nav_by_legacy_account(
         ),
         {"anchor_date": anchor_date, "current_user_id": current_user_id},
     ).mappings().all()
-    return [dict(row) for row in rows]
+    return [_money_row(row, _NAV_MONEY) for row in rows]
 
 
 @valuation_cached(shared=True)
@@ -245,9 +265,9 @@ def canonical_account_balance_rows(
             COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
             abs.currency,
             abs.balance_type,
-            CAST(abs.balance_local AS DOUBLE PRECISION) AS balance_local,
-            CAST(abs.balance_base  AS DOUBLE PRECISION) AS balance_base,
-            CAST(abs.fx_rate_to_base AS DOUBLE PRECISION) AS fx_rate,
+            CAST(abs.balance_local AS NUMERIC) AS balance_local,
+            CAST(abs.balance_base  AS NUMERIC) AS balance_base,
+            CAST(abs.fx_rate_to_base AS NUMERIC) AS fx_rate,
             'account_balance_snapshots' AS source,
             CAST(abs.as_of_date AS TEXT) AS as_of_date
           FROM (""" + ef.effective_uploaded_balances_sql() + """) abs
@@ -273,9 +293,9 @@ def canonical_account_balance_rows(
             COALESCE(pl_by_code.country, pl.country, acc.country) AS platform_country,
             cs.currency,
             'broker_cash' AS balance_type,
-            CAST(cs.cash_balance      AS DOUBLE PRECISION) AS balance_local,
-            CAST(cs.cash_balance_base AS DOUBLE PRECISION) AS balance_base,
-            CAST(cs.fx_rate_to_base   AS DOUBLE PRECISION) AS fx_rate,
+            CAST(cs.cash_balance      AS NUMERIC) AS balance_local,
+            CAST(cs.cash_balance_base AS NUMERIC) AS balance_base,
+            CAST(cs.fx_rate_to_base   AS NUMERIC) AS fx_rate,
             'portfolio_cash_balance_snapshots' AS source,
             CAST(cs.report_date AS TEXT) AS as_of_date
           FROM (""" + ef.effective_broker_cash_sql(
@@ -297,7 +317,7 @@ def canonical_account_balance_rows(
         q,
         {"anchor_date": anchor_date, "current_user_id": current_user_id, **ef.flex_binds()},
     ).mappings().all()
-    return [dict(r) for r in rows]
+    return [_money_row(r, _BALANCE_MONEY) for r in rows]
 
 
 @valuation_cached(shared=True)
@@ -424,7 +444,7 @@ def canonical_card_statement_rows(
             "current_user_id": current_user_id,
         },
     ).mappings().all()
-    return [dict(r) for r in rows]
+    return [_money_row(r, _CARD_MONEY) for r in rows]
 
 
 @valuation_cached(shared=True)

@@ -52,11 +52,11 @@ def test_a_balance_is_carried_by_the_transactions_after_it():
         ],
     )
     assert ledger.method == "running"
-    assert ledger.owed_now == pytest.approx(632.5)
-    assert ledger.charges_since == pytest.approx(132.5)
+    assert float(ledger.owed_now) == pytest.approx(632.5)
+    assert float(ledger.charges_since) == pytest.approx(132.5)
     assert ledger.paid_since == 0.0
     assert ledger.paid_in_full is False
-    assert ledger.fees_interest_ytd == pytest.approx(12.5)
+    assert float(ledger.fees_interest_ytd) == pytest.approx(12.5)
 
 
 def test_paying_last_months_bill_in_full():
@@ -65,8 +65,8 @@ def test_paying_last_months_bill_in_full():
         [(D(2026, 11, 2), "TRANSFER", 524.21), (D(2026, 11, 3), "EXPENSE", -40.0)],
     )
     assert ledger.paid_in_full is True
-    assert ledger.paid_since == pytest.approx(524.21)
-    assert ledger.owed_now == pytest.approx(40.0)
+    assert float(ledger.paid_since) == pytest.approx(524.21)
+    assert float(ledger.owed_now) == pytest.approx(40.0)
 
 
 def test_an_overpayment_is_a_credit_not_zero():
@@ -74,7 +74,7 @@ def test_an_overpayment_is_a_credit_not_zero():
         [(D(2026, 10, 13), 100.0, "statement_balance")],
         [(D(2026, 11, 2), "TRANSFER", 250.0)],
     )
-    assert ledger.owed_now == pytest.approx(-150.0)
+    assert float(ledger.owed_now) == pytest.approx(-150.0)
     assert ledger.paid_in_full is True
 
 
@@ -97,8 +97,8 @@ def test_every_statement_is_checked_against_the_transactions_between():
     first, second, third, newest = ledger.periods
     assert (first.expected, first.printed, first.difference, first.flagged) == (214.28, 214.28, 0.0, False)
     assert first.paid_in_full is True
-    assert second.difference == pytest.approx(300.00 - 271.06) and second.flagged
-    assert third.difference == pytest.approx(500.00 - 524.21) and third.flagged
+    assert float(second.difference) == pytest.approx(300.00 - 271.06) and second.flagged
+    assert float(third.difference) == pytest.approx(500.00 - 524.21) and third.flagged
     assert newest.to_date is None and newest.printed is None and not newest.flagged
     assert ledger.flagged_count == 2
 
@@ -110,7 +110,7 @@ def test_a_period_with_no_transactions_is_flagged_as_missing_data():
     )
     period = ledger.periods[0]
     assert period.transaction_count == 0
-    assert period.flagged and period.difference == pytest.approx(512.21 - 683.09)
+    assert float(period.flagged and period.difference) == pytest.approx(512.21 - 683.09)
 
 
 def test_a_difference_under_the_threshold_is_rounding():
@@ -119,7 +119,7 @@ def test_a_difference_under_the_threshold_is_rounding():
         [(D(2026, 9, 12), 100.0, "x"), (D(2026, 10, 13), 150.6, "x")],
         [(D(2026, 9, 20), "EXPENSE", -150.0), (D(2026, 10, 2), "TRANSFER", 100.0)],
     )
-    assert ledger.periods[0].difference == pytest.approx(0.6) and not ledger.periods[0].flagged
+    assert float(ledger.periods[0].difference) == pytest.approx(0.6) and not ledger.periods[0].flagged
 
 
 def test_a_newer_balance_rebases_the_running_balance():
@@ -128,13 +128,13 @@ def test_a_newer_balance_rebases_the_running_balance():
         [(D(2026, 9, 20), "EXPENSE", -150.0), (D(2026, 10, 20), "EXPENSE", -60.0)],
     )
     assert ledger.last_balance == 400.0
-    assert ledger.owed_now == pytest.approx(460.0)  # the newest balance, not 100 + all spend
+    assert float(ledger.owed_now) == pytest.approx(460.0)  # the newest balance, not 100 + all spend
 
 
 def test_a_card_with_no_dated_balance_estimates_from_this_months_transactions():
     ledger = _ledger([], [(D(2026, 10, 20), "EXPENSE", -80.0), (D(2026, 11, 3), "EXPENSE", -25.0)])
     assert ledger.method == "transactions"
-    assert ledger.owed_now == pytest.approx(25.0)
+    assert float(ledger.owed_now) == pytest.approx(25.0)
     assert ledger.periods == []
 
 
@@ -182,7 +182,7 @@ def test_the_valuation_is_the_running_balance_rebased_by_each_statement(db_engin
     _tx(db_engine, "2026-10-02 00:00:00+00:00", "TRANSFER", 271.06)
     # 30 Sep month-end (anchor 1 Oct): 271.06 + 524.21
     sep = _owed(db_engine, datetime(2026, 9, 1, tzinfo=timezone.utc))
-    assert sep["method"] == "running" and sep["value"] == pytest.approx(795.27)
+    assert sep["method"] == "running" and float(sep["value"]) == pytest.approx(795.27)
 
     seed_canonical_account_balance_for_test(
         db_engine, account_id=CARD, as_of="2026-10-13", currency="SGD", balance_base=-524.21, balance_type="credit_balance"
@@ -191,9 +191,9 @@ def test_the_valuation_is_the_running_balance_rebased_by_each_statement(db_engin
     # 31 Oct month-end (anchor 1 Nov): re-based on the 13 Oct statement, plus 60.
     octo = _owed(db_engine, datetime(2026, 10, 1, tzinfo=timezone.utc))
     assert octo["as_of_date"] == D(2026, 10, 13)
-    assert octo["value"] == pytest.approx(584.21)
+    assert float(octo["value"]) == pytest.approx(584.21)
     # September is unchanged by October's statement.
-    assert _owed(db_engine, datetime(2026, 9, 1, tzinfo=timezone.utc))["value"] == pytest.approx(795.27)
+    assert float(_owed(db_engine, datetime(2026, 9, 1, tzinfo=timezone.utc))["value"]) == pytest.approx(795.27)
 
 
 # ─── The month bridge ────────────────────────────────────────────────────────
@@ -210,8 +210,8 @@ def test_with_a_running_balance_the_bridge_explains_the_card(client: TestClient,
     )
     bridge = client.get("/dashboard/month-bridge?month=2026-03&base_currency=SGD&limit=20").json()
     parts = {part["key"]: part["amount"] for part in bridge["unexplained"]["parts"]}
-    assert parts.get("card_balances", 0.0) == pytest.approx(0.0, abs=0.01)
-    assert bridge["liabilities_change"] == pytest.approx(660.0 + 310.55, abs=0.01)
+    assert float(parts.get("card_balances", 0.0)) == pytest.approx(0.0, abs=0.01)
+    assert float(bridge["liabilities_change"]) == pytest.approx(660.0 + 310.55, abs=0.01)
 
 
 # ─── The UOB parser ──────────────────────────────────────────────────────────
@@ -306,7 +306,7 @@ def test_balances_endpoint_and_a_typed_in_statement(client: TestClient, db_engin
     card = next(c for c in resp.json()["cards"] if c["account_id"] == CARD)
     assert card["method"] == "running"
     assert card["last_balance"] == 500.0 and card["last_balance_source"] == "manual"
-    assert card["owed_now"] == pytest.approx(560.0)
+    assert float(card["owed_now"]) == pytest.approx(560.0)
 
     future = client.post(f"/spending/credit-card-balances/{CARD}", json={"as_of_date": "2099-01-01", "owed": 1.0})
     assert future.status_code == 422

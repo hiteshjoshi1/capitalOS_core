@@ -43,7 +43,12 @@ from tests.valuation_household import (
 
 MID = SCENARIOS["mid"]
 FIRST = SCENARIOS["first"]
-TOL = 0.01  # one cent: every figure here is a sum of floats
+# Valuation adds up in Decimal (#360, D-106), so one figure shown on two pages is the same
+# number: compared exactly. A sum this test makes of a response's floats can differ in the
+# last float digit from the server's Decimal sum: SUM_TOL. A figure a page rounds: TOL.
+EXACT = 0.0
+SUM_TOL = 1e-6
+TOL = 0.01  # one cent
 
 
 @pytest.fixture()
@@ -124,7 +129,7 @@ def test_net_worth_components_add_up(household):
     ]
     for nw in candidates:
         cash, stocks, crypto, liabilities, total = _components(nw)
-        assert total == pytest.approx(cash + stocks + crypto - liabilities, abs=TOL), nw
+        assert total == pytest.approx(cash + stocks + crypto - liabilities, abs=SUM_TOL), nw
 
 
 def test_household_has_something_in_every_component(household):
@@ -138,17 +143,17 @@ def test_stock_pages_equal_net_worth_stocks(household):
     stocks_funds component of the live headline. Past month: the same at that
     month's anchor."""
     live = _summary(household, "2026-03")["current_net_worth"]["stocks_funds"]
-    assert _get(household, "/dashboard/stock-holdings?month=2026-03&base_currency=SGD")["stock_current_total"] == pytest.approx(live, abs=TOL)
-    assert _get(household, "/dashboard/stock-exposure?month=2026-03&base_currency=SGD")["total"] == pytest.approx(live, abs=TOL)
+    assert _get(household, "/dashboard/stock-holdings?month=2026-03&base_currency=SGD")["stock_current_total"] == pytest.approx(live, abs=EXACT)
+    assert _get(household, "/dashboard/stock-exposure?month=2026-03&base_currency=SGD")["total"] == pytest.approx(live, abs=EXACT)
     past = _summary(household, "2026-02")["net_worth"]["stocks_funds"]
-    assert _get(household, "/dashboard/stock-holdings?month=2026-02&base_currency=SGD")["stock_current_total"] == pytest.approx(past, abs=TOL)
+    assert _get(household, "/dashboard/stock-holdings?month=2026-02&base_currency=SGD")["stock_current_total"] == pytest.approx(past, abs=EXACT)
 
 
 def test_crypto_page_equals_net_worth_crypto(household):
     live = _summary(household, "2026-03")["current_net_worth"]["crypto"]
-    assert _get(household, "/crypto/summary?month=2026-03&base_currency=SGD")["total_crypto_base"] == pytest.approx(live, abs=TOL)
+    assert _get(household, "/crypto/summary?month=2026-03&base_currency=SGD")["total_crypto_base"] == pytest.approx(live, abs=EXACT)
     past = _summary(household, "2026-02")["net_worth"]["crypto"]
-    assert _get(household, "/crypto/summary?month=2026-02&base_currency=SGD")["total_crypto_base"] == pytest.approx(past, abs=TOL)
+    assert _get(household, "/crypto/summary?month=2026-02&base_currency=SGD")["total_crypto_base"] == pytest.approx(past, abs=EXACT)
 
 
 def test_cash_page_equals_net_worth_cash_plus_stablecoins(household, db_engine):
@@ -158,14 +163,14 @@ def test_cash_page_equals_net_worth_cash_plus_stablecoins(household, db_engine):
     live_page = _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
     usd = fx(MID.date(), "USD")
     live_stable = _stablecoins_usd(db_engine, USER_A, MID.date()) * usd
-    assert live_page["current_total"] == pytest.approx(live_nw + live_stable, abs=TOL)
-    assert live_page["total"] == pytest.approx(live_nw + live_stable, abs=TOL)
+    assert live_page["current_total"] == pytest.approx(live_nw + live_stable, abs=EXACT)
+    assert live_page["total"] == pytest.approx(live_nw + live_stable, abs=EXACT)
 
     past_nw = _summary(household, "2026-02")["net_worth"]["cash"]
     past_page = _get(household, "/dashboard/cash-deposits?month=2026-02&base_currency=SGD")
     anchor = date(2026, 3, 1)
     past_stable = _stablecoins_usd(db_engine, USER_A, anchor) * fx(anchor, "USD")
-    assert past_page["current_total"] == pytest.approx(past_nw + past_stable, abs=TOL)
+    assert past_page["current_total"] == pytest.approx(past_nw + past_stable, abs=EXACT)
 
 
 def test_cash_page_ibkr_cash_is_nav_cash(household):
@@ -193,21 +198,21 @@ def test_card_account_balance_never_counts_as_cash(household, db_engine):
     with db_engine.begin() as conn:
         conn.execute(text("DELETE FROM account_balance_snapshots WHERE account_id = :a"), {"a": MISFILED_CARD})
     valuation_cache.clear_shared_cache()
-    assert with_card_balance == pytest.approx(figures(), abs=TOL)
+    assert with_card_balance == pytest.approx(figures(), abs=EXACT)
 
 
 def test_platform_allocation_total_is_assets(household):
     """Allocation splits gross assets: its total is net worth + liabilities."""
     nw = _summary(household, "2026-03")["current_net_worth"]
     allocation = _get(household, "/dashboard/platform-allocation?month=2026-03&base_currency=SGD")
-    assert allocation["total"] == pytest.approx(nw["total"] + nw["liabilities"], abs=TOL)
-    assert sum(i["value"] for i in allocation["items"]) == pytest.approx(allocation["total"], abs=TOL)
+    assert allocation["total"] == pytest.approx(nw["total"] + nw["liabilities"], abs=SUM_TOL)
+    assert sum(i["value"] for i in allocation["items"]) == pytest.approx(allocation["total"], abs=SUM_TOL)
 
 
 def test_summary_geography_adds_up_to_assets(household):
     summary = _summary(household, "2026-03")
     nw = summary["current_net_worth"]
-    assert sum(g["value"] for g in summary["geography"]) == pytest.approx(nw["total"] + nw["liabilities"], abs=TOL)
+    assert sum(g["value"] for g in summary["geography"]) == pytest.approx(nw["total"] + nw["liabilities"], abs=SUM_TOL)
     assert sum(g["percent"] for g in summary["geography"]) == pytest.approx(100.0, abs=0.05)
 
 
@@ -219,20 +224,20 @@ def test_geography_exposure_total_is_assets(household):
         nw = summary["current_net_worth"] if live else summary["net_worth"]
         geo = _get(household, f"/dashboard/geography-exposure?month={month}&base_currency=SGD")
         assert geo["is_live"] is live, month
-        assert geo["total"] == pytest.approx(nw["cash"] + nw["stocks_funds"] + nw["crypto"], abs=TOL), month
+        assert geo["total"] == pytest.approx(nw["cash"] + nw["stocks_funds"] + nw["crypto"], abs=SUM_TOL), month
 
 
 def test_breakdowns_add_up_to_their_own_totals(household):
     """Within one response, the items add up to the total it states."""
     cash = _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
-    assert sum(i["value"] for i in cash["items"]) == pytest.approx(cash["total"], abs=TOL)
+    assert sum(i["value"] for i in cash["items"]) == pytest.approx(cash["total"], abs=SUM_TOL)
     geo = _get(household, "/dashboard/geography-exposure?month=2026-03&base_currency=SGD")
-    assert sum(i["total"] for i in geo["items"]) == pytest.approx(geo["total"], abs=TOL)
+    assert sum(i["total"] for i in geo["items"]) == pytest.approx(geo["total"], abs=SUM_TOL)
     for item in geo["items"]:
-        assert item["stocks_funds"] + item["cash"] + item["crypto"] == pytest.approx(item["total"], abs=TOL)
+        assert item["stocks_funds"] + item["cash"] + item["crypto"] == pytest.approx(item["total"], abs=SUM_TOL)
     exposure = _get(household, "/dashboard/stock-exposure?month=2026-03&base_currency=SGD")
     for key in ("by_country", "by_platform"):
-        assert sum(i["value"] for i in exposure[key]) == pytest.approx(exposure["total"], abs=TOL), key
+        assert sum(i["value"] for i in exposure[key]) == pytest.approx(exposure["total"], abs=SUM_TOL), key
 
 
 # ─── Live vs anchor, and one figure per page ─────────────────────────────────
@@ -243,15 +248,15 @@ def test_live_headline_is_the_same_everywhere(household):
     bootstrap = _get(household, "/dashboard/bootstrap?month=2026-03&base_currency=SGD")
     timeline = _timeline(household, backfill=True)
     now = {k: v for k, v in timeline["now"].items() if k not in {"as_of", "uploads"}}
-    assert bootstrap["current_net_worth"] == pytest.approx(summary["current_net_worth"], abs=TOL)
-    assert now == pytest.approx(summary["current_net_worth"], abs=TOL)
-    assert bootstrap["net_worth"] == pytest.approx(summary["net_worth"], abs=TOL)
+    assert bootstrap["current_net_worth"] == pytest.approx(summary["current_net_worth"], abs=EXACT)
+    assert now == pytest.approx(summary["current_net_worth"], abs=EXACT)
+    assert bootstrap["net_worth"] == pytest.approx(summary["net_worth"], abs=EXACT)
 
 
 def test_open_month_reports_the_last_completed_anchor(household):
     """For the open month the snapshot figures are the last completed
     month-end's, the same as browsing that month."""
-    assert _summary(household, "2026-03")["net_worth"] == pytest.approx(_summary(household, "2026-02")["net_worth"], abs=TOL)
+    assert _summary(household, "2026-03")["net_worth"] == pytest.approx(_summary(household, "2026-02")["net_worth"], abs=EXACT)
     assert _summary(household, "2026-03")["net_worth_boundary_at"] == "2026-03-01T00:00:00+00:00"
 
 
@@ -263,16 +268,16 @@ def test_history_points_equal_the_dashboard_for_each_month(household):
     for month in ("2025-12", "2026-01", "2026-02"):
         summary = _summary(household, month)
         point = {k: points[month][k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-        assert point == pytest.approx(summary["net_worth"], abs=TOL), month
+        assert point == pytest.approx(summary["net_worth"], abs=EXACT), month
     change = _summary(household, "2026-02")["net_worth_change"]["vs_prev_month"]["abs"]
-    assert change == pytest.approx(points["2026-02"]["total"] - points["2026-01"]["total"], abs=TOL)
+    assert change == pytest.approx(points["2026-02"]["total"] - points["2026-01"]["total"], abs=SUM_TOL)
 
 
 def test_cash_trend_points_equal_each_months_cash_page(household):
     trend = {p["month"]: p["value"] for p in _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")["trend"]}
     for month in ("2026-01", "2026-02"):
         page = _get(household, f"/dashboard/cash-deposits?month={month}&base_currency=SGD")
-        assert trend[month] == pytest.approx(page["current_total"], abs=TOL), month
+        assert trend[month] == pytest.approx(page["current_total"], abs=EXACT), month
 
 
 def test_first_of_month_dashboard_and_history_agree(household_first):
@@ -285,7 +290,7 @@ def test_first_of_month_dashboard_and_history_agree(household_first):
     assert newest["month"] == "2026-03"
     assert summary["net_worth_boundary_at"][:10] == newest["anchor_date"]
     point = {k: newest[k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-    assert point == pytest.approx(summary["net_worth"], abs=TOL)
+    assert point == pytest.approx(summary["net_worth"], abs=EXACT)
 
 
 def test_first_of_month_last_month_is_closed_everywhere(household_first):
@@ -296,13 +301,13 @@ def test_first_of_month_last_month_is_closed_everywhere(household_first):
     april = _summary(household_first, "2026-04")
     march = _summary(household_first, "2026-03")
     assert march["net_worth_boundary_at"] == april["net_worth_boundary_at"] == "2026-04-01T00:00:00+00:00"
-    assert march["net_worth"] == pytest.approx(april["net_worth"], abs=TOL)
+    assert march["net_worth"] == pytest.approx(april["net_worth"], abs=EXACT)
     assert april["current_net_worth_change"]["vs_prev_month"]["compare_month"] == "2026-03"
     for path in ("/dashboard/stock-holdings", "/dashboard/cash-deposits", "/crypto/summary"):
         assert _get(household_first, f"{path}?month=2026-03&base_currency=SGD")["is_live"] is False, path
         assert _get(household_first, f"{path}?month=2026-04&base_currency=SGD")["is_live"] is True, path
     crypto_march = _get(household_first, "/crypto/summary?month=2026-03&base_currency=SGD")["total_crypto_base"]
-    assert crypto_march == pytest.approx(march["net_worth"]["crypto"], abs=TOL)
+    assert crypto_march == pytest.approx(march["net_worth"]["crypto"], abs=EXACT)
 
 
 # ─── User isolation ──────────────────────────────────────────────────────────
@@ -332,9 +337,9 @@ def test_user_b_sees_only_their_own_money(household, monkeypatch, db_engine):
     usd = fx(MID.date(), "USD")
     # B: OCBC 17,000 SGD; wallet 1 ETH @ 3,000 + 700 USDT; card limit 5,000 - 4,200 available
     # on 20 Feb (owes 800), plus the 11 Mar purchase of 400 since (#300's running balance).
-    assert nw["cash"] == pytest.approx(17000.0, abs=TOL)
-    assert nw["crypto"] == pytest.approx((3000.0 + 700.0) * usd, abs=TOL)
-    assert nw["liabilities"] == pytest.approx(1200.0, abs=TOL)
+    assert nw["cash"] == pytest.approx(17000.0, abs=EXACT)
+    assert nw["crypto"] == pytest.approx((3000.0 + 700.0) * usd, abs=EXACT)
+    assert nw["liabilities"] == pytest.approx(1200.0, abs=EXACT)
     assert nw["stocks_funds"] == 0.0
     cash_page = _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
     assert {i["source"] for i in cash_page["items"]} == {"OCBC", "Base"}
@@ -372,16 +377,16 @@ def test_missing_fx_rate_is_left_out_and_flagged(household, db_engine):
     assert after["summary"]["fx_incomplete"] is True
     assert after["summary"]["fx_missing_currencies"] == ["TWD"]
     for key in ("net_worth", "current_net_worth"):
-        assert after["summary"][key] == pytest.approx(before["summary"][key], abs=TOL), key
+        assert after["summary"][key] == pytest.approx(before["summary"][key], abs=EXACT), key
     def by_currency(rows: list[dict]) -> dict[str, float]:
         return {row["currency"]: row["value"] for row in rows if row["value"]}
 
     assert by_currency(after["summary"]["cash_balances"]) == pytest.approx(
-        by_currency(before["summary"]["cash_balances"]), abs=TOL
+        by_currency(before["summary"]["cash_balances"]), abs=EXACT
     )
-    assert after["cash"]["current_total"] == pytest.approx(before["cash"]["current_total"], abs=TOL)
-    assert after["allocation"]["total"] == pytest.approx(before["allocation"]["total"], abs=TOL)
-    assert after["geography"]["total"] == pytest.approx(before["geography"]["total"], abs=TOL)
+    assert after["cash"]["current_total"] == pytest.approx(before["cash"]["current_total"], abs=EXACT)
+    assert after["allocation"]["total"] == pytest.approx(before["allocation"]["total"], abs=EXACT)
+    assert after["geography"]["total"] == pytest.approx(before["geography"]["total"], abs=EXACT)
 
 
 # ─── History (D-29): stored rollups equal a fresh recompute after writes ─────
@@ -428,7 +433,7 @@ def test_history_after_writes_equals_a_fresh_recompute(household, db_engine, mon
     assert lazily == recomputed
     for month in ("2026-01", "2026-02"):
         point = {k: lazily[month][k] for k in ("cash", "stocks_funds", "crypto", "liabilities", "total")}
-        assert point == pytest.approx(_summary(household, month)["net_worth"], abs=TOL), month
+        assert point == pytest.approx(_summary(household, month)["net_worth"], abs=EXACT), month
     # The writes did reach History (else this proves nothing): the crypto
     # snapshot and the Flex re-import change January, the statement February.
     assert [m for m in before if before[m]["total"] != recomputed[m]["total"]] == ["2026-01", "2026-02"]
@@ -512,8 +517,8 @@ def test_history_after_a_corrected_flex_statement_rate_equals_a_fresh_process(ho
     valuation_cache.clear_shared_cache()
     fresh = _points(_timeline(household, backfill=True))
     summary_fresh = _summary(household, "2026-01")["net_worth"]["total"]
-    assert fresh["2026-01"]["total"] != pytest.approx(before["2026-01"]["total"], abs=TOL)  # the correction matters
-    assert summary_fresh != pytest.approx(summary_before, abs=TOL)
+    assert fresh["2026-01"]["total"] != pytest.approx(before["2026-01"]["total"], abs=EXACT)  # the correction matters
+    assert summary_fresh != pytest.approx(summary_before, abs=EXACT)
     assert lazily == fresh
     assert summary_lazily == summary_fresh
 
@@ -536,7 +541,7 @@ def test_an_older_flex_report_imported_after_newer_ones_leaves_newer_rates_and_h
     assert {k: v for k, v in rates_after.items() if k != jan_key} == {
         k: v for k, v in rates_before.items() if k != jan_key
     }
-    assert after["2026-01"]["total"] != pytest.approx(before["2026-01"]["total"], abs=TOL)  # it did reach History
+    assert after["2026-01"]["total"] != pytest.approx(before["2026-01"]["total"], abs=EXACT)  # it did reach History
     for month in ("2026-02",):  # read from the 27 Feb statement rate
         assert after[month] == before[month], month
 
@@ -552,7 +557,7 @@ def test_flex_backfill_does_not_resource_older_history(household, db_engine):
     )
     import_flex(db_engine, report, from_date=date(2025, 12, 1))
     after = {p["month"]: p["total"] for p in _timeline(household)["points"]}
-    assert after["2025-12"] == pytest.approx(before["2025-12"], abs=TOL)
+    assert after["2025-12"] == pytest.approx(before["2025-12"], abs=EXACT)
 
 
 # ─── Caching (D-28): on or off, the same answers ─────────────────────────────

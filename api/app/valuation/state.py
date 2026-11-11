@@ -2,8 +2,10 @@
 wallets and snapshot coverage, read from the canonical facts."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -19,6 +21,7 @@ from app.valuation import clock, fx
 from app.valuation.clock import _date_only, _iso_value, _normalize_ts
 from app.valuation.prices import _canonical_base_currency
 from app.valuation_cache import valuation_cached
+from app.valuation.money import D, ZERO
 
 
 def _effective_as_of(db: Session, anchor_ts: datetime, current_user_id: int) -> Optional[datetime]:
@@ -70,7 +73,7 @@ def _crypto_snapshot_coverage_as_of(db: Session, anchor_date: Any, current_user_
     return row["as_of_date"]
 
 
-def _cash_row_amount(row: Dict[str, Any], fallback_currency: str) -> tuple[float, str]:
+def _cash_row_amount(row: Dict[str, Any], fallback_currency: str) -> tuple[Decimal, str]:
     """(amount, the currency it is in) for one canonical balance row.
 
     Broker cash (IBKR Flex) is taken in the Flex base currency, the same figure
@@ -81,15 +84,15 @@ def _cash_row_amount(row: Dict[str, Any], fallback_currency: str) -> tuple[float
     account's currency would treat a foreign-currency balance as already
     converted (#130 2.8)."""
     if row.get("account_base_currency"):
-        return float(row.get("balance_base") or 0.0), str(row["account_base_currency"]).upper()
+        return D(row.get("balance_base")), str(row["account_base_currency"]).upper()
     if row.get("balance_local") is not None and row.get("currency"):
-        return float(row["balance_local"]), str(row["currency"]).upper()
-    return float(row.get("balance_base") or 0.0), _canonical_base_currency(row, fallback_currency)
+        return D(row["balance_local"]), str(row["currency"]).upper()
+    return D(row.get("balance_base")), _canonical_base_currency(row, fallback_currency)
 
 
-def _canonical_cash_value(row: Dict[str, Any], rates: Dict[str, float], fallback_currency: str) -> float:
+def _canonical_cash_value(row: Dict[str, Any], rates: Mapping[str, Any], fallback_currency: str) -> Decimal:
     amount, currency = _cash_row_amount(row, fallback_currency)
-    return amount * rates.get(currency, 0.0)
+    return amount * D(rates.get(currency))
 
 
 @valuation_cached(shared=True)
@@ -132,7 +135,7 @@ CASH_SCOPE_CASH_PAGE = "cash_page"  # net-worth cash plus stablecoins (net worth
 CASH_KIND_BALANCE = "balance"  # an account's own balance rows (bank, upload, broker without NAV)
 CASH_KIND_NAV = "nav"  # the cash of an account valued by its NAV (IBKR Flex)
 CASH_KIND_STABLECOIN = "stablecoin"
-_NAV_CASH_TOLERANCE = 0.005  # base-currency units: below this the NAV's cash rows "add up"
+_NAV_CASH_TOLERANCE = Decimal("0.005")  # base-currency units: below this the NAV's cash rows "add up"
 
 
 def _wallet_valuation(db: Session, anchor_ts: datetime, current_user_id: int, *, price_overlay: bool) -> Dict[str, Any]:
@@ -227,7 +230,7 @@ def _cash_positions(
         currencies.add("USD")
     rates = fx.get_rates(anchor_ts, base_currency, currencies) if currencies else {}
 
-    def _entry(kind: str, row: Dict[str, Any], *, currency: str, value: float, as_of: Any, country: Any) -> Dict[str, Any]:
+    def _entry(kind: str, row: Dict[str, Any], *, currency: str, value: Decimal, as_of: Any, country: Any) -> Dict[str, Any]:
         return {
             "kind": kind,
             "balance_type": str(row.get("balance_type") or "broker_cash").lower(),
@@ -261,8 +264,8 @@ def _cash_positions(
             continue
         account_id = int(nav["legacy_account_id"])
         nav_currency = str(nav.get("base_currency") or base_currency).upper()
-        rate = rates.get(nav_currency, 0.0)
-        nav_cash = float(nav.get("cash_base") or 0.0)
+        rate = D(rates.get(nav_currency))
+        nav_cash = D(nav.get("cash_base"))
         report_date = _date_only(nav.get("report_date"))
         same_day = [
             row
@@ -279,18 +282,18 @@ def _cash_positions(
             "platform": (same_day[0].get("platform") if same_day else None) or nav.get("platform"),
             "platform_type": nav.get("platform_type"),
         }
-        amounts: Dict[str, float] = {}
+        amounts: Dict[str, Decimal] = {}
         as_of_by_currency: Dict[str, Any] = {}
         for row in same_day:
             currency = str(row.get("currency") or nav_currency).upper()
-            amounts[currency] = amounts.get(currency, 0.0) + float(row.get("balance_base") or 0.0)
+            amounts[currency] = amounts.get(currency, ZERO) + D(row.get("balance_base"))
             as_of_by_currency[currency] = row.get("as_of_date")
         # Whatever the rows don't cover (a missing row, or IBKR's own rounding of
         # the NAV) is held in the NAV's base currency, so the entries add up to
         # exactly the NAV's cash, the figure net worth has always used.
         remainder = nav_cash - sum(amounts.values())
         if nav_currency in amounts or abs(remainder) > _NAV_CASH_TOLERANCE or not amounts:
-            amounts[nav_currency] = amounts.get(nav_currency, 0.0) + remainder
+            amounts[nav_currency] = amounts.get(nav_currency, ZERO) + remainder
         else:
             # No row in the base currency and only rounding left: fold it into the largest.
             largest = max(amounts, key=lambda c: abs(amounts[c]))
@@ -312,7 +315,7 @@ def _cash_positions(
     # Account order, as the canonical rows come (a tie in the freshness labels
     # resolves the same way it always has).
     out = sorted(nav_entries + out, key=lambda entry: entry["account_id"] if entry["account_id"] is not None else -1)
-    usd_rate = rates.get("USD", 0.0)
+    usd_rate = D(rates.get("USD"))
     for row in stablecoins:
         if row.get("value_usd") is None:
             continue
@@ -325,7 +328,7 @@ def _cash_positions(
                 "platform_type": "WALLET_PROVIDER",
                 "country": "US",
                 "currency": "USD",
-                "value": float(row["value_usd"]) * usd_rate,
+                "value": D(row["value_usd"]) * usd_rate,
                 "as_of_date": row.get("as_of_date"),
             }
         )

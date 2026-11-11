@@ -26,7 +26,7 @@ def _change(start: _Holding | None, end: _Holding | None) -> HoldingChange:
 
 def test_steth_growth_is_staking_rewards():
     change = _change(_token("STETH", 10.0, 3000.0), _token("STETH", 10.03, 3000.0))
-    assert b.staking_reward(change) == pytest.approx(0.03 * 3000.0)
+    assert float(b.staking_reward(change)) == pytest.approx(0.03 * 3000.0)
 
 
 @pytest.mark.parametrize("case,start,end", [

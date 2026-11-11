@@ -14,6 +14,7 @@ from app.market_data.service import YAHOO_QUALIFIED_SUFFIXES, YAHOO_SUFFIX
 from app.portfolio.canonical_reads import canonical_position_rows_by_legacy_account
 from app.valuation import clock as valuation_clock
 # The holdings' market value under the dashboard's price rule (D-21, #144), from the valuation service.
+from app.valuation.money import floats
 from app.valuation.prices import _asset_market_values as _latest_asset_market_values
 from app.portfolio.ledger_dividends import fetch_ledger_dividend_rows, ledger_covered_since
 from app.schemas.dividends import (
@@ -321,7 +322,8 @@ def _aggregate_dividend_data(
         totals["estimated_tax"] += item.estimated_tax
         totals["payout_minus_tax"] += item.payout_minus_tax
 
-    asset_values = _latest_asset_market_values(db, anchor_ts, base_currency, current_user_id)
+    # Valuation computes in Decimal (#360); this router works in floats.
+    asset_values = floats(_latest_asset_market_values(db, anchor_ts, base_currency, current_user_id))
     company_items: list[dict[str, Any]] = []
     for item in company_rollups.values():
         asset_id = item["asset_id"]

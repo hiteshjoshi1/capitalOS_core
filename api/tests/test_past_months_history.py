@@ -98,7 +98,7 @@ def _upload(client: TestClient, account_id: int, path: Path) -> dict:
 def _liability(db_engine, anchor: datetime) -> float:
     db = Session(bind=db_engine)
     try:
-        return _networth_components(db, anchor, "SGD", 1)["liabilities"]
+        return float(_networth_components(db, anchor, "SGD", 1)["liabilities"])
     finally:
         db.close()
 
