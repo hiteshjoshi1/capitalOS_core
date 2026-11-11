@@ -313,3 +313,57 @@ describe("CashOverview stablecoins", () => {
     expect(screen.getByText("S$ 500.00")).toBeInTheDocument();
   });
 });
+
+// #397: the per-account table (U13) and the FX revaluation of foreign cash (U14).
+describe("CashOverview accounts and FX revaluation", () => {
+  it("lists each account with its change and data date, flags an overdue one, and shows the FX effect", async () => {
+    mockApi.cashDeposits.mockResolvedValue({
+      ...cashDepositsFixture,
+      accounts: [
+        { account_id: 1, kind: "account", label: "DBS Multiplier", platform: "DBS", currencies: ["SGD"], current_value: 25000, snapshot_value: 22000, delta_abs: 3000, last_data_date: "2026-02-20", stale: false },
+        { account_id: 2, kind: "account", label: "OCBC 360", platform: "OCBC", currencies: ["USD"], current_value: 15000, snapshot_value: 14000, delta_abs: 1000, last_data_date: "2026-01-02", stale: true },
+      ],
+      fx_revaluation: {
+        total: -320,
+        from_at: "2026-02-01T00:00:00+00:00",
+        to_at: "2026-02-21T00:00:00+00:00",
+        items: [{ currency: "USD", start_value: 14000, fx_effect: -320 }],
+      },
+    });
+    mockApi.cryptoStablecoins.mockResolvedValue(stablecoinsFixture);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    const table = await screen.findByTestId("cash-accounts");
+    expect(table).toHaveTextContent("DBS Multiplier");
+    expect(table).toHaveTextContent("+S$ 3,000");
+    expect(table).toHaveTextContent("OCBC 360");
+    expect(table).toHaveTextContent("Overdue");
+    expect(screen.getAllByText("Overdue")).toHaveLength(1);
+    const fx = screen.getByTestId("cash-fx-revaluation");
+    expect(fx).toHaveTextContent("USD cash");
+    expect(fx).toHaveTextContent("-S$ 320");
+  });
+
+  it("says so when there was no foreign-currency cash", async () => {
+    mockApi.cashDeposits.mockResolvedValue({
+      ...cashDepositsFixture,
+      accounts: [],
+      fx_revaluation: { total: 0, from_at: "2026-02-01T00:00:00+00:00", to_at: "2026-02-21T00:00:00+00:00", items: [] },
+    });
+    mockApi.cryptoStablecoins.mockResolvedValue(stablecoinsFixture);
+    render(
+      <ThemeProvider>
+        <MemoryRouter>
+          <CashOverview />
+        </MemoryRouter>
+      </ThemeProvider>,
+    );
+    expect(await screen.findByText(/No foreign-currency cash/)).toBeInTheDocument();
+    expect(screen.getByText("No cash accounts yet.")).toBeInTheDocument();
+  });
+});

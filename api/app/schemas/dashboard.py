@@ -280,6 +280,21 @@ class StockBreakdownItem(BaseModel):
     percent: float
 
 
+class StockPlatformTotal(BaseModel):
+    """A platform's stocks (#396, U7): value, cost basis and unrealised P&L in the base
+    currency. Rows with no average cost are left out of cost and P&L and counted apart."""
+
+    platform: str
+    value: float = 0.0
+    cost_basis: float = 0.0
+    unrealised_pnl: float = 0.0
+    # unrealised_pnl / cost_basis x 100; None without a cost basis.
+    unrealised_pnl_pct: Optional[float] = None
+    positions: int = 0
+    positions_without_cost: int = 0
+    value_without_cost: float = 0.0
+
+
 class StockMonthChange(BaseModel):
     """A holding's change vs the compare month-end (#251), split as Overview's
     bridge splits it (D-60): abs = price_effect + quantity_effect + fx_effect + unsplit,
@@ -350,6 +365,8 @@ class StockHoldingsResponse(FxStatusFields):
     geography_performance: list["StockGeographyBreakdownItem"] = []
     geography_performance_as_of: Optional[str] = None
     platform_breakdown: list[StockBreakdownItem] = []
+    # #396 (U7): cost basis and unrealised P&L per platform.
+    platform_totals: list[StockPlatformTotal] = []
     stock_current_total: float = 0.0
     stock_snapshot_total: float = 0.0
     # The date of the holdings stock_snapshot_total is taken from (#232).
@@ -416,6 +433,10 @@ class CashDepositsOut(BaseModel):
     currency_breakdown: list["CashCurrencyBreakdownItem"] = []
     # No cash data at all for the compare month (not a real zero), #224.
     snapshot_missing: bool = False
+    # #397 (U13): one row per cash account (and stablecoin source); adds up to current_total.
+    accounts: list["CashAccountRow"] = []
+    # #397 (U14): foreign-currency cash revalued from the compare point to now.
+    fx_revaluation: Optional["CashFxRevaluation"] = None
 
 
 class StockExposureItem(BaseModel):
@@ -476,6 +497,42 @@ class MiniTrendPoint(BaseModel):
     # headline); every other bar is a completed month-end, or None when that
     # month-end hasn't passed.
     is_live: bool = False
+
+
+class CashAccountRow(BaseModel):
+    """One cash account on the Cash page (#397, U13). ``kind``: account or
+    stablecoin. ``last_data_date``: its newest data at the figures' point.
+    ``stale``: overdue on Data Hub's source freshness (live month only; None
+    for a past month or a source it doesn't track)."""
+
+    account_id: Optional[int] = None
+    kind: str
+    label: str
+    platform: str
+    currencies: list[str] = []
+    current_value: float
+    snapshot_value: float
+    delta_abs: float
+    last_data_date: Optional[str] = None
+    stale: Optional[bool] = None
+
+
+class CashFxItem(BaseModel):
+    currency: str
+    # The currency's cash at the compare point, in the base currency at that point's rate.
+    start_value: float
+    fx_effect: float
+
+
+class CashFxRevaluation(BaseModel):
+    """Foreign-currency cash (net-worth scope: no stablecoins) revalued from the
+    compare point's rates to now's (#397, U14). ``total`` is the Overview bridge's
+    FX part for foreign-currency cash over the same window."""
+
+    total: float
+    from_at: str
+    to_at: str
+    items: list[CashFxItem] = []
 
 
 class CashCurrencyBreakdownItem(BaseModel):
@@ -807,6 +864,36 @@ class MonthBridgeResponse(FxStatusFields):
     trades: List[BridgeTrade] = []
     move_causes: Optional[MoveCauses] = None
 
+
+
+class SpanBridgeMonth(BaseModel):
+    """One month inside a compared span: its own close-to-close change."""
+
+    month: str
+    start_value: float
+    end_value: float
+    change: float
+
+
+class SpanBridgeResponse(FxStatusFields):
+    """GET /dashboard/bridge?from=&to= (#398, D-110): month A's close to month B's close,
+    the sum of the month bridges A+1 … B. start + sum(lines) + unexplained = end."""
+
+    from_month: str
+    to_month: str
+    base_currency: str
+    snapshot_day: int
+    # The span ends at the open month: its end is live now.
+    is_live: bool
+    months: List[SpanBridgeMonth] = Field(default_factory=list)
+    start: BridgeEndpoint
+    end: BridgeEndpoint
+    change: float
+    lines: List[BridgeLine]
+    unexplained: BridgeLine
+    liabilities_change: float
+    movers: List[BridgeMover]
+    trades: List[BridgeTrade] = []
 
 # #253: PlatformConcentration names PlatformAllocationItem, defined after it.
 PlatformConcentration.model_rebuild()

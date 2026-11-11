@@ -1101,24 +1101,41 @@ def _platform_label(platform: Optional[str]) -> str:
     return " ".join(w.upper() if (w.isupper() and len(w) <= 4) or w.upper() in {"IBKR", "HSBC", "OCBC", "POSB"} else w.capitalize() for w in words)
 
 
-def _cash_fx(
+def cash_fx_by_currency(
     db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime
-) -> Decimal:
-    """The start's foreign-currency cash revalued from the start's rates to the end's."""
+) -> list[Dict[str, Any]]:
+    """The start's foreign-currency cash (net-worth scope), per currency, revalued
+    from the start's rates to the end's (#397, U14): ``start_value`` in the base
+    currency at the start's rate, ``fx_effect`` the revaluation. The bridge's
+    "Foreign-currency cash" FX part is their sum (_cash_fx). Largest effect first."""
     by_currency: Dict[str, Decimal] = {}
     for entry in _cash_positions(db, start, base_currency, current_user_id):
         by_currency[entry["currency"]] = by_currency.get(entry["currency"], ZERO) + D(entry["value"])
     foreign = {c for c in by_currency if c != base_currency.upper()}
     if not foreign:
-        return ZERO
+        return []
     r0 = fx.get_rates(start, base_currency, foreign)
     r1 = fx.get_rates(end, base_currency, foreign)
-    total = ZERO
+    items: list[Dict[str, Any]] = []
     for currency in foreign:
         a, b = r0.get(currency, ZERO), r1.get(currency, ZERO)
-        if a > 0 and b > 0:
-            total += by_currency[currency] * (D(b) / D(a) - ONE)
-    return total
+        if a > 0 and b > 0 and by_currency[currency]:
+            items.append(
+                {
+                    "currency": currency,
+                    "start_value": by_currency[currency],
+                    "fx_effect": by_currency[currency] * (D(b) / D(a) - ONE),
+                }
+            )
+    items.sort(key=lambda row: (-abs(row["fx_effect"]), row["currency"]))
+    return items
+
+
+def _cash_fx(
+    db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime
+) -> Decimal:
+    """The start's foreign-currency cash revalued from the start's rates to the end's."""
+    return dsum(row["fx_effect"] for row in cash_fx_by_currency(db, current_user_id, base_currency, start, end))
 
 
 def _not_updated(db: Session, current_user_id: int, base_currency: str, end: datetime, since: date) -> list[str]:

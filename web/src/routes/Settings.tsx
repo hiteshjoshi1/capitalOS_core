@@ -5,24 +5,18 @@ import ChangePasswordCard from "../components/ChangePasswordCard";
 import HomeRegionCard from "../components/HomeRegionCard";
 import PageShell from "../components/PageShell";
 import RiskThresholdsCard from "../components/RiskThresholdsCard";
-import { useTheme } from "../context/ThemeContext";
+import SettingsFactsCard from "../components/SettingsFactsCard";
 import { useAuth } from "../context/useAuth";
 
 export default function Settings() {
-  const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
 
   return (
     <PageShell title="Settings" subtitle="Application settings">
       <div className="wrap settingsStack">
-        <div className="card placeholderCard settingsCard">
-          <div className="cardTitle">Appearance</div>
-          <p className="muted">Theme controls live here now instead of the app shell.</p>
-          <button className="btn settingsThemeToggle" type="button" onClick={toggleTheme}>
-            {theme === "dark" ? "Switch to Light Mode" : "Switch to Dark Mode"}
-          </button>
-        </div>
+        {/* #399 (U23): the theme has one control, in the header (the user menu on a phone). */}
         <HomeRegionCard />
+        <SettingsFactsCard />
         <RiskThresholdsCard />
         <ChangePasswordCard />
         {/* #321: shared-data tools (platforms, token allowlist, job status), admins only. */}

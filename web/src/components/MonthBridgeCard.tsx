@@ -28,7 +28,7 @@ function partsSummary(line: BridgeLine, currency: string): string | null {
     .join(" · ");
 }
 
-function BridgeRow({
+export function BridgeRow({
   line,
   currency,
   muted = false,
@@ -120,7 +120,7 @@ function BridgeRow({
   );
 }
 
-function MoverChip({ mover, currency }: { mover: BridgeMover; currency: string }) {
+export function MoverChip({ mover, currency }: { mover: BridgeMover; currency: string }) {
   // What the market did (price + FX); buying or selling is listed under trades.
   const amount = mover.market_effect ?? mover.change;
   return (
@@ -138,7 +138,7 @@ const TRADE_LABEL: Record<string, string> = {
   moved_out: "Moved out",
 };
 
-function TradeChip({ trade, currency }: { trade: BridgeTrade; currency: string }) {
+export function TradeChip({ trade, currency }: { trade: BridgeTrade; currency: string }) {
   const note = trade.side === "sold" && trade.cash_recorded
     ? "to cash"
     : trade.side === "bought" && trade.cash_recorded

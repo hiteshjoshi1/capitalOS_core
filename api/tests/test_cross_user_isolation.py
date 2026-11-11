@@ -72,6 +72,9 @@ PATH_PARAMS: dict[str, str] = {
 QUERY_PARAMS: dict[str, str] = {
     "month": MONTH,
     "base_currency": "SGD",
+    # History → Compare (#398): the month before A's to A's month.
+    "from": "2026-02",
+    "to": MONTH,
 }
 
 # Same answer for every user (checked: A and B get identical answers), and it may change
@@ -83,6 +86,8 @@ SHARED_ROUTES: dict[str, str] = {
     "/crypto/allowlist": "the shared token allowlist (admin-maintained)",
     "/market-data/runs": "shared market-data job history (prices are shared data)",
     "/auth/methods": "which sign-in methods are on (server config, no user data)",
+    "/operations/backup-status": "the Mac's backup status file (#399): server state, no user data",
+    "/settings/facts": "snapshot day, default upload cadence, base currencies (#399): server config",
 }
 # Not called, with the reason.
 SKIPPED_ROUTES: dict[str, str] = {
@@ -111,6 +116,7 @@ A_SEES_OWN_DATA = (
     "/crypto/tokens",
     "/crypto/wallets",
     "/dashboard/bootstrap",
+    "/dashboard/bridge",
     "/dashboard/cash-deposits",
     "/dashboard/data-hub-summary",
     "/dashboard/net-worth-since-update",

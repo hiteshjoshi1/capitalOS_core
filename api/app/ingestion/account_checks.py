@@ -46,6 +46,19 @@ PARSER_ACCOUNT_TYPES: dict[str, frozenset[str]] = {
     "dbs_vickers_holdings_xls_v1": frozenset({"BROKER", "MUTUAL_FUND"}),
 }
 
+# Which platform codes each parser's files come from (#399, U27: pre-selecting the account).
+PARSER_PLATFORMS: dict[str, frozenset[str]] = {
+    "dbs_transaction_history_csv_v1": frozenset({"DBS"}),
+    "ocbc_account_csv_v1": frozenset({"OCBC"}),
+    "uob_account_xls_v1": frozenset({"UOB"}),
+    "dbs_credit_card_csv_v1": frozenset({"DBS"}),
+    "uob_credit_card_xls_v1": frozenset({"UOB"}),
+    "citi_credit_card_csv_v1": frozenset({"CITI", "CITIBANK"}),
+    "ibkr_activity_csv_v1": frozenset({"IBKR"}),
+    "sharekhan_holdings_xls_v1": frozenset({"SHAREKHAN"}),
+    "dbs_vickers_holdings_xls_v1": frozenset({"DBS_VICKERS", "VICKERS"}),
+}
+
 # How each parser's files are named in messages.
 PARSER_FILE_LABELS: dict[str, str] = {
     "dbs_transaction_history_csv_v1": "DBS bank-account statement",

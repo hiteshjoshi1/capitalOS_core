@@ -10,6 +10,8 @@ export BACKUP_DIR="" BACKUP_OFFSITE_DIR="" BACKUP_AGE_RECIPIENT="" BACKUP_AGE_ID
 unset BACKUP_DIR BACKUP_AGE_IDENTITY
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# Never the checkout's state/backup-status.json either (#399): the app reads that one.
+export BACKUP_STATUS_FILE=$tmp/state/backup-status.json
 # shellcheck source=db-backup.sh
 . "$src/scripts/db-backup.sh"
 
@@ -500,6 +502,27 @@ out=$(BACKUP_INDEX_DIR=$ix BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b6 backup_ne
 f2=$(HOME=/Users/x BACKUP_INDEX_DIR= backup_index_of "/Users/x/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups")
 [ "$f2" = "/Users/x/.capitalos/backup/index/Users_x_Library_Mobile_Documents_com_apple_CloudDocs_CapitalOS_backups.index" ] &&
   ok "outside index: an iCloud folder's index defaults to ~/.capitalos/backup/index" || bad "default index path: $f2"
+
+# #399, D-111: the status file the app reads (Data Hub's backup line, the Inbox).
+sf=$tmp/state7/backup-status.json; b7=$tmp/b7; mkdir -p "$b7"; mkset "$b7" 20261103; mkset "$b7" 20261104
+(BACKUP_DIR=$b7 BACKUP_STATUS_FILE=$sf BACKUP_TIME=13:00 write_status run 0)
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["newest_verified_at"].startswith("2026-11-04T03:00:00"), d; assert d["sets"]==2 and d["encrypted"] is True and d["location"]=="local" and d["daily_time"]=="13:00" and d["last_run_ok"] is True, d; assert d["last_run_at"] and d["utc_offset"][0] in "+-", d' "$sf" 2>/dev/null &&
+  ok "status file: newest set, count, encrypted, location, daily time and the run's result, as valid JSON" || bad "status file: $(cat "$sf" 2>&1)"
+if grep -q "$b7" "$sf"; then bad "status file names the backup folder (it must hold no paths)"; else ok "status file: no paths in it"; fi
+(BACKUP_DIR=$b7 BACKUP_STATUS_FILE=$sf write_status)
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["last_run_ok"] is True and d["last_run_at"], d' "$sf" 2>/dev/null &&
+  ok "status file: a prune or status keeps the last run's result" || bad "status file kept run: $(cat "$sf" 2>&1)"
+(BACKUP_DIR=$b7 BACKUP_STATUS_FILE=$sf write_status run 1)
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["last_run_ok"] is False, d' "$sf" 2>/dev/null &&
+  ok "status file: a failed run is recorded" || bad "status file failed run: $(cat "$sf" 2>&1)"
+e7=$tmp/b7e; mkdir -p "$e7"
+(BACKUP_DIR=$e7 BACKUP_STATUS_FILE=$tmp/state8/s.json write_status)
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["newest_verified_at"] is None and d["sets"]==0 and d["last_run_ok"] is None, d' "$tmp/state8/s.json" 2>/dev/null &&
+  ok "status file: no backups yet is valid JSON with nulls" || bad "status file empty: $(cat "$tmp/state8/s.json" 2>&1)"
+i9=$tmp/icloud-home/Library/Mobile\ Documents/com~apple~CloudDocs/B; mkdir -p "$i9"
+(HOME=$tmp/icloud-home BACKUP_DIR=$i9 BACKUP_STATUS_FILE=$tmp/s9.json write_status 2>/dev/null)
+python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); assert d["location"]=="icloud", d' "$tmp/s9.json" 2>/dev/null &&
+  ok "status file: an iCloud Drive folder is reported as icloud" || bad "status file location: $(cat "$tmp/s9.json" 2>&1)"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

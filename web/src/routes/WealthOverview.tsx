@@ -104,6 +104,21 @@ function AssetFreshnessChip({
   );
 }
 
+type AllocView = "platform" | "asset_class" | "currency" | "country";
+
+const regionNames = typeof Intl !== "undefined" && "DisplayNames" in Intl ? new Intl.DisplayNames(["en"], { type: "region" }) : null;
+
+/** "SG" → "Singapore" (#397); an unknown or missing code stays as it is. */
+function countryLabel(code: string): string {
+  const upper = (code || "").toUpperCase();
+  if (!upper || upper === "UNKNOWN") return "Unknown";
+  try {
+    return regionNames?.of(upper) ?? upper;
+  } catch {
+    return upper;
+  }
+}
+
 export default function WealthOverview() {
   // #223: the shared selected month, like every other page. The current month shows the
   // live headline; a past month shows that month-end snapshot, with that month's comparisons.
@@ -111,7 +126,7 @@ export default function WealthOverview() {
 
   const [baseCurrency] = useBaseCurrency();
   const allocDescId = useId();
-  const [allocView, setAllocView] = useState<"platform" | "asset_class">("platform");
+  const [allocView, setAllocView] = useState<AllocView>("platform");
   const [holdingsView, setHoldingsView] = useState<"holdings" | "movers" | "today">("holdings");
 
   // #148: each panel is its own resource. Bootstrap is the lean call, so the hero renders
@@ -134,6 +149,12 @@ export default function WealthOverview() {
     allocation: await api.platformAllocation(month, baseCurrency),
   }));
   // "Since last update" and today's movers are live only: not fetched for a past month.
+  // #397 (U2): net worth by currency comes from the Risk summary's currency exposure (#253);
+  // fetched only when that view is open.
+  const riskRes = useApiResource(
+    allocView === "currency" ? resourceKey("riskSummary", month, baseCurrency) : null,
+    () => api.riskSummary(month, baseCurrency),
+  );
   const sinceUpdateRes = useApiResource(
     isPastMonth(month) ? null : resourceKey("netWorthSinceUpdate", baseCurrency),
     () => api.netWorthSinceUpdate(baseCurrency),
@@ -248,10 +269,46 @@ export default function WealthOverview() {
     [platformAllocation],
   );
 
-  const activeAllocItems = allocView === "platform" ? platformItems : assetClassItems;
-  const formatAllocMoney = allocView === "platform" ? formatPlatformMoney : formatMoney;
-  const allocCurrency = allocView === "platform" ? platformCurrency : bootstrap?.base_currency || selectedBaseCurrency;
-  const allocTotal = allocView === "platform" ? (platformAllocation?.total ?? 0) : grossAssets;
+  // #397 (U2): gross assets by currency (stablecoins count as USD; other crypto isn't a
+  // currency) and by country, each adding up to gross assets like the other two views.
+  const riskSummary = riskRes.data ?? null;
+  const riskCurrency = riskSummary?.base_currency || selectedBaseCurrency;
+  const currencyItems = useMemo(() => {
+    const rows = (riskSummary?.currency_exposure?.items ?? [])
+      .map((item) => ({
+        label: item.currency === "CRYPTO" ? "Crypto (not a currency)" : item.currency,
+        value: item.cash + item.stocks_funds + item.stablecoins + item.crypto,
+      }))
+      .filter((item) => item.value > 0)
+      .sort((a, b) => b.value - a.value);
+    const sum = rows.reduce((acc, item) => acc + item.value, 0);
+    return rows.map((item) => ({ ...item, percent: sum > 0 ? (item.value / sum) * 100 : 0 }));
+  }, [riskSummary]);
+  const currencyTotal = useMemo(() => currencyItems.reduce((acc, item) => acc + item.value, 0), [currencyItems]);
+  const countryItems = useMemo(
+    () =>
+      (summary?.geography ?? [])
+        .filter((item) => item.value > 0)
+        .map((item) => ({ label: countryLabel(item.country), value: item.value, percent: item.percent })),
+    [summary],
+  );
+  const countryTotal = useMemo(() => countryItems.reduce((acc, item) => acc + item.value, 0), [countryItems]);
+
+  const allocViews: Record<AllocView, { items: typeof platformItems; format: (v?: number | null) => string; currency: string; total: number; label: string }> = {
+    platform: { items: platformItems, format: formatPlatformMoney, currency: platformCurrency, total: platformAllocation?.total ?? 0, label: "Allocation by platform" },
+    asset_class: { items: assetClassItems, format: formatMoney, currency: bootstrap?.base_currency || selectedBaseCurrency, total: grossAssets, label: "Allocation by asset class" },
+    currency: { items: currencyItems, format: moneyFormatter(riskCurrency), currency: riskCurrency, total: currencyTotal, label: "Allocation by currency" },
+    country: { items: countryItems, format: formatSummaryMoney, currency: summaryCurrency, total: countryTotal, label: "Allocation by country" },
+  };
+  const activeAlloc = allocViews[allocView];
+  const activeAllocItems = activeAlloc.items;
+  const formatAllocMoney = activeAlloc.format;
+  const allocCurrency = activeAlloc.currency;
+  const allocTotal = activeAlloc.total;
+  // The resource behind the view on screen, for its loading and error states.
+  const allocRes = allocView === "platform" ? platformRes : allocView === "currency" ? riskRes : allocView === "country" ? summaryRes : null;
+  const allocHasData =
+    allocView === "platform" ? platformAllocation != null : allocView === "currency" ? riskSummary != null : allocView === "country" ? summary != null : true;
 
   // The live headline's deltas are the live comparisons (live vs the latest completed
   // month-end, and that month-end a year earlier), #133. A past month's headline is a
@@ -427,7 +484,7 @@ export default function WealthOverview() {
                 </p>
                 <h2 className="coSectionTitle">Where the money sits</h2>
               </div>
-              <div className="coSegmentedControl" role="group" aria-label="Allocation view">
+              <div className="coSegmentedControl coAllocViewControl" role="group" aria-label="Allocation view">
                 <button
                   type="button"
                   className={`coSegmentedBtn${allocView === "platform" ? " coSegmentedBtnActive" : ""}`}
@@ -442,13 +499,27 @@ export default function WealthOverview() {
                 >
                   By asset class
                 </button>
+                <button
+                  type="button"
+                  className={`coSegmentedBtn${allocView === "currency" ? " coSegmentedBtnActive" : ""}`}
+                  onClick={() => setAllocView("currency")}
+                >
+                  By currency
+                </button>
+                <button
+                  type="button"
+                  className={`coSegmentedBtn${allocView === "country" ? " coSegmentedBtnActive" : ""}`}
+                  onClick={() => setAllocView("country")}
+                >
+                  By country
+                </button>
               </div>
             </div>
 
-            {allocView === "platform" && platformRes.isLoading ? (
+            {allocRes && allocRes.isLoading && !allocHasData ? (
               <p className="muted" role="status">Loading allocation…</p>
-            ) : allocView === "platform" && platformRes.error && !platformAllocation ? (
-              <LoadError compact title="Couldn't load the allocation" error={platformRes.error} onRetry={retry(platformRes)} />
+            ) : allocRes && allocRes.error && !allocHasData ? (
+              <LoadError compact title="Couldn't load the allocation" error={allocRes.error} onRetry={retry(allocRes)} />
             ) : activeAllocItems.length > 0 ? (
               <div className="coAllocationCard">
                 <div
@@ -459,10 +530,7 @@ export default function WealthOverview() {
                   aria-describedby={allocDescId}
                 >
                   <span id={allocDescId} className="srOnly">
-                    {describeShares(
-                      allocView === "platform" ? "Allocation by platform" : "Allocation by asset class",
-                      activeAllocItems,
-                    )}
+                    {describeShares(activeAlloc.label, activeAllocItems)}
                   </span>
                   <div className="coAllocationInner">
                     <span className="coAllocationTotalLabel">GROSS ASSETS</span>
@@ -495,6 +563,13 @@ export default function WealthOverview() {
                       {formatMoney(currentNetWorth.total)}
                     </p>
                   ) : null}
+                  {allocView === "currency" ? (
+                    <p className="coAllocationNetLine muted">
+                      Stocks by the currency they trade in, cash by the currency it's held in; stablecoins count as USD.
+                    </p>
+                  ) : allocView === "country" ? (
+                    <p className="coAllocationNetLine muted">Stocks by listing country, cash by the bank's country; crypto counts as US.</p>
+                  ) : null}
                 </div>
               </div>
             ) : (
@@ -508,7 +583,7 @@ export default function WealthOverview() {
               <p className="coEyebrow" id="wealth-signals-heading">
                 SIGNALS
               </p>
-              <h2 className="coSectionTitle">Cash flow, risk, and movement</h2>
+              <h2 className="coSectionTitle">Cash flow, liabilities and largest positions</h2>
             </div>
 
             <div className="coSignalsGrid">

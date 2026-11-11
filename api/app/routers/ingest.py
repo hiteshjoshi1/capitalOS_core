@@ -12,9 +12,18 @@ from app.core.clock import app_today
 from app.auth_context import CurrentUser, account_scope_sql, require_current_user
 from app.db.session import get_db
 from app.fx_backfill import backfill_in_background
-from app.ingestion.runner import PARSER_REGISTRY, create_import_job, run_ingestion
-from app.ingestion.registry import register_signature
-from app.ingestion.account_checks import account_type_of, check_parser_account_type
+from app.ingestion.runner import PARSER_REGISTRY, create_import_job, run_ingestion, stored_upload_name
+from app.ingestion.registry import lookup_parser_key, register_signature
+from app.ingestion.account_checks import (
+    PARSER_ACCOUNT_TYPES,
+    PARSER_FILE_LABELS,
+    PARSER_PLATFORMS,
+    account_type_of,
+    check_parser_account_type,
+    statement_identity,
+)
+from app.ingestion.signature import compute_format_signature
+from app.schemas.ingest import UploadDetectOut
 from app.ingestion.undo import RemovalRefused, remove_import_job
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
@@ -219,6 +228,82 @@ def _check_as_of(as_of: date | None) -> None:
     # One day of slack: the browser's local "today" can be ahead of the app timezone.
     if as_of is not None and as_of > app_today() + timedelta(days=1):
         raise HTTPException(status_code=422, detail="as_of can't be in the future")
+
+
+@router.post("/detect", response_model=UploadDetectOut)
+def ingest_detect(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """Which of the caller's accounts a statement file belongs to, before uploading it (#399,
+    U27). Reads the file's format (the same detection an upload runs) and, where the format names
+    its account, the statement's account number; stores and imports nothing. `suggested_account_id`
+    is set only when exactly one open account fits (or the statement's number is linked to one)."""
+    if not file.filename:
+        raise HTTPException(status_code=422, detail="No filename provided")
+    tmp_path = _spool_upload(file)
+    # Detection keys on the extension (as the stored copy of an upload has it).
+    named = f"{tmp_path}-{stored_upload_name(file.filename)}"
+    try:
+        os.rename(tmp_path, named)
+        try:
+            signature, debug = compute_format_signature(named, platform_hint=None)
+            parser_key = lookup_parser_key(db, signature, signature_debug=debug, platform_hint=None)
+        except Exception:  # noqa: BLE001 - an unreadable file just isn't recognised
+            parser_key = None
+        if not parser_key or parser_key not in PARSER_ACCOUNT_TYPES:
+            return UploadDetectOut(recognised=False)
+        types = sorted(PARSER_ACCOUNT_TYPES[parser_key])
+        platforms = PARSER_PLATFORMS.get(parser_key, frozenset())
+        rows = db.execute(
+            text(
+                """
+                SELECT a.id, UPPER(COALESCE(NULLIF(TRIM(a.platform), ''), p.code, '')) AS platform,
+                       UPPER(COALESCE(a.account_type, '')) AS account_type
+                FROM accounts AS a
+                LEFT JOIN platforms AS p ON p.id = a.platform_id
+                WHERE a.closed_on IS NULL AND """
+                + account_scope_sql("a")
+                + " ORDER BY a.id"
+            ),
+            {"current_user_id": current_user.id},
+        ).mappings().all()
+        candidates = [
+            int(r["id"]) for r in rows if r["account_type"] in types and (not platforms or r["platform"] in platforms)
+        ]
+        suggested = candidates[0] if len(candidates) == 1 else None
+        identity = None
+        try:
+            identity = statement_identity(parser_key, named, None)
+        except Exception:  # noqa: BLE001
+            identity = None
+        if identity is not None and len(candidates) > 1:
+            linked = [
+                int(r[0])
+                for r in db.execute(
+                    text("SELECT account_id FROM account_statement_identities WHERE identity_hash = :h"),
+                    {"h": identity.identity_hash},
+                ).fetchall()
+                if int(r[0]) in candidates
+            ]
+            if linked:
+                suggested = min(linked)
+        return UploadDetectOut(
+            recognised=True,
+            parser_key=parser_key,
+            file_label=PARSER_FILE_LABELS.get(parser_key),
+            account_types=types,
+            candidate_account_ids=candidates,
+            suggested_account_id=suggested,
+            statement_last4=identity.last4 if identity else None,
+        )
+    finally:
+        for path in (tmp_path, named):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
 
 @router.post("/upload")

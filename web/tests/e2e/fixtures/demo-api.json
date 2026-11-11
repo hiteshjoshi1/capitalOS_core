@@ -1413,10 +1413,10 @@
    "currency_breakdown": [
     {
      "currency": "USD",
-     "current_value": 1440053.5,
+     "current_value": 1439896.54,
      "snapshot_value": 1420281.12345,
-     "delta_abs": 19772.376549999928,
-     "delta_pct": 0.013921452748714223
+     "delta_abs": 19615.41655,
+     "delta_pct": 0.013810939416241947
     },
     {
      "currency": "SGD",
@@ -1424,30 +1424,121 @@
      "snapshot_value": 1034250,
      "delta_abs": 15750,
      "delta_pct": 0.015228426395939087
-    },
-    {
-     "currency": "HKD",
-     "current_value": 0,
-     "snapshot_value": 0,
-     "delta_abs": 0,
-     "delta_pct": null
-    },
-    {
-     "currency": "INR",
-     "current_value": 0,
-     "snapshot_value": 0,
-     "delta_abs": 0,
-     "delta_pct": null
-    },
-    {
-     "currency": "Other",
-     "current_value": 0,
-     "snapshot_value": 0,
-     "delta_abs": 0,
-     "delta_pct": null
     }
    ],
-   "snapshot_missing": false
+   "snapshot_missing": false,
+   "accounts": [
+    {
+     "account_id": 5,
+     "kind": "account",
+     "label": "DUMMY - IBKR Global",
+     "platform": "IBKR",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 924704.2,
+     "snapshot_value": 912107.1435,
+     "delta_abs": 12597.0565,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": 2,
+     "kind": "account",
+     "label": "DUMMY - DBS Savings",
+     "platform": "DBS",
+     "currencies": [
+      "SGD"
+     ],
+     "current_value": 400000,
+     "snapshot_value": 394000,
+     "delta_abs": 6000,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": 3,
+     "kind": "account",
+     "label": "DUMMY - OCBC 360",
+     "platform": "OCBC",
+     "currencies": [
+      "SGD"
+     ],
+     "current_value": 350000,
+     "snapshot_value": 344750,
+     "delta_abs": 5250,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": null,
+     "kind": "stablecoin",
+     "label": "Stablecoins · Ethereum",
+     "platform": "Ethereum",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 330251.5,
+     "snapshot_value": 325752.55125,
+     "delta_abs": 4498.94875,
+     "last_data_date": "2026-11-11",
+     "stale": null
+    },
+    {
+     "account_id": 4,
+     "kind": "account",
+     "label": "DUMMY - UOB One",
+     "platform": "UOB",
+     "currencies": [
+      "SGD"
+     ],
+     "current_value": 300000,
+     "snapshot_value": 295500,
+     "delta_abs": 4500,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": null,
+     "kind": "stablecoin",
+     "label": "Stablecoins · Solana",
+     "platform": "Solana",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 105680.48,
+     "snapshot_value": 104240.8164,
+     "delta_abs": 1439.6636,
+     "last_data_date": "2026-11-11",
+     "stale": null
+    },
+    {
+     "account_id": null,
+     "kind": "stablecoin",
+     "label": "Stablecoins · Arbitrum",
+     "platform": "Arbitrum",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 79260.36,
+     "snapshot_value": 78180.6123,
+     "delta_abs": 1079.7477,
+     "last_data_date": "2026-11-11",
+     "stale": null
+    }
+   ],
+   "fx_revaluation": {
+    "total": -1273.5065,
+    "from_at": "2026-11-01T00:00:00+00:00",
+    "to_at": "2026-11-11T20:27:31+08:00",
+    "items": [
+     {
+      "currency": "USD",
+      "start_value": 912107.1435,
+      "fx_effect": -1273.5065
+     }
+    ]
+   }
   }
  },
  "/dashboard/data-hub-summary": {
@@ -4659,7 +4750,39 @@
     "compare_value": 6536003.26025146,
     "compare_month": "2026-10",
     "baseline_missing": false
-   }
+   },
+   "platform_totals": [
+    {
+     "platform": "IBKR",
+     "value": 5510871.834718292,
+     "cost_basis": 4802298.090307368,
+     "unrealised_pnl": 708573.7444109237,
+     "unrealised_pnl_pct": 14.754888827935542,
+     "positions": 27,
+     "positions_without_cost": 0,
+     "value_without_cost": 0.0
+    },
+    {
+     "platform": "DBS_VICKERS",
+     "value": 1758000.0,
+     "cost_basis": 1528000.0,
+     "unrealised_pnl": 230000.0,
+     "unrealised_pnl_pct": 15.052356020942408,
+     "positions": 5,
+     "positions_without_cost": 0,
+     "value_without_cost": 0.0
+    },
+    {
+     "platform": "DBS",
+     "value": 300000.0,
+     "cost_basis": 300000.0,
+     "unrealised_pnl": 0.0,
+     "unrealised_pnl_pct": 0.0,
+     "positions": 1,
+     "positions_without_cost": 0,
+     "value_without_cost": 0.0
+    }
+   ]
   }
  },
  "/dashboard/summary?month=2026-11&base_currency=SGD&compare=prev_month%2Cprev_year": {
@@ -5843,6 +5966,74 @@
    },
    "cash_percent": 18.88,
    "data_completeness_indicators": null
+  }
+ },
+ "/dividends/by-company?from_month=2025-12&to_month=2026-11&base_currency=SGD&assumed_tax_rate=0": {
+  "status": 200,
+  "body": {
+   "fx_incomplete": false,
+   "fx_missing_currencies": [],
+   "fx_stale_currencies": [],
+   "from_month": "2025-12",
+   "to_month": "2026-11",
+   "base_currency": "SGD",
+   "assumed_tax_rate": 0,
+   "country_tax_rates": {},
+   "items": [
+    {
+     "gross": 20800,
+     "withholding": 0,
+     "net_received": 20800,
+     "estimated_tax": 0,
+     "payout_minus_tax": 20800,
+     "asset_id": 29,
+     "symbol": "D05",
+     "company": "DBS Group Holdings Ltd.",
+     "country": "SG",
+     "yield_pct": 3.301587301587302
+    }
+   ],
+   "totals": {
+    "gross": 20800,
+    "withholding": 0,
+    "net_received": 20800,
+    "estimated_tax": 0,
+    "payout_minus_tax": 20800
+   }
+  }
+ },
+ "/dividends/by-company?from_month=2026-01&to_month=2026-11&base_currency=SGD&assumed_tax_rate=0": {
+  "status": 200,
+  "body": {
+   "fx_incomplete": false,
+   "fx_missing_currencies": [],
+   "fx_stale_currencies": [],
+   "from_month": "2026-01",
+   "to_month": "2026-11",
+   "base_currency": "SGD",
+   "assumed_tax_rate": 0,
+   "country_tax_rates": {},
+   "items": [
+    {
+     "gross": 20800,
+     "withholding": 0,
+     "net_received": 20800,
+     "estimated_tax": 0,
+     "payout_minus_tax": 20800,
+     "asset_id": 29,
+     "symbol": "D05",
+     "company": "DBS Group Holdings Ltd.",
+     "country": "SG",
+     "yield_pct": 3.301587301587302
+    }
+   ],
+   "totals": {
+    "gross": 20800,
+    "withholding": 0,
+    "net_received": 20800,
+    "estimated_tax": 0,
+    "payout_minus_tax": 20800
+   }
   }
  },
  "/dividends/by-company?from_month=2026-11&to_month=2026-11&base_currency=SGD&assumed_tax_rate=0": {
@@ -9392,6 +9583,283 @@
      "category": "Interest",
      "amount": 114.86
     }
+   ]
+  }
+ },
+ "/currencies": {
+  "status": 200,
+  "body": [
+   {
+    "id": 30,
+    "code": "AED",
+    "name": "UAE Dirham",
+    "country": "United Arab Emirates"
+   },
+   {
+    "id": 34,
+    "code": "ARS",
+    "name": "Argentine Peso",
+    "country": "Argentina"
+   },
+   {
+    "id": 6,
+    "code": "AUD",
+    "name": "Australian Dollar",
+    "country": "Australia"
+   },
+   {
+    "id": 16,
+    "code": "BDT",
+    "name": "Bangladeshi Taka",
+    "country": "Bangladesh"
+   },
+   {
+    "id": 15,
+    "code": "BRL",
+    "name": "Brazilian Real",
+    "country": "Brazil"
+   },
+   {
+    "id": 7,
+    "code": "CAD",
+    "name": "Canadian Dollar",
+    "country": "Canada"
+   },
+   {
+    "id": 38,
+    "code": "CDF",
+    "name": "Congolese Franc",
+    "country": "DR Congo"
+   },
+   {
+    "id": 8,
+    "code": "CHF",
+    "name": "Swiss Franc",
+    "country": "Switzerland"
+   },
+   {
+    "id": 36,
+    "code": "CLP",
+    "name": "Chilean Peso",
+    "country": "Chile"
+   },
+   {
+    "id": 5,
+    "code": "CNY",
+    "name": "Chinese Renminbi (Yuan)",
+    "country": "China"
+   },
+   {
+    "id": 33,
+    "code": "COP",
+    "name": "Colombian Peso",
+    "country": "Colombia"
+   },
+   {
+    "id": 26,
+    "code": "EGP",
+    "name": "Egyptian Pound",
+    "country": "Egypt"
+   },
+   {
+    "id": 19,
+    "code": "ETB",
+    "name": "Ethiopian Birr",
+    "country": "Ethiopia"
+   },
+   {
+    "id": 2,
+    "code": "EUR",
+    "name": "Euro",
+    "country": "European Union (Eurozone)"
+   },
+   {
+    "id": 4,
+    "code": "GBP",
+    "name": "British Pound",
+    "country": "United Kingdom"
+   },
+   {
+    "id": 9,
+    "code": "HKD",
+    "name": "Hong Kong Dollar",
+    "country": "Hong Kong (SAR)"
+   },
+   {
+    "id": 12,
+    "code": "IDR",
+    "name": "Indonesian Rupiah",
+    "country": "Indonesia"
+   },
+   {
+    "id": 32,
+    "code": "ILS",
+    "name": "Israeli New Shekel",
+    "country": "Israel"
+   },
+   {
+    "id": 11,
+    "code": "INR",
+    "name": "Indian Rupee",
+    "country": "India"
+   },
+   {
+    "id": 31,
+    "code": "IQD",
+    "name": "Iraqi Dinar",
+    "country": "Iraq"
+   },
+   {
+    "id": 27,
+    "code": "IRR",
+    "name": "Iranian Rial",
+    "country": "Iran"
+   },
+   {
+    "id": 3,
+    "code": "JPY",
+    "name": "Japanese Yen",
+    "country": "Japan"
+   },
+   {
+    "id": 25,
+    "code": "KRW",
+    "name": "South Korean Won",
+    "country": "South Korea"
+   },
+   {
+    "id": 18,
+    "code": "MXN",
+    "name": "Mexican Peso",
+    "country": "Mexico"
+   },
+   {
+    "id": 23,
+    "code": "MYR",
+    "name": "Malaysian Ringgit",
+    "country": "Malaysia"
+   },
+   {
+    "id": 14,
+    "code": "NGN",
+    "name": "Nigerian Naira",
+    "country": "Nigeria"
+   },
+   {
+    "id": 10,
+    "code": "NZD",
+    "name": "New Zealand Dollar",
+    "country": "New Zealand"
+   },
+   {
+    "id": 35,
+    "code": "PEN",
+    "name": "Peruvian Sol",
+    "country": "Peru"
+   },
+   {
+    "id": 20,
+    "code": "PHP",
+    "name": "Philippine Peso",
+    "country": "Philippines"
+   },
+   {
+    "id": 13,
+    "code": "PKR",
+    "name": "Pakistani Rupee",
+    "country": "Pakistan"
+   },
+   {
+    "id": 17,
+    "code": "RUB",
+    "name": "Russian Ruble",
+    "country": "Russia"
+   },
+   {
+    "id": 29,
+    "code": "SAR",
+    "name": "Saudi Riyal",
+    "country": "Saudi Arabia"
+   },
+   {
+    "id": 24,
+    "code": "SGD",
+    "name": "Singapore Dollar",
+    "country": "Singapore"
+   },
+   {
+    "id": 22,
+    "code": "THB",
+    "name": "Thai Baht",
+    "country": "Thailand"
+   },
+   {
+    "id": 28,
+    "code": "TRY",
+    "name": "Turkish Lira",
+    "country": "Turkey"
+   },
+   {
+    "id": 39,
+    "code": "TZS",
+    "name": "Tanzanian Shilling",
+    "country": "Tanzania"
+   },
+   {
+    "id": 1,
+    "code": "USD",
+    "name": "U.S. Dollar",
+    "country": "United States"
+   },
+   {
+    "id": 37,
+    "code": "VES",
+    "name": "Venezuelan Bolívar",
+    "country": "Venezuela"
+   },
+   {
+    "id": 21,
+    "code": "VND",
+    "name": "Vietnamese Dong",
+    "country": "Vietnam"
+   },
+   {
+    "id": 40,
+    "code": "ZAR",
+    "name": "South African Rand",
+    "country": "South Africa"
+   }
+  ]
+ },
+ "/operations/backup-status": {
+  "status": 200,
+  "body": {
+   "available": false,
+   "last_verified_at": null,
+   "age_hours": null,
+   "stale": false,
+   "very_stale": false,
+   "next_run_at": null,
+   "daily_time": null,
+   "location": null,
+   "location_label": null,
+   "sets": null,
+   "encrypted": null,
+   "last_run_at": null,
+   "last_run_ok": null,
+   "status_written_at": null
+  }
+ },
+ "/settings/facts": {
+  "status": 200,
+  "body": {
+   "snapshot_day": 1,
+   "upload_stale_days": 30,
+   "base_currencies": [
+    "SGD",
+    "USD",
+    "HKD",
+    "INR"
    ]
   }
  }

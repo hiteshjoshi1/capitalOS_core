@@ -29,6 +29,9 @@ type Props = {
   /** The app's selected month (#223), marked on the chart: its point, or "now" for the open month. */
   selectedMonth?: string | null;
   onSelectMonth?: (month: string) => void;
+  /** #398 (U21): the same month a year earlier for each point (null: no data), drawn as a
+   * dashed "last year" line in Total mode. */
+  lastYear?: (number | null)[] | null;
 };
 
 const M = { l: 60, r: 24, t: 20, b: 30 };
@@ -56,6 +59,7 @@ export default function WealthHistoryChart({
   formatMoneyShort,
   selectedMonth = null,
   onSelectMonth,
+  lastYear = null,
 }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
@@ -89,13 +93,14 @@ export default function WealthHistoryChart({
       for (const s of seriesDefs) vals.push(p[s.key] as number);
     }
     for (const s of seriesDefs) vals.push(now[s.key] as number);
+    for (const v of lastYear ?? []) if (v != null) vals.push(v);
     if (vals.length === 0) return { lo: 0, hi: 1 };
     let min = Math.min(...vals, mode === "comp" ? 0 : Math.min(...vals));
     const max = Math.max(...vals);
     if (mode === "comp") min = Math.min(0, min);
     const pad = (max - min) * 0.1 || Math.abs(max) * 0.1 || 1;
     return { lo: min - (mode === "comp" ? 0 : pad), hi: max + pad };
-  }, [points, now, seriesDefs, mode]);
+  }, [points, now, seriesDefs, mode, lastYear]);
 
   const y = (v: number) => M.t + innerH - ((v - lo) / (hi - lo || 1)) * innerH;
 
@@ -272,6 +277,25 @@ export default function WealthHistoryChart({
             </rect>
           ) : null}
 
+          {lastYear
+            ? points.slice(1).map((p, idx) => {
+                const i = idx + 1;
+                const a = lastYear[i - 1];
+                const b = lastYear[i];
+                if (a == null || b == null) return null;
+                return (
+                  <line
+                    key={`last-year-${p.month}`}
+                    x1={xAt(i - 1)}
+                    y1={y(a)}
+                    x2={xAt(i)}
+                    y2={y(b)}
+                    className="whLastYearLine"
+                    data-testid="wh-last-year-segment"
+                  />
+                );
+              })
+            : null}
           {seriesDefs.map((s) => (
             <g key={s.key}>
               {points.slice(1).map((p, idx) => {
@@ -401,6 +425,12 @@ export default function WealthHistoryChart({
                       <span>Total</span>
                       <strong>{formatMoney(hoverPoint.total)}</strong>
                     </div>
+                    {lastYear && hoverIdx != null && lastYear[hoverIdx] != null ? (
+                      <div className="whTooltipRow">
+                        <span>Same month last year</span>
+                        <strong>{formatMoney(lastYear[hoverIdx])}</strong>
+                      </div>
+                    ) : null}
                     <div className="whTooltipRow">
                       <span>Stocks & funds</span>
                       <strong>{formatMoney(hoverPoint.stocks_funds)}</strong>
@@ -473,6 +503,11 @@ export default function WealthHistoryChart({
           {mode === "total" ? (
             <span className="whHonestyItem">
               <span className="whHonestyOutlierMark">!</span> unusual move
+            </span>
+          ) : null}
+          {lastYear ? (
+            <span className="whHonestyItem" data-testid="wh-last-year-legend">
+              <span className="whLastYearKey" /> same month last year
             </span>
           ) : null}
         </div>

@@ -6,13 +6,15 @@ import { MemoryRouter } from "react-router-dom";
 import StockHoldings from "../routes/StockHoldings";
 import { api } from "../lib/api";
 import { ThemeProvider } from "../context/ThemeContext";
-import type { StockHoldingsSummary, StockMonthChange } from "../lib/api";
+import { currentMonthYYYYMM, shiftMonth } from "../lib/selectedMonth";
+import type { DividendCompanyItem, DividendsByCompany, StockHoldingsSummary, StockMonthChange } from "../lib/api";
 
 vi.mock("../lib/api", () => ({
   api: {
     stockHoldingsSummary: vi.fn(),
     marketDataRefreshNow: vi.fn(),
     realisedPnl: vi.fn(),
+    dividendsByCompany: vi.fn(),
   },
 }));
 
@@ -103,12 +105,50 @@ const summaryFixture: StockHoldingsSummary = {
   ],
 };
 
+function dividendsFixture(items: DividendCompanyItem[]): DividendsByCompany {
+  const totals = { gross: 0, withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 };
+  return { from_month: "2026-01", to_month: "2026-02", base_currency: "SGD", assumed_tax_rate: 0, country_tax_rates: {}, items, totals };
+}
+
+function renderPage() {
+  return render(
+    <ThemeProvider>
+      <MemoryRouter>
+        <StockHoldings />
+      </MemoryRouter>
+    </ThemeProvider>,
+  );
+}
+
+const manyPositions = (count: number): StockHoldingsSummary => ({
+  ...summaryFixture,
+  top_holdings: Array.from({ length: count }, (_, idx) => ({
+    asset_id: idx + 100,
+    symbol: `POS${idx + 1}`,
+    asset_class: "STOCK" as const,
+    value: 100000 - idx * 100,
+    percent_of_networth: 10 - idx * 0.01,
+    quantity: idx + 1,
+    avg_cost: 100 + idx,
+    latest_price: 110 + idx,
+    quote_currency: "USD",
+    geo: "US",
+    platform: "IBKR",
+  })),
+});
+
+/** The asset symbols in the holdings table, top to bottom. */
+const tableSymbols = () =>
+  Array.from(document.querySelectorAll(".stockHoldingsTable tbody .stockHoldingsSymbol")).map((el) => el.textContent);
+
 describe("StockHoldings", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // #293: the realised P&L card loads on its own; no sales here.
     const noSales = { realised: 0, sales: 0, cost_unknown: 0, fx_missing_currencies: [], sources: {} };
     mockApi.realisedPnl.mockResolvedValue({ base_currency: "SGD", month: noSales, year_to_date: noSales, sales: [] });
+    // #396 (U8): no dividends unless a test says so.
+    mockApi.dividendsByCompany.mockResolvedValue(dividendsFixture([]));
     window.localStorage.clear();
     Object.defineProperty(window, "innerWidth", { value: 1024, configurable: true, writable: true });
   });
@@ -137,7 +177,9 @@ describe("StockHoldings", () => {
     expect(platformHeading.compareDocumentPosition(trendHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByLabelText("Stock geography exposure pie chart")).toBeInTheDocument();
     expect(screen.getByLabelText("Stock platform exposure pie chart")).toBeInTheDocument();
-    expect(screen.queryByText("Dividends")).not.toBeInTheDocument();
+    // No "Dividends" page link in the header (Income is the nav item); the table's
+    // Dividends column (#396) is a column header, not a link.
+    expect(screen.queryByRole("link", { name: "Dividends" })).not.toBeInTheDocument();
 
     expect(screen.getByLabelText("Base currency")).toBeInTheDocument();
     expect(screen.getByLabelText("Month")).toBeInTheDocument();
@@ -525,7 +567,7 @@ describe("StockHoldings", () => {
     fireEvent.click(sold.getByRole("button", { name: /^AAPL since 28 Feb 2026: -S\$ 5,000, sold/ }));
     expect(sold.getByRole("note")).toHaveTextContent("Quantity-S$ 5,000sold 20 shares");
     expect(sold.getByRole("note")).not.toHaveTextContent("Price");
-    expect(screen.getByText("2 of 2 positions · 1 sold since 28 Feb 2026")).toBeInTheDocument();
+    expect(screen.getByText("2 positions · 1 sold since 28 Feb 2026")).toBeInTheDocument();
   });
 
   it("shows the change and its price / quantity / FX split on the mobile card (#251)", async () => {
@@ -633,88 +675,108 @@ describe("StockHoldings", () => {
     expect(screen.getByRole("button", { name: "Refresh quotes" })).toBeDisabled();
   });
 
-  it("shows top 20 positions first and reveals more on Next", async () => {
-    const manyHoldings: StockHoldingsSummary = {
-      ...summaryFixture,
-      top_holdings: Array.from({ length: 25 }, (_, idx) => ({
-        asset_id: idx + 100,
-        symbol: `POS${idx + 1}`,
-        asset_class: "STOCK" as const,
-        value: 100000 - idx * 1000,
-        percent_of_networth: 10 - idx * 0.1,
-        quantity: idx + 1,
-        avg_cost: 100 + idx,
-        latest_price: 110 + idx,
-        quote_currency: "USD",
-        geo: "US",
-        platform: "IBKR",
-      })),
-    };
+  it("shows every position without paging up to 100 (#396, U6)", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(manyPositions(40));
+    renderPage();
 
-    mockApi.stockHoldingsSummary.mockResolvedValueOnce(manyHoldings);
+    expect(await screen.findByText("40 positions")).toBeInTheDocument();
+    expect(screen.getByText("POS40")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Next" })).not.toBeInTheDocument();
+  });
 
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <StockHoldings />
-        </MemoryRouter>
-      </ThemeProvider>,
-    );
+  it("pages only above 100 positions (#396, U6)", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(manyPositions(105));
+    renderPage();
 
-    expect(await screen.findByText("20 of 25 positions")).toBeInTheDocument();
-    expect(screen.getByText("POS20")).toBeInTheDocument();
-    expect(screen.queryByText("POS21")).not.toBeInTheDocument();
-
+    expect(await screen.findByText("100 of 105 positions")).toBeInTheDocument();
+    expect(screen.queryByText("POS101")).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
-
-    expect(await screen.findByText("25 of 25 positions")).toBeInTheDocument();
-    expect(screen.getByText("POS25")).toBeInTheDocument();
+    expect(await screen.findByText("105 of 105 positions")).toBeInTheDocument();
+    expect(screen.getByText("POS105")).toBeInTheDocument();
   });
 
-  it("renders geography performance for the live period, separate from the allocation pie", async () => {
-    const liveFixture: StockHoldingsSummary = {
+  it("sorts holdings by P&L, change and weight, both ways (#396, U5)", async () => {
+    const change = (abs: number): StockMonthChange => ({
+      abs, pct: null, price_effect: abs, quantity_effect: 0, fx_effect: 0, unsplit: 0, compare_value: 1000, compare_month: "2026-01", side: "held", baseline_missing: false,
+    } as StockMonthChange);
+    const row = (symbol: string, value: number, avg: number, price: number, abs: number) => ({
+      asset_id: symbol.charCodeAt(0), symbol, asset_class: "STOCK" as const, value, percent_of_networth: value / 1000,
+      quantity: 10, avg_cost: avg, latest_price: price, quote_currency: "SGD", geo: "SG", platform: "IBKR", month_change: change(abs),
+    });
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
       ...summaryFixture,
-      is_live: true,
-      geography_performance: [
-        { geography: "US", current_value: 50000, snapshot_value: 48000, delta_abs: 2000, delta_pct: 2000 / 48000 },
-        { geography: "HK", current_value: 120000, snapshot_value: 122000, delta_abs: -2000, delta_pct: -2000 / 122000 },
-      ],
-      geography_performance_as_of: "2026-03-01T09:00:00+00:00",
-    };
-    mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
+      top_holdings: [row("AAA", 3000, 290, 300, 50), row("BBB", 2000, 100, 200, -400), row("CCC", 1000, 150, 100, 900)],
+    });
+    renderPage();
+    await screen.findByText("AAA");
+    expect(tableSymbols()).toEqual(["AAA", "BBB", "CCC"]);
 
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <StockHoldings />
-        </MemoryRouter>
-      </ThemeProvider>,
-    );
+    fireEvent.change(screen.getByLabelText("Sort holdings by"), { target: { value: "pnl" } });
+    // P&L: BBB +1,000, AAA +100, CCC −500.
+    expect(tableSymbols()).toEqual(["BBB", "AAA", "CCC"]);
+    fireEvent.click(screen.getByRole("button", { name: /Sorted high to low/ }));
+    expect(tableSymbols()).toEqual(["CCC", "AAA", "BBB"]);
 
-    expect(await screen.findByText("Geography Performance")).toBeInTheDocument();
-    expect(screen.getByText("United States")).toBeInTheDocument();
-    expect(screen.getByText("+S$ 2,000")).toBeInTheDocument();
-    expect(screen.getByText("Hong Kong")).toBeInTheDocument();
-    expect(screen.getByText("-S$ 2,000")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Δ vs/ }));
+    expect(tableSymbols()).toEqual(["CCC", "AAA", "BBB"]);
+    expect(screen.getByRole("columnheader", { name: /Δ vs/ })).toHaveAttribute("aria-sort", "descending");
+    fireEvent.click(screen.getByRole("button", { name: /Δ vs/ }));
+    expect(tableSymbols()).toEqual(["BBB", "AAA", "CCC"]);
   });
 
-  it("shows a fallback message for geography performance on a historical (non-live) month", async () => {
+  it("shows each geography's change on the page's baseline, for a past month too (#396, U4)", async () => {
     mockApi.stockHoldingsSummary.mockResolvedValueOnce({ ...summaryFixture, is_live: false });
+    renderPage();
 
-    render(
-      <ThemeProvider>
-        <MemoryRouter>
-          <StockHoldings />
-        </MemoryRouter>
-      </ThemeProvider>,
-    );
+    const section = await screen.findByRole("region", { name: "Stock change by geography" });
+    expect(within(section).getByText("Change by geography")).toBeInTheDocument();
+    expect(within(section).getByText("Hong Kong")).toBeInTheDocument();
+    expect(within(section).getByText("+S$ 20,000")).toBeInTheDocument();
+    expect(within(section).getByText("India")).toBeInTheDocument();
+    expect(screen.queryByText("Geography Performance")).not.toBeInTheDocument();
+    expect(screen.queryByText(/only available for the current, live period/)).not.toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("Geography Performance")).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        "Geography performance is only available for the current, live period — pick the current month to see it.",
-      ),
-    ).toBeInTheDocument();
+  it("shows cost and unrealised profit per platform (#396, U7)", async () => {
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce({
+      ...summaryFixture,
+      platform_totals: [
+        { platform: "IBKR", value: 210000, cost_basis: 180000, unrealised_pnl: 30000, unrealised_pnl_pct: 16.6667, positions: 2, positions_without_cost: 1, value_without_cost: 90000 },
+      ],
+    });
+    renderPage();
+
+    const row = await screen.findByTestId("platform-total-IBKR");
+    expect(within(row).getByText("+S$ 30,000")).toBeInTheDocument();
+    expect(within(row).getByText("+16.7%")).toBeInTheDocument();
+    expect(within(row).getByText(/cost S\$ 180,000/)).toBeInTheDocument();
+    expect(within(row).getByText(/1 without a purchase price/)).toBeInTheDocument();
+  });
+
+  it("shows dividends paid this year and the yield per holding, linking to Income (#396, U8)", async () => {
+    const tencent = { asset_id: 1, symbol: "700", company: "Tencent Holdings", country: "HK", withholding: 0, net_received: 0, estimated_tax: 0, payout_minus_tax: 0 };
+    mockApi.dividendsByCompany
+      .mockResolvedValueOnce(dividendsFixture([{ ...tencent, gross: 1200, yield_pct: 1 }]))
+      .mockResolvedValueOnce(dividendsFixture([{ ...tencent, gross: 3000, yield_pct: 2.5 }]));
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    renderPage();
+
+    const link = await screen.findByRole("link", { name: /S\$ 1,200 this year/ });
+    expect(link).toHaveAttribute("href", "/income");
+    expect(within(link).getByText("2.5% yield")).toBeInTheDocument();
+    // Year to date (Jan to the selected month) and the last 12 months.
+    const month = currentMonthYYYYMM();
+    expect(mockApi.dividendsByCompany).toHaveBeenCalledWith(`${month.slice(0, 4)}-01`, month, "SGD");
+    expect(mockApi.dividendsByCompany).toHaveBeenCalledWith(shiftMonth(month, -11), month, "SGD");
+  });
+
+  it("doesn't ask for dividends while the column is hidden (#396, U8)", async () => {
+    window.localStorage.setItem(STOCK_COLUMN_STORAGE_KEY, JSON.stringify({ dividends: false }));
+    mockApi.stockHoldingsSummary.mockResolvedValueOnce(summaryFixture);
+    renderPage();
+
+    await screen.findByText("Tencent Holdings", undefined, { timeout: 2000 }).catch(() => screen.findByText("700"));
+    expect(mockApi.dividendsByCompany).not.toHaveBeenCalled();
   });
 });
 

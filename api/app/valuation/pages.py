@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.portfolio.canonical_reads import get_data_completeness_status
 from app.valuation import clock
-from app.valuation.bridge import AssetChange, stock_asset_changes, stock_mover_key
+from app.valuation.bridge import AssetChange, cash_fx_by_currency, stock_asset_changes, stock_mover_key
 from app.valuation.clock import (
     _add_months,
     _anchor_ts,
@@ -32,6 +32,7 @@ from app.valuation.clock import (
 from app.valuation.exposure import _currency_exposure, _geography, _geography_exposure, _platform_allocation
 from app.valuation.facts import (
     _cash_balances,
+    _cash_account_rows,
     _cash_currency_breakdown,
     _cash_deposits,
     _cash_trend,
@@ -66,7 +67,8 @@ from app.valuation.holdings import (
 )
 from app.valuation.prices import _quote_stale_days
 from app.valuation.state import _effective_as_of, _positions_coverage_as_of, _snapshot_freshness
-from app.valuation.money import D, ZERO, float_edge
+from app.services.source_freshness import source_freshness
+from app.valuation.money import D, ZERO, dsum, float_edge
 
 
 def _summary_top_holdings_limit() -> int:
@@ -450,6 +452,49 @@ def _sold_holding(asset: AssetChange, month_change: Dict[str, Any]) -> Dict[str,
     }
 
 
+def _stock_platform_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per platform: value, cost basis and unrealised P&L in the base currency (#396, U7).
+
+    A row's P&L is quantity x (price - average cost) in its quote currency, taken into the
+    base currency at the rate its value implies (value / (quantity x price)): the same
+    figure as the row's Profit & Loss cell, so a platform's total is the sum of its rows.
+    Cost basis = value - P&L. Rows without an average cost (or price, or quantity) are
+    counted apart (value_without_cost), never as a zero cost.
+    """
+    totals: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        platform = str(row.get("platform") or "UNKNOWN")
+        item = totals.setdefault(
+            platform,
+            {
+                "platform": platform,
+                "value": ZERO,
+                "cost_basis": ZERO,
+                "unrealised_pnl": ZERO,
+                "unrealised_pnl_pct": None,
+                "positions": 0,
+                "positions_without_cost": 0,
+                "value_without_cost": ZERO,
+            },
+        )
+        value = D(row.get("value"))
+        item["value"] += value
+        item["positions"] += 1
+        quantity, avg_cost, price = row.get("quantity"), row.get("avg_cost"), row.get("latest_price")
+        native_value = D(quantity) * D(price) if quantity is not None and price is not None else ZERO
+        if avg_cost is None or native_value <= 0 or row.get("value") is None:
+            item["positions_without_cost"] += 1
+            item["value_without_cost"] += value
+            continue
+        pnl = D(quantity) * (D(price) - D(avg_cost)) * (value / native_value)
+        item["unrealised_pnl"] += pnl
+        item["cost_basis"] += value - pnl
+    for item in totals.values():
+        if item["cost_basis"] > 0:
+            item["unrealised_pnl_pct"] = item["unrealised_pnl"] / item["cost_basis"] * 100
+    return sorted(totals.values(), key=lambda item: (-item["value"], item["platform"]))
+
+
 @float_edge
 def stock_holdings(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
@@ -557,6 +602,8 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "geography_performance": geography_performance,
         "geography_performance_as_of": geography_performance_as_of,
         "platform_breakdown": platform_breakdown,
+        # #396 (U7): cost basis and unrealised P&L per platform, from the rows above.
+        "platform_totals": _stock_platform_totals(top),
         "stock_current_total": stock_exposure["total"],
         "stock_snapshot_total": compare_stock_exposure["total"],
         # The date of the holdings behind stock_snapshot_total (#232).
@@ -779,6 +826,45 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
         "trend": _cash_trend(db, month_start, base_currency, current_user_id),
         "currency_breakdown": _cash_currency_breakdown(current_balances, snapshot_balances),
         "snapshot_missing": baseline_missing(snapshot_cash_as_of, snapshot_total),
+        # #397 (U13): one row per cash account, the first check when net worth looks off.
+        "accounts": _cash_accounts_with_freshness(
+            db, current_user_id, _cash_account_rows(db, effective_anchor, compare_anchor, base_currency, current_user_id), is_live
+        ),
+        # #397 (U14): how much of the change in foreign-currency cash is exchange rates
+        # alone, per currency; the same window and figure as the bridge's FX part for
+        # foreign-currency cash.
+        "fx_revaluation": _cash_fx_revaluation(db, current_user_id, base_currency, compare_anchor, effective_anchor),
+    }
+
+
+def _cash_accounts_with_freshness(
+    db: Session, current_user_id: int, rows: list[Dict[str, Any]], is_live: bool
+) -> list[Dict[str, Any]]:
+    """Adds ``stale`` to each account row: overdue on Data Hub's source freshness
+    (#252) for the live month; None for a past month or a source it doesn't track."""
+    overdue: dict[int, bool] = {}
+    if is_live and any(row["account_id"] is not None for row in rows):
+        for source in source_freshness(db, current_user_id)["sources"]:
+            key = str(source.get("source_key") or "")
+            if key.startswith("account:"):
+                try:
+                    overdue[int(key.split(":", 1)[1])] = bool(source.get("overdue"))
+                except ValueError:
+                    continue
+    for row in rows:
+        row["stale"] = overdue.get(row["account_id"]) if is_live and row["account_id"] is not None else None
+    return rows
+
+
+def _cash_fx_revaluation(
+    db: Session, current_user_id: int, base_currency: str, start: datetime, end: datetime
+) -> Dict[str, Any]:
+    items = cash_fx_by_currency(db, current_user_id, base_currency, start, end)
+    return {
+        "total": dsum(row["fx_effect"] for row in items),
+        "from_at": start.isoformat(),
+        "to_at": end.isoformat(),
+        "items": items,
     }
 
 

@@ -1036,6 +1036,70 @@ a.btn {
   color: var(--bad);
 }
 
+/* #396 (U5): sort control and sortable headers on Stocks. */
+.stockSortControl {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.stockSortControl select {
+  min-height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  background: var(--panel2);
+  color: var(--text);
+  padding: 0 8px;
+  font: inherit;
+}
+
+.stockSortDirection {
+  min-width: 36px;
+  min-height: 36px;
+  justify-content: center;
+}
+
+.stockSortHeader {
+  all: unset;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+.stockSortHeader:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* #396 (U8): dividends per holding, linking to Income. */
+.stockDividends {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-end;
+  color: inherit;
+  text-decoration: none;
+}
+
+.stockDividends:hover span {
+  text-decoration: underline;
+}
+
+.stockDividends small {
+  color: var(--muted);
+}
+
+.stockDividends--card {
+  flex-direction: row;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
 .stockHoldingsControls {
   margin-top: 18px;
   display: flex;
@@ -7126,6 +7190,31 @@ html, body {
   font-size: 13px;
 }
 
+/* Settings → How CapitalOS counts (#399, U24). */
+.settingsFacts {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+.settingsFacts > div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 8px;
+}
+.settingsFacts dt {
+  font-weight: 600;
+}
+.settingsFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .settingsFacts > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 .whGenerateProgress {
   display: flex;
   flex-direction: column;
@@ -7145,4 +7234,45 @@ html, body {
 .whGenerateNote {
   margin: 0 0 12px;
   font-size: 13px;
+}
+
+/* #397 (U13, U14): the Cash page's per-account table and FX revaluation. */
+.cashAccountsNote {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.cashAccountValue {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.cashAccountDelta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cashAccountDelta.isUp {
+  color: var(--delta-up);
+}
+
+.cashAccountDelta.isDown {
+  color: var(--delta-down);
+}
+
+/* #397 (U2): four allocation views don't fit one row on a phone; two by two there. */
+@media (max-width: 600px) {
+  .coAllocViewControl {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-radius: 16px;
+    width: 100%;
+  }
+
+  .coAllocViewControl .coSegmentedBtn {
+    text-align: center;
+  }
 }

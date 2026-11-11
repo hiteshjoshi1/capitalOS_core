@@ -1,10 +1,12 @@
 // Data Hub: inbox, sources, reminders, alerts: API calls (split out of lib/api.ts, #368).
 import { req } from "../http";
-import type { DataHubSummary, InboxResponse, SourceFreshness, SourceFreshnessRow, UnifiedAlertsCount, UnifiedAlertsResponse, UploadReminder, UploadReminderCount } from "../types/dataHub";
+import type { BackupStatus, DataHubSummary, InboxResponse, SettingsFacts, SourceFreshness, SourceFreshnessRow, UnifiedAlertsCount, UnifiedAlertsResponse, UploadReminder, UploadReminderCount } from "../types/dataHub";
 
 export const dataHubClient = {
   dataHubSummary: () => req<DataHubSummary>("/dashboard/data-hub-summary"),
   operationsInbox: () => req<InboxResponse>("/operations/inbox"),
+  backupStatus: () => req<BackupStatus>("/operations/backup-status"),
+  settingsFacts: () => req<SettingsFacts>("/settings/facts"),
   sourceFreshness: () => req<SourceFreshness>("/dashboard/source-freshness"),
   setSourceFreshnessCadence: (sourceKey: string, body: { cadence: string; grace_days: number }) =>
     req<SourceFreshnessRow>(`/dashboard/source-freshness/${encodeURIComponent(sourceKey)}`, {

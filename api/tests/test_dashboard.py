@@ -1257,6 +1257,68 @@ def test_dashboard_cash_deposits_exposes_snapshot_delta_and_trend(client: TestCl
     assert currency_breakdown["USD"]["snapshot_value"] == 300.0
 
 
+def test_dashboard_cash_deposits_accounts_currencies_and_fx_revaluation(client: TestClient, db_engine, monkeypatch):
+    """#397: per-account rows (U13), only held currencies (U12) and the FX
+    revaluation of foreign cash (U14), which is the bridge's cash FX part."""
+    may1 = datetime(2026, 5, 1, tzinfo=timezone.utc)
+    jun1 = datetime(2026, 6, 1, tzinfo=timezone.utc)
+    with db_engine.begin() as conn:
+        conn.execute(text(
+            "INSERT INTO platforms (id, code, name, platform_type, country) VALUES "
+            "(410, 'DBS', 'DBS Bank', 'BANK', 'SG'), (411, 'IBKR', 'Interactive Brokers', 'BROKER', 'US')"
+        ))
+        conn.execute(text(
+            "INSERT INTO accounts (id, name, platform, account_type, currency, country, platform_id, user_id) VALUES "
+            "(410, 'DBS Savings', 'DBS', 'BANK', 'SGD', 'SG', 410, 1), "
+            "(411, 'IBKR Cash', 'IBKR', 'BROKER', 'USD', 'US', 411, 1)"
+        ))
+    for account_id, as_of, currency, value, kind in (
+        (410, may1, "SGD", 1000, "bank_cash"),
+        (411, may1, "USD", 200, "broker_cash"),
+        (410, jun1, "SGD", 1200, "bank_cash"),
+        (411, jun1, "USD", 300, "broker_cash"),
+    ):
+        seed_canonical_account_balance_for_test(
+            db_engine, account_id=account_id, as_of=as_of, currency=currency, balance_base=value, balance_type=kind
+        )
+
+    def rates(when, _base, symbols):
+        usd = 1.5 if when.date() <= may1.date() else 1.4
+        return {s: (usd if s == "USD" else 1.0) for s in symbols}
+
+    monkeypatch.setattr("app.valuation.fx.get_rates", rates)
+    data = client.get("/dashboard/cash-deposits?month=2026-05&base_currency=SGD").json()
+
+    # U12: only the currencies held, largest first; no HKD/INR/Other zero rows.
+    assert [c["currency"] for c in data["currency_breakdown"]] == ["SGD", "USD"]
+
+    # U13: one row per account; the rows add up to the page total.
+    rows = {r["label"]: r for r in data["accounts"]}
+    assert set(rows) == {"DBS Savings", "IBKR Cash"}
+    assert rows["DBS Savings"]["current_value"] == 1200.0
+    assert rows["DBS Savings"]["snapshot_value"] == 1000.0
+    assert rows["DBS Savings"]["delta_abs"] == 200.0
+    assert rows["IBKR Cash"]["current_value"] == pytest.approx(420.0)
+    assert rows["IBKR Cash"]["snapshot_value"] == pytest.approx(300.0)
+    assert rows["IBKR Cash"]["currencies"] == ["USD"]
+    assert rows["IBKR Cash"]["last_data_date"] == "2026-06-01"
+    assert all(r["stale"] is None for r in data["accounts"])  # a past month: no freshness flag
+    assert sum(r["current_value"] for r in data["accounts"]) == pytest.approx(data["current_total"])
+
+    # U14: USD 200 held at the start (S$ 300 at 1.5) revalued to 1.4: -S$ 20, all FX.
+    fx_rev = data["fx_revaluation"]
+    assert [i["currency"] for i in fx_rev["items"]] == ["USD"]
+    assert fx_rev["items"][0]["start_value"] == pytest.approx(300.0)
+    assert fx_rev["items"][0]["fx_effect"] == pytest.approx(-20.0)
+    assert fx_rev["total"] == pytest.approx(-20.0)
+
+    # The same figure as the Overview bridge's FX part for foreign-currency cash.
+    bridge = client.get("/dashboard/month-bridge?month=2026-05&base_currency=SGD").json()
+    fx_line = next(line for line in bridge["lines"] if line["key"] == "fx")
+    cash_part = next(part for part in fx_line["parts"] if part["key"] == "cash")
+    assert cash_part["amount"] == pytest.approx(fx_rev["total"])
+
+
 def test_dashboard_cash_deposits_includes_stablecoins_by_chain(client: TestClient, db_engine, monkeypatch):
     from sqlalchemy import text
     from datetime import datetime, timezone

@@ -8,6 +8,7 @@ import "./OperationsInbox.css";
 import PageShell from "../components/PageShell";
 import * as fmt from "../lib/format";
 import LoadError from "../components/LoadError";
+import BackupStatusLine from "../components/BackupStatusLine";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import { useAuth } from "../context/useAuth";
 import { INBOX_SEVERITY_LABEL, inboxItemRoute } from "../lib/inbox";
@@ -208,6 +209,8 @@ export default function OperationsOverview() {
               </ul>
             </details>
           )}
+
+          <BackupStatusLine />
 
           <Link className="card inboxDetails inboxSourcesLink" to="/operations/sources">
             Every account and source, with its schedule and actions →

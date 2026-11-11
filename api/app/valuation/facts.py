@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Literal, Mapping, overload
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
 from app.auth_context import account_scope_sql
@@ -40,6 +40,7 @@ from app.valuation.prices import (
     _nav_live_price_deltas,
 )
 from app.valuation.state import (
+    CASH_KIND_STABLECOIN,
     CASH_SCOPE_CASH_PAGE,
     _cash_balance_rows,
     _cash_positions,
@@ -493,30 +494,32 @@ def _sum_balances(items: list[dict[str, Any]]) -> Decimal:
     return dsum(item.get("value") for item in items)
 
 
-def _cash_currency_bucket(currency: str | None) -> str:
-    normalized = (currency or "").upper()
-    if normalized in {"USD", "SGD", "HKD", "INR"}:
-        return normalized
-    return "Other"
-
-
-def _cash_currency_value_map(items: list[dict[str, Any]]) -> dict[str, Decimal]:
-    grouped = {"USD": ZERO, "SGD": ZERO, "HKD": ZERO, "INR": ZERO, "Other": ZERO}
-    for item in items:
-        grouped[_cash_currency_bucket(item.get("currency"))] += D(item.get("value"))
-    return grouped
+# Below half a cent, a cash row is nothing (#397): wallet dust, a closed account.
+_CENT = Decimal("0.005")
 
 
 def _cash_currency_breakdown(
     current_balances: list[dict[str, Any]],
     snapshot_balances: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    current_values = _cash_currency_value_map(current_balances)
-    snapshot_values = _cash_currency_value_map(snapshot_balances)
+    """Cash by the currency it is held in, now and at the compare point (#397, U12):
+    every currency the user holds at either point (no fixed USD/SGD/HKD/INR/Other
+    buckets), and none that is zero at both; largest now first."""
+    def _by_currency(items: list[dict[str, Any]]) -> dict[str, Decimal]:
+        out: dict[str, Decimal] = {}
+        for item in items:
+            key = str(item.get("currency") or "").upper() or "Other"
+            out[key] = out.get(key, ZERO) + D(item.get("value"))
+        return out
+
+    current_values = _by_currency(current_balances)
+    snapshot_values = _by_currency(snapshot_balances)
     items: list[dict[str, Any]] = []
-    for currency in ("USD", "SGD", "HKD", "INR", "Other"):
+    for currency in set(current_values) | set(snapshot_values):
         current_value = current_values.get(currency, ZERO)
         snapshot_value = snapshot_values.get(currency, ZERO)
+        if abs(current_value) < _CENT and abs(snapshot_value) < _CENT:
+            continue
         delta_abs = current_value - snapshot_value
         items.append(
             {
@@ -527,6 +530,7 @@ def _cash_currency_breakdown(
                 "delta_pct": (delta_abs / snapshot_value) if snapshot_value > 0 else None,
             }
         )
+    items.sort(key=lambda row: (-row["current_value"], -row["snapshot_value"], row["currency"]))
     return items
 
 
@@ -708,6 +712,80 @@ def _cash_deposits(db: Session, anchor_ts: datetime, base_currency: str, current
             }
         )
     return {"items": items, "total": total}
+
+
+def _cash_account_rows(
+    db: Session,
+    current_anchor: datetime,
+    compare_anchor: datetime,
+    base_currency: str,
+    current_user_id: int,
+) -> list[dict[str, Any]]:
+    """The Cash page's per-account table (#397, U13): each cash account (and each
+    stablecoin source) with its balance now and at the compare point, the change,
+    and the date of its newest data at the current point. The same cash as the page
+    total (Cash-page scope, stablecoins included), so the rows add up to it."""
+    def _key(entry: dict[str, Any]) -> tuple[str, str]:
+        if entry.get("account_id") is not None:
+            return ("account", str(entry["account_id"]))
+        return ("source", str(entry.get("platform") or "UNKNOWN"))
+
+    current: dict[tuple[str, str], dict[str, Any]] = {}
+    compare: dict[tuple[str, str], Decimal] = {}
+    for entry in _cash_positions(db, current_anchor, base_currency, current_user_id, scope=CASH_SCOPE_CASH_PAGE):
+        row = current.setdefault(
+            _key(entry),
+            {"entry": entry, "value": ZERO, "last": None, "currencies": set()},
+        )
+        row["value"] += D(entry["value"])
+        row["currencies"].add(str(entry.get("currency") or base_currency).upper())
+        day = _date_only(entry.get("as_of_date"))
+        if day is not None and (row["last"] is None or day > row["last"]):
+            row["last"] = day
+    first_seen: dict[tuple[str, str], dict[str, Any]] = {}
+    for entry in _cash_positions(db, compare_anchor, base_currency, current_user_id, scope=CASH_SCOPE_CASH_PAGE):
+        key = _key(entry)
+        compare[key] = compare.get(key, ZERO) + D(entry["value"])
+        first_seen.setdefault(key, entry)
+
+    account_ids = sorted(int(k[1]) for k in set(current) | set(compare) if k[0] == "account")
+    names: dict[int, str] = {}
+    if account_ids:
+        for row in db.execute(
+            text("SELECT id, name FROM accounts WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
+            {"ids": account_ids},
+        ).mappings():
+            names[int(row["id"])] = str(row["name"] or "")
+
+    rows: list[dict[str, Any]] = []
+    for key in set(current) | set(compare):
+        now = current.get(key)
+        entry = now["entry"] if now else first_seen[key]
+        value = now["value"] if now else ZERO
+        before = compare.get(key, ZERO)
+        # Nothing (to the cent) now or then: dust in a wallet isn't an account row.
+        if abs(value) < _CENT and abs(before) < _CENT:
+            continue
+        platform = _display_source(entry.get("platform"))
+        if key[0] == "account":
+            label = names.get(int(key[1])) or platform
+        else:
+            label = f"Stablecoins · {platform}"
+        rows.append(
+            {
+                "account_id": int(key[1]) if key[0] == "account" else None,
+                "kind": "stablecoin" if entry.get("kind") == CASH_KIND_STABLECOIN else "account",
+                "label": label,
+                "platform": platform,
+                "currencies": sorted(now["currencies"]) if now else [],
+                "current_value": value,
+                "snapshot_value": before,
+                "delta_abs": value - before,
+                "last_data_date": _iso_value(now["last"]) if now and now["last"] else None,
+            }
+        )
+    rows.sort(key=lambda r: (-r["current_value"], r["label"]))
+    return rows
 
 
 @valuation_cached(shared=True)
