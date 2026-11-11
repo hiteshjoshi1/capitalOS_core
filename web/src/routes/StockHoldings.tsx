@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../lib/api";
-import type { StockHolding } from "../lib/api";
+import type { DividendCompanyItem, StockHolding, StockPlatformTotal } from "../lib/api";
 import { formatPlatformLabel } from "../lib/platformLabels";
-import { monthEndCloseDate, snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
+import { monthEndCloseDate, shiftMonth, snapshotMonthOf, useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import { deltaDirection, deltaPercent, noDataFor } from "../lib/delta";
 import { hasLivePrice, holdingPriceAge } from "../lib/priceAge";
+import { holdingPnlBase } from "../lib/holdingPnl";
 import "../App.css";
 import Delta, { DeltaArrow } from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
@@ -24,9 +25,19 @@ import LoadError from "../components/LoadError";
 /** P&L colour by direction (#268): zero is neutral, not green. */
 const PNL_CLASS = { up: "good", down: "bad", flat: "" } as const;
 
-type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "monthChange" | "pnl" | "percentNetWorth" | "quoteFreshness";
+type StockColumnKey = "shares" | "purchasePrice" | "currentPrice" | "monthChange" | "pnl" | "percentNetWorth" | "dividends" | "quoteFreshness";
 
-const PAGE_SIZE = 20;
+/** #396 (U6): the page's job is the full list; it pages only above this many rows. */
+const PAGE_SIZE = 100;
+
+/** #396 (U5): what the holdings are sorted by. "weight" is the API's order (value, largest first). */
+type SortKey = "weight" | "change" | "pnl" | "name";
+const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
+  { key: "weight", label: "Weight" },
+  { key: "change", label: "Change vs month-end" },
+  { key: "pnl", label: "Profit & Loss" },
+  { key: "name", label: "Name" },
+];
 const MOBILE_BREAKPOINT_PX = 900;
 const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns";
 const STOCK_COLUMN_OPTIONS: Array<{ key: StockColumnKey; label: string; align?: "right" }> = [
@@ -36,6 +47,7 @@ const STOCK_COLUMN_OPTIONS: Array<{ key: StockColumnKey; label: string; align?: 
   { key: "monthChange", label: "Change vs month-end", align: "right" },
   { key: "pnl", label: "Profit & Loss", align: "right" },
   { key: "percentNetWorth", label: "% NW", align: "right" },
+  { key: "dividends", label: "Dividends", align: "right" },
   { key: "quoteFreshness", label: "Quote freshness" },
 ];
 const DEFAULT_VISIBLE_STOCK_COLUMNS: Record<StockColumnKey, boolean> = {
@@ -45,8 +57,16 @@ const DEFAULT_VISIBLE_STOCK_COLUMNS: Record<StockColumnKey, boolean> = {
   monthChange: true,
   pnl: true,
   percentNetWorth: true,
+  dividends: true,
   quoteFreshness: true,
 };
+
+/** Dividends paid on a holding: matched by asset id, else by symbol (#396, U8). */
+function dividendFor(items: DividendCompanyItem[] | undefined, holding: StockHolding): DividendCompanyItem | undefined {
+  if (!items) return undefined;
+  return items.find((item) => holding.asset_id != null && item.asset_id === holding.asset_id)
+    ?? items.find((item) => item.asset_id == null && item.symbol != null && item.symbol.toUpperCase() === holding.symbol.toUpperCase());
+}
 
 const loadVisibleStockColumns = (): Record<StockColumnKey, boolean> => {
   const defaults = { ...DEFAULT_VISIBLE_STOCK_COLUMNS };
@@ -82,6 +102,8 @@ export default function StockHoldings() {
   );
   const summary = resource.data ?? null;
   const [visibleCount, setVisibleCount] = useState<number>(PAGE_SIZE);
+  const [sortKey, setSortKey] = useState<SortKey>("weight");
+  const [sortDesc, setSortDesc] = useState<boolean>(true);
   const [refreshing, setRefreshing] = useState<boolean>(false);
   const [visibleColumns, setVisibleColumns] = useState<Record<StockColumnKey, boolean>>(loadVisibleStockColumns);
   const [isMobile, setIsMobile] = useState<boolean>(() =>
@@ -128,6 +150,41 @@ export default function StockHoldings() {
   useEffect(() => {
     window.localStorage.setItem(STOCK_COLUMN_STORAGE_KEY, JSON.stringify(visibleColumns));
   }, [visibleColumns]);
+
+  // #396 (U8): dividends per holding, only while the column is shown. "This year" is the
+  // selected month's calendar year to date; the yield is the last 12 months' dividends over
+  // the holding's value now (as on Income).
+  const [dividends, setDividends] = useState<{ key: string; ytd: DividendCompanyItem[]; trailing: DividendCompanyItem[] } | null>(null);
+  const dividendsKey = `${month}|${baseCurrency}`;
+  const showDividends = visibleColumns.dividends;
+  useEffect(() => {
+    if (!showDividends) return;
+    let cancelled = false;
+    const year = month.slice(0, 4);
+    Promise.all([
+      api.dividendsByCompany(`${year}-01`, month, baseCurrency),
+      api.dividendsByCompany(shiftMonth(month, -11), month, baseCurrency),
+    ])
+      .then(([ytd, trailing]) => {
+        if (!cancelled) setDividends({ key: dividendsKey, ytd: ytd.items, trailing: trailing.items });
+      })
+      // The column then shows "—": dividends are a side panel, not the page.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [showDividends, month, baseCurrency, dividendsKey]);
+  const shownDividends = dividends && dividends.key === dividendsKey ? dividends : null;
+
+  const handleSort = (key: SortKey) => {
+    if (key === sortKey) {
+      setSortDesc((current) => !current);
+    } else {
+      setSortKey(key);
+      setSortDesc(key !== "name");
+    }
+    setVisibleCount(PAGE_SIZE);
+  };
 
   const onRefresh = async () => {
     try {
@@ -199,7 +256,25 @@ export default function StockHoldings() {
   // #251: holdings held at the compare month-end and sold since, listed after the
   // held ones (value 0, "Sold"), so the rows' changes add up to the headline's.
   const soldHoldings = useMemo(() => summary?.sold_holdings ?? [], [summary]);
-  const rows = useMemo(() => [...holdings, ...soldHoldings], [holdings, soldHoldings]);
+  // #396 (U5): sorted by the chosen column. Sold holdings have a change but no P&L or
+  // weight, so they sort in only by change; otherwise they stay after the held ones.
+  const rows = useMemo(() => {
+    const dir = sortDesc ? -1 : 1;
+    const byNumber = (a: number | null | undefined, b: number | null | undefined) => {
+      if (a == null && b == null) return 0;
+      if (a == null) return 1;
+      if (b == null) return -1;
+      return (a - b) * dir;
+    };
+    if (sortKey === "change") {
+      return [...holdings, ...soldHoldings].sort((a, b) => byNumber(a.month_change?.abs, b.month_change?.abs));
+    }
+    const held = [...holdings];
+    if (sortKey === "pnl") held.sort((a, b) => byNumber(holdingPnlBase(a), holdingPnlBase(b)));
+    else if (sortKey === "name") held.sort((a, b) => (a.name ?? a.symbol).localeCompare(b.name ?? b.symbol) * dir);
+    else if (!sortDesc) held.reverse();
+    return [...held, ...soldHoldings];
+  }, [holdings, soldHoldings, sortKey, sortDesc]);
   const compareCloseDate = monthEndCloseDate(summary?.compare_boundary_at);
   const compareLabel = compareCloseDate
     ? fmt.formatDate(compareCloseDate)
@@ -257,6 +332,8 @@ export default function StockHoldings() {
   const visibleColumnCount = 1 + STOCK_COLUMN_OPTIONS.filter((option) => visibleColumns[option.key]).length;
   const hasMore = visibleCount < rows.length;
   const hasPrevious = visibleCount > PAGE_SIZE;
+  const paged = rows.length > PAGE_SIZE;
+  const platformTotals: StockPlatformTotal[] = summary?.platform_totals ?? [];
   const stockCurrentTotal = summary?.stock_current_total ?? 0;
   const geographyPieItems = useMemo(
     () => (summary?.geography_breakdown ?? [])
@@ -278,19 +355,14 @@ export default function StockHoldings() {
       })),
     [summary?.platform_breakdown],
   );
-  const geographyPerformanceItems = useMemo(
-    () => (summary?.geography_performance ?? [])
+  // #396 (U4): each geography's change on the page's own baseline (the compare
+  // month-end, like the header), for any month, not a separate "since last update".
+  const geographyChangeItems = useMemo(
+    () => (summary?.geography_breakdown ?? [])
       .filter((item) => item.current_value > 0 || item.snapshot_value > 0)
-      .sort((a, b) => b.delta_pct != null && a.delta_pct != null ? b.delta_pct - a.delta_pct : (b.delta_abs - a.delta_abs)),
-    [summary?.geography_performance],
+      .sort((a, b) => b.current_value - a.current_value),
+    [summary?.geography_breakdown],
   );
-  const geographyPerformanceAsOfLabel = useMemo(() => {
-    const raw = summary?.geography_performance_as_of;
-    if (!raw) return null;
-    const parsed = new Date(raw);
-    if (Number.isNaN(parsed.getTime())) return null;
-    return fmt.formatDateTime(raw);
-  }, [summary?.geography_performance_as_of]);
 
   return (
     <PageShell
@@ -401,25 +473,21 @@ export default function StockHoldings() {
             </div>
           </section>
 
-          {/* ── Geography performance (separate from allocation above) ──── */}
-          <section aria-label="Stock geography performance">
+          {/* ── Change by geography, on the page's baseline (#396, U4) ── */}
+          <section aria-label="Stock change by geography">
             <div className="coSectionHeader">
               <div>
                 <p className="coEyebrow">PERFORMANCE</p>
-                <h2 className="coSectionTitle">Geography Performance</h2>
+                <h2 className="coSectionTitle">Change by geography</h2>
               </div>
-              {geographyPerformanceAsOfLabel ? (
-                <span className="muted" style={{ fontSize: "13px" }}>
-                  Since {geographyPerformanceAsOfLabel}
-                </span>
-              ) : null}
+              <span className="muted" style={{ fontSize: "13px" }}>vs {compareLabel}</span>
             </div>
             <div className="card">
-              {!summary?.is_live ? (
-                <p className="muted">Geography performance is only available for the current, live period — pick the current month to see it.</p>
-              ) : geographyPerformanceItems.length > 0 ? (
+              {stockMissingReason ? (
+                <p className="muted">{stockMissingReason}</p>
+              ) : geographyChangeItems.length > 0 ? (
                 <div className="coHoldingsList">
-                  {geographyPerformanceItems.map((item) => (
+                  {geographyChangeItems.map((item) => (
                     <div key={item.geography} className="coHoldingRow">
                       <div className="coHoldingLeft">
                         <strong className="coHoldingSymbol">{formatGeoLabel(item.geography)}</strong>
@@ -437,10 +505,53 @@ export default function StockHoldings() {
                   ))}
                 </div>
               ) : (
-                <p className="muted">No geography performance data yet.</p>
+                <p className="muted">No stocks in this month or the one it's compared with.</p>
               )}
             </div>
           </section>
+
+          {/* ── Cost and unrealised P&L per platform (#396, U7) ──────── */}
+          {platformTotals.length > 0 ? (
+            <section aria-label="Stocks by platform">
+              <div className="coSectionHeader">
+                <div>
+                  <p className="coEyebrow">BY PLATFORM</p>
+                  <h2 className="coSectionTitle">Cost and unrealised profit</h2>
+                </div>
+              </div>
+              <div className="card">
+                <div className="coHoldingsList stockPlatformTotals">
+                  {platformTotals.map((item) => {
+                    const direction = deltaDirection(item.unrealised_pnl);
+                    return (
+                      <div key={item.platform} className="coHoldingRow" data-testid={`platform-total-${item.platform}`}>
+                        <div className="coHoldingLeft">
+                          <strong className="coHoldingSymbol">{formatPlatformLabel(item.platform)}</strong>
+                          <span className="coHoldingClass">
+                            {formatMoney(item.value)} now · cost {formatMoney(item.cost_basis)}
+                            {" · "}{item.positions} {item.positions === 1 ? "position" : "positions"}
+                          </span>
+                          {item.positions_without_cost > 0 ? (
+                            <span className="coHoldingClass muted">
+                              {item.positions_without_cost} without a purchase price ({formatMoney(item.value_without_cost)}) left out of cost and profit
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="coHoldingRight">
+                          <strong className={`coHoldingValue ${PNL_CLASS[direction]}`}>
+                            <DeltaArrow direction={direction} />{fmt.formatSignedMoney(item.unrealised_pnl, shownCurrency)}
+                          </strong>
+                          <span className="coHoldingPct">
+                            {item.unrealised_pnl_pct == null ? fmt.MISSING : fmt.formatPercent(item.unrealised_pnl_pct, { signed: true, scale: "points" })}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {/* ── Trend chart ───────────────────────────────────────────── */}
           <section aria-label="Stock trend">
@@ -477,9 +588,26 @@ export default function StockHoldings() {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
                 <span className="muted" style={{ fontSize: "13px" }}>
-                  {Math.min(visibleHoldings.length, holdings.length)} of {holdings.length} positions
+                  {paged ? `${Math.min(visibleHoldings.length, holdings.length)} of ` : ""}{holdings.length} {holdings.length === 1 ? "position" : "positions"}
                   {soldHoldings.length > 0 ? ` · ${soldHoldings.length} sold since ${compareLabel}` : ""}
                 </span>
+                <label className="stockSortControl">
+                  <span>Sort</span>
+                  <select value={sortKey} onChange={(event) => handleSort(event.target.value as SortKey)} aria-label="Sort holdings by">
+                    {SORT_OPTIONS.map((option) => (
+                      <option key={option.key} value={option.key}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className="btn stockSortDirection"
+                  onClick={() => setSortDesc((current) => !current)}
+                  aria-label={sortDesc ? "Sorted high to low; sort low to high" : "Sorted low to high; sort high to low"}
+                  title={sortDesc ? "High to low" : "Low to high"}
+                >
+                  {sortDesc ? "↓" : "↑"}
+                </button>
                 <button
                   className="btn stockHoldingsRefreshBtn"
                   onClick={onRefresh}
@@ -560,6 +688,9 @@ export default function StockHoldings() {
                             />
                           </div>
                         ) : null}
+                        {!sold && visibleColumns.dividends ? (
+                          <DividendsLine holding={h} dividends={shownDividends} currency={shownCurrency} layout="card" />
+                        ) : null}
                         {sold ? null : (
                           <small className={`priceAge stockHoldingsMobilePriceAge${priceAge.stale ? " priceAge--stale" : ""}`}>
                             {priceAge.text}
@@ -581,9 +712,12 @@ export default function StockHoldings() {
                         {visibleColumns.shares && <th className="right">Shares</th>}
                         {visibleColumns.purchasePrice && <th className="right">Purchase Price</th>}
                         {visibleColumns.currentPrice && <th className="right">Current Price</th>}
-                        {visibleColumns.monthChange && <th className="right">Δ vs {compareLabel}</th>}
-                        {visibleColumns.pnl && <th className="right">Profit &amp; Loss</th>}
-                        {visibleColumns.percentNetWorth && <th className="right">% NW</th>}
+                        {visibleColumns.monthChange && (
+                          <SortHeader label={`Δ vs ${compareLabel}`} sortKey="change" current={sortKey} desc={sortDesc} onSort={handleSort} />
+                        )}
+                        {visibleColumns.pnl && <SortHeader label="Profit & Loss" sortKey="pnl" current={sortKey} desc={sortDesc} onSort={handleSort} />}
+                        {visibleColumns.percentNetWorth && <SortHeader label="% NW" sortKey="weight" current={sortKey} desc={sortDesc} onSort={handleSort} />}
+                        {visibleColumns.dividends && <th className="right">Dividends</th>}
                         {visibleColumns.quoteFreshness && <th>Quote freshness</th>}
                       </tr>
                     </thead>
@@ -618,6 +752,7 @@ export default function StockHoldings() {
                                   <small>{formatMoney(0)}</small>
                                 </td>
                               )}
+                              {visibleColumns.dividends && <td />}
                               {visibleColumns.quoteFreshness && <td />}
                             </tr>
                           );
@@ -664,6 +799,11 @@ export default function StockHoldings() {
                                 <small>{formatMoney(h.value)}</small>
                               </td>
                             )}
+                            {visibleColumns.dividends && (
+                              <td className="right">
+                                <DividendsLine holding={h} dividends={shownDividends} currency={shownCurrency} layout="cell" />
+                              </td>
+                            )}
                             {visibleColumns.quoteFreshness && (
                               <td>
                                 {isLive ? <div>{h.quote_freshness_status ?? "missing"}</div> : null}
@@ -682,7 +822,7 @@ export default function StockHoldings() {
                   </table>
                 </div>
               )}
-              {rows.length > 0 ? (
+              {paged ? (
                 <div className="stockHoldingsControls">
                   <button
                     type="button"
@@ -707,5 +847,46 @@ export default function StockHoldings() {
         </RefreshingRegion>
       )}
     </PageShell>
+  );
+}
+
+/** A sortable column header (#396, U5): a button, with aria-sort on the active one. */
+function SortHeader({ label, sortKey, current, desc, onSort }: {
+  label: string;
+  sortKey: SortKey;
+  current: SortKey;
+  desc: boolean;
+  onSort: (key: SortKey) => void;
+}) {
+  const active = current === sortKey;
+  return (
+    <th className="right" aria-sort={active ? (desc ? "descending" : "ascending") : "none"}>
+      <button type="button" className="stockSortHeader" onClick={() => onSort(sortKey)}>
+        {label}
+        <span aria-hidden="true">{active ? (desc ? " ↓" : " ↑") : ""}</span>
+      </button>
+    </th>
+  );
+}
+
+/** Dividends paid this year and the trailing 12-month yield, linking to Income (#396, U8). */
+function DividendsLine({ holding, dividends, currency, layout }: {
+  holding: StockHolding;
+  dividends: { ytd: DividendCompanyItem[]; trailing: DividendCompanyItem[] } | null;
+  currency: string;
+  layout: "cell" | "card";
+}) {
+  if (!dividends) return <span className="muted">{fmt.MISSING}</span>;
+  const ytd = dividendFor(dividends.ytd, holding);
+  const trailing = dividendFor(dividends.trailing, holding);
+  if (!ytd?.gross && !trailing?.gross) {
+    return layout === "card" ? null : <span className="muted">None</span>;
+  }
+  const yieldText = trailing?.yield_pct != null ? `${fmt.formatPercent(trailing.yield_pct, { scale: "points" })} yield` : null;
+  return (
+    <Link className={`stockDividends stockDividends--${layout}`} to="/income" title="Dividends this year, and the last 12 months' over the value now">
+      <span>{fmt.formatMoney(ytd?.gross ?? 0, currency)} this year</span>
+      {yieldText ? <small>{yieldText}</small> : null}
+    </Link>
   );
 }

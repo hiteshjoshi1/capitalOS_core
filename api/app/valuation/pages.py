@@ -450,6 +450,49 @@ def _sold_holding(asset: AssetChange, month_change: Dict[str, Any]) -> Dict[str,
     }
 
 
+def _stock_platform_totals(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Per platform: value, cost basis and unrealised P&L in the base currency (#396, U7).
+
+    A row's P&L is quantity x (price - average cost) in its quote currency, taken into the
+    base currency at the rate its value implies (value / (quantity x price)): the same
+    figure as the row's Profit & Loss cell, so a platform's total is the sum of its rows.
+    Cost basis = value - P&L. Rows without an average cost (or price, or quantity) are
+    counted apart (value_without_cost), never as a zero cost.
+    """
+    totals: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        platform = str(row.get("platform") or "UNKNOWN")
+        item = totals.setdefault(
+            platform,
+            {
+                "platform": platform,
+                "value": ZERO,
+                "cost_basis": ZERO,
+                "unrealised_pnl": ZERO,
+                "unrealised_pnl_pct": None,
+                "positions": 0,
+                "positions_without_cost": 0,
+                "value_without_cost": ZERO,
+            },
+        )
+        value = D(row.get("value"))
+        item["value"] += value
+        item["positions"] += 1
+        quantity, avg_cost, price = row.get("quantity"), row.get("avg_cost"), row.get("latest_price")
+        native_value = D(quantity) * D(price) if quantity is not None and price is not None else ZERO
+        if avg_cost is None or native_value <= 0 or row.get("value") is None:
+            item["positions_without_cost"] += 1
+            item["value_without_cost"] += value
+            continue
+        pnl = D(quantity) * (D(price) - D(avg_cost)) * (value / native_value)
+        item["unrealised_pnl"] += pnl
+        item["cost_basis"] += value - pnl
+    for item in totals.values():
+        if item["cost_basis"] > 0:
+            item["unrealised_pnl_pct"] = item["unrealised_pnl"] / item["cost_basis"] * 100
+    return sorted(totals.values(), key=lambda item: (-item["value"], item["platform"]))
+
+
 @float_edge
 def stock_holdings(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
@@ -557,6 +600,8 @@ def stock_holdings(db: Session, current_user_id: int, month: str, month_start: d
         "geography_performance": geography_performance,
         "geography_performance_as_of": geography_performance_as_of,
         "platform_breakdown": platform_breakdown,
+        # #396 (U7): cost basis and unrealised P&L per platform, from the rows above.
+        "platform_totals": _stock_platform_totals(top),
         "stock_current_total": stock_exposure["total"],
         "stock_snapshot_total": compare_stock_exposure["total"],
         # The date of the holdings behind stock_snapshot_total (#232).
