@@ -96,6 +96,12 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   personal folders): every backup folder keeps `.capitalos-index` (a new set is added, prune rewrites it;
   a pre-#383 `.capitalos-offsite-index` is adopted), read wherever listing is refused, rebuilt from a listing
   where it works. Don't grant `/bin/bash` Full Disk Access (too broad); keep backups out of personal folders.
+- In the app (#399, D-111): after each backup, prune and `make backup-status`, the script writes
+  `state/backup-status.json` (newest verified time, count, encrypted, icloud/local, daily time, UTC offset, last
+  run ok; no paths or keys). Compose mounts `./state` read-only into the API: `GET /operations/backup-status`,
+  Data Hub's "Last verified backup … · next … · iCloud Drive" line (amber after 2 days, red after 7 or a failed
+  run) and a `backup_stale` Inbox item. `state/` is not `data/`, so it's never archived. Worktrees and the test
+  instance have no status file: nothing shows. `scripts/test-db-backup.sh` writes its own temp status file.
 - `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
   is down).
 

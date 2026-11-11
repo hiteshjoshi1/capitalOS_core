@@ -116,6 +116,7 @@ export type InboxItem = {
     | "unmapped_transactions"
     | "card_due_soon"
     | "card_overdue"
+    | "backup_stale"
     | string;
   severity: "high" | "medium" | "low";
   title: string;
@@ -178,4 +179,32 @@ export type UnifiedAlertsResponse = {
 /** GET /alerts/notifications/count (#149): /alerts/notifications' total_count only. */
 export type UnifiedAlertsCount = {
   total_count: number;
+};
+
+/** GET /operations/backup-status (#399, U22, D-111). `available` false: no backup has reported
+ *  here (a worktree or the test instance). Times are ISO 8601 with the Mac's offset. */
+export type BackupStatus = {
+  available: boolean;
+  last_verified_at: string | null;
+  age_hours: number | null;
+  /** No verified backup in 48 hours, or the last daily run failed. */
+  stale: boolean;
+  /** Over 7 days, or the last run failed. */
+  very_stale: boolean;
+  next_run_at: string | null;
+  daily_time: string | null;
+  location: "icloud" | "local" | null;
+  location_label: string | null;
+  sets: number | null;
+  encrypted: boolean | null;
+  last_run_at: string | null;
+  last_run_ok: boolean | null;
+  status_written_at: string | null;
+};
+
+/** GET /settings/facts (#399, U24): read-only server settings the Settings page explains. */
+export type SettingsFacts = {
+  snapshot_day: number;
+  upload_stale_days: number;
+  base_currencies: string[];
 };

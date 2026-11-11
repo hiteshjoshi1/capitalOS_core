@@ -17,6 +17,7 @@ vi.mock("../lib/api", async (importOriginal) => {
       ingestJobs: vi.fn(),
       ingestJob: vi.fn(),
       ingestUpload: vi.fn(),
+      ingestDetect: vi.fn(),
       registerIngestSignature: vi.fn(),
       removeIngestJob: vi.fn(),
     },
@@ -99,6 +100,15 @@ describe("Statement date helpers (#141)", () => {
 describe("Ingest", () => {
   beforeEach(() => {
     mockApi.ingestJobs.mockResolvedValue([]);
+    mockApi.ingestDetect.mockResolvedValue({
+      recognised: false,
+      parser_key: null,
+      file_label: null,
+      account_types: [],
+      candidate_account_ids: [],
+      suggested_account_id: null,
+      statement_last4: null,
+    });
   });
 
   it("sends the chosen statement date and shows where the snapshot date came from", async () => {
@@ -126,7 +136,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     const dateInput = screen.getByLabelText("Statement date") as HTMLInputElement;
     expect(dateInput.value).toBe(todayLocalYYYYMMDD());
 
@@ -153,7 +163,7 @@ describe("Ingest", () => {
         </MemoryRouter>
       </ThemeProvider>
     );
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     const dateInput = screen.getByLabelText("Statement date") as HTMLInputElement;
     const file = new File(["data"], "portfolio_23_June_2025.xls", { type: "application/vnd.ms-excel" });
     await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, file);
@@ -186,7 +196,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
 
     expect(screen.getByRole("option", { name: `${account.name} (${account.currency})` })).toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText("Account"), "1");
@@ -313,7 +323,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "8");
     const file = new File(["data"], "test.csv", { type: "text/csv" });
     await userEvent.upload(screen.getByLabelText("Statement file"), file);
@@ -352,7 +362,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "9");
     const file = new File(["data"], "uob.xls", { type: "application/vnd.ms-excel" });
     await userEvent.upload(screen.getByLabelText("Statement file"), file);
@@ -398,7 +408,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "2");
 
     const file = new File(["data"], "sharekhan.xls", { type: "application/vnd.ms-excel" });
@@ -494,7 +504,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "3");
 
     const file = new File(["data"], "dbs_vickers.xls", { type: "application/vnd.ms-excel" });
@@ -543,7 +553,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "4");
 
     const file = new File(["data"], "citi_credit_card_sample.csv", { type: "text/csv" });
@@ -592,7 +602,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "5");
 
     const file = new File(["data"], "uob_account.xls", { type: "application/vnd.ms-excel" });
@@ -652,7 +662,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "6");
 
     const file = new File(["data"], "uob_account.xls", { type: "application/vnd.ms-excel" });
@@ -715,7 +725,7 @@ describe("Ingest", () => {
       </ThemeProvider>
     );
 
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "16");
 
     const file = new File(["data"], "uob_credit_card.xls", { type: "application/vnd.ms-excel" });
@@ -813,7 +823,7 @@ describe("Ingest", () => {
         </MemoryRouter>
       </ThemeProvider>
     );
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "5");
     const file = new File(["data"], "dbs.csv", { type: "text/csv" });
     await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, file);
@@ -851,7 +861,7 @@ describe("Ingest", () => {
         </MemoryRouter>
       </ThemeProvider>
     );
-    await screen.findByText("Upload Statement CSV");
+    await screen.findByText("Upload a statement");
     await userEvent.selectOptions(screen.getByLabelText("Account"), "7");
     await userEvent.upload(screen.getByLabelText("Statement file") as HTMLInputElement, new File(["d"], "dbs.csv"));
     await userEvent.click(screen.getByRole("button", { name: "Upload statement" }));

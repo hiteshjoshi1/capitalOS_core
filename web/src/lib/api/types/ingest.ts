@@ -59,3 +59,16 @@ export type ImportJobDetail = {
   };
   report: Record<string, unknown> | string | null;
 };
+
+/** POST /ingest/detect (#399, U27): what a statement file is and which account it fits;
+ *  nothing is stored. `suggested_account_id` only when exactly one open account fits (or the
+ *  statement's number is linked to one). */
+export type UploadDetect = {
+  recognised: boolean;
+  parser_key: string | null;
+  file_label: string | null;
+  account_types: string[];
+  candidate_account_ids: number[];
+  suggested_account_id: number | null;
+  statement_last4: string | null;
+};

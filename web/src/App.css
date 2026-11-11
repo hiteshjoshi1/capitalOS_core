@@ -7190,6 +7190,31 @@ html, body {
   font-size: 13px;
 }
 
+/* Settings → How CapitalOS counts (#399, U24). */
+.settingsFacts {
+  display: grid;
+  gap: 10px;
+  margin: 8px 0 0;
+}
+.settingsFacts > div {
+  display: grid;
+  grid-template-columns: 7rem 1fr;
+  gap: 8px;
+}
+.settingsFacts dt {
+  font-weight: 600;
+}
+.settingsFacts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .settingsFacts > div {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}
+
 .whGenerateProgress {
   display: flex;
   flex-direction: column;

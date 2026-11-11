@@ -1,7 +1,7 @@
 // Uploads and import jobs: API calls (split out of lib/api.ts, #368).
 import { UploadRefusedError, uploadRefusalFrom } from "../errors";
 import { API_BASE, buildHeaders, formatHttpError, req } from "../http";
-import type { ImportJobDetail, ImportJobListItem, ImportJobRemoval } from "../types/ingest";
+import type { ImportJobDetail, ImportJobListItem, ImportJobRemoval, UploadDetect } from "../types/ingest";
 
 export const ingestClient = {
   // asOf (YYYY-MM-DD): the statement's date, used when the file states none of its own (#141).
@@ -54,6 +54,19 @@ export const ingestClient = {
       throw new Error(formatHttpError(res.status, text));
     }
     return res.json() as Promise<Record<string, unknown>>;
+  },
+  // #399: which account a statement fits, before uploading it (nothing is stored).
+  ingestDetect: async (file: File): Promise<UploadDetect> => {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API_BASE}/ingest/detect`, {
+      method: "POST",
+      credentials: "include",
+      headers: buildHeaders(undefined, { includeJsonContentType: false }),
+      body: form,
+    });
+    if (!res.ok) throw new Error(formatHttpError(res.status, await res.text()));
+    return res.json() as Promise<UploadDetect>;
   },
   ingestJobs: () => req<ImportJobListItem[]>("/ingest/jobs"),
   ingestJob: (jobId: number) => req<ImportJobDetail>(`/ingest/jobs/${jobId}`),

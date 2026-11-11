@@ -45,3 +45,19 @@ class ImportJobResponse(BaseModel):
 
 
 ImportJobList = List[ImportJobListItem]
+
+
+class UploadDetectOut(BaseModel):
+    """POST /ingest/detect (#399, U27): what a statement file is and which account it fits.
+    Nothing is stored. `candidate_account_ids`: the caller's open accounts of a fitting type
+    and platform; `suggested_account_id`: the one to pre-select (exactly one candidate, or the
+    one the statement's account number is linked to); `statement_last4`: the number's last four
+    digits when the format names its account."""
+
+    recognised: bool
+    parser_key: Optional[str] = None
+    file_label: Optional[str] = None
+    account_types: List[str] = []
+    candidate_account_ids: List[int] = []
+    suggested_account_id: Optional[int] = None
+    statement_last4: Optional[str] = None
