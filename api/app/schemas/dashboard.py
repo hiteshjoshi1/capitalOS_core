@@ -280,6 +280,21 @@ class StockBreakdownItem(BaseModel):
     percent: float
 
 
+class StockPlatformTotal(BaseModel):
+    """A platform's stocks (#396, U7): value, cost basis and unrealised P&L in the base
+    currency. Rows with no average cost are left out of cost and P&L and counted apart."""
+
+    platform: str
+    value: float = 0.0
+    cost_basis: float = 0.0
+    unrealised_pnl: float = 0.0
+    # unrealised_pnl / cost_basis x 100; None without a cost basis.
+    unrealised_pnl_pct: Optional[float] = None
+    positions: int = 0
+    positions_without_cost: int = 0
+    value_without_cost: float = 0.0
+
+
 class StockMonthChange(BaseModel):
     """A holding's change vs the compare month-end (#251), split as Overview's
     bridge splits it (D-60): abs = price_effect + quantity_effect + fx_effect + unsplit,
@@ -350,6 +365,8 @@ class StockHoldingsResponse(FxStatusFields):
     geography_performance: list["StockGeographyBreakdownItem"] = []
     geography_performance_as_of: Optional[str] = None
     platform_breakdown: list[StockBreakdownItem] = []
+    # #396 (U7): cost basis and unrealised P&L per platform.
+    platform_totals: list[StockPlatformTotal] = []
     stock_current_total: float = 0.0
     stock_snapshot_total: float = 0.0
     # The date of the holdings stock_snapshot_total is taken from (#232).

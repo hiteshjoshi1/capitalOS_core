@@ -4659,7 +4659,39 @@
     "compare_value": 6536003.26025146,
     "compare_month": "2026-10",
     "baseline_missing": false
-   }
+   },
+   "platform_totals": [
+    {
+     "platform": "IBKR",
+     "value": 5510871.834718292,
+     "cost_basis": 4802298.090307368,
+     "unrealised_pnl": 708573.7444109237,
+     "unrealised_pnl_pct": 14.754888827935542,
+     "positions": 27,
+     "positions_without_cost": 0,
+     "value_without_cost": 0.0
+    },
+    {
+     "platform": "DBS_VICKERS",
+     "value": 1758000.0,
+     "cost_basis": 1528000.0,
+     "unrealised_pnl": 230000.0,
+     "unrealised_pnl_pct": 15.052356020942408,
+     "positions": 5,
+     "positions_without_cost": 0,
+     "value_without_cost": 0.0
+    },
+    {
+     "platform": "DBS",
+     "value": 300000.0,
+     "cost_basis": 300000.0,
+     "unrealised_pnl": 0.0,
+     "unrealised_pnl_pct": 0.0,
+     "positions": 1,
+     "positions_without_cost": 0,
+     "value_without_cost": 0.0
+    }
+   ]
   }
  },
  "/dashboard/summary?month=2026-11&base_currency=SGD&compare=prev_month%2Cprev_year": {
@@ -5843,6 +5875,74 @@
    },
    "cash_percent": 18.88,
    "data_completeness_indicators": null
+  }
+ },
+ "/dividends/by-company?from_month=2025-12&to_month=2026-11&base_currency=SGD&assumed_tax_rate=0": {
+  "status": 200,
+  "body": {
+   "fx_incomplete": false,
+   "fx_missing_currencies": [],
+   "fx_stale_currencies": [],
+   "from_month": "2025-12",
+   "to_month": "2026-11",
+   "base_currency": "SGD",
+   "assumed_tax_rate": 0,
+   "country_tax_rates": {},
+   "items": [
+    {
+     "gross": 20800,
+     "withholding": 0,
+     "net_received": 20800,
+     "estimated_tax": 0,
+     "payout_minus_tax": 20800,
+     "asset_id": 29,
+     "symbol": "D05",
+     "company": "DBS Group Holdings Ltd.",
+     "country": "SG",
+     "yield_pct": 3.301587301587302
+    }
+   ],
+   "totals": {
+    "gross": 20800,
+    "withholding": 0,
+    "net_received": 20800,
+    "estimated_tax": 0,
+    "payout_minus_tax": 20800
+   }
+  }
+ },
+ "/dividends/by-company?from_month=2026-01&to_month=2026-11&base_currency=SGD&assumed_tax_rate=0": {
+  "status": 200,
+  "body": {
+   "fx_incomplete": false,
+   "fx_missing_currencies": [],
+   "fx_stale_currencies": [],
+   "from_month": "2026-01",
+   "to_month": "2026-11",
+   "base_currency": "SGD",
+   "assumed_tax_rate": 0,
+   "country_tax_rates": {},
+   "items": [
+    {
+     "gross": 20800,
+     "withholding": 0,
+     "net_received": 20800,
+     "estimated_tax": 0,
+     "payout_minus_tax": 20800,
+     "asset_id": 29,
+     "symbol": "D05",
+     "company": "DBS Group Holdings Ltd.",
+     "country": "SG",
+     "yield_pct": 3.301587301587302
+    }
+   ],
+   "totals": {
+    "gross": 20800,
+    "withholding": 0,
+    "net_received": 20800,
+    "estimated_tax": 0,
+    "payout_minus_tax": 20800
+   }
   }
  },
  "/dividends/by-company?from_month=2026-11&to_month=2026-11&base_currency=SGD&assumed_tax_rate=0": {

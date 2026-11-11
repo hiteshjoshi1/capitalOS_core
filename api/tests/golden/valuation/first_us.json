@@ -1433,6 +1433,28 @@
           "snapshot_value": 958.6957
         }
       ],
+      "platform_totals": [
+        {
+          "cost_basis": 8448.5594,
+          "platform": "IBKR",
+          "positions": 2,
+          "positions_without_cost": 0,
+          "unrealised_pnl": 2112.1399,
+          "unrealised_pnl_pct": 25.0,
+          "value": 10560.6993,
+          "value_without_cost": 0.0
+        },
+        {
+          "cost_basis": 860.1197,
+          "platform": "SHAREKHAN",
+          "positions": 2,
+          "positions_without_cost": 0,
+          "unrealised_pnl": 95.5689,
+          "unrealised_pnl_pct": 11.1111,
+          "value": 955.6885,
+          "value_without_cost": 0.0
+        }
+      ],
       "quote_freshness_summary": {
         "fresh": 0,
         "missing": 0,
@@ -1770,6 +1792,28 @@
           "key": "SHAREKHAN",
           "percent": 8.24,
           "snapshot_value": 955.6885
+        }
+      ],
+      "platform_totals": [
+        {
+          "cost_basis": 9662.8358,
+          "platform": "IBKR",
+          "positions": 2,
+          "positions_without_cost": 0,
+          "unrealised_pnl": 2414.0465,
+          "unrealised_pnl_pct": 24.9828,
+          "value": 12076.8824,
+          "value_without_cost": 0.0
+        },
+        {
+          "cost_basis": 958.2964,
+          "platform": "SHAREKHAN",
+          "positions": 2,
+          "positions_without_cost": 0,
+          "unrealised_pnl": 126.1954,
+          "unrealised_pnl_pct": 13.1687,
+          "value": 1084.4918,
+          "value_without_cost": 0.0
         }
       ],
       "quote_freshness_summary": {

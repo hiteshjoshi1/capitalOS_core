@@ -435,6 +435,8 @@ export type StockHoldingsSummary = FxStatus & {
     delta_pct?: number | null;
     percent: number;
   }>;
+  // #396 (U7): cost basis and unrealised P&L per platform, in the base currency.
+  platform_totals?: StockPlatformTotal[];
   stock_current_total?: number;
   stock_snapshot_total?: number;
   // #232: the date of the holdings stock_snapshot_total is taken from.
@@ -731,4 +733,16 @@ export type StockExposure = {
   total: number;
   by_country: StockExposureItem[];
   by_platform: StockExposureItem[];
+};
+
+/** A platform's stocks (#396, U7): rows with no average cost are counted apart, not as a zero cost. */
+export type StockPlatformTotal = {
+  platform: string;
+  value: number;
+  cost_basis: number;
+  unrealised_pnl: number;
+  unrealised_pnl_pct?: number | null;
+  positions: number;
+  positions_without_cost: number;
+  value_without_cost: number;
 };
