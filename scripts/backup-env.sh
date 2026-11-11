@@ -11,6 +11,9 @@
 #                         ~/.capitalos/backup/age-identity.txt (outside the repo).
 #   BACKUP_OFFSITE_DIR    a second folder (iCloud Drive) that gets a copy of every encrypted set
 #                         (#357). Like BACKUP_DIR, from .env only in the main checkout; unset: none.
+#   BACKUP_TIME           when the daily scheduled backup runs, HH:MM (24-hour, local time);
+#                         default 13:00 (#387: the Mac is usually asleep at night). Read by
+#                         scripts/backup-schedule.sh (backup_time); takes effect on `make backup-schedule`.
 # shellcheck shell=bash
 
 backup_env_value() {  # <.env file> <name>: the last NAME=value line, quotes stripped
@@ -24,6 +27,24 @@ backup_is_main_checkout() {  # <repo dir>
   g=$(cd "$1" && cd "$(git rev-parse --absolute-git-dir 2>/dev/null)" 2>/dev/null && pwd -P) || return 1
   c=$(cd "$1" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) || return 1
   [ "$g" = "$c" ]
+}
+
+BACKUP_TIME_DEFAULT=13:00
+
+# "H M" (no leading zeros) for a 24-hour HH:MM (or H:MM) time; fails on anything else (#387).
+backup_time_parse() {  # <HH:MM>
+  local h m
+  [[ "$1" =~ ^([0-9]{1,2}):([0-9]{2})$ ]] || return 1
+  h=$((10#${BASH_REMATCH[1]})) m=$((10#${BASH_REMATCH[2]}))
+  [ "$h" -le 23 ] && [ "$m" -le 59 ] || return 1
+  echo "$h $m"
+}
+
+# The configured daily backup time (HH:MM): the environment, then the repo's .env, then 13:00.
+backup_time() {  # <repo dir>
+  local t=${BACKUP_TIME:-}
+  [ -n "$t" ] || t=$(backup_env_value "$1/.env" BACKUP_TIME)
+  echo "${t:-$BACKUP_TIME_DEFAULT}"
 }
 
 backup_env() {  # <repo dir>
@@ -46,7 +67,7 @@ backup_env() {  # <repo dir>
   export BACKUP_DIR BACKUP_AGE_RECIPIENT BACKUP_AGE_IDENTITY BACKUP_OFFSITE_DIR
 }
 
-# Where a backup folder's index lives (#383). In iCloud Drive the 03:00 job (launchd) could neither
+# Where a backup folder's index lives (#383). In iCloud Drive the daily job (launchd) could neither
 # read nor replace an index file Terminal had written there ("Operation not permitted"), so an
 # iCloud folder's index is kept on the Mac in ~/.capitalos/backup/index/ (no privacy controls
 # there; it is only a list of names, rebuilt from a listing in Terminal if lost). BACKUP_INDEX_DIR

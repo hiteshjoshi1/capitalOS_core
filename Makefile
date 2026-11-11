@@ -762,6 +762,7 @@ lint: web-deps
 	PYTHON="$(PYTHON)" scripts/test-check-migrations.sh
 	scripts/test-checkout-guard.sh
 	scripts/test-db-backup.sh
+	scripts/test-backup-schedule.sh
 	scripts/test-test-instance.sh
 	scripts/test-worktree-prune.sh
 	scripts/test-pretooluse-guard.sh
