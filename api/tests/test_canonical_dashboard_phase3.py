@@ -201,9 +201,9 @@ def ibkr_flex_canonical_account(db_engine):
         conn.execute(text(
             """
             INSERT INTO portfolio_nav_snapshots
-              (broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+              (broker_account_id, import_run_id, report_date, base_currency,
                cash_base, stock_base, total_nav_base, authority_status, metadata_json)
-            SELECT ba.id, 803, ir.id, '2026-02-20', 'USD', 1000, 3000, 4000, 'authoritative', '{}'
+            SELECT ba.id, ir.id, '2026-02-20', 'USD', 1000, 3000, 4000, 'authoritative', '{}'
             FROM broker_accounts ba
             JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
             WHERE ba.broker_account_id = 'U_P3_FLEX'
@@ -214,10 +214,10 @@ def ibkr_flex_canonical_account(db_engine):
         conn.execute(text(
             """
             INSERT INTO portfolio_position_snapshots
-              (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+              (broker_account_id, broker_instrument_id, import_run_id, report_date,
                quantity, currency, market_price, market_value_local, market_value_base,
                cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
-            SELECT ba.id, 803, bi.id, ir.id, '2026-02-20',
+            SELECT ba.id, bi.id, ir.id, '2026-02-20',
                    10, 'USD', 200, 2000, 2000, 1500, 1500, 1, 'authoritative', '{}'
             FROM broker_accounts ba
             JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
@@ -230,10 +230,10 @@ def ibkr_flex_canonical_account(db_engine):
         conn.execute(text(
             """
             INSERT INTO portfolio_position_snapshots
-              (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+              (broker_account_id, broker_instrument_id, import_run_id, report_date,
                quantity, currency, market_price, market_value_local, market_value_base,
                cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
-            SELECT ba.id, 803, bi.id, ir.id, '2026-02-20',
+            SELECT ba.id, bi.id, ir.id, '2026-02-20',
                    100, 'HKD', 80, 8000, 1000, 7000, 875, 0.125, 'authoritative', '{}'
             FROM broker_accounts ba
             JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
@@ -315,9 +315,9 @@ def test_canonical_position_rows_excludes_ibkr_flex_nav_accounts(db_engine, shar
         conn.execute(text(
             """
             INSERT INTO portfolio_nav_snapshots
-              (broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+              (broker_account_id, import_run_id, report_date, base_currency,
                cash_base, stock_base, total_nav_base, authority_status, metadata_json)
-            SELECT ba.id, 803, ir.id, '2026-02-20', 'USD', 1000, 5000, 6000, 'authoritative', '{}'
+            SELECT ba.id, ir.id, '2026-02-20', 'USD', 1000, 5000, 6000, 'authoritative', '{}'
             FROM broker_accounts ba
             JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
             WHERE ba.broker_account_id = 'U_P3_TEST'
@@ -391,9 +391,9 @@ def test_canonical_position_rows_maps_ibkr_class_share_symbols_and_stk_security_
         conn.execute(text(
             """
             INSERT INTO portfolio_nav_snapshots
-              (broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+              (broker_account_id, import_run_id, report_date, base_currency,
                cash_base, stock_base, total_nav_base, authority_status, metadata_json)
-            SELECT ba.id, 804, ir.id, '2026-02-20', 'USD', 1000, 5078, 6078, 'authoritative', '{}'
+            SELECT ba.id, ir.id, '2026-02-20', 'USD', 1000, 5078, 6078, 'authoritative', '{}'
             FROM broker_accounts ba
             JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
             WHERE ba.broker_account_id = 'U_P3_BRK'
@@ -404,10 +404,10 @@ def test_canonical_position_rows_maps_ibkr_class_share_symbols_and_stk_security_
         conn.execute(text(
             """
             INSERT INTO portfolio_position_snapshots
-              (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+              (broker_account_id, broker_instrument_id, import_run_id, report_date,
                quantity, currency, market_price, market_value_local, market_value_base,
                cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
-            SELECT ba.id, 804, bi.id, ir.id, '2026-02-20',
+            SELECT ba.id, bi.id, ir.id, '2026-02-20',
                    10, 'USD', 507.8, 5078, 5078, 4691.09, 4691.09, 1, 'authoritative', '{}'
             FROM broker_accounts ba
             JOIN broker_import_runs ir ON ir.broker_account_id = ba.id
@@ -600,7 +600,7 @@ def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
                 """
                 UPDATE portfolio_nav_snapshots
                 SET authority_status = 'reference'
-                WHERE legacy_account_id = :account_id
+                WHERE broker_account_id IN (SELECT id FROM broker_accounts WHERE legacy_account_id = :account_id)
                 """
             ),
             {"account_id": ibkr_flex_canonical_account},
@@ -610,7 +610,7 @@ def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
                 """
                 UPDATE portfolio_position_snapshots
                 SET authority_status = 'reference'
-                WHERE legacy_account_id = :account_id
+                WHERE broker_account_id IN (SELECT id FROM broker_accounts WHERE legacy_account_id = :account_id)
                   AND broker_account_id = (
                     SELECT id FROM broker_accounts WHERE broker_account_id = 'U_P3_FLEX'
                   )
@@ -655,11 +655,11 @@ def test_ibkr_flex_nav_supersedes_stale_legacy_backfill_dashboard_reads(
             text(
                 """
                 INSERT INTO portfolio_position_snapshots
-                  (id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                  (id, broker_account_id, broker_instrument_id, import_run_id, report_date,
                    quantity, currency, market_price, market_value_local, market_value_base,
                    cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
                 VALUES
-                  (48001, 48001, :account_id, 48001, 48001, '2026-02-10',
+                  (48001, 48001, 48001, 48001, '2026-02-10',
                    100, 'USD', 7500, 750000, 750000, 750000, 750000, 1, 'authoritative', '{}')
                 """
             ),

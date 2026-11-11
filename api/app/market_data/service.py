@@ -885,18 +885,14 @@ def _diagnostics_summary(items: list[dict[str, Any]]) -> dict[str, int]:
 
 
 def held_asset_ids(db: Session, user_id: int) -> set[int]:
-    """Assets the user holds or has held: a position, a canonical position
-    snapshot or a transaction in one of their accounts (#153). Market-data
-    diagnostics are scoped to these so one user never sees another's tickers."""
+    """Assets the user holds or has held: a canonical position snapshot or a
+    transaction in one of their accounts (#153). Market-data diagnostics are
+    scoped to these so one user never sees another's tickers. (The legacy
+    positions table is gone, #359.)"""
     scope = account_scope_sql("acc")
     rows = db.execute(
         text(
             f"""
-            SELECT p.asset_id
-            FROM positions p
-            JOIN accounts acc ON acc.id = p.account_id
-            WHERE p.asset_id IS NOT NULL AND {scope}
-            UNION
             SELECT bi.asset_id
             FROM portfolio_position_snapshots ps
             JOIN broker_instruments bi ON bi.id = ps.broker_instrument_id

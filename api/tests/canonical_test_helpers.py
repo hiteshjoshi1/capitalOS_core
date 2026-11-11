@@ -1,17 +1,6 @@
 from datetime import date, datetime
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
-
-from app.portfolio.legacy_backfill import backfill_legacy_positions
-
-
-def backfill_legacy_positions_for_test(db_engine, *, current_user_id: int = 1) -> None:
-    db = Session(bind=db_engine)
-    try:
-        backfill_legacy_positions(db, current_user_id=current_user_id)
-    finally:
-        db.close()
 
 
 def _as_date(value: date | datetime | str) -> date | str:
@@ -186,11 +175,11 @@ def seed_canonical_position_snapshot_for_test(
             text(
                 """
                 INSERT INTO portfolio_position_snapshots
-                  (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                  (broker_account_id, broker_instrument_id, import_run_id, report_date,
                    quantity, currency, market_price, market_value_local, market_value_base,
                    cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
                 VALUES
-                  (:broker_account_id, :legacy_account_id, :broker_instrument_id, :import_run_id, :report_date,
+                  (:broker_account_id, :broker_instrument_id, :import_run_id, :report_date,
                    :quantity, :currency, :market_price, :market_value_local, :market_value_base,
                    :cost_basis_local, :cost_basis_base, 1, :authority_status, :metadata_json)
                 """

@@ -79,10 +79,10 @@ def update_account(
     if account is None:
         raise HTTPException(status_code=404, detail="account not found")
     if "closed_on" not in payload.model_fields_set:
-        raise HTTPException(status_code=400, detail="nothing to change: send closed_on (a date, or null to reopen)")
+        raise HTTPException(status_code=422, detail="nothing to change: send closed_on (a date, or null to reopen)")
     new_closed_on = payload.closed_on
     if new_closed_on is not None and new_closed_on > clock._app_today():
-        raise HTTPException(status_code=400, detail="closed_on can't be in the future")
+        raise HTTPException(status_code=422, detail="closed_on can't be in the future")
     old_closed_on: date | None = account.closed_on
     if new_closed_on != old_closed_on:
         account.closed_on = new_closed_on
@@ -136,15 +136,15 @@ def create_account(
 ):
     # lightweight validation
     if not payload.name.strip():
-        raise HTTPException(status_code=400, detail="name is required")
+        raise HTTPException(status_code=422, detail="name is required")
 
     account_type = payload.account_type.strip()
     if account_type not in AccountType.enums:
-        raise HTTPException(status_code=400, detail="invalid account_type")
+        raise HTTPException(status_code=422, detail="invalid account_type")
 
     currency = payload.currency.strip().upper()
     if not re.match(r"^[A-Z]{3}$", currency):
-        raise HTTPException(status_code=400, detail="invalid currency")
+        raise HTTPException(status_code=422, detail="invalid currency")
 
     existing_currency = db.query(Currency).filter(Currency.code == currency).one_or_none()
     if existing_currency is None:
@@ -154,7 +154,7 @@ def create_account(
     platform_code = payload.platform.strip()
     country = payload.country.strip().upper() if payload.country and payload.country.strip() else None
     if country is not None and not re.match(r"^[A-Z]{2,3}$", country):
-        raise HTTPException(status_code=400, detail="invalid country")
+        raise HTTPException(status_code=422, detail="invalid country")
 
     if payload.platform_id is not None:
         platform = db.query(Platform).filter(Platform.id == payload.platform_id).one_or_none()
@@ -163,7 +163,7 @@ def create_account(
         platform_code = platform.code
     else:
         if not platform_code:
-            raise HTTPException(status_code=400, detail="platform is required")
+            raise HTTPException(status_code=422, detail="platform is required")
         platform = db.query(Platform).filter(Platform.code == platform_code).one_or_none()
         if platform is None:
             raise HTTPException(status_code=400, detail="platform not found")

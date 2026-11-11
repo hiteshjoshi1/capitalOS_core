@@ -82,49 +82,6 @@ def _solana_candidates(raw_msg: bytes) -> list[tuple[str, bytes]]:
     return candidates
 
 
-def verify_solana_signature_debug(message: str, signature: str, address: str) -> VerificationResult:
-    try:
-        signature = signature.strip()
-        pubkey = base58.b58decode(address)
-        base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-        if not signature or any(c not in base58_alphabet for c in signature):
-            return VerificationResult(ok=False, error="Signature is not base58")
-        sig_bytes = base58.b58decode(signature)
-        if len(sig_bytes) != 64:
-            return VerificationResult(ok=False, error="Decoded signature length is not 64", decoded_len=len(sig_bytes))
-        raw_msg = message.encode("utf-8")
-        for label, candidate in _solana_candidates(raw_msg):
-            try:
-                VerifyKey(pubkey).verify(candidate, sig_bytes)
-                return VerificationResult(ok=True, matched_variant=label, decoder="base58", decoded_len=len(sig_bytes))
-            except Exception:
-                continue
-        return VerificationResult(ok=False, error="No candidate matched", decoder="base58", decoded_len=len(sig_bytes))
-    except Exception as exc:  # noqa: BLE001
-        return VerificationResult(ok=False, error=str(exc))
-
-
-def verify_solana_signature_bytes_debug(raw_msg: bytes, signature: str, address: str) -> VerificationResult:
-    try:
-        signature = signature.strip()
-        pubkey = base58.b58decode(address)
-        base58_alphabet = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
-        if not signature or any(c not in base58_alphabet for c in signature):
-            return VerificationResult(ok=False, error="Signature is not base58")
-        sig_bytes = base58.b58decode(signature)
-        if len(sig_bytes) != 64:
-            return VerificationResult(ok=False, error="Decoded signature length is not 64", decoded_len=len(sig_bytes))
-        for label, candidate in _solana_candidates(raw_msg):
-            try:
-                VerifyKey(pubkey).verify(candidate, sig_bytes)
-                return VerificationResult(ok=True, matched_variant=label, decoder="base58", decoded_len=len(sig_bytes))
-            except Exception:
-                continue
-        return VerificationResult(ok=False, error="No candidate matched", decoder="base58", decoded_len=len(sig_bytes))
-    except Exception as exc:  # noqa: BLE001
-        return VerificationResult(ok=False, error=str(exc))
-
-
 def verify_evm_signature(message: str, signature: str, address: str) -> VerificationResult:
     try:
         msg = encode_defunct(text=message)

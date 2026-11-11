@@ -101,5 +101,38 @@ expect "drift: the real app has a newer import" \
 expect "no drift when the copy is current" "" "$(data_drift '2026-11-07 13:42:00' '2026-11-07 13:42:00')"
 expect "no drift line when the real app can't be read" "" "$(data_drift '' '2026-11-07 13:42:00')"
 
+# --- Google sign-in on the copy (#373): its own redirect URLs, :8444 served and removed -----
+expect "redirect URLs: the tailnet HTTPS port and localhost, never the real app's" \
+  "https://mac.tail.ts.net:8444/api/auth/google/callback,http://localhost:5174/api/auth/google/callback" \
+  "$(ISO_WEB_PORT=5174 test_google_redirects mac.tail.ts.net)"
+expect "redirect URLs without Tailscale: localhost only" \
+  "http://localhost:5174/api/auth/google/callback" "$(ISO_WEB_PORT=5174 test_google_redirects '')"
+cat >"$tmp/bin/tailscale" <<'EOF2'
+#!/bin/bash
+# Stub tailscale: logs each call; `status --json` names the Mac.
+echo "$*" >>"$TS_LOG"
+[ "$1 $2" = "status --json" ] && echo '{"Self": {"DNSName": "mac.tail.ts.net."}}'
+exit 0
+EOF2
+chmod +x "$tmp/bin/tailscale"
+export TS_LOG="$tmp/ts.log"
+: >"$TS_LOG"
+expect "the tailnet name, without the trailing dot" "mac.tail.ts.net" "$(TAILSCALE_BIN="$tmp/bin/tailscale" tailnet_name)"
+( TAILSCALE_BIN="$tmp/bin/tailscale" ISO_WEB_PORT=5174 tailnet_serve_on )
+( TAILSCALE_BIN="$tmp/bin/tailscale" tailnet_serve_off )
+expect "serve on :8444 to the test web, then only :8444 off" \
+  "serve --bg --https=8444 http://127.0.0.1:5174|serve --https=8444 off" \
+  "$(grep '^serve' "$TS_LOG" | tr '\n' '|' | sed 's/|$//')"
+if out=$( (TEST_TAILNET_PORT=8443 TAILSCALE_BIN="$tmp/bin/tailscale" tailnet_serve_off) 2>&1 ); then
+  bad "the real app's :8443 is refused"
+elif printf '%s' "$out" | grep -q "belongs to InvestOS / the real app"; then ok "the real app's :8443 is refused"
+else bad "refusing :8443 didn't say why ($out)"; fi
+if (TEST_TAILNET_PORT=443 TAILSCALE_BIN="$tmp/bin/tailscale" tailnet_serve_on) >/dev/null 2>&1; then bad "InvestOS's :443 is refused"
+else ok "InvestOS's :443 is refused"; fi
+grep -q -- "--https=844[3]\|--https=443 " "$TS_LOG" && bad "a refused port still reached tailscale" || ok "a refused port never reaches tailscale"
+grep -q 'GOOGLE_OAUTH_REDIRECT_URL: ${ISO_GOOGLE_OAUTH_REDIRECT_URL:-}' "$src/docker-compose.isolated.yml" &&
+  ok "isolated stacks override the API's redirect list (empty unless the test instance sets it)" ||
+  bad "docker-compose.isolated.yml doesn't override GOOGLE_OAUTH_REDIRECT_URL"
+
 echo "test-instance issue refs: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

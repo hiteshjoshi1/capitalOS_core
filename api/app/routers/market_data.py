@@ -29,6 +29,7 @@ from app.market_data.service import (
     unpriced_held_positions,
 )
 from app.services.portfolio_realtime import publish_portfolio_refresh
+from app.schemas.market_data import MarketDataRunsResponse, MarketDataStatusResponse, UnpricedResponse
 
 router = APIRouter(prefix="/market-data", tags=["market-data"], dependencies=[Depends(require_current_user)])
 logger = logging.getLogger("capitalos.market_data")
@@ -51,7 +52,8 @@ def _visible_asset_ids(db: Session, current_user: CurrentUser) -> set[int] | Non
     return held_asset_ids(db, current_user.id)
 
 
-@router.get("/status")
+# exclude_unset: an exchange that never ran has no run fields at all, as before #361.
+@router.get("/status", response_model=MarketDataStatusResponse, response_model_exclude_unset=True)
 def market_data_status(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),
@@ -59,7 +61,7 @@ def market_data_status(
     return {"status": latest_status_by_exchange(db, asset_ids=_visible_asset_ids(db, current_user))}
 
 
-@router.get("/runs")
+@router.get("/runs", response_model=MarketDataRunsResponse)
 def market_data_runs(limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db)):
     return {"runs": list_runs(db, limit=limit)}
 
@@ -75,7 +77,7 @@ class TickerSetIn(BaseModel):
     yahoo_symbol: str = Field(..., min_length=1, max_length=32)
 
 
-@router.get("/unpriced")
+@router.get("/unpriced", response_model=UnpricedResponse)
 def market_data_unpriced(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(require_current_user),

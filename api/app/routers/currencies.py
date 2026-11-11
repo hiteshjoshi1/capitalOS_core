@@ -28,7 +28,7 @@ def create_currency(
     country = payload.country.strip() if payload.country else None
 
     if not re.match(r"^[A-Z]{3}$", code):
-        raise HTTPException(status_code=400, detail="invalid currency")
+        raise HTTPException(status_code=422, detail="invalid currency")
 
     existing = db.query(Currency).filter(Currency.code == code).one_or_none()
     if existing:

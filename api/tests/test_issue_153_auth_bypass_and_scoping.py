@@ -162,8 +162,9 @@ def two_users_two_tickers(db_engine):
             )
         conn.execute(
             text(
-                "INSERT INTO positions (account_id, asset_id, as_of, quantity, avg_cost, cost_basis_base) "
-                "VALUES (1531, 15301, :ts, 5, 10, 50)"
+                # User A holds AAAA through a trade (the legacy positions table is gone, #359).
+                "INSERT INTO transactions (ts, account_id, type, amount, currency, asset_id, quantity, source) "
+                "VALUES (:ts, 1531, 'BUY', -50, 'USD', 15301, 5, 'MANUAL')"
             ),
             {"ts": now},
         )
@@ -201,9 +202,9 @@ def two_users_two_tickers(db_engine):
         )
         conn.execute(
             text(
-                "INSERT INTO portfolio_position_snapshots (broker_account_id, legacy_account_id, broker_instrument_id, "
+                "INSERT INTO portfolio_position_snapshots (broker_account_id, broker_instrument_id, "
                 "import_run_id, report_date, quantity, currency, market_value_local, market_value_base, fx_rate_to_base) "
-                "VALUES (1530, 1532, 1530, 1530, :d, 3, 'USD', 30, 30, 1)"
+                "VALUES (1530, 1530, 1530, :d, 3, 'USD', 30, 30, 1)"
             ),
             {"d": now.date()},
         )
@@ -359,7 +360,7 @@ def test_register_requires_admin(client, db_engine, needs_mapping_job):
 def test_register_rejects_unknown_parser_key(client, db_engine, needs_mapping_job):
     with act_as(USER_A, admin=True):
         resp = client.post(f"/ingest/jobs/{needs_mapping_job}/register", json={"parser_key": "made_up_parser_v9"})
-    assert resp.status_code == 400
+    assert resp.status_code == 422
     assert "Unknown parser_key" in resp.json()["detail"]
     assert _registered(db_engine) is None
 

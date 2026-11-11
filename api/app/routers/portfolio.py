@@ -21,6 +21,7 @@ from app.portfolio.ibkr_flex import (
     IbkrFlexImportError,
     IbkrFlexImportInProgress,
 )
+from app.schemas.portfolio import IbkrFlexDataQualityEventOut, IbkrFlexImportRunOut, IbkrFlexReconciliationOut
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"], dependencies=[Depends(require_current_user)])
 logger = logging.getLogger("capitalos.portfolio.ibkr_flex")
@@ -41,7 +42,7 @@ def _parse_cutover_date(raw: str | None) -> date | None:
         try:
             return date.fromisoformat(raw)
         except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Invalid cutover_date. Use YYYY-MM-DD") from exc
+            raise HTTPException(status_code=422, detail="Invalid cutover_date. Use YYYY-MM-DD") from exc
     env_value = os.getenv("IBKR_FLEX_CUTOVER_DATE")
     if env_value:
         try:
@@ -183,7 +184,7 @@ def import_ibkr_flex_now(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@router.get("/ibkr-flex/import-runs")
+@router.get("/ibkr-flex/import-runs", response_model=list[IbkrFlexImportRunOut])
 def list_ibkr_flex_import_runs(
     account_id: int | None = Query(None),
     limit: int = Query(25, ge=1, le=100),
@@ -235,7 +236,7 @@ def list_ibkr_flex_import_runs(
     ]
 
 
-@router.get("/ibkr-flex/reconciliations")
+@router.get("/ibkr-flex/reconciliations", response_model=list[IbkrFlexReconciliationOut])
 def list_ibkr_flex_reconciliations(
     account_id: int | None = Query(None),
     limit: int = Query(25, ge=1, le=100),
@@ -285,7 +286,7 @@ def list_ibkr_flex_reconciliations(
     ]
 
 
-@router.get("/ibkr-flex/data-quality-events")
+@router.get("/ibkr-flex/data-quality-events", response_model=list[IbkrFlexDataQualityEventOut])
 def list_ibkr_flex_data_quality_events(
     account_id: int | None = Query(None),
     limit: int = Query(25, ge=1, le=100),

@@ -28,5 +28,5 @@ def get_income_summary(
     try:
         datetime.strptime(month, "%Y-%m")
     except ValueError:
-        raise HTTPException(status_code=400, detail="month must be YYYY-MM")
+        raise HTTPException(status_code=422, detail="month must be YYYY-MM")
     return IncomeSummaryOut(**income_summary(db, current_user.id, month, base_currency.upper()), **fx_status())

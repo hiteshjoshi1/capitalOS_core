@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -42,6 +43,8 @@ from app.services.login_throttle import client_ip, login_throttle, request_autho
 from app.services.passwords import set_user_password
 from app.services.user_preferences import BASE_CURRENCIES, timezone_source
 from app.wealth_rollup_dirty import mark_rollups_dirty
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -95,8 +98,11 @@ def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
     )
 
 
-def _create_refresh_session(db: Session, *, user_id: int) -> str:
-    now = datetime.now(tz=timezone.utc)
+def _create_refresh_session(db: Session, *, user_id: int, now: datetime | None = None) -> str:
+    # A rotation passes its own `now`, so the new session's created_at equals the old one's
+    # revoked_at: that is how a replay inside the grace window finds the session it was
+    # rotated into (its own successor), not some other device's (#364).
+    now = now or datetime.now(tz=timezone.utc)
     refresh_token = generate_refresh_token()
     db.execute(
         text(
@@ -289,6 +295,40 @@ def login(payload: LoginRequest, request: Request, response: Response, db: Sessi
     return _session_response(db, user_id=user_id, access_token=access_token, exp=exp, now=now)
 
 
+def _active_successor(db: Session, *, user_id: int, session_id: int, revoked_at, now: datetime) -> int | None:
+    """The active session a rotated one was replaced by, following later rotations (#364).
+
+    A rotation creates the new session with created_at = the old one's revoked_at, so the
+    successor is the user's next session created at exactly that instant."""
+    current_id, current_revoked = session_id, revoked_at
+    for _ in range(20):
+        row = db.execute(
+            text(
+                """
+                SELECT id, revoked_at, revoke_reason, expires_at
+                FROM auth_sessions
+                WHERE user_id = :user_id AND id > :id AND created_at = :created_at
+                ORDER BY id
+                LIMIT 1
+                """
+            ),
+            {"user_id": user_id, "id": current_id, "created_at": current_revoked},
+        ).mappings().one_or_none()
+        if row is None:
+            return None
+        if row["revoked_at"] is None:
+            expires_at = row["expires_at"]
+            if isinstance(expires_at, str):
+                expires_at = datetime.fromisoformat(expires_at)
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            return int(row["id"]) if expires_at > now else None
+        if row["revoke_reason"] != "rotation":
+            return None
+        current_id, current_revoked = int(row["id"]), row["revoked_at"]
+    return None
+
+
 @router.post("/refresh", response_model=AuthSessionResponse)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
     refresh_token = request.cookies.get(refresh_cookie_name())
@@ -347,7 +387,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
             revoked_row = db.execute(
                 text(
                     """
-                    SELECT s.user_id, u.username
+                    SELECT s.id AS session_id, s.user_id, s.revoked_at, u.username
                     FROM auth_sessions s
                     JOIN users u ON u.id = s.user_id
                     WHERE s.refresh_token_hash = :refresh_token_hash
@@ -362,26 +402,18 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
             ).mappings().one_or_none()
 
             if revoked_row is not None:
-                # Concurrent refresh: find and rotate the user's current active session so
-                # this caller converges on the same session every other racer landed on.
+                # Concurrent refresh of the same token (two tabs, StrictMode): converge on the
+                # session THIS token was rotated into, never another device's (#364).
                 user_id = int(revoked_row["user_id"])
                 username = str(revoked_row["username"])
-                active_session = db.execute(
-                    text(
-                        """
-                        SELECT id AS session_id
-                        FROM auth_sessions
-                        WHERE user_id = :user_id
-                          AND revoked_at IS NULL
-                          AND expires_at > :now
-                        ORDER BY created_at DESC
-                        LIMIT 1
-                        """
-                    ),
-                    {"user_id": user_id, "now": now},
-                ).mappings().one_or_none()
-
-                if active_session is not None:
+                successor = _active_successor(
+                    db,
+                    user_id=user_id,
+                    session_id=int(revoked_row["session_id"]),
+                    revoked_at=revoked_row["revoked_at"],
+                    now=now,
+                )
+                if successor is not None:
                     rotated = db.execute(
                         text(
                             """
@@ -390,16 +422,49 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
                             WHERE id = :session_id AND revoked_at IS NULL
                             """
                         ),
-                        {"now": now, "session_id": int(active_session["session_id"])},
+                        {"now": now, "session_id": successor},
                     ).rowcount
                     if rotated > 0:
-                        next_refresh_token = _create_refresh_session(db, user_id=user_id)
+                        next_refresh_token = _create_refresh_session(db, user_id=user_id, now=now)
                         access_token, exp = create_access_token(user_id=user_id, username=username)
                         db.commit()
                         _set_refresh_cookie(response, next_refresh_token)
                         return _session_response(
                             db, user_id=user_id, access_token=access_token, exp=exp, now=now
                         )
+                # Its line of sessions has ended (signed out): just refuse, below.
+
+        replayed = db.execute(
+            text(
+                """
+                SELECT user_id FROM auth_sessions
+                WHERE refresh_token_hash = :refresh_token_hash
+                  AND revoke_reason = 'rotation'
+                  AND revoked_at < :grace_cutoff
+                LIMIT 1
+                """
+            ),
+            {"refresh_token_hash": token_hash, "grace_cutoff": now - timedelta(seconds=grace)},
+        ).mappings().one_or_none()
+        if replayed is not None:
+            # An already-rotated token used again after the grace window: someone holds a
+            # copy. End every session of that user, on every device (#364, #130 §8.6).
+            ended = db.execute(
+                text(
+                    """
+                    UPDATE auth_sessions
+                    SET revoked_at = :now, revoke_reason = 'replay'
+                    WHERE user_id = :user_id
+                      AND revoked_at IS NULL
+                    """
+                ),
+                {"now": now, "user_id": int(replayed["user_id"])},
+            ).rowcount
+            log.warning(
+                "Refresh token replay outside the grace window: user_id=%s, ended %s session(s)",
+                replayed["user_id"],
+                ended,
+            )
 
         db.execute(
             text(
@@ -418,7 +483,7 @@ def refresh(request: Request, response: Response, db: Session = Depends(get_db))
 
     user_id = int(claimed["user_id"])
     username = str(claimed["username"])
-    next_refresh_token = _create_refresh_session(db, user_id=user_id)
+    next_refresh_token = _create_refresh_session(db, user_id=user_id, now=now)
     access_token, exp = create_access_token(user_id=user_id, username=username)
     db.commit()
 

@@ -654,11 +654,11 @@ def _insert_upload_position_snapshots(
             text(
                 f"""
                 INSERT INTO portfolio_position_snapshots
-                  (broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, raw_document_id,
+                  (broker_account_id, broker_instrument_id, import_run_id, raw_document_id,
                    report_date, quantity, currency, market_price, market_value_local, market_value_base,
                    cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
                 VALUES
-                  (:broker_account_id, :legacy_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
+                  (:broker_account_id, :broker_instrument_id, :import_run_id, :raw_document_id,
                    :report_date, :quantity, :currency, :market_price, :market_value_local, :market_value_base,
                    :cost_basis_local, :cost_basis_base, :fx_rate_to_base, :authority_status, {_platform_json_default(db)})
                 """

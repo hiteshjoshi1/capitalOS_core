@@ -227,4 +227,4 @@ def test_net_worth_timeline_movers_endpoint_diffs_two_historical_anchors(client:
 
 def test_net_worth_timeline_movers_endpoint_rejects_bad_month(client: TestClient):
     resp = client.get("/dashboard/net-worth-timeline/2026-13/movers")
-    assert resp.status_code == 400
+    assert resp.status_code == 422

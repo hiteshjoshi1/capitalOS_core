@@ -50,13 +50,13 @@ def create_platform(
     country = payload.country.strip().upper()
 
     if not code or not name:
-        raise HTTPException(status_code=400, detail="code and name are required")
+        raise HTTPException(status_code=422, detail="code and name are required")
     if platform_type not in PlatformType.enums:
-        raise HTTPException(status_code=400, detail="invalid platform_type")
+        raise HTTPException(status_code=422, detail="invalid platform_type")
     if not re.match(r"^[A-Z0-9_]+$", code):
-        raise HTTPException(status_code=400, detail="invalid code")
+        raise HTTPException(status_code=422, detail="invalid code")
     if not re.match(r"^[A-Z]{2,3}$", country):
-        raise HTTPException(status_code=400, detail="invalid country")
+        raise HTTPException(status_code=422, detail="invalid country")
 
     existing = db.query(Platform).filter(Platform.code == code).one_or_none()
     if existing:

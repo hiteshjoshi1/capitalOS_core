@@ -188,22 +188,9 @@ def _create_canonical_portfolio_tables(conn):
         ON broker_instruments(platform_code, broker_instrument_id, COALESCE(listing_exchange, ''), COALESCE(currency, ''))
         """,
         """
-        CREATE TABLE IF NOT EXISTS asset_identifiers (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          asset_id INTEGER,
-          broker_instrument_id INTEGER,
-          identifier_namespace TEXT NOT NULL,
-          identifier_type TEXT NOT NULL,
-          identifier_value TEXT NOT NULL,
-          metadata_json TEXT,
-          created_at TIMESTAMP
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS portfolio_position_snapshots (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           broker_account_id INTEGER NOT NULL,
-          legacy_account_id INTEGER,
           broker_instrument_id INTEGER NOT NULL,
           import_run_id INTEGER NOT NULL,
           raw_document_id INTEGER,
@@ -226,7 +213,6 @@ def _create_canonical_portfolio_tables(conn):
         CREATE TABLE IF NOT EXISTS portfolio_cash_balance_snapshots (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           broker_account_id INTEGER NOT NULL,
-          legacy_account_id INTEGER,
           import_run_id INTEGER NOT NULL,
           raw_document_id INTEGER,
           report_date DATE NOT NULL,
@@ -244,7 +230,6 @@ def _create_canonical_portfolio_tables(conn):
         CREATE TABLE IF NOT EXISTS portfolio_nav_snapshots (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           broker_account_id INTEGER NOT NULL,
-          legacy_account_id INTEGER,
           import_run_id INTEGER NOT NULL,
           raw_document_id INTEGER,
           report_date DATE NOT NULL,
@@ -343,26 +328,12 @@ def _create_canonical_portfolio_tables(conn):
         )
         """,
         """
-        CREATE TABLE IF NOT EXISTS portfolio_event_groups (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          broker_account_id INTEGER NOT NULL,
-          import_run_id INTEGER NOT NULL,
-          raw_document_id INTEGER,
-          event_date DATE NOT NULL,
-          event_type TEXT NOT NULL,
-          broker_event_id TEXT,
-          metadata_json TEXT,
-          created_at TIMESTAMP
-        )
-        """,
-        """
         CREATE TABLE IF NOT EXISTS portfolio_trades (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           broker_account_id INTEGER NOT NULL,
           broker_instrument_id INTEGER,
           import_run_id INTEGER NOT NULL,
           raw_document_id INTEGER,
-          event_group_id INTEGER,
           trade_date DATE NOT NULL,
           settle_date DATE,
           side TEXT,
@@ -382,7 +353,6 @@ def _create_canonical_portfolio_tables(conn):
           broker_account_id INTEGER NOT NULL,
           import_run_id INTEGER NOT NULL,
           raw_document_id INTEGER,
-          event_group_id INTEGER,
           activity_date DATE NOT NULL,
           currency TEXT NOT NULL,
           amount NUMERIC NOT NULL,
@@ -400,7 +370,6 @@ def _create_canonical_portfolio_tables(conn):
           broker_instrument_id INTEGER,
           import_run_id INTEGER NOT NULL,
           raw_document_id INTEGER,
-          event_group_id INTEGER,
           action_date DATE NOT NULL,
           action_type TEXT,
           quantity NUMERIC,
@@ -794,18 +763,6 @@ def setup_db():
             )
             """
         )
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS crypto_user_networth (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              user_id INTEGER,
-              as_of_date DATE NOT NULL,
-              total_usd REAL,
-              crypto_usd REAL,
-              updated_at TIMESTAMP
-            )
-            """
-        )
     Base.metadata.create_all(bind=engine)
     with engine.begin() as conn:
         conn.exec_driver_sql(
@@ -817,19 +774,6 @@ def setup_db():
               asset_class TEXT NOT NULL,
               quote_currency TEXT,
               home_country TEXT
-            )
-            """
-        )
-        conn.exec_driver_sql(
-            """
-            CREATE TABLE IF NOT EXISTS positions (
-              id INTEGER PRIMARY KEY,
-              account_id INTEGER NOT NULL,
-              asset_id INTEGER NOT NULL,
-              as_of TIMESTAMP NOT NULL,
-              quantity REAL,
-              avg_cost REAL,
-              cost_basis_base REAL NOT NULL
             )
             """
         )
@@ -983,7 +927,6 @@ def setup_db():
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
             "portfolio_trades",
-            "portfolio_event_groups",
             "portfolio_data_completeness",
             "portfolio_data_quality_events",
             "portfolio_reconciliations",
@@ -992,7 +935,6 @@ def setup_db():
             "portfolio_nav_snapshots",
             "portfolio_cash_balance_snapshots",
             "portfolio_position_snapshots",
-            "asset_identifiers",
             "broker_instruments",
             "raw_broker_documents",
             "broker_import_runs",
@@ -1016,14 +958,12 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS job_runs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_dividend_yields")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_symbol_map")
-        conn.exec_driver_sql("DROP TABLE IF EXISTS positions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS assets")
         conn.exec_driver_sql("DROP TABLE IF EXISTS platforms")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallet_snapshot_items")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallet_snapshots")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallet_verifications")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_wallets")
-        conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_user_networth")
         conn.exec_driver_sql("DROP TABLE IF EXISTS crypto_allowlist")
         conn.exec_driver_sql("DROP TABLE IF EXISTS auth_sessions")
         conn.exec_driver_sql("DROP TABLE IF EXISTS oauth_identities")
@@ -1069,7 +1009,6 @@ def clear_db():
             "portfolio_corporate_action_events",
             "portfolio_cash_ledger_entries",
             "portfolio_trades",
-            "portfolio_event_groups",
             "portfolio_data_completeness",
             "portfolio_data_quality_events",
             "portfolio_reconciliations",
@@ -1078,7 +1017,6 @@ def clear_db():
             "portfolio_nav_snapshots",
             "portfolio_cash_balance_snapshots",
             "portfolio_position_snapshots",
-            "asset_identifiers",
             "broker_instruments",
             "raw_broker_documents",
             "broker_import_runs",
@@ -1094,7 +1032,6 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM accounts")
         conn.exec_driver_sql("DELETE FROM platforms")
         conn.exec_driver_sql("DELETE FROM credit_card_accounts")
-        conn.exec_driver_sql("DELETE FROM positions")
         conn.exec_driver_sql("DELETE FROM assets")
         conn.exec_driver_sql("DELETE FROM transactions")
         conn.exec_driver_sql("DELETE FROM prices")
@@ -1115,7 +1052,6 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM crypto_wallet_snapshots")
         conn.exec_driver_sql("DELETE FROM crypto_wallet_verifications")
         conn.exec_driver_sql("DELETE FROM crypto_wallets")
-        conn.exec_driver_sql("DELETE FROM crypto_user_networth")
     yield
 
 
@@ -1199,11 +1135,11 @@ def seed_dashboard_data():
             text(
                 """
                 INSERT INTO portfolio_nav_snapshots
-                  (id, broker_account_id, legacy_account_id, import_run_id, report_date, base_currency,
+                  (id, broker_account_id, import_run_id, report_date, base_currency,
                    cash_base, stock_base, total_nav_base, authority_status, metadata_json)
                 VALUES
-                  (1, 1, 2, 1, '2026-02-06', 'SGD', 0, 50000, 50000, 'authoritative', '{}'),
-                  (2, 1, 2, 2, '2026-01-06', 'SGD', 0, 45000, 45000, 'authoritative', '{}')
+                  (1, 1, 1, '2026-02-06', 'SGD', 0, 50000, 50000, 'authoritative', '{}'),
+                  (2, 1, 2, '2026-01-06', 'SGD', 0, 45000, 45000, 'authoritative', '{}')
                 """
             )
         )
@@ -1211,12 +1147,12 @@ def seed_dashboard_data():
             text(
                 """
                 INSERT INTO portfolio_position_snapshots
-                  (id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date,
+                  (id, broker_account_id, broker_instrument_id, import_run_id, report_date,
                    quantity, currency, market_price, market_value_local, market_value_base,
                    cost_basis_local, cost_basis_base, fx_rate_to_base, authority_status, metadata_json)
                 VALUES
-                  (1, 1, 2, 1, 1, '2026-02-06', 10, 'USD', 5000, 50000, 50000, 50000, 50000, 1, 'authoritative', '{}'),
-                  (2, 1, 2, 1, 2, '2026-01-06', 9, 'USD', 5000, 45000, 45000, 45000, 45000, 1, 'authoritative', '{}')
+                  (1, 1, 1, 1, '2026-02-06', 10, 'USD', 5000, 50000, 50000, 50000, 50000, 1, 'authoritative', '{}'),
+                  (2, 1, 1, 2, '2026-01-06', 9, 'USD', 5000, 45000, 45000, 45000, 45000, 1, 'authoritative', '{}')
                 """
             )
         )

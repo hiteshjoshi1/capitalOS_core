@@ -427,7 +427,6 @@ describe("Ingest", () => {
         platform: "DBS",
         account_id: 7,
         original_filename: "dbs.csv",
-        stored_path: "data/dbs.csv",
         file_sha256: "x",
         format_signature: "sig",
         parser_key: "dbs_transaction_history_csv_v1",
@@ -744,7 +743,6 @@ describe("Ingest", () => {
         platform: "IBKR",
         account_id: 3,
         original_filename: "ibkr.csv",
-        stored_path: "/data/raw/99/ibkr.csv",
         file_sha256: "sha",
         format_signature: "sig",
         parser_key: "ibkr_activity_csv_v1",
@@ -934,7 +932,7 @@ describe("Ingest", () => {
     ]);
     mockApi.ingestJob.mockResolvedValue({
       job: {
-        id: 7, status: "NEEDS_MAPPING", platform: "CITI", account_id: 11, original_filename: "odd.csv", stored_path: "x",
+        id: 7, status: "NEEDS_MAPPING", platform: "CITI", account_id: 11, original_filename: "odd.csv",
         file_sha256: "x", format_signature: "sig", parser_key: null, report_path: null, error_message: null,
       },
       report: null,

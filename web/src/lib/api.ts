@@ -1252,8 +1252,8 @@ export type ImportJobDetail = {
     platform: string;
     account_id: number;
     original_filename: string;
-    stored_path: string;
-    file_sha256: string;
+    // stored_path (a server file path) was removed in #361 (D-99).
+    file_sha256: string | null;
     format_signature: string | null;
     parser_key: string | null;
     report_path: string | null;

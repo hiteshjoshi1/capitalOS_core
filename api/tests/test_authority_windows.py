@@ -481,27 +481,27 @@ def _seed_pre_075_layout(conn) -> None:
     # window (reference, counted today), and inside the first window.
     conn.exec_driver_sql(
         "INSERT INTO portfolio_nav_snapshots "
-        "(id, broker_account_id, legacy_account_id, import_run_id, report_date, base_currency, total_nav_base, authority_status, metadata_json) VALUES "
-        "(1, 1410, 1410, 1410, '2026-01-05', 'USD', 100, 'reference', '{}'), "
-        "(2, 1410, 1410, 1410, '2026-01-12', 'USD', 110, 'reference', '{}'), "
-        "(3, 1410, 1410, 1410, '2026-02-03', 'USD', 120, 'authoritative', '{}')"
+        "(id, broker_account_id, import_run_id, report_date, base_currency, total_nav_base, authority_status, metadata_json) VALUES "
+        "(1, 1410, 1410, '2026-01-05', 'USD', 100, 'reference', '{}'), "
+        "(2, 1410, 1410, '2026-01-12', 'USD', 110, 'reference', '{}'), "
+        "(3, 1410, 1410, '2026-02-03', 'USD', 120, 'authoritative', '{}')"
     )
     conn.exec_driver_sql(
         "INSERT INTO portfolio_cash_balance_snapshots "
-        "(id, broker_account_id, legacy_account_id, import_run_id, report_date, currency, cash_balance, cash_balance_base, fx_rate_to_base, authority_status, metadata_json) VALUES "
-        "(1, 1410, 1410, 1410, '2026-01-05', 'USD', 1, 1, 1, 'reference', '{}'), "
-        "(2, 1410, 1410, 1410, '2026-01-12', 'USD', 2, 2, 1, 'reference', '{}'), "
-        "(3, 1410, 1410, 1410, '2026-02-03', 'USD', 3, 3, 1, 'authoritative', '{}')"
+        "(id, broker_account_id, import_run_id, report_date, currency, cash_balance, cash_balance_base, fx_rate_to_base, authority_status, metadata_json) VALUES "
+        "(1, 1410, 1410, '2026-01-05', 'USD', 1, 1, 1, 'reference', '{}'), "
+        "(2, 1410, 1410, '2026-01-12', 'USD', 2, 2, 1, 'reference', '{}'), "
+        "(3, 1410, 1410, '2026-02-03', 'USD', 3, 3, 1, 'authoritative', '{}')"
     )
     conn.exec_driver_sql(
         "INSERT INTO portfolio_position_snapshots "
-        "(id, broker_account_id, legacy_account_id, broker_instrument_id, import_run_id, report_date, quantity, currency, "
+        "(id, broker_account_id, broker_instrument_id, import_run_id, report_date, quantity, currency, "
         " market_value_local, market_value_base, fx_rate_to_base, authority_status, metadata_json) VALUES "
-        "(1, 1410, 1410, 1410, 1410, '2026-01-05', 1, 'USD', 10, 10, 1, 'reference', '{}'), "
-        "(2, 1410, 1410, 1410, 1410, '2026-01-12', 1, 'USD', 11, 11, 1, 'superseded', '{}'), "
-        "(3, 1410, 1410, 1410, 1410, '2026-02-03', 1, 'USD', 12, 12, 1, 'authoritative', '{}'), "
-        "(4, 1411, 1411, 1411, 1411, '2026-01-25', 5, 'INR', 50, 50, 1, 'authoritative', '{}'), "
-        "(5, 1411, 1411, 1411, 1411, '2026-01-26', 5, 'INR', 50, 50, 1, 'reference', '{}')"
+        "(1, 1410, 1410, 1410, '2026-01-05', 1, 'USD', 10, 10, 1, 'reference', '{}'), "
+        "(2, 1410, 1410, 1410, '2026-01-12', 1, 'USD', 11, 11, 1, 'superseded', '{}'), "
+        "(3, 1410, 1410, 1410, '2026-02-03', 1, 'USD', 12, 12, 1, 'authoritative', '{}'), "
+        "(4, 1411, 1411, 1411, '2026-01-25', 5, 'INR', 50, 50, 1, 'authoritative', '{}'), "
+        "(5, 1411, 1411, 1411, '2026-01-26', 5, 'INR', 50, 50, 1, 'reference', '{}')"
     )
 
 

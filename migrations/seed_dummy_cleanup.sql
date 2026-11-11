@@ -61,7 +61,7 @@ BEGIN
     'portfolio_position_snapshots', 'portfolio_cash_balance_snapshots', 'portfolio_nav_snapshots',
     'portfolio_cash_ledger_entries', 'portfolio_trades', 'portfolio_corporate_action_events',
     'portfolio_fx_rates', 'portfolio_data_completeness', 'portfolio_data_quality_events',
-    'portfolio_reconciliations', 'portfolio_report_metrics', 'portfolio_event_groups'
+    'portfolio_reconciliations', 'portfolio_report_metrics'
   ] LOOP
     EXECUTE format('DELETE FROM %I WHERE import_run_id = ANY($1)', fact_table) USING run_ids;
   END LOOP;

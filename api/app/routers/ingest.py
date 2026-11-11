@@ -19,6 +19,7 @@ from app.ingestion.undo import RemovalRefused, remove_import_job
 from pydantic import BaseModel
 from app.models.import_job import ImportJob
 from app.portfolio.ibkr_flex import is_ibkr_flex_cutover_active
+from app.schemas.ingest import ImportJobList, ImportJobResponse
 
 logger = logging.getLogger("capitalos.ingest")
 
@@ -184,7 +185,7 @@ def ingest_ibkr(
     current_user: CurrentUser = Depends(require_current_user),
 ):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided")
+        raise HTTPException(status_code=422, detail="No filename provided")
 
     platform = _require_account_platform(db, account_id, current_user.id)
     _reject_ibkr_manual_upload_after_flex_cutover(db, account_id, platform)
@@ -217,7 +218,7 @@ def ingest_ibkr(
 def _check_as_of(as_of: date | None) -> None:
     # One day of slack: the browser's local "today" can be ahead of the app timezone.
     if as_of is not None and as_of > app_today() + timedelta(days=1):
-        raise HTTPException(status_code=400, detail="as_of can't be in the future")
+        raise HTTPException(status_code=422, detail="as_of can't be in the future")
 
 
 @router.post("/upload")
@@ -237,7 +238,7 @@ def ingest_upload(
     current_user: CurrentUser = Depends(require_current_user),
 ):
     if not file.filename:
-        raise HTTPException(status_code=400, detail="No filename provided")
+        raise HTTPException(status_code=422, detail="No filename provided")
     _check_as_of(as_of)
 
     platform = _require_account_platform(db, account_id, current_user.id)
@@ -305,7 +306,7 @@ def _backfill_account_categories(db: Session, account_id: int) -> None:
         apply_rules(db, tx_ids)
 
 
-@router.get("/jobs")
+@router.get("/jobs", response_model=ImportJobList)
 def list_jobs(
     db: Session = Depends(get_db),
     limit: int = Query(25, ge=1, le=100),
@@ -351,7 +352,7 @@ def _iso(value) -> str | None:
     return value.isoformat() if hasattr(value, "isoformat") else str(value)
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}", response_model=ImportJobResponse)
 def get_job(
     job_id: int,
     db: Session = Depends(get_db),
@@ -391,7 +392,6 @@ def get_job(
             "platform": job["platform"],
             "account_id": int(job["account_id"]),
             "original_filename": job["original_filename"],
-            "stored_path": job["stored_path"],
             "file_sha256": job["file_sha256"],
             "format_signature": job["format_signature"],
             "parser_key": job["parser_key"],
@@ -416,7 +416,7 @@ def register_job_signature(
         raise HTTPException(status_code=403, detail="Only an admin can register a file format")
     parser_key = (payload.parser_key or "").strip()
     if parser_key not in PARSER_REGISTRY:
-        raise HTTPException(status_code=400, detail=f"Unknown parser_key: {parser_key!r}")
+        raise HTTPException(status_code=422, detail=f"Unknown parser_key: {parser_key!r}")
     job = db.query(ImportJob).filter(ImportJob.id == job_id).one_or_none()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
