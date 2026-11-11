@@ -9,6 +9,7 @@ import { useTheme } from "../context/ThemeContext";
 import { ShellHeaderProvider } from "../context/ShellHeaderContext";
 import { findActiveSection, isNavItemActive } from "../lib/navigation";
 import { NARROW_SHELL_QUERY, useMediaQuery } from "../lib/useMediaQuery";
+import { watchActiveTab } from "../lib/tabRail";
 
 export default function AppShell() {
   const location = useLocation();
@@ -21,12 +22,14 @@ export default function AppShell() {
   // (PageShell), and the theme switch moves into the account menu.
   const narrow = useMediaQuery(NARROW_SHELL_QUERY);
   // #264: the section tabs are one row that scrolls sideways when it doesn't fit (Wealth has 7);
-  // the active tab is scrolled into view on every route change.
+  // the active tab is kept in view: on every route change, and again whenever the rail or the
+  // tab changes size afterwards (fonts, a lazy page filling the top bar; #371).
   const tabsRef = useRef<HTMLElement | null>(null);
+  const activeSectionLabel = activeSection?.label;
   useEffect(() => {
-    const active = tabsRef.current?.querySelector<HTMLElement>(".appShellTabActive");
-    active?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
-  }, [location.pathname]);
+    const rail = tabsRef.current;
+    return rail ? watchActiveTab(rail) : undefined;
+  }, [location.pathname, activeSectionLabel]);
 
   return (
     <div className="appShell">

@@ -51,11 +51,7 @@ for (const viewport of VIEWPORTS) {
         // as tall as the page once, and that window is captured.
         const height = await page.evaluate(() => document.documentElement.scrollHeight);
         await page.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, height) });
-        // The section tab rail scrolls its active tab into view on a route change, but only if the
-        // tab has rendered by then (lazy pages); line it up the same way every time.
-        await page.evaluate(() =>
-          document.querySelector(".appShellTabActive")?.scrollIntoView({ block: "nearest", inline: "nearest" }),
-        );
+        // The app keeps the active section tab in view itself, also after the window resize above (#371).
         await waitForStableSize(page);
         await expect(page).toHaveScreenshot(`${viewport.name}-${routeSlug(route)}.png`);
       });
