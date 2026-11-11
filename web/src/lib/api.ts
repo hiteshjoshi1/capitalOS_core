@@ -1252,11 +1252,10 @@ export type ImportJobDetail = {
     platform: string;
     account_id: number;
     original_filename: string;
-    // stored_path (a server file path) was removed in #361 (D-99).
+    // stored_path (#361) and report_path (#388), server file paths, were removed (D-99).
     file_sha256: string | null;
     format_signature: string | null;
     parser_key: string | null;
-    report_path: string | null;
     error_message: string | null;
     created_at: string | null;
     updated_at: string | null;
