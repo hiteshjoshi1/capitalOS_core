@@ -198,8 +198,9 @@ test("navigates via wealth section tabs", async ({ page }) => {
 test("persists theme toggle across reload", async ({ page }) => {
   await mockDashboardApis(page);
   await page.goto("/");
-  await page.goto("/settings");
-  await page.getByRole("button", { name: "Switch to Light Mode" }).click();
+  // #399 (U23): the theme control lives only in the header now.
+  await page.goto("/wealth");
+  await page.getByRole("group", { name: "Theme" }).getByRole("button", { name: "Light" }).click();
 
   await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
   await expect
