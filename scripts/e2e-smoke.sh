@@ -22,7 +22,10 @@ cd "$(dirname "$0")/.."
 
 mode=${1:-check}
 [ $# -gt 0 ] && shift
-name=${SMOKE_NAME:-capitalos-smoke}
+# One stack per checkout: a shared default let parallel runs in different worktrees break each
+# other (one run's cleanup removed another's database mid-migration).
+default_name=capitalos-smoke-$(basename "$PWD" | tr 'A-Z' 'a-z' | tr -c 'a-z0-9_-\n' '-' | cut -c1-40)
+name=${SMOKE_NAME:-$default_name}
 case "$name" in
   capitalos|capitalos-oss-*|capitalos-test|capitalos-postgres) echo "Refusing: '$name' is not a throwaway name." >&2; exit 2 ;;
 esac
