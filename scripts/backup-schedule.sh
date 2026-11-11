@@ -56,8 +56,8 @@ EOF
       echo "Schedule: not installed (make backup-schedule)"
     fi
     [ -f "$LOG" ] && { echo "Last log lines ($LOG):"; tail -5 "$LOG" | sed 's/^/  /'; }
-    # #356/#357: macOS privacy controls can block the job (/bin/bash under launchd) from ~/Documents
-    # or iCloud Drive while the same command works in Terminal.
+    # #356/#357/#383: macOS privacy controls can block the job (/bin/bash under launchd) from a
+    # protected folder (iCloud Drive listing, personal folders) while the same command works in Terminal.
     if [ -f "$LOG" ] && tail -200 "$LOG" | grep -q "Operation not permitted\|can't write to"; then
       echo "  <- macOS blocked the scheduled job from a folder (Operation not permitted). Run make backup-now in"
       echo "     Terminal to compare; don't grant /bin/bash Full Disk Access (docs/setup/backups.md, macOS privacy)."

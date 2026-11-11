@@ -80,21 +80,22 @@ Postgres 16 + FastAPI + React (Vite/TS), all in Docker via `docker-compose.yml`.
   current `data/` is moved to `data.pre-restore-<ts>/`). The database part is one transaction, committed
   only when every table's count matches the dump's snapshot; grants to a role the target lacks (e.g.
   `capitalos_mcp_ro` on a new stack: run `make db-create-mcp-role` after) are left out and named (#233).
-- Encrypted, outside the repo (#356, D-95): the main checkout's `.env` sets `BACKUP_DIR`
-  (`~/Documents/CapitalOS_backups`) and `BACKUP_AGE_RECIPIENT` (age public key); each set is made and
+- Encrypted, outside the repo (#356, D-95; one iCloud Drive folder, #383, D-105): the main checkout's `.env`
+  sets `BACKUP_DIR` (`~/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups`, Keep Downloaded:
+  the Mac's copy and the off-site one in one) and `BACKUP_AGE_RECIPIENT` (age public key); each set is made and
   verified in a private temp dir, then stored as `.age` files (dump, counts, data archive) with plain
   `.verified`/`.failed` markers. Verify/restore/the test instance decrypt with the private key
   `~/.capitalos/backup/age-identity.txt` (`BACKUP_AGE_IDENTITY`; a copy lives in Hitesh's password manager).
   `make backup-key-init` (once), `make backup-encrypt-existing` (dry run; `APPLY=1`) moves old plain sets
   over. `age` is pinned by sha256 in `scripts/age-tool.sh` (`make host-tools`). Worktrees, CI and the
   test instance (which links the main `.env`) keep `./backups`; there `BACKUP_DIR` from `.env` is ignored.
-- Off-site (#357, D-96): `BACKUP_OFFSITE_DIR` (`.env`, iCloud Drive) gets a copy of every verified
-  encrypted set after each backup (missing ones too) and the same retention; a missing/unwritable folder
-  warns, never fails the backup. `backup-status` shows the newest off-site copy (warns > 2 days);
-  `make backup-offsite-check` decrypts the newest off-site set and runs the restore check;
-  `make backup-offsite-sync` copies what's missing now. The 03:00 job is `/bin/bash` under launchd, which macOS
-  lets open files in iCloud Drive but not list the folder: the off-site steps never list it (they use the
-  local set names and `.capitalos-offsite-index`). Don't grant `/bin/bash` Full Disk Access (too broad).
+- Second copy (#357, D-96, optional; unset since #383): `BACKUP_OFFSITE_DIR` gets a copy of every verified
+  encrypted set after each backup and the same retention; a missing/unwritable folder warns, never fails the
+  backup. `make backup-offsite-check` / `backup-offsite-sync`. The 03:00 job is `/bin/bash` under launchd,
+  which macOS lets open/rename/delete files in iCloud Drive but not list the folder (and refused renames in
+  personal folders): every backup folder keeps `.capitalos-index` (a new set is added, prune rewrites it;
+  a pre-#383 `.capitalos-offsite-index` is adopted), read wherever listing is refused, rebuilt from a listing
+  where it works. Don't grant `/bin/bash` Full Disk Access (too broad); keep backups out of personal folders.
 - `/health` checks the database and reports `migrations.applied` vs `latest_file` (503 when the DB
   is down).
 

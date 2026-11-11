@@ -415,12 +415,12 @@ printf '%s' "$out" | grep -q "WARNING .* does not exist (iCloud Drive not turned
   ok "off-site status: a missing folder is a warning" || bad "off-site status, missing: $out"
 # macOS under launchd may open files in iCloud Drive but not list the folder: nothing may list it.
 # BACKUP_TEST_UNLISTABLE=1 makes listing fail; files stay reachable by name.
-grep -qx capitalos_20261104_030000.dump "$off/.capitalos-offsite-index" &&
-  ok "off-site: the sets copied are recorded in .capitalos-offsite-index" || bad "off-site: index written ($(cat "$off/.capitalos-offsite-index" 2>&1))"
+grep -qx capitalos_20261104_030000.dump "$off/.capitalos-index" &&
+  ok "off-site: the sets copied are recorded in .capitalos-index" || bad "off-site: index written ($(cat "$off/.capitalos-index" 2>&1))"
 off2=$tmp/icloud/Unlistable
 mkdir -p "$off2"
 out=$( (BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off2 offsite_sync) 2>&1) && rc=0 || rc=$?
-if [ "$rc" = 0 ] && [ -f "$off2/capitalos_20261104_030000.dump.verified" ] && grep -qx capitalos_20261104_030000.dump "$off2/.capitalos-offsite-index" &&
+if [ "$rc" = 0 ] && [ -f "$off2/capitalos_20261104_030000.dump.verified" ] && grep -qx capitalos_20261104_030000.dump "$off2/.capitalos-index" &&
   printf '%s' "$out" | grep -q "Off-site: 1 set(s) copied"; then
   ok "off-site, unlistable folder: the sync copies by name and writes the index"
 else bad "off-site, unlistable folder: sync (exit $rc): $out"; fi
@@ -429,10 +429,10 @@ printf '%s' "$out" | grep -q "Off-site: 0 set(s) copied" && ok "off-site, unlist
 out=$(BACKUP_TEST_UNLISTABLE=1 BACKUP_OFFSITE_DIR=$off2 offsite_status)
 printf '%s' "$out" | grep -q "1 set(s), newest capitalos_20261104_030000.dump.verified" &&
   ok "off-site status, unlistable folder: read from the index" || bad "off-site status, unlistable: $out"
-rm -f "$off2/.capitalos-offsite-index"
+rm -f "$off2/.capitalos-index"
 out=$( (BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$local_dir BACKUP_OFFSITE_DIR=$off2 offsite_sync) 2>&1) && rc=0 || rc=$?
 if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q "can't list $off2" && printf '%s' "$out" | grep -q "Off-site: 0 set(s) copied" &&
-  grep -qx capitalos_20261104_030000.dump "$off2/.capitalos-offsite-index"; then
+  grep -qx capitalos_20261104_030000.dump "$off2/.capitalos-index"; then
   ok "off-site, unlistable folder, no index: says so, finds sets by the local names, rebuilds the index"
 else bad "off-site, no index, unlistable (exit $rc): $out"; fi
 # prune keeps the same retention off-site.
@@ -443,9 +443,45 @@ done
 printf '%s\n' capitalos_20250101_030000.dump capitalos_20261103_030000.dump >"$o3/.capitalos-offsite-index"
 BACKUP_TEST_UNLISTABLE=1 BACKUP_DIR=$b3 BACKUP_OFFSITE_DIR=$o3 BACKUP_TODAY=20261104 "$src/scripts/db-backup.sh" prune >/dev/null
 if [ "$(ls "$o3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ] && [ "$(ls "$b3" | sed 's/_030000.*//' | sort -u | tr '\n' ' ')" = "capitalos_20261103 " ] &&
-  [ "$(cat "$o3/.capitalos-offsite-index")" = capitalos_20261103_030000.dump ]; then
+  [ "$(cat "$o3/.capitalos-index")" = capitalos_20261103_030000.dump ]; then
   ok "off-site: prune applies the same retention off-site, by the index (no listing), and rewrites it"
-else bad "off-site: prune off-site (local: $(ls "$b3" | tr '\n' ' '); off-site: $(ls "$o3" | tr '\n' ' '); index: $(cat "$o3/.capitalos-offsite-index"))"; fi
+else bad "off-site: prune off-site (local: $(ls "$b3" | tr '\n' ' '); off-site: $(ls "$o3" | tr '\n' ' '); index: $(cat "$o3/.capitalos-index"))"; fi
+
+# #383: one backup folder in iCloud Drive, which the 03:00 job may not list. BACKUP_DIR itself is
+# then driven by its index (.capitalos-index, or the pre-#383 off-site one, adopted).
+b4=$tmp/b4; mkdir -p "$b4"
+mkset() { local ext; for ext in .dump.age .dump.counts.age .dump.verified .data.tar.gz.age; do touch "$1/capitalos_${2}_030000$ext"; done; }
+mkset "$b4" 20250101; mkset "$b4" 20261103
+printf '%s\n' capitalos_20250101_030000.dump capitalos_20261103_030000.dump >"$b4/.capitalos-offsite-index"
+out=$(BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b4 backup_newest_verified)
+[ "$out" = "$b4/capitalos_20261103_030000.dump" ] &&
+  ok "backup folder, unlistable: the newest set comes from the adopted pre-#383 index (deploy, status, test instance)" || bad "newest from index: $out"
+out=$(BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b4 verified_sets | tr '\n' ' ')
+[ "$out" = "$b4/capitalos_20250101_030000.dump $b4/capitalos_20261103_030000.dump " ] &&
+  ok "backup folder, unlistable: verified sets from the index" || bad "verified sets from index: $out"
+mkset "$b4" 20261104
+(BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b4 index_add "$b4" capitalos_20261104_030000.dump)
+[ "$(tr '\n' ' ' <"$b4/.capitalos-index")" = "capitalos_20250101_030000.dump capitalos_20261103_030000.dump capitalos_20261104_030000.dump " ] &&
+  ok "backup folder, unlistable: a new set is recorded in .capitalos-index (create)" || bad "index_add: $(cat "$b4/.capitalos-index" 2>&1)"
+out=$( (BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b4 status) 2>&1)
+printf '%s' "$out" | grep -q "Newest verified backup: $b4/capitalos_20261104_030000.dump (encrypted)" &&
+  printf '%s' "$out" | grep -q "Verified backups kept: 3, 3 encrypted" &&
+  ok "backup folder, unlistable: status reads the index" || bad "status from index: $out"
+BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b4 BACKUP_TODAY=20261104 "$src/scripts/db-backup.sh" prune >/dev/null 2>&1
+if [ ! -e "$b4/capitalos_20250101_030000.dump.age" ] && [ -e "$b4/capitalos_20261103_030000.dump.age" ] &&
+  [ "$(tr '\n' ' ' <"$b4/.capitalos-index")" = "capitalos_20261103_030000.dump capitalos_20261104_030000.dump " ]; then
+  ok "backup folder, unlistable: prune works by the index and rewrites it"
+else bad "prune by index: $(ls "$b4" | tr '\n' ' '); index: $(cat "$b4/.capitalos-index")"; fi
+b5=$tmp/b5; mkdir -p "$b5"; mkset "$b5" 20261104
+out=$( (BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b5 verified_sets) 2>&1)
+printf '%s' "$out" | grep -q "can't list $b5 .*no .capitalos-index yet" &&
+  ok "backup folder, unlistable, no index: says so (and names the fix)" || bad "no index warning: $out"
+(BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b5 BACKUP_TODAY=20261104 "$src/scripts/db-backup.sh" prune) >/dev/null 2>&1 || true
+[ ! -e "$b5/.capitalos-index" ] && [ -e "$b5/capitalos_20261104_030000.dump.age" ] &&
+  ok "backup folder, unlistable, no index: prune removes nothing and writes no empty index" || bad "prune without index: $(ls -A "$b5" | tr '\n' ' ')"
+(BACKUP_DIR=$b5 verified_sets >/dev/null)
+[ "$(cat "$b5/.capitalos-index" 2>/dev/null)" = capitalos_20261104_030000.dump ] &&
+  ok "backup folder: a listing (Terminal) rebuilds the index" || bad "index rebuild from listing: $(cat "$b5/.capitalos-index" 2>&1)"
 
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -47,6 +47,19 @@ backup_env() {  # <repo dir>
 }
 
 # The newest verified set's logical path (capitalos_<ts>.dump, whether stored plain or as .age).
+# #383: from a listing, else from the folder's index (.capitalos-index, or the pre-#383
+# .capitalos-offsite-index): under launchd macOS refuses listing an iCloud Drive folder. Names
+# carry the timestamp, so the last name in order is the newest.
 backup_newest_verified() {
-  ls -1t "$BACKUP_DIR"/capitalos_*.dump.verified 2>/dev/null | head -1 | sed 's/\.verified$//'
+  local idx n
+  if [ "${BACKUP_TEST_UNLISTABLE:-}" != all ] && [ "${BACKUP_TEST_UNLISTABLE:-}" != local ] && ls -1 "$BACKUP_DIR" >/dev/null 2>&1; then
+    n=$(ls -1 "$BACKUP_DIR" 2>/dev/null | sed -n 's/^\(capitalos_.*\.dump\)\.verified$/\1/p' | sort | tail -1)
+  else
+    idx="$BACKUP_DIR/.capitalos-index"
+    [ -f "$idx" ] || idx="$BACKUP_DIR/.capitalos-offsite-index"
+    [ -f "$idx" ] || return 0
+    n=$(while IFS= read -r n; do [ -n "$n" ] && [ -e "$BACKUP_DIR/$n.verified" ] && echo "$n"; done <"$idx" | sort | tail -1)
+  fi
+  [ -n "$n" ] && printf '%s/%s\n' "$BACKUP_DIR" "$n"
+  return 0
 }
