@@ -483,5 +483,23 @@ printf '%s' "$out" | grep -q "can't list $b5 .*no .capitalos-index yet" &&
 [ "$(cat "$b5/.capitalos-index" 2>/dev/null)" = capitalos_20261104_030000.dump ] &&
   ok "backup folder: a listing (Terminal) rebuilds the index" || bad "index rebuild from listing: $(cat "$b5/.capitalos-index" 2>&1)"
 
+# #383: an iCloud folder's index lives outside it (BACKUP_INDEX_DIR here; ~/.capitalos/backup/index
+# for real), because the 03:00 job could not read or replace an index Terminal wrote in iCloud.
+b6=$tmp/b6; ix=$tmp/index; mkdir -p "$b6"; mkset "$b6" 20261103
+printf '%s\n' capitalos_20261103_030000.dump >"$b6/.capitalos-index"
+out=$(BACKUP_INDEX_DIR=$ix BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b6 backup_newest_verified)
+[ "$out" = "$b6/capitalos_20261103_030000.dump" ] &&
+  ok "outside index: falls back to the folder's own index until the outside one exists" || bad "outside index fallback: $out"
+mkset "$b6" 20261104
+(BACKUP_INDEX_DIR=$ix BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b6 index_add "$b6" capitalos_20261104_030000.dump)
+f=$(BACKUP_INDEX_DIR=$ix backup_index_of "$b6")
+[ "${f#"$ix"/}" != "$f" ] && [ "$(tr '\n' ' ' <"$f")" = "capitalos_20261103_030000.dump capitalos_20261104_030000.dump " ] &&
+  ok "outside index: create records the new set in BACKUP_INDEX_DIR, not in the folder" || bad "outside index_add: $f: $(cat "$f" 2>&1)"
+out=$(BACKUP_INDEX_DIR=$ix BACKUP_TEST_UNLISTABLE=local BACKUP_DIR=$b6 backup_newest_verified)
+[ "$out" = "$b6/capitalos_20261104_030000.dump" ] && ok "outside index: newest set comes from it" || bad "outside newest: $out"
+f2=$(HOME=/Users/x BACKUP_INDEX_DIR= backup_index_of "/Users/x/Library/Mobile Documents/com~apple~CloudDocs/CapitalOS_backups")
+[ "$f2" = "/Users/x/.capitalos/backup/index/Users_x_Library_Mobile_Documents_com_apple_CloudDocs_CapitalOS_backups.index" ] &&
+  ok "outside index: an iCloud folder's index defaults to ~/.capitalos/backup/index" || bad "default index path: $f2"
+
 echo "$pass passed, $fail failed"
 [ "$fail" -eq 0 ]

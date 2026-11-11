@@ -290,7 +290,12 @@ offsite_copy_set() {  # <dump in BACKUP_DIR>
 # read too, so a folder that was the off-site copy keeps its history (adopted, then rewritten).
 INDEX_NAME=.capitalos-index
 LEGACY_INDEX_NAME=.capitalos-offsite-index
-index_of() { printf '%s/%s' "$1" "$INDEX_NAME"; }  # <dir>
+# Where a folder's index lives. In iCloud Drive the 03:00 job (launchd) could neither read nor
+# replace an index file Terminal had written there ("Operation not permitted", #383), so an iCloud
+# folder's index is kept on the Mac in ~/.capitalos/backup/index/ (no privacy controls there; it
+# is only a list of names, rebuilt from a listing in Terminal if lost). BACKUP_INDEX_DIR overrides
+# it for every folder; other folders keep it inside (worktrees, tests).
+index_of() { backup_index_of "$1"; }  # <dir>; see backup_index_of (scripts/backup-env.sh)
 
 # BACKUP_TEST_UNLISTABLE simulates the refusal (scripts/test-db-backup.sh): 1 or offsite = the
 # off-site folder, local = BACKUP_DIR, all = both.
@@ -313,6 +318,7 @@ dir_listing() {  # <dir>
 index_write() {  # <dir>; names on stdin; atomic (tmp + mv); quiet when unchanged
   local idx tmp
   idx=$(index_of "$1"); tmp="$idx.part"
+  mkdir -p "$(dirname "$idx")" 2>/dev/null || true
   sort -u | grep . >"$tmp" 2>/dev/null || true
   if [ -f "$idx" ] && cmp -s "$tmp" "$idx"; then rm -f "$tmp"; return 0; fi
   mv "$tmp" "$idx" 2>/dev/null || { rm -f "$tmp"; say "WARNING: could not write $idx" >&2; return 1; }
@@ -322,9 +328,11 @@ index_write() {  # <dir>; names on stdin; atomic (tmp + mv); quiet when unchange
 index_names() {  # <dir>
   local idx n
   idx=$(index_of "$1")
+  # Before the index moved out of iCloud: the folder's own index files (may be unreadable here).
+  [ -f "$idx" ] || idx="$1/$INDEX_NAME"
   [ -f "$idx" ] || idx="$1/$LEGACY_INDEX_NAME"
-  [ -f "$idx" ] || return 1
-  while IFS= read -r n; do [ -n "$n" ] && [ -e "$1/$n.verified" ] && echo "$n"; done <"$idx" || true
+  [ -f "$idx" ] && [ -r "$idx" ] || return 1
+  { while IFS= read -r n; do [ -n "$n" ] && [ -e "$1/$n.verified" ] && echo "$n"; done <"$idx"; } 2>/dev/null || true
 }
 
 # The verified set names in <dir>, oldest first. A listing when allowed (the index is refreshed
@@ -346,7 +354,7 @@ dir_names() {  # <dir>
 index_refresh() {  # <dir>
   local names
   names=$(dir_names "$1")
-  [ -n "$names" ] || [ -f "$(index_of "$1")" ] || [ -f "$1/$LEGACY_INDEX_NAME" ] || return 0
+  [ -n "$names" ] || [ -f "$(index_of "$1")" ] || [ -f "$1/$INDEX_NAME" ] || [ -f "$1/$LEGACY_INDEX_NAME" ] || return 0
   printf '%s\n' "$names" | index_write "$1"
 }
 
