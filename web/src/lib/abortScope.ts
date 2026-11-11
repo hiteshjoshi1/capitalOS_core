@@ -2,13 +2,13 @@
  * Ambient AbortSignal for API calls (#148).
  *
  * `useApiResource` runs each fetcher inside `withAbortSignal(signal, fetcher)`. Every
- * `req()` in lib/api.ts that *starts* during that synchronous call picks the signal up,
+ * `req()` in lib/api/http.ts that *starts* during that synchronous call picks the signal up,
  * so `() => api.cashDeposits(month, ccy)` (or a `Promise.all` of several calls) is
  * abortable without threading a `signal` argument through ~40 API wrappers.
  *
  * Only calls started synchronously inside `call` see the signal; a call started after an
  * `await` doesn't, and then simply isn't aborted (the hook still ignores its result).
- * This lives outside lib/api.ts so tests that `vi.mock("../lib/api")` keep it.
+ * This lives outside lib/api(.ts and api/) so tests that `vi.mock("../lib/api")` keep it.
  */
 let ambientSignal: AbortSignal | undefined;
 
