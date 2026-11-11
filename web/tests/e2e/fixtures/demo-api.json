@@ -1413,10 +1413,10 @@
    "currency_breakdown": [
     {
      "currency": "USD",
-     "current_value": 1440053.5,
+     "current_value": 1439896.54,
      "snapshot_value": 1420281.12345,
-     "delta_abs": 19772.376549999928,
-     "delta_pct": 0.013921452748714223
+     "delta_abs": 19615.41655,
+     "delta_pct": 0.013810939416241947
     },
     {
      "currency": "SGD",
@@ -1424,30 +1424,121 @@
      "snapshot_value": 1034250,
      "delta_abs": 15750,
      "delta_pct": 0.015228426395939087
-    },
-    {
-     "currency": "HKD",
-     "current_value": 0,
-     "snapshot_value": 0,
-     "delta_abs": 0,
-     "delta_pct": null
-    },
-    {
-     "currency": "INR",
-     "current_value": 0,
-     "snapshot_value": 0,
-     "delta_abs": 0,
-     "delta_pct": null
-    },
-    {
-     "currency": "Other",
-     "current_value": 0,
-     "snapshot_value": 0,
-     "delta_abs": 0,
-     "delta_pct": null
     }
    ],
-   "snapshot_missing": false
+   "snapshot_missing": false,
+   "accounts": [
+    {
+     "account_id": 5,
+     "kind": "account",
+     "label": "DUMMY - IBKR Global",
+     "platform": "IBKR",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 924704.2,
+     "snapshot_value": 912107.1435,
+     "delta_abs": 12597.0565,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": 2,
+     "kind": "account",
+     "label": "DUMMY - DBS Savings",
+     "platform": "DBS",
+     "currencies": [
+      "SGD"
+     ],
+     "current_value": 400000,
+     "snapshot_value": 394000,
+     "delta_abs": 6000,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": 3,
+     "kind": "account",
+     "label": "DUMMY - OCBC 360",
+     "platform": "OCBC",
+     "currencies": [
+      "SGD"
+     ],
+     "current_value": 350000,
+     "snapshot_value": 344750,
+     "delta_abs": 5250,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": null,
+     "kind": "stablecoin",
+     "label": "Stablecoins · Ethereum",
+     "platform": "Ethereum",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 330251.5,
+     "snapshot_value": 325752.55125,
+     "delta_abs": 4498.94875,
+     "last_data_date": "2026-11-11",
+     "stale": null
+    },
+    {
+     "account_id": 4,
+     "kind": "account",
+     "label": "DUMMY - UOB One",
+     "platform": "UOB",
+     "currencies": [
+      "SGD"
+     ],
+     "current_value": 300000,
+     "snapshot_value": 295500,
+     "delta_abs": 4500,
+     "last_data_date": "2026-11-11",
+     "stale": false
+    },
+    {
+     "account_id": null,
+     "kind": "stablecoin",
+     "label": "Stablecoins · Solana",
+     "platform": "Solana",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 105680.48,
+     "snapshot_value": 104240.8164,
+     "delta_abs": 1439.6636,
+     "last_data_date": "2026-11-11",
+     "stale": null
+    },
+    {
+     "account_id": null,
+     "kind": "stablecoin",
+     "label": "Stablecoins · Arbitrum",
+     "platform": "Arbitrum",
+     "currencies": [
+      "USD"
+     ],
+     "current_value": 79260.36,
+     "snapshot_value": 78180.6123,
+     "delta_abs": 1079.7477,
+     "last_data_date": "2026-11-11",
+     "stale": null
+    }
+   ],
+   "fx_revaluation": {
+    "total": -1273.5065,
+    "from_at": "2026-11-01T00:00:00+00:00",
+    "to_at": "2026-11-11T20:27:31+08:00",
+    "items": [
+     {
+      "currency": "USD",
+      "start_value": 912107.1435,
+      "fx_effect": -1273.5065
+     }
+    ]
+   }
   }
  },
  "/dashboard/data-hub-summary": {

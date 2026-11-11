@@ -15,6 +15,7 @@ vi.mock("../lib/api", () => ({
     platformAllocation: vi.fn(),
     spendingSummary: vi.fn(),
     netWorthSinceUpdate: vi.fn(),
+    riskSummary: vi.fn(),
   },
 }));
 
@@ -737,5 +738,53 @@ describe("WealthOverview panel errors", () => {
     const chip = document.querySelector(".coHeroValueRow .deltaChip");
     expect(chip).toHaveClass("delta--down");
     expect(chip).toHaveTextContent("▼-4.0%");
+  });
+
+  // #397: the section heading promises what it shows (U1), and the donut also splits gross
+  // assets by currency and by country (U2), each adding up to the same gross assets.
+  it("splits gross assets by currency and by country, and names the signals section for what it shows", async () => {
+    mockSubscribe.mockImplementation(() => () => {});
+    mockApi.dashboardBootstrap.mockResolvedValue(makeBootstrap(100) as never);
+    mockApi.dashboardSummary.mockResolvedValue({
+      ...makeSummary(100),
+      geography: [
+        { country: "US", value: 80, percent: 72.73 },
+        { country: "SG", value: 30, percent: 27.27 },
+      ],
+    } as never);
+    mockApi.riskSummary.mockResolvedValue({
+      as_of_month: "2026-05",
+      base_currency: "SGD",
+      top_holdings: [],
+      currency_exposure: {
+        total: 100,
+        items: [
+          { currency: "USD", cash: 0, stocks_funds: 70, stablecoins: 5, crypto: 0, liabilities: 0, value: 75, percent: 75 },
+          { currency: "SGD", cash: 10, stocks_funds: 0, stablecoins: 0, crypto: 0, liabilities: 10, value: 0, percent: 0 },
+          { currency: "CRYPTO", cash: 0, stocks_funds: 0, stablecoins: 0, crypto: 25, liabilities: 0, value: 25, percent: 25 },
+        ],
+      },
+    } as never);
+
+    render(
+      <MemoryRouter>
+        <WealthOverview />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole("heading", { name: "Cash flow, liabilities and largest positions" })).toBeInTheDocument();
+    expect(screen.queryByText(/Cash flow, risk, and movement/)).not.toBeInTheDocument();
+    expect(mockApi.riskSummary).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "By currency" }));
+    const donut = await screen.findByRole("img", { name: "Allocation donut chart" });
+    // Gross, before liabilities: USD 75, crypto 25, SGD 10 (the card owed isn't taken off here).
+    await waitFor(() =>
+      expect(donut).toHaveAccessibleDescription(/USD 68\.2%, Crypto \(not a currency\) 22\.7%, SGD 9\.1%/),
+    );
+    expect(mockApi.riskSummary).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "By country" }));
+    await waitFor(() => expect(donut).toHaveAccessibleDescription(/United States 72\.7%, Singapore 27\.3%/));
   });
 });

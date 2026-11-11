@@ -7210,3 +7210,44 @@ html, body {
   margin: 0 0 12px;
   font-size: 13px;
 }
+
+/* #397 (U13, U14): the Cash page's per-account table and FX revaluation. */
+.cashAccountsNote {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+
+.cashAccountValue {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.cashAccountDelta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.cashAccountDelta.isUp {
+  color: var(--delta-up);
+}
+
+.cashAccountDelta.isDown {
+  color: var(--delta-down);
+}
+
+/* #397 (U2): four allocation views don't fit one row on a phone; two by two there. */
+@media (max-width: 600px) {
+  .coAllocViewControl {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-radius: 16px;
+    width: 100%;
+  }
+
+  .coAllocViewControl .coSegmentedBtn {
+    text-align: center;
+  }
+}

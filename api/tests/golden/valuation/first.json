@@ -443,17 +443,83 @@
       "stock_exposure_total": 13143.3186
     },
     "/dashboard/cash-deposits?month=2026-03&base_currency=SGD": {
+      "accounts": [
+        {
+          "account_id": 101,
+          "currencies": [
+            "SGD"
+          ],
+          "current_value": 46100.0,
+          "delta_abs": 600.0,
+          "kind": "account",
+          "label": "DBS Savings",
+          "last_data_date": "2026-03-31",
+          "platform": "DBS",
+          "snapshot_value": 45500.0,
+          "stale": null
+        },
+        {
+          "account_id": 102,
+          "currencies": [
+            "USD"
+          ],
+          "current_value": 10862.212,
+          "delta_abs": -134.1014,
+          "kind": "account",
+          "label": "HSBC USD Saver",
+          "last_data_date": "2026-03-10",
+          "platform": "HSBC",
+          "snapshot_value": 10996.3134,
+          "stale": null
+        },
+        {
+          "account_id": 103,
+          "currencies": [
+            "SGD",
+            "USD"
+          ],
+          "current_value": 3445.6221,
+          "delta_abs": -1058.9234,
+          "kind": "account",
+          "label": "IBKR Main",
+          "last_data_date": "2026-03-31",
+          "platform": "IBKR",
+          "snapshot_value": 4504.5455,
+          "stale": null
+        },
+        {
+          "account_id": null,
+          "currencies": [
+            "USD"
+          ],
+          "current_value": 1475.1152,
+          "delta_abs": -1206.9124,
+          "kind": "stablecoin",
+          "label": "Stablecoins · Ethereum",
+          "last_data_date": "2026-03-31",
+          "platform": "Ethereum",
+          "snapshot_value": 2682.0276,
+          "stale": null
+        },
+        {
+          "account_id": null,
+          "currencies": [
+            "USD"
+          ],
+          "current_value": 335.2535,
+          "delta_abs": 335.2535,
+          "kind": "stablecoin",
+          "label": "Stablecoins · Solana",
+          "last_data_date": "2026-03-15",
+          "platform": "Solana",
+          "snapshot_value": 0.0,
+          "stale": null
+        }
+      ],
       "as_of_month": "2026-03",
       "base_currency": "SGD",
       "compare_month": "2026-02",
       "currency_breakdown": [
-        {
-          "currency": "USD",
-          "current_value": 14818.2028,
-          "delta_abs": -864.6837,
-          "delta_pct": -0.0551,
-          "snapshot_value": 15682.8865
-        },
         {
           "currency": "SGD",
           "current_value": 47400.0,
@@ -462,25 +528,11 @@
           "snapshot_value": 48000.0
         },
         {
-          "currency": "HKD",
-          "current_value": 0.0,
-          "delta_abs": 0.0,
-          "delta_pct": null,
-          "snapshot_value": 0.0
-        },
-        {
-          "currency": "INR",
-          "current_value": 0.0,
-          "delta_abs": 0.0,
-          "delta_pct": null,
-          "snapshot_value": 0.0
-        },
-        {
-          "currency": "Other",
-          "current_value": 0.0,
-          "delta_abs": 0.0,
-          "delta_pct": null,
-          "snapshot_value": 0.0
+          "currency": "USD",
+          "current_value": 14818.2028,
+          "delta_abs": -864.6837,
+          "delta_pct": -0.0551,
+          "snapshot_value": 15682.8865
         }
       ],
       "current_cash_as_of": "2026-03-31T00:00:00+00:00",
@@ -488,6 +540,18 @@
       "current_total": 62218.2027,
       "delta_abs": -1464.6838,
       "delta_pct": -0.023,
+      "fx_revaluation": {
+        "from_at": "2026-03-01T00:00:00+00:00",
+        "items": [
+          {
+            "currency": "USD",
+            "fx_effect": 0.0,
+            "start_value": 13000.8588
+          }
+        ],
+        "to_at": "2026-04-01T00:00:00+00:00",
+        "total": 0.0
+      },
       "is_live": false,
       "items": [
         {
@@ -557,17 +621,83 @@
       ]
     },
     "/dashboard/cash-deposits?month=2026-04&base_currency=SGD": {
+      "accounts": [
+        {
+          "account_id": 101,
+          "currencies": [
+            "SGD"
+          ],
+          "current_value": 46100.0,
+          "delta_abs": 0.0,
+          "kind": "account",
+          "label": "DBS Savings",
+          "last_data_date": "2026-03-31",
+          "platform": "DBS",
+          "snapshot_value": 46100.0,
+          "stale": false
+        },
+        {
+          "account_id": 102,
+          "currencies": [
+            "USD"
+          ],
+          "current_value": 10862.212,
+          "delta_abs": 0.0,
+          "kind": "account",
+          "label": "HSBC USD Saver",
+          "last_data_date": "2026-03-10",
+          "platform": "HSBC",
+          "snapshot_value": 10862.212,
+          "stale": false
+        },
+        {
+          "account_id": 103,
+          "currencies": [
+            "SGD",
+            "USD"
+          ],
+          "current_value": 3445.6221,
+          "delta_abs": 0.0,
+          "kind": "account",
+          "label": "IBKR Main",
+          "last_data_date": "2026-03-31",
+          "platform": "IBKR",
+          "snapshot_value": 3445.6221,
+          "stale": false
+        },
+        {
+          "account_id": null,
+          "currencies": [
+            "USD"
+          ],
+          "current_value": 1475.1152,
+          "delta_abs": 0.0,
+          "kind": "stablecoin",
+          "label": "Stablecoins · Ethereum",
+          "last_data_date": "2026-03-31",
+          "platform": "Ethereum",
+          "snapshot_value": 1475.1152,
+          "stale": null
+        },
+        {
+          "account_id": null,
+          "currencies": [
+            "USD"
+          ],
+          "current_value": 335.2535,
+          "delta_abs": 0.0,
+          "kind": "stablecoin",
+          "label": "Stablecoins · Solana",
+          "last_data_date": "2026-03-15",
+          "platform": "Solana",
+          "snapshot_value": 335.2535,
+          "stale": null
+        }
+      ],
       "as_of_month": "2026-04",
       "base_currency": "SGD",
       "compare_month": "2026-03",
       "currency_breakdown": [
-        {
-          "currency": "USD",
-          "current_value": 14818.2028,
-          "delta_abs": 0.0,
-          "delta_pct": 0.0,
-          "snapshot_value": 14818.2028
-        },
         {
           "currency": "SGD",
           "current_value": 47400.0,
@@ -576,25 +706,11 @@
           "snapshot_value": 47400.0
         },
         {
-          "currency": "HKD",
-          "current_value": 0.0,
+          "currency": "USD",
+          "current_value": 14818.2028,
           "delta_abs": 0.0,
-          "delta_pct": null,
-          "snapshot_value": 0.0
-        },
-        {
-          "currency": "INR",
-          "current_value": 0.0,
-          "delta_abs": 0.0,
-          "delta_pct": null,
-          "snapshot_value": 0.0
-        },
-        {
-          "currency": "Other",
-          "current_value": 0.0,
-          "delta_abs": 0.0,
-          "delta_pct": null,
-          "snapshot_value": 0.0
+          "delta_pct": 0.0,
+          "snapshot_value": 14818.2028
         }
       ],
       "current_cash_as_of": "2026-03-31T00:00:00+00:00",
@@ -602,6 +718,18 @@
       "current_total": 62218.2027,
       "delta_abs": 0.0,
       "delta_pct": 0.0,
+      "fx_revaluation": {
+        "from_at": "2026-04-01T00:00:00+00:00",
+        "items": [
+          {
+            "currency": "USD",
+            "fx_effect": 0.0,
+            "start_value": 13007.8341
+          }
+        ],
+        "to_at": "2026-04-01T06:00:00+08:00",
+        "total": 0.0
+      },
       "is_live": true,
       "items": [
         {

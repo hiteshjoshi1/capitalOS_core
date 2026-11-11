@@ -15,6 +15,7 @@ import { noDataFor } from "../lib/delta";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
 import { describeShares } from "../lib/chartA11y";
+import StatusPill from "../components/StatusPill";
 
 /** Shown until /crypto/stablecoins answers with the symbols it counts. */
 const STABLECOIN_LABEL_FALLBACK = ["USDC", "USDT"];
@@ -83,6 +84,12 @@ export default function CashOverview() {
     stablecoinsInTotal > 0
       ? ` · Includes ${money(stablecoinsInTotal)} in stablecoins, which net worth counts under Crypto`
       : "";
+
+  // #397 (U13): the per-account table, the first check when net worth looks off.
+  const accountRows = cashDeposits?.accounts ?? [];
+  const compareLabel = cashDeposits?.compare_month ? formatMonth(cashDeposits.compare_month, "medium") : "last month";
+  // #397 (U14): foreign-currency cash revalued at today's rates (the bridge's cash FX part).
+  const fxRevaluation = cashDeposits?.fx_revaluation ?? null;
 
   // #224: a compare month with no cash data says so; it isn't a zero baseline.
   const missingReason = cashDeposits?.snapshot_missing ? noDataFor(cashDeposits.compare_month) : null;
@@ -195,6 +202,88 @@ export default function CashOverview() {
               </div>
             </div>
           </section>
+
+          <section aria-labelledby="cash-accounts-heading">
+            <div className="cashFlowSectionHeading">
+              <p className="wealthEyebrow">Accounts</p>
+              <h2 className="cashFlowSectionTitle" id="cash-accounts-heading">
+                Cash by account
+              </h2>
+            </div>
+            <div className="card" style={{ padding: 24 }}>
+              {accountRows.length === 0 ? (
+                <p className="muted">No cash accounts yet.</p>
+              ) : (
+                <>
+                  <p className="muted cashAccountsNote">
+                    Balance now, the change vs {compareLabel}, and how recent each account's data is. Check here first
+                    when net worth looks off.
+                  </p>
+                  <div className="listRows" data-testid="cash-accounts">
+                    {accountRows.map((row) => (
+                      <div className="listRow" key={`${row.kind}-${row.account_id ?? row.label}`}>
+                        <div className="listRowMain">
+                          <span className="listRowTitle">
+                            {row.label}{" "}
+                            {row.stale ? <StatusPill tone="warn" label="Overdue" /> : null}
+                          </span>
+                          <span className="listRowMeta">
+                            <span>{row.platform}</span>
+                            {row.currencies && row.currencies.length > 0 ? <span>{row.currencies.join(", ")}</span> : null}
+                            <span>{row.last_data_date ? `Data ${formatDate(row.last_data_date)}` : "No data now"}</span>
+                          </span>
+                        </div>
+                        <div className="listRowValue cashAccountValue">
+                          <span>{money(row.current_value)}</span>
+                          <span className={`cashAccountDelta ${row.delta_abs > 0 ? "isUp" : row.delta_abs < 0 ? "isDown" : ""}`}>
+                            {formatSignedMoney(row.delta_abs, shownCurrency)}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+
+          {fxRevaluation ? (
+            <section aria-labelledby="cash-fx-heading">
+              <div className="cashFlowSectionHeading">
+                <p className="wealthEyebrow">Exchange rates</p>
+                <h2 className="cashFlowSectionTitle" id="cash-fx-heading">
+                  Foreign cash revalued
+                </h2>
+              </div>
+              <div className="card" style={{ padding: 24 }} data-testid="cash-fx-revaluation">
+                {fxRevaluation.items.length === 0 ? (
+                  <p className="muted">No foreign-currency cash at {compareLabel}, so exchange rates moved nothing.</p>
+                ) : (
+                  <>
+                    <div className="big small">{formatSignedMoney(fxRevaluation.total, shownCurrency)}</div>
+                    <p className="muted cashAccountsNote">
+                      What exchange rates alone did to the foreign-currency cash you held at {compareLabel} (
+                      {formatDate(fxRevaluation.from_at)} to {formatDate(fxRevaluation.to_at)}), stablecoins not included.
+                      The same figure as the FX line for foreign-currency cash in Overview's "This month".
+                    </p>
+                    <div className="listRows">
+                      {fxRevaluation.items.map((item) => (
+                        <div className="listRow" key={item.currency}>
+                          <div className="listRowMain">
+                            <span className="listRowTitle">{item.currency} cash</span>
+                            <span className="listRowMeta">
+                              <span>{money(item.start_value)} at {compareLabel}</span>
+                            </span>
+                          </div>
+                          <div className="listRowValue">{formatSignedMoney(item.fx_effect, shownCurrency)} from FX</div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
+            </section>
+          ) : null}
 
           <div className="card">
             <div className="stockHoldingsHeader">

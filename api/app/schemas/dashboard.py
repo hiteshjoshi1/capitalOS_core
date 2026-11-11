@@ -433,6 +433,10 @@ class CashDepositsOut(BaseModel):
     currency_breakdown: list["CashCurrencyBreakdownItem"] = []
     # No cash data at all for the compare month (not a real zero), #224.
     snapshot_missing: bool = False
+    # #397 (U13): one row per cash account (and stablecoin source); adds up to current_total.
+    accounts: list["CashAccountRow"] = []
+    # #397 (U14): foreign-currency cash revalued from the compare point to now.
+    fx_revaluation: Optional["CashFxRevaluation"] = None
 
 
 class StockExposureItem(BaseModel):
@@ -493,6 +497,42 @@ class MiniTrendPoint(BaseModel):
     # headline); every other bar is a completed month-end, or None when that
     # month-end hasn't passed.
     is_live: bool = False
+
+
+class CashAccountRow(BaseModel):
+    """One cash account on the Cash page (#397, U13). ``kind``: account or
+    stablecoin. ``last_data_date``: its newest data at the figures' point.
+    ``stale``: overdue on Data Hub's source freshness (live month only; None
+    for a past month or a source it doesn't track)."""
+
+    account_id: Optional[int] = None
+    kind: str
+    label: str
+    platform: str
+    currencies: list[str] = []
+    current_value: float
+    snapshot_value: float
+    delta_abs: float
+    last_data_date: Optional[str] = None
+    stale: Optional[bool] = None
+
+
+class CashFxItem(BaseModel):
+    currency: str
+    # The currency's cash at the compare point, in the base currency at that point's rate.
+    start_value: float
+    fx_effect: float
+
+
+class CashFxRevaluation(BaseModel):
+    """Foreign-currency cash (net-worth scope: no stablecoins) revalued from the
+    compare point's rates to now's (#397, U14). ``total`` is the Overview bridge's
+    FX part for foreign-currency cash over the same window."""
+
+    total: float
+    from_at: str
+    to_at: str
+    items: list[CashFxItem] = []
 
 
 class CashCurrencyBreakdownItem(BaseModel):

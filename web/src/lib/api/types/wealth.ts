@@ -537,6 +537,32 @@ export type CashDeposits = {
   }>;
   /** No cash data at all for compare_month (not a real zero), #224. */
   snapshot_missing?: boolean;
+  /** #397 (U13): one row per cash account (and stablecoin source); adds up to current_total. */
+  accounts?: CashAccountRow[];
+  /** #397 (U14): foreign-currency cash revalued from the compare point to now. */
+  fx_revaluation?: CashFxRevaluation | null;
+};
+
+/** One cash account on the Cash page (#397). `stale`: overdue on Data Hub (live month only). */
+export type CashAccountRow = {
+  account_id?: number | null;
+  kind: "account" | "stablecoin" | string;
+  label: string;
+  platform: string;
+  currencies?: string[];
+  current_value: number;
+  snapshot_value: number;
+  delta_abs: number;
+  last_data_date?: string | null;
+  stale?: boolean | null;
+};
+
+/** Foreign-currency cash (no stablecoins) revalued at the rates now (#397); the bridge's cash FX part. */
+export type CashFxRevaluation = {
+  total: number;
+  from_at: string;
+  to_at: string;
+  items: Array<{ currency: string; start_value: number; fx_effect: number }>;
 };
 
 export type NetWorthBreakdown = {
