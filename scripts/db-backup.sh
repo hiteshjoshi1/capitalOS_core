@@ -197,6 +197,14 @@ open_set() {  # <dump> [copy]
 # Encrypts a verified (or failed) plain set from its temp dir into <dir>: each member to .age,
 # then the markers; .verified last, so a set counts only once all of it is in place. When the
 # private key is here too, each .age is decrypted back and compared before the plaintext goes.
+# Copies <src> to <dest> as <dest>.part, checks the sha256, then renames it into place (#383).
+put_file() {  # <src> <dest>
+  cp -p "$1" "$2.part" 2>/dev/null &&
+    [ "$(sha256_of "$1")" = "$(sha256_of "$2.part")" ] &&
+    mv "$2.part" "$2" ||
+    { rm -f "$2.part"; say "FAILED: could not copy $1 to $2" >&2; return 1; }
+}
+
 seal_set() {  # <plain dump> <dir>
   local dump=$1 dir=$2 m base f roundtrip=""
   mkdir -p "$dir"
@@ -204,15 +212,22 @@ seal_set() {  # <plain dump> <dir>
   while IFS= read -r m; do
     [ -f "$m" ] || continue
     base=${m##*/}
-    encrypt_file "$m" "$dir/$base.age" || return 1
+    # Encrypt next to the plain file (private temp dir), then copy in: under launchd macOS refused
+    # bash renaming a file that age had just written inside iCloud Drive (#383, 11 Nov), while a
+    # file bash itself copies in can be renamed.
+    encrypt_file "$m" "$m.age" || return 1
+    # The round trip reads the private copy: under launchd, reading a just-copied file back out of
+    # iCloud Drive hung (#383). put_file then checks the copy's sha256 against it.
     if [ -n "$roundtrip" ]; then
-      decrypt_file "$dir/$base.age" "$m.check" || return 1
-      [ "$(sha256_of "$m")" = "$(sha256_of "$m.check")" ] || { say "FAILED: $dir/$base.age does not decrypt to the file it was made from" >&2; return 1; }
+      decrypt_file "$m.age" "$m.check" || return 1
+      [ "$(sha256_of "$m")" = "$(sha256_of "$m.check")" ] || { say "FAILED: $m.age does not decrypt to the file it was made from" >&2; return 1; }
       rm -f "$m.check"
     fi
+    put_file "$m.age" "$dir/$base.age" || { tcc_hint "$dir" >&2; return 1; }
+    rm -f "$m.age"
   done < <(set_members "$dump")
   for f in "$dump".failed "$dump".diff "$dump".restore.log "$dump".data-check "$dump".restorable "$dump".verified; do
-    [ -f "$f" ] && mv "$f" "$dir/${f##*/}"
+    if [ -f "$f" ]; then put_file "$f" "$dir/${f##*/}" && rm -f "$f" || return 1; fi
   done
   say "Encrypted to $dir/${dump##*/}.age (+ counts, data archive)$([ -n "$roundtrip" ] && echo '; each decrypted back and compared' || echo '; not decrypted back (no private key here)')"
 }
