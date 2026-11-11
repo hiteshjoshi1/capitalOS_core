@@ -19,6 +19,7 @@ vi.mock("../lib/api", () => ({
     cashFlowDetail: vi.fn(),
     cashFlowTrend: vi.fn(),
     spendingSummary: vi.fn(),
+    spanBridge: vi.fn(),
   },
 }));
 
@@ -428,6 +429,47 @@ describe("WealthHistory selected month", () => {
     await screen.findByText("Net worth");
     expect(mockApi.netWorthTimeline).toHaveBeenCalledWith(60, "SGD");
     expect(mockApi.netWorthTimeline).not.toHaveBeenCalledWith(24, "SGD");
+  });
+});
+
+// #398: History's Compare mode (U20) and the "vs last year" line (U21).
+describe("WealthHistory compare and last year", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.removeItem("capitalos.selectedMonth");
+    mockApi.dividendsSummary.mockResolvedValue(emptyDividends as never);
+    mockApi.cashFlowTrend.mockResolvedValue(emptyCashFlow as never);
+    mockApi.netWorthTimelineMovers.mockResolvedValue({ compare_month: "2026-05", gainers: [], detractors: [] });
+    mockApi.netWorthTimelineGenerateStatus.mockResolvedValue(runStatus({ status: "idle", stage: "done", months: 0 }));
+    mockApi.netWorthTimeline.mockResolvedValue(timeline([dataPoint("2026-05"), dataPoint("2026-06")]));
+  });
+
+  it("switches to Compare: the card asks for a year ago to now, and the chart goes", async () => {
+    mockApi.spanBridge.mockResolvedValue(new Promise(() => undefined) as never);
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Net worth");
+    fireEvent.click(screen.getByRole("button", { name: "Compare" }));
+    expect(await screen.findByTestId("compare-months")).toBeInTheDocument();
+    const now = currentMonth();
+    await waitFor(() => expect(mockApi.spanBridge).toHaveBeenCalledWith(shiftMonth(now, -12), now, "SGD"));
+    expect(screen.queryByText("Net worth")).not.toBeInTheDocument();
+  });
+
+  it("vs last year loads a timeline reaching 12 months further back", async () => {
+    render(
+      <MemoryRouter>
+        <WealthHistory />
+      </MemoryRouter>,
+    );
+    await screen.findByText("Net worth");
+    const calls = mockApi.netWorthTimeline.mock.calls.length;
+    const range = mockApi.netWorthTimeline.mock.calls[calls - 1][0] as number;
+    fireEvent.click(screen.getByLabelText(/vs last/));
+    await waitFor(() => expect(mockApi.netWorthTimeline).toHaveBeenCalledWith(Math.min(range + 12, 120), "SGD"));
   });
 });
 

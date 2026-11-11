@@ -865,6 +865,36 @@ class MonthBridgeResponse(FxStatusFields):
     move_causes: Optional[MoveCauses] = None
 
 
+
+class SpanBridgeMonth(BaseModel):
+    """One month inside a compared span: its own close-to-close change."""
+
+    month: str
+    start_value: float
+    end_value: float
+    change: float
+
+
+class SpanBridgeResponse(FxStatusFields):
+    """GET /dashboard/bridge?from=&to= (#398, D-110): month A's close to month B's close,
+    the sum of the month bridges A+1 … B. start + sum(lines) + unexplained = end."""
+
+    from_month: str
+    to_month: str
+    base_currency: str
+    snapshot_day: int
+    # The span ends at the open month: its end is live now.
+    is_live: bool
+    months: List[SpanBridgeMonth] = Field(default_factory=list)
+    start: BridgeEndpoint
+    end: BridgeEndpoint
+    change: float
+    lines: List[BridgeLine]
+    unexplained: BridgeLine
+    liabilities_change: float
+    movers: List[BridgeMover]
+    trades: List[BridgeTrade] = []
+
 # #253: PlatformConcentration names PlatformAllocationItem, defined after it.
 PlatformConcentration.model_rebuild()
 RiskSummaryResponse.model_rebuild()

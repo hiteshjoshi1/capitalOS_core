@@ -6,8 +6,10 @@ import FxNote from "../components/FxNote";
 import WealthHistoryChart, { type WealthHistoryChartMode } from "../components/WealthHistoryChart";
 import WealthAttributionStrip from "../components/WealthAttributionStrip";
 import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
-import { computeMonthFlags, isGapPoint } from "../lib/wealthHistoryAnalysis";
+import CompareMonthsCard from "../components/CompareMonthsCard";
+import { computeMonthFlags, isGapPoint, lastYearSeries, monthOptions } from "../lib/wealthHistoryAnalysis";
 import "../App.css";
+import "../components/CompareMonthsCard.css";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import MonthBar from "../components/MonthBar";
 import * as fmt from "../lib/format";
@@ -69,6 +71,15 @@ export default function WealthHistory() {
   const [range, setRange] = useState<number>(() => rangeCovering(selectedMonth, 24));
   const [mode, setMode] = useState<WealthHistoryChartMode>("total");
   const [baseCurrency] = useBaseCurrency();
+  // #398: "Over time" (the chart) or "Compare" (two month-ends, the bridge between them).
+  const [view, setView] = useState<"chart" | "compare">("chart");
+  const [compare, setCompare] = useState(() => {
+    const to = fmt.currentMonth();
+    return { from: shiftMonth(to, -12), to };
+  });
+  // #398 (U21): last year's line on the chart; its timeline reaches 12 months further back.
+  const [showLastYear, setShowLastYear] = useState(false);
+  const [lastYearTimeline, setLastYearTimeline] = useState<WealthTimeline | null>(null);
 
   // Everything starts loading: the fetch effects below only set state once a response arrives.
   const [timelineState, setTimelineState] = useState<LoadState>("loading");
@@ -120,6 +131,22 @@ export default function WealthHistory() {
     },
     [setSelectedMonth],
   );
+
+  useEffect(() => {
+    if (!showLastYear) return;
+    let ignore = false;
+    void api
+      .netWorthTimeline(Math.min(range + 12, 120), baseCurrency)
+      .then((data) => {
+        if (!ignore) setLastYearTimeline(data);
+      })
+      .catch(() => {
+        if (!ignore) setLastYearTimeline(null);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [showLastYear, range, baseCurrency]);
 
   // `ignore` drops a response that a newer request (or unmount) has superseded.
   useEffect(() => {
@@ -256,6 +283,17 @@ export default function WealthHistory() {
   );
   const formatMoneyShort = useCallback((value?: number | null) => fmt.formatMoneyCompact(value, baseCurrency), [baseCurrency]);
 
+  // #398: the Compare pickers offer the months the data spans (at most 10 years), newest first.
+  const compareMonths = useMemo(() => {
+    const last = fmt.currentMonth();
+    const first = timeline?.data_span?.first_month ?? shiftMonth(last, -(range - 1));
+    return monthOptions(first < shiftMonth(last, -119) ? shiftMonth(last, -119) : first, last);
+  }, [timeline, range]);
+  // #398 (U21): the same month a year earlier, for each point on the chart.
+  const lastYear = useMemo(
+    () => (showLastYear && timeline && lastYearTimeline ? lastYearSeries(timeline.points, lastYearTimeline.points) : null),
+    [showLastYear, timeline, lastYearTimeline],
+  );
   const hasAnyData = useMemo(() => (timeline ? timeline.points.some((p) => !isGapPoint(p)) : false), [timeline]);
 
   const monthFlags = useMemo(() => computeMonthFlags(timeline?.points ?? []), [timeline]);
@@ -291,6 +329,26 @@ export default function WealthHistory() {
       monthBar={<MonthBar month={selectedMonth} onMonthChange={setSelectedMonth} />}
     >
       <div className="whFilters">
+        <div className="coSegmentedControl" role="group" aria-label="View">
+          <button
+            type="button"
+            className={`coSegmentedBtn${view === "chart" ? " coSegmentedBtnActive" : ""}`}
+            aria-pressed={view === "chart"}
+            onClick={() => setView("chart")}
+          >
+            Over time
+          </button>
+          <button
+            type="button"
+            className={`coSegmentedBtn${view === "compare" ? " coSegmentedBtnActive" : ""}`}
+            aria-pressed={view === "compare"}
+            onClick={() => setView("compare")}
+          >
+            Compare
+          </button>
+        </div>
+        {view === "chart" ? (
+        <>
         <div className="coSegmentedControl" role="group" aria-label="Range">
           {rangeOptions.map((opt) => (
             <button
@@ -319,12 +377,32 @@ export default function WealthHistory() {
             By component
           </button>
         </div>
+        {mode === "total" ? (
+          <label className="whLastYearToggle">
+            <input type="checkbox" checked={showLastYear} onChange={(e) => setShowLastYear(e.target.checked)} /> vs last
+            year
+          </label>
+        ) : null}
+        </>
+        ) : null}
       </div>
 
+      {view === "compare" ? (
+        <CompareMonthsCard
+          from={compare.from}
+          to={compare.to}
+          months={compareMonths}
+          baseCurrency={baseCurrency}
+          onChange={setCompare}
+        />
+      ) : null}
+
+      {view === "chart" ? (
       <p className="muted whCarriedNote">
         <strong>Carried</strong> means no new statement or price for that month, so the last known value is
         used. Carried months are dashed; months with no data stay empty.
       </p>
+      ) : null}
 
       {run?.status === "running" ? (
         <div className="card whGenerateProgress" role="status">
@@ -359,12 +437,12 @@ export default function WealthHistory() {
         </p>
       ) : null}
 
-      {timelineState === "loading" ? <div className="card" role="status">Loading…</div> : null}
-      {timelineState === "error" ? (
+      {view === "chart" && timelineState === "loading" ? <div className="card" role="status">Loading…</div> : null}
+      {view === "chart" && timelineState === "error" ? (
         <LoadError title="Couldn't load history" error={timelineErr} onRetry={() => setTimelineReload((n) => n + 1)} />
       ) : null}
 
-      {timelineState === "ready" && timeline ? (
+      {view === "chart" && timelineState === "ready" && timeline ? (
         !hasAnyData ? (
           <div className="card whEmptyState">
             <p className="cardTitle">No history yet</p>
@@ -403,6 +481,7 @@ export default function WealthHistory() {
                 points={timeline.points}
                 now={timeline.now}
                 mode={mode}
+                lastYear={mode === "total" ? lastYear : null}
                 formatMoney={formatMoney}
                 formatMoneyShort={formatMoneyShort}
                 selectedMonth={selectedMonth}

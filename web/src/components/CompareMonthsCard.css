@@ -1,0 +1,70 @@
+/* History → Compare (#398): pickers and summary; the bridge rows reuse MonthBridgeCard.css. */
+.compareMonthsCard {
+  margin-bottom: 18px;
+}
+
+.compareMonthsPickers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  align-items: center;
+}
+
+.compareMonthsPickers label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.compareMonthsPickers select {
+  min-height: 36px;
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.compareMonthsSummary {
+  margin: 4px 0 0;
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .compareMonthsPickers label {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .compareMonthsPickers select {
+    flex: 1;
+    max-width: 65%;
+  }
+}
+
+/* The chart's "vs last year" line (#398, U21): dashed and muted, behind the total. */
+.whLastYearLine {
+  stroke: var(--muted);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  opacity: 0.8;
+}
+
+.whLastYearKey {
+  display: inline-block;
+  width: 18px;
+  border-top: 2px dashed var(--muted);
+  vertical-align: middle;
+}
+
+.whLastYearToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  min-height: 36px;
+}

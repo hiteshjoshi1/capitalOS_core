@@ -1,6 +1,6 @@
 // Wealth pages: dashboard, history, risk, bridge, stocks: API calls (split out of lib/api.ts, #368).
 import { req } from "../http";
-import type { CashDeposits, DashboardBootstrap, DashboardNetWorthChange, DashboardSummary, GeographyExposure, HistoryGenerateStatus, MonthBridge, NetWorthSinceUpdate, PlatformAllocation, RealisedPeriodQuery, RealisedPnl, RiskSummary, RiskThresholdsSetting, StockExposure, StockHoldingsSummary, WealthTimeline, WealthTimelineBackfillResult, WealthTopMovers } from "../types/wealth";
+import type { CashDeposits, DashboardBootstrap, DashboardNetWorthChange, DashboardSummary, GeographyExposure, HistoryGenerateStatus, MonthBridge, NetWorthSinceUpdate, PlatformAllocation, RealisedPeriodQuery, RealisedPnl, RiskSummary, RiskThresholdsSetting, SpanBridge, StockExposure, StockHoldingsSummary, WealthTimeline, WealthTimelineBackfillResult, WealthTopMovers } from "../types/wealth";
 
 export const wealthClient = {
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
@@ -37,6 +37,10 @@ export const wealthClient = {
   riskThresholds: () => req<RiskThresholdsSetting>("/dashboard/risk-thresholds"),
   saveRiskThresholds: (payload: RiskThresholdsSetting) =>
     req<RiskThresholdsSetting>("/dashboard/risk-thresholds", { method: "PUT", body: JSON.stringify(payload) }),
+  spanBridge: (fromMonth: string, toMonth: string, baseCurrency = "SGD") =>
+    req<SpanBridge>(
+      `/dashboard/bridge?from=${encodeURIComponent(fromMonth)}&to=${encodeURIComponent(toMonth)}&base_currency=${encodeURIComponent(baseCurrency)}`,
+    ),
   monthBridge: (month: string, baseCurrency = "SGD") =>
     req<MonthBridge>(`/dashboard/month-bridge?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
   realisedPnl: (month: string, baseCurrency = "SGD", period?: RealisedPeriodQuery) => {

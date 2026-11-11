@@ -124,3 +124,32 @@ export function componentDelta(current: WealthTimelinePoint, prev: WealthTimelin
     liabilities: current.liabilities - base.liabilities,
   };
 }
+
+/** #398 (U21): for each of `points`, the total of the same month a year earlier from
+ * `older` (a timeline reaching 12 months further back), or null where that month has no
+ * data. Aligned with `points`, for the chart's "vs last year" line. */
+export function lastYearSeries(points: WealthTimelinePoint[], older: WealthTimelinePoint[]): (number | null)[] {
+  const byMonth = new Map(older.map((p) => [p.month, p]));
+  return points.map((p) => {
+    const [y, m] = p.month.split("-");
+    const prior = byMonth.get(`${Number(y) - 1}-${m}`);
+    return prior && !isGapPoint(prior) ? prior.total : null;
+  });
+}
+
+/** #398: months from `first` to `last` (YYYY-MM), newest first (at most 240). */
+export function monthOptions(first: string, last: string): string[] {
+  const out: string[] = [];
+  let [y, m] = last.split("-").map(Number);
+  const [fy, fm] = first.split("-").map(Number);
+  while (y > fy || (y === fy && m >= fm)) {
+    out.push(`${y}-${String(m).padStart(2, "0")}`);
+    m -= 1;
+    if (m === 0) {
+      m = 12;
+      y -= 1;
+    }
+    if (out.length > 240) break;
+  }
+  return out;
+}

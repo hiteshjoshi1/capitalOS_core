@@ -20,6 +20,7 @@ from app.schemas.dashboard import (
     GeographyExposureOut,
     HistoryGenerateStatus,
     MonthBridgeResponse,
+    SpanBridgeResponse,
     NetWorthChangeResponse,
     NetWorthSinceUpdateResponse,
     PlatformAllocationOut,
@@ -34,7 +35,7 @@ from app.schemas.dashboard import (
 from app.services import data_hub
 from app.services.risk_thresholds import read_risk_thresholds, save_risk_thresholds
 from app.portfolio.realised import realised_summary, resolve_period
-from app.valuation import bridge, history_job, pages
+from app.valuation import bridge, history_job, pages, span_bridge
 from app.valuation.clock import _app_today, _parse_month
 from app.valuation.history import _backfill_wealth_rollups
 
@@ -202,6 +203,23 @@ def dashboard_month_bridge(
     unexplained rest, to the headline. Live for the open month, that month-end for
     a past month (D-55). The lines always add up to end - start."""
     return bridge.month_bridge(db, current_user.id, month, _parse_month(month), base_currency, movers_limit=limit)
+
+
+@router.get("/bridge", response_model=SpanBridgeResponse)
+def dashboard_span_bridge(
+    from_month: str = Query(..., alias="from", description="YYYY-MM: the start is this month's close"),
+    to_month: str = Query(..., alias="to", description="YYYY-MM: the end is this month's close (live for the open month)"),
+    base_currency: str = Query("SGD"),
+    limit: int = Query(5, ge=1, le=20, description="How many movers and trades"),
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(require_current_user),
+):
+    """History → Compare (#398, D-110): what moved net worth from month A's close to
+    month B's: the month bridges A+1 … B added up, line by line. Adds up exactly."""
+    try:
+        return span_bridge.span_bridge(db, current_user.id, from_month, to_month, base_currency, movers_limit=limit)
+    except span_bridge.SpanError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("/stock-holdings", response_model=StockHoldingsResponse)
