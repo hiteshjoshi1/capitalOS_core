@@ -46,6 +46,21 @@ backup_env() {  # <repo dir>
   export BACKUP_DIR BACKUP_AGE_RECIPIENT BACKUP_AGE_IDENTITY BACKUP_OFFSITE_DIR
 }
 
+# Where a backup folder's index lives (#383). In iCloud Drive the 03:00 job (launchd) could neither
+# read nor replace an index file Terminal had written there ("Operation not permitted"), so an
+# iCloud folder's index is kept on the Mac in ~/.capitalos/backup/index/ (no privacy controls
+# there; it is only a list of names, rebuilt from a listing in Terminal if lost). BACKUP_INDEX_DIR
+# overrides it for every folder; other folders keep it inside as .capitalos-index (worktrees, tests).
+backup_index_of() {  # <dir>
+  local key
+  if [ -n "${BACKUP_INDEX_DIR:-}" ] || [[ "$1" == "$HOME/Library/Mobile Documents/"* ]]; then
+    key=$(printf '%s' "$1" | sed 's#^/##; s#[^A-Za-z0-9._-]#_#g')
+    printf '%s/%s.index' "${BACKUP_INDEX_DIR:-$HOME/.capitalos/backup/index}" "$key"
+  else
+    printf '%s/.capitalos-index' "$1"
+  fi
+}
+
 # The newest verified set's logical path (capitalos_<ts>.dump, whether stored plain or as .age).
 # #383: from a listing, else from the folder's index (.capitalos-index, or the pre-#383
 # .capitalos-offsite-index): under launchd macOS refuses listing an iCloud Drive folder. Names
@@ -55,10 +70,11 @@ backup_newest_verified() {
   if [ "${BACKUP_TEST_UNLISTABLE:-}" != all ] && [ "${BACKUP_TEST_UNLISTABLE:-}" != local ] && ls -1 "$BACKUP_DIR" >/dev/null 2>&1; then
     n=$(ls -1 "$BACKUP_DIR" 2>/dev/null | sed -n 's/^\(capitalos_.*\.dump\)\.verified$/\1/p' | sort | tail -1)
   else
-    idx="$BACKUP_DIR/.capitalos-index"
+    idx=$(backup_index_of "$BACKUP_DIR")
+    [ -f "$idx" ] || idx="$BACKUP_DIR/.capitalos-index"
     [ -f "$idx" ] || idx="$BACKUP_DIR/.capitalos-offsite-index"
-    [ -f "$idx" ] || return 0
-    n=$(while IFS= read -r n; do [ -n "$n" ] && [ -e "$BACKUP_DIR/$n.verified" ] && echo "$n"; done <"$idx" | sort | tail -1)
+    [ -f "$idx" ] && [ -r "$idx" ] || return 0
+    n=$( { while IFS= read -r n; do [ -n "$n" ] && [ -e "$BACKUP_DIR/$n.verified" ] && echo "$n"; done <"$idx"; } 2>/dev/null | sort | tail -1)
   fi
   [ -n "$n" ] && printf '%s/%s\n' "$BACKUP_DIR" "$n"
   return 0
