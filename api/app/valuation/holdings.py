@@ -2,6 +2,8 @@
 by country and platform."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from datetime import datetime
 from typing import Any, Dict, List, cast
 
@@ -23,6 +25,7 @@ from app.valuation.prices import (
     _quote_freshness_status,
 )
 from app.valuation_cache import valuation_cached
+from app.valuation.money import D, ZERO
 
 
 def _infer_country(
@@ -69,7 +72,7 @@ def _infer_country(
 def _top_holdings(
     db: Session,
     anchor_ts: datetime,
-    total: float,
+    total: Decimal,
     base_currency: str,
     current_user_id: int,
     limit: int = 10,
@@ -133,12 +136,12 @@ def _top_holdings(
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
 
     agg: Dict[tuple, Dict[str, Any]] = {}
-    geo_bucket: Dict[tuple, Dict[str, float]] = {}
-    platform_bucket: Dict[tuple, Dict[str, float]] = {}
+    geo_bucket: Dict[tuple, Dict[str, Decimal]] = {}
+    platform_bucket: Dict[tuple, Dict[str, Decimal]] = {}
 
     def _record(row: Dict[str, Any]) -> None:
         key = (row.get("asset_id"), row.get("symbol"), row.get("asset_class"))
-        value = float(row.get("value") or 0.0)
+        value = D(row.get("value"))
         if value <= 0:
             return
         if key not in agg:
@@ -147,13 +150,13 @@ def _top_holdings(
                 "symbol": row.get("symbol"),
                 "name": row.get("name"),
                 "asset_class": row.get("asset_class"),
-                "value": 0.0,
-                "quantity": 0.0,
+                "value": ZERO,
+                "quantity": ZERO,
                 "avg_cost": None,
                 "latest_price": row.get("latest_price"),
                 "quote_currency": row.get("quote_currency"),
-                "_avg_cost_numerator": 0.0,
-                "_avg_cost_denominator": 0.0,
+                "_avg_cost_numerator": ZERO,
+                "_avg_cost_denominator": ZERO,
                 "_has_quantity": False,
                 "latest_trade_date": _iso_value(row.get("latest_trade_date")),
                 "quote_age_days": prices._quote_age_days(row.get("latest_trade_date")),
@@ -172,42 +175,42 @@ def _top_holdings(
         agg[key]["value"] += value
         agg[key]["valued_at_cost"] = agg[key]["valued_at_cost"] or bool(row.get("valued_at_cost"))
         raw_quantity = row.get("quantity")
-        quantity = float(raw_quantity) if raw_quantity is not None else None
+        quantity = D(raw_quantity) if raw_quantity is not None else None
         if quantity is not None:
             agg[key]["quantity"] += quantity
             agg[key]["_has_quantity"] = True
             avg_cost = row.get("avg_cost")
             if avg_cost is not None and quantity > 0:
-                agg[key]["_avg_cost_numerator"] += float(avg_cost) * quantity
+                agg[key]["_avg_cost_numerator"] += D(avg_cost) * quantity
                 agg[key]["_avg_cost_denominator"] += quantity
         if agg[key]["latest_price"] is None and row.get("latest_price") is not None:
             agg[key]["latest_price"] = row.get("latest_price")
         geo = row.get("geo") or "UNKNOWN"
         platform = row.get("platform") or "UNKNOWN"
-        geo_bucket.setdefault(key, {})[geo] = geo_bucket.setdefault(key, {}).get(geo, 0.0) + value
-        platform_bucket.setdefault(key, {})[platform] = platform_bucket.setdefault(key, {}).get(platform, 0.0) + value
+        geo_bucket.setdefault(key, {})[geo] = geo_bucket.setdefault(key, {}).get(geo, ZERO) + value
+        platform_bucket.setdefault(key, {})[platform] = platform_bucket.setdefault(key, {}).get(platform, ZERO) + value
 
     for cr in canonical_pos_rows:
         asset_class = str(cr.get("asset_class") or "STOCK").upper()
         if asset_class not in {"STOCK", "FUND"}:
             continue
-        quantity = float(cr.get("quantity") or 0.0)
+        quantity = D(cr.get("quantity"))
         has_nav_snapshot = bool(cr.get("has_nav_snapshot"))
         avg_cost = cr.get("avg_cost")
         if has_nav_snapshot and cr.get("snapshot_cost_basis_local") is not None and quantity > 0:
-            avg_cost = float(cr.get("snapshot_cost_basis_local") or 0.0) / quantity
+            avg_cost = D(cr.get("snapshot_cost_basis_local")) / quantity
         # Live view: the price job's quote when it's at least as recent as the
         # holding's statement (and within 2x of it); otherwise the statement
         # price, with the reason (D-21, #124; every holding since #144).
         priced = price_position(cr, latest_prices if price_overlay else None, rates, base_currency)
         price_row, price_fallback_reason, value = priced.quote, priced.fallback_reason, priced.value
         snapshot_price = cr.get("snapshot_market_price")
-        latest_price = float(snapshot_price) if snapshot_price is not None else None
+        latest_price = D(snapshot_price) if snapshot_price is not None else None
         latest_trade_date = cr.get("report_date")
         price_source = "ibkr_flex" if has_nav_snapshot else "canonical_snapshot"
         quote_currency = str(cr.get("quote_currency")).upper() if cr.get("quote_currency") else None
         if price_row:
-            latest_price = float(price_row["price"]) if price_row.get("price") is not None else latest_price
+            latest_price = D(price_row["price"]) if price_row.get("price") is not None else latest_price
             latest_trade_date = price_row.get("trade_date") or latest_trade_date
             price_source = price_row.get("source") or price_source
             quote_currency = str(price_row.get("currency") or quote_currency).upper() if price_row.get("currency") or quote_currency else None
@@ -237,9 +240,9 @@ def _top_holdings(
             "platform": cr.get("platform"),
         })
 
-    usd_rate = rates.get("USD", 0.0)
+    usd_rate = D(rates.get("USD"))
     for row in crypto_rows:
-        value = float(row.get("value") or 0.0) * usd_rate
+        value = D(row.get("value")) * usd_rate
         _record({
             "asset_id": None,
             "symbol": row.get("symbol"),
@@ -259,13 +262,13 @@ def _top_holdings(
 
     out = sorted(agg.values(), key=lambda x: x["value"], reverse=True)[:limit]
     for row in out:
-        value = float(row["value"])
-        den = float(row.pop("_avg_cost_denominator"))
-        num = float(row.pop("_avg_cost_numerator"))
+        value = D(row["value"])
+        den = D(row.pop("_avg_cost_denominator"))
+        num = D(row.pop("_avg_cost_numerator"))
         has_quantity = bool(row.pop("_has_quantity"))
         row["quantity"] = row["quantity"] if has_quantity else None
         row["avg_cost"] = (num / den) if den > 0 else None
-        row["percent_of_networth"] = round((value / total) * 100, 2)
+        row["percent_of_networth"] = round((value / D(total)) * 100, 2)
         row["quote_age_days"] = int(row["quote_age_days"]) if row.get("quote_age_days") is not None else None
         key = (row["asset_id"], row["symbol"], row["asset_class"])
         geo = geo_bucket.get(key, {})
@@ -292,8 +295,8 @@ def _top_movers_from_holdings(
     for key in sorted(set(current_by_key) | set(prior_by_key), key=lambda item: (str(item[1]).lower(), str(item[2]).lower())):
         current = current_by_key.get(key)
         prior = prior_by_key.get(key)
-        current_value = float(current["value"]) if current else 0.0
-        previous_value = float(prior["value"]) if prior else 0.0
+        current_value = D(current["value"]) if current else ZERO
+        previous_value = D(prior["value"]) if prior else ZERO
         delta_abs = current_value - previous_value
         if abs(delta_abs) < 0.005:
             continue
@@ -337,26 +340,26 @@ def _stock_geo_bucket(country: str | None) -> str:
     return "Other"
 
 
-def _stock_geo_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
-    grouped = {"US": 0.0, "HK": 0.0, "SG": 0.0, "IN": 0.0, "Other": 0.0}
+def _stock_geo_value_map(items: list[dict[str, Any]]) -> dict[str, Decimal]:
+    grouped = {"US": ZERO, "HK": ZERO, "SG": ZERO, "IN": ZERO, "Other": ZERO}
     for item in items:
-        grouped[_stock_geo_bucket(item.get("key"))] += float(item.get("value") or 0.0)
+        grouped[_stock_geo_bucket(item.get("key"))] += D(item.get("value"))
     return grouped
 
 
-def _stock_key_value_map(items: list[dict[str, Any]]) -> dict[str, float]:
-    grouped: dict[str, float] = {}
+def _stock_key_value_map(items: list[dict[str, Any]]) -> dict[str, Decimal]:
+    grouped: dict[str, Decimal] = {}
     for item in items:
         key = str(item.get("key") or "UNKNOWN")
-        grouped[key] = grouped.get(key, 0.0) + float(item.get("value") or 0.0)
+        grouped[key] = grouped.get(key, ZERO) + D(item.get("value"))
     return grouped
 
 
 def _stock_breakdown_items(
-    current_values: dict[str, float],
-    snapshot_values: dict[str, float],
+    current_values: dict[str, Decimal],
+    snapshot_values: dict[str, Decimal],
     *,
-    current_total: float,
+    current_total: Decimal,
     preferred_order: tuple[str, ...] | None = None,
 ) -> list[dict[str, Any]]:
     keys = set(current_values) | set(snapshot_values)
@@ -364,12 +367,12 @@ def _stock_breakdown_items(
         ordered_keys = [key for key in preferred_order if key in keys]
         ordered_keys.extend(sorted(keys - set(preferred_order)))
     else:
-        ordered_keys = sorted(keys, key=lambda key: (-current_values.get(key, 0.0), key))
+        ordered_keys = sorted(keys, key=lambda key: (-current_values.get(key, ZERO), key))
 
     items: list[dict[str, Any]] = []
     for key in ordered_keys:
-        current_value = current_values.get(key, 0.0)
-        snapshot_value = snapshot_values.get(key, 0.0)
+        current_value = current_values.get(key, ZERO)
+        snapshot_value = snapshot_values.get(key, ZERO)
         delta_abs = current_value - snapshot_value
         items.append(
             {
@@ -378,7 +381,7 @@ def _stock_breakdown_items(
                 "snapshot_value": snapshot_value,
                 "delta_abs": delta_abs,
                 "delta_pct": (delta_abs / snapshot_value) if snapshot_value > 0 else None,
-                "percent": round((current_value / current_total) * 100, 2) if current_total > 0 else 0.0,
+                "percent": round((current_value / current_total) * 100, 2) if current_total > 0 else ZERO,
             }
         )
     return items
@@ -402,7 +405,7 @@ def _stock_geography_breakdown(
         for item in _stock_breakdown_items(
             current_values,
             snapshot_values,
-            current_total=float(current_payload.get("total") or 0.0),
+            current_total=D(current_payload.get("total")),
             preferred_order=("US", "HK", "SG", "IN", "Other"),
         )
     ]
@@ -423,10 +426,10 @@ def _stock_trend(
     for offset in range(months):
         point_month = _add_months(trend_start, offset)
         anchor, is_live = _trend_point_anchor(point_month)
-        total = 0.0
+        total = ZERO
         if anchor is not None:
             exposure = _stock_exposure(db, anchor, base_currency, current_user_id, price_overlay=is_live)
-            total = float(exposure.get("total") or 0.0)
+            total = D(exposure.get("total"))
         points.append({
             "month": point_month.strftime("%Y-%m"),
             "value": total if total > 0 else None,
@@ -444,7 +447,7 @@ def _stock_platform_breakdown(
     return _stock_breakdown_items(
         current_values,
         snapshot_values,
-        current_total=float(current_payload.get("total") or 0.0),
+        current_total=D(current_payload.get("total")),
     )
 
 
@@ -499,7 +502,7 @@ def _stock_exposure(
         return {
             "as_of": None,
             "base_currency": base_currency,
-            "total": 0.0,
+            "total": ZERO,
             "by_country": [],
             "by_platform": [],
             "by_currency": [],
@@ -511,11 +514,11 @@ def _stock_exposure(
     rates = fx.get_rates(anchor_ts, base_currency, currencies)
     nav_deltas = _nav_live_price_deltas(canonical_pos_rows, latest_prices, rates, base_currency)
 
-    by_country: Dict[str, float] = {}
-    by_platform: Dict[str, float] = {}
+    by_country: Dict[str, Decimal] = {}
+    by_platform: Dict[str, Decimal] = {}
     # #253: the same values by the currency each holding is denominated in.
-    by_currency: Dict[str, float] = {}
-    total = 0.0
+    by_currency: Dict[str, Decimal] = {}
+    total = ZERO
     nav_position_rows_by_account: Dict[int, list[dict[str, Any]]] = {}
     for row in canonical_pos_rows:
         if not row.get("has_nav_snapshot"):
@@ -527,17 +530,17 @@ def _stock_exposure(
 
     for row in canonical_nav_rows:
         nav_currency = str(row.get("base_currency") or base_currency).upper()
-        raw_stock_value = float(row.get("total_nav_base") or 0.0) - float(row.get("cash_base") or 0.0)
-        value = raw_stock_value * rates.get(nav_currency, 0.0) + nav_deltas.get(int(row["legacy_account_id"]), 0.0)
+        raw_stock_value = D(row.get("total_nav_base")) - D(row.get("cash_base"))
+        value = raw_stock_value * D(rates.get(nav_currency)) + nav_deltas.get(int(row["legacy_account_id"]), ZERO)
         if value <= 0:
             continue
         platform = row.get("platform") or "UNKNOWN"
         total += value
-        by_platform[platform] = by_platform.get(platform, 0.0) + value
+        by_platform[platform] = by_platform.get(platform, ZERO) + value
 
-        detail_buckets: Dict[str, float] = {}
-        currency_buckets: Dict[str, float] = {}
-        detail_total = 0.0
+        detail_buckets: Dict[str, Decimal] = {}
+        currency_buckets: Dict[str, Decimal] = {}
+        detail_total = ZERO
         for detail in nav_position_rows_by_account.get(int(row["legacy_account_id"]), []):
             asset_class = str(detail.get("asset_class") or "STOCK").upper()
             if asset_class not in {"STOCK", "FUND"}:
@@ -550,7 +553,7 @@ def _stock_exposure(
             if detail_value <= 0:
                 continue
             detail_currency = _holding_currency(detail, quote, nav_currency)
-            currency_buckets[detail_currency] = currency_buckets.get(detail_currency, 0.0) + detail_value
+            currency_buckets[detail_currency] = currency_buckets.get(detail_currency, ZERO) + detail_value
             country = _infer_country(
                 detail.get("symbol"),
                 detail.get("home_country"),
@@ -558,18 +561,18 @@ def _stock_exposure(
                 detail.get("quote_currency"),
                 detail.get("exchange_code"),
             )
-            detail_buckets[country] = detail_buckets.get(country, 0.0) + detail_value
+            detail_buckets[country] = detail_buckets.get(country, ZERO) + detail_value
             detail_total += detail_value
         if detail_total > 0:
             scale = value / detail_total
             for country, detail_value in detail_buckets.items():
-                by_country[country] = by_country.get(country, 0.0) + (detail_value * scale)
+                by_country[country] = by_country.get(country, ZERO) + (detail_value * scale)
             for currency, detail_value in currency_buckets.items():
-                by_currency[currency] = by_currency.get(currency, 0.0) + (detail_value * scale)
+                by_currency[currency] = by_currency.get(currency, ZERO) + (detail_value * scale)
         else:
             country = row.get("country") or "UNKNOWN"
-            by_country[country] = by_country.get(country, 0.0) + value
-            by_currency[nav_currency] = by_currency.get(nav_currency, 0.0) + value
+            by_country[country] = by_country.get(country, ZERO) + value
+            by_currency[nav_currency] = by_currency.get(nav_currency, ZERO) + value
 
     for row in canonical_pos_rows:
         if row.get("has_nav_snapshot"):
@@ -587,15 +590,15 @@ def _stock_exposure(
             row.get("symbol"), row.get("home_country"), platform, row.get("quote_currency"), row.get("exchange_code")
         )
         total += value
-        by_platform[platform] = by_platform.get(platform, 0.0) + value
-        by_country[country] = by_country.get(country, 0.0) + value
+        by_platform[platform] = by_platform.get(platform, ZERO) + value
+        by_country[country] = by_country.get(country, ZERO) + value
         currency = _holding_currency(row, priced.quote, base_currency)
-        by_currency[currency] = by_currency.get(currency, 0.0) + value
+        by_currency[currency] = by_currency.get(currency, ZERO) + value
 
-    def _to_items(bucket: Dict[str, float]) -> list[dict]:
+    def _to_items(bucket: Dict[str, Decimal]) -> list[dict]:
         items = []
         for key, value in sorted(bucket.items(), key=lambda x: x[1], reverse=True):
-            percent = round((value / total) * 100, 2) if total > 0 else 0.0
+            percent = round((value / total) * 100, 2) if total > 0 else ZERO
             items.append({"key": key, "value": value, "percent": percent})
         return items
 

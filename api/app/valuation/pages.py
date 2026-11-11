@@ -6,6 +6,8 @@ response model.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 import os
 from datetime import datetime
 from typing import Any, Dict, Optional
@@ -64,6 +66,7 @@ from app.valuation.holdings import (
 )
 from app.valuation.prices import _quote_stale_days
 from app.valuation.state import _effective_as_of, _positions_coverage_as_of, _snapshot_freshness
+from app.valuation.money import D, ZERO, float_edge
 
 
 def _summary_top_holdings_limit() -> int:
@@ -101,10 +104,11 @@ def _current_header(current_state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _cash_percent(nw: Dict[str, float]) -> float:
-    return round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else 0.0
+def _cash_percent(nw: Dict[str, Decimal]) -> Decimal:
+    return round((nw["cash"] / nw["total"]) * 100, 2) if nw["total"] > 0 else ZERO
 
 
+@float_edge
 def bootstrap(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     """Lean first-paint payload: net worth + exposure totals only."""
     anchor = _completed_snapshot_anchor_ts(month_start)
@@ -133,6 +137,7 @@ def bootstrap(db: Session, current_user_id: int, month: str, month_start: dateti
     }
 
 
+@float_edge
 def net_worth_change(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str, compare: str
 ) -> Dict[str, Any]:
@@ -155,6 +160,7 @@ def net_worth_change(
     }
 
 
+@float_edge
 def net_worth_timeline(db: Session, current_user_id: int, months: int, base_currency: str) -> Dict[str, Any]:
     """Stored History rows (stale ones recomputed first, #138) plus the live "now" point."""
     current_month_start = clock._parse_month(clock._current_anchor_ts().strftime("%Y-%m"))
@@ -178,6 +184,7 @@ def net_worth_timeline(db: Session, current_user_id: int, months: int, base_curr
     }
 
 
+@float_edge
 def timeline_movers(db: Session, current_user_id: int, month_start: datetime, base_currency: str, limit: int) -> Dict[str, Any]:
     # Like for like (#133): the anchor actually used vs the completed anchor one
     # month before it. For the open month both used to resolve to the same date.
@@ -193,6 +200,7 @@ def timeline_movers(db: Session, current_user_id: int, month_start: datetime, ba
     return _top_movers_from_holdings(current_holdings, prior_holdings, prev_month_start.strftime("%Y-%m"), limit=limit)
 
 
+@float_edge
 def summary_without_net_worth(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
 ) -> Dict[str, Any]:
@@ -225,6 +233,7 @@ def summary_without_net_worth(
     }
 
 
+@float_edge
 def summary(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str, compare: str
 ) -> Dict[str, Any]:
@@ -262,7 +271,7 @@ def summary(
     cf = _cashflow(db, month_start, month_end, base_currency, current_user_id)
 
     compare_set = _compare_set(compare)
-    nw_cache: Dict[datetime, Dict[str, float]] = {anchor: nw}
+    nw_cache: Dict[datetime, Dict[str, Decimal]] = {anchor: nw}
     changes = _compute_net_worth_changes(
         db=db,
         compare_months=_snapshot_compare_months(snapshot_month_start, compare_set),
@@ -345,6 +354,7 @@ def summary(
     }
 
 
+@float_edge
 def risk_summary(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
 ) -> Dict[str, Any]:
@@ -431,15 +441,16 @@ def _sold_holding(asset: AssetChange, month_change: Dict[str, Any]) -> Dict[str,
         "symbol": asset.symbol,
         "name": asset.name,
         "asset_class": asset.asset_class,
-        "value": 0.0,
-        "percent_of_networth": 0.0,
-        "quantity": 0.0,
+        "value": ZERO,
+        "percent_of_networth": ZERO,
+        "quantity": ZERO,
         "quote_currency": asset.price_currency,
         "platform": asset.platform,
         "month_change": month_change,
     }
 
 
+@float_edge
 def stock_holdings(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse holdings as of {month}" — effective_anchor/is_live decide whether this
     # is live "now" data (current/future month) or a completed historical boundary.
@@ -634,6 +645,7 @@ def _since_update_movers(
     return movers
 
 
+@float_edge
 def net_worth_since_update(db: Session, current_user_id: int, base_currency: str) -> Dict[str, Any]:
     """Since-last-update net-worth delta: current live state vs. the last
     available prior data point (not a fixed calendar day — if prices haven't
@@ -662,7 +674,7 @@ def net_worth_since_update(db: Session, current_user_id: int, base_currency: str
     current_nw = _networth_components(db, current_anchor, base_currency, current_user_id, price_overlay=True)
     compare_nw = _networth_components(db, compare_anchor, base_currency, current_user_id, price_overlay=True)
 
-    def _change(current_value: float, previous_value: float) -> dict[str, Any]:
+    def _change(current_value: Decimal, previous_value: Decimal) -> dict[str, Any]:
         abs_change = current_value - previous_value
         return {
             "abs": abs_change,
@@ -704,6 +716,7 @@ def net_worth_since_update(db: Session, current_user_id: int, base_currency: str
     }
 
 
+@float_edge
 def platform_allocation(
     db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str
 ) -> Dict[str, Any]:
@@ -722,6 +735,7 @@ def platform_allocation(
     }
 
 
+@float_edge
 def cash_deposits(db: Session, current_user_id: int, month: str, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # "browse cash as of {month}" — effective_anchor/is_live decide whether this is
     # live "now" data (current/future month) or a completed historical boundary.
@@ -768,6 +782,7 @@ def cash_deposits(db: Session, current_user_id: int, month: str, month_start: da
     }
 
 
+@float_edge
 def stock_exposure(db: Session, current_user_id: int, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # Same rule as platform_allocation (#223; this used to discard `month`).
     anchor, is_live = _month_view_anchor(month_start)
@@ -783,6 +798,7 @@ def stock_exposure(db: Session, current_user_id: int, month_start: datetime, bas
     }
 
 
+@float_edge
 def geography_exposure(db: Session, current_user_id: int, month_start: datetime, base_currency: str) -> Dict[str, Any]:
     # Same rule as platform_allocation (#241, D-55): live (quote-priced) for the
     # open month, like the Risk page's positions and the Overview headline; a past

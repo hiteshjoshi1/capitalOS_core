@@ -73,7 +73,7 @@ def test_foreign_currency_upload_is_converted_from_its_own_currency(household, d
         )
     upload_balance(db_engine, 191, "2026-03-05", "USD", 1000.0)
     valuation_cache.clear_shared_cache()
-    assert _live_cash(household) - before == pytest.approx(1000.0 * fx(MID.date(), "USD"), abs=TOL)
+    assert float(_live_cash(household) - before) == pytest.approx(1000.0 * fx(MID.date(), "USD"), abs=TOL)
 
 
 def test_nav_cash_rows_that_dont_add_up_keep_the_nav_total(household, db_engine):
@@ -93,11 +93,11 @@ def test_nav_cash_rows_that_dont_add_up_keep_the_nav_total(household, db_engine)
 
     page = _get(household, "/dashboard/cash-deposits?month=2026-03&base_currency=SGD")
     items = {i["source"]: i["value"] for i in page["items"]}
-    assert items["IBKR"] == pytest.approx(nav_cash, abs=TOL)
+    assert float(items["IBKR"]) == pytest.approx(nav_cash, abs=TOL)
     stable = page["total"] - _live_cash(household)
     assert stable > 0  # stablecoins, the only difference
     balances = {b["currency"]: b["value"] for b in _get(household, "/dashboard/summary?month=2026-03&base_currency=SGD")["cash_balances"]}
-    assert sum(balances.values()) == pytest.approx(_live_cash(household), abs=TOL)
+    assert float(sum(balances.values())) == pytest.approx(_live_cash(household), abs=TOL)
 
 
 def test_every_cash_reader_uses_one_scope(household):
@@ -105,11 +105,11 @@ def test_every_cash_reader_uses_one_scope(household):
     stablecoins) and the cash in geography all describe the same money."""
     summary = _get(household, "/dashboard/summary?month=2026-03&base_currency=SGD")
     nw_cash = summary["current_net_worth"]["cash"]
-    assert sum(b["value"] for b in summary["cash_balances"]) == pytest.approx(nw_cash, abs=TOL)
+    assert float(sum(b["value"] for b in summary["cash_balances"])) == pytest.approx(nw_cash, abs=TOL)
     past = _get(household, "/dashboard/summary?month=2026-02&base_currency=SGD")["net_worth"]
     geo = _get(household, "/dashboard/geography-exposure?month=2026-02&base_currency=SGD")
     # geography shows stablecoins as US cash; net worth counts them as crypto
-    assert sum(i["cash"] + i["crypto"] for i in geo["items"]) == pytest.approx(past["cash"] + past["crypto"], abs=TOL)
+    assert float(sum(i["cash"] + i["crypto"] for i in geo["items"])) == pytest.approx(past["cash"] + past["crypto"], abs=TOL)
 
 
 # ─── D-21 for every holding ──────────────────────────────────────────────────
@@ -123,10 +123,10 @@ def test_uploaded_holding_ignores_a_quote_older_than_its_statement(household, db
     valuation_cache.clear_shared_cache()
     reliance = _holding(household, "RELIANCE")
     assert reliance["price_fallback_reason"] == PRICE_FALLBACK_OLDER_QUOTE
-    assert reliance["value"] == pytest.approx(12 * 2880.0 * fx(MID.date(), "INR"), abs=TOL)
+    assert float(reliance["value"]) == pytest.approx(12 * 2880.0 * fx(MID.date(), "INR"), abs=TOL)
     infy = _holding(household, "INFY")
     assert infy["price_fallback_reason"] is None  # its 17 March quote is used
-    assert infy["value"] == pytest.approx(20 * 1650.0 * fx(MID.date(), "INR"), abs=TOL)
+    assert float(infy["value"]) == pytest.approx(20 * 1650.0 * fx(MID.date(), "INR"), abs=TOL)
 
 
 def test_uploaded_holding_ignores_an_implausible_quote(household, db_engine):
@@ -137,11 +137,11 @@ def test_uploaded_holding_ignores_an_implausible_quote(household, db_engine):
     valuation_cache.clear_shared_cache()
     reliance = _holding(household, "RELIANCE")
     assert reliance["price_fallback_reason"] == PRICE_FALLBACK_IMPLAUSIBLE
-    assert reliance["value"] == pytest.approx(12 * 2880.0 * fx(MID.date(), "INR"), abs=TOL)
+    assert float(reliance["value"]) == pytest.approx(12 * 2880.0 * fx(MID.date(), "INR"), abs=TOL)
     # Net worth uses the same value (one rule, one figure).
     nw = _get(household, "/dashboard/summary?month=2026-03&base_currency=SGD")["current_net_worth"]["stocks_funds"]
     exposure = _get(household, "/dashboard/stock-exposure?month=2026-03&base_currency=SGD")["total"]
-    assert exposure == pytest.approx(nw, abs=TOL)
+    assert float(exposure) == pytest.approx(nw, abs=TOL)
 
 
 def test_snapshot_views_report_no_fallback_reason(household):
@@ -164,8 +164,8 @@ def test_dividend_yield_denominator_follows_the_same_rule(household, db_engine):
     finally:
         db.close()
     rate = fx(MID.date(), "INR")
-    assert values[RELIANCE] == pytest.approx(12 * 2880.0 * rate, abs=TOL)  # statement, not the 27 Feb quote
-    assert values[INFY] == pytest.approx(20 * 1650.0 * rate, abs=TOL)  # its 17 March quote
+    assert float(values[RELIANCE]) == pytest.approx(12 * 2880.0 * rate, abs=TOL)  # statement, not the 27 Feb quote
+    assert float(values[INFY]) == pytest.approx(20 * 1650.0 * rate, abs=TOL)  # its 17 March quote
 
 
 def _row(**overrides) -> dict:
@@ -189,7 +189,7 @@ def test_price_position_rules():
     # Not a live view: the statement value.
     assert price_position(_row(), None, rates, "USD") == (None, None, 1000.0, 1000.0, False)
     # Live, a recent quote: used.
-    assert price_position(_row(), {7: quote}, rates, "USD").value == pytest.approx(1100.0)
+    assert float(price_position(_row(), {7: quote}, rates, "USD").value) == pytest.approx(1100.0)
     # Live, no quote / an older quote / an implausible one: the statement, with the reason.
     assert price_position(_row(), {}, rates, "USD").fallback_reason == PRICE_FALLBACK_NO_QUOTE
     older = {**quote, "trade_date": "2026-03-09"}

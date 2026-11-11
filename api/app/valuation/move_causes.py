@@ -23,6 +23,8 @@ least ``BIG_MOVE_PCT`` of the start. When a big move has no significant cause,
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from datetime import date, datetime
 from typing import Any, Dict, Iterable, Mapping, Optional
 
@@ -31,13 +33,14 @@ from sqlalchemy.orm import Session
 
 from app.valuation.clock import _date_only
 from app.valuation.state import _cash_positions
+from app.valuation.money import D, ZERO
 
-BIG_MOVE_PCT = 5.0
-SIGNIFICANT_SHARE = 0.2
-CAUSE_MIN = 1000.0
+BIG_MOVE_PCT = Decimal(5)
+SIGNIFICANT_SHARE = Decimal("0.2")
+CAUSE_MIN = Decimal(1000)
 CATCH_UP_DAYS = 45
 NONE_REASON = "No data cause found: a market move"
-_EPS = 1e-9
+_EPS = Decimal("1e-9")
 
 
 def _day(value: date) -> str:
@@ -57,12 +60,12 @@ class _Account:
     __slots__ = ("value", "as_of", "market")
 
     def __init__(self) -> None:
-        self.value = 0.0
+        self.value = ZERO
         self.as_of: Optional[date] = None
-        self.market = 0.0  # price + FX effect on its holdings (filled for the end side)
+        self.market = ZERO  # price + FX effect on its holdings (filled for the end side)
 
     def see(self, value: Any, as_of: Any) -> None:
-        self.value += float(value or 0.0)
+        self.value += D(value)
         day = _date_only(as_of)
         if day is not None and (self.as_of is None or day > self.as_of):
             self.as_of = day
@@ -81,7 +84,7 @@ def _accounts(cash: Iterable[Mapping[str, Any]], holdings: Iterable[Any]) -> Dic
     return out
 
 
-def _market_effect(start: Any, end: Any) -> float:
+def _market_effect(start: Any, end: Any) -> Decimal:
     """What price and FX did to one holding held at both ends (the bridge's split)."""
     from app.valuation.bridge import _split  # the bridge imports this module
 
@@ -93,8 +96,8 @@ def _cause(
     key: str,
     label: str,
     *,
-    amount: Optional[float],
-    change: float,
+    amount: Optional[Decimal],
+    change: Decimal,
     detail: Optional[str] = None,
     account_id: Optional[int] = None,
     as_of: Optional[date] = None,
@@ -115,8 +118,8 @@ def _cause(
 
 def classify(
     *,
-    start_total: float,
-    end_total: float,
+    start_total: Decimal,
+    end_total: Decimal,
     start_accounts: Mapping[int, _Account],
     end_accounts: Mapping[int, _Account],
     start_holdings: Iterable[Any],
@@ -128,18 +131,18 @@ def classify(
 ) -> Dict[str, Any]:
     """The causes from already-valued facts (pure, so each cause is tested alone)."""
     change = end_total - start_total
-    change_pct = (change / abs(start_total) * 100.0) if abs(start_total) > _EPS and not baseline_missing else None
+    change_pct = (change / abs(start_total) * 100) if abs(start_total) > _EPS and not baseline_missing else None
     is_big_move = change_pct is not None and abs(change_pct) >= BIG_MOVE_PCT
     causes: list[Dict[str, Any]] = []
 
     start_by_key = {h_key(h): h for h in start_holdings}
     end_list = list(end_holdings)
     # Per account: the market part of its change (holdings held at both ends).
-    market_by_account: Dict[int, float] = {}
+    market_by_account: Dict[int, Decimal] = {}
     for held in end_list:
         before = start_by_key.get(h_key(held))
         if held.account_id is not None and before is not None and not before.is_empty():
-            market_by_account[int(held.account_id)] = market_by_account.get(int(held.account_id), 0.0) + _market_effect(before, held)
+            market_by_account[int(held.account_id)] = market_by_account.get(int(held.account_id), ZERO) + _market_effect(before, held)
 
     first_accounts: set[int] = set()
     for account_id, end in sorted(end_accounts.items()):
@@ -156,7 +159,7 @@ def classify(
             continue
         if end.as_of is None or start.as_of is None or end.as_of <= start.as_of:
             continue  # no new data for it in the period
-        data_change = (end.value - start.value) - market_by_account.get(account_id, 0.0)
+        data_change = (end.value - start.value) - market_by_account.get(account_id, ZERO)
         gap_days = (end.as_of - start.as_of).days
         if gap_days > CATCH_UP_DAYS:
             causes.append(_cause(
@@ -223,8 +226,8 @@ def move_causes(
     base_currency: str,
     start_anchor: datetime,
     end_anchor: datetime,
-    start_total: float,
-    end_total: float,
+    start_total: Decimal,
+    end_total: Decimal,
     start_holdings: list[Any],
     end_holdings: list[Any],
     fx_flags: Mapping[str, Any],

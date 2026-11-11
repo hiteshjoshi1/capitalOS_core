@@ -18,11 +18,13 @@ yields all value holdings through here.
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, NamedTuple, Optional
+from decimal import Decimal
+from typing import Any, Mapping, NamedTuple, Optional
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.valuation.money import D
 from app.valuation_cache import valuation_cached
 
 PRICE_FALLBACK_NO_QUOTE = "no_quote"  # the price job has no quote for it
@@ -92,7 +94,7 @@ def position_base_currency(row: dict[str, Any], fallback: str) -> str:
     return str(row.get("account_base_currency") or row.get("account_currency") or fallback).upper()
 
 
-def statement_value(row: dict[str, Any], rates: dict[str, float], fallback_currency: str) -> tuple[float, bool]:
+def statement_value(row: dict[str, Any], rates: Mapping[str, Any], fallback_currency: str) -> tuple[Decimal, bool]:
     """(value in the target currency, valued_at_cost) from the holding's own statement:
     its market value, else its cost basis. A missing FX rate gives 0 (D-30: left out)."""
     currency = position_base_currency(row, fallback_currency)
@@ -103,26 +105,26 @@ def statement_value(row: dict[str, Any], rates: dict[str, float], fallback_curre
         if raw_value is None:
             raw_value = row.get("cost_basis_base")
         valued_at_cost = raw_value is not None
-    return float(raw_value or 0.0) * rates.get(currency, 0.0), valued_at_cost
+    return D(raw_value) * D(rates.get(currency)), valued_at_cost
 
 
-def quote_value(row: dict[str, Any], quote: dict[str, Any], rates: dict[str, float], fallback_currency: str) -> float:
+def quote_value(row: dict[str, Any], quote: dict[str, Any], rates: Mapping[str, Any], fallback_currency: str) -> Decimal:
     currency = str(quote.get("currency") or row.get("quote_currency") or fallback_currency).upper()
-    return float(row.get("quantity") or 0.0) * float(quote["price"]) * rates.get(currency, 0.0)
+    return D(row.get("quantity")) * D(quote["price"]) * D(rates.get(currency))
 
 
 class PositionPrice(NamedTuple):
     quote: Optional[dict[str, Any]]  # the quote used, or None (statement value)
     fallback_reason: Optional[str]  # why the statement value was used (live views only)
-    value: float  # the value to show and add up
-    statement_value: float  # the holding's statement value
+    value: Decimal  # the value to show and add up (Decimal, #360)
+    statement_value: Decimal  # the holding's statement value
     valued_at_cost: bool  # the value is the holding's cost (no market value, no usable quote)
 
 
 def price_position(
     row: dict[str, Any],
     quotes: dict[int, dict[str, Any]] | None,
-    rates: dict[str, float],
+    rates: Mapping[str, Any],
     fallback_currency: str,
 ) -> PositionPrice:
     """Value one holding. ``quotes`` is None outside live views: the statement

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from decimal import Decimal
+from typing import Any, Dict, Mapping, Optional
 
 from sqlalchemy.orm import Session
 
@@ -21,6 +22,7 @@ from app.portfolio.position_pricing import (
 )
 from app.valuation import fx
 from app.valuation.clock import _iso_value, _normalize_ts
+from app.valuation.money import ZERO
 
 
 def _quote_stale_days() -> int:
@@ -71,10 +73,10 @@ def _canonical_base_currency(row: Dict[str, Any], fallback: str) -> str:
 
 def _canonical_position_value(
     row: Dict[str, Any],
-    rates: Dict[str, float],
+    rates: Mapping[str, Any],
     fallback_currency: str,
     latest_prices: Dict[int, Dict[str, Any]] | None = None,
-) -> float:
+) -> Decimal:
     """A holding's value: its statement value (market value, else cost), or in a
     live view (``latest_prices`` given) the price job's quote under D-21's rule,
     for every holding (#144). An empty ``latest_prices`` is the same as none."""
@@ -109,7 +111,7 @@ _IMPLAUSIBLE_QUOTE_RATIO = IMPLAUSIBLE_QUOTE_RATIO
 def _live_position_price(
     row: Dict[str, Any],
     latest_prices: Dict[int, Dict[str, Any]],
-    rates: Dict[str, float],
+    rates: Mapping[str, Any],
     base_currency: str,
 ) -> PositionPrice:
     """One holding in a live view, under D-21 (whichever platform holds it)."""
@@ -119,9 +121,9 @@ def _live_position_price(
 def _nav_row_live_price(
     row: Dict[str, Any],
     latest_prices: Dict[int, Dict[str, Any]],
-    rates: Dict[str, float],
+    rates: Mapping[str, Any],
     base_currency: str,
-) -> tuple[Optional[Dict[str, Any]], Optional[str], float, float]:
+) -> tuple[Optional[Dict[str, Any]], Optional[str], Decimal, Decimal]:
     """(quote to use or None, fallback reason or None, live value, statement value)."""
     priced = _live_position_price(row, latest_prices, rates, base_currency)
     return priced.quote, priced.fallback_reason, priced.value, priced.statement_value
@@ -130,12 +132,12 @@ def _nav_row_live_price(
 def _nav_live_price_deltas(
     nav_position_rows: list[Dict[str, Any]],
     latest_prices: Dict[int, Dict[str, Any]],
-    rates: Dict[str, float],
+    rates: Mapping[str, Any],
     base_currency: str,
-) -> Dict[int, float]:
+) -> Dict[int, Decimal]:
     """Per legacy account: (holdings at the price job's quotes) - (holdings at IBKR's
     statement prices), in base currency, to add to that account's NAV in live views."""
-    deltas: Dict[int, float] = {}
+    deltas: Dict[int, Decimal] = {}
     for row in nav_position_rows:
         if not row.get("has_nav_snapshot") or row.get("account_id") is None:
             continue
@@ -145,7 +147,7 @@ def _nav_live_price_deltas(
         if quote is None:
             continue
         account_id = int(row["account_id"])
-        deltas[account_id] = deltas.get(account_id, 0.0) + (live_value - snapshot_value)
+        deltas[account_id] = deltas.get(account_id, ZERO) + (live_value - snapshot_value)
     return deltas
 
 
@@ -182,7 +184,7 @@ def _asset_market_values(
     anchor_ts: datetime,
     base_currency: str,
     current_user_id: int,
-) -> dict[int, float]:
+) -> dict[int, Decimal]:
     """Per asset: the market value of every stock/fund holding at ``anchor_ts``
     in ``base_currency``, priced like the live dashboard holdings (the yield
     denominator of the Dividends page)."""
@@ -207,8 +209,8 @@ def _asset_market_values(
     currencies.update(str(quote["currency"]).upper() for quote in quotes.values() if quote.get("currency"))
     currencies.update(str(row["quote_currency"]).upper() for row in holding_rows if row.get("quote_currency"))
     fx_rates = fx.get_rates(anchor_ts, base_currency, currencies)
-    out: dict[int, float] = {}
+    out: dict[int, Decimal] = {}
     for row in holding_rows:
         asset = int(row["asset_id"])
-        out[asset] = out.get(asset, 0.0) + price_position(row, quotes, fx_rates, base_currency).value
+        out[asset] = out.get(asset, ZERO) + price_position(row, quotes, fx_rates, base_currency).value
     return out
