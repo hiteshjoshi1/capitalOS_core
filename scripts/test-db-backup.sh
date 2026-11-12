@@ -173,6 +173,11 @@ docker() {  # docker exec [-i] <container> <command> <args...>
       cat >/dev/null
       case " $* " in
         *" --schema-only "*) cat "$schema" ;;
+        *" --data-only "*)  # schema_migrations rows (#416); none when fake_dump_untracked is set
+          [ -n "${fake_dump_untracked:-}" ] && { printf -- '-- no data\n'; return 0; }
+          printf 'COPY public.schema_migrations (filename, applied_at) FROM stdin;\n'
+          printf '%s\t2026-11-01 00:00:00+00\n' $fake_dump_migrations
+          printf '\\.\n' ;;
         *" --no-privileges "*) printf '\\restrict k\nCREATE TABLE public.import_jobs (id integer);\n\\unrestrict k\n' ;;
         *) echo "unexpected pg_restore $*" >&2; return 1 ;;
       esac ;;
@@ -197,6 +202,11 @@ docker() {  # docker exec [-i] <container> <command> <args...>
     *) echo "unexpected docker exec $cmd" >&2; return 99 ;;
   esac
 }
+# #416: the checkout's migrations and the ones the fake dump has applied.
+export MIGRATIONS_DIR=$tmp/migrations; mkdir -p "$MIGRATIONS_DIR"
+printf 'CREATE TABLE users (id integer PRIMARY KEY);\n' >"$MIGRATIONS_DIR/001_users.sql"
+printf 'CREATE TABLE user_last_visit (user_id integer REFERENCES users (id));\n' >"$MIGRATIONS_DIR/002_last_visit.sql"
+fake_dump_migrations="001_users.sql 002_last_visit.sql"
 target=$tmp/target; rset=$tmp/rset
 new_target() {
   rm -rf "$target" "$target".pre-restore-*; mkdir -p "$target"
@@ -242,6 +252,64 @@ if [ "$rc" != 0 ] && [ -f "$target/current.txt" ] && [ ! -e "$target/raw" ] && !
   ok "restore: a failed database restore leaves data/ untouched (and no staging folder behind)"
 else bad "restore: a failed database restore leaves data/ untouched (exit $rc): $out"; fi
 fake_psql_fails=""
+
+# #416: the restore starts from an empty public schema (not pg_restore --clean, which couldn't drop
+# a table a newer migration made another depend on), keeping the target's schema owner and grants.
+new_target
+rc=0; out=$(run_restore) || rc=$?
+drop_line=$(grep -n '^DROP SCHEMA public CASCADE;' "$fake/applied.sql" | head -1 | cut -d: -f1)
+create_line=$(grep -n '^CREATE TABLE public.import_jobs' "$fake/applied.sql" | head -1 | cut -d: -f1)
+if [ "$rc" = 0 ] && [ -n "$drop_line" ] && [ "$drop_line" -lt "$create_line" ] && grep -q '^CREATE SCHEMA public;' "$fake/applied.sql" &&
+  grep -q 'ALTER SCHEMA public OWNER TO' "$fake/applied.sql" && grep -q 'GRANT %s ON SCHEMA public' "$fake/applied.sql" &&
+  ! grep -q -- '--clean' "$fake/applied.sql"; then
+  ok "restore: from an empty public schema (owner and schema grants kept), then the dump"
+else bad "restore: from an empty public schema (exit $rc): $out"; fi
+if [ "$rc" = 0 ] && ! grep -q '^RESET ALL;' "$fake/applied.sql" && ! grep -q 'INSERT INTO schema_migrations' "$fake/applied.sql" &&
+  ! printf '%s' "$out" | grep -q 'newer migration'; then
+  ok "restore: a backup at this checkout's version applies no migrations"
+else bad "restore: same version, no migrations (exit $rc): $out"; fi
+
+# An older backup (001 only) into this checkout (001 + 002): 002 is applied in the same transaction,
+# after the counts check, with the session options pg_restore set taken back first.
+fake_dump_migrations="001_users.sql"
+new_target
+rc=0; out=$(run_restore) || rc=$?
+counts_line=$(grep -n "row counts differ" "$fake/applied.sql" | head -1 | cut -d: -f1)
+reset_line=$(grep -n '^RESET ALL;' "$fake/applied.sql" | head -1 | cut -d: -f1)
+mig_line=$(grep -n '^CREATE TABLE user_last_visit' "$fake/applied.sql" | head -1 | cut -d: -f1)
+if [ "$rc" = 0 ] && [ -n "$reset_line" ] && [ "$counts_line" -lt "$reset_line" ] && [ "$reset_line" -lt "$mig_line" ] &&
+  grep -qF "INSERT INTO schema_migrations (filename) VALUES ('002_last_visit.sql');" "$fake/applied.sql" &&
+  ! grep -qF "VALUES ('001_users.sql')" "$fake/applied.sql" && [ "$(tail -1 "$fake/applied.sql")" = "COMMIT;" ] &&
+  printf '%s' "$out" | grep -q "1 newer migration(s) applied (002_last_visit.sql)"; then
+  ok "restore: an older backup is brought up to this checkout's version in the same transaction"
+else bad "restore: older backup migrated (exit $rc): $out"; fi
+
+# A newer migration failing on the restored data rolls the whole restore back: data/ untouched.
+fake_psql_fails=1
+new_target
+rc=0; out=$(run_restore) || rc=$?
+if [ "$rc" != 0 ] && [ -f "$target/current.txt" ] && ! ls -d "$target".pre-restore-* >/dev/null 2>&1 &&
+  printf '%s' "$out" | grep -q 'rolled back (the database is as it was before'; then
+  ok "restore: a failure (e.g. a newer migration on the restored data) leaves database and data/ as they were"
+else bad "restore: failure leaves everything as it was (exit $rc): $out"; fi
+fake_psql_fails=""
+
+# A backup from newer code (a migration this checkout lacks) is restored with a warning.
+fake_dump_migrations="001_users.sql 002_last_visit.sql 003_from_newer_code.sql"
+new_target
+rc=0; out=$(run_restore) || rc=$?
+if [ "$rc" = 0 ] && printf '%s' "$out" | grep -q "WARNING: the backup has migrations this checkout doesn't (003_from_newer_code.sql"; then
+  ok "restore: a backup from newer code says so"
+else bad "restore: newer-code backup warning (exit $rc): $out"; fi
+# A dump without migration tracking: restored as it is, with the next steps named.
+fake_dump_untracked=1
+new_target
+rc=0; out=$(run_restore) || rc=$?
+if [ "$rc" = 0 ] && ! grep -q '^RESET ALL;' "$fake/applied.sql" && printf '%s' "$out" | grep -q 'records no migrations'; then
+  ok "restore: a dump from before migration tracking is restored as it is, next steps named"
+else bad "restore: untracked dump (exit $rc): $out"; fi
+fake_dump_untracked=""
+fake_dump_migrations="001_users.sql 002_last_visit.sql"
 
 # ---- encrypted sets (#356): the pinned age, a throwaway key pair ----
 if ! "$src/scripts/age-tool.sh" path >/dev/null 2>&1; then "$src/scripts/age-tool.sh" install >/dev/null; fi
