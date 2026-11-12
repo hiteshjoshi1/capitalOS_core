@@ -832,7 +832,7 @@ a.btn {
 .stockHoldingsTable th,
 .stockHoldingsTable td {
   font-size: 14px;
-  padding: 14px 16px;
+  padding: 14px 10px; /* #418: 16px side padding made the default columns too wide at 1440px */
   white-space: nowrap;
   vertical-align: middle;
 }
@@ -843,7 +843,7 @@ a.btn {
   background: color-mix(in srgb, var(--panel2) 84%, white 16%);
   z-index: 1;
   font-size: 11px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em; /* #418: was 0.16em; the spaced-out headers set several column widths */
   text-transform: uppercase;
 }
 
@@ -865,7 +865,14 @@ a.btn {
 .stockHoldingsAssetCell {
   display: grid;
   gap: 6px;
-  min-width: 220px;
+  min-width: 160px;
+}
+
+.stockHoldingsPriceAge {
+  display: block;
+  white-space: normal;
+  max-width: 16ch;
+  margin-left: auto;
 }
 
 .stockHoldingsAssetMeta {

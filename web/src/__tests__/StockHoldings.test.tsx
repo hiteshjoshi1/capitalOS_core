@@ -19,7 +19,7 @@ vi.mock("../lib/api", () => ({
 }));
 
 const mockApi = vi.mocked(api, true);
-const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns";
+const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns.v2";
 
 const summaryFixture: StockHoldingsSummary = {
   as_of_month: "2026-02",
@@ -188,10 +188,11 @@ describe("StockHoldings", () => {
     expect(screen.getByRole("columnheader", { name: "Purchase Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Current Price" })).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Profit & Loss" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Quote freshness" })).toBeInTheDocument();
+    // #418: Quote freshness is off by default (Columns picker) so the table fits at 1440px.
+    expect(screen.queryByRole("columnheader", { name: "Quote freshness" })).not.toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "% NW" })).toBeInTheDocument();
     const columnHeaders = screen.getAllByRole("columnheader").map((header) => header.textContent);
-    expect(columnHeaders.at(-1)).toBe("Quote freshness");
+    expect(columnHeaders.at(-1)).toBe("Dividends");
     expect(screen.queryByText("Quote Freshness")).not.toBeInTheDocument();
 
     const hkRow = screen.getByText("700").closest("tr");
@@ -204,8 +205,6 @@ describe("StockHoldings", () => {
       // P&L in the base currency, the local currency in the tooltip (#251).
       expect(scoped.getByText("+S$ 21,319").closest("td")).toHaveAttribute("title", "In HKD: +HKD 280.04");
       expect(scoped.getByText("+21.6%")).toBeInTheDocument();
-      expect(scoped.getByText("fresh")).toBeInTheDocument();
-      expect(scoped.getByText("price from 1 Mar 2026, EODHD")).toBeInTheDocument();
       expect(scoped.getByText("24.0%")).toBeInTheDocument();
     }
 
@@ -215,7 +214,7 @@ describe("StockHoldings", () => {
       const scoped = within(inRow);
       expect(scoped.getByText("20")).toBeInTheDocument();
       expect(scoped.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-      expect(scoped.getByText("stale")).toBeInTheDocument();
+      // #418: with Quote freshness off, the stale price is flagged in the Current Price cell.
       expect(scoped.getByText(/^stale \(price from 27 Feb 2026, /)).toBeInTheDocument();
     }
 
@@ -297,6 +296,8 @@ describe("StockHoldings", () => {
     ["375px cards", 375],
   ])("marks a statement-only price older than the stale window as stale (%s)", async (_label, width) => {
     Object.defineProperty(window, "innerWidth", { value: width, configurable: true, writable: true });
+    // The Quote freshness column is opt-in since #418.
+    window.localStorage.setItem(STOCK_COLUMN_STORAGE_KEY, JSON.stringify({ quoteFreshness: true }));
     mockApi.stockHoldingsSummary.mockResolvedValueOnce(liveFixture);
 
     render(
@@ -353,6 +354,8 @@ describe("StockHoldings", () => {
     ["375px cards", 375],
   ])("shows no freshness badges on a past month, only the price date (%s)", async (_label, width) => {
     Object.defineProperty(window, "innerWidth", { value: width, configurable: true, writable: true });
+    // The Quote freshness column is opt-in since #418.
+    window.localStorage.setItem(STOCK_COLUMN_STORAGE_KEY, JSON.stringify({ quoteFreshness: true }));
     mockApi.stockHoldingsSummary.mockResolvedValueOnce({
       ...liveFixture,
       as_of_month: "2026-02",
