@@ -1,3 +1,4 @@
+import pytest
 import os
 from pathlib import Path
 
@@ -179,6 +180,13 @@ def test_ocbc_ingest_upload_and_import(client: TestClient, db_engine):
     assert data["counts"]["positions_parsed"] == 1
     assert data["counts"]["positions_inserted"] == 0
     assert data["counts"].get("canonical_balances_written", 0) >= 1
+    # #410 (U28): what the upload changed, for the statement's month.
+    effect = data["effect"]
+    assert effect is not None and effect["base_currency"] == "SGD"
+    assert effect["balance_date"] == data["canonical_result"]["as_of_date"]  # the balance's date sets the month
+    assert effect["balance"] is not None and effect["balance_date"]
+    assert effect["net_worth_change"] == pytest.approx(effect["net_worth_after"] - effect["net_worth_before"])
+    assert effect["net_worth_change"] == pytest.approx(effect["balance"], abs=0.01)  # a new account: all of it is new
 
     with open(fixture, "rb") as f:
         resp_two = client.post(

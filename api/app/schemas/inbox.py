@@ -24,7 +24,8 @@ class InboxAction(BaseModel):
 class InboxItem(BaseModel):
     """`kind`: source_overdue, source_never_loaded, unknown_format, import_pending,
     unpriced_holding, fx_gap, fx_unsupported, job_failing, unmapped_transactions,
-    card_due_soon, card_overdue (#352), backup_stale (#399).
+    card_due_soon, card_overdue (#352), backup_stale (#399), month_closed_stale, concentration,
+    unusual_move, recurring_new, recurring_up (#410).
     `severity`: high, medium or low. `source` is the source-freshness row for the
     source kinds (#252), so the page can build the prefilled Upload link (#278)."""
 

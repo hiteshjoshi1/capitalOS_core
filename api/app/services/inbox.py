@@ -12,7 +12,10 @@ header bell (#317) and the Alerts page can't disagree:
 - transactions of this or last month without a category (Map transactions);
 - card payments due within 5 days or overdue, from the due date a statement printed
   (#352, D-94), until the card's payments since the statement cover it;
-- backups: no verified backup in 48 hours, or the last daily run failed (#399, D-111).
+- backups: no verified backup in 48 hours, or the last daily run failed (#399, D-111);
+- about the money itself (#410, D-114, ``app.services.insight_alerts``): a month that closed
+  with stale data, one holding above a share of net worth, an unusual monthly move, a new
+  recurring card charge or one above its usual amount.
 Items are ordered high, medium, low; within a severity, as listed above.
 """
 from __future__ import annotations
@@ -29,6 +32,7 @@ from app.fx_backfill import plan_backfill
 from app.schemas.inbox import InboxAction, InboxItem, InboxResponse
 from app.services import data_hub
 from app.services.backup_status import backup_status
+from app.services.insight_alerts import insight_items
 from app.services.source_freshness import (
     KIND_ACCOUNT_STATEMENT,
     KIND_BANK_STATEMENT,
@@ -58,6 +62,11 @@ KIND_ORDER = {
             "fx_gap",
             "fx_unsupported",
             "unmapped_transactions",
+            "month_closed_stale",
+            "concentration",
+            "unusual_move",
+            "recurring_up",
+            "recurring_new",
         ]
     )
 }
@@ -382,6 +391,7 @@ def build_inbox(db: Session, user: CurrentUser, *, today: Optional[date] = None)
         + _safe(lambda: _unmapped_items(db, user, today), [])
         + card_items
         + backup_items
+        + _safe(lambda: insight_items(db, user, _saved_base_currency(db, user.id), _safe), [])
     )
     items.sort(key=lambda i: (SEVERITY_ORDER.get(i.severity, 9), KIND_ORDER.get(i.kind, 99), i.title.lower()))
 

@@ -117,6 +117,12 @@ export type InboxItem = {
     | "card_due_soon"
     | "card_overdue"
     | "backup_stale"
+    // #410 (U29): about the money itself.
+    | "month_closed_stale"
+    | "concentration"
+    | "unusual_move"
+    | "recurring_new"
+    | "recurring_up"
     | string;
   severity: "high" | "medium" | "low";
   title: string;

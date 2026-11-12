@@ -41,9 +41,11 @@ def test_household_parts_name_their_items_and_add_up(mid: TestClient):
                 continue
             assert sum(i["amount"] or 0.0 for i in part["items"]) == pytest.approx(part["amount"], abs=0.01), part["key"]
     parts = {p["key"]: p for p in bridge["unexplained"]["parts"]}
-    # RELIANCE bought at Sharekhan (no cash record) is named, with the reason.
-    untracked = parts["untracked_trades"]["items"]
-    assert untracked[0]["label"].startswith("RELIANCE") and "no cash record at Sharekhan" in untracked[0]["reason"]
+    # RELIANCE bought at Sharekhan (no cash record) is named on New money now (#410/U30).
+    assert "untracked_trades" not in parts
+    new_money = next(line for line in bridge["lines"] if line["key"] == "new_money")
+    broker = next(p for p in new_money["parts"] if p["key"].startswith("broker:"))
+    assert broker["items"][0]["label"] == "RELIANCE" and broker["items"][0]["reason"] == "bought"
     # The card part names the household's card, with a link to fix it.
     cards = parts["card_balances"]["items"]
     assert cards and all(item["link"] == "/liabilities" for item in cards)
