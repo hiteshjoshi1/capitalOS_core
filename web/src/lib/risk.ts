@@ -252,3 +252,29 @@ export function riskStateClassName(state: RiskState): "muted" | "warn" | "" {
 export function thresholdRule(thresholdPct: number): string {
   return `Above ${formatPercent(thresholdPct, { scale: "points", decimals: Number.isInteger(thresholdPct) ? 0 : 1 })}: concentrated`;
 }
+
+/** #409 (U18): one risk figure's move against last month, in percentage points. */
+export type RiskChange = {
+  /** Current minus prior, in points; null when last month has no figure to compare. */
+  points: number | null;
+  /** "+1.2 pts" / "−0.4 pts" / "no change", or null without a comparison. */
+  text: string | null;
+  /** For a concentration figure a rise is the worse direction; for the cash buffer neither is. */
+  tone: "bad" | "good" | "neutral";
+};
+
+/** How a share moved vs last month. ``higherIsWorse``: concentration (true) vs cash buffer (false). */
+export function riskChange(
+  current: number | null | undefined,
+  prior: number | null | undefined,
+  { higherIsWorse, hasPrior }: { higherIsWorse: boolean; hasPrior: boolean },
+): RiskChange {
+  if (!hasPrior || current == null || prior == null || !Number.isFinite(current) || !Number.isFinite(prior)) {
+    return { points: null, text: null, tone: "neutral" };
+  }
+  const points = current - prior;
+  if (Math.abs(points) < 0.05) return { points: 0, text: "no change", tone: "neutral" };
+  const text = `${points > 0 ? "+" : "−"}${formatPercent(Math.abs(points), { scale: "points" }).replace("%", "")} pts`;
+  const tone = !higherIsWorse ? "neutral" : points > 0 ? "bad" : "good";
+  return { points, text, tone };
+}

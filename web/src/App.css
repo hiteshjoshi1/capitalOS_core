@@ -1742,6 +1742,12 @@ a.btn {
   margin-top: 6px;
 }
 
+/* #409 (U18): a risk figure's move vs last month. */
+.riskChangeLine {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
 .riskNoData {
   margin-top: 10px;
   font-size: 12px;

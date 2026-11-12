@@ -805,6 +805,48 @@ def expected_dividends_overview(
                 }
             )
 
+    # #409 (U16, D-113): a held company with no stored yield is projected from what it actually
+    # paid in the twelve months to the period's end (gross, in the base currency at each payment
+    # date's rate), instead of counting as nothing.
+    yield_projected = {int(row["asset_id"]) for row in company_rows}
+    past_payment_rows: list[dict[str, Any]] = []
+    held_without_yield = {
+        int(h["asset_id"])
+        for h in holdings
+        if shares_by_asset.get(int(h["asset_id"]), 0.0) > 0 and int(h["asset_id"]) not in yield_projected
+    }
+    if held_without_yield:
+        trailing_rows = [
+            r
+            for r in _fetch_dividend_rows(db, _add_months(end, -12), end, current_user.id)
+            if r.get("asset_id") is not None and int(r["asset_id"]) in held_without_yield
+        ]
+        _b, paid_companies, _t = _aggregate_dividend_data(
+            trailing_rows,
+            period="month",
+            base_currency=base_currency,
+            assumed_tax_rate=normalized_default_rate,
+            country_rates=country_rates,
+            anchor_ts=end,
+            current_user_id=current_user.id,
+            db=db,
+        )
+        holding_by_id = {int(h["asset_id"]): h for h in holdings}
+        for paid in paid_companies:
+            if paid.get("asset_id") is None or float(paid.get("gross") or 0.0) <= 0:
+                continue
+            holding = holding_by_id.get(int(paid["asset_id"]), {})
+            past_payment_rows.append(
+                {
+                    "asset_id": int(paid["asset_id"]),
+                    "symbol": str(holding.get("symbol") or paid["symbol"]),
+                    "company": str(holding.get("company") or paid["company"]),
+                    "country": holding.get("country") or paid.get("country"),
+                    "shares": shares_by_asset.get(int(paid["asset_id"]), 0.0),
+                    "annual_gross_base": float(paid["gross"]),
+                }
+            )
+
     currencies = {(row.get("quote_currency") or base_currency).upper() for row in company_rows}
     fx_rates = get_rates(end, base_currency, currencies) if currencies else {}
 
@@ -842,6 +884,32 @@ def expected_dividends_overview(
                 payout_minus_tax=annual_payout_minus_tax,
             )
         )
+    for row in past_payment_rows:
+        annual_gross_base = row["annual_gross_base"]
+        tax_rate = _resolved_tax_rate(row.get("country"), normalized_default_rate, country_rates)
+        annual_estimated_tax = annual_gross_base * tax_rate
+        annual_rollup["gross"] += annual_gross_base
+        annual_rollup["estimated_tax"] += annual_estimated_tax
+        annual_rollup["payout_minus_tax"] += annual_gross_base - annual_estimated_tax
+        companies.append(
+            ExpectedDividendCompanyOut(
+                asset_id=row["asset_id"],
+                symbol=row["symbol"],
+                company=row["company"],
+                country=row.get("country"),
+                shares=float(row["shares"]),
+                yield_pct=None,
+                price=None,
+                quote_currency=base_currency,
+                yearly_dividend=annual_gross_base,
+                quarterly_dividend=annual_gross_base / 4.0,
+                monthly_dividend=annual_gross_base / 12.0,
+                gross=annual_gross_base,
+                estimated_tax=annual_estimated_tax,
+                payout_minus_tax=annual_gross_base - annual_estimated_tax,
+                method="past_payments",
+            )
+        )
     companies.sort(key=lambda item: item.gross, reverse=True)
 
     monthly_selected = {
@@ -873,4 +941,6 @@ def expected_dividends_overview(
         quarterly=_expected_summary_from_buckets("quarter", quarterly_selected),
         yearly=_expected_summary_from_buckets("year", yearly_selected),
         companies=companies,
+        companies_by_yield=sum(1 for c in companies if c.method == "yield"),
+        companies_by_past_payments=sum(1 for c in companies if c.method == "past_payments"),
     )

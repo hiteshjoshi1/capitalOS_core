@@ -94,6 +94,9 @@ class ExpectedDividendCompanyOut(BaseModel):
     gross: float
     estimated_tax: float
     payout_minus_tax: float
+    # #409 (U16, D-113): "yield" (a stored dividend yield x price x shares) or "past_payments"
+    # (no yield stored: the dividends it actually paid in the twelve months to the period's end).
+    method: str = "yield"
 
 
 class ExpectedDividendsOverviewOut(BaseModel):
@@ -109,3 +112,7 @@ class ExpectedDividendsOverviewOut(BaseModel):
     quarterly: ExpectedDividendSummaryOut
     yearly: ExpectedDividendSummaryOut
     companies: list[ExpectedDividendCompanyOut]
+    # #409 (U16): how many held companies each method projected, so the page can say which it
+    # used ("based on stored yields" / "based on the last 12 months' payments" / both).
+    companies_by_yield: int = 0
+    companies_by_past_payments: int = 0

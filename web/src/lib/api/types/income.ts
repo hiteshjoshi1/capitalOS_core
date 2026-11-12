@@ -133,6 +133,9 @@ export type ExpectedDividendCompany = {
   gross: number;
   estimated_tax: number;
   payout_minus_tax: number;
+  /** #409 (U16): "yield" (stored yield x price x shares) or "past_payments" (no yield stored: what
+   * it paid in the twelve months to the period's end). */
+  method?: "yield" | "past_payments" | string;
 };
 
 export type ExpectedDividendsOverview = {
@@ -148,4 +151,7 @@ export type ExpectedDividendsOverview = {
   quarterly: ExpectedDividendSummary;
   yearly: ExpectedDividendSummary;
   companies: ExpectedDividendCompany[];
+  /** #409 (U16): held companies projected by each method. */
+  companies_by_yield?: number;
+  companies_by_past_payments?: number;
 };

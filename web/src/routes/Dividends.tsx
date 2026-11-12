@@ -5,6 +5,7 @@ import { useSelectedMonth } from "../lib/selectedMonth";
 import { resourceKey, useApiResource } from "../lib/useApiResource";
 import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
+import { expectedMethodText, projectedHoldingCount } from "../lib/dividendProjection";
 import "../App.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
@@ -244,13 +245,13 @@ export default function Dividends() {
                   <span className={fmt.directionClass(expectedVsTrailingPct)}>
                     {fmt.formatPercent(expectedVsTrailingPct, { signed: true, decimals: 0 })}
                   </span>{" "}
-                  vs trailing 12 months ({formatMoney(realizedTrailing12.payout_minus_tax)}), based on current holdings and yields.
+                  vs trailing 12 months ({formatMoney(realizedTrailing12.payout_minus_tax)}), {expectedMethodText(expectedOverview)}.
                 </p>
               </article>
               <article className="card dividendSignalCard">
                 <p className="dividendSignalLabel">Portfolio coverage</p>
                 <p className="dividendSignalValue">
-                  {expectedOverview?.assets_with_actions ?? 0} / {expectedOverview?.holdings_considered ?? 0}
+                  {projectedHoldingCount(expectedOverview)} / {expectedOverview?.holdings_considered ?? 0}
                 </p>
                 <p className="dividendSignalContext">
                   Holdings currently paying a dividend · {fmt.formatPercent(avgYieldPct, { scale: "points" })} average yield.
@@ -341,6 +342,7 @@ export default function Dividends() {
                       <span className="listRowTitle">
                         {item.company}
                         {item.yield_pct != null ? <span className="tag">{fmt.formatPercent(item.yield_pct, { scale: "points", decimals: 2 })}</span> : null}
+                        {item.method === "past_payments" ? <span className="tag" title="No yield stored: projected from what it paid in the last 12 months">past 12 months</span> : null}
                       </span>
                       <span className="listRowMeta">
                         <span>{item.symbol}</span>

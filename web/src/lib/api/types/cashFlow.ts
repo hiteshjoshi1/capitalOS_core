@@ -125,6 +125,32 @@ export type CashFlowComparison = {
   deterioration_drivers: CashFlowCategoryDeltaItem[];
 };
 
+/** The month against the same month a year earlier, like for like (#409, U15, D-113): the open
+ * month is days 1..through_day against the same days last year; any other month whole vs whole.
+ * Own-account transfers and card payments are left out as for the month itself. */
+export type CashFlowYearOverYear = {
+  basis: "month_to_date" | "full_month" | string;
+  month: string;
+  prior_year_month: string;
+  through_day: number;
+  /** ISO date, first day counted. */
+  prior_start: string;
+  /** ISO date, last day counted (inclusive). */
+  prior_end: string;
+  /** False when nothing is recorded for last year's month: deltas then mean "no data". */
+  has_prior_year_data: boolean;
+  inflows: number;
+  outflows: number;
+  net: number;
+  savings_rate: number | null;
+  prior_inflows: number;
+  prior_outflows: number;
+  prior_net: number;
+  prior_savings_rate: number | null;
+  /** Every outflow category of either month, biggest increase first (both directions). */
+  outflow_category_deltas: CashFlowCategoryDeltaItem[];
+};
+
 export type CashFlowAnalytics = {
   /** Still returned (fields are only added); the page no longer shows it (#243). */
   burn_rate: number | null;
@@ -146,6 +172,10 @@ export type CashFlowAnalytics = {
   answers: CashFlowDiagnosticAnswer[];
   /** #243: always sent by the API; optional here like its Python default. */
   comparison?: CashFlowComparison | null;
+  /** #409 (U15): the same month last year. */
+  year_over_year?: CashFlowYearOverYear | null;
+  /** #409 (U15): the twelve months ending at the month, oldest first. */
+  savings_rate_trend?: CashFlowTrendPoint[];
 };
 
 export type CashFlowDetail = FxStatus & {
