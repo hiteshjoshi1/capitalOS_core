@@ -2022,6 +2022,18 @@ CREATE TABLE public.user_credentials (
 
 
 --
+-- Name: user_last_visit; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.user_last_visit (
+    user_id bigint NOT NULL,
+    seen_at timestamp with time zone NOT NULL,
+    net_worth numeric(38,2),
+    base_currency text
+);
+
+
+--
 -- Name: user_preferences; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -3097,6 +3109,14 @@ ALTER TABLE ONLY public.fx_rates
 
 ALTER TABLE ONLY public.user_credentials
     ADD CONSTRAINT user_credentials_pkey PRIMARY KEY (user_id);
+
+
+--
+-- Name: user_last_visit user_last_visit_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_last_visit
+    ADD CONSTRAINT user_last_visit_pkey PRIMARY KEY (user_id);
 
 
 --
@@ -4230,6 +4250,14 @@ ALTER TABLE ONLY public.transfer_links
 
 ALTER TABLE ONLY public.user_credentials
     ADD CONSTRAINT user_credentials_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_last_visit user_last_visit_user_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.user_last_visit
+    ADD CONSTRAINT user_last_visit_user_id_fkey FOREIGN KEY (user_id) REFERENCES public.users(id) ON DELETE CASCADE;
 
 
 --

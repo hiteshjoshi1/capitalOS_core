@@ -26,17 +26,21 @@ type Props = {
   symbol: string;
   /** `cell`: the table's column (breakdown on hover/tap); `card`: the mobile card (breakdown shown). */
   layout?: "cell" | "card";
+  /** What a quantity counts: "shares" (Stocks) or a token's symbol (Crypto, #408). */
+  unit?: string;
 };
 
-function sharesText(change: Change): string | null {
+function sharesText(change: Change, unit = "shares"): string | null {
   const before = change.start_quantity ?? 0;
   const after = change.end_quantity ?? 0;
   const moved = after - before;
-  if (change.side === "sold") return `sold ${fmt.formatNumber(before, 4)} shares`;
-  if (change.side === "new") return `bought ${fmt.formatNumber(after, 4)} shares`;
+  // #408: a wallet's quantity also moves by transfers and staking rewards, not only trades.
+  const [added, removed] = unit === "shares" ? ["bought", "sold"] : ["added", "removed"];
+  if (change.side === "sold") return `${removed} ${fmt.formatNumber(before, 4)} ${unit}`;
+  if (change.side === "new") return `${added} ${fmt.formatNumber(after, 4)} ${unit}`;
   if (change.start_quantity == null || change.end_quantity == null) return null;
-  if (Math.abs(moved) < 1e-9) return "no shares added or sold";
-  return moved > 0 ? `bought ${fmt.formatNumber(moved, 4)} shares` : `sold ${fmt.formatNumber(-moved, 4)} shares`;
+  if (Math.abs(moved) < 1e-9) return unit === "shares" ? "no shares added or sold" : `no ${unit} added or removed`;
+  return moved > 0 ? `${added} ${fmt.formatNumber(moved, 4)} ${unit}` : `${removed} ${fmt.formatNumber(-moved, 4)} ${unit}`;
 }
 
 function priceText(change: Change): string | null {
@@ -56,12 +60,12 @@ function fxText(change: Change, currency: string): string | null {
 
 type Part = { key: string; label: string; amount: number; detail: string | null };
 
-function parts(change: Change, currency: string): Part[] {
+function parts(change: Change, currency: string, unit = "shares"): Part[] {
   const out: Part[] = [];
   if (change.side !== "sold" && change.side !== "new") {
     out.push({ key: "price", label: "Price", amount: change.price_effect, detail: priceText(change) });
   }
-  out.push({ key: "quantity", label: "Quantity", amount: change.quantity_effect, detail: sharesText(change) });
+  out.push({ key: "quantity", label: "Quantity", amount: change.quantity_effect, detail: sharesText(change, unit) });
   if (change.side !== "sold" && change.side !== "new") {
     out.push({ key: "fx", label: "FX", amount: change.fx_effect, detail: fxText(change, currency) });
   }
@@ -77,15 +81,15 @@ function parts(change: Change, currency: string): Part[] {
 }
 
 /** One line for the hover title: "Price +S$ 402 (190.00 → 205.00 USD) · Quantity …". */
-function summaryText(change: Change, currency: string, compareLabel: string): string {
-  const lines = parts(change, currency).map(
+function summaryText(change: Change, currency: string, compareLabel: string, unit = "shares"): string {
+  const lines = parts(change, currency, unit).map(
     (part) => `${part.label} ${fmt.formatSignedMoney(part.amount, currency)}${part.detail ? ` (${part.detail})` : ""}`,
   );
   lines.push(`was ${fmt.formatMoney(change.compare_value, currency)} at ${compareLabel} close`);
   return lines.join(" · ");
 }
 
-export default function StockMonthChange({ change, currency, compareLabel, symbol, layout = "cell" }: Props) {
+export default function StockMonthChange({ change, currency, compareLabel, symbol, layout = "cell", unit = "shares" }: Props) {
   const [open, setOpen] = useState(false);
   const noteId = useId();
   if (!change) return <span className="stockMonthChange stockMonthChange--missing">{fmt.MISSING}</span>;
@@ -98,8 +102,8 @@ export default function StockMonthChange({ change, currency, compareLabel, symbo
   }
 
   const traded = Math.abs(change.quantity_effect) >= TRADE_MIN;
-  const breakdown = parts(change, currency);
-  const title = summaryText(change, currency, compareLabel);
+  const breakdown = parts(change, currency, unit);
+  const title = summaryText(change, currency, compareLabel, unit);
 
   let headline: ReactNode;
   if (change.side === "sold") {
@@ -124,7 +128,8 @@ export default function StockMonthChange({ change, currency, compareLabel, symbo
       <span className="stockMonthChangeHeadline">
         <span className="stockMonthChangeNeutral">{fmt.formatSignedMoney(change.abs, currency)}</span>
         <small className="stockMonthChangeSub">
-          {change.quantity_effect > 0 ? "bought" : "sold"} {fmt.formatMoney(Math.abs(change.quantity_effect), currency)}
+          {change.quantity_effect > 0 ? (unit === "shares" ? "bought" : "added") : unit === "shares" ? "sold" : "removed"}{" "}
+          {fmt.formatMoney(Math.abs(change.quantity_effect), currency)}
           {" · market "}
           {fmt.formatSignedMoney(market, currency)}
         </small>

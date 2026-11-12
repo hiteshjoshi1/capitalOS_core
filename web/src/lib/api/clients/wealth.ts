@@ -1,6 +1,6 @@
 // Wealth pages: dashboard, history, risk, bridge, stocks: API calls (split out of lib/api.ts, #368).
 import { req } from "../http";
-import type { CashDeposits, DashboardBootstrap, DashboardNetWorthChange, DashboardSummary, GeographyExposure, HistoryGenerateStatus, MonthBridge, NetWorthSinceUpdate, PlatformAllocation, RealisedPeriodQuery, RealisedPnl, RiskSummary, RiskThresholdsSetting, SpanBridge, StockExposure, StockHoldingsSummary, WealthTimeline, WealthTimelineBackfillResult, WealthTopMovers } from "../types/wealth";
+import type { CashDeposits, DashboardBootstrap, DashboardNetWorthChange, DashboardSummary, GeographyExposure, HistoryGenerateStatus, MarkVisitResult, MonthBridge, NetWorthSinceUpdate, PlatformAllocation, RealisedPeriodQuery, RealisedPnl, RiskSummary, RiskThresholdsSetting, SinceLastVisit, SpanBridge, StockExposure, StockHoldingsSummary, WealthTimeline, WealthTimelineBackfillResult, WealthTopMovers } from "../types/wealth";
 
 export const wealthClient = {
   dashboardBootstrap: (month: string, baseCurrency = "SGD") =>
@@ -55,6 +55,11 @@ export const wealthClient = {
   },
   stockHoldingsSummary: (month: string, baseCurrency = "SGD") =>
     req<StockHoldingsSummary>(`/dashboard/stock-holdings?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`),
+  // #408 (U3): "Since your last visit". markVisit moves the stored mark (force: Dismiss).
+  sinceLastVisit: (baseCurrency = "SGD") =>
+    req<SinceLastVisit>(`/dashboard/since-last-visit?base_currency=${encodeURIComponent(baseCurrency)}`),
+  markVisit: (baseCurrency = "SGD", force = false) =>
+    req<MarkVisitResult>(`/dashboard/visit?base_currency=${encodeURIComponent(baseCurrency)}${force ? "&force=true" : ""}`, { method: "POST" }),
   netWorthSinceUpdate: (baseCurrency = "SGD") =>
     req<NetWorthSinceUpdate>(`/dashboard/net-worth-since-update?base_currency=${encodeURIComponent(baseCurrency)}`),
   cashDeposits: (month: string, baseCurrency = "SGD") =>

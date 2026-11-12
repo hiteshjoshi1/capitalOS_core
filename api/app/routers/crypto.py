@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.auth_context import CurrentUser, allow_legacy_null_ownership, require_admin, require_current_user
 from app.crypto.coinbase import coinbase_configured, ensure_coinbase_wallet
+from app.crypto.token_kinds import is_stablecoin, wrapped_of
 from app.crypto.token_visibility import annotate as annotate_token_visibility
 from app.crypto.token_visibility import list_overrides as list_token_overrides
 from app.crypto.token_visibility import set_override as set_token_override
@@ -46,6 +47,68 @@ from app.valuation.clock import _month_window
 from app.valuation.clock import _anchor_ts as _anchor_date
 from app.valuation.clock import _configured_snapshot_day as _snapshot_day
 from app.wealth_rollup_dirty import mark_wallet_history_dirty
+
+
+def _crypto_month_change(
+    key: tuple,
+    previous: Optional[dict[str, Any]],
+    current: dict[str, Any],
+    rate: float,
+    snapshot_rate: float,
+    compare_month: str,
+    baseline_missing: bool,
+) -> dict[str, Any]:
+    """One token's change since the compare month-end (#408, U9), split as Overview's bridge
+    splits it (D-60, ``bridge._split``): price = q0 (p1 - p0) r1, FX = q0 p0 (r1 - r0),
+    quantity = (q1 - q0) p1 r1; what can't be split (no price on one side, or a value that
+    isn't quantity x price) is ``unsplit``. In USD then the base currency at each anchor's rate."""
+    from app.valuation.bridge import _Holding, _split  # local: bridge imports a lot
+
+    def holding(item: Optional[dict[str, Any]], fx: float) -> Optional[_Holding]:
+        if item is None:
+            return None
+        quantity = item.get("normalized_amount")
+        price = item.get("price_usd")
+        return _Holding(
+            mover_key=key,
+            asset_id=None,
+            symbol=str(item.get("symbol") or ""),
+            name=None,
+            asset_class="CRYPTO",
+            platform=None,
+            account_id=None,
+            quantity=quantity,
+            price=price,
+            value=float(item.get("value_usd") or 0.0) * fx,
+            fx_rate=fx if fx > 0 else None,
+            price_currency="USD",
+        )
+
+    start, end = holding(previous, snapshot_rate), holding(current, rate)
+    split = _split(start, end)
+    start_value = float(start.value) if start is not None else 0.0
+    end_value = float(end.value) if end is not None else 0.0
+    change = end_value - start_value
+    return {
+        "abs": change,
+        "pct": (change / start_value) if start_value > 0 else None,
+        "price_effect": float(split.price),
+        "quantity_effect": float(split.quantity),
+        "fx_effect": float(split.fx),
+        "unsplit": float(split.unsplit + split.gap),
+        "compare_value": start_value,
+        "end_value": end_value,
+        "compare_month": compare_month,
+        "baseline_missing": baseline_missing,
+        "side": "held" if start is not None and not start.is_empty() else "new",
+        "start_quantity": float(previous["normalized_amount"]) if previous and previous.get("normalized_amount") is not None else None,
+        "end_quantity": float(current["normalized_amount"]) if current.get("normalized_amount") is not None else None,
+        "start_price": float(previous["price_usd"]) if previous and previous.get("price_usd") is not None else None,
+        "end_price": float(current["price_usd"]) if current.get("price_usd") is not None else None,
+        "price_currency": "USD",
+        "start_rate": snapshot_rate if previous is not None else None,
+        "end_rate": rate,
+    }
 
 _STALE_THRESHOLD_SECONDS = 24 * 3600
 # Crypto counted as cash on the Cash page (#149): /crypto/stablecoins returns these.
@@ -845,6 +908,18 @@ def crypto_summary(
                 "visibility_override": row.get("visibility_override"),
                 "hidden": bool(row.get("hidden")),
                 "hidden_reason": row.get("hidden_reason"),
+                # #408 (U10, U9)
+                "is_stablecoin": is_stablecoin(symbol),
+                "wrapped_of": wrapped_of(symbol, chain),
+                "month_change": _crypto_month_change(
+                    key,
+                    previous,
+                    row,
+                    rate,
+                    snapshot_rate,
+                    compare_month_start.strftime("%Y-%m"),
+                    snapshot_missing_reason is not None,
+                ),
             }
         )
 
