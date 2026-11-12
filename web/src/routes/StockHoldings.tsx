@@ -11,6 +11,7 @@ import { deltaDirection, deltaPercent, noDataFor } from "../lib/delta";
 import { hasLivePrice, holdingPriceAge } from "../lib/priceAge";
 import { holdingPnlBase } from "../lib/holdingPnl";
 import "../App.css";
+import "./StockHoldings.css";
 import Delta, { DeltaArrow } from "../components/Delta";
 import ExposurePieCard from "../components/ExposurePieCard";
 import MonthBar from "../components/MonthBar";
@@ -39,7 +40,9 @@ const SORT_OPTIONS: Array<{ key: SortKey; label: string }> = [
   { key: "name", label: "Name" },
 ];
 const MOBILE_BREAKPOINT_PX = 900;
-const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns";
+// v2 (#418): Quote freshness moved off by default so the table fits at 1440px; a new key so a
+// saved choice from before (all columns on) doesn't keep the table too wide.
+const STOCK_COLUMN_STORAGE_KEY = "capitalos.stockHoldings.visibleColumns.v2";
 const STOCK_COLUMN_OPTIONS: Array<{ key: StockColumnKey; label: string; align?: "right" }> = [
   { key: "shares", label: "Shares", align: "right" },
   { key: "purchasePrice", label: "Purchase Price", align: "right" },
@@ -58,7 +61,8 @@ const DEFAULT_VISIBLE_STOCK_COLUMNS: Record<StockColumnKey, boolean> = {
   pnl: true,
   percentNetWorth: true,
   dividends: true,
-  quoteFreshness: true,
+  // #418: in the Columns picker; with it off, a stale price is still flagged in the Current Price cell.
+  quoteFreshness: false,
 };
 
 /** Dividends paid on a holding: matched by asset id, else by symbol (#396, U8). */
@@ -780,6 +784,10 @@ export default function StockHoldings() {
                                 {h.price_fallback_reason && (
                                   <PriceFallbackInfo symbol={h.symbol} reason={h.price_fallback_reason} asOf={h.latest_trade_date} platform={h.platform} />
                                 )}
+                                {/* #418: Quote freshness is off by default; a stale price must still show. */}
+                                {!visibleColumns.quoteFreshness && priceAge.stale ? (
+                                  <small className="priceAge priceAge--stale stockHoldingsPriceAge">{priceAge.text}</small>
+                                ) : null}
                               </td>
                             )}
                             {visibleColumns.monthChange && (

@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import "../App.css";
+import "./Settings.css";
 import "./AdminSettings.css";
 import ChangePasswordCard from "../components/ChangePasswordCard";
 import HomeRegionCard from "../components/HomeRegionCard";

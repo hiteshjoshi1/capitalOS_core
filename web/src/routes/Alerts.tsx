@@ -2,6 +2,7 @@ import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { useApiResource } from "../lib/useApiResource";
 import "../App.css";
+import "./Alerts.css";
 import "./OperationsInbox.css";
 import PageShell from "../components/PageShell";
 import LoadError from "../components/LoadError";

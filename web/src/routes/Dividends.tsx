@@ -7,6 +7,7 @@ import RefreshingRegion from "../components/RefreshingRegion";
 import * as fmt from "../lib/format";
 import { expectedMethodText, projectedHoldingCount } from "../lib/dividendProjection";
 import "../App.css";
+import "./Dividends.css";
 import MonthBar from "../components/MonthBar";
 import PageShell from "../components/PageShell";
 import FxNote from "../components/FxNote";
@@ -15,6 +16,7 @@ import TrendBarChart from "../components/TrendBarChart";
 import SegmentedToggle from "../components/SegmentedToggle";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import LoadError from "../components/LoadError";
+import DividendCalendarCard from "../components/DividendCalendarCard";
 
 type CompanyTab = "realized" | "expected";
 
@@ -149,7 +151,7 @@ export default function Dividends() {
 
   return (
     <PageShell
-      title="Income"
+      title="Dividends"
       subtitle="Dividends and interest received, compared with a year earlier, and what your holdings are projected to pay next."
       activeRoute="/income"
       monthBar={<MonthBar month={month} onMonthChange={setMonth} />}
@@ -259,6 +261,8 @@ export default function Dividends() {
               </article>
             </div>
           </section>
+
+          <DividendCalendarCard baseCurrency={shownCurrency} />
 
           <section className="dividendHistorySection" aria-labelledby="dividend-history-heading">
             <div className="coSectionHeader">

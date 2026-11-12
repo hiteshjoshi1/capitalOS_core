@@ -370,10 +370,6 @@ a {
   grid-template-columns: 1.2fr 1.2fr 1.6fr;
 }
 
-@media (max-width: 980px) {
-  /* Consolidated at bottom of file in CapitalOS Design System v2 section */
-}
-
 .card {
   border: 1px solid var(--line);
   background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255, 255, 255, 0.04) 6%) 0%, var(--panel2) 100%);
@@ -746,11 +742,6 @@ a.btn {
   border-bottom: none;
 }
 
-.tableWrap {
-  overflow-x: auto;
-  border-radius: 12px;
-}
-
 .stockHoldingsHeader {
   display: flex;
   align-items: baseline;
@@ -763,76 +754,10 @@ a.btn {
   font-size: 13px;
 }
 
-.stockColumnMenu {
-  position: relative;
-}
-
-.stockColumnMenu[open] .stockColumnPanel {
-  display: grid;
-}
-
-.stockColumnSummary {
-  list-style: none;
-  cursor: pointer;
-}
-
-.stockColumnSummary::-webkit-details-marker {
-  display: none;
-}
-
-.stockColumnPanel {
-  display: none;
-  position: absolute;
-  right: 0;
-  top: calc(100% + 8px);
-  z-index: 5;
-  min-width: 190px;
-  gap: 8px;
-  padding: 12px;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent 22%);
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: 0 16px 34px color-mix(in srgb, black 18%, transparent 82%);
-}
-
-.stockColumnOption {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 13px;
-  color: var(--text);
-  white-space: nowrap;
-}
-
-.stockColumnOption input {
-  width: 14px;
-  height: 14px;
-  accent-color: var(--accent);
-}
-
-.stockHoldingsTableWrap {
-  overflow-x: auto;
-  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent 28%);
-  border-radius: 18px;
-  max-height: 680px;
-  background: color-mix(in srgb, var(--panel2) 88%, transparent 12%);
-}
-
-.stockHoldingsPrimaryCard {
-  padding: 24px;
-}
-
-.stockHoldingsTable {
-  min-width: 980px;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-}
-
 .stockHoldingsTable th,
 .stockHoldingsTable td {
   font-size: 14px;
-  padding: 14px 16px;
+  padding: 14px 10px; /* #418: 16px side padding made the default columns too wide at 1440px */
   white-space: nowrap;
   vertical-align: middle;
 }
@@ -843,143 +768,8 @@ a.btn {
   background: color-mix(in srgb, var(--panel2) 84%, white 16%);
   z-index: 1;
   font-size: 11px;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.08em; /* #418: was 0.16em; the spaced-out headers set several column widths */
   text-transform: uppercase;
-}
-
-.stockHoldingsTable tbody tr:nth-child(even) {
-  background: color-mix(in srgb, var(--panel2) 90%, transparent 10%);
-}
-
-.stockHoldingsTable tbody tr:hover {
-  background: color-mix(in srgb, var(--accent) 12%, var(--panel2) 88%);
-}
-
-.stockHoldingsSymbol {
-  font-size: 18px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
-  color: var(--text);
-}
-
-.stockHoldingsAssetCell {
-  display: grid;
-  gap: 6px;
-  min-width: 220px;
-}
-
-.stockHoldingsAssetMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.stockHoldingsPriceCell {
-  font-weight: 650;
-  font-variant-numeric: tabular-nums;
-}
-
-.stockHoldingsQuantityCell {
-  font-weight: 700;
-  font-variant-numeric: tabular-nums;
-}
-
-.stockHoldingsPnlCell {
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-.stockHoldingsPnlCell small,
-.stockHoldingsPercentCell small {
-  display: block;
-  margin-top: 4px;
-  font-size: 11px;
-  font-weight: 600;
-  opacity: 0.9;
-}
-
-.stockHoldingsPercentCell {
-  font-weight: 750;
-  font-variant-numeric: tabular-nums;
-}
-
-.stockHoldingsMobileList {
-  display: grid;
-  gap: 0;
-}
-
-.stockHoldingsMobileCard {
-  display: grid;
-  gap: 20px;
-  padding: 20px 0 22px;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
-}
-
-.stockHoldingsMobileCard:last-child {
-  border-bottom: none;
-}
-
-.stockHoldingsMobileHeader {
-  min-width: 0;
-}
-
-.stockHoldingsMobileTitleLine {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-}
-
-.stockHoldingsMobileTitle {
-  min-width: 0;
-  color: var(--text);
-  font-size: 20px;
-  font-weight: 850;
-  line-height: 1.12;
-  overflow-wrap: anywhere;
-}
-
-.stockHoldingsExchangePill {
-  display: inline-flex;
-  align-items: center;
-  flex-shrink: 0;
-  padding: 2px 9px;
-  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent 16%);
-  border-radius: 999px;
-  color: var(--muted);
-  background: color-mix(in srgb, var(--panel2) 70%, transparent 30%);
-  font-size: 12px;
-  font-weight: 850;
-  line-height: 1.25;
-  text-transform: uppercase;
-}
-
-.stockHoldingsMobileMeta {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 16px;
-  font-weight: 650;
-  line-height: 1.25;
-}
-
-.stockHoldingsFreshnessTag {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: fit-content;
-  min-width: 82px;
-  padding: 5px 13px;
-  border-radius: 999px;
-  font-size: 15px;
-  font-weight: 800;
-  text-transform: capitalize;
-  color: var(--muted);
-  background: var(--panel2);
-  white-space: nowrap;
 }
 
 .stockHoldingsFreshnessTagFresh {
@@ -990,21 +780,6 @@ a.btn {
 .stockHoldingsFreshnessTagStale {
   color: var(--warn);
   background: color-mix(in srgb, var(--warn) 20%, transparent 80%);
-}
-
-.stockHoldingsMobileMetrics {
-  display: grid;
-  grid-template-columns: minmax(76px, 0.8fr) minmax(100px, 1fr) minmax(108px, 1fr);
-  align-items: center;
-  gap: 12px;
-}
-
-.stockHoldingsMobileValueBlock,
-.stockHoldingsMobilePnlBlock {
-  display: grid;
-  gap: 5px;
-  min-width: 0;
-  text-align: right;
 }
 
 .stockHoldingsMobileValueBlock strong,
@@ -1036,83 +811,8 @@ a.btn {
   color: var(--bad);
 }
 
-/* #396 (U5): sort control and sortable headers on Stocks. */
-.stockSortControl {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.stockSortControl select {
-  min-height: 36px;
-  border-radius: 10px;
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  color: var(--text);
-  padding: 0 8px;
-  font: inherit;
-}
-
-.stockSortDirection {
-  min-width: 36px;
-  min-height: 36px;
-  justify-content: center;
-}
-
-.stockSortHeader {
-  all: unset;
-  cursor: pointer;
-  font: inherit;
-  letter-spacing: inherit;
-  text-transform: inherit;
-}
-
-.stockSortHeader:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 4px;
-}
-
-/* #396 (U8): dividends per holding, linking to Income. */
-.stockDividends {
-  display: inline-flex;
-  flex-direction: column;
-  align-items: flex-end;
-  color: inherit;
-  text-decoration: none;
-}
-
-.stockDividends:hover span {
-  text-decoration: underline;
-}
-
-.stockDividends small {
-  color: var(--muted);
-}
-
-.stockDividends--card {
-  flex-direction: row;
-  gap: 8px;
-  align-items: baseline;
-  font-size: 13px;
-  margin-top: 6px;
-}
-
-.stockHoldingsControls {
-  margin-top: 18px;
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-}
-
 .grid.g-mid.stockHoldingsLayout {
   grid-template-columns: minmax(0, 1fr);
-}
-
-.valueTrendCard {
-  padding: 16px;
 }
 
 .valueTrendCardWide {
@@ -1121,18 +821,6 @@ a.btn {
 
 .valueTrendCard .stockHoldingsHeader {
   margin-bottom: 10px;
-}
-
-.valueTrendValue {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-  padding: 9px 12px;
-  border: 1px solid color-mix(in srgb, var(--line) 68%, transparent 32%);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--panel2) 74%, transparent 26%);
 }
 
 .valueTrendValue span {
@@ -1511,13 +1199,6 @@ a.btn {
   max-width: 78ch;
 }
 
-.cashFlowEditor {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 280px;
-}
-
 .mappingRow.isPending {
   opacity: 0.7;
 }
@@ -1611,71 +1292,6 @@ a.btn {
   padding: 4px 6px;
 }
 
-.riskChartList {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.riskChartRow {
-  display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(120px, 2fr) 64px;
-  align-items: center;
-  gap: 18px;
-  padding: 15px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
-}
-
-.riskChartRow:last-child {
-  border-bottom: none;
-}
-
-.riskChartIdentity {
-  display: grid;
-  gap: 3px;
-  min-width: 0;
-}
-
-.riskChartSymbol {
-  overflow: hidden;
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 750;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.riskChartMeta {
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.riskChartTrack {
-  border-radius: 999px;
-  height: 8px;
-  background: color-mix(in srgb, var(--line) 54%, transparent 46%);
-  overflow: hidden;
-}
-
-.riskChartFill {
-  display: block;
-  height: 100%;
-  background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 68%, white 32%));
-  border-radius: inherit;
-}
-
-.riskChartPercent {
-  text-align: right;
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-.riskPositionsCard {
-  padding: 10px 24px;
-}
-
 .riskSectionHeader {
   display: flex;
   align-items: end;
@@ -1697,19 +1313,11 @@ a.btn {
 }
 
 @media (max-width: 620px) {
-  .riskPositionsCard {
-    padding: 12px 16px 18px;
-  }
 
   .riskSectionHeader {
     align-items: flex-start;
     flex-direction: column;
     gap: 5px;
-  }
-
-  .riskChartRow {
-    grid-template-columns: minmax(0, 1fr) 56px;
-    gap: 8px 12px;
   }
 
   .riskChartTrack {
@@ -1734,22 +1342,6 @@ a.btn {
 
 .riskHelperText {
   margin-top: 8px;
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.riskThresholdRule {
-  margin-top: 6px;
-}
-
-/* #409 (U18): a risk figure's move vs last month. */
-.riskChangeLine {
-  margin-top: 4px;
-  font-size: 12px;
-}
-
-.riskNoData {
-  margin-top: 10px;
   font-size: 12px;
   color: var(--muted);
 }
@@ -1872,306 +1464,15 @@ a.btn {
   border-color: color-mix(in srgb, var(--accent) 62%, var(--line) 38%);
 }
 
-/* ── Import Statements: dropzone + report chips/preview ── */
-
-.ingestDropzone {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
-  text-align: center;
-  border: 1.5px dashed var(--line);
-  border-radius: 14px;
-  padding: 34px 20px;
-  background: var(--panel);
-  cursor: pointer;
-}
-
-.ingestDropzoneActive {
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 8%, var(--panel) 92%);
-}
-
-.ingestDropzoneTitle {
-  margin: 6px 0 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.ingestDropzoneHint {
-  margin: 0;
-  font-size: 12px;
-  color: var(--muted);
-  font-family: ui-monospace, Menlo, monospace;
-}
-
-.ingestDropzoneInput {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0;
-  cursor: pointer;
-}
-
-.ingestStatChips {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-bottom: 14px;
-}
-
-.ingestWarningStack {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.ingestWarningBanner {
-  color: var(--text);
-}
-
-.ingestWarningDotIcon {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--warn);
-  flex-shrink: 0;
-}
-
-.ingestPreview {
-  margin-top: 8px;
-}
-
-.ingestPreviewTitle {
-  margin: 0;
-  padding: 13px 0;
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--muted);
-  border-bottom: 1px solid var(--line);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
 .ingestPreview .listRow {
   gap: 14px;
   flex-wrap: nowrap;
-}
-
-.ingestPreviewDate {
-  font-size: 13px;
-  color: var(--muted);
-  min-width: 50px;
-  flex-shrink: 0;
-}
-
-.ingestPreviewMerchant {
-  flex: 1;
-  min-width: 0;
-  font-size: 14px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ingestPreviewAmount {
-  font-size: 14px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-.ingestJobRow {
-  cursor: pointer;
-}
-
-/* ── Add Crypto Wallets: mobile desktop-only connect notice ── */
-
-.cryptoMobileNotice {
-  border-style: dashed;
-  background: var(--panel2);
-}
-
-/* ── Market Data: status chips + expandable exchange rows ── */
-
-.marketDataStatusChips {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.marketDataExchange {
-  border-bottom: 1px solid var(--line);
-}
-
-.marketDataExchange:last-child {
-  border-bottom: none;
-}
-
-.marketDataExchangeRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 16px 0;
-  cursor: pointer;
-  flex-wrap: wrap;
-}
-
-.marketDataExchangeMeta {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
 }
 
 .marketDataExchangeMeta strong {
   font-size: 15px;
   font-weight: 800;
   color: var(--text);
-}
-
-.marketDataExchangeSummary {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.marketDataChevron {
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--accent);
-  white-space: nowrap;
-}
-
-.marketDataSymbolList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 0 0 14px 8px;
-}
-
-.marketDataSymbolRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 14px;
-  border-radius: 9px;
-  background: var(--panel);
-  flex-wrap: wrap;
-}
-
-.marketDataSymbolCode {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  width: 60px;
-}
-
-.marketDataSymbolMeta {
-  flex: 1;
-  min-width: 120px;
-}
-
-.marketDataRunsTableWrap {
-  overflow-x: auto;
-}
-
-.marketDataRunsTable {
-  width: 100%;
-  min-width: 620px;
-  border-collapse: collapse;
-  table-layout: fixed;
-}
-
-.marketDataRunsTable th,
-.marketDataRunsTable td {
-  padding: 12px 16px 12px 0;
-  border-bottom: 1px solid color-mix(in srgb, var(--line) 65%, transparent 35%);
-  text-align: left;
-  vertical-align: middle;
-}
-
-.marketDataRunsTable th {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.marketDataRunsTable td {
-  font-size: 13px;
-}
-
-.marketDataRunsTable th:nth-child(1),
-.marketDataRunsTable td:nth-child(1) {
-  width: 28%;
-}
-
-.marketDataRunsTable th:nth-child(2),
-.marketDataRunsTable td:nth-child(2) {
-  width: 14%;
-}
-
-.marketDataRunsTable th:nth-child(3),
-.marketDataRunsTable td:nth-child(3) {
-  width: 24%;
-}
-
-.marketDataRunsTable th:nth-child(4),
-.marketDataRunsTable td:nth-child(4) {
-  width: 18%;
-}
-
-.marketDataRunsTable th:nth-child(5),
-.marketDataRunsTable td:nth-child(5) {
-  width: 16%;
-}
-
-.marketDataRunsTable th:last-child,
-.marketDataRunsTable td:last-child {
-  padding-right: 0;
-}
-
-.marketDataRunsTable tbody tr:last-child td {
-  border-bottom: none;
-}
-
-.marketDataRunStarted,
-.marketDataRunProvider,
-.marketDataRunCounts {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.marketDataRunCounts {
-  font-variant-numeric: tabular-nums;
-}
-
-/* ── Stock Holdings: refresh-quotes live indicator dot ── */
-
-.stockHoldingsRefreshBtn {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.stockHoldingsRefreshDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 999px;
-  background: var(--good);
-  display: inline-block;
-}
-
-.stockHoldingsRefreshDotActive {
-  background: var(--warn);
 }
 
 /* ── Author Ingestion form/control system (reuses .field/.label/.hint tokens) ── */
@@ -2255,15 +1556,6 @@ a.btn {
 .btnPrimary:hover {
   border-color: var(--accent);
   opacity: 0.92;
-}
-
-.btnDanger {
-  color: var(--bad);
-  border-color: color-mix(in srgb, var(--bad) 45%, var(--line) 55%);
-}
-
-.btnDanger:hover {
-  border-color: var(--bad);
 }
 
 .btnSmall {
@@ -2433,10 +1725,6 @@ a.btn {
   flex-wrap: wrap;
 }
 
-.footerAction {
-  margin-left: auto;
-}
-
 .authPage {
   min-height: 100vh;
   display: grid;
@@ -2552,22 +1840,6 @@ a.btn {
 .alertActions {
   display: flex;
   gap: 10px;
-}
-
-.alertEmptyState {
-  text-align: center;
-  padding: 40px 24px;
-}
-
-.alertEmptyIcon {
-  font-size: 40px;
-  margin: 0 0 8px;
-}
-
-.alertEmptyText {
-  color: var(--muted);
-  font-size: 15px;
-  margin: 0;
 }
 
 .alertBadge {
@@ -3656,108 +2928,15 @@ a.btn {
   flex: 0 0 auto;
 }
 
-/* ── Split bar (Recurring vs one-off, Fixed vs variable) ─────────────── */
-
-.cashFlowSplitBarCard {
-  display: grid;
-  gap: 12px;
-}
-
-.cashFlowSplitBarTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-.cashFlowSplitBarTrack {
-  height: 14px;
-  display: flex;
-  border-radius: 999px;
-  overflow: hidden;
-  background: var(--panel2);
-}
-
 .cashFlowSplitBarTrack > span {
   display: block;
   height: 100%;
-}
-
-.cashFlowSplitBarLegend {
-  display: flex;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.cashFlowSplitBarLegendItem {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.cashFlowSplitBarLegendItem i {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  display: inline-block;
-  flex-shrink: 0;
-}
-
-/* ── Merchant rows (single line: label | track | amount | percent) ──── */
-
-.cashFlowMerchantList {
-  display: grid;
-  gap: 14px;
-}
-
-.cashFlowMerchantRow {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.cashFlowMerchantLabel {
-  flex: 1;
-  min-width: 0;
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-
-.cashFlowMerchantTrack {
-  flex: 1;
-  min-width: 80px;
-  max-width: 220px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--panel2);
-  overflow: hidden;
 }
 
 .cashFlowMerchantTrack > span {
   display: block;
   height: 100%;
   border-radius: 999px;
-}
-
-.cashFlowMerchantAmount {
-  width: 80px;
-  flex-shrink: 0;
-  text-align: right;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.cashFlowMerchantPercent {
-  width: 40px;
-  flex-shrink: 0;
-  text-align: right;
-  font-size: 12px;
-  color: var(--muted);
 }
 
 /* ── Driver rows (Vs. last month drivers, Categories trending up) ───── */
@@ -3814,51 +2993,6 @@ a.btn {
   min-height: 220px;
 }
 
-.cashFlowUnavailableState {
-  display: grid;
-  gap: 10px;
-  padding: 14px 16px;
-  border-radius: 18px;
-  border: 1px dashed color-mix(in srgb, var(--line) 72%, transparent 28%);
-  background: color-mix(in srgb, var(--panel2) 82%, transparent 18%);
-}
-
-.cashFlowBridgeStep {
-  display: grid;
-  gap: 8px;
-  justify-items: center;
-  text-align: center;
-}
-
-.cashFlowBridgeValue {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-}
-
-.cashFlowBridgeLabel {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.cashFlowBridgeTrack {
-  width: 100%;
-  min-height: 140px;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  border-radius: 18px;
-  background: color-mix(in srgb, var(--line) 46%, transparent 54%);
-  padding: 14px 10px;
-}
-
-.cashFlowBridgeFill {
-  width: 100%;
-  border-radius: 12px 12px 6px 6px;
-  min-height: 6px;
-}
-
 .cashFlowBridgeFill.positive,
 .cashFlowBridgeFill.neutral {
   background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 72%, white 28%), var(--accent));
@@ -3866,36 +3000,6 @@ a.btn {
 
 .cashFlowBridgeFill.negative {
   background: linear-gradient(90deg, color-mix(in srgb, var(--bad) 72%, white 28%), var(--bad));
-}
-
-/* ── Transaction rows (audit trail, click-to-edit category) ──────────── */
-
-.cashFlowTxn {
-  display: grid;
-}
-
-.cashFlowTxnCategoryBtn {
-  appearance: none;
-  background: transparent;
-  font-family: inherit;
-  cursor: pointer;
-}
-
-.cashFlowTxnCategoryBtn:hover {
-  border-color: color-mix(in srgb, var(--text) 40%, var(--line) 60%);
-  color: var(--text);
-}
-
-.cashFlowTxnEditor {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 10px;
-  padding: 0 0 14px;
-}
-
-.cashFlowTxnCancelBtn {
-  background: transparent;
 }
 
 /* ── StackedBar (bar + legend, used by Chain/Wallet/Currency mix cards) ── */
@@ -4083,16 +3187,6 @@ a.btn {
     width: 220px;
     height: 220px;
   }
-
-  .cashFlowMerchantRow {
-    flex-wrap: wrap;
-  }
-
-  .cashFlowMerchantTrack {
-    order: 3;
-    flex: 1 1 100%;
-    max-width: none;
-  }
 }
 
 .wealthInlineLink {
@@ -4121,11 +3215,6 @@ a.btn {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
-}
-
-.settingsStack {
-  display: grid;
-  gap: 16px;
 }
 
 .wealthHoldingsList {
@@ -4342,89 +3431,13 @@ a.btn {
   color: var(--text);
 }
 
-.dividendSignalGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.dividendSignalCard {
-  display: grid;
-  gap: 8px;
-  padding: 22px;
-}
-
-.dividendSignalLabel,
-.dividendSignalValue,
-.dividendSignalContext,
-.dividendCompaniesContext {
-  margin: 0;
-}
-
-.dividendSignalLabel {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.dividendSignalValue {
-  color: var(--text);
-  font-size: 26px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-}
-
-.dividendSignalContext,
-.dividendCompaniesContext {
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.dividendHistoryCard {
-  min-width: 0;
-  overflow-x: auto;
-  padding: 24px;
-}
-
-.dividendHistorySection {
-  min-width: 0;
-}
-
 .dividendHistoryCard .trendBarChart {
   min-width: 680px;
-}
-
-.dividendCompaniesCard {
-  padding: 10px 24px;
-}
-
-.dividendCompaniesContext {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
 }
 
 .dividendCompaniesCard .listRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-}
-
-@media (max-width: 680px) {
-  .dividendSignalGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .dividendSignalCard {
-    padding: 18px;
-  }
-
-  .dividendHistoryCard,
-  .dividendCompaniesCard {
-    padding: 16px;
-  }
 }
 
 /* ── Data Hub Overview: stat row + quick-action grid ── */
@@ -4660,70 +3673,11 @@ a.btn {
   font-size: 12px;
 }
 
-/* Price age per holding (#224). */
-.priceAge {
-  display: block;
-  color: var(--muted);
-}
-
-.priceAge--stale {
-  color: var(--warn);
-  font-weight: 600;
-}
-
 .coHeroFreshness {
   margin: 6px 0 0;
   font-size: 13px;
   color: var(--muted);
   line-height: 1.4;
-}
-
-/* #223: a past month on Overview is a month-end snapshot, said in the hero (in the
-   #127 "Past month" callout's colour), with a way back to the live month. */
-.coHeroPastMonth {
-  margin: 10px 0 0;
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
-  padding: 5px 10px;
-  border: 1px solid var(--warn);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--warn) 14%, transparent);
-  color: var(--warn);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
-}
-
-.coHeroBackToLive {
-  border: none;
-  background: none;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-
-/* #342: hidden (spam/unknown) wallet tokens and their toggle */
-.cryptoHoldingsToggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.cryptoHiddenToggle {
-  cursor: pointer;
-  font: inherit;
-}
-
-/* #408 (U10): stablecoin filter and the stablecoin / wrapped tags. */
-.cryptoKindFilter {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 6px;
 }
 
 /* Buttons keep .pill's own small type (a button doesn't inherit it by default). */
@@ -4738,89 +3692,9 @@ a.btn {
   color: var(--text, inherit);
 }
 
-.cryptoKindTag {
-  font-weight: 500;
-}
-
-.cryptoHoldingHidden {
-  opacity: 0.6;
-}
-
-.cryptoVisibilityBtn {
-  margin-left: 8px;
-}
-
-/* Per-source freshness chips — replaces a single "As of ..." line so each
-   source's own staleness is visible instead of averaged away. */
-.coFreshnessRow {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 0;
-}
-
-.coFreshnessChip {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  border-radius: 999px;
-  padding: 5px 12px;
-  font-size: 12px;
-  color: var(--text);
-  cursor: default;
-}
-
-.coFreshnessTooltip {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 210px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
-  font-size: 12px;
-  opacity: 0;
-  visibility: hidden;
-  transform: translateY(-4px);
-  transition: opacity 120ms ease, transform 120ms ease;
-  pointer-events: none;
-}
-
-.coFreshnessChip:hover .coFreshnessTooltip,
-.coFreshnessChip:focus-visible .coFreshnessTooltip {
-  opacity: 1;
-  visibility: visible;
-  transform: translateY(0);
-}
-
 /* #239: a closed tooltip still takes up layout room, and next to a chip near the right
    edge of a phone it made the page scroll sideways. On a phone it is taken out of the
    layout while closed, and when open it is kept inside the screen. */
-@media (max-width: 980px) {
-  .coFreshnessChip:not(:hover):not(:focus-visible) .coFreshnessTooltip {
-    display: none;
-  }
-
-  .coFreshnessTooltip {
-    max-width: calc(100vw - 36px);
-  }
-}
-
-.coFreshnessTooltipRow {
-  display: flex;
-  justify-content: space-between;
-  gap: 12px;
-  white-space: nowrap;
-}
 
 .coFreshnessTooltipRow span:first-child {
   color: var(--muted);
@@ -4832,17 +3706,6 @@ a.btn {
 
 .coFreshnessChip span {
   color: var(--muted);
-}
-
-.coFreshnessChipCarried {
-  border-style: dashed;
-}
-
-.coFreshnessDot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: none;
 }
 
 .coFreshnessDotFresh {
@@ -4867,38 +3730,10 @@ a.btn {
   align-items: center;
 }
 
-/* Entry point into the Wealth Timeline History page */
-.coHeroHistoryTeaser {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-left: auto;
-  border: 1px solid var(--accent);
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: 999px;
-  padding: 7px 14px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  text-decoration: none;
-  white-space: nowrap;
-  transition: background-color 0.14s ease;
-}
-
-.coHeroHistoryTeaser:hover {
-  background: color-mix(in srgb, var(--accent) 20%, transparent);
-}
-
 .coHeroDelta {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-/* #249: holdings the since-update delta compares with an older statement price */
-.coHeroDeltaNote {
-  font-size: 11px;
-  color: var(--muted);
 }
 
 .coHeroDeltaLabel {
@@ -4909,140 +3744,6 @@ a.btn {
   text-transform: uppercase;
 }
 
-/* ─── Allocation card ────────────────────────────────────────────── */
-
-.coAllocationCard {
-  display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 40px;
-  align-items: center;
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 28px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
-  box-shadow: 0 22px 48px var(--shadow);
-}
-
-.coAllocationDonut {
-  width: 220px;
-  height: 220px;
-  border-radius: 999px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
-.coAllocationInner {
-  width: 140px;
-  height: 140px;
-  border-radius: 999px;
-  background: var(--panel2);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-}
-
-.coAllocationTotalLabel {
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--muted);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.coAllocationTotalValue {
-  font-size: 17px;
-  font-weight: 800;
-  margin-top: 2px;
-  color: var(--text);
-}
-
-.coAllocationLegend {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-/* #232: gross assets − liabilities = the headline, under the donut legend. */
-.coAllocationNetLine {
-  margin: 4px 0 0;
-  padding-top: 10px;
-  border-top: 1px solid var(--line);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
-  overflow-wrap: anywhere;
-}
-
-.coAllocationRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.coAllocationRowLeft {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.coAllocationDot {
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  flex-shrink: 0;
-  display: inline-block;
-}
-
-.coAllocationName {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text);
-}
-
-.coAllocationRowRight {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.coAllocationValue {
-  font-size: 13px;
-  color: var(--muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.coAllocationPct {
-  font-size: 14px;
-  font-weight: 700;
-  width: 48px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  color: var(--text);
-}
-
-/* ─── Signals section ────────────────────────────────────────────── */
-
-.coSignalsGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-  margin-bottom: 16px;
-}
-
-.coSignalCard {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 22px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
-  box-shadow: 0 14px 30px var(--shadow);
-}
-
 .coSignalEyebrow {
   margin: 0;
   font-size: 11px;
@@ -5050,48 +3751,6 @@ a.btn {
   letter-spacing: 0.08em;
   color: var(--muted);
   text-transform: uppercase;
-}
-
-.coSignalValue {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 800;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: -0.01em;
-}
-
-.coSignalMeta {
-  margin: 0;
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.5;
-}
-
-/* ─── Holdings card ──────────────────────────────────────────────── */
-
-.coHoldingsCard {
-  border: 1px solid var(--line);
-  border-radius: 16px;
-  padding: 24px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 94%, rgba(255,255,255,0.04) 6%) 0%, var(--panel2) 100%);
-  box-shadow: 0 14px 30px var(--shadow);
-}
-
-.coHoldingsHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 4px;
-  flex-wrap: wrap;
-}
-
-.coHoldingsTitle {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 800;
-  color: var(--text);
 }
 
 .coHoldingsList {
@@ -5143,15 +3802,6 @@ a.btn {
 .coHoldingPct {
   font-size: 12px;
   color: var(--muted);
-}
-
-/* #249: what "Today" compares with, under its movers */
-.coHoldingsNote {
-  margin: 12px 0 0;
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--muted);
-  overflow-wrap: anywhere;
 }
 
 /* ─── Mobile bottom navigation ──────────────────────────────────── */
@@ -5306,19 +3956,6 @@ html, body {
     padding-bottom: 0;
   }
 
-  /* Signals stack on mobile (#239). They were a sideways scroller whose first card grew
-     to its longest line, which pushed the Liabilities card out of sight. */
-  .coSignalsGrid {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 12px;
-  }
-
-  /* Allocation card: stack donut above legend */
-  .coAllocationCard {
-    grid-template-columns: 1fr;
-    justify-items: center;
-  }
-
   /* Section header wrap */
   .coSectionHeader {
     flex-direction: column;
@@ -5418,21 +4055,6 @@ html, body {
     align-items: flex-start; /* #239: stacked deltas line up with the value, not centred */
   }
 
-  /* Donut: match reference 170×170 / inner 108×108 */
-  .coAllocationDonut {
-    width: 170px;
-    height: 170px;
-  }
-
-  .coAllocationInner {
-    width: 108px;
-    height: 108px;
-  }
-
-  .coAllocationTotalValue {
-    font-size: 14px;
-  }
-
   /* Holdings row compact */
   .coHoldingRow {
     padding: 12px 0;
@@ -5446,71 +4068,18 @@ html, body {
     font-size: 10px;
   }
 
-  /* Holdings card less padding */
-  .coHoldingsCard, .coSignalCard {
-    padding: 18px;
-  }
-
   /* Section titles smaller */
   .coSectionTitle {
     font-size: 17px;
   }
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   StockHoldings — Design System v2 layout classes
-   ═══════════════════════════════════════════════════════════════════ */
-
-/* 2-col exposure grid (geography + platform) */
-.coExposureGrid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px;
-}
-
-/* Tighten primary card padding to 24px for table pages */
-.stockHoldingsPrimaryCard {
-  padding: 24px;
-  border-radius: 16px;
-}
-
-/* Trend card matches card border-radius */
-.valueTrendCard {
-  border-radius: 16px;
-}
-
-/* Table: remove redundant border on inner wrap for cleaner look */
-.stockHoldingsTableWrap {
-  border-radius: 12px;
-}
-
 @media (max-width: 980px) {
-  /* coExposureGrid: stack on mobile. minmax(0, 1fr), not 1fr: a bare 1fr column is as
-     wide as its widest unbreakable line (a wallet address on Crypto), wider than a phone. */
-  .coExposureGrid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  /* Table max-height: relax on mobile for easier browsing */
-  .stockHoldingsTableWrap {
-    max-height: none;
-  }
-
-  /* Controls row: full-width on mobile */
-  .stockHoldingsControls {
-    justify-content: stretch;
-    gap: 12px;
-  }
 
   .stockHoldingsControls .btn {
     flex: 1;
     justify-content: center;
     text-align: center;
-  }
-
-  /* Collapse trend chart on mobile  */
-  .valueTrendCard {
-    padding: 16px;
   }
 
   .valueTrendBars {
@@ -5521,37 +4090,6 @@ html, body {
   .valueTrendBarValue,
   .valueTrendBarMonth {
     font-size: 10px;
-  }
-}
-
-@media (max-width: 520px) {
-  .stockHoldingsMobileMetrics {
-    grid-template-columns: minmax(70px, 0.78fr) minmax(86px, 1fr) minmax(92px, 1fr);
-    gap: 8px;
-  }
-
-  .stockHoldingsMobileTitle {
-    font-size: 18px;
-  }
-
-  .stockHoldingsMobileMeta {
-    font-size: 14px;
-  }
-
-  .stockHoldingsFreshnessTag {
-    min-width: 70px;
-    padding-inline: 10px;
-    font-size: 13px;
-  }
-
-  .stockHoldingsMobileValueBlock strong,
-  .stockHoldingsMobilePnlBlock strong {
-    font-size: 17px;
-  }
-
-  .stockHoldingsMobileValueBlock span,
-  .stockHoldingsMobilePnlBlock span {
-    font-size: 12px;
   }
 }
 
@@ -5706,10 +4244,6 @@ html, body {
   .ingestPreview .listRow {
     flex-wrap: wrap;
   }
-
-  .ingestPreviewMerchant {
-    white-space: normal;
-  }
 }
 
 /* ─── Hero legend row (Liabilities hero: revolving vs installment) ─── */
@@ -5846,65 +4380,6 @@ html, body {
   gap: 10px;
 }
 
-/* ─── Loans section (Liabilities, hasLoans === true) ────────────────── */
-
-.liabLoanRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  flex-wrap: wrap;
-}
-
-.liabLoanMeta,
-.liabLoanBalance,
-.liabLoanNextPayment {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.liabLoanBalance,
-.liabLoanNextPayment {
-  align-items: flex-end;
-}
-
-.liabLoanNextPayment {
-  min-width: 130px;
-}
-
-/* No-loans empty state banner */
-
-.liabNoLoansBanner {
-  border: 1px dashed var(--line);
-  border-radius: 16px;
-  padding: 18px 22px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
-  background: color-mix(in srgb, var(--panel2) 60%, transparent 40%);
-}
-
-.liabNoLoansText {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.liabConnectLoanBtn {
-  font-size: 12px;
-  font-weight: 700;
-  padding: 9px 16px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: transparent;
-  color: var(--muted);
-  cursor: not-allowed;
-  white-space: nowrap;
-}
-
 /* ─── Ledger toggle (Credit Cards "All transactions") ───────────────── */
 
 .liabWorkspaceCta {
@@ -5935,27 +4410,6 @@ html, body {
     flex-direction: column;
     gap: 10px;
   }
-
-  .liabLoanRow {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .liabLoanBalance,
-  .liabLoanNextPayment {
-    align-items: flex-start;
-  }
-}
-
-/* ─── Wealth History (Phase 2 timeline) ──────────────────────────────── */
-
-.whFilters {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  margin-bottom: 18px;
-  flex-wrap: wrap;
 }
 
 .whCard {
@@ -5984,39 +4438,6 @@ html, body {
 .whCardMeta {
   color: var(--muted);
   font-size: 12.5px;
-}
-
-.whStatValue {
-  color: var(--text);
-  font-weight: 700;
-}
-
-.whRefreshBtn {
-  border: 1px solid var(--line);
-  background: var(--panel2);
-  color: var(--text);
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.whRefreshBtn:hover {
-  border-color: var(--accent);
-}
-
-.whRefreshBtn:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-
-.whEmptyState {
-  text-align: left;
-}
-
-.whEmptyState p {
-  margin: 6px 0 14px;
 }
 
 /* Chart */
@@ -6204,134 +4625,6 @@ html, body {
   background: var(--warn);
   display: inline-block;
   transform: rotate(45deg);
-}
-
-/* Table view (accessible fallback for the chart) */
-
-.whTableView {
-  margin-top: 14px;
-  color: var(--muted);
-  font-size: 12.5px;
-}
-
-.whTableView summary {
-  cursor: pointer;
-  color: var(--text);
-}
-
-.whTableScroll {
-  overflow-x: auto;
-  margin-top: 10px;
-}
-
-.whTableScroll table {
-  border-collapse: collapse;
-  width: 100%;
-  font-variant-numeric: tabular-nums;
-}
-
-.whTableScroll th,
-.whTableScroll td {
-  text-align: right;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--line);
-  white-space: nowrap;
-}
-
-.whTableScroll th:first-child,
-.whTableScroll td:first-child {
-  text-align: left;
-}
-
-/* Secondary cards: dividends + income vs spending */
-
-.whGrid2 {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-}
-
-.whBarChart {
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  align-items: end;
-  gap: 6px;
-  height: 150px;
-}
-
-.whBarItem {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  height: 100%;
-  gap: 6px;
-}
-
-.whBarTrack {
-  flex: 1;
-  width: 100%;
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
-  gap: 3px;
-}
-
-.whBarTrackPaired {
-  gap: 2px;
-}
-
-.whBar {
-  width: 60%;
-  min-height: 4px;
-  border-radius: 3px 3px 0 0;
-  background: var(--wh-cash);
-}
-
-.whBarChartPaired .whBar {
-  width: 45%;
-}
-
-.whBarDividend {
-  background: var(--wh-cash);
-}
-
-.whBarLabel {
-  font-size: 10px;
-  color: var(--muted);
-  white-space: nowrap;
-}
-
-@media (max-width: 980px) {
-  .whGrid2 {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ─── Wealth History Phase 3: attribution strip, outliers, drill-down ──── */
-
-.whLayout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 330px;
-  gap: 18px;
-  align-items: start;
-}
-
-.whLayoutMain {
-  min-width: 0;
-}
-
-@media (max-width: 980px) {
-  .whLayout {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* Attribution strip */
-
-.whAttribDivider {
-  border-top: 1px solid var(--line);
-  margin: 16px 0 12px;
 }
 
 .whAttribHead {
@@ -6578,149 +4871,6 @@ html, body {
   background: color-mix(in srgb, var(--accent) 16%, var(--panel));
 }
 
-.ccFilterDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  flex-shrink: 0;
-  display: inline-block;
-}
-
-.ccHeroGrid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) repeat(2, minmax(180px, 0.65fr));
-  gap: 14px;
-  margin-bottom: 18px;
-  align-items: stretch;
-}
-
-.ccChargeAlert {
-  margin-bottom: 18px;
-  padding: 17px 20px;
-  border: 1px solid color-mix(in srgb, var(--bad) 42%, var(--line));
-  border-radius: 15px;
-  background: color-mix(in srgb, var(--bad) 9%, var(--panel));
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  flex-wrap: wrap;
-}
-
-.ccChargeAlertTitle {
-  font-weight: 800;
-  color: var(--bad);
-  margin-bottom: 2px;
-}
-
-.ccChargeAlertMeta {
-  font-size: 12px;
-  color: var(--muted);
-}
-
-.ccChargeAlertAmount {
-  font-size: 22px;
-  font-weight: 800;
-  color: var(--bad);
-  white-space: nowrap;
-}
-
-.ccCardGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 14px;
-  margin-bottom: 18px;
-}
-
-.ccCardTile {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 148px;
-  padding: 18px 20px;
-  border: 0;
-  border-radius: 18px;
-  color: #fff;
-  overflow: hidden;
-  isolation: isolate;
-  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
-}
-
-.ccCardTile::after {
-  content: "";
-  position: absolute;
-  inset: auto -40px -60px auto;
-  width: 140px;
-  height: 140px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 0 0 26px rgba(255, 255, 255, 0.035);
-  z-index: -1;
-}
-
-.ccCardTileHeader {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.ccCardTileName {
-  font-weight: 800;
-  font-size: 14px;
-}
-
-.ccCardTileIssuer {
-  display: block;
-  margin-top: 2px;
-  font-size: 11px;
-  opacity: 0.72;
-}
-
-.ccCardTileTx {
-  flex-shrink: 0;
-  font-size: 10px;
-  font-weight: 750;
-  padding: 4px 9px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.16);
-  white-space: nowrap;
-}
-
-.ccCardTileFooter {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 14px;
-}
-
-.ccCardTileSpend {
-  font-size: 20px;
-  font-weight: 800;
-  font-variant-numeric: tabular-nums;
-}
-
-.ccCardTileSub {
-  font-size: 11px;
-  opacity: 0.76;
-}
-
-.ccCardTileAvailable {
-  font-size: 11px;
-  opacity: 0.78;
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.ccCardTileAvailable strong {
-  font-size: 13px;
-  opacity: 1;
-}
-
 .ccGridMain {
   display: grid;
   grid-template-columns: minmax(0, 1.65fr) minmax(280px, 0.75fr);
@@ -6735,31 +4885,10 @@ html, body {
 }
 
 @media (max-width: 1100px) {
-  .ccHeroGrid {
-    grid-template-columns: 1fr 1fr;
-  }
-  .ccHeroGrid > :first-child {
-    grid-column: 1 / -1;
-  }
   /* minmax(0, …), not 1fr (#239): a plain 1fr column grows to its chart's min-content. */
   .ccGridMain,
   .ccChargesAndLedger {
     grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-@media (max-width: 720px) {
-  .ccHeroGrid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  .ccChargeAlert {
-    align-items: flex-start;
-  }
-  .ccChargeAlertAmount {
-    font-size: 18px;
-  }
-  .ccCardGrid {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -6993,105 +5122,7 @@ html, body {
   }
 }
 
-/* ─── Liabilities: one transaction list with filters (#266) ─────────── */
-.ccChargeAlertSide {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.liabTxFilters {
-  margin: 12px 0 4px;
-}
-
-.liabTxFilterCount {
-  margin-left: 6px;
-  opacity: 0.7;
-  font-variant-numeric: tabular-nums;
-}
-
-.liabTxFilterHint {
-  margin: 0 0 10px;
-  font-size: 12px;
-}
-
-.liabTxTable td:nth-child(2) {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.liabTxMerchant {
-  overflow-wrap: anywhere;
-}
-
 /* Phone: the table becomes stacked rows, so nothing scrolls sideways (#266). */
-@media (max-width: 640px) {
-  .liabTxTable thead {
-    display: none;
-  }
-
-  .liabTxTable,
-  .liabTxTable tbody,
-  .liabTxTable tr,
-  .liabTxTable td {
-    display: block;
-    width: 100%;
-  }
-
-  .liabTxTable tr {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 2px 12px;
-    padding: 10px 0;
-    border-bottom: 1px solid var(--line);
-  }
-
-  .liabTxTable td {
-    padding: 0;
-    border: none;
-  }
-
-  .liabTxTable td:nth-child(1) {
-    grid-column: 1;
-    grid-row: 2;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .liabTxTable td:nth-child(2) {
-    grid-column: 1;
-    grid-row: 1;
-  }
-
-  .liabTxTable td:nth-child(3) {
-    grid-column: 1;
-    grid-row: 3;
-    font-size: 12px;
-    color: var(--muted);
-  }
-
-  .liabTxTable td:nth-child(4) {
-    grid-column: 2;
-    grid-row: 2 / span 2;
-    justify-self: end;
-  }
-
-  .liabTxTable td:nth-child(5) {
-    grid-column: 2;
-    grid-row: 1;
-    text-align: right;
-  }
-}
-
-/* Income (#267): the last-12-months headline and its monthly bars, above the dividend detail. */
-.incomeHeadline {
-  display: grid;
-  gap: 16px;
-  min-width: 0;
-}
 
 /* ─── One FX note per page (#290) ───────────────────────────────────── */
 .fxPageNote {
@@ -7128,15 +5159,6 @@ html, body {
   font: inherit;
   text-decoration: underline;
   cursor: pointer;
-}
-
-/* ─── Market data: action bar and "Needs a fix" (#320) ──────────────── */
-.marketDataActions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 14px;
-  margin: 0 0 16px;
 }
 
 .needsFixList {
@@ -7213,12 +5235,6 @@ html, body {
   cursor: default;
 }
 
-/* History first run (#292): the "carried" line and a running Generate's progress. */
-.whCarriedNote {
-  margin: 0 0 12px;
-  font-size: 13px;
-}
-
 /* Settings → How CapitalOS counts (#399, U24). */
 .settingsFacts {
   display: grid;
@@ -7244,40 +5260,6 @@ html, body {
   }
 }
 
-.whGenerateProgress {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.whGenerateProgress p {
-  margin: 0;
-}
-
-.whGenerateProgress progress {
-  width: 100%;
-  height: 8px;
-}
-
-.whGenerateNote {
-  margin: 0 0 12px;
-  font-size: 13px;
-}
-
-/* #397 (U13, U14): the Cash page's per-account table and FX revaluation. */
-.cashAccountsNote {
-  margin: 0 0 8px;
-  font-size: 13px;
-}
-
-.cashAccountValue {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-}
-
 .cashAccountDelta {
   font-size: 12px;
   font-weight: 600;
@@ -7294,21 +5276,8 @@ html, body {
 
 /* #397 (U2): four allocation views don't fit one row on a phone; two by two there. */
 @media (max-width: 600px) {
-  .coAllocViewControl {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    border-radius: 16px;
-    width: 100%;
-  }
 
   .coAllocViewControl .coSegmentedBtn {
     text-align: center;
   }
-}
-
-/* #410 (U28): what an upload changed, under the report counts. */
-.ingestEffect {
-  margin: 8px 0 0;
-  font-size: 13px;
-  font-weight: 600;
 }

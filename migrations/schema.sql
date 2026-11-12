@@ -1112,6 +1112,45 @@ ALTER SEQUENCE public.market_data_runs_id_seq OWNED BY public.market_data_runs.i
 
 
 --
+-- Name: market_dividend_events; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.market_dividend_events (
+    id bigint NOT NULL,
+    asset_id bigint NOT NULL,
+    kind text NOT NULL,
+    ex_date date NOT NULL,
+    pay_date date,
+    amount_per_share numeric(38,18),
+    currency text NOT NULL,
+    source text DEFAULT 'yfinance'::text NOT NULL,
+    exchange_code text,
+    provider_symbol text,
+    fetched_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT market_dividend_events_kind_check CHECK ((kind = ANY (ARRAY['history'::text, 'announced'::text])))
+);
+
+
+--
+-- Name: market_dividend_events_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.market_dividend_events_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: market_dividend_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.market_dividend_events_id_seq OWNED BY public.market_dividend_events.id;
+
+
+--
 -- Name: market_dividend_yields; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -2320,6 +2359,13 @@ ALTER TABLE ONLY public.market_data_runs ALTER COLUMN id SET DEFAULT nextval('pu
 
 
 --
+-- Name: market_dividend_events id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_dividend_events ALTER COLUMN id SET DEFAULT nextval('public.market_dividend_events_id_seq'::regclass);
+
+
+--
 -- Name: market_dividend_yields id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -2805,6 +2851,22 @@ ALTER TABLE ONLY public.market_data_run_items
 
 ALTER TABLE ONLY public.market_data_runs
     ADD CONSTRAINT market_data_runs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: market_dividend_events market_dividend_events_asset_id_kind_ex_date_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_dividend_events
+    ADD CONSTRAINT market_dividend_events_asset_id_kind_ex_date_key UNIQUE (asset_id, kind, ex_date);
+
+
+--
+-- Name: market_dividend_events market_dividend_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_dividend_events
+    ADD CONSTRAINT market_dividend_events_pkey PRIMARY KEY (id);
 
 
 --
@@ -3363,6 +3425,13 @@ CREATE INDEX idx_market_data_runs_exchange_date ON public.market_data_runs USING
 
 
 --
+-- Name: idx_market_dividend_events_asset_date; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX idx_market_dividend_events_asset_date ON public.market_dividend_events USING btree (asset_id, ex_date DESC);
+
+
+--
 -- Name: idx_market_dividend_yields_asset_date; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -3850,6 +3919,14 @@ ALTER TABLE ONLY public.market_data_run_items
 
 ALTER TABLE ONLY public.market_data_run_items
     ADD CONSTRAINT market_data_run_items_run_id_fkey FOREIGN KEY (run_id) REFERENCES public.market_data_runs(id) ON DELETE CASCADE;
+
+
+--
+-- Name: market_dividend_events market_dividend_events_asset_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.market_dividend_events
+    ADD CONSTRAINT market_dividend_events_asset_id_fkey FOREIGN KEY (asset_id) REFERENCES public.assets(id) ON DELETE CASCADE;
 
 
 --

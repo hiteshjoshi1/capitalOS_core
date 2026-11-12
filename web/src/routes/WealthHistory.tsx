@@ -9,6 +9,7 @@ import WealthDrilldownPanel from "../components/WealthDrilldownPanel";
 import CompareMonthsCard from "../components/CompareMonthsCard";
 import { computeMonthFlags, isGapPoint, lastYearSeries, monthOptions } from "../lib/wealthHistoryAnalysis";
 import "../App.css";
+import "./WealthHistory.css";
 import "../components/CompareMonthsCard.css";
 import { useBaseCurrency } from "../context/CurrencyContext";
 import MonthBar from "../components/MonthBar";

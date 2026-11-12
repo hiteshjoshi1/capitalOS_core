@@ -903,6 +903,25 @@ def setup_db():
             )
             """
         )
+        # #417 (migration 087): the dividend calendar's provider events.
+        conn.exec_driver_sql(
+            """
+            CREATE TABLE IF NOT EXISTS market_dividend_events (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              asset_id INTEGER NOT NULL,
+              kind TEXT NOT NULL,
+              ex_date DATE NOT NULL,
+              pay_date DATE,
+              amount_per_share REAL,
+              currency TEXT NOT NULL,
+              source TEXT NOT NULL DEFAULT 'yfinance',
+              exchange_code TEXT,
+              provider_symbol TEXT,
+              fetched_at TIMESTAMP,
+              UNIQUE (asset_id, kind, ex_date)
+            )
+            """
+        )
         _create_canonical_portfolio_tables(conn)
         conn.exec_driver_sql(
             """
@@ -957,6 +976,7 @@ def setup_db():
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_data_runs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS job_runs")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_dividend_yields")
+        conn.exec_driver_sql("DROP TABLE IF EXISTS market_dividend_events")
         conn.exec_driver_sql("DROP TABLE IF EXISTS market_symbol_map")
         conn.exec_driver_sql("DROP TABLE IF EXISTS assets")
         conn.exec_driver_sql("DROP TABLE IF EXISTS platforms")
@@ -986,6 +1006,16 @@ def synthetic_fx_providers(monkeypatch):
     fx._CACHE.clear()
     yield
     fx._CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def no_dividend_event_fetch(monkeypatch):
+    """No test reaches Yahoo for dividend events (#417): the refresh sees none unless a test
+    patches YFinanceProvider.fetch_dividend_events itself."""
+    monkeypatch.setattr(
+        "app.market_data.providers.YFinanceProvider.fetch_dividend_events",
+        lambda self, symbols, **kwargs: {},
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -1040,6 +1070,7 @@ def clear_db():
         conn.exec_driver_sql("DELETE FROM market_data_runs")
         conn.exec_driver_sql("DELETE FROM job_runs")
         conn.exec_driver_sql("DELETE FROM market_dividend_yields")
+        conn.exec_driver_sql("DELETE FROM market_dividend_events")
         conn.exec_driver_sql("DELETE FROM market_symbol_map")
         conn.exec_driver_sql("DELETE FROM currencies")
         conn.exec_driver_sql("DELETE FROM parser_registry")

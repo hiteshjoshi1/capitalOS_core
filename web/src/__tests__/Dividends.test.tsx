@@ -14,6 +14,7 @@ vi.mock("../lib/api", () => ({
     dividendsByCompany: vi.fn(),
     expectedDividendsOverview: vi.fn(),
     incomeSummary: vi.fn(),
+    dividendCalendar: vi.fn(),
   },
 }));
 
@@ -50,6 +51,19 @@ describe("Dividends", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockApi.incomeSummary.mockResolvedValue(incomeFixture());
+    // #417: the calendar card (its own tests in dividendCalendar417.test.tsx).
+    mockApi.dividendCalendar.mockResolvedValue({
+      base_currency: "SGD",
+      from_date: "2026-02-01",
+      to_date: "2026-04-30",
+      events: [],
+      months: [],
+      total_base: 0,
+      holdings_considered: 0,
+      holdings_with_events: 0,
+      holdings_without_data: 0,
+      data_as_of: null,
+    });
   });
 
   it("renders period totals and company table", async () => {
@@ -144,7 +158,7 @@ describe("Dividends", () => {
       </ThemeProvider>,
     );
 
-    expect(await screen.findByRole("heading", { name: "Income" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Dividends" })).toBeInTheDocument();
     expect(await screen.findByText("DIVIDENDS THIS MONTH")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "What's received vs. what's ahead" })).toBeInTheDocument();
     expect(screen.getByText("Expected, next 12 months")).toBeInTheDocument();

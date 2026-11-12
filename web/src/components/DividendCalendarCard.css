@@ -1,0 +1,63 @@
+/* #417 (U17): Income → Dividends, next 3 months. */
+.divCalCard {
+  display: grid;
+  gap: 12px;
+}
+
+.divCalMonths {
+  display: grid;
+  /* Today + 3 months touches 3 or 4 calendar months: one row on desktop, two per row on a phone. */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+
+.divCalMonth {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.divCalMonthName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.divCalMonthValue {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.divCalMonthCount {
+  font-size: 12px;
+}
+
+.divCalGroupTitle {
+  margin: 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.divCalEmpty,
+.divCalNote {
+  margin: 0;
+  font-size: 13px;
+}
+
+@media (max-width: 600px) {
+  .divCalMonths {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+  }
+
+  .divCalMonth {
+    padding: 8px;
+  }
+
+  .divCalMonthValue {
+    font-size: 15px;
+  }
+}

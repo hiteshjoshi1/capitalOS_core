@@ -1,8 +1,13 @@
 // Income and dividends: API calls (split out of lib/api.ts, #368).
 import { req } from "../http";
-import type { DividendHistory, DividendsByCompany, DividendsSummary, ExpectedDividendsOverview, IncomeSummary } from "../types/income";
+import type { DividendCalendar, DividendHistory, DividendsByCompany, DividendsSummary, ExpectedDividendsOverview, IncomeSummary } from "../types/income";
 
 export const incomeClient = {
+  // #417 (U17): dividends expected over the next `months` months.
+  dividendCalendar: (baseCurrency = "SGD", months = 3) =>
+    req<DividendCalendar>(
+      `/dividends/calendar?base_currency=${encodeURIComponent(baseCurrency)}&months=${encodeURIComponent(String(months))}`,
+    ),
   incomeSummary: (month: string, baseCurrency = "SGD") =>
     req<IncomeSummary>(
       `/income/summary?month=${encodeURIComponent(month)}&base_currency=${encodeURIComponent(baseCurrency)}`,
