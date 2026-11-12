@@ -66,6 +66,31 @@ class TokenVisibilityFields(BaseModel):
     hidden_reason: Optional[str] = None
 
 
+class CryptoMonthChange(BaseModel):
+    """One token's change since the compare month-end (#408, U9), in the base currency, split
+    as Overview's bridge splits it (D-60): abs = price_effect + quantity_effect + fx_effect + unsplit."""
+
+    abs: float
+    pct: Optional[float] = None
+    price_effect: float = 0.0
+    quantity_effect: float = 0.0
+    fx_effect: float = 0.0
+    unsplit: float = 0.0
+    compare_value: float = 0.0
+    end_value: float = 0.0
+    compare_month: Optional[str] = None
+    baseline_missing: bool = False
+    # held | new (not held at the compare month-end)
+    side: str = "held"
+    start_quantity: Optional[float] = None
+    end_quantity: Optional[float] = None
+    start_price: Optional[float] = None
+    end_price: Optional[float] = None
+    price_currency: Optional[str] = "USD"
+    start_rate: Optional[float] = None
+    end_rate: Optional[float] = None
+
+
 class CryptoHoldingOut(TokenVisibilityFields):
     """A row of /crypto/summary's top_holdings / top5_holdings."""
 
@@ -90,6 +115,14 @@ class CryptoHoldingOut(TokenVisibilityFields):
     price_as_of: Optional[str] = None
     holdings_provider: Optional[str] = None
     price_provider: Optional[str] = None
+    # #408 (U10, D-112): display tags. A stablecoin (fiat-pegged) and the coin a wrapped
+    # token stands for (WBTC -> BTC). Neither changes a total.
+    is_stablecoin: bool = False
+    wrapped_of: Optional[str] = None
+    # #408 (U9): the change vs the compare month-end split as the bridge splits it (D-60):
+    # price + quantity + FX + unsplit = abs (= value_change_base). Quantity is a buy, sell,
+    # transfer or staking reward, never a gain or loss.
+    month_change: Optional[CryptoMonthChange] = None
 
 
 class CryptoWalletExposureOut(BaseModel):

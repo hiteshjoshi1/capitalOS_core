@@ -1,6 +1,6 @@
 // Crypto wallets and holdings: response and request types (split out of lib/api.ts, #368).
 import type { FxStatus } from "./common";
-import type { MiniTrendPoint } from "./wealth";
+import type { MiniTrendPoint, StockMonthChange } from "./wealth";
 
 export type CryptoWallet = {
   id: string;
@@ -94,6 +94,13 @@ export type CryptoSummary = FxStatus & {
     /** Hidden from the lists by default (unknown, or hidden by the user). */
     hidden?: boolean;
     hidden_reason?: "unknown_token" | "user_hidden" | null;
+    /** #408 (U10): a fiat-pegged token; a display tag, it changes no total. */
+    is_stablecoin?: boolean;
+    /** #408 (U10): the coin a wrapped token stands for (WBTC -> BTC), else null. */
+    wrapped_of?: string | null;
+    /** #408 (U9): the change since the compare month-end, split into price, quantity and FX
+     * as the bridge splits it (D-60). Same shape as the Stocks page's. Prices are in USD. */
+    month_change?: StockMonthChange | null;
   }>;
   /** #342: how many of top_holdings are hidden. */
   hidden_token_count?: number;

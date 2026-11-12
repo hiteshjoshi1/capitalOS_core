@@ -30,7 +30,10 @@ for (const viewport of VIEWPORTS) {
         async (route) => {
           const key = apiKey(route.request(), origin);
           if (key === null) return route.fallback();
-          const hit = route.request().method() === "GET" ? fixture[key] : undefined;
+          // A write the page makes on its own (#408: Overview records the visit) is in the
+          // fixture as "POST <key>"; any other write is missing.
+          const method = route.request().method();
+          const hit = method === "GET" ? fixture[key] : fixture[`${method} ${key}`];
           if (hit) return route.fulfill({ status: hit.status, json: hit.body });
           missing.push(`${route.request().method()} ${key}`);
           return route.fulfill({ status: 404, json: { detail: `not in the demo fixture: ${key}` } });

@@ -4713,6 +4713,29 @@ a.btn {
   font: inherit;
 }
 
+/* #408 (U10): stablecoin filter and the stablecoin / wrapped tags. */
+.cryptoKindFilter {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Buttons keep .pill's own small type (a button doesn't inherit it by default). */
+.cryptoKindFilter .pill {
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+}
+
+.cryptoKindFilter .pill[aria-pressed="true"] {
+  border-color: var(--accent, currentColor);
+  color: var(--text, inherit);
+}
+
+.cryptoKindTag {
+  font-weight: 500;
+}
+
 .cryptoHoldingHidden {
   opacity: 0.6;
 }

@@ -731,6 +731,25 @@ export type WealthTopMovers = {
   detractors: WealthTopMover[];
 };
 
+/** GET /dashboard/since-last-visit (#408, U3, D-112): what changed since the user last
+ * looked at Overview. `first_visit`: nothing stored yet (no strip). `change` is null when
+ * the stored figure was in another base currency (`currency_changed`). */
+export type SinceLastVisit = {
+  first_visit: boolean;
+  base_currency: string;
+  seen_at?: string | null;
+  net_worth_then?: number | null;
+  net_worth_now?: number | null;
+  change?: number | null;
+  currency_changed?: boolean;
+  imports_since?: number;
+  /** The Inbox's count now; null if it couldn't be read. */
+  needs_action?: number | null;
+};
+
+/** POST /dashboard/visit: `moved` is false when the stored visit is under an hour old. */
+export type MarkVisitResult = { moved: boolean; seen_at: string };
+
 export type NetWorthSinceUpdateChange = NetWorthChange;
 
 /** #249 (D-65): a since-update mover, with what its compare value was priced at. */

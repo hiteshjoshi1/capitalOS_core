@@ -1,0 +1,60 @@
+/* #408 (U3): "Since your last visit" on Overview. */
+.sinceVisitStrip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 12px;
+  font-size: 14px;
+}
+
+.sinceVisitText {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 8px;
+  min-width: 0;
+}
+
+.sinceVisitLead {
+  font-weight: 600;
+}
+
+.sinceVisitWhen {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.sinceVisitParts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.sinceVisitPart + .sinceVisitPart::before {
+  content: "·";
+  margin-right: 12px;
+  color: var(--muted);
+}
+
+.sinceVisitChange.isUp {
+  color: var(--delta-up);
+}
+
+.sinceVisitChange.isDown {
+  color: var(--delta-down);
+}
+
+.sinceVisitDismiss {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 600px) {
+  .sinceVisitStrip {
+    align-items: flex-start;
+  }
+}
