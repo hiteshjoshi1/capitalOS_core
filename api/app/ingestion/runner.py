@@ -566,6 +566,14 @@ def _run_ingestion_with_context(
             if other_account is not None:
                 return reject(other_account)
 
+        # #410 (U28): the statement's month, measured before anything is written.
+        from app.ingestion import upload_effect
+
+        effect_day = upload_effect.statement_day(parsed, positions or [], parser_meta, as_of)
+        effect_before = (
+            upload_effect.measure(db, account_user_id, int(job.account_id), effect_day) if effect_day else None
+        )
+
         # What removing this upload must put back (#180); saved with its rows.
         undo = new_undo_log()
         _persist_credit_card_limit_metadata(
@@ -785,6 +793,10 @@ def _run_ingestion_with_context(
         db.add(job)
         db.commit()
 
+        effect_after = (
+            upload_effect.measure(db, account_user_id, int(job.account_id), effect_day)
+            if effect_day and effect_before else None
+        )
         preview = [_serialize_tx(tx) for tx in parsed[:10]]
         report = _report(
             job,
@@ -806,6 +818,7 @@ def _run_ingestion_with_context(
             parser_meta=parser_meta,
             canonical_result=canonical_result,
             canonical_warning=canonical_warning,
+            effect=upload_effect.effect(effect_before, effect_after),
         )
         return write_and_return(report)
     except Exception as exc:  # noqa: BLE001
@@ -860,6 +873,7 @@ def _report(
     canonical_result: dict | None = None,
     canonical_warning: str | None = None,
     refusal: dict | None = None,
+    effect: dict | None = None,
 ) -> dict:
     return {
         "job_id": job.id,
@@ -895,6 +909,9 @@ def _report(
         "canonical_warning": canonical_warning,
         # Why the upload was refused (status REJECTED, #180).
         "refusal": refusal,
+        # What it changed (#410, U28): the month's net worth before and after, and the
+        # account's balance there; None when nothing dated was imported.
+        "effect": effect,
     }
 
 

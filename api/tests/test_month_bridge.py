@@ -147,18 +147,21 @@ def test_open_month_lines_by_hand(mid: TestClient):
     markets = _line(bridge, "markets")
     assert float(_part(markets, "crypto")) == pytest.approx((2 * 300.0 + 40 * 20.0) * usd, abs=TOL)
 
-    # Unexplained, named: two RELIANCE bought at Sharekhan (no cash record there),
-    # tokens moved into the wallets, and February's card spend that March's card
-    # liability (this month's transactions, no statement) no longer counts.
+    # Unexplained, named: tokens moved into the wallets, and February's card spend that March's
+    # card liability (this month's transactions, no statement) no longer counts.
     rest = bridge["unexplained"]
-    assert float(_part(rest, "untracked_trades")) == pytest.approx(2 * 2900.0 * inr, abs=TOL)
+    assert not any(part["key"] == "untracked_trades" for part in rest["parts"])
     assert float(_part(rest, "crypto_moved")) == pytest.approx((0.5 * 3100.0 - 1000.0 + 250.0) * usd, abs=TOL)
     assert float(_part(rest, "card_balances")) == pytest.approx(1210.4 + 95.0 - 1000.0, abs=TOL)
     assert float(bridge["liabilities_change"]) == pytest.approx((660.0 + 310.55) - (1210.4 + 95.0 - 1000.0), abs=TOL)
+    # #410/U30: the two RELIANCE bought at Sharekhan (no cash record there) are new money, estimated
+    # from the change in holdings at this month's price; no bank row shows them paid from your accounts.
     new_money = _line(bridge, "new_money")
-    assert new_money["amount"] == 0.0
+    assert new_money["amount"] == pytest.approx(2 * 2900.0 * inr, abs=TOL)
     assert new_money["status"] == "partial" and "Sharekhan" in new_money["reason"]
-    assert any("Sharekhan" in part["label"] for part in rest["parts"] if part["key"] == "untracked_trades")
+    sharekhan = next(part for part in new_money["parts"] if part["key"].startswith("broker:"))
+    assert "Sharekhan" in sharekhan["label"] and float(sharekhan["amount"]) == pytest.approx(2 * 2900.0 * inr, abs=TOL)
+    assert [item["label"] for item in sharekhan["items"]] == ["RELIANCE"]
 
 
 def test_past_month_lines_by_hand(mid: TestClient):
@@ -248,8 +251,10 @@ def test_new_money_counts_deposits_from_outside_only(mid: TestClient, db_engine)
     bridge = _bridge(mid, "2026-03")
     _assert_adds_up(bridge, "new money")
     new_money = _line(bridge, "new_money")
-    assert float(new_money["amount"]) == pytest.approx(1000.0 * fx(date(2026, 3, 10), "USD"), abs=TOL)
-    assert float(_part(new_money, "deposits")) == pytest.approx(new_money["amount"], abs=TOL)
+    assert float(_part(new_money, "deposits")) == pytest.approx(1000.0 * fx(date(2026, 3, 10), "USD"), abs=TOL)
+    # ... plus the RELIANCE bought at Sharekhan, which has no cash record (#410/U30).
+    brokers = sum(float(p["amount"]) for p in new_money["parts"] if p["key"].startswith("broker:"))
+    assert float(new_money["amount"]) == pytest.approx(float(_part(new_money, "deposits")) + brokers, abs=TOL)
     internal = next(note for note in new_money["notes"] if note["key"] == "internal_transfers")
     assert float(internal["amount"]) == pytest.approx(2000.0, abs=TOL)
     # The transfer out of DBS isn't spending.

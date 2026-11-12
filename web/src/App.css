@@ -7305,3 +7305,10 @@ html, body {
     text-align: center;
   }
 }
+
+/* #410 (U28): what an upload changed, under the report counts. */
+.ingestEffect {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}

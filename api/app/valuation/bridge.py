@@ -880,6 +880,9 @@ class _Flows:
     card_activity: Decimal = ZERO  # every card transaction a card's liability counts
     card_activity_by_account: Dict[int, Decimal] = field(default_factory=dict)  # the same, per card (#332)
     transaction_count: int = 0
+    # Bank and wallet rows out that neither Cash flow line counts (transfers, #410/U30): one
+    # may be the money that paid for a buy at a broker with no cash record.
+    uncounted_out: list[Dict[str, Any]] = field(default_factory=list)
 
 
 def _flows(
@@ -908,6 +911,17 @@ def _flows(
                 out.dividends += amount
             continue
         bucket = _cash_flow_bucket(row)
+        if (
+            bucket not in ("income", "expense")
+            and amount < 0
+            and str(row.get("account_type") or "").upper() not in ("BROKER", "CREDIT_CARD")
+        ):
+            out.uncounted_out.append({
+                "text": " ".join(str(row.get(k) or "") for k in ("merchant_counterparty", "notes", "raw_category")).upper(),
+                "base": amount,
+                "account": str(row.get("account_name") or ""),
+                "day": clock._transaction_date(row["ts"]),
+            })
         if bucket == "income":
             if _is_interest_row(row):
                 out.interest += amount
@@ -1089,6 +1103,48 @@ def _line(
     }
 
 
+def _broker_money(
+    broker_trades: Mapping[Optional[str], Mapping[str, Any]], uncounted_out: list[Dict[str, Any]]
+) -> tuple[Decimal, list[Dict[str, Any]]]:
+    """Money into or out of brokers with no cash record (#410/U30): each one's buys and sales
+    (estimated from the change in holdings), less bank rows out naming that broker that no
+    Cash flow line counts (money paid in from your own accounts, so not new). A part per broker."""
+    total = ZERO
+    parts: list[Dict[str, Any]] = []
+    used: set[int] = set()
+    for platform in sorted(broker_trades, key=lambda p: _platform_label(p)):
+        trades = broker_trades[platform]
+        keywords = _platform_keywords(platform)
+        funded = ZERO
+        transfers = 0
+        for i, row in enumerate(uncounted_out):
+            if i in used or not keywords or not any(k in row["text"] for k in keywords):
+                continue
+            used.add(i)
+            funded += row["base"]
+            transfers += 1
+        net = trades["buys"] + trades["sales"] + funded
+        total += net
+        items = list(trades["rows"])
+        if transfers:
+            items.append(_item(f"Paid in from your own accounts ({transfers} transfer(s))", funded, "not new money"))
+        parts.append(_part(
+            f"broker:{platform}",
+            f"{_platform_label(platform)}: bought and sold (estimated, no cash record)",
+            net,
+            _items(items, net),
+        ))
+    return total, parts
+
+
+def _platform_keywords(platform: Optional[str]) -> list[str]:
+    """Words that name a broker in a bank row's text (#410/U30): "DBS_VICKERS" -> ["VICKERS"].
+    Short codes (DBS, UOB) also name banks, so they don't count on their own."""
+    words = [w.upper() for w in str(platform or "").replace("-", "_").split("_") if w]
+    long_words = [w for w in words if len(w) >= 5]
+    return long_words or ([words[0]] if len(words) == 1 and len(words[0]) >= 4 else [])
+
+
 def _platform_list(platforms: Iterable[Optional[str]]) -> str:
     return ", ".join(sorted({_platform_label(p) for p in platforms}))
 
@@ -1205,6 +1261,7 @@ def month_bridge(
     # What each Unexplained part is made of (#332).
     catch_up_rows: Dict[int, list[Dict[str, Any]]] = {}
     untracked_rows: list[Dict[str, Any]] = []
+    broker_trades: Dict[Optional[str], Dict[str, Any]] = {}
     unsplit_rows: list[Dict[str, Any]] = []
     gap_rows: list[Dict[str, Any]] = []
     moved_rows: list[Dict[str, Any]] = []
@@ -1231,10 +1288,15 @@ def month_bridge(
                 holdings_catch_up[held.account_id] = holdings_catch_up.get(held.account_id, ZERO) + split.quantity
                 catch_up_rows.setdefault(held.account_id, []).append(_item(held.symbol, split.quantity, side))
             else:
-                untracked_trades += split.quantity
+                # #410/U30: a buy or sale at a broker with no cash record is money in or out of
+                # that broker, estimated from the change in quantity at the period's price. It goes
+                # on the New money line (less what a bank row shows was paid in from your own
+                # accounts), no longer in Unexplained.
                 untracked_platforms.add(held.platform)
-                untracked_rows.append(_item(f"{held.symbol} ({_platform_label(held.platform)})", split.quantity,
-                                            f"{side}; no cash record at {_platform_label(held.platform)}"))
+                key = "buys" if split.quantity > 0 else "sales"
+                broker_trades.setdefault(held.platform, {"buys": ZERO, "sales": ZERO, "rows": []})
+                broker_trades[held.platform][key] += split.quantity
+                broker_trades[held.platform]["rows"].append(_item(held.symbol, split.quantity, side))
 
     crypto_price = crypto_fx = crypto_moved = ZERO
     staking = ZERO
@@ -1280,6 +1342,8 @@ def month_bridge(
     lines: list[Dict[str, Any]] = []
 
     new_money = flows.new_money_in + flows.new_money_out
+    broker_total, broker_parts = _broker_money(broker_trades, flows.uncounted_out)
+    new_money += broker_total
     new_money_notes = []
     if flows.internal_count:
         new_money_notes.append(_note(
@@ -1293,10 +1357,15 @@ def month_bridge(
         new_money,
         status="partial" if no_cash_record else "ok",
         reason=(
-            f"No cash record for {', '.join(no_cash_record)}: money paid in or taken out there is in Unexplained"
+            f"No cash record for {', '.join(no_cash_record)}: their buys and sales are estimated from the change "
+            "in holdings at this period's prices, less transfers from your own accounts"
             if no_cash_record else None
         ),
-        parts=[_part("deposits", "Deposits", flows.new_money_in), _part("withdrawals", "Withdrawals", flows.new_money_out)],
+        parts=[
+            _part("deposits", "Deposits", flows.new_money_in),
+            _part("withdrawals", "Withdrawals", flows.new_money_out),
+            *broker_parts,
+        ],
         notes=new_money_notes,
     ))
 
